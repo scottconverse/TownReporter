@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.2 — 2026-08-26
+
+Reporting breadth and evidence chronology. Dark Desk engine unchanged; editor UI rewritten.
+
+- Four reporting lanes are allocated by lane, not array order. A four-search budget is one context, one stakeholder, one contradiction, one gap. Extra budget on explainers and investigations comes after that.
+- A prospective brief is challenged once (attachments already followed, one context/contradiction search, beat memory) before the classification sticks. Money, history, a changed timeline, affected people, contradiction or a missing record promote it to reported and the normal lanes run. A genuine small item stays a brief.
+- Story form follows the reporting that exists. It does not control what the system is allowed to discover.
+- “What TownReporter found” requires a published source URL and a specific captured version or capture event. A URL match alone is not enough. Unbound hypotheses stay in the newsroom.
+- Public evidence history is capture chronology (`capture_events.observed_at`), not unique content versions. Repeated observation of the same bytes is kept. A missing check is an event. A revert compares B → A when A is what TownReporter last saw.
+- Public evidence is scoped to source URLs cited in a published story, not a door into the evidence store.
+- Original-bytes language no longer implies a download the page does not provide.
+- Dark Desk editor UI: Worth a Look cards use headlines, not raw URLs. Start digging opens an investigation immediately and shows progress on the card while hops run. Results live in an investigation workspace (what started this / what we know / what Dark Desk found / next leads / evidence). API errors such as 403 are translated. Research log is behind a disclosure. The investigative engine is still non-gating.
+
 ## 0.2.1 — 2026-08-26
 
 Evidence hardening on the path from capture → reporting → story → proof. Dark Desk engine unchanged.

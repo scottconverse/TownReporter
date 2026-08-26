@@ -15,11 +15,15 @@ export function ProvenanceBlock({
   const versions = new Set(
     items.map((p) => p.version_id).filter((id): id is number => id != null),
   );
+  const captures = new Set(
+    items.map((p) => p.capture_event_id).filter((id): id is number => id != null),
+  );
   const publicFindings = (findings ?? []).filter((f) => {
     if (!f.text.trim()) return false;
-    if (f.source_urls.some((u) => urls.has(u))) return true;
-    if (f.artifact_version_ids.some((id) => versions.has(id))) return true;
-    return false;
+    if (!f.source_urls.some((u) => urls.has(u))) return false;
+    const versionOk = f.artifact_version_ids.some((id) => versions.has(id));
+    const captureOk = f.capture_event_ids.some((id) => captures.has(id));
+    return versionOk || captureOk;
   });
   if (!items.length && !publicFindings.length) return null;
   return (
@@ -106,6 +110,9 @@ export function ProvenanceBlock({
                 <p className="whitespace-pre-wrap">{f.text}</p>
                 {f.source_urls[0] ? (
                   <p className="mt-1 break-all text-sm text-muted">{f.source_urls[0]}</p>
+                ) : null}
+                {f.locators[0] ? (
+                  <p className="mt-1 text-sm text-muted">{f.locators[0]}</p>
                 ) : null}
                 {f.artifact_version_ids[0] != null ? (
                   <p className="mt-1 text-sm">

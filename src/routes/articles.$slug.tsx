@@ -61,6 +61,7 @@ function ArticlePage() {
         captured_at: null,
         version_id: null,
         version_count: null,
+        capture_event_id: null,
         disappeared: false,
         role: "source",
       }));

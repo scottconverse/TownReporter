@@ -11,6 +11,15 @@ export const Route = createFileRoute("/evidence/$versionId")({
   component: EvidencePage,
 });
 
+function observationLabel(kind: string, disappeared: boolean): string {
+  if (disappeared || kind === "unavailable") return "Source unavailable at this check";
+  if (kind === "changed") return "Changed";
+  if (kind === "reverted") return "Reverted to an earlier content version";
+  if (kind === "restored") return "Restored";
+  if (kind === "unchanged") return "Observed again, same content";
+  return "Captured";
+}
+
 function EvidencePage() {
   const { versionId } = Route.useParams();
   const loaded = Route.useLoaderData();
@@ -75,29 +84,60 @@ function EvidencePage() {
           </dd>
         </div>
         <div>
-          <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">Captured</dt>
-          <dd className="mt-1">{record.captured_at ? formatDateTime(record.captured_at) : "—"}</dd>
+          <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">This observation</dt>
+          <dd className="mt-1">
+            {record.captured_at ? `Captured ${formatDateTime(record.captured_at)}` : "Captured"}
+            {record.disappeared ? " — source unavailable at this check" : ""}
+          </dd>
         </div>
+        {record.content_label ? (
+          <div>
+            <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">Content</dt>
+            <dd className="mt-1">{record.content_label}</dd>
+          </div>
+        ) : null}
+        {record.previously_observed_at ? (
+          <div>
+            <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">Previously observed</dt>
+            <dd className="mt-1">{formatDateTime(record.previously_observed_at)}</dd>
+          </div>
+        ) : null}
         <div>
           <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">SHA-256</dt>
-          <dd className="mt-1 break-all font-mono text-xs">{record.content_hash}</dd>
-        </div>
-        <div>
-          <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">Version</dt>
-          <dd className="mt-1">v{record.version_id}</dd>
+          <dd className="mt-1 break-all font-mono text-xs">{record.content_hash || "—"}</dd>
         </div>
         {record.has_original_bytes ? (
           <div>
             <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">Original artifact</dt>
             <dd className="mt-1">
-              Bytes captured ({record.byte_length ? `${Math.round(record.byte_length / 1024)} KB` : "yes"}).
-              Extracted text is shown below.
+              Original bytes retained by TownReporter. Extracted text is shown below.
             </dd>
           </div>
         ) : null}
       </dl>
+      {record.timeline.length > 1 ? (
+        <section className="mt-8 max-w-2xl">
+          <h2 className="text-[11px] tracking-[0.16em] text-muted uppercase">Capture history</h2>
+          <ol className="mt-3 space-y-2 text-sm">
+            {record.timeline.map((entry) => (
+              <li key={entry.capture_event_id} className="border-b border-rule pb-2 last:border-0">
+                <p>
+                  {entry.observed_at ? formatDateTime(entry.observed_at) : "Observed"}
+                  {" — "}
+                  {observationLabel(entry.observation, entry.disappeared)}
+                </p>
+                {entry.content_label && !entry.disappeared ? (
+                  <p className="text-muted">{entry.content_label}</p>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
       <div className="mt-8 max-w-2xl whitespace-pre-wrap text-sm leading-6 text-ink-2">
-        {record.extraction_text || "(no extractable text in this capture)"}
+        {record.disappeared
+          ? "(source unavailable at this check)"
+          : record.extraction_text || "(no extractable text in this capture)"}
       </div>
       <p className="mt-8">
         <Link
@@ -105,7 +145,7 @@ function EvidencePage() {
           search={{ url: record.url }}
           className="text-rust hover:text-rust-2"
         >
-          Compare versions of this record
+          Compare observed states of this record
         </Link>
       </p>
     </PaperShell>

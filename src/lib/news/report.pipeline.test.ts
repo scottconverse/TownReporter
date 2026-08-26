@@ -230,4 +230,255 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
     assert.match(published[0]!.text, /\$2\.4 million/);
     assert.ok(result.unanswered.some((q) => /hydrant/i.test(q)));
   });
+
+  it("runs one search per reporting lane even when research proposes four context queries", async () => {
+    const searches: string[] = [];
+    const chat: ReportChat = async (system) => {
+      if (system === REPORT_RESEARCH_SYSTEM) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            news: "Group 2 starts August 31.",
+            why_it_matters: "Hover Street closes.",
+            angle: "Group 2 start",
+            form: "reported",
+            questions: ["cost?"],
+            fetch_urls: [],
+            unknowns: ["hydrants"],
+            follow: "prior packet",
+            lanes: {
+              context: [
+                "CTX-1 Group 2 prior schedule Longmont",
+                "CTX-2 Group 2 2025 contract Longmont",
+                "CTX-3 Group 2 earlier phase Longmont",
+                "CTX-4 Group 2 council history Longmont",
+              ],
+              stakeholders: ["STK-1 Group 2 Hover Street residents Longmont"],
+              contradiction: ["CTR-1 Group 2 delay valve shortage Longmont"],
+              gaps: ["GAP-1 Group 2 contract amount Longmont"],
+            },
+          }),
+        };
+      }
+      if (system === REPORT_WRITE_SYSTEM) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            headline: "Group 2 waterline work starts Aug. 31",
+            dek: "Hover Street crossings close.",
+            body: "Longmont will shut parts of Hover Street starting August 31. The packet lists a $2.4 million Acme contract after a valve-shortage delay from June.",
+            topic: "utilities",
+            source_urls: [ANNOUNCE],
+            form: "reported",
+            found: null,
+            unanswered: [],
+            reporting_trail: [],
+          }),
+        };
+      }
+      return { ok: true, text: "{}" };
+    };
+
+    const result = await reportAndDraft(
+      { userId: "lane-budget", lead, urls: [ANNOUNCE], memory: [] },
+      {
+        ingest: async (url) => DOCS[url] ?? { url, title: url, text: "", extras: [] },
+        search: async (q) => {
+          searches.push(q);
+          return [];
+        },
+        chat,
+        capture: async () => ({ version_id: 1, capture_event_id: 1 }),
+        hydrate: async () => [],
+      },
+    );
+    assert.ok(!("error" in result));
+    const laneSearches = searches.filter((q) => /^(CTX|STK|CTR|GAP)-/.test(q));
+    assert.equal(laneSearches.length, 4);
+    assert.equal(laneSearches.filter((q) => q.startsWith("CTX-")).length, 1);
+    assert.ok(laneSearches.some((q) => q.startsWith("STK-")));
+    assert.ok(laneSearches.some((q) => q.startsWith("CTR-")));
+    assert.ok(laneSearches.some((q) => q.startsWith("GAP-")));
+  });
+
+  it("promotes a brief candidate after a challenge finds a $3.7 million remediation", async () => {
+    const PARK = "https://longmontcolorado.gov/news/park-closes.html";
+    const REMEDIATION = "https://longmontcolorado.gov/public-works/sunset-remediation.pdf";
+    const searches: string[] = [];
+    let promotedLanes = false;
+    const chat: ReportChat = async (system) => {
+      if (system === REPORT_RESEARCH_SYSTEM) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            news: "Sunset Park closes Monday.",
+            why_it_matters: "The park will be fenced.",
+            angle: "park closure",
+            form: "brief",
+            questions: [],
+            fetch_urls: [],
+            unknowns: [],
+            follow: "",
+            lanes: {
+              context: ["Sunset Park prior work Longmont"],
+              stakeholders: ["Sunset Park neighbors Longmont"],
+              contradiction: ["Sunset Park remediation cost Longmont"],
+              gaps: ["Sunset Park duration Longmont"],
+            },
+          }),
+        };
+      }
+      if (system === REPORT_WRITE_SYSTEM) {
+        promotedLanes = true;
+        return {
+          ok: true,
+          text: JSON.stringify({
+            headline: "Sunset Park closes Monday for $3.7 million remediation",
+            dek: "A soil cleanup, not a routine lockup.",
+            body: "Sunset Park closes Monday because a $3.7 million remediation project begins, city public-works records show. Neighbors along Collyer will lose the playground for the season.",
+            topic: "planning",
+            source_urls: [PARK, REMEDIATION],
+            form: "reported",
+            found: {
+              text: "Public-works records list the cleanup at $3.7 million.",
+              source_urls: [REMEDIATION],
+              locators: ["page:1"],
+            },
+            unanswered: [],
+            reporting_trail: [],
+          }),
+        };
+      }
+      return { ok: true, text: "{}" };
+    };
+    const parkLead: LeadRow = {
+      ...lead,
+      headline: "Park closure begins Monday",
+      why: "City announcement of a park closure",
+      topic: "planning",
+      source_urls: JSON.stringify([PARK]),
+    };
+    const result = await reportAndDraft(
+      { userId: "brief-promote", lead: parkLead, urls: [PARK], memory: [] },
+      {
+        ingest: async (url) => {
+          if (url === PARK) {
+            return {
+              url,
+              title: "Park closure begins Monday",
+              text: "Sunset Park closes Monday.",
+              extras: [],
+            };
+          }
+          if (url === REMEDIATION) {
+            return {
+              url,
+              title: "Sunset Park remediation",
+              text: "The park is closing because a $3.7 million remediation project begins Monday.",
+              extras: [],
+            };
+          }
+          return { url, title: url, text: "", extras: [] };
+        },
+        search: async (q) => {
+          searches.push(q);
+          return [{ title: "remediation", url: REMEDIATION, snippet: "$3.7 million remediation" }];
+        },
+        chat,
+        capture: async (_u, doc) => ({
+          version_id: doc.url === REMEDIATION ? 44 : 43,
+          capture_event_id: doc.url === REMEDIATION ? 144 : 143,
+        }),
+        hydrate: async (_u, urls) =>
+          urls.map((url) => ({
+            url,
+            version_id: url === REMEDIATION ? 44 : 43,
+            capture_event_id: url === REMEDIATION ? 144 : 143,
+            captured_at: "2026-08-25T15:00:00.000Z",
+            disappeared: false,
+          })),
+      },
+    );
+    assert.ok(!("error" in result), "error" in result ? result.error : "");
+    if ("error" in result) return;
+    assert.equal(result.form, "reported");
+    assert.ok(promotedLanes);
+    assert.ok(searches.length >= 5);
+    assert.match(result.body, /\$3\.7 million/);
+    const published = resolvePublicFindings(result.findings, result.provenance);
+    assert.equal(published.length, 1);
+  });
+
+  it("keeps a genuine maintenance notice a brief after a fruitless challenge", async () => {
+    const LIB = "https://longmontcolorado.gov/library/hours.html";
+    const searches: string[] = [];
+    const chat: ReportChat = async (system) => {
+      if (system === REPORT_RESEARCH_SYSTEM) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            news: "Library closes two hours early Friday.",
+            why_it_matters: "Friday evening hours change once.",
+            angle: "library hours",
+            form: "brief",
+            questions: [],
+            fetch_urls: [],
+            unknowns: [],
+            follow: "",
+            lanes: { context: [], stakeholders: [], contradiction: [], gaps: [] },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        text: JSON.stringify({
+          headline: "Library closes two hours early Friday for maintenance",
+          dek: "A one-night HVAC check.",
+          body: "The Longmont Public Library will close at 6 p.m. Friday, two hours early, for scheduled maintenance.",
+          topic: "about",
+          source_urls: [LIB],
+          form: "brief",
+          found: null,
+          unanswered: [],
+          reporting_trail: [],
+        }),
+      };
+    };
+    const libLead: LeadRow = {
+      ...lead,
+      headline: "Library closes two hours early for scheduled maintenance",
+      why: "Hours notice",
+      topic: "about",
+      source_urls: JSON.stringify([LIB]),
+    };
+    const result = await reportAndDraft(
+      { userId: "brief-keep", lead: libLead, urls: [LIB], memory: [] },
+      {
+        ingest: async (url) => ({
+          url,
+          title: "Library hours",
+          text: "The Longmont Public Library closes two hours early Friday for scheduled maintenance.",
+          extras: [],
+        }),
+        search: async (q) => {
+          searches.push(q);
+          return [];
+        },
+        chat,
+        capture: async () => ({ version_id: 8, capture_event_id: 18 }),
+        hydrate: async (_u, urls) =>
+          urls.map((url) => ({
+            url,
+            version_id: 8,
+            capture_event_id: 18,
+            captured_at: "2026-08-25T15:00:00.000Z",
+            disappeared: false,
+          })),
+      },
+    );
+    assert.ok(!("error" in result), "error" in result ? result.error : "");
+    if ("error" in result) return;
+    assert.equal(result.form, "brief");
+    assert.equal(searches.length, 1);
+  });
 });

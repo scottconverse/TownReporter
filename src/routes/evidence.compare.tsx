@@ -19,6 +19,15 @@ export const Route = createFileRoute("/evidence/compare")({
   component: ComparePage,
 });
 
+function observationLabel(kind: string, disappeared: boolean): string {
+  if (disappeared || kind === "unavailable") return "source unavailable";
+  if (kind === "changed") return "changed";
+  if (kind === "reverted") return "reverted";
+  if (kind === "restored") return "restored";
+  if (kind === "unchanged") return "observed again";
+  return "captured";
+}
+
 function ComparePage() {
   const search = Route.useSearch();
   const loaded = Route.useLoaderData();
@@ -53,56 +62,72 @@ function ComparePage() {
     );
   }
 
-  const { older, newer, changes } = compared;
+  const { older, newer, changes, timeline } = compared;
   const unchanged =
     older.content_hash === newer.content_hash ||
     (!changes.added.length && !changes.removed.length);
 
   return (
     <PaperShell compact>
-      <p className="text-[11px] tracking-[0.16em] text-rust uppercase">Compare versions</p>
+      <p className="text-[11px] tracking-[0.16em] text-rust uppercase">Compare observations</p>
       <h1 className="mt-3 max-w-3xl font-display text-4xl font-semibold leading-tight">
         {newer.title || newer.url}
       </h1>
       <p className="mt-3 max-w-2xl break-all text-sm text-muted">{newer.url}</p>
+      {timeline.length > 0 ? (
+        <ol className="mt-6 max-w-2xl space-y-2 text-sm">
+          {timeline.map((entry) => (
+            <li key={entry.capture_event_id}>
+              {entry.observed_at ? formatDateTime(entry.observed_at) : "Observed"}
+              {" — "}
+              {observationLabel(entry.observation, entry.disappeared)}
+              {entry.content_label && !entry.disappeared ? ` — ${entry.content_label}` : ""}
+            </li>
+          ))}
+        </ol>
+      ) : null}
       <div className="mt-6 grid gap-6 sm:grid-cols-2">
         <div className="border border-rule p-4">
-          <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Earlier capture</p>
-          <p className="mt-2">v{older.version_id}</p>
+          <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Previous observed state</p>
+          <p className="mt-2">{older.content_label || (older.version_id != null ? `v${older.version_id}` : "—")}</p>
           <p className="text-sm text-muted">
             {older.captured_at ? formatDateTime(older.captured_at) : "—"}
           </p>
           <p className="mt-2 break-all font-mono text-xs">{older.content_hash}</p>
-          <p className="mt-2">
-            <Link
-              to="/evidence/$versionId"
-              params={{ versionId: String(older.version_id) }}
-              className="text-rust hover:text-rust-2"
-            >
-              Open
-            </Link>
-          </p>
+          {older.version_id != null ? (
+            <p className="mt-2">
+              <Link
+                to="/evidence/$versionId"
+                params={{ versionId: String(older.version_id) }}
+                className="text-rust hover:text-rust-2"
+              >
+                Open
+              </Link>
+            </p>
+          ) : null}
         </div>
         <div className="border border-rule p-4">
-          <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Later capture</p>
-          <p className="mt-2">v{newer.version_id}</p>
+          <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Latest observed state</p>
+          <p className="mt-2">{newer.content_label || (newer.version_id != null ? `v${newer.version_id}` : "—")}</p>
           <p className="text-sm text-muted">
             {newer.captured_at ? formatDateTime(newer.captured_at) : "—"}
           </p>
           <p className="mt-2 break-all font-mono text-xs">{newer.content_hash}</p>
-          <p className="mt-2">
-            <Link
-              to="/evidence/$versionId"
-              params={{ versionId: String(newer.version_id) }}
-              className="text-rust hover:text-rust-2"
-            >
-              Open
-            </Link>
-          </p>
+          {newer.version_id != null ? (
+            <p className="mt-2">
+              <Link
+                to="/evidence/$versionId"
+                params={{ versionId: String(newer.version_id) }}
+                className="text-rust hover:text-rust-2"
+              >
+                Open
+              </Link>
+            </p>
+          ) : null}
         </div>
       </div>
       {unchanged ? (
-        <p className="mt-8 max-w-2xl text-ink-2">No textual change between these captures.</p>
+        <p className="mt-8 max-w-2xl text-ink-2">No textual change between these observations.</p>
       ) : (
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
           <div>

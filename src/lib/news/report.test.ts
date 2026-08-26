@@ -2,6 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   asStoryForm,
+  allocateLaneQueries,
+  briefChallengeQuery,
+  challengeLooksSubstantive,
+  chooseStoryForm,
   collapseRepeatedParagraphs,
   describeSourceUrl,
   looksLikeRewrite,
@@ -12,6 +16,7 @@ import {
   stripAiFiller,
   type ProvenanceItem,
 } from "./report.ts";
+import type { LeadRow } from "./types.ts";
 import { describeTextChanges, retrieveRelevantChunks } from "./retrieve.ts";
 import { rankWorthItems } from "./worth-a-look.ts";
 
@@ -182,6 +187,7 @@ describe("What TownReporter found", () => {
       captured_at: "2026-08-25T12:00:00.000Z",
       version_id: 11,
       version_count: 2,
+      capture_event_id: 21,
       disappeared: false,
       role: "followed",
     },
@@ -192,10 +198,20 @@ describe("What TownReporter found", () => {
       text: "The packet lists the Group 2 contract at $2.4 million.",
       source_urls: ["https://longmontcolorado.gov/packet.pdf"],
       artifact_version_ids: [11],
+      locators: ["page:60"],
     });
     const pub = resolvePublicFindings(findings, prov);
     assert.equal(pub.length, 1);
     assert.match(pub[0]!.text, /\$2\.4 million/);
+  });
+
+  it("does not render the public module for a URL with no capture binding", () => {
+    const findings = parseFindings({
+      text: "The packet lists the Group 2 contract at $2.4 million.",
+      source_urls: ["https://longmontcolorado.gov/packet.pdf"],
+    });
+    const pub = resolvePublicFindings(findings, prov);
+    assert.equal(pub.length, 0);
   });
 
   it("does not render the public module for an unbound model assertion", () => {
@@ -206,6 +222,106 @@ describe("What TownReporter found", () => {
     });
     const pub = resolvePublicFindings(findings, prov);
     assert.equal(pub.length, 0);
+  });
+});
+
+describe("four reporting lanes", () => {
+  it("spends a four-search budget as one query per lane, not four context searches", () => {
+    const allocated = allocateLaneQueries(
+      {
+        context: [
+          "CTX-1 Group 2 prior schedule Longmont",
+          "CTX-2 Group 2 2025 contract Longmont",
+          "CTX-3 Group 2 earlier phase Longmont",
+          "CTX-4 Group 2 council history Longmont",
+        ],
+        stakeholders: ["STK-1 Group 2 Hover Street residents Longmont"],
+        contradiction: ["CTR-1 Group 2 delay valve shortage Longmont"],
+        gaps: ["GAP-1 Group 2 contract amount Longmont"],
+      },
+      4,
+    );
+    assert.equal(allocated.length, 4);
+    assert.deepEqual(
+      allocated.map((a) => a.lane),
+      ["context", "stakeholders", "contradiction", "gaps"],
+    );
+    assert.match(allocated[0]!.query, /^CTX-1/);
+    assert.match(allocated[1]!.query, /^STK-1/);
+    assert.match(allocated[2]!.query, /^CTR-1/);
+    assert.match(allocated[3]!.query, /^GAP-1/);
+    assert.equal(allocated.filter((a) => a.lane === "context").length, 1);
+  });
+
+  it("gives leftover explainer budget to remaining high-value searches after each lane has one", () => {
+    const allocated = allocateLaneQueries(
+      {
+        context: ["CTX-1 prior Longmont", "CTX-2 earlier Longmont"],
+        stakeholders: ["STK-1 residents Longmont"],
+        contradiction: ["CTR-1 delay Longmont"],
+        gaps: ["GAP-1 cost Longmont"],
+      },
+      6,
+    );
+    assert.equal(allocated.length, 5);
+    assert.equal(allocated.filter((a) => a.lane === "context").length, 2);
+    assert.equal(allocated[4]!.query, "CTX-2 earlier Longmont");
+  });
+});
+
+describe("brief challenge", () => {
+  const lead: LeadRow = {
+    id: 9,
+    headline: "Park closure begins Monday",
+    why: "City announcement",
+    topic: "planning",
+    status: "new",
+    source_urls: "[]",
+    evidence: "",
+    newsworthiness: 6,
+    created_at: new Date().toISOString(),
+  };
+
+  it("promotes a brief when the challenge finds money and remediation", () => {
+    assert.equal(
+      challengeLooksSubstantive(
+        "The park is closing because a $3.7 million remediation project begins Monday.",
+      ),
+      true,
+    );
+    const q = briefChallengeQuery(lead, {
+      form: "brief",
+      lanes: { contradiction: ["Sunset Park remediation cost Longmont"] },
+    });
+    assert.match(q, /Sunset Park remediation/);
+    assert.equal(
+      chooseStoryForm({
+        candidate: "brief",
+        challengePromoted: true,
+        body: "Sunset Park closes Monday for a $3.7 million remediation project.",
+        extraDocs: 2,
+      }),
+      "reported",
+    );
+  });
+
+  it("keeps a genuine small item a brief", () => {
+    assert.equal(
+      challengeLooksSubstantive(
+        "The Longmont Public Library closes two hours early Friday for scheduled maintenance.",
+      ),
+      false,
+    );
+    assert.equal(
+      chooseStoryForm({
+        candidate: "brief",
+        written: "brief",
+        challengePromoted: false,
+        body: "The library closes two hours early Friday for scheduled maintenance.",
+        extraDocs: 0,
+      }),
+      "brief",
+    );
   });
 });
 

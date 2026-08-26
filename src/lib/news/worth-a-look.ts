@@ -1,3 +1,13 @@
+import {
+  editorKindLabel,
+  extractUrl,
+  headlineFromUrl,
+  looksLikeUrl,
+  organizationFromUrl,
+  sourceLineFromUrl,
+  withoutUrls,
+} from "./desk-copy.ts";
+
 export type WorthSeed = {
   id: string;
   kind: string;
@@ -9,6 +19,8 @@ export type WorthSeed = {
   question: string;
   seed: string;
   priority: number;
+  badge?: string;
+  source_line?: string;
 };
 
 type AnomalyIn = { kind: string; summary: string; url: string | null; details: string | null; created_at?: string };
@@ -200,4 +212,61 @@ export function rankWorthItems(input: {
       return true;
     })
     .slice(0, 12);
+}
+
+function stripInternalJargon(text: string): string {
+  return withoutUrls(text)
+    .replace(/Previously parked\s*\([^)]*\)\.?\s*/gi, "")
+    .replace(/Reopened from resolved:?\s*/gi, "")
+    .replace(/Prior:\s*Fetched\.?/gi, "")
+    .replace(/\bfrontier\b/gi, "lead")
+    .replace(/\b(reopened_from|prior_status|closed_reason)\b/gi, "")
+    .replace(/Attachment\/document link on/gi, "linked from")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function reviewingContext(item: WorthSeed, org: string): string {
+  const url = extractUrl(`${item.happened} ${item.why} ${item.evidence}`) || item.source_url;
+  const from = url ? organizationFromUrl(url) : "";
+  if (from) return `a ${from} page`;
+  if (org) return `a ${org} record`;
+  return "another public record";
+}
+
+/** Editor presentation. Ranking and seeds stay as the engine produced them. */
+export function presentWorthItem(item: WorthSeed): WorthSeed {
+  const url = item.source_url || extractUrl(item.title) || extractUrl(item.evidence);
+  let title = item.title;
+  if (looksLikeUrl(title) && url) title = headlineFromUrl(url);
+  else if (url && title.includes(url)) title = title.replace(url, headlineFromUrl(url)).replace(/\s+/g, " ").trim();
+  const org = url ? organizationFromUrl(url) : "";
+  const badge = editorKindLabel(item.kind);
+  let happened = stripInternalJargon(item.happened);
+  let why = stripInternalJargon(item.why);
+  if (item.kind === "reopened") {
+    happened = `Dark Desk encountered this again while reviewing ${reviewingContext(item, org)}.`;
+    why =
+      org
+        ? `A ${org} record Dark Desk previously considered finished has appeared again in new material. That may mean it is newly relevant to another record or investigation.`
+        : "A record Dark Desk previously considered finished has appeared again in new material. That may mean it is newly relevant to another record or investigation.";
+  } else if (!why || /flagged a |strength |handoff/i.test(item.why)) {
+    why = why
+      .replace(/Dark Desk \/ monitors flagged a [\w\s]+\./i, "A monitored public record did not look the way it usually does.")
+      .replace(/Prior Dark Desk signal \([^)]+\)\.?/i, "A previous Dark Desk pass left this open.")
+      .replace(/High-newsworthiness scanner lead \([^)]+\)\.?/i, "The scanner ranked this as worth a reporter’s time.");
+  }
+  if (!happened || looksLikeUrl(happened)) {
+    happened = url
+      ? `This turned up while Dark Desk was reviewing ${org || "a public page"}.`
+      : happened || "Something on the beat changed enough to put this on the desk.";
+  }
+  return {
+    ...item,
+    title: title || item.title,
+    happened,
+    why,
+    badge,
+    source_line: url ? sourceLineFromUrl(url) : withoutUrls(item.evidence).slice(0, 160),
+  };
 }

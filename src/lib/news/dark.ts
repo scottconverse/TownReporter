@@ -11,11 +11,13 @@ import {
   researchLoop,
   resurfaceDeadEnds,
   runDueMonitors,
-  seedInvestigation,
 } from "./investigate";
 import { sanitizePublicUrls } from "./schema";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types";
-import { rankWorthItems, type WorthSeed } from "./worth-a-look";
+import { rankWorthItems, presentWorthItem, type WorthSeed } from "./worth-a-look";
+import { openInvestigationForEditor } from "./dark-open";
+
+export { openInvestigationForEditor } from "./dark-open";
 
 export type DarkSignalRow = {
   id: number;
@@ -290,7 +292,9 @@ async function gatherWorthALook(userId: string): Promise<WorthSeed[]> {
     where user_id = ${userId} and status in ('open', 'unclear')
     order by id desc limit 8
   `.catch(() => []);
-  return rankWorthItems({ anomalies, monitors, leads, frontier, signals, promises });
+  return rankWorthItems({ anomalies, monitors, leads, frontier, signals, promises }).map(
+    presentWorthItem,
+  );
 }
 
 export const listWorthALook = createServerFn({ method: "GET" })
@@ -405,6 +409,17 @@ export const getInvestigation = createServerFn({ method: "GET" })
       where investigation_id = ${id} and user_id = ${context.userId}
       order by id desc limit 40
     `;
+    const signals = await sql<{
+      id: number;
+      name: string;
+      observation: string;
+      handoff: string;
+      strength: number;
+    }>`
+      select id, name, observation, handoff, strength from dark_signals
+      where investigation_id = ${id} and user_id = ${context.userId}
+      order by id desc limit 12
+    `.catch(() => []);
     return {
       investigation: inv[0],
       frontier,
@@ -417,6 +432,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
       anomalies,
       deadEnds,
       searches,
+      signals,
     };
   });
 
@@ -547,6 +563,20 @@ async function synthesizeSignals(
   return { stored, summary: header, error: undefined as string | undefined };
 }
 
+function asDarkError(err: unknown): string {
+  if (err && typeof err === "object" && "error" in err) return String((err as { error: unknown }).error);
+  return err instanceof Error ? err.message : "Dark desk failed";
+}
+
+async function markInvestigationPaused(userId: string, investigationId: number, error: string) {
+  const sql = await getSql();
+  await sql`
+    update investigations
+    set status = ${"paused"}, pause_reason = ${error.slice(0, 800)}, updated_at = now()
+    where id = ${investigationId} and user_id = ${userId}
+  `;
+}
+
 async function executeDarkRun(
   userId: string,
   opts: { paste: string; investigationId?: number; title?: string },
@@ -560,76 +590,78 @@ async function executeDarkRun(
 
   let investigationId = opts.investigationId ?? 0;
   if (!investigationId) {
-    const title =
-      (opts.title || paste.slice(0, 80).replace(/\s+/g, " ") || `Investigation ${new Date().toISOString().slice(0, 10)}`).slice(
-        0,
-        200,
-      );
-    const created = await sql<{ id: number }>`
-      insert into investigations (user_id, title, budget)
-      values (${userId}, ${title}, ${5})
-      returning id
-    `;
-    investigationId = created[0]!.id;
-    const snaps = await sql<{ title: string; url: string; excerpt: string }>`
-      select s.title, s.url, snap.excerpt
-      from snapshots snap
-      join sources s on s.id = snap.source_id
-      where snap.user_id = ${userId}
-      order by snap.id desc
-      limit 16
-    `;
-    await seedInvestigation(userId, investigationId, paste, snaps);
+    const opened = await openInvestigationForEditor(userId, { paste, title: opts.title });
+    investigationId = opened.investigationId;
   }
 
-  await checkBaselines(userId, investigationId);
-  await runDueMonitors({ userId });
+  try {
+    await checkBaselines(userId, investigationId);
+    await runDueMonitors({ userId });
 
-  const loop = await researchLoop({
-    userId,
-    investigationId,
-    hops: 5,
-  });
+    const loop = await researchLoop({
+      userId,
+      investigationId,
+      hops: 5,
+    });
 
-  const synth = await synthesizeSignals(userId, runId, investigationId, paste);
-  const names = (
-    await sql<{ name: string }>`
-      select e.name from investigation_entities ie
-      join entities e on e.id = ie.entity_id
-      where ie.investigation_id = ${investigationId} and ie.user_id = ${userId}
-      order by ie.id desc limit 40
-    `
-  ).map((n) => n.name);
-  await resurfaceDeadEnds(userId, investigationId, names, { foreignOnly: true });
-  const revived = await matchDeadEnds(userId, names);
+    const synth = await synthesizeSignals(userId, runId, investigationId, paste);
+    const names = (
+      await sql<{ name: string }>`
+        select e.name from investigation_entities ie
+        join entities e on e.id = ie.entity_id
+        where ie.investigation_id = ${investigationId} and ie.user_id = ${userId}
+        order by ie.id desc limit 40
+      `
+    ).map((n) => n.name);
+    await resurfaceDeadEnds(userId, investigationId, names, { foreignOnly: true });
+    const revived = await matchDeadEnds(userId, names);
 
-  const header = [
-    loop.summary,
-    synth.summary,
-    `Hops ${loop.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
-    revived.length ? `Prior dead ends matched: ${revived.map((r) => r.hypothesis).join("; ")}` : "",
-    synth.error ? `Synthesis: ${synth.error}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    const header = [
+      loop.summary,
+      synth.summary,
+      `Hops ${loop.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
+      revived.length ? `Prior dead ends matched: ${revived.map((r) => r.hypothesis).join("; ")}` : "",
+      synth.error ? `Synthesis: ${synth.error}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-  await sql`
-    update dark_runs
-    set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null}
-    where id = ${runId} and user_id = ${userId}
-  `;
-  await audit(userId, "dark", `run ${runId} inv ${investigationId} hops ${loop.hops} signals ${synth.stored}`);
-  return {
-    ok: true as const,
-    runId,
-    investigationId,
-    stored: synth.stored,
-    hops: loop.hops,
-    artifacts: loop.artifacts,
-    frontier: loop.frontier,
-    paused: loop.paused,
-    summary: header,
-  };
+    await sql`
+      update dark_runs
+      set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null}
+      where id = ${runId} and user_id = ${userId}
+    `;
+    await audit(userId, "dark", `run ${runId} inv ${investigationId} hops ${loop.hops} signals ${synth.stored}`);
+    if (synth.error) {
+      await markInvestigationPaused(userId, investigationId, synth.error);
+    }
+    return {
+      ok: true as const,
+      runId,
+      investigationId,
+      stored: synth.stored,
+      hops: loop.hops,
+      artifacts: loop.artifacts,
+      frontier: loop.frontier,
+      paused: loop.paused || Boolean(synth.error),
+      summary: header,
+      error: synth.error,
+    };
+  } catch (err) {
+    const error = asDarkError(err);
+    await sql`
+      update dark_runs
+      set finished_at = now(), error = ${error.slice(0, 800)}
+      where id = ${runId} and user_id = ${userId}
+    `;
+    await markInvestigationPaused(userId, investigationId, error);
+    return {
+      ok: false as const,
+      runId,
+      investigationId,
+      error,
+    };
+  }
 }
 
 export const runDarkDesk = createServerFn({ method: "POST" })
@@ -644,17 +676,28 @@ export const runDarkDesk = createServerFn({ method: "POST" })
     });
   });
 
+export const openDarkInvestigation = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { paste: string; title?: string }) => input)
+  .handler(async ({ context, data }) => {
+    await ensureDarkSchema();
+    const opened = await openInvestigationForEditor(context.userId, data);
+    await audit(context.userId, "dark", `open inv ${opened.investigationId}`);
+    return opened;
+  });
+
 export const findSomethingToDigInto = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
     await ensureDarkSchema();
-    await assertRate(context.userId, "dark");
     const items = await gatherWorthALook(context.userId);
     const top = items[0];
-    return executeDarkRun(context.userId, {
+    const opened = await openInvestigationForEditor(context.userId, {
       paste: top?.seed ?? "",
       title: top?.title,
     });
+    await audit(context.userId, "dark", `open inv ${opened.investigationId} from worth-a-look`);
+    return opened;
   });
 
 export const continueInvestigation = createServerFn({ method: "POST" })
@@ -672,56 +715,69 @@ export const continueInvestigation = createServerFn({ method: "POST" })
       insert into dark_runs (user_id) values (${context.userId}) returning id
     `;
     const runId = runRows[0]!.id;
-    await checkBaselines(context.userId, id);
-    await runDueMonitors({ userId: context.userId });
-    const loop = await researchLoop({
-      userId: context.userId,
-      investigationId: id,
-      hops: 5,
-    });
-    const synth = await synthesizeSignals(context.userId, runId, id, "");
-    const names = (
-      await sql<{ name: string }>`
-        select e.name from investigation_entities ie
-        join entities e on e.id = ie.entity_id
-        where ie.investigation_id = ${id} and ie.user_id = ${context.userId}
-        order by ie.id desc limit 40
-      `
-    ).map((n) => n.name);
-    await resurfaceDeadEnds(context.userId, id, names, { foreignOnly: true });
-    const revived = await matchDeadEnds(context.userId, names);
-    const header = [
-      loop.summary,
-      synth.summary,
-      `Hops ${loop.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
-      revived.length
-        ? `Prior dead ends matched: ${revived.map((r) => r.hypothesis).join("; ")}`
-        : "",
-      synth.error ? `Synthesis: ${synth.error}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-    await sql`
-      update dark_runs
-      set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null}
-      where id = ${runId} and user_id = ${context.userId}
-    `;
-    await audit(
-      context.userId,
-      "dark-continue",
-      `run ${runId} inv ${id} hops ${loop.hops} signals ${synth.stored}`,
-    );
-    return {
-      ok: true as const,
-      runId,
-      investigationId: id,
-      stored: synth.stored,
-      hops: loop.hops,
-      artifacts: loop.artifacts,
-      frontier: loop.frontier,
-      paused: loop.paused,
-      summary: header,
-    };
+    try {
+      await checkBaselines(context.userId, id);
+      await runDueMonitors({ userId: context.userId });
+      const loop = await researchLoop({
+        userId: context.userId,
+        investigationId: id,
+        hops: 5,
+      });
+      const synth = await synthesizeSignals(context.userId, runId, id, "");
+      const names = (
+        await sql<{ name: string }>`
+          select e.name from investigation_entities ie
+          join entities e on e.id = ie.entity_id
+          where ie.investigation_id = ${id} and ie.user_id = ${context.userId}
+          order by ie.id desc limit 40
+        `
+      ).map((n) => n.name);
+      await resurfaceDeadEnds(context.userId, id, names, { foreignOnly: true });
+      const revived = await matchDeadEnds(context.userId, names);
+      const header = [
+        loop.summary,
+        synth.summary,
+        `Hops ${loop.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
+        revived.length
+          ? `Prior dead ends matched: ${revived.map((r) => r.hypothesis).join("; ")}`
+          : "",
+        synth.error ? `Synthesis: ${synth.error}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      await sql`
+        update dark_runs
+        set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null}
+        where id = ${runId} and user_id = ${context.userId}
+      `;
+      await audit(
+        context.userId,
+        "dark-continue",
+        `run ${runId} inv ${id} hops ${loop.hops} signals ${synth.stored}`,
+      );
+      if (synth.error) await markInvestigationPaused(context.userId, id, synth.error);
+      return {
+        ok: true as const,
+        runId,
+        investigationId: id,
+        stored: synth.stored,
+        hops: loop.hops,
+        artifacts: loop.artifacts,
+        frontier: loop.frontier,
+        paused: loop.paused || Boolean(synth.error),
+        summary: header,
+        error: synth.error,
+      };
+    } catch (err) {
+      const error = asDarkError(err);
+      await sql`
+        update dark_runs
+        set finished_at = now(), error = ${error.slice(0, 800)}
+        where id = ${runId} and user_id = ${context.userId}
+      `;
+      await markInvestigationPaused(context.userId, id, error);
+      return { ok: false as const, runId, investigationId: id, error };
+    }
   });
 
 export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
@@ -777,5 +833,41 @@ export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
       returning id
     `;
     await audit(context.userId, "dark-handoff", String(id));
+    return { ok: true as const, leadId: created[0]!.id };
+  });
+
+export const queueInvestigation = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((id: number) => id)
+  .handler(async ({ context, data: id }) => {
+    await ensureDarkSchema();
+    const sql = await getSql();
+    const inv = await sql<InvestigationRow>`
+      select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at
+      from investigations where id = ${id} and user_id = ${context.userId} limit 1
+    `;
+    if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
+    const arts = await sql<{ url: string }>`
+      select url from artifacts
+      where user_id = ${context.userId} and investigation_id = ${id}
+      order by id desc limit 12
+    `;
+    const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
+    const created = await sql<{ id: number }>`
+      insert into leads (user_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
+      values (
+        ${context.userId},
+        ${inv[0].title.slice(0, 240)},
+        ${`DARK DESK notes. Publication is a separate human action.\n\n${inv[0].summary}`.slice(0, 4000)},
+        'council',
+        'new',
+        ${urls},
+        ${inv[0].summary.slice(0, 4000)},
+        ${12},
+        ${id}
+      )
+      returning id
+    `;
+    await audit(context.userId, "dark-handoff", `inv ${id} lead ${created[0]!.id}`);
     return { ok: true as const, leadId: created[0]!.id };
   });

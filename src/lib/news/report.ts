@@ -21,6 +21,7 @@ export type ProvenanceItem = {
   captured_at: string | null;
   version_id: number | null;
   version_count: number | null;
+  capture_event_id?: number | null;
   disappeared: boolean;
   role: string;
 };
@@ -31,6 +32,7 @@ export type StoryFinding = {
   capture_event_ids: number[];
   artifact_version_ids: number[];
   locators: string[];
+  excerpt?: string;
 };
 
 export type ReportedDraft = {
@@ -352,6 +354,8 @@ export function mergeProvenanceItem(
         : base.captured_at,
     version_id: extra.version_id != null ? extra.version_id : base.version_id,
     version_count: extra.version_count != null ? extra.version_count : base.version_count,
+    capture_event_id:
+      extra.capture_event_id != null ? extra.capture_event_id : base.capture_event_id ?? null,
     disappeared: extra.disappeared !== undefined ? Boolean(extra.disappeared) : base.disappeared,
   };
 }
@@ -365,6 +369,7 @@ function blankProvenance(url: string): ProvenanceItem {
     captured_at: null,
     version_id: null,
     version_count: null,
+    capture_event_id: null,
     disappeared: false,
     role: "",
   };
@@ -448,6 +453,7 @@ export function parseFindings(raw: unknown): StoryFinding[] {
       capture_event_ids: asIntList(o.capture_event_ids),
       artifact_version_ids: asIntList(o.artifact_version_ids ?? o.version_ids),
       locators: Array.isArray(o.locators) ? o.locators.map(String).slice(0, 12) : [],
+      excerpt: typeof o.excerpt === "string" ? o.excerpt.slice(0, 800) : undefined,
     });
   }
   return out.slice(0, 6);
@@ -466,12 +472,18 @@ export function resolvePublicFindings(
   const versions = new Set(
     provenance.map((p) => p.version_id).filter((id): id is number => id != null),
   );
+  const captures = new Set(
+    provenance
+      .map((p) => p.capture_event_id)
+      .filter((id): id is number => id != null),
+  );
   return findings.filter((f) => {
     if (!f.text.trim()) return false;
-    if (f.source_urls.some((u) => urls.has(u))) return true;
-    if (f.artifact_version_ids.some((id) => versions.has(id))) return true;
-    if (f.capture_event_ids.length && f.source_urls.some((u) => urls.has(u))) return true;
-    return false;
+    const urlOk = f.source_urls.some((u) => urls.has(u));
+    if (!urlOk) return false;
+    const versionOk = f.artifact_version_ids.some((id) => versions.has(id));
+    const captureOk = f.capture_event_ids.some((id) => captures.has(id));
+    return versionOk || captureOk;
   });
 }
 
@@ -526,16 +538,18 @@ async function hydrateCaptures(userId: string, urls: string[]): Promise<Partial<
         title: string;
         captured_at: string | null;
         version_id: number | null;
+        capture_event_id: number | null;
         fetch_outcome: string | null;
         versions: number | null;
       }>`
-        select av.title, ce.observed_at::text as captured_at, ce.version_id, ce.fetch_outcome,
+        select av.title, ce.observed_at::text as captured_at, ce.version_id, ce.id as capture_event_id,
+          ce.fetch_outcome,
           (select count(*)::int from artifact_versions av2
             where av2.user_id = ${userId} and av2.url = ${url}) as versions
         from capture_events ce
         left join artifact_versions av on av.id = ce.version_id
         where ce.user_id = ${userId} and ce.source_url = ${url}
-        order by ce.id desc
+        order by ce.observed_at desc, ce.id desc
         limit 1
       `;
       const row = rows[0];
@@ -549,6 +563,7 @@ async function hydrateCaptures(userId: string, urls: string[]): Promise<Partial<
         title: row.title,
         captured_at: row.captured_at,
         version_id: row.version_id,
+        capture_event_id: row.capture_event_id,
         version_count: row.versions,
         disappeared: gone,
       });
@@ -588,7 +603,7 @@ async function fetchDocs(
   });
 }
 
-type ResearchJson = {
+export type ResearchJson = {
   news?: string;
   why_it_matters?: string;
   angle?: string;
@@ -610,34 +625,131 @@ function stringsFrom(raw: unknown): string[] {
   return raw.map(String).map((s) => s.trim()).filter((s) => s.length > 3).slice(0, 6);
 }
 
+export const REPORT_LANES = ["context", "stakeholders", "contradiction", "gaps"] as const;
+export type ReportLane = (typeof REPORT_LANES)[number];
+
+/** Breadth first: one query per lane, then leftover budget round-robins remaining candidates. */
+export function allocateLaneQueries(
+  candidates: Record<string, string[]>,
+  budget: number,
+): { lane: ReportLane; query: string }[] {
+  const queues: Record<ReportLane, string[]> = {
+    context: [...(candidates.context ?? [])],
+    stakeholders: [...(candidates.stakeholders ?? [])],
+    contradiction: [...(candidates.contradiction ?? [])],
+    gaps: [...(candidates.gaps ?? [])],
+  };
+  const out: { lane: ReportLane; query: string }[] = [];
+  const seen = new Set<string>();
+  const take = (lane: ReportLane): boolean => {
+    while (queues[lane].length) {
+      const q = queues[lane].shift()!.replace(/\s+/g, " ").trim().slice(0, 180);
+      if (q.length < 8) continue;
+      const key = q.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ lane, query: q });
+      return true;
+    }
+    return false;
+  };
+  for (const lane of REPORT_LANES) {
+    if (out.length >= budget) break;
+    take(lane);
+  }
+  let progressed = true;
+  while (out.length < budget && progressed) {
+    progressed = false;
+    for (const lane of REPORT_LANES) {
+      if (out.length >= budget) break;
+      if (take(lane)) progressed = true;
+    }
+  }
+  return out;
+}
+
 function buildLaneQueries(
   form: StoryForm,
   lead: LeadRow,
   research: ResearchJson | null,
-): { lane: string; query: string }[] {
+): { lane: ReportLane; query: string }[] {
   if (form === "brief") return [];
   const news = research?.angle || research?.news || lead.headline;
   const city = "Longmont";
   const lanes = research?.lanes ?? {};
-  const out: { lane: string; query: string }[] = [];
-  const add = (lane: string, query: string) => {
-    const q = query.replace(/\s+/g, " ").trim();
-    if (q.length < 8) return;
-    if (out.some((x) => x.query === q)) return;
-    out.push({ lane, query: q.slice(0, 180) });
+  const candidates: Record<string, string[]> = {
+    context: [
+      ...stringsFrom(lanes.context),
+      `${news} prior OR previous OR earlier contract OR 2025 ${city}`,
+      research?.follow ? `${research.follow} ${city}` : "",
+    ].filter(Boolean),
+    stakeholders: [
+      ...stringsFrom(lanes.stakeholders),
+      `${news} neighborhood OR vendor OR applicant OR residents ${city}`,
+    ],
+    contradiction: [
+      ...stringsFrom(lanes.contradiction),
+      `${news} delay OR dispute OR postponed OR shortage ${city}`,
+    ],
+    gaps: [
+      ...stringsFrom(lanes.gaps),
+      stringsFrom(research?.unknowns)[0]
+        ? `${stringsFrom(research?.unknowns)[0]} ${city}`
+        : stringsFrom(research?.questions)[0]
+          ? `${stringsFrom(research?.questions)[0]} ${city}`
+          : "",
+    ].filter(Boolean),
   };
-  for (const q of stringsFrom(lanes.context)) add("context", q);
-  for (const q of stringsFrom(lanes.stakeholders)) add("stakeholders", q);
-  for (const q of stringsFrom(lanes.contradiction)) add("contradiction", q);
-  for (const q of stringsFrom(lanes.gaps)) add("gaps", q);
-  add("context", `${news} prior OR previous OR earlier contract OR 2025 ${city}`);
-  add("stakeholders", `${news} neighborhood OR vendor OR applicant OR residents ${city}`);
-  add("contradiction", `${news} delay OR dispute OR postponed OR shortage ${city}`);
-  const gap = stringsFrom(research?.unknowns)[0] || stringsFrom(research?.questions)[0];
-  if (gap) add("gaps", `${gap} ${city}`);
-  if (research?.follow) add("context", `${research.follow} ${city}`);
-  const cap = form === "investigation" || form === "explainer" ? 6 : 4;
-  return out.slice(0, cap);
+  const budget = form === "investigation" || form === "explainer" ? 6 : 4;
+  return allocateLaneQueries(candidates, budget);
+}
+
+export function briefChallengeQuery(lead: LeadRow, research: ResearchJson | null): string {
+  const contradiction = stringsFrom(research?.lanes?.contradiction)[0];
+  if (contradiction) return contradiction;
+  const context = stringsFrom(research?.lanes?.context)[0];
+  if (context) return context;
+  const news = research?.news || research?.angle || lead.headline;
+  return `${news} prior delay cost contract Longmont`;
+}
+
+/** Cheap check that a brief candidate is actually a bigger story. False negatives stay briefs. */
+export function challengeLooksSubstantive(text: string): boolean {
+  if (!text || text.replace(/\s+/g, " ").trim().length < 40) return false;
+  if (/\$[\d,]+|\b\d+(\.\d+)?\s*(million|billion)\b/i.test(text)) return true;
+  if (/\b(20\d{2}|previously|prior |earlier |last year|amendment)\b/i.test(text)) return true;
+  if (/\b(delay|postpon|moved from|pushed from|reschedul)\b/i.test(text)) return true;
+  if (
+    /\b(resident|neighborhood|vendor|evict|contaminat|remediat|layoff|shortage|dispute|oppos|denied|contradict)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (/\b(missing|unpublished|not (provided|released|posted)|overdue)\b/i.test(text)) return true;
+  return false;
+}
+
+export function chooseStoryForm(input: {
+  candidate: StoryForm;
+  written?: StoryForm;
+  challengePromoted: boolean;
+  body: string;
+  extraDocs: number;
+}): StoryForm {
+  let form = input.written ?? input.candidate;
+  if (input.challengePromoted && form === "brief") form = "reported";
+  const words = input.body.trim().split(/\s+/).filter(Boolean).length;
+  if (
+    (form === "reported" || form === "explainer") &&
+    !input.challengePromoted &&
+    words < 280 &&
+    input.extraDocs <= 1
+  ) {
+    return "brief";
+  }
+  if (form === "reported" && words > 900 && input.extraDocs >= 4) return "explainer";
+  return form;
 }
 
 export async function reportAndDraft(
@@ -703,8 +815,29 @@ ${researchEvidence || docs.map((d) => `URL ${d.url}\n${d.text.slice(0, 1200)}`).
   const researchAi = await chat(REPORT_RESEARCH_SYSTEM, researchUser, 900);
   const research = researchAi.ok ? parseJsonBlock<ResearchJson>(researchAi.text) : null;
   let form = asStoryForm(research?.form);
+  let challengePromoted = false;
 
   await take(sanitizePublicUrls(research?.fetch_urls), 4);
+
+  if (form === "brief") {
+    const challengeQ = briefChallengeQuery(opts.lead, research);
+    try {
+      const hits = await search(challengeQ);
+      const challengeUrls = hits.map((h) => h.url).filter((u) => !seen.has(u)).slice(0, 2);
+      await take(challengeUrls, 2);
+      const snippets = hits.map((h) => `${h.title} ${h.snippet ?? ""}`).join("\n");
+      const challengeEvidence = formatRetrievedEvidence(
+        retrieveRelevantChunks(docs, [challengeQ, opts.lead.headline], { budgetChars: 6000 }),
+      );
+      const memoryBlob = opts.memory.map((m) => `${m.entity} ${m.last_angle}`).join("\n");
+      if (challengeLooksSubstantive(`${challengeEvidence}\n${snippets}\n${memoryBlob}`)) {
+        form = "reported";
+        challengePromoted = true;
+      }
+    } catch {
+      /* challenge search is best-effort */
+    }
+  }
 
   const laneQueries = buildLaneQueries(form, opts.lead, research);
   const searchUrls: string[] = [];
@@ -825,6 +958,7 @@ ${researchEvidence || docs.map((d) => `URL ${d.url}\n${d.text.slice(0, 1200)}`).
       url: d.url,
       title: d.title,
       version_id: d.version_id ?? null,
+      capture_event_id: d.capture_event_id ?? null,
       role: seedUrls.includes(d.url) ? "announcing-source" : "followed",
     }));
   const provenance = provenanceFromUrls(used.length ? used : seedUrls, [
@@ -837,21 +971,40 @@ ${researchEvidence || docs.map((d) => `URL ${d.url}\n${d.text.slice(0, 1200)}`).
     : stringsFrom(research?.unknowns);
   const findings = parseFindings(parsed.found);
   for (const f of findings) {
+    const fromDocs = docs.filter((d) => f.source_urls.includes(d.url));
     if (!f.artifact_version_ids.length) {
-      f.artifact_version_ids = docs
-        .filter((d) => f.source_urls.includes(d.url) && d.version_id)
-        .map((d) => d.version_id!)
+      f.artifact_version_ids = fromDocs
+        .map((d) => d.version_id)
+        .filter((id): id is number => id != null)
         .slice(0, 8);
     }
     if (!f.capture_event_ids.length) {
-      f.capture_event_ids = docs
-        .filter((d) => f.source_urls.includes(d.url) && d.capture_event_id)
-        .map((d) => d.capture_event_id!)
+      f.capture_event_ids = fromDocs
+        .map((d) => d.capture_event_id)
+        .filter((id): id is number => id != null)
         .slice(0, 8);
     }
+    const provHits = provenance.filter((p) => f.source_urls.includes(p.url));
+    const provV = provHits.map((p) => p.version_id).filter((id): id is number => id != null);
+    const provC = provHits
+      .map((p) => p.capture_event_id)
+      .filter((id): id is number => id != null);
+    if (provV.length) {
+      const keep = f.artifact_version_ids.filter((id) => provV.includes(id));
+      f.artifact_version_ids = keep.length ? keep : provV;
+    }
+    if (provC.length) {
+      const keep = f.capture_event_ids.filter((id) => provC.includes(id));
+      f.capture_event_ids = keep.length ? keep : provC;
+    }
   }
-  form = asStoryForm(parsed.form ?? research?.form);
-  // Grounded reporting is not a brief. Only a genuine small item is.
+  form = chooseStoryForm({
+    candidate: asStoryForm(research?.form),
+    written: parsed.form != null ? asStoryForm(parsed.form) : undefined,
+    challengePromoted,
+    body,
+    extraDocs: docs.filter((d) => d.text && !seedUrls.includes(d.url)).length,
+  });
 
   return {
     headline: coerced.headline,
