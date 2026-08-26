@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.3 — 2026-08-26
+
+Dark Desk editor language and desk piles. Investigative engine unchanged.
+
+- A round of research is five short passes, then a stop. Remaining pages, names, and documents stay on the file. That stop is not a failure and not “too many leads.”
+- Editor copy no longer uses hop, frontier, or research-budget jargon. Status, progress, findings, and run logs are plain English.
+- Dark Desk is three piles: To look at (not opened yet), On the desk (started, including files that stopped with more to read), Set aside (parked or finished, pull back anytime).
+- Start digging moves a card off To look at and onto the desk. Close file leaves it on the desk. Set aside files it. Pull back restores it.
+- On-desk files show records saved, things still unopened, and last touched. The open file is the work surface.
+- Fetch and model errors no longer leak as raw TypeErrors. A hop-budget pause is not overwritten by a later model hiccup.
+
 ## 0.2.2 — 2026-08-26
 
 Reporting breadth and evidence chronology. Dark Desk engine unchanged; editor UI rewritten.

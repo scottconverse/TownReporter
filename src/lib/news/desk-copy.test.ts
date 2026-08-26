@@ -3,10 +3,16 @@ import assert from "node:assert/strict";
 import {
   editorError,
   editorKindLabel,
+  editorPauseReason,
   editorStatus,
   headlineFromUrl,
+  looksLikeInternalSummary,
+  plainEditorText,
+  plainFinding,
   progressLine,
   sourceLineFromUrl,
+  titlesOverlap,
+  worthItemOnDesk,
 } from "./desk-copy.ts";
 import { presentWorthItem, rankWorthItems } from "./worth-a-look.ts";
 
@@ -26,16 +32,42 @@ describe("editor copy", () => {
     const msg = editorError("xAI API error 403");
     assert.ok(msg);
     assert.doesNotMatch(msg!, /xAI API error 403/);
-    assert.match(msg!, /unavailable|denied|Keep digging/i);
+    assert.match(msg!, /unavailable|Keep digging/i);
+  });
+
+  it("does not show a TypeError as editor copy", () => {
+    const msg = editorError("Cannot read properties of undefined (reading 'ok')");
+    assert.ok(msg);
+    assert.doesNotMatch(msg!, /Cannot read properties/i);
+    assert.match(msg!, /Keep digging/i);
   });
 
   it("labels investigation status in English", () => {
-    assert.equal(editorStatus("investigating"), "Researching");
-    assert.equal(editorStatus("paused"), "Paused — work remaining");
-    assert.equal(editorKindLabel("reopened"), "Resurfaced");
+    assert.equal(editorStatus("investigating"), "Looking now");
+    assert.equal(editorStatus("paused"), "Stopped — more to read");
+    assert.equal(editorKindLabel("reopened"), "Showed up again");
   });
 
-  it("progresses from started to hops without developer jargon", () => {
+  it("explains a stop after a round without hop or frontier", () => {
+    const msg = editorPauseReason(
+      "Hop budget 5 reached with 65 frontier item(s) still open. Budget pauses work; evidence exhaustion would close it.",
+    );
+    assert.ok(msg);
+    assert.match(msg!, /65 pages, names, or documents/);
+    assert.match(msg!, /Keep digging/);
+    assert.match(msg!, /not an error/i);
+    assert.doesNotMatch(msg!, /frontier/i);
+    assert.doesNotMatch(msg!, /\bhop\b/i);
+    assert.doesNotMatch(msg!, /budget/i);
+  });
+
+  it("does not treat a heuristic hop dump as a reader-facing summary", () => {
+    assert.equal(looksLikeInternalSummary("Heuristic hop: 3 searches, 4 fetches, 14 frontier items."), true);
+    assert.equal(looksLikeInternalSummary("Opened from Dark Desk."), true);
+    assert.equal(looksLikeInternalSummary("The city moved the transportation extension from 2024 into 2026."), false);
+  });
+
+  it("progresses from started to rounds without hop or frontier", () => {
     const start = progressLine({
       running: true,
       status: "investigating",
@@ -55,8 +87,31 @@ describe("editor copy", () => {
       searches: 3,
       claims: 1,
     });
-    assert.match(mid, /Hop 2 of 5/);
+    assert.match(mid, /Round 2 of 5/);
+    assert.doesNotMatch(mid, /\bhop\b/i);
     assert.doesNotMatch(mid, /frontier/i);
+    const paused = progressLine({
+      running: false,
+      status: "paused",
+      hops: 5,
+      budget: 5,
+      artifacts: 4,
+      searches: 3,
+      claims: 0,
+    });
+    assert.match(paused, /more still to open/i);
+    assert.doesNotMatch(paused, /\bhop\b/i);
+  });
+
+  it("translates engine dumps into English", () => {
+    const run = plainEditorText("Hops 5. Artifacts 34. Open frontier 149.");
+    assert.match(run, /5 rounds/);
+    assert.match(run, /34 records/);
+    assert.match(run, /149 things still to open/);
+    assert.doesNotMatch(run, /frontier|artifacts|\bhops?\b/i);
+    const finding = plainFinding("Document changed: https://youtube.com/@CityofLongmont");
+    assert.match(finding, /YouTube|different/i);
+    assert.doesNotMatch(finding, /Document changed/i);
   });
 });
 
@@ -77,11 +132,36 @@ describe("Worth a Look presentation", () => {
     assert.doesNotMatch(card.title, /^https?:/i);
     assert.doesNotMatch(card.title, /https?:/i);
     assert.match(card.title, /transportation extension/i);
-    assert.equal(card.badge, "Resurfaced");
+    assert.equal(card.badge, "Showed up again");
     assert.doesNotMatch(card.why, /resolved|Prior: Fetched|frontier|Previously parked/i);
     assert.doesNotMatch(card.happened, /Previously parked|https?:/i);
     assert.match(card.happened, /Boulder County|encountered this again/i);
     assert.match(card.question, /new evidence|miss/i);
     assert.match(card.seed, /assets.bouldercounty.gov/);
+  });
+
+  it("moves a started card off To look at once an investigation exists", () => {
+    assert.equal(
+      titlesOverlap("Transportation Extension document", "Transportation Extension document"),
+      true,
+    );
+    assert.equal(
+      worthItemOnDesk(
+        { id: "frontier:url:pdf", title: "Transportation Extension document" },
+        [{ title: "Transportation Extension document" }],
+      ),
+      true,
+    );
+    assert.equal(
+      worthItemOnDesk(
+        { id: "x", title: "Water quality report overdue" },
+        [{ title: "Transportation Extension document" }],
+      ),
+      false,
+    );
+    assert.equal(
+      worthItemOnDesk({ id: "claimed", title: "Anything" }, [], ["claimed"]),
+      true,
+    );
   });
 });

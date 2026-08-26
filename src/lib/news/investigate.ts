@@ -534,26 +534,43 @@ function parsePlan(raw: unknown): HopPlan {
 
 export async function grokPlanner(pack: string): Promise<HopPlan> {
   const ai = await grokChat(DARK_PLANNER, pack.slice(0, 24000), 2200);
-  if (!ai.ok) return heuristicPlan(pack, new Set());
+  if (!ai?.ok) return heuristicPlan(pack, new Set());
   return parsePlan(parseJsonBlock<unknown>(ai.text));
 }
 
 async function defaultFetch(url: string): ReturnType<FetchFn> {
-  const doc = await ingestDocument(url);
-  return {
-    ok: doc.ok,
-    status: doc.status,
-    text: doc.text,
-    title: doc.title,
-    extras: doc.extras,
-    outcome: doc.outcome,
-    redirectChain: doc.redirectChain,
-    contentType: doc.contentType,
-    extractionMethod: doc.extractionMethod,
-    pages: doc.pages,
-    needsOcr: doc.needsOcr,
-    rawBytes: doc.rawBytes,
-  };
+  try {
+    const doc = await ingestDocument(url);
+    if (!doc || typeof doc.ok !== "boolean") {
+      return { ok: false, status: 0, text: "", title: url, extras: [] };
+    }
+    return {
+      ok: doc.ok,
+      status: doc.status,
+      text: doc.text,
+      title: doc.title,
+      extras: doc.extras ?? [],
+      outcome: doc.outcome,
+      redirectChain: doc.redirectChain,
+      contentType: doc.contentType,
+      extractionMethod: doc.extractionMethod,
+      pages: doc.pages,
+      needsOcr: doc.needsOcr,
+      rawBytes: doc.rawBytes,
+    };
+  } catch {
+    return { ok: false, status: 0, text: "", title: url, extras: [] };
+  }
+}
+
+function asFetched(
+  got: Awaited<ReturnType<FetchFn>> | null | undefined,
+  url: string,
+): Awaited<ReturnType<FetchFn>> {
+  if (got && typeof got.ok === "boolean") {
+    return { ...got, extras: got.extras ?? [], text: got.text ?? "", title: got.title || url, status: got.status ?? 0 };
+  }
+  return { ok: false, status: 0, text: "", title: url, extras: [] };
 }
 
 function parseJsonArray(raw: string | null | undefined): string[] {
@@ -1605,7 +1622,7 @@ export async function researchLoop(opts: {
             order by id desc limit 1
           `
         )[0];
-      const got = await fetchDoc(url);
+      const got = asFetched(await fetchDoc(url), url);
       const hash = got.ok ? await sha256(got.text) : "missing";
       const classified = classifyFetchedPage({
         status: got.status,
@@ -2407,7 +2424,7 @@ export async function runDueMonitors(opts: {
       where ce.user_id = ${opts.userId} and ce.source_url = ${url}
       order by ce.id desc limit 1
     `;
-    const got = await fetchDoc(url);
+    const got = asFetched(await fetchDoc(url), url);
     const hash = got.ok ? await sha256(got.text) : "missing";
     const classified = classifyFetchedPage({
       status: got.status,

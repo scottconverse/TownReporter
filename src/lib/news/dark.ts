@@ -16,6 +16,7 @@ import { sanitizePublicUrls } from "./schema";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types";
 import { rankWorthItems, presentWorthItem, type WorthSeed } from "./worth-a-look";
 import { openInvestigationForEditor } from "./dark-open";
+import { titlesOverlap } from "./desk-copy";
 
 export { openInvestigationForEditor } from "./dark-open";
 
@@ -68,6 +69,8 @@ export type InvestigationRow = {
   pause_reason: string | null;
   created_at: string;
   updated_at: string;
+  records?: number;
+  still_open?: number;
 };
 
 const HANDOFFS = new Set([
@@ -222,13 +225,28 @@ export const listInvestigations = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await ensureDarkSchema();
     const sql = await getSql();
-    return sql<InvestigationRow>`
-      select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at
-      from investigations
-      where user_id = ${context.userId}
-      order by updated_at desc
-      limit 20
+    const rows = await sql<InvestigationRow>`
+      select i.id, i.title, i.status, i.summary, i.hops, i.budget, i.pause_reason,
+        i.created_at, i.updated_at,
+        coalesce((
+          select count(*)::int from artifacts a
+          where a.investigation_id = i.id and a.user_id = i.user_id
+        ), 0) as records,
+        coalesce((
+          select count(*)::int from frontier_items f
+          where f.investigation_id = i.id and f.user_id = i.user_id
+            and f.status in ('open', 'investigating', 'reopened')
+        ), 0) as still_open
+      from investigations i
+      where i.user_id = ${context.userId}
+      order by i.updated_at desc
+      limit 40
     `;
+    return rows.map((r) => ({
+      ...r,
+      records: Number(r.records ?? 0),
+      still_open: Number(r.still_open ?? 0),
+    }));
   });
 
 async function gatherWorthALook(userId: string): Promise<WorthSeed[]> {
@@ -504,7 +522,7 @@ async function synthesizeSignals(
   ].join("\n\n");
 
   const ai = await grokChat(DARK_SYSTEM, pack.slice(0, 28000), 3200);
-  if (!ai.ok) return { stored: 0, summary: "", error: ai.error as string | undefined };
+  if (!ai?.ok) return { stored: 0, summary: "", error: (ai && "error" in ai ? ai.error : "Empty model response") as string | undefined };
 
   const parsed = parseJsonBlock<DarkJson>(ai.text) ?? {};
   const summary = String(parsed.editor_summary ?? "").slice(0, 2000);
@@ -632,7 +650,7 @@ async function executeDarkRun(
       where id = ${runId} and user_id = ${userId}
     `;
     await audit(userId, "dark", `run ${runId} inv ${investigationId} hops ${loop.hops} signals ${synth.stored}`);
-    if (synth.error) {
+    if (synth.error && !loop.paused) {
       await markInvestigationPaused(userId, investigationId, synth.error);
     }
     return {
@@ -691,7 +709,14 @@ export const findSomethingToDigInto = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     await ensureDarkSchema();
     const items = await gatherWorthALook(context.userId);
-    const top = items[0];
+    const sql = await getSql();
+    const active = await sql<{ title: string }>`
+      select title from investigations
+      where user_id = ${context.userId}
+        and status in ('open', 'investigating', 'paused')
+    `;
+    const top =
+      items.find((item) => !active.some((row) => titlesOverlap(item.title, row.title))) ?? items[0];
     const opened = await openInvestigationForEditor(context.userId, {
       paste: top?.seed ?? "",
       title: top?.title,
@@ -755,7 +780,7 @@ export const continueInvestigation = createServerFn({ method: "POST" })
         "dark-continue",
         `run ${runId} inv ${id} hops ${loop.hops} signals ${synth.stored}`,
       );
-      if (synth.error) await markInvestigationPaused(context.userId, id, synth.error);
+      if (synth.error && !loop.paused) await markInvestigationPaused(context.userId, id, synth.error);
       return {
         ok: true as const,
         runId,
@@ -870,4 +895,44 @@ export const queueInvestigation = createServerFn({ method: "POST" })
     `;
     await audit(context.userId, "dark-handoff", `inv ${id} lead ${created[0]!.id}`);
     return { ok: true as const, leadId: created[0]!.id };
+  });
+
+export const parkInvestigation = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((id: number) => id)
+  .handler(async ({ context, data: id }) => {
+    await ensureDarkSchema();
+    const sql = await getSql();
+    await sql`
+      update investigations
+      set status = ${"closed"},
+          pause_reason = ${"Editor set this aside."},
+          updated_at = now()
+      where id = ${id} and user_id = ${context.userId}
+    `;
+    await audit(context.userId, "dark", `set aside inv ${id}`);
+    return { ok: true as const, investigationId: id };
+  });
+
+export const reopenParkedInvestigation = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((id: number) => id)
+  .handler(async ({ context, data: id }) => {
+    await ensureDarkSchema();
+    const sql = await getSql();
+    const leftover = await sql<{ c: number }>`
+      select count(*)::int as c from frontier_items
+      where investigation_id = ${id} and user_id = ${context.userId}
+        and status in ('open', 'investigating', 'reopened')
+    `;
+    const still = Number(leftover[0]?.c ?? 0);
+    await sql`
+      update investigations
+      set status = ${still > 0 ? "paused" : "open"},
+          pause_reason = ${still > 0 ? `Hop budget resumed with ${still} frontier item(s) still open.` : null},
+          updated_at = now()
+      where id = ${id} and user_id = ${context.userId}
+    `;
+    await audit(context.userId, "dark", `pull back inv ${id}`);
+    return { ok: true as const, investigationId: id };
   });
