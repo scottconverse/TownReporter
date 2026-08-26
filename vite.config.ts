@@ -153,6 +153,48 @@ function authPopupPlugin(): Plugin {
   };
 }
 
+/**
+ * Dark Desk monitors must recapture due URLs even if no editor is signed in.
+ * Ticks after boot, then every 5 minutes. Production can also hit GET /api/cron/monitors.
+ */
+function darkDeskMonitorPlugin(): Plugin {
+  return {
+    name: "townreporter:dark-desk-monitors",
+    apply: "serve",
+    configureServer(server) {
+      let ticking = false;
+      const tick = async () => {
+        if (ticking) return;
+        ticking = true;
+        try {
+          const mod = (await server.ssrLoadModule("/src/lib/news/monitors-cron.ts")) as {
+            tickAllDueMonitors?: () => Promise<unknown>;
+          };
+          if (typeof mod.tickAllDueMonitors === "function") {
+            await mod.tickAllDueMonitors();
+          }
+        } catch (err) {
+          console.error("[townreporter] monitor tick failed:", err);
+        } finally {
+          ticking = false;
+        }
+      };
+      const intervalMs = 5 * 60 * 1000;
+      const first = setTimeout(() => {
+        void tick();
+      }, 45_000);
+      const id = setInterval(() => {
+        void tick();
+      }, intervalMs);
+      const stop = () => {
+        clearTimeout(first);
+        clearInterval(id);
+      };
+      server.httpServer?.once("close", stop);
+    },
+  };
+}
+
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
@@ -175,6 +217,7 @@ export default defineConfig(({ command, isPreview }) => ({
   resolve: { tsconfigPaths: true },
   plugins: [
     pgliteBootstrapPlugin(),
+    darkDeskMonitorPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),
     // Dev-only /__app-env, read by scripts/check-auth-invariant.mjs.

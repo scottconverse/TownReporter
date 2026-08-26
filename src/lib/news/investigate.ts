@@ -96,6 +96,8 @@ export type FetchFn = (url: string) => Promise<{
   extractionMethod?: string;
   pages?: PdfPage[];
   needsOcr?: boolean;
+  rawBytes?: Uint8Array;
+  classification?: string;
 }>;
 export type SearchAttemptFn = (query: string) => Promise<SearchAttempt>;
 export type PlannerFn = (pack: string) => Promise<HopPlan>;
@@ -385,6 +387,23 @@ alter table artifact_versions add column if not exists raw_ref text;
 alter table artifact_versions add column if not exists content_type text;
 alter table entity_aliases add column if not exists evidence text;
 alter table entity_aliases add column if not exists verdict text;
+alter table investigations add column if not exists pause_reason text;
+alter table frontier_items add column if not exists prior_status text;
+alter table frontier_items add column if not exists reopened_at timestamptz;
+alter table frontier_items add column if not exists reopened_from text;
+create table if not exists artifact_blobs (
+  id serial primary key,
+  version_id integer not null,
+  user_id text not null,
+  sha256 text not null,
+  mime text not null default 'application/octet-stream',
+  original_url text not null default '',
+  redirect_chain text not null default '[]',
+  byte_length integer not null default 0,
+  body_b64 text not null default '',
+  captured_at timestamptz not null default now()
+);
+create index if not exists artifact_blobs_version_idx on artifact_blobs (version_id);
 `;
 
 export async function ensureInvestigateSchema() {
@@ -519,19 +538,7 @@ export async function grokPlanner(pack: string): Promise<HopPlan> {
   return parsePlan(parseJsonBlock<unknown>(ai.text));
 }
 
-async function defaultFetch(url: string): Promise<{
-  ok: boolean;
-  status: number;
-  text: string;
-  title: string;
-  extras: string[];
-  outcome?: string;
-  redirectChain?: string[];
-  contentType?: string;
-  extractionMethod?: string;
-  pages?: PdfPage[];
-  needsOcr?: boolean;
-}> {
+async function defaultFetch(url: string): ReturnType<FetchFn> {
   const doc = await ingestDocument(url);
   return {
     ok: doc.ok,
@@ -545,6 +552,7 @@ async function defaultFetch(url: string): Promise<{
     extractionMethod: doc.extractionMethod,
     pages: doc.pages,
     needsOcr: doc.needsOcr,
+    rawBytes: doc.rawBytes,
   };
 }
 
@@ -618,7 +626,8 @@ async function addFrontierFromRefs(
   }
 }
 
-async function persistDiscovery(
+/** Record a lead. Unknown/weak/parked never skip this — exhaustion is historical, not a ban. */
+export async function persistDiscovery(
   userId: string,
   investigationId: number,
   item: { kind: string; label: string; why: string; evidence?: string; priority?: number; query?: string },
@@ -626,22 +635,62 @@ async function persistDiscovery(
   const sql = await getSql();
   const label = item.label.slice(0, 240);
   if (!label) return;
-  const existing = await sql<{ id: number; queries_tried: string }>`
-    select id, queries_tried from frontier_items
+  const existing = await sql<{
+    id: number;
+    queries_tried: string;
+    status: string;
+    evidence: string;
+    closed_reason: string | null;
+    why: string;
+  }>`
+    select id, queries_tried, status, evidence, closed_reason, why from frontier_items
     where investigation_id = ${investigationId} and user_id = ${userId} and label = ${label}
     limit 1
   `;
   if (existing[0]) {
+    const row = existing[0];
     if (item.query) {
-      const tried = parseJsonArray(existing[0].queries_tried);
+      const tried = parseJsonArray(row.queries_tried);
       if (!tried.includes(item.query)) {
         tried.push(item.query);
         await sql`
           update frontier_items
           set queries_tried = ${JSON.stringify(tried).slice(0, 4000)}
-          where id = ${existing[0].id}
+          where id = ${row.id}
         `;
       }
+    }
+    const incoming = (item.evidence ?? "").trim();
+    const priorEv = (row.evidence ?? "").trim();
+    const newEvidence = incoming.length >= 8 && !priorEv.includes(incoming.slice(0, 120));
+    const parked = ["exhausted", "dead-end", "resolved", "deferred"].includes(row.status);
+    if (parked && newEvidence) {
+      const merged = `${priorEv}\n${incoming}`.trim().slice(0, 2000);
+      const note =
+        `Reopened from ${row.status}: materially new evidence. Prior: ${(row.closed_reason ?? row.why).slice(0, 240)}`.slice(
+          0,
+          800,
+        );
+      const reopenNext = (item.query || `"${label}" Longmont`).slice(0, 800);
+      await sql`
+        update frontier_items
+        set status = ${"reopened"},
+            prior_status = ${row.status},
+            reopened_at = now(),
+            reopened_from = ${incoming.slice(0, 400)},
+            closed_reason = ${note},
+            evidence = ${merged},
+            why = ${item.why.slice(0, 800)},
+            next_steps = ${reopenNext},
+            priority = greatest(priority, ${item.priority ?? 9})
+        where id = ${row.id}
+      `;
+    } else if (incoming && incoming !== priorEv) {
+      await sql`
+        update frontier_items
+        set evidence = ${`${priorEv}\n${incoming}`.trim().slice(0, 2000)}
+        where id = ${row.id}
+      `;
     }
     return;
   }
@@ -747,6 +796,7 @@ export async function rememberCapture(opts: {
   pages?: PdfPage[];
   extras?: string[];
   observedAt?: Date;
+  rawBytes?: Uint8Array;
 }): Promise<CaptureRecord> {
   const sql = await getSql();
   let url = opts.url;
@@ -838,6 +888,27 @@ export async function rememberCapture(opts: {
     returning id
   `;
   const captureEventId = cap[0]!.id;
+
+  if (versionId && opts.rawBytes && opts.rawBytes.byteLength > 0 && opts.rawBytes.byteLength <= 4_000_000) {
+    const alreadyBlob = await sql<{ c: number }>`
+      select count(*)::int as c from artifact_blobs where version_id = ${versionId} and user_id = ${opts.userId}
+    `;
+    if ((alreadyBlob[0]?.c ?? 0) === 0) {
+      const b64 = Buffer.from(opts.rawBytes).toString("base64");
+      try {
+        await sql`
+          insert into artifact_blobs (
+            version_id, user_id, sha256, mime, original_url, redirect_chain, byte_length, body_b64
+          ) values (
+            ${versionId}, ${opts.userId}, ${opts.hash}, ${opts.contentType ?? "application/octet-stream"},
+            ${url}, ${JSON.stringify(opts.redirectChain ?? [])}, ${opts.rawBytes.byteLength}, ${b64}
+          )
+        `;
+      } catch {
+        /* blob table may not exist on an old process */
+      }
+    }
+  }
 
   if (opts.investigationId != null) {
     await sql`
@@ -1244,6 +1315,12 @@ export async function researchLoop(opts: {
   `;
   for (const q of priorQueries) tried.add(queryFingerprint(q.query));
 
+  await sql`
+    update investigations
+    set status = ${"investigating"}, updated_at = now()
+    where id = ${opts.investigationId} and user_id = ${opts.userId}
+  `;
+
   let hopsDone = 0;
   let lastSummary = "";
   const fetchedThisRun = new Set<string>();
@@ -1456,7 +1533,7 @@ export async function researchLoop(opts: {
           await sql`
             update frontier_items set status = 'investigating'
             where investigation_id = ${opts.investigationId} and user_id = ${opts.userId}
-              and label = ${f.label} and status = 'open'
+              and label = ${f.label} and status in ('open', 'reopened')
           `;
           await persistDiscovery(opts.userId, opts.investigationId, {
             kind: f.kind,
@@ -1553,6 +1630,8 @@ export async function researchLoop(opts: {
         extractionMethod: got.extractionMethod,
         pages: got.pages,
         extras: got.extras,
+        rawBytes: got.rawBytes,
+        classification: got.classification ?? "discovered",
       });
 
       if (outcome === "unchanged") {
@@ -1605,7 +1684,29 @@ export async function researchLoop(opts: {
         continue;
       }
 
-      if (!got.ok) {
+      if (outcome === "needs-ocr") {
+        await persistDiscovery(opts.userId, opts.investigationId, {
+          kind: "url",
+          label: url,
+          why: "Scanned or image-only document — OCR incomplete; keep investigating",
+          evidence: (got.text || url).slice(0, 400),
+          priority: 10,
+        });
+        if (got.text && got.text.trim().length >= 40) {
+          /* fall through and treat available text as evidence */
+        } else {
+          continue;
+        }
+      }
+
+      if (!got.ok && outcome !== "needs-ocr") {
+        await persistDiscovery(opts.userId, opts.investigationId, {
+          kind: "url",
+          label: url,
+          why: `Fetch ${outcome} — deferred, not closed`,
+          evidence: url,
+          priority: 8,
+        });
         await markFrontier(opts.userId, opts.investigationId, url, "deferred", `Fetch ${outcome}`);
         continue;
       }
@@ -1713,9 +1814,14 @@ export async function researchLoop(opts: {
     where investigation_id = ${opts.investigationId} and user_id = ${opts.userId}
   `;
   const paused = (open[0]?.c ?? 0) > 0;
+  const pauseReason = paused
+    ? `Hop budget ${hopsBudget} reached with ${open[0]!.c} frontier item(s) still open. Budget pauses work; evidence exhaustion would close it.`
+    : "";
   await sql`
     update investigations
-    set status = ${paused ? "paused" : "open"}, updated_at = now()
+    set status = ${paused ? "paused" : "open"},
+        pause_reason = ${pauseReason || null},
+        updated_at = now()
     where id = ${opts.investigationId} and user_id = ${opts.userId}
   `;
   return {
@@ -1951,6 +2057,22 @@ async function persistPlan(userId: string, investigationId: number, plan: HopPla
       } catch {
         /* match already recorded */
       }
+      await persistDiscovery(userId, investigationId, {
+        kind: e.kind || "unknown",
+        label: e.name,
+        why: `Unresolved identity vs ${resolved.matched} (${verdict}) — keep both possibilities alive`,
+        evidence: e.why,
+        priority: 8,
+        query: `"${e.name}" Longmont`,
+      });
+      await persistDiscovery(userId, investigationId, {
+        kind: e.kind || "unknown",
+        label: resolved.matched,
+        why: `Unresolved identity vs ${e.name} (${verdict}) — keep both possibilities alive`,
+        evidence: e.why,
+        priority: 8,
+        query: `"${resolved.matched}" Longmont`,
+      });
     }
     known.push({ canonical: c, name: e.name });
   }
@@ -1974,6 +2096,15 @@ async function persistPlan(userId: string, investigationId: number, plan: HopPla
         ${prov.contentHash}, ${prov.status}, ${prov.locator}
       )
     `;
+    if (prov.status === "unresolved") {
+      await persistDiscovery(userId, investigationId, {
+        kind: "unresolved-provenance",
+        label: `${r.from} ${r.kind} ${r.to}`.slice(0, 240),
+        why: "Relationship provenance unresolved; keep investigating",
+        evidence: r.evidence.slice(0, 400),
+        priority: 7,
+      });
+    }
   }
   for (const h of plan.hypotheses) {
     const status = h.contradicting.trim()
@@ -2028,6 +2159,15 @@ async function persistPlan(userId: string, investigationId: number, plan: HopPla
         ${prov.capturedAt}
       )
     `;
+    if (prov.status === "unresolved") {
+      await persistDiscovery(userId, investigationId, {
+        kind: "unresolved-provenance",
+        label: c.text.slice(0, 240),
+        why: "Provenance unresolved; keep investigating — missing artifact link is a state, not a stop",
+        evidence: (c.evidence || c.text).slice(0, 400),
+        priority: 7,
+      });
+    }
   }
   for (const f of plan.frontier) {
     await persistDiscovery(userId, investigationId, {
@@ -2115,7 +2255,11 @@ export async function resurfaceDeadEnds(
         await sql`
           update frontier_items
           set status = ${"reopened"},
+              prior_status = ${existing[0].status},
+              reopened_at = now(),
+              reopened_from = ${names.join(", ").slice(0, 400)},
               closed_reason = ${"New evidence revived this dead end"},
+              next_steps = ${`"${label}" Longmont`},
               priority = greatest(priority, 11)
           where id = ${existing[0].id}
         `;
@@ -2291,6 +2435,7 @@ export async function runDueMonitors(opts: {
       pages: got.pages,
       extras: got.extras,
       observedAt: now,
+      rawBytes: got.rawBytes,
     });
     const invId = m.investigation_id;
     const gone = outcome === "removed" || outcome === "not-found" || outcome === "soft-404";
@@ -2358,7 +2503,13 @@ export async function runDueMonitors(opts: {
           if (rows[0]) {
             await sql`
               update frontier_items
-              set status = ${"reopened"}, closed_reason = ${"Monitored source restored"}
+              set status = ${"reopened"},
+                  prior_status = ${"exhausted"},
+                  reopened_at = now(),
+                  reopened_from = ${`Monitored source restored: ${url}`.slice(0, 400)},
+                  closed_reason = ${"Monitored source restored"},
+                  next_steps = ${url.slice(0, 800)},
+                  priority = greatest(priority, 11)
               where id = ${rows[0].id}
             `;
           }

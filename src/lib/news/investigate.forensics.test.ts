@@ -607,13 +607,18 @@ describe("dead-end resurfacing", { timeout: 120000 }, () => {
       },
       archives: async () => [],
     });
-    const item = await sql<{ status: string; closed_reason: string | null }>`
-      select status, closed_reason from frontier_items
+    const item = await sql<{
+      status: string;
+      closed_reason: string | null;
+      prior_status: string | null;
+    }>`
+      select status, closed_reason, prior_status from frontier_items
       where investigation_id = ${id} and user_id = ${user} and label = ${"Acme Holdings LLC"}
       limit 1
     `;
     assert.ok(item[0], "Acme Holdings LLC must remain on the frontier");
     assert.equal(item[0]!.status, "reopened");
-    assert.match(item[0]!.closed_reason ?? "", /revived/i);
+    assert.match(item[0]!.closed_reason ?? "", /revived|reopened from|materially new evidence/i);
+    assert.equal(item[0]!.prior_status, "dead-end");
   });
 });

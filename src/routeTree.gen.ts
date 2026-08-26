@@ -27,6 +27,7 @@ import { Route as DeskScanRouteImport } from './routes/desk.scan'
 import { Route as DeskSourcesRouteImport } from './routes/desk.sources'
 import { Route as NewsletterConfirmRouteImport } from './routes/newsletter.confirm'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiCronMonitorsRouteImport } from './routes/api/cron.monitors'
 import { Route as DeskStoryLeadIdRouteImport } from './routes/desk.story.$leadId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -119,6 +120,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCronMonitorsRoute = ApiCronMonitorsRouteImport.update({
+  id: '/api/cron/monitors',
+  path: '/api/cron/monitors',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DeskStoryLeadIdRoute = DeskStoryLeadIdRouteImport.update({
   id: '/story/$leadId',
   path: '/story/$leadId',
@@ -144,6 +150,7 @@ export interface FileRoutesByFullPath {
   '/newsletter/confirm': typeof NewsletterConfirmRoute
   '/desk/': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/cron/monitors': typeof ApiCronMonitorsRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
 }
 export interface FileRoutesByTo {
@@ -164,6 +171,7 @@ export interface FileRoutesByTo {
   '/newsletter/confirm': typeof NewsletterConfirmRoute
   '/desk': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/cron/monitors': typeof ApiCronMonitorsRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
 }
 export interface FileRoutesById {
@@ -186,6 +194,7 @@ export interface FileRoutesById {
   '/newsletter/confirm': typeof NewsletterConfirmRoute
   '/desk/': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/cron/monitors': typeof ApiCronMonitorsRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
 }
 export interface FileRouteTypes {
@@ -209,6 +218,7 @@ export interface FileRouteTypes {
     | '/newsletter/confirm'
     | '/desk/'
     | '/api/auth/$'
+    | '/api/cron/monitors'
     | '/desk/story/$leadId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -229,6 +239,7 @@ export interface FileRouteTypes {
     | '/newsletter/confirm'
     | '/desk'
     | '/api/auth/$'
+    | '/api/cron/monitors'
     | '/desk/story/$leadId'
   id:
     | '__root__'
@@ -250,6 +261,7 @@ export interface FileRouteTypes {
     | '/newsletter/confirm'
     | '/desk/'
     | '/api/auth/$'
+    | '/api/cron/monitors'
     | '/desk/story/$leadId'
   fileRoutesById: FileRoutesById
 }
@@ -266,6 +278,7 @@ export interface RootRouteChildren {
   ArticlesSlugRoute: typeof ArticlesSlugRoute
   NewsletterConfirmRoute: typeof NewsletterConfirmRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiCronMonitorsRoute: typeof ApiCronMonitorsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -396,6 +409,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/cron/monitors': {
+      id: '/api/cron/monitors'
+      path: '/api/cron/monitors'
+      fullPath: '/api/cron/monitors'
+      preLoaderRoute: typeof ApiCronMonitorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/desk/story/$leadId': {
       id: '/desk/story/$leadId'
       path: '/story/$leadId'
@@ -441,6 +461,7 @@ const rootRouteChildren: RootRouteChildren = {
   ArticlesSlugRoute: ArticlesSlugRoute,
   NewsletterConfirmRoute: NewsletterConfirmRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiCronMonitorsRoute: ApiCronMonitorsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

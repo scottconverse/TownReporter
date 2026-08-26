@@ -188,12 +188,114 @@ export function pickSearchResult(attempts: SearchAttempt[]): SearchAttempt {
   return { ...attempts[attempts.length - 1]!, lineage: attempts };
 }
 
-/** DDG HTML, then DDG lite, then Wikipedia. Failures fall through. Zero on one provider still tries the next. */
+export function parseBingHtml(html: string): WebHit[] {
+  const hits: WebHit[] = [];
+  const seen = new Set<string>();
+  const re = /<h2[^>]*>\s*<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const url = m[1]!;
+    if (/bing\.com|microsoft\.com|msn\.com/i.test(url)) continue;
+    if (seen.has(url)) continue;
+    try {
+      assertHttpUrl(url);
+    } catch {
+      continue;
+    }
+    seen.add(url);
+    const title = m[2]!.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    hits.push({ title: title || url, url, snippet: "" });
+    if (hits.length >= 8) break;
+  }
+  return hits;
+}
+
+export function parseBraveHtml(html: string): WebHit[] {
+  const hits: WebHit[] = [];
+  const seen = new Set<string>();
+  const re = /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*class="[^"]*heading-serpresult[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const url = m[1]!;
+    if (/brave\.com|search\.brave/i.test(url)) continue;
+    if (seen.has(url)) continue;
+    try {
+      assertHttpUrl(url);
+    } catch {
+      continue;
+    }
+    seen.add(url);
+    const title = m[2]!.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    hits.push({ title: title || url, url, snippet: "" });
+    if (hits.length >= 8) break;
+  }
+  if (!hits.length) {
+    const hrefs = html.matchAll(/href="(https?:\/\/[^"]+)"/gi);
+    for (const h of hrefs) {
+      const url = h[1]!;
+      if (/brave\.com|javascript:|google\.com\/search/i.test(url)) continue;
+      if (seen.has(url)) continue;
+      try {
+        assertHttpUrl(url);
+      } catch {
+        continue;
+      }
+      seen.add(url);
+      hits.push({ title: url, url, snippet: "" });
+      if (hits.length >= 8) break;
+    }
+  }
+  return hits;
+}
+
+async function searchBing(query: string): Promise<SearchAttempt> {
+  const url = new URL("https://www.bing.com/search");
+  url.searchParams.set("q", query);
+  try {
+    const res = await fetchPublicHttp(url);
+    const html = await res.text();
+    const hits = parseBingHtml(html);
+    const state = classifySearchHtml(res.status, html, hits.length);
+    return { state, hits: state.startsWith("SEARCH_SUCCESS") ? hits : [], provider: "bing-html" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "network";
+    const timeout = /timeout|aborted/i.test(msg);
+    return {
+      state: timeout ? "SEARCH_TIMEOUT" : "SEARCH_FAILED_NETWORK",
+      hits: [],
+      provider: "bing-html",
+      error: msg,
+    };
+  }
+}
+
+async function searchBrave(query: string): Promise<SearchAttempt> {
+  const url = new URL("https://search.brave.com/search");
+  url.searchParams.set("q", query);
+  try {
+    const res = await fetchPublicHttp(url);
+    const html = await res.text();
+    const hits = parseBraveHtml(html);
+    const state = classifySearchHtml(res.status, html, hits.length);
+    return { state, hits: state.startsWith("SEARCH_SUCCESS") ? hits : [], provider: "brave-html" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "network";
+    const timeout = /timeout|aborted/i.test(msg);
+    return {
+      state: timeout ? "SEARCH_TIMEOUT" : "SEARCH_FAILED_NETWORK",
+      hits: [],
+      provider: "brave-html",
+      error: msg,
+    };
+  }
+}
+
+/** DDG, then an independent index (Bing, Brave), then Wikipedia. A failure or zero is not "nothing exists." */
 export async function searchWithFallback(query: string): Promise<SearchAttempt> {
   const q = query.trim().slice(0, 180);
   if (!q) return { state: "SEARCH_SUCCESS_ZERO_RESULTS", hits: [], provider: "none", lineage: [] };
   const lineage: SearchAttempt[] = [];
-  for (const fn of [searchDdg, searchDdgLite, searchWikipedia]) {
+  for (const fn of [searchDdg, searchDdgLite, searchBing, searchBrave, searchWikipedia]) {
     const attempt = await fn(q);
     lineage.push(attempt);
     if (attempt.state === "SEARCH_SUCCESS_RESULTS") return { ...attempt, lineage };

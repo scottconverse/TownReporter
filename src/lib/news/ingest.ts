@@ -90,11 +90,22 @@ export function getOcrImpl() {
   return ocrImpl;
 }
 
+async function loadDefaultOcr(): Promise<OcrImpl | null> {
+  if (ocrImpl) return ocrImpl;
+  try {
+    const mod = (await import("./ocr.ts")) as { productionOcr: OcrImpl };
+    ocrImpl = mod.productionOcr;
+    return ocrImpl;
+  } catch {
+    return null;
+  }
+}
+
 export async function extractPdfBetter(
   buf: Uint8Array,
   impl: OcrImpl | undefined | null = undefined,
 ): Promise<PdfExtract> {
-  const ocr = impl === undefined ? ocrImpl : impl;
+  const ocr = impl === undefined ? ocrImpl ?? (await loadDefaultOcr()) : impl;
   try {
     const { extractText } = await import("unpdf");
     const result = await extractText(buf, { mergePages: false });
@@ -291,6 +302,7 @@ export type IngestDocument = {
   redirectChain: string[];
   extractionMethod: string;
   pages: PdfPage[];
+  rawBytes?: Uint8Array;
 };
 
 export async function ingestDocument(raw: string): Promise<IngestDocument> {
@@ -306,6 +318,7 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
     redirectChain: [],
     extractionMethod: "",
     pages: [],
+    rawBytes: undefined,
     ...over,
   });
   try {
@@ -340,18 +353,20 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
 
     if (ctype.includes("pdf") || path.endsWith(".pdf")) {
       const pdf = await extractPdfBetter(buf);
+      const title = url.pathname.split("/").pop() ?? "pdf";
       if (pdf.needsOcr) {
         return empty({
-          ok: false,
+          ok: true,
           status,
           outcome: "needs-ocr",
           text: pdf.text,
-          title: url.pathname.split("/").pop() ?? "pdf",
+          title,
           contentType: "application/pdf",
           needsOcr: true,
           redirectChain: tracked.chain,
           extractionMethod: pdf.method,
           pages: pdf.pages,
+          rawBytes: buf,
         });
       }
       return empty({
@@ -359,11 +374,12 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
         status,
         outcome: "fetched",
         text: `PDF ${url.toString()}\n\n${pdf.text}`.slice(0, ARCHIVE_TEXT_CAP),
-        title: url.pathname.split("/").pop() ?? "pdf",
+        title,
         contentType: "application/pdf",
         redirectChain: tracked.chain,
         extractionMethod: pdf.method,
         pages: pdf.pages,
+        rawBytes: buf,
       });
     }
 
@@ -389,6 +405,7 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
         contentType: ctype,
         redirectChain: tracked.chain,
         extractionMethod: "html",
+        rawBytes: buf.byteLength <= 4_000_000 ? buf : undefined,
       });
     }
     const extras = discoverDocLinks(body, url);
@@ -402,6 +419,7 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
       contentType: ctype || "text/html",
       redirectChain: tracked.chain,
       extractionMethod: "html",
+      rawBytes: buf.byteLength <= 4_000_000 ? buf : undefined,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "fetch failed";

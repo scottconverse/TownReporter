@@ -62,6 +62,7 @@ export type InvestigationRow = {
   summary: string;
   hops: number;
   budget: number;
+  pause_reason: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -219,7 +220,7 @@ export const listInvestigations = createServerFn({ method: "GET" })
     await ensureDarkSchema();
     const sql = await getSql();
     return sql<InvestigationRow>`
-      select id, title, status, summary, hops, budget, created_at, updated_at
+      select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at
       from investigations
       where user_id = ${context.userId}
       order by updated_at desc
@@ -234,12 +235,23 @@ export const getInvestigation = createServerFn({ method: "GET" })
     await ensureDarkSchema();
     const sql = await getSql();
     const inv = await sql<InvestigationRow>`
-      select id, title, status, summary, hops, budget, created_at, updated_at
+      select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at
       from investigations where id = ${id} and user_id = ${context.userId} limit 1
     `;
     if (!inv[0]) return null;
-    const frontier = await sql<{ id: number; kind: string; label: string; why: string; priority: number; status: string; closed_reason: string | null }>`
-      select id, kind, label, why, priority, status, closed_reason from frontier_items
+    const frontier = await sql<{
+      id: number;
+      kind: string;
+      label: string;
+      why: string;
+      priority: number;
+      status: string;
+      closed_reason: string | null;
+      prior_status: string | null;
+      reopened_at: string | null;
+    }>`
+      select id, kind, label, why, priority, status, closed_reason, prior_status, reopened_at::text as reopened_at
+      from frontier_items
       where investigation_id = ${id} and user_id = ${context.userId}
       order by priority desc, id desc limit 40
     `;

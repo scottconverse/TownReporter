@@ -199,8 +199,11 @@ function DarkPage() {
                   <p className="text-sm text-paper-2">
                     {inv.status} · {inv.hops} hops · {formatShortDate(inv.updated_at)}
                   </p>
+                  {inv.pause_reason ? (
+                    <p className="mt-1 text-sm text-paper-2">{inv.pause_reason}</p>
+                  ) : null}
                 </button>
-                {inv.status === "paused" || inv.status === "open" ? (
+                {inv.status === "paused" || inv.status === "open" || inv.status === "investigating" ? (
                   <div className="mt-2">
                     <InkButton
                       tone="invert"
@@ -230,11 +233,14 @@ function DarkPage() {
           <p className="whitespace-pre-wrap text-paper-2">
             {detail.data.investigation.summary}
           </p>
+          {detail.data.investigation.pause_reason ? (
+            <p className="text-sm text-paper-2">{detail.data.investigation.pause_reason}</p>
+          ) : null}
           <BlockList
             title="Frontier"
             items={detail.data.frontier.map(
               (f) =>
-                `${f.status} ${f.priority} ${f.kind}: ${f.label} — ${f.why}${f.closed_reason ? ` [${f.closed_reason}]` : ""}`,
+                `${f.status} ${f.priority} ${f.kind}: ${f.label} — ${f.why}${f.prior_status ? ` (was ${f.prior_status})` : ""}${f.closed_reason ? ` [${f.closed_reason}]` : ""}`,
             )}
           />
           <BlockList
