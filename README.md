@@ -1,6 +1,6 @@
 # TownReporter — Longmont edition
 
-A small civic newspaper: public paper + signed-in editor desk. Grok fetches official sources, files leads, drafts under wire-service rules. Nothing prints until an editor publishes. Dark Desk is a question lane, never copy.
+A civic newsroom and investigative record for Longmont: public paper + signed-in editor desk. The public record is only the beginning. TownReporter follows meetings, money, contracts and public records, then keeps digging when something changes, disappears or doesn’t add up. Nothing prints until an editor publishes. Dark Desk is the recursive investigative lane, never copy.
 
 Built in Grok Build. The live preview database is in-memory; **Publish** (or your own Postgres) is what lasts.
 

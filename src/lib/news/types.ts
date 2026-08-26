@@ -33,6 +33,10 @@ export type DraftRow = {
   source_urls: string;
   integrity_notes: string | null;
   updated_at: string;
+  provenance_json?: string | null;
+  form?: string | null;
+  found_note?: string | null;
+  unanswered?: string | null;
 };
 
 export type ArticleRow = {
@@ -45,6 +49,11 @@ export type ArticleRow = {
   source_urls: string;
   status: string;
   published_at: string;
+  provenance_json?: string | null;
+  form?: string | null;
+  found_note?: string | null;
+  unanswered?: string | null;
+  provenance?: import("./report").ProvenanceItem[];
 };
 
 export type MemoryRow = {

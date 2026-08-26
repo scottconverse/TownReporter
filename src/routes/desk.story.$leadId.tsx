@@ -180,7 +180,7 @@ function StoryPage() {
       </div>
       {draft.isPending && (
         <div className="enter-fade-fast mt-4 max-w-2xl border border-rule bg-paper-2 p-4">
-          <BusyLine label="Grok is drafting under wire-service rules. Stay on this page." />
+          <BusyLine label="Reporting first — following the trail, then drafting. Stay on this page." />
         </div>
       )}
       {publish.isPending && (
@@ -210,6 +210,27 @@ function StoryPage() {
           </Link>
         </p>
       )}
+      {data.draft?.form && (
+        <p className="mt-4 text-[11px] tracking-[0.12em] text-muted uppercase">
+          Form · {data.draft.form}
+        </p>
+      )}
+      {data.draft?.found_note ? (
+        <p className="mt-4 max-w-2xl border border-ink bg-paper-2 p-3 text-sm">
+          <span className="tracking-[0.12em] text-muted uppercase">What we found · </span>
+          {data.draft.found_note}
+        </p>
+      ) : null}
+      {unansweredNotes(data.draft?.unanswered).length > 0 ? (
+        <div className="mt-4 max-w-2xl border border-rule bg-paper-2 p-3 text-sm">
+          <p className="tracking-[0.12em] text-muted uppercase">Still unanswered</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {unansweredNotes(data.draft?.unanswered).map((q) => (
+              <li key={q}>{q}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {data.draft?.integrity_notes && (
         <p className="mt-4 max-w-2xl border border-rule bg-paper-2 p-3 text-sm">
           <span className="tracking-[0.12em] text-muted uppercase">Verify · </span>
@@ -251,4 +272,14 @@ function StoryPage() {
       )}
     </DeskShell>
   );
+}
+
+function unansweredNotes(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return Array.isArray(v) ? v.map(String).map((s) => s.trim()).filter(Boolean).slice(0, 12) : [];
+  } catch {
+    return [];
+  }
 }

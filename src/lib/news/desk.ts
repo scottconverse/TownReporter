@@ -1,13 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql, withTransaction } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
-import { PAPER, SEED_SOURCES, slugify } from "@/lib/paper";
+import { PAPER, SEED_SOURCES, slugify, parseUrlList } from "@/lib/paper";
 import { assertHttpUrl, sha256 } from "./fetch-url";
 import { ingestUrl, mapLimit, withRetry } from "./ingest";
 import { assertRate, audit } from "./ops";
-import { DRAFT_SYSTEM, SCAN_SYSTEM, grokChat, parseJsonBlock, isGrokAvailable, GROK_UNAVAILABLE } from "./ai";
-import { coerceDraft, unpackStoredDraft } from "./coerce-draft";
+import { SCAN_SYSTEM, grokChat, parseJsonBlock, isGrokAvailable, GROK_UNAVAILABLE } from "./ai";
+import { unpackStoredDraft } from "./coerce-draft";
 import { ScanResultSchema, sanitizePublicUrls } from "./schema";
+import { provenanceFromUrls, reportAndDraft } from "./report";
 import type {
   DraftRow,
   LeadRow,
@@ -270,7 +271,8 @@ export const getLead = createServerFn({ method: "GET" })
     const lead = leads[0];
     if (!lead) return null;
     const drafts = await sql<DraftRow>`
-      select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at
+      select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
+             provenance_json, form, found_note, unanswered
       from drafts where lead_id = ${id} and user_id = ${context.userId}
       order by updated_at desc limit 1
     `;
@@ -545,53 +547,34 @@ export const draftLead = createServerFn({ method: "POST" })
       urls = [];
     }
 
-    const evidenceBits: string[] = [];
-    if (lead.evidence) evidenceBits.push(lead.evidence);
-    for (const url of urls.slice(0, 4)) {
-      try {
-        const { text } = await ingestUrl(url);
-        evidenceBits.push(`URL ${url}\n${text.slice(0, 3500)}`);
-      } catch {
-        evidenceBits.push(`URL ${url} (could not refetch)`);
-      }
-    }
-
     const memory = await sql<MemoryRow>`
       select entity, last_angle from beat_memory
       where user_id = ${context.userId} order by updated_at desc limit 16
     `;
 
-    const userMsg = `Draft a publishable recap.
-Lead headline: ${lead.headline}
-Why: ${lead.why}
-Topic hint: ${lead.topic}
-Already covered: ${memory.map((m) => `${m.entity} (${m.last_angle})`).join("; ") || "none"}
-
-Evidence:
-${evidenceBits.join("\n\n").slice(0, 16000)}`;
-
-    const ai = await grokChat(DRAFT_SYSTEM, userMsg, 1800);
-    if (!ai.ok) return { ok: false as const, error: ai.error };
-
-    const coerced = coerceDraft(ai.text, {
-      headline: lead.headline,
-      dek: lead.why,
-      topic: lead.topic,
+    const reported = await reportAndDraft({
+      userId: context.userId,
+      lead,
+      urls,
+      memory,
     });
-    if (!coerced.body) {
-      return { ok: false as const, error: "Draft came back unreadable. Try again." };
-    }
-    const headline = coerced.headline;
-    const dek = coerced.dek;
-    const body = coerced.body;
-    const topic = coerced.topic;
-    const cleaned = sanitizePublicUrls(coerced.source_urls);
-    const sourceUrls = JSON.stringify(cleaned.length ? cleaned : urls);
-    const notes = coerced.integrity_notes;
+    if ("error" in reported) return { ok: false as const, error: reported.error };
+
+    const sourceUrls = JSON.stringify(reported.source_urls.length ? reported.source_urls : urls);
+    const notes = reported.integrity_notes;
+    const provenanceJson = JSON.stringify(reported.provenance).slice(0, 8000);
+    const unansweredJson = JSON.stringify(reported.unanswered).slice(0, 2000);
 
     await sql`
-      insert into drafts (user_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes)
-      values (${context.userId}, ${leadId}, ${headline}, ${dek}, ${body}, ${topic}, ${sourceUrls}, ${notes})
+      insert into drafts (
+        user_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
+        provenance_json, form, found_note, unanswered
+      )
+      values (
+        ${context.userId}, ${leadId}, ${reported.headline}, ${reported.dek}, ${reported.body},
+        ${reported.topic}, ${sourceUrls}, ${notes},
+        ${provenanceJson}, ${reported.form}, ${reported.found_note.slice(0, 1200)}, ${unansweredJson}
+      )
     `;
     await sql`
       update leads set status = 'drafted' where id = ${leadId} and user_id = ${context.userId}
@@ -676,7 +659,8 @@ export const publishLead = createServerFn({ method: "POST" })
 
     const drafts = await getSql().then((sql) =>
       sql<DraftRow>`
-        select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at
+        select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
+               provenance_json, form, found_note, unanswered
         from drafts where lead_id = ${leadId} and user_id = ${context.userId}
         order by updated_at desc limit 1
       `,
@@ -684,6 +668,10 @@ export const publishLead = createServerFn({ method: "POST" })
     const row = drafts[0];
     if (!row) return { ok: false as const, error: "Draft this lead before publishing." };
     const draft = unpackStoredDraft(row);
+    let provenanceJson = row.provenance_json && row.provenance_json !== "[]" ? row.provenance_json : "";
+    if (!provenanceJson) {
+      provenanceJson = JSON.stringify(provenanceFromUrls(parseUrlList(draft.source_urls)));
+    }
 
     let slug = slugify(draft.headline);
 
@@ -691,10 +679,14 @@ export const publishLead = createServerFn({ method: "POST" })
       const clash = await sql<{ slug: string }>`select slug from articles where slug = ${slug}`;
       if (clash[0]) slug = `${slug}-${leadId}`;
       await sql`
-        insert into articles (user_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at)
+        insert into articles (
+          user_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
+          provenance_json, form, found_note, unanswered
+        )
         values (
           ${context.userId}, ${leadId}, ${slug}, ${draft.headline}, ${draft.dek},
-          ${draft.body}, ${draft.topic}, ${draft.source_urls}, 'published', now()
+          ${draft.body}, ${draft.topic}, ${draft.source_urls}, 'published', now(),
+          ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}
         )
       `;
       await sql`

@@ -11,27 +11,39 @@ function How() {
       </h1>
       <div className="stagger-in mt-6 max-w-2xl space-y-4 text-lg leading-7 text-ink-2">
         <p>
-          <strong className="text-ink">Sources.</strong> The editor keeps a list
-          of official pages: the city, council, planning, NextLight, St. Vrain
-          Valley Schools, Boulder County, and the city’s YouTube channel.
-          Grok may propose more official URLs. Community apps are signals, not
-          sources we quote.
+          <strong className="text-ink">Watch.</strong> The desk keeps a list of
+          Longmont civic sources — city, council, planning, NextLight, St. Vrain
+          Valley Schools, Boulder County. That list is a starting point, not a
+          fence. Newly discovered public records are fair game.
         </p>
         <p>
-          <strong className="text-ink">Scan.</strong> On the editor’s click —
-          never on a timer — Grok fetches those pages, hashes them against the
-          last snapshot, and files leads. Unchanged boilerplate is not news.
+          <strong className="text-ink">Detect.</strong> Scans and background
+          monitors fetch those pages, hash them against the last snapshot, and
+          flag what changed, what disappeared, and what failed to appear when
+          it usually does.
         </p>
         <p>
-          <strong className="text-ink">Draft.</strong> Wire-service rules:
-          attributed claims, no editorializing, no loaded language, no invented
-          votes or dollar figures. YouTube captions map topics; they are not
-          treated as verbatim quotes.
+          <strong className="text-ink">Follow.</strong> Before a story is
+          drafted, the desk asks what the announcing source leaves unexplained,
+          then follows attachments, names, companies, contracts, parcels, prior
+          meetings and historical versions. A useful story often lives one or
+          two documents beyond the press release.
         </p>
         <p>
-          <strong className="text-ink">Gate.</strong> Hold, kill, or publish is
-          a person. Beat memory records what already ran so we do not reprint
-          yesterday.
+          <strong className="text-ink">Preserve.</strong> Significant captures
+          are stored. If a record later vanishes, the captured version remains,
+          and the article says so.
+        </p>
+        <p>
+          <strong className="text-ink">Investigate.</strong> Dark Desk is the
+          recursive lane: competing hypotheses, unresolved identities, and
+          trails that were exhausted until new evidence reopened them. It does
+          not print.
+        </p>
+        <p>
+          <strong className="text-ink">Write, then gate.</strong> Drafts are
+          reported stories, not recaps. Hold, kill, or publish is a person.
+          Every material claim should be checkable against a document we show.
         </p>
         <p>
           <strong className="text-ink">Corrections.</strong> Errors get a public

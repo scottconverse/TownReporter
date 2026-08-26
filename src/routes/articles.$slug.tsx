@@ -6,6 +6,7 @@ import { EmptyState, StorySkeleton } from "@/components/states";
 import { inkGhost } from "@/components/desk-chrome";
 import { getPublishedArticle, listPublishedArticles } from "@/lib/news/public";
 import { formatDate, parseUrlList } from "@/lib/paper";
+import { ProvenanceBlock } from "@/components/provenance";
 
 export const Route = createFileRoute("/articles/$slug")({
   loader: ({ params }) => getPublishedArticle({ data: params.slug }),
@@ -50,6 +51,19 @@ function ArticlePage() {
   }
 
   const sources = parseUrlList(article.source_urls);
+  const provenance = article.provenance?.length
+    ? article.provenance
+    : sources.map((url) => ({
+        title: url,
+        organization: "",
+        document_date: "",
+        url,
+        captured_at: null,
+        version_id: null,
+        version_count: null,
+        disappeared: false,
+        role: "source",
+      }));
   const more = related.filter((a) => a.slug !== slug).slice(0, 4);
 
   return (
@@ -66,31 +80,11 @@ function ArticlePage() {
       <div className="enter-rise mt-8 max-w-2xl">
         <StoryBody body={article.body} />
       </div>
-      {sources.length > 0 && (
-        <section className="enter-rise mt-10 max-w-2xl border-t border-rule pt-4">
-          <h2 className="text-[11px] tracking-[0.16em] text-muted uppercase">
-            Sources
-          </h2>
-          <ul className="mt-2 space-y-1 text-sm">
-            {sources.map((u) => (
-              <li key={u}>
-                <a
-                  href={u}
-                  className="break-all text-rust transition-[color] duration-150 ease-out hover:text-rust-2"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {u}
-                </a>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 text-sm text-muted">
-            Trust is verifiable. Check the official record before you act on a
-            figure or a vote.
-          </p>
-        </section>
-      )}
+      <ProvenanceBlock
+        items={provenance}
+        found={article.found_note}
+        form={article.form}
+      />
       <p className="mt-8 max-w-2xl text-sm text-muted">
         Free to reprint in whole or part with credit to TownReporter and a link
         back. Do not imply endorsement.

@@ -20,7 +20,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "A civic newspaper for Longmont, Colorado. Human-edited. Grok-reported from the public record.",
+          "Independent civic reporting for Longmont, Colorado. The public record is only the beginning. Human-edited. Sources shown.",
       },
       { name: "theme-color", content: "#F6F1E7" },
     ],

@@ -3,22 +3,33 @@ import { getSql } from "@/lib/db";
 import type { ArticleRow, CorrectionRow } from "./types";
 import { unpackStoredDraft } from "./coerce-draft";
 import { randomBytes } from "node:crypto";
+import { parseUrlList } from "@/lib/paper";
+import { provenanceFromUrls, type ProvenanceItem } from "./report";
 
-function publicArticle(row: ArticleRow): ArticleRow {
+function publicArticle(row: ArticleRow): ArticleRow & { provenance: ProvenanceItem[] } {
   const u = unpackStoredDraft({
     headline: row.headline,
     dek: row.dek,
     body: row.body,
     topic: row.topic,
   });
-  return { ...row, ...u };
+  let provenance: ProvenanceItem[] = [];
+  try {
+    const stored = JSON.parse(row.provenance_json || "[]") as ProvenanceItem[];
+    if (Array.isArray(stored) && stored.length) provenance = stored;
+  } catch {
+    provenance = [];
+  }
+  if (!provenance.length) provenance = provenanceFromUrls(parseUrlList(row.source_urls));
+  return { ...row, ...u, provenance };
 }
 
 export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
   async () => {
     const sql = await getSql();
     return sql<ArticleRow>`
-      select id, slug, headline, dek, body, topic, source_urls, status, published_at
+      select id, slug, headline, dek, body, topic, source_urls, status, published_at,
+             provenance_json, form, found_note, unanswered
       from articles
       where status = 'published'
       order by published_at desc
@@ -32,7 +43,8 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
   .handler(async ({ data: slug }) => {
     const sql = await getSql();
     const rows = await sql<ArticleRow>`
-      select id, slug, headline, dek, body, topic, source_urls, status, published_at
+      select id, slug, headline, dek, body, topic, source_urls, status, published_at,
+             provenance_json, form, found_note, unanswered
       from articles
       where slug = ${slug} and status = 'published'
       limit 1
@@ -45,7 +57,8 @@ export const listPublishedByTopic = createServerFn({ method: "GET" })
   .handler(async ({ data: topic }) => {
     const sql = await getSql();
     return sql<ArticleRow>`
-      select id, slug, headline, dek, body, topic, source_urls, status, published_at
+      select id, slug, headline, dek, body, topic, source_urls, status, published_at,
+             provenance_json, form, found_note, unanswered
       from articles
       where status = 'published' and topic = ${topic}
       order by published_at desc
@@ -60,7 +73,8 @@ export const searchPublished = createServerFn({ method: "GET" })
     const sql = await getSql();
     const like = `%${q}%`;
     return sql<ArticleRow>`
-      select id, slug, headline, dek, body, topic, source_urls, status, published_at
+      select id, slug, headline, dek, body, topic, source_urls, status, published_at,
+             provenance_json, form, found_note, unanswered
       from articles
       where status = 'published'
         and (headline ilike ${like} or dek ilike ${like} or body ilike ${like})

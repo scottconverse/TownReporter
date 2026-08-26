@@ -157,6 +157,10 @@ function Home() {
       ) : null}
       <FetchingRule active={dimming} />
 
+      {!topic && !q ? (
+        <p className="enter-fade mb-6 max-w-2xl text-ink-2">{PAPER.deck}</p>
+      ) : null}
+
       {showSkeleton ? (
         <div className="mt-6">
           <EditionSkeleton />
@@ -297,8 +301,8 @@ function Home() {
           </Notice>
         )}
         <p className="mt-6 text-sm text-muted">
-          {PAPER.name} complements the local paper. We cover the meetings and
-          packets most people never sit through.
+          {PAPER.name} complements the local paper. The public record is only
+          the beginning.
         </p>
       </section>
     </PaperShell>

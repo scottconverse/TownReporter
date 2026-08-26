@@ -15,6 +15,7 @@ import {
 } from "./investigate";
 import { sanitizePublicUrls } from "./schema";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types";
+import { rankWorthItems, type WorthSeed } from "./worth-a-look";
 
 export type DarkSignalRow = {
   id: number;
@@ -228,6 +229,77 @@ export const listInvestigations = createServerFn({ method: "GET" })
     `;
   });
 
+async function gatherWorthALook(userId: string): Promise<WorthSeed[]> {
+  const sql = await getSql();
+  const anomalies = await sql<{ kind: string; summary: string; url: string | null; details: string }>`
+    select kind, summary, url, details from anomalies
+    where user_id = ${userId}
+    order by id desc limit 24
+  `.catch(() => []);
+  const monitors = await sql<{ url: string; title: string; last_outcome: string | null }>`
+    select url, title, last_outcome from source_monitors
+    where user_id = ${userId} and enabled = true
+    order by last_check_at desc nulls last
+    limit 24
+  `.catch(() => []);
+  const leads = await sql<{
+    id: number;
+    headline: string;
+    why: string;
+    evidence: string | null;
+    newsworthiness: number | null;
+    source_urls: string;
+  }>`
+    select id, headline, why, evidence, newsworthiness, source_urls from leads
+    where user_id = ${userId} and status in ('new', 'held', 'drafted')
+    order by newsworthiness desc nulls last, id desc
+    limit 12
+  `.catch(() => []);
+  const frontier = await sql<{
+    label: string;
+    kind: string;
+    why: string;
+    status: string;
+    closed_reason: string | null;
+  }>`
+    select label, kind, why, status, closed_reason from frontier_items
+    where user_id = ${userId} and status in ('reopened', 'open')
+    order by priority desc, id desc
+    limit 16
+  `.catch(() => []);
+  const signals = await sql<{
+    id: number;
+    name: string;
+    observation: string;
+    pathway: string;
+    handoff: string;
+    strength: number;
+  }>`
+    select id, name, observation, pathway, handoff, strength from dark_signals
+    where user_id = ${userId}
+    order by id desc limit 12
+  `.catch(() => []);
+  const promises = await sql<{
+    who_promised: string;
+    what: string;
+    when_due: string | null;
+    source_cite: string | null;
+    status: string;
+  }>`
+    select who_promised, what, when_due, source_cite, status from dark_promises
+    where user_id = ${userId} and status in ('open', 'unclear')
+    order by id desc limit 8
+  `.catch(() => []);
+  return rankWorthItems({ anomalies, monitors, leads, frontier, signals, promises });
+}
+
+export const listWorthALook = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    await ensureDarkSchema();
+    return gatherWorthALook(context.userId);
+  });
+
 export const getInvestigation = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .validator((id: number) => id)
@@ -328,8 +400,8 @@ export const getInvestigation = createServerFn({ method: "GET" })
       where investigation_id = ${id} and user_id = ${context.userId}
       order by id desc limit 20
     `;
-    const searches = await sql<{ hop: number; query: string; state: string | null; provider: string | null }>`
-      select hop, query, state, provider from search_log
+    const searches = await sql<{ hop: number; query: string; state: string | null; provider: string | null; generated_json: string | null }>`
+      select hop, query, state, provider, generated_json from search_log
       where investigation_id = ${id} and user_id = ${context.userId}
       order by id desc limit 40
     `;
@@ -475,95 +547,114 @@ async function synthesizeSignals(
   return { stored, summary: header, error: undefined as string | undefined };
 }
 
+async function executeDarkRun(
+  userId: string,
+  opts: { paste: string; investigationId?: number; title?: string },
+) {
+  const sql = await getSql();
+  const runRows = await sql<{ id: number }>`
+    insert into dark_runs (user_id) values (${userId}) returning id
+  `;
+  const runId = runRows[0]!.id;
+  const paste = opts.paste.trim().slice(0, 14000);
+
+  let investigationId = opts.investigationId ?? 0;
+  if (!investigationId) {
+    const title =
+      (opts.title || paste.slice(0, 80).replace(/\s+/g, " ") || `Investigation ${new Date().toISOString().slice(0, 10)}`).slice(
+        0,
+        200,
+      );
+    const created = await sql<{ id: number }>`
+      insert into investigations (user_id, title, budget)
+      values (${userId}, ${title}, ${5})
+      returning id
+    `;
+    investigationId = created[0]!.id;
+    const snaps = await sql<{ title: string; url: string; excerpt: string }>`
+      select s.title, s.url, snap.excerpt
+      from snapshots snap
+      join sources s on s.id = snap.source_id
+      where snap.user_id = ${userId}
+      order by snap.id desc
+      limit 16
+    `;
+    await seedInvestigation(userId, investigationId, paste, snaps);
+  }
+
+  await checkBaselines(userId, investigationId);
+  await runDueMonitors({ userId });
+
+  const loop = await researchLoop({
+    userId,
+    investigationId,
+    hops: 5,
+  });
+
+  const synth = await synthesizeSignals(userId, runId, investigationId, paste);
+  const names = (
+    await sql<{ name: string }>`
+      select e.name from investigation_entities ie
+      join entities e on e.id = ie.entity_id
+      where ie.investigation_id = ${investigationId} and ie.user_id = ${userId}
+      order by ie.id desc limit 40
+    `
+  ).map((n) => n.name);
+  await resurfaceDeadEnds(userId, investigationId, names, { foreignOnly: true });
+  const revived = await matchDeadEnds(userId, names);
+
+  const header = [
+    loop.summary,
+    synth.summary,
+    `Hops ${loop.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
+    revived.length ? `Prior dead ends matched: ${revived.map((r) => r.hypothesis).join("; ")}` : "",
+    synth.error ? `Synthesis: ${synth.error}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  await sql`
+    update dark_runs
+    set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null}
+    where id = ${runId} and user_id = ${userId}
+  `;
+  await audit(userId, "dark", `run ${runId} inv ${investigationId} hops ${loop.hops} signals ${synth.stored}`);
+  return {
+    ok: true as const,
+    runId,
+    investigationId,
+    stored: synth.stored,
+    hops: loop.hops,
+    artifacts: loop.artifacts,
+    frontier: loop.frontier,
+    paused: loop.paused,
+    summary: header,
+  };
+}
+
 export const runDarkDesk = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: { paste: string; investigationId?: number }) => input)
   .handler(async ({ context, data }) => {
     await ensureDarkSchema();
     await assertRate(context.userId, "dark");
-    const sql = await getSql();
-    const runRows = await sql<{ id: number }>`
-      insert into dark_runs (user_id) values (${context.userId}) returning id
-    `;
-    const runId = runRows[0]!.id;
-    const paste = data.paste.trim().slice(0, 14000);
-
-    let investigationId = data.investigationId ?? 0;
-    if (!investigationId) {
-      const title =
-        paste.slice(0, 80).replace(/\s+/g, " ") ||
-        `Investigation ${new Date().toISOString().slice(0, 10)}`;
-      const created = await sql<{ id: number }>`
-        insert into investigations (user_id, title, budget)
-        values (${context.userId}, ${title.slice(0, 200)}, ${5})
-        returning id
-      `;
-      investigationId = created[0]!.id;
-      const snaps = await sql<{ title: string; url: string; excerpt: string }>`
-        select s.title, s.url, snap.excerpt
-        from snapshots snap
-        join sources s on s.id = snap.source_id
-        where snap.user_id = ${context.userId}
-        order by snap.id desc
-        limit 16
-      `;
-      await seedInvestigation(context.userId, investigationId, paste, snaps);
-    }
-
-    await checkBaselines(context.userId, investigationId);
-    await runDueMonitors({ userId: context.userId });
-
-    const loop = await researchLoop({
-      userId: context.userId,
-      investigationId,
-      hops: 5,
+    return executeDarkRun(context.userId, {
+      paste: data.paste,
+      investigationId: data.investigationId,
     });
+  });
 
-    const synth = await synthesizeSignals(context.userId, runId, investigationId, paste);
-    const names = (
-      await sql<{ name: string }>`
-        select e.name from investigation_entities ie
-        join entities e on e.id = ie.entity_id
-        where ie.investigation_id = ${investigationId} and ie.user_id = ${context.userId}
-        order by ie.id desc limit 40
-      `
-    ).map((n) => n.name);
-    await resurfaceDeadEnds(context.userId, investigationId, names, { foreignOnly: true });
-    const revived = await matchDeadEnds(context.userId, names);
-
-    const header = [
-      loop.summary,
-      synth.summary,
-      `Hops ${loop.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
-      revived.length
-        ? `Prior dead ends matched: ${revived.map((r) => r.hypothesis).join("; ")}`
-        : "",
-      synth.error ? `Synthesis: ${synth.error}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    await sql`
-      update dark_runs
-      set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null}
-      where id = ${runId} and user_id = ${context.userId}
-    `;
-    await audit(
-      context.userId,
-      "dark",
-      `run ${runId} inv ${investigationId} hops ${loop.hops} signals ${synth.stored}`,
-    );
-    return {
-      ok: true as const,
-      runId,
-      investigationId,
-      stored: synth.stored,
-      hops: loop.hops,
-      artifacts: loop.artifacts,
-      frontier: loop.frontier,
-      paused: loop.paused,
-      summary: header,
-    };
+export const findSomethingToDigInto = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    await ensureDarkSchema();
+    await assertRate(context.userId, "dark");
+    const items = await gatherWorthALook(context.userId);
+    const top = items[0];
+    return executeDarkRun(context.userId, {
+      paste: top?.seed ?? "",
+      title: top?.title,
+    });
   });
 
 export const continueInvestigation = createServerFn({ method: "POST" })

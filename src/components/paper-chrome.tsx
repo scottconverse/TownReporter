@@ -37,9 +37,14 @@ export function Masthead({ compact = false }: { compact?: boolean }) {
           </p>
         </Link>
         {!compact && (
-          <p className="mx-auto mt-3 max-w-md font-display text-base italic text-ink-2">
-            {PAPER.tagline}
-          </p>
+          <>
+            <p className="mx-auto mt-3 max-w-md font-display text-base italic text-ink-2">
+              {PAPER.tagline}
+            </p>
+            <p className="mx-auto mt-1 text-[11px] tracking-[0.16em] text-muted uppercase">
+              {PAPER.trust}
+            </p>
+          </>
         )}
       </div>
       <PaperNav />
@@ -149,8 +154,8 @@ export function PaperShell({
         </div>
         <footer className="mt-8 border-t border-ink pt-4 pb-10 text-sm text-muted">
           <p>
-            {PAPER.name} · {PAPER.location}. Free to reprint with credit and a
-            link back. Verify details against the official record.
+            {PAPER.name} · {PAPER.location}. {PAPER.tagline} Free to reprint with
+            credit and a link back. Verify details against the official record.
           </p>
         </footer>
       </div>

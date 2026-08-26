@@ -3,8 +3,10 @@ export const PAPER = {
   city: "Longmont",
   state: "Colorado",
   location: "Longmont, Colorado",
-  tagline: "Civic news, human-edited.",
-  kicker: "Vol. 1  ·  Longmont edition",
+  tagline: "The public record is only the beginning.",
+  kicker: "Independent civic reporting  ·  Longmont",
+  deck: "TownReporter follows Longmont's meetings, money, contracts and public records — then keeps digging when something changes, disappears or doesn't add up. Human-edited. Sources shown.",
+  trust: "Civic news, human-edited.",
 } as const;
 
 export const TOPICS = [
@@ -122,5 +124,18 @@ export function formatShortDate(iso: string | Date | null | undefined) {
     month: "short",
     day: "numeric",
     year: "numeric",
+  });
+}
+
+export function formatDateTime(iso: string | Date | null | undefined) {
+  if (!iso) return "";
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
 }

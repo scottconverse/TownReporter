@@ -1,5 +1,5 @@
-import { parseJsonBlock } from "./ai";
-import { TOPICS } from "../paper";
+import { parseJsonBlock } from "./ai.ts";
+import { TOPICS } from "../paper.ts";
 
 export type CoercedDraft = {
   headline: string;

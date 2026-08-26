@@ -5,11 +5,13 @@ import { DeskShell, InkButton, areaClass } from "@/components/desk-chrome";
 import { BusyLine, EmptyState, ListSkeleton, Notice } from "@/components/states";
 import {
   continueInvestigation,
+  findSomethingToDigInto,
   getInvestigation,
   listDarkPromises,
   listDarkRuns,
   listDarkSignals,
   listInvestigations,
+  listWorthALook,
   runDarkDesk,
   sendDarkSignalToQueue,
 } from "@/lib/news/dark";
@@ -32,6 +34,7 @@ function DarkPage() {
     queryKey: ["investigations"],
     queryFn: () => listInvestigations(),
   });
+  const worth = useQuery({ queryKey: ["worth-a-look"], queryFn: () => listWorthALook() });
   const detail = useQuery({
     queryKey: ["investigation", openId],
     queryFn: () => getInvestigation({ data: openId! }),
@@ -43,23 +46,34 @@ function DarkPage() {
     void qc.invalidateQueries({ queryKey: ["dark-runs"] });
     void qc.invalidateQueries({ queryKey: ["dark-promises"] });
     void qc.invalidateQueries({ queryKey: ["investigations"] });
+    void qc.invalidateQueries({ queryKey: ["worth-a-look"] });
     if (openId != null) void qc.invalidateQueries({ queryKey: ["investigation", openId] });
   };
 
+  function onRunOk(res: {
+    ok: boolean;
+    investigationId?: number;
+    error?: string;
+  }) {
+    if (!res.ok) {
+      setNotice("error" in res ? String(res.error) : "Dark desk failed");
+      return;
+    }
+    setNotice(null);
+    if (res.investigationId) setOpenId(res.investigationId);
+    invalidate();
+  }
+
   const run = useMutation({
-    mutationFn: () => runDarkDesk({ data: { paste } }),
-    onSuccess: (res) => {
-      if (!res.ok) {
-        setNotice("error" in res ? String(res.error) : "Dark desk failed");
-        return;
-      }
-      setNotice(null);
-      setOpenId(res.investigationId);
-      invalidate();
-    },
-    onError: (err) => {
-      setNotice(err instanceof Error ? err.message : "Dark desk failed");
-    },
+    mutationFn: (seed?: string) => runDarkDesk({ data: { paste: seed ?? paste } }),
+    onSuccess: onRunOk,
+    onError: (err) => setNotice(err instanceof Error ? err.message : "Dark desk failed"),
+  });
+
+  const find = useMutation({
+    mutationFn: () => findSomethingToDigInto(),
+    onSuccess: onRunOk,
+    onError: (err) => setNotice(err instanceof Error ? err.message : "Find failed"),
   });
 
   const cont = useMutation({
@@ -73,9 +87,7 @@ function DarkPage() {
       setOpenId(res.investigationId);
       invalidate();
     },
-    onError: (err) => {
-      setNotice(err instanceof Error ? err.message : "Continue failed");
-    },
+    onError: (err) => setNotice(err instanceof Error ? err.message : "Continue failed"),
   });
 
   const toQueue = useMutation({
@@ -91,33 +103,132 @@ function DarkPage() {
     },
   });
 
+  const digging = run.isPending || find.isPending || cont.isPending;
+  const active = (investigations.data ?? []).filter(
+    (inv) => inv.status === "paused" || inv.status === "open" || inv.status === "investigating",
+  );
+
   return (
     <DeskShell night title="Dark desk" kicker="Lane 3 — investigative engine">
-      <div className="max-w-2xl border border-ink-2 bg-ink-2 p-4">
-        <p>
-          Search broadly. Dig recursively. Preserve evidence. Challenge
-          conclusions. The watch list is a starting point, not a fence. Five
-          hops per run; continue if the frontier is still open. Publication is a
-          separate human action.
-        </p>
-      </div>
-      <label className="mt-6 block space-y-1.5">
-        <span className="text-[11px] tracking-[0.14em] text-paper-2 uppercase">
-          Paste minutes, a packet, a name, a contract number — optional seed
-        </span>
-        <textarea
-          className={areaClass + " min-h-36"}
-          value={paste}
-          onChange={(e) => setPaste(e.target.value)}
-          placeholder="Transcript, staff report, an LLC, an RFP number…"
-        />
-      </label>
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <InkButton tone="invert" disabled={run.isPending} onClick={() => run.mutate()}>
-          {run.isPending ? "Digging…" : "Start investigation"}
-        </InkButton>
-      </div>
-      {run.isPending && (
+      <p className="max-w-2xl text-paper-2">
+        What deserves a closer look today? Dark Desk already sees changes,
+        disappearances, late reports, scanner leads and unfinished trails. Paste
+        is one way to begin — not the only way. It does not print.
+      </p>
+
+      <section className="mt-8">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <h2 className="font-display text-2xl">Worth a look</h2>
+          <InkButton tone="invert" disabled={digging} onClick={() => find.mutate()}>
+            {find.isPending ? "Looking…" : "Find something to dig into"}
+          </InkButton>
+        </div>
+        {worth.isPending && !(worth.data ?? []).length ? (
+          <ListSkeleton rows={3} night />
+        ) : (worth.data ?? []).length === 0 ? (
+          <p className="mt-3 text-sm text-paper-2">
+            No alerts queued. Find something still searches the latest snapshots
+            and beat memory.
+          </p>
+        ) : (
+          <ul className="stagger-in mt-4 space-y-3">
+            {(worth.data ?? []).map((item) => (
+              <li key={item.id} className="border border-ink-2 bg-ink-2 p-4">
+                <p className="text-[11px] tracking-[0.14em] text-rust uppercase">
+                  {item.kind}
+                </p>
+                <h3 className="mt-1 font-display text-xl">{item.title}</h3>
+                <p className="mt-2 whitespace-pre-wrap text-paper-2">{item.happened}</p>
+                <p className="mt-2 text-sm text-paper-2">{item.why}</p>
+                {item.source_url ? (
+                  <p className="mt-1 break-all text-sm text-paper-2">{item.source_url}</p>
+                ) : null}
+                <p className="mt-2 text-sm italic text-paper-2">First question: {item.question}</p>
+                <div className="mt-3">
+                  <InkButton
+                    tone="invert"
+                    disabled={digging}
+                    onClick={() => run.mutate(item.seed)}
+                  >
+                    Start digging
+                  </InkButton>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="mt-10 grid gap-8 lg:grid-cols-2">
+        <div>
+          <h2 className="font-display text-2xl">Investigate a lead</h2>
+          <p className="mt-1 text-sm text-paper-2">
+            Paste a URL, minutes, name, company, contract number, question or
+            tip.
+          </p>
+          <label className="mt-3 block space-y-1.5">
+            <span className="sr-only">Seed</span>
+            <textarea
+              className={areaClass + " min-h-32"}
+              value={paste}
+              onChange={(e) => setPaste(e.target.value)}
+              placeholder="Transcript, staff report, an LLC, an RFP number…"
+            />
+          </label>
+          <div className="mt-3">
+            <InkButton tone="invert" disabled={digging} onClick={() => run.mutate(paste)}>
+              {run.isPending ? "Digging…" : "Start digging"}
+            </InkButton>
+          </div>
+        </div>
+        <div>
+          <h2 className="font-display text-2xl">Continue an investigation</h2>
+          {investigations.isPending && !active.length ? (
+            <ListSkeleton rows={3} night />
+          ) : active.length === 0 ? (
+            <p className="mt-3 text-sm text-paper-2">No open investigations yet.</p>
+          ) : (
+            <ul className="mt-3 divide-y divide-ink-2 border border-ink-2">
+              {active.map((inv) => (
+                <li key={inv.id} className="px-4 py-3">
+                  <button
+                    type="button"
+                    className="min-h-11 text-left"
+                    onClick={() => setOpenId(inv.id)}
+                  >
+                    <p className="font-medium">
+                      #{inv.id} {inv.title}
+                    </p>
+                    <p className="text-sm text-paper-2">
+                      {inv.status} · {inv.hops} hops · {formatShortDate(inv.updated_at)}
+                    </p>
+                    {inv.summary ? (
+                      <p className="mt-1 line-clamp-2 text-sm text-paper-2">{inv.summary}</p>
+                    ) : null}
+                    {inv.pause_reason ? (
+                      <p className="mt-1 text-sm text-paper-2">{inv.pause_reason}</p>
+                    ) : null}
+                  </button>
+                  <div className="mt-2">
+                    <InkButton
+                      tone="invert"
+                      disabled={digging}
+                      onClick={() => {
+                        setOpenId(inv.id);
+                        cont.mutate(inv.id);
+                      }}
+                    >
+                      {cont.isPending && openId === inv.id ? "Continuing…" : "Keep digging"}
+                    </InkButton>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      {digging && (
         <div className="enter-fade-fast mt-6 border border-ink-2 bg-ink-2 p-4">
           <BusyLine
             night
@@ -125,33 +236,15 @@ function DarkPage() {
           />
         </div>
       )}
-      {run.data?.ok && (
+      {(run.data?.ok || find.data?.ok) && (
         <div className="enter-fade-fast mt-6 border border-paper-2 bg-ink-2 p-4">
           <p className="font-medium">
-            Investigation {run.data.investigationId} · {run.data.hops} hops ·{" "}
-            {run.data.artifacts} artifacts · {run.data.frontier} frontier
-            {run.data.paused ? " · paused with work remaining" : ""}
+            Investigation {(run.data?.ok ? run.data : find.data)?.investigationId} ·{" "}
+            {(run.data?.ok ? run.data : find.data)?.hops} hops ·{" "}
+            {(run.data?.ok ? run.data : find.data)?.artifacts} artifacts ·{" "}
+            {(run.data?.ok ? run.data : find.data)?.frontier} frontier
+            {(run.data?.ok ? run.data : find.data)?.paused ? " · paused with work remaining" : ""}
           </p>
-          {run.data.summary && (
-            <p className="mt-2 whitespace-pre-wrap text-paper-2">{run.data.summary}</p>
-          )}
-        </div>
-      )}
-      {cont.isPending && (
-        <div className="enter-fade-fast mt-6 border border-ink-2 bg-ink-2 p-4">
-          <BusyLine night label="Continuing the trail. Stay on this page." />
-        </div>
-      )}
-      {cont.data?.ok && (
-        <div className="enter-fade-fast mt-6 border border-paper-2 bg-ink-2 p-4">
-          <p className="font-medium">
-            Continued investigation {cont.data.investigationId} · {cont.data.hops} hops ·{" "}
-            {cont.data.artifacts} artifacts · {cont.data.frontier} frontier
-            {cont.data.paused ? " · still open" : ""}
-          </p>
-          {cont.data.summary && (
-            <p className="mt-2 whitespace-pre-wrap text-paper-2">{cont.data.summary}</p>
-          )}
         </div>
       )}
       {(notice || (run.data && !run.data.ok)) && (
@@ -177,54 +270,6 @@ function DarkPage() {
         </p>
       )}
 
-      {(investigations.isPending && !(investigations.data ?? []).length) ? (
-        <section className="mt-10">
-          <h2 className="font-display text-2xl">Investigations</h2>
-          <ListSkeleton rows={3} night />
-        </section>
-      ) : (investigations.data ?? []).length > 0 ? (
-        <section className="mt-10">
-          <h2 className="font-display text-2xl">Investigations</h2>
-          <ul className="mt-3 divide-y divide-ink-2 border border-ink-2">
-            {(investigations.data ?? []).map((inv) => (
-              <li key={inv.id} className="px-4 py-3">
-                <button
-                  type="button"
-                  className="min-h-11 text-left"
-                  onClick={() => setOpenId(inv.id)}
-                >
-                  <p className="font-medium">
-                    #{inv.id} {inv.title}
-                  </p>
-                  <p className="text-sm text-paper-2">
-                    {inv.status} · {inv.hops} hops · {formatShortDate(inv.updated_at)}
-                  </p>
-                  {inv.pause_reason ? (
-                    <p className="mt-1 text-sm text-paper-2">{inv.pause_reason}</p>
-                  ) : null}
-                </button>
-                {inv.status === "paused" || inv.status === "open" || inv.status === "investigating" ? (
-                  <div className="mt-2">
-                    <InkButton
-                      tone="invert"
-                      disabled={cont.isPending}
-                      onClick={() => {
-                        setOpenId(inv.id);
-                        cont.mutate(inv.id);
-                      }}
-                    >
-                      {cont.isPending && openId === inv.id
-                        ? "Continuing…"
-                        : "Continue digging"}
-                    </InkButton>
-                  </div>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
       {detail.data && (
         <section className="mt-10 space-y-8">
           <h2 className="font-display text-2xl">
@@ -236,54 +281,63 @@ function DarkPage() {
           {detail.data.investigation.pause_reason ? (
             <p className="text-sm text-paper-2">{detail.data.investigation.pause_reason}</p>
           ) : null}
+          {(detail.data.investigation.status === "paused" ||
+            detail.data.investigation.status === "open" ||
+            detail.data.investigation.status === "investigating") && (
+            <InkButton
+              tone="invert"
+              disabled={digging}
+              onClick={() => cont.mutate(detail.data!.investigation.id)}
+            >
+              Keep digging
+            </InkButton>
+          )}
           <BlockList
-            title="Frontier"
-            items={detail.data.frontier.map(
-              (f) =>
-                `${f.status} ${f.priority} ${f.kind}: ${f.label} — ${f.why}${f.prior_status ? ` (was ${f.prior_status})` : ""}${f.closed_reason ? ` [${f.closed_reason}]` : ""}`,
-            )}
+            title="What we know"
+            items={detail.data.claims
+              .filter((c) => c.kind === "FACT" || c.kind === "OBSERVATION")
+              .map(
+                (c) =>
+                  `${c.kind}: ${c.body}${c.provenance_status === "unresolved" ? " — provenance unresolved" : ""}`,
+              )}
           />
           <BlockList
-            title="Artifacts"
-            items={detail.data.artifacts.map(
-              (a) =>
-                `${a.fetch_outcome ?? a.fetch_status ?? "?"} v${a.version_id ?? "—"} ${a.title} ${a.url}`,
-            )}
-          />
-          <BlockList
-            title="Entities"
-            items={detail.data.entities.map((e) => `${e.kind}: ${e.name} — ${e.why}`)}
-          />
-          <BlockList
-            title="Historical matches"
-            items={(detail.data.historicalEntities ?? []).map(
-              (e) =>
-                `inv ${e.investigation_id}${e.verdict ? ` ${e.verdict}` : ""}: ${e.kind}: ${e.name} — ${e.why}`,
-            )}
-          />
-          <BlockList
-            title="Relationships"
-            items={detail.data.relationships.map(
-              (r) =>
-                `${r.from_name} —[${r.kind}]→ ${r.to_name} (${r.evidence})${r.version_id != null ? ` v${r.version_id}` : ""}${r.capture_event_id != null ? ` c${r.capture_event_id}` : ""}${r.provenance_status === "unresolved" ? " provenance unresolved" : ""}`,
-            )}
-          />
-          <BlockList
-            title="Claims"
-            items={detail.data.claims.map(
-              (c) =>
-                `${c.kind}${c.confidence != null ? ` ${c.confidence}` : ""}${c.version_id != null ? ` v${c.version_id}` : ""}${c.capture_event_id != null ? ` c${c.capture_event_id}` : ""}${c.provenance_status === "unresolved" ? " provenance unresolved" : ""}: ${c.body}`,
-            )}
-          />
-          <BlockList
-            title="Hypotheses"
+            title="What we're testing"
             items={(detail.data.hypotheses ?? []).map(
-              (h) => `[${h.status}] ${h.body}`,
+              (h) => `[${h.status}] ${h.body}${h.supporting ? ` · pro: ${h.supporting}` : ""}${h.contradicting ? ` · con: ${h.contradicting}` : ""}`,
             )}
           />
           <BlockList
-            title="Anomalies"
-            items={detail.data.anomalies.map((a) => `${a.kind}: ${a.summary}`)}
+            title="What Dark Desk found"
+            items={[
+              ...detail.data.anomalies.map((a) => `${a.kind}: ${a.summary}`),
+              ...detail.data.entities.map((e) => `${e.kind}: ${e.name} — ${e.why}`),
+              ...detail.data.relationships.map(
+                (r) => `${r.from_name} —[${r.kind}]→ ${r.to_name}${r.evidence ? ` (${r.evidence})` : ""}`,
+              ),
+              ...detail.data.artifacts.slice(0, 12).map(
+                (a) => `${a.title} ${a.url} (${a.fetch_outcome ?? "captured"})`,
+              ),
+            ]}
+          />
+          <BlockList
+            title="Research trail"
+            items={detail.data.searches.map(
+              (s) => `${s.state ?? "unknown"} hop ${s.hop}: ${s.query}`,
+            )}
+          />
+          <BlockList
+            title="Open questions"
+            items={openQuestionsFrom(detail.data)}
+          />
+          <BlockList
+            title="Leads to follow"
+            items={detail.data.frontier
+              .filter((f) => f.status === "open" || f.status === "investigating" || f.status === "reopened")
+              .map(
+                (f) =>
+                  `${f.status} ${f.kind}: ${f.label} — ${f.why}${f.prior_status ? ` (was ${f.prior_status})` : ""}`,
+              )}
           />
           <BlockList
             title="Dead ends"
@@ -292,9 +346,10 @@ function DarkPage() {
             )}
           />
           <BlockList
-            title="Searches"
-            items={detail.data.searches.map(
-              (s) => `${s.state ?? "unknown"} hop ${s.hop}${s.provider ? ` ${s.provider}` : ""}: ${s.query}`,
+            title="Evidence"
+            items={detail.data.artifacts.map(
+              (a) =>
+                `${a.fetch_outcome ?? a.fetch_status ?? "?"} v${a.version_id ?? "—"} ${a.title} ${a.url}`,
             )}
           />
         </section>
@@ -322,7 +377,7 @@ function DarkPage() {
 
       <section className="mt-10">
         <h2 className="font-display text-2xl">Signals</h2>
-        {(signals.isPending && !(signals.data ?? []).length) ? (
+        {signals.isPending && !(signals.data ?? []).length ? (
           <ListSkeleton rows={2} night />
         ) : (signals.data ?? []).length === 0 ? (
           <div className="mt-3">
@@ -330,7 +385,7 @@ function DarkPage() {
               night
               kicker="Lane 3"
               title="No signals yet"
-              body="Start an investigation. Dark desk searches broadly, preserves evidence, and never prints on its own."
+              body="Find something to dig into, or paste a lead. Dark desk searches broadly, preserves evidence, and never prints on its own."
             />
           </div>
         ) : null}
@@ -388,15 +443,6 @@ function DarkPage() {
           </ul>
         </section>
       )}
-
-      {toQueue.isSuccess && (
-        <p className="mt-4 text-sm text-paper-2">
-          In the working queue with provenance.{" "}
-          <Link to="/desk/queue" className="text-rust">
-            Open the queue
-          </Link>
-        </p>
-      )}
     </DeskShell>
   );
 }
@@ -425,4 +471,32 @@ function BlockList({ title, items }: { title: string; items: string[] }) {
       </ul>
     </div>
   );
+}
+
+function openQuestionsFrom(detail: {
+  claims: { kind: string; body: string }[];
+  searches: { generated_json?: string | null }[];
+}): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string) => {
+    const t = raw.trim();
+    if (t.length < 8) return;
+    const key = t.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(t);
+  };
+  for (const c of detail.claims) {
+    if (/QUESTION|UNKNOWN|GAP/i.test(c.kind)) push(c.body);
+  }
+  for (const s of detail.searches) {
+    try {
+      const g = JSON.parse(s.generated_json || "{}") as { questions?: unknown };
+      if (Array.isArray(g.questions)) for (const q of g.questions) push(String(q));
+    } catch {
+      /* ignore */
+    }
+  }
+  return out.slice(0, 16);
 }
