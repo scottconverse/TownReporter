@@ -1,0 +1,73 @@
+export type SourceRow = {
+  id: number;
+  url: string;
+  title: string;
+  kind: string;
+  tier: string;
+  status: string;
+  last_hash: string | null;
+  last_fetched_at: string | null;
+  last_error: string | null;
+};
+
+export type LeadRow = {
+  id: number;
+  headline: string;
+  why: string;
+  topic: string;
+  status: string;
+  source_urls: string;
+  evidence: string | null;
+  newsworthiness: number | null;
+  created_at: string;
+  article_slug?: string | null;
+};
+
+export type DraftRow = {
+  id: number;
+  lead_id: number;
+  headline: string;
+  dek: string;
+  body: string;
+  topic: string;
+  source_urls: string;
+  integrity_notes: string | null;
+  updated_at: string;
+};
+
+export type ArticleRow = {
+  id: number;
+  slug: string;
+  headline: string;
+  dek: string;
+  body: string;
+  topic: string;
+  source_urls: string;
+  status: string;
+  published_at: string;
+};
+
+export type MemoryRow = {
+  id: number;
+  entity: string;
+  last_angle: string;
+  updated_at: string;
+};
+
+export type ScanRow = {
+  id: number;
+  started_at: string;
+  finished_at: string | null;
+  sources_fetched: number;
+  leads_created: number;
+  sources_proposed: number;
+  summary: string | null;
+  error: string | null;
+};
+
+export type CorrectionRow = {
+  id: number;
+  body: string;
+  created_at: string;
+  headline: string | null;
+};

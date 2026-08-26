@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/get-the-code",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "TownReporter — Longmont, Colorado",
+      "hasCanvas": false,
+      "bodyTextLen": 244,
+      "bodyTextHash": "1c639de8d50504f82e761d758369ceeb0925e37e3dab99d096baf330cd0da84a",
+      "bodyTextPrefix": "TOWNREPORTER Source archive This preview cannot attach files to ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/get-the-code.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "TownReporter — Longmont, Colorado",
+      "hasCanvas": false,
+      "bodyTextLen": 244,
+      "bodyTextHash": "1c639de8d50504f82e761d758369ceeb0925e37e3dab99d096baf330cd0da84a",
+      "bodyTextPrefix": "TOWNREPORTER Source archive This preview cannot attach files to ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/get-the-code-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/get-the-code.json"
+}

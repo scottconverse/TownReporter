@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "TownReporter — Longmont, Colorado",
+      "hasCanvas": false,
+      "bodyTextLen": 1414,
+      "bodyTextHash": "5108adb72f9799bca9a7eb862e37036fd2f1256d70cefc3469ea90ea486d7e58",
+      "bodyTextPrefix": "VOL. 1 · LONGMONT EDITION TUESDAY, AUGUST 25, 2026 SIGN IN TownR",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/home-now.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "TownReporter — Longmont, Colorado",
+      "hasCanvas": false,
+      "bodyTextLen": 1389,
+      "bodyTextHash": "d4437de5dff60ace9a2da1b786e4285e86547d116b2a352337e0f2a10e7dea42",
+      "bodyTextPrefix": "VOL. 1 · LONGMONT EDITION SIGN IN TownReporter LONGMONT, COLORAD",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/home-now-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/home-now.json"
+}

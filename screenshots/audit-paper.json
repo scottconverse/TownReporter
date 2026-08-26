@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "TownReporter — Longmont, Colorado",
+      "hasCanvas": false,
+      "bodyTextLen": 1414,
+      "bodyTextHash": "2e007354c4dafe8cb2ba5a3fad9e453137533e88bf00bd16ec81cb81ca18f3ce",
+      "bodyTextPrefix": "VOL. 1 · LONGMONT EDITION TUESDAY, AUGUST 25, 2026 SIGN IN TownR",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/audit-paper.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "TownReporter — Longmont, Colorado",
+      "hasCanvas": false,
+      "bodyTextLen": 1389,
+      "bodyTextHash": "474d1514da951d237e21af5fcd6fc045cb558c81e86cc12e3ff33b16c92488c6",
+      "bodyTextPrefix": "VOL. 1 · LONGMONT EDITION SIGN IN TownReporter LONGMONT, COLORAD",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/audit-paper-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/audit-paper.json"
+}

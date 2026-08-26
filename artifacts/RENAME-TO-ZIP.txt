@@ -1,0 +1,3 @@
+TownReporter-source.bin is the source archive.
+Rename it to TownReporter.zip then unzip.
+Same bytes as TownReporter.zip. Chat previews .zip as 'explore contents' and never offers Save.

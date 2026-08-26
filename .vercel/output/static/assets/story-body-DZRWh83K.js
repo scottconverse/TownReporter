@@ -1,0 +1,3 @@
+import{d as e}from"./paper-DWKfnA9e.js";var t=e();function n({body:e}){let n=e.replace(/\r\n/g,`
+`).split(/\n{2,}/).map(e=>e.trim()).filter(Boolean);return(0,t.jsx)(`div`,{className:`space-y-4 text-[1.05rem] leading-7 text-ink-2`,children:n.map((e,n)=>{if(e.startsWith(`## `))return(0,t.jsx)(`h2`,{className:`font-display text-xl font-semibold text-ink`,children:e.slice(3)},n);if(e.startsWith(`- `)){let r=e.split(`
+`).map(e=>e.replace(/^- /,``).trim());return(0,t.jsx)(`ul`,{className:`list-disc space-y-1 pl-5`,children:r.map((e,n)=>(0,t.jsx)(`li`,{children:e},n))},n)}return(0,t.jsx)(`p`,{className:`whitespace-pre-wrap`,children:e.replace(/\*\*(.+?)\*\*/g,`$1`)},n)})})}export{n as t};

@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/desk/dark",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "TownReporter — Longmont, Colorado",
+      "hasCanvas": false,
+      "bodyTextLen": 17,
+      "bodyTextHash": "c76da3c4792234ddb3c16330e051f66002e34a265b9732156c5f8ddc7af55213",
+      "bodyTextPrefix": "Opening the desk…",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/dark-now.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "TownReporter — Longmont, Colorado",
+      "hasCanvas": false,
+      "bodyTextLen": 8,
+      "bodyTextHash": "c926c2c50e65d5a5799f548604472ee8554b53c376e45be580b3a06a484d8fc0",
+      "bodyTextPrefix": "Opening…",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/dark-now-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/dark-now.json"
+}
