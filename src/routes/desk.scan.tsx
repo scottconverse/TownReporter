@@ -24,9 +24,10 @@ function ScanPage() {
   return (
     <DeskShell title="Scan" kicker="Reporter pass">
       <p className="max-w-2xl text-ink-2">
-        Fetches up to sixteen accepted sources, then Grok files leads and
-        proposed official URLs. You review them in the queue, draft with Grok,
-        edit, and print. This is the expensive button — not a loop.
+        Fetches every accepted source on the watch list (up to 200), then
+        Grok files leads and proposed official URLs. You review them in the
+        queue, draft with Grok, edit, and print. This is the expensive button
+        — not a loop.
       </p>
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <InkButton disabled={scan.isPending} onClick={() => scan.mutate()}>

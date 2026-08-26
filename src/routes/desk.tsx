@@ -26,13 +26,13 @@ function DeskGate() {
   const [gaveUp, setGaveUp] = useState(false);
 
   useEffect(() => {
-    if (!isPending || user) {
+    if (user) {
       setGaveUp(false);
       return;
     }
     const t = window.setTimeout(() => setGaveUp(true), SESSION_WAIT_MS);
     return () => window.clearTimeout(t);
-  }, [isPending, user]);
+  }, [user]);
 
   if (user) {
     return (

@@ -50,7 +50,7 @@ function Root() {
         <script
           dangerouslySetInnerHTML={{
             __html:
-              'setTimeout(function(){var h=document.querySelector("h1");if(h&&(h.textContent||"").indexOf("Checking sign-in")!==-1)location.replace("/login");},1200);',
+              'setTimeout(function(){var h=document.querySelector("h1");if(!h)return;var t=h.textContent||"";if(t.indexOf("Checking sign-in")!==-1||t.indexOf("Opening the desk")!==-1)location.replace("/login");},1200);',
           }}
         />
         <PreviewHostBridge />
