@@ -21,6 +21,7 @@ import {
   editorKindLabel,
   editorPauseReason,
   editorStatus,
+  excerptForEditor,
   headlineFromUrl,
   looksLikeInternalSummary,
   organizationFromUrl,
@@ -28,6 +29,7 @@ import {
   plainEditorText,
   plainFinding,
   progressLine,
+  recordKindFromUrl,
   sourceLineFromUrl,
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
@@ -554,6 +556,85 @@ function DeskFileCard({
   );
 }
 
+function OpenedRecords({
+  artifacts,
+}: {
+  artifacts: {
+    id: number;
+    url: string;
+    title: string;
+    classification: string;
+    fetch_status: number | null;
+    fetch_outcome: string | null;
+    version_id: number | null;
+    created_at: string;
+    excerpt?: string;
+  }[];
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? artifacts : artifacts.slice(0, 12);
+  return (
+    <div id="opened-records" className="mt-6 scroll-mt-6">
+      <h3 className="font-display text-xl">What to read ({artifacts.length})</h3>
+      <p className="mt-1 text-sm text-paper-2">
+        These are the pages and documents Dark Desk already opened. This is the
+        file. Click a title to read the captured copy.
+      </p>
+      <ul className="mt-3 space-y-3">
+        {visible.map((a) => {
+          const title =
+            a.title && !/^https?:/i.test(a.title) ? a.title : headlineFromUrl(a.url) || a.title;
+          const excerpt = excerptForEditor(a.excerpt ?? "");
+          const captured = (a.excerpt ?? "").trim();
+          const kind = recordKindFromUrl(a.url);
+          const org = organizationFromUrl(a.url);
+          return (
+            <li key={a.id} className="border border-ink p-3">
+              <p className="text-[11px] tracking-[0.14em] text-paper-2 uppercase">
+                {kind}
+                {org ? ` · ${org}` : ""}
+                {a.created_at ? ` · captured ${formatShortDate(a.created_at)}` : ""}
+              </p>
+              <p className="mt-1 font-medium">{title}</p>
+              {excerpt ? (
+                <p className="mt-2 text-sm text-paper-2">{excerpt}</p>
+              ) : (
+                <p className="mt-2 text-sm text-paper-2">
+                  Opened, but no readable text was extracted. Use the original link.
+                </p>
+              )}
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                {a.url.startsWith("http") ? (
+                  <a href={a.url} className="text-blush hover:text-paper" target="_blank" rel="noreferrer">
+                    Open original
+                  </a>
+                ) : null}
+                {captured ? (
+                  <details>
+                    <summary className="min-h-11 cursor-pointer text-blush">Read captured copy</summary>
+                    <p className="mt-2 whitespace-pre-wrap text-paper-2">{captured}</p>
+                  </details>
+                ) : null}
+              </div>
+              <details className="mt-1 text-sm text-paper-2">
+                <summary className="cursor-pointer">Address</summary>
+                <p className="mt-1 break-all">{a.url}</p>
+              </details>
+            </li>
+          );
+        })}
+      </ul>
+      {artifacts.length > 12 && !showAll ? (
+        <div className="mt-3">
+          <InkButton tone="invert" onClick={() => setShowAll(true)}>
+            Show all {artifacts.length} records
+          </InkButton>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function WorthCard({
   item,
   busy,
@@ -681,9 +762,6 @@ function InvestigationWorkspace({
     ["open", "investigating", "reopened"].includes(f.status),
   );
   const seedSummary = !inv?.summary || looksLikeInternalSummary(inv.summary);
-  const started = inv?.title
-    ? `You opened this from Dark Desk because “${inv.title}” looked worth a closer look.`
-    : "Opened from Dark Desk. It is reading the records now.";
   const whyMatters = !seedSummary && inv?.summary ? plainEditorText(inv.summary) : "";
   const pauseText = editorPauseReason(inv?.pause_reason);
   const leftover = next.length;
@@ -706,7 +784,13 @@ function InvestigationWorkspace({
       </h2>
       <p className="mt-2 text-sm text-paper-2">{subtitle}</p>
       <p className="mt-1 text-sm text-paper-2">
-        {artifacts.length} records on file
+        {artifacts.length > 0 ? (
+          <a href="#opened-records" className="text-blush hover:text-paper">
+            {artifacts.length} records on file — read them below
+          </a>
+        ) : (
+          "No records captured yet."
+        )}
         {leftover > 0 ? ` · ${leftover} still to open` : ""}
         {inv?.updated_at ? ` · last touched ${formatShortDate(inv.updated_at)}` : ""}
       </p>
@@ -723,40 +807,32 @@ function InvestigationWorkspace({
         </div>
       ) : null}
       {pending ? (
-        <p className="mt-4 text-sm text-paper-2">Preparing the lead…</p>
+        <p className="mt-4 text-sm text-paper-2">Getting this ready…</p>
       ) : null}
 
-      <Block title="What started this" text={started} />
-      {pauseText ? <Block title="Why it stopped" text={pauseText} /> : null}
-      {inv?.status === "paused" && !digging ? (
-        <div className="mt-4">
-          <InkButton tone="invert" disabled={keepDisabled} onClick={onKeepDigging}>
-            Keep digging
-          </InkButton>
-        </div>
+      {artifacts.length > 0 ? (
+        <OpenedRecords artifacts={artifacts} />
+      ) : digging ? (
+        <p className="mt-6 text-sm text-paper-2">Opening pages now. They will land here.</p>
+      ) : (
+        <p className="mt-6 text-sm text-paper-2">
+          Nothing captured yet. Keep digging starts the first round.
+        </p>
+      )}
+
+      {found.length > 0 ? (
+        <BlockList title="What Dark Desk noticed" items={found} />
       ) : null}
-      <BlockList
-        title="What we know"
-        items={facts.map((c) => c.body)}
-        empty={digging ? "Still reading." : "Nothing confirmed yet."}
-      />
-      <BlockList
-        title="What Dark Desk found"
-        items={found}
-        empty={digging ? "Searching…" : "Nothing distinctive yet. That does not close the file."}
-      />
-      {whyMatters ? <Block title="Why it matters" text={whyMatters} /> : null}
-      <BlockList
-        title="What we’re testing"
-        items={hyps.map((h) => h.body)}
-      />
-      <BlockList title="Open questions" items={questions} />
+      {facts.length > 0 ? (
+        <BlockList title="What we know" items={facts.map((c) => c.body)} />
+      ) : null}
 
       {next.length > 0 && (
         <div className="mt-6">
-          <h3 className="font-display text-xl">Still to look at</h3>
+          <h3 className="font-display text-xl">Still unopened ({next.length})</h3>
           <p className="mt-1 text-sm text-paper-2">
-            Names, pages, and documents mentioned in what Dark Desk already opened. It has not read these yet.
+            These names and links showed up in the records above. Dark Desk has
+            not opened them yet. Keep digging reads the next batch.
           </p>
           <ul className="mt-2 space-y-2">
             {next.slice(0, 8).map((f) => (
@@ -785,55 +861,20 @@ function InvestigationWorkspace({
         </div>
       )}
 
-      {artifacts.length > 0 && (
-        <div className="mt-6">
-          <h3 className="font-display text-xl">Evidence</h3>
-          <ul className="mt-3 space-y-3">
-            {artifacts.slice(0, 16).map((a) => (
-              <li key={a.id} className="border border-ink p-3">
-                <p className="font-medium">
-                  {a.title && !/^https?:/i.test(a.title) ? a.title : headlineFromUrl(a.url) || a.title}
-                </p>
-                <p className="text-sm text-paper-2">
-                  {organizationFromUrl(a.url)}
-                  {a.created_at ? ` · captured ${formatShortDate(a.created_at)}` : ""}
-                </p>
-                <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
-                  {a.url.startsWith("http") ? (
-                    <a href={a.url} className="text-blush hover:text-paper" target="_blank" rel="noreferrer">
-                      Open source
-                    </a>
-                  ) : null}
-                  {a.version_id != null ? (
-                    <Link
-                      to="/evidence/$versionId"
-                      params={{ versionId: String(a.version_id) }}
-                      className="text-blush hover:text-paper"
-                    >
-                      View evidence
-                    </Link>
-                  ) : null}
-                  {a.url.startsWith("http") ? (
-                    <Link
-                      to="/evidence/compare"
-                      search={{ url: a.url }}
-                      className="text-blush hover:text-paper"
-                    >
-                      Compare versions
-                    </Link>
-                  ) : null}
-                </p>
-                <details className="mt-2 text-sm text-paper-2">
-                  <summary className="cursor-pointer">Technical details</summary>
-                  <p className="break-all">{a.url}</p>
-                  {a.version_id != null ? <p>Content version {a.version_id}</p> : null}
-                  {a.fetch_outcome ? <p>{a.fetch_outcome}</p> : null}
-                </details>
-              </li>
-            ))}
-          </ul>
+      {pauseText ? <Block title="Why it stopped" text={pauseText} /> : null}
+      {inv?.status === "paused" && !digging ? (
+        <div className="mt-4">
+          <InkButton tone="invert" disabled={keepDisabled} onClick={onKeepDigging}>
+            Keep digging
+          </InkButton>
         </div>
-      )}
+      ) : null}
+
+      {whyMatters ? <Block title="Why it matters" text={whyMatters} /> : null}
+      {hyps.length > 0 ? (
+        <BlockList title="What we’re testing" items={hyps.map((h) => h.body)} />
+      ) : null}
+      {questions.length > 0 ? <BlockList title="Open questions" items={questions} /> : null}
 
       <details className="mt-6">
         <summary className="min-h-11 cursor-pointer font-display text-xl">Research trail</summary>
@@ -842,7 +883,6 @@ function InvestigationWorkspace({
             searches.map((s, i) => (
               <li key={`${s.hop}-${i}`}>
                 {s.query}
-                <span className="text-paper-2"> · round {s.hop}</span>
               </li>
             ))
           ) : (

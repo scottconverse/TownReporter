@@ -24,7 +24,7 @@ Needs:
 - `/desk/sources` — watch list + bulk paste
 - `/desk/scan` — fetch + leads
 - `/desk/queue` — draft / hold / publish
-- `/desk/dark` — Dark Desk (not publishable)
+- `/desk/dark` — Dark Desk (not publishable). Editor UI brief: [`docs/dark-desk-editor.md`](docs/dark-desk-editor.md).
 - `/feed` — RSS
 
 MIT if you ship it that way; this copy is yours.

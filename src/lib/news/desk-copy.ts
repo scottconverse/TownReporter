@@ -266,3 +266,17 @@ export function pileForStatus(status: string): "desk" | "aside" {
   if (["open", "investigating", "paused"].includes(status)) return "desk";
   return "aside";
 }
+
+export function recordKindFromUrl(url: string): string {
+  if (/\.pdf($|\?)/i.test(url)) return "PDF";
+  if (/youtube\.com|youtu\.be/i.test(url)) return "Video page";
+  if (/\.(docx?|xlsx?|pptx?)($|\?)/i.test(url)) return "Office file";
+  return "Web page";
+}
+
+export function excerptForEditor(text: string, max = 280): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1).replace(/\s+\S*$/, "") + "…";
+}

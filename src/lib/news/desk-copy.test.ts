@@ -13,6 +13,8 @@ import {
   sourceLineFromUrl,
   titlesOverlap,
   worthItemOnDesk,
+  recordKindFromUrl,
+  excerptForEditor,
 } from "./desk-copy.ts";
 import { presentWorthItem, rankWorthItems } from "./worth-a-look.ts";
 
@@ -163,5 +165,15 @@ describe("Worth a Look presentation", () => {
       worthItemOnDesk({ id: "claimed", title: "Anything" }, [], ["claimed"]),
       true,
     );
+  });
+
+  it("labels a captured PDF as a document an editor can read", () => {
+    assert.equal(
+      recordKindFromUrl(
+        "https://assets.bouldercounty.gov/wp-content/uploads/2025/02/2022-048-rst-td3-transportation-extension-o.100pct.pdf",
+      ),
+      "PDF",
+    );
+    assert.match(excerptForEditor("Council approved the contract Tuesday. ".repeat(20)), /…$/);
   });
 });

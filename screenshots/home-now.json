@@ -7,12 +7,14 @@
       "status": 200,
       "title": "TownReporter — Longmont, Colorado",
       "hasCanvas": false,
-      "bodyTextLen": 1414,
-      "bodyTextHash": "5108adb72f9799bca9a7eb862e37036fd2f1256d70cefc3469ea90ea486d7e58",
-      "bodyTextPrefix": "VOL. 1 · LONGMONT EDITION TUESDAY, AUGUST 25, 2026 SIGN IN TownR",
+      "bodyTextLen": 1621,
+      "bodyTextHash": "cabf550c225508a096822738f73d48625b71e9d82b1456a97e701b1c6c5bc16a",
+      "bodyTextPrefix": "Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY",
       "horizontalOverflow": false,
       "consoleErrors": [],
-      "pageErrors": [],
+      "pageErrors": [
+        "Module \"node:dns/promises\" has been externalized for browser compatibility. Cannot access \"node:dns/promises.lookup\" in client code.  See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details."
+      ],
       "screenshot": "/workspace/screenshots/home-now.png"
     },
     "mobile": {
@@ -21,12 +23,14 @@
       "status": 200,
       "title": "TownReporter — Longmont, Colorado",
       "hasCanvas": false,
-      "bodyTextLen": 1389,
-      "bodyTextHash": "d4437de5dff60ace9a2da1b786e4285e86547d116b2a352337e0f2a10e7dea42",
-      "bodyTextPrefix": "VOL. 1 · LONGMONT EDITION SIGN IN TownReporter LONGMONT, COLORAD",
+      "bodyTextLen": 1594,
+      "bodyTextHash": "6130d02d30e67afcb050ca3b1a10e255ea6bfaec1aa2118a5a00bda095a16274",
+      "bodyTextPrefix": "Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT TownRepor",
       "horizontalOverflow": false,
       "consoleErrors": [],
-      "pageErrors": [],
+      "pageErrors": [
+        "Module \"node:dns/promises\" has been externalized for browser compatibility. Cannot access \"node:dns/promises.lookup\" in client code.  See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details."
+      ],
       "screenshot": "/workspace/screenshots/home-now-mobile.png"
     }
   },

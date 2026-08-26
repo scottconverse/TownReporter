@@ -349,10 +349,22 @@ export const getInvestigation = createServerFn({ method: "GET" })
       where investigation_id = ${id} and user_id = ${context.userId}
       order by priority desc, id desc limit 40
     `;
-    const artifacts = await sql<{ id: number; url: string; title: string; classification: string; fetch_status: number | null; fetch_outcome: string | null; version_id: number | null; created_at: string }>`
-      select id, url, title, classification, fetch_status, fetch_outcome, version_id, created_at from artifacts
+    const artifacts = await sql<{
+      id: number;
+      url: string;
+      title: string;
+      classification: string;
+      fetch_status: number | null;
+      fetch_outcome: string | null;
+      version_id: number | null;
+      created_at: string;
+      excerpt: string;
+    }>`
+      select id, url, title, classification, fetch_status, fetch_outcome, version_id,
+        created_at, left(full_text, 2500) as excerpt
+      from artifacts
       where investigation_id = ${id} and user_id = ${context.userId}
-      order by id desc limit 40
+      order by id desc limit 60
     `;
     const entities = await sql<{ name: string; kind: string; why: string }>`
       select e.name, e.kind, e.why

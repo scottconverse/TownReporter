@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.4 — 2026-08-26
+
+Dark Desk open file puts captured records first. Designer brief checked in. Investigative engine unchanged.
+
+- “34 records on file” is no longer a count with nowhere to click. The open file leads with **What to read**: title, excerpt, Open original, Read captured copy.
+- Empty “What we know / testing / questions” sections stay hidden.
+- Still unopened is labeled as not-yet-fetched, not the reading list.
+- Designer handoff: `docs/dark-desk-editor.md`.
+
 ## 0.2.3 — 2026-08-26
 
 Dark Desk editor language and desk piles. Investigative engine unchanged.
