@@ -5,9 +5,14 @@ import {
   collapseRepeatedParagraphs,
   describeSourceUrl,
   looksLikeRewrite,
+  mergeProvenanceItem,
+  parseFindings,
   provenanceFromUrls,
+  resolvePublicFindings,
   stripAiFiller,
+  type ProvenanceItem,
 } from "./report.ts";
+import { describeTextChanges, retrieveRelevantChunks } from "./retrieve.ts";
 import { rankWorthItems } from "./worth-a-look.ts";
 
 describe("describeSourceUrl", () => {
@@ -37,7 +42,18 @@ describe("collapseRepeatedParagraphs", () => {
     const out = collapseRepeatedParagraphs(body);
     assert.match(out, /Hover Street/);
     const paras = out.split(/\n{2,}/);
-    assert.ok(paras.length <= 2, `expected collapse, got ${paras.length}: ${out}`);
+    assert.ok(paras.length <= 3, `expected some collapse, got ${paras.length}: ${out}`);
+  });
+
+  it("keeps a richer paragraph that shares the short paragraph's vocabulary", () => {
+    const body = [
+      "Council approved the Acme contract Tuesday.",
+      "Council approved the Acme contract Tuesday for $2.4 million, covering three water projects through 2028 after rejecting the lower bidder on technical grounds.",
+    ].join("\n\n");
+    const out = collapseRepeatedParagraphs(body);
+    assert.match(out, /\$2\.4 million/);
+    assert.match(out, /2028/);
+    assert.match(out, /lower bidder/);
   });
 });
 
@@ -59,7 +75,7 @@ describe("stripAiFiller", () => {
 });
 
 describe("looksLikeRewrite", () => {
-  it("flags a draft that mostly echoes the announcing source", () => {
+  it("flags a draft that mostly copies the announcing source verbatim", () => {
     const src =
       "The City of Longmont announced that construction on the Group 2 waterline replacement will begin August 31. Work starts August 31.";
     const body =
@@ -73,6 +89,14 @@ describe("looksLikeRewrite", () => {
       "Longmont will shut parts of Hover Street starting August 31 as crews replace Group 2 water lines, a phase city documents describe as the stretch between 9th and 17th. The packet lists the contract at $2.4 million. What the announcement does not say is which hydrants go offline.";
     assert.equal(looksLikeRewrite(body, src), false);
   });
+
+  it("does not treat grounded factual vocabulary as a rewrite", () => {
+    const src =
+      "Council approved the Acme Holdings water contract Tuesday for $2.4 million.";
+    const body =
+      "Longmont City Council voted Tuesday to award Acme Holdings a $2.4 million water contract. The award covers three projects through 2028. The packet does not name the neighborhoods that lose water during construction.";
+    assert.equal(looksLikeRewrite(body, src), false);
+  });
 });
 
 describe("asStoryForm", () => {
@@ -83,12 +107,161 @@ describe("asStoryForm", () => {
   });
 });
 
-describe("provenanceFromUrls", () => {
+describe("provenance merge", () => {
   it("keeps the exact document URL", () => {
     const url = "https://longmontcolorado.gov/water/group-2-notice.html";
     const items = provenanceFromUrls([url]);
     assert.equal(items[0]!.url, url);
     assert.match(items[0]!.title, /group 2/i);
+  });
+
+  it("does not let blank capture metadata overwrite a reported title, org, date, or role", () => {
+    const url = "https://longmontcolorado.gov/water/group-2-staff-report.pdf";
+    const items = provenanceFromUrls(
+      [url],
+      [
+        {
+          url,
+          title: "Group 2 staff report",
+          organization: "City of Longmont",
+          document_date: "2026-08-12",
+          role: "attachment",
+        },
+        {
+          url,
+          title: "",
+          organization: "",
+          document_date: "",
+          captured_at: "2026-08-25T12:00:00.000Z",
+          version_id: 7,
+          version_count: 3,
+          disappeared: false,
+        },
+      ],
+    );
+    assert.equal(items[0]!.title, "Group 2 staff report");
+    assert.equal(items[0]!.organization, "City of Longmont");
+    assert.equal(items[0]!.document_date, "2026-08-12");
+    assert.equal(items[0]!.role, "attachment");
+    assert.equal(items[0]!.captured_at, "2026-08-25T12:00:00.000Z");
+    assert.equal(items[0]!.version_id, 7);
+    assert.equal(items[0]!.version_count, 3);
+  });
+
+  it("lets forensic disappearance win while keeping the reported title", () => {
+    const base: ProvenanceItem = {
+      title: "August water report",
+      organization: "City of Longmont",
+      document_date: "2026-08-01",
+      url: "https://longmontcolorado.gov/water/report.pdf",
+      captured_at: null,
+      version_id: null,
+      version_count: null,
+      disappeared: false,
+      role: "source",
+    };
+    const merged = mergeProvenanceItem(base, {
+      url: base.url,
+      disappeared: true,
+      captured_at: "2026-08-20T00:00:00.000Z",
+      version_id: 4,
+    });
+    assert.equal(merged.title, "August water report");
+    assert.equal(merged.disappeared, true);
+    assert.equal(merged.version_id, 4);
+  });
+});
+
+describe("What TownReporter found", () => {
+  const prov: ProvenanceItem[] = [
+    {
+      title: "Packet",
+      organization: "longmontcolorado.gov",
+      document_date: "",
+      url: "https://longmontcolorado.gov/packet.pdf",
+      captured_at: "2026-08-25T12:00:00.000Z",
+      version_id: 11,
+      version_count: 2,
+      disappeared: false,
+      role: "followed",
+    },
+  ];
+
+  it("publishes a finding bound to a captured version", () => {
+    const findings = parseFindings({
+      text: "The packet lists the Group 2 contract at $2.4 million.",
+      source_urls: ["https://longmontcolorado.gov/packet.pdf"],
+      artifact_version_ids: [11],
+    });
+    const pub = resolvePublicFindings(findings, prov);
+    assert.equal(pub.length, 1);
+    assert.match(pub[0]!.text, /\$2\.4 million/);
+  });
+
+  it("does not render the public module for an unbound model assertion", () => {
+    const findings = parseFindings({
+      text: "A source said the mayor privately promised the vendor the award.",
+      source_urls: [],
+      artifact_version_ids: [],
+    });
+    const pub = resolvePublicFindings(findings, prov);
+    assert.equal(pub.length, 0);
+  });
+});
+
+describe("large-document retrieval", () => {
+  it("pulls cost, amendment and contradiction from deep pages, not only the prefix", () => {
+    const pages = Array.from({ length: 200 }, (_, i) => {
+      const page = i + 1;
+      if (page === 1) {
+        return { page, text: "City announcement: Group 2 construction begins August 31." };
+      }
+      if (page === 60) {
+        return { page, text: "Staff report: the Group 2 contract is $4.1 million." };
+      }
+      if (page === 140) {
+        return {
+          page,
+          text: "Amendment 3 shifts the completion date from June 2027 to March 2028.",
+        };
+      }
+      if (page === 180) {
+        return {
+          page,
+          text: "Staff now says work was delayed from June because of a valve shortage.",
+        };
+      }
+      return { page, text: `Routine appendix filler for page ${page}.` };
+    });
+    const chunks = retrieveRelevantChunks(
+      [
+        {
+          url: "https://longmontcolorado.gov/packet.pdf",
+          title: "Council packet",
+          text: pages.map((p) => p.text).join("\n\n"),
+          pages,
+        },
+      ],
+      ["cost", "contract", "amendment", "delay", "valve", "Group 2"],
+    );
+    const blob = chunks.map((c) => c.excerpt).join("\n");
+    assert.match(blob, /\$4\.1 million/);
+    assert.match(blob, /Amendment 3/);
+    assert.match(blob, /valve shortage/);
+    assert.ok(
+      chunks.some((c) => c.page_number === 60 || c.page_number === 140 || c.page_number === 180),
+    );
+  });
+});
+
+describe("describeTextChanges", () => {
+  it("reports added and removed sentences", () => {
+    const d = describeTextChanges(
+      "Construction begins August 31. The contract is $2 million.",
+      "Construction begins August 31. The contract is $2.4 million after amendment.",
+    );
+    assert.ok(d.removed.some((s) => /\$2 million/.test(s)));
+    assert.ok(d.added.some((s) => /\$2\.4 million/.test(s)));
   });
 });
 
@@ -151,5 +324,37 @@ describe("rankWorthItems", () => {
     });
     assert.equal(ranked[0]!.kind, "promise");
     assert.match(ranked[0]!.question, /agenda|dropped/i);
+  });
+
+  it("keeps unknown and future frontier kinds eligible", () => {
+    const ranked = rankWorthItems({
+      frontier: [
+        {
+          label: "Riverstone Consultants",
+          kind: "consultant",
+          why: "Named in the staff report as the traffic study vendor",
+          status: "open",
+          closed_reason: null,
+        },
+        {
+          label: "Unexplained wire 4411",
+          kind: "future-kind-we-have-never-seen",
+          why: "Appears in a disbursement log with no matching agenda item",
+          status: "open",
+          closed_reason: null,
+        },
+      ],
+      anomalies: [
+        {
+          kind: "disappeared",
+          summary: "Expected water report taken down",
+          url: "https://longmontcolorado.gov/water/report.html",
+          details: "Was present last month.",
+        },
+      ],
+    });
+    assert.ok(ranked.some((r) => r.kind === "consultant"));
+    assert.ok(ranked.some((r) => r.kind === "future-kind-we-have-never-seen"));
+    assert.equal(ranked[0]!.kind, "disappeared");
   });
 });

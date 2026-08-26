@@ -18,17 +18,27 @@ type FrontierIn = { label: string; kind: string; why: string; status: string; cl
 type SignalIn = { id: number; name: string; observation: string; pathway: string; handoff: string; strength: number };
 type PromiseIn = { who_promised: string; what: string; when_due: string | null; source_cite: string | null; status: string };
 
-const OPEN_FRONTIER = new Set([
-  "missing-record",
-  "missing-cadence",
-  "company",
-  "contract",
-  "rfp",
-  "url",
-  "unresolved-reference",
-  "unresolved-provenance",
-  "legislation",
-]);
+/** Ranking bonuses only. Unknown kinds stay eligible. */
+const PRIORITY_BONUS: Record<string, number> = {
+  disappeared: 12,
+  removed: 12,
+  "soft-404": 12,
+  "missing-cadence": 10,
+  "missing-record": 10,
+  reopened: 11,
+  company: 8,
+  contract: 8,
+  rfp: 8,
+  legislation: 8,
+  url: 7,
+  "unresolved-reference": 7,
+  "unresolved-provenance": 7,
+};
+
+function frontierPriority(status: string, kind: string): number {
+  if (status === "reopened") return PRIORITY_BONUS.reopened ?? 11;
+  return PRIORITY_BONUS[kind] ?? 6;
+}
 
 function questionFor(kind: string, title: string): string {
   const t = title.slice(0, 80);
@@ -79,7 +89,7 @@ export function rankWorthItems(input: {
       source_url: url,
       question: questionFor(kind, title),
       seed: [a.summary, a.details, url].filter(Boolean).join("\n").slice(0, 4000),
-      priority: kind === "disappeared" || kind === "missing-cadence" ? 12 : 9,
+      priority: PRIORITY_BONUS[kind] ?? 9,
     });
   }
 
@@ -106,7 +116,6 @@ export function rankWorthItems(input: {
 
   for (const f of input.frontier ?? []) {
     if (f.status !== "reopened" && f.status !== "open") continue;
-    if (f.status === "open" && !OPEN_FRONTIER.has(f.kind)) continue;
     out.push({
       id: `frontier:${f.kind}:${f.label}`,
       kind: f.status === "reopened" ? "reopened" : f.kind,
@@ -120,7 +129,7 @@ export function rankWorthItems(input: {
       source_url: /^https?:/i.test(f.label) ? f.label : "",
       question: questionFor(f.status === "reopened" ? "reopened" : f.kind, f.label),
       seed: `${f.label}\n${f.why}\n${f.closed_reason ?? ""}`,
-      priority: f.status === "reopened" ? 11 : 8,
+      priority: frontierPriority(f.status, f.kind),
     });
   }
 

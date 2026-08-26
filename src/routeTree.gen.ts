@@ -25,6 +25,8 @@ import { Route as DeskMemoryRouteImport } from './routes/desk.memory'
 import { Route as DeskQueueRouteImport } from './routes/desk.queue'
 import { Route as DeskScanRouteImport } from './routes/desk.scan'
 import { Route as DeskSourcesRouteImport } from './routes/desk.sources'
+import { Route as EvidenceVersionIdRouteImport } from './routes/evidence.$versionId'
+import { Route as EvidenceCompareRouteImport } from './routes/evidence.compare'
 import { Route as NewsletterConfirmRouteImport } from './routes/newsletter.confirm'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiCronMonitorsRouteImport } from './routes/api/cron.monitors'
@@ -110,6 +112,16 @@ const DeskSourcesRoute = DeskSourcesRouteImport.update({
   path: '/sources',
   getParentRoute: () => DeskRoute,
 } as any)
+const EvidenceVersionIdRoute = EvidenceVersionIdRouteImport.update({
+  id: '/evidence/$versionId',
+  path: '/evidence/$versionId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EvidenceCompareRoute = EvidenceCompareRouteImport.update({
+  id: '/evidence/compare',
+  path: '/evidence/compare',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const NewsletterConfirmRoute = NewsletterConfirmRouteImport.update({
   id: '/newsletter/confirm',
   path: '/newsletter/confirm',
@@ -147,6 +159,8 @@ export interface FileRoutesByFullPath {
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
   '/desk/sources': typeof DeskSourcesRoute
+  '/evidence/$versionId': typeof EvidenceVersionIdRoute
+  '/evidence/compare': typeof EvidenceCompareRoute
   '/newsletter/confirm': typeof NewsletterConfirmRoute
   '/desk/': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -168,6 +182,8 @@ export interface FileRoutesByTo {
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
   '/desk/sources': typeof DeskSourcesRoute
+  '/evidence/$versionId': typeof EvidenceVersionIdRoute
+  '/evidence/compare': typeof EvidenceCompareRoute
   '/newsletter/confirm': typeof NewsletterConfirmRoute
   '/desk': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -191,6 +207,8 @@ export interface FileRoutesById {
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
   '/desk/sources': typeof DeskSourcesRoute
+  '/evidence/$versionId': typeof EvidenceVersionIdRoute
+  '/evidence/compare': typeof EvidenceCompareRoute
   '/newsletter/confirm': typeof NewsletterConfirmRoute
   '/desk/': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -215,6 +233,8 @@ export interface FileRouteTypes {
     | '/desk/queue'
     | '/desk/scan'
     | '/desk/sources'
+    | '/evidence/$versionId'
+    | '/evidence/compare'
     | '/newsletter/confirm'
     | '/desk/'
     | '/api/auth/$'
@@ -236,6 +256,8 @@ export interface FileRouteTypes {
     | '/desk/queue'
     | '/desk/scan'
     | '/desk/sources'
+    | '/evidence/$versionId'
+    | '/evidence/compare'
     | '/newsletter/confirm'
     | '/desk'
     | '/api/auth/$'
@@ -258,6 +280,8 @@ export interface FileRouteTypes {
     | '/desk/queue'
     | '/desk/scan'
     | '/desk/sources'
+    | '/evidence/$versionId'
+    | '/evidence/compare'
     | '/newsletter/confirm'
     | '/desk/'
     | '/api/auth/$'
@@ -276,6 +300,8 @@ export interface RootRouteChildren {
   HowWeReportRoute: typeof HowWeReportRoute
   LoginRoute: typeof LoginRoute
   ArticlesSlugRoute: typeof ArticlesSlugRoute
+  EvidenceVersionIdRoute: typeof EvidenceVersionIdRoute
+  EvidenceCompareRoute: typeof EvidenceCompareRoute
   NewsletterConfirmRoute: typeof NewsletterConfirmRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCronMonitorsRoute: typeof ApiCronMonitorsRoute
@@ -395,6 +421,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskSourcesRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/evidence/$versionId': {
+      id: '/evidence/$versionId'
+      path: '/evidence/$versionId'
+      fullPath: '/evidence/$versionId'
+      preLoaderRoute: typeof EvidenceVersionIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/evidence/compare': {
+      id: '/evidence/compare'
+      path: '/evidence/compare'
+      fullPath: '/evidence/compare'
+      preLoaderRoute: typeof EvidenceCompareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/newsletter/confirm': {
       id: '/newsletter/confirm'
       path: '/newsletter/confirm'
@@ -459,6 +499,8 @@ const rootRouteChildren: RootRouteChildren = {
   HowWeReportRoute: HowWeReportRoute,
   LoginRoute: LoginRoute,
   ArticlesSlugRoute: ArticlesSlugRoute,
+  EvidenceVersionIdRoute: EvidenceVersionIdRoute,
+  EvidenceCompareRoute: EvidenceCompareRoute,
   NewsletterConfirmRoute: NewsletterConfirmRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCronMonitorsRoute: ApiCronMonitorsRoute,

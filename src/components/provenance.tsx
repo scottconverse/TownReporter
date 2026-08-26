@@ -1,16 +1,27 @@
+import { Link } from "@tanstack/react-router";
 import { formatDateTime, formatShortDate } from "@/lib/paper";
-import type { ProvenanceItem } from "@/lib/news/report";
+import type { ProvenanceItem, StoryFinding } from "@/lib/news/report";
 
 export function ProvenanceBlock({
   items,
-  found,
+  findings,
   form,
 }: {
   items: ProvenanceItem[];
-  found?: string | null;
+  findings?: StoryFinding[] | null;
   form?: string | null;
 }) {
-  if (!items.length && !found) return null;
+  const urls = new Set(items.map((p) => p.url));
+  const versions = new Set(
+    items.map((p) => p.version_id).filter((id): id is number => id != null),
+  );
+  const publicFindings = (findings ?? []).filter((f) => {
+    if (!f.text.trim()) return false;
+    if (f.source_urls.some((u) => urls.has(u))) return true;
+    if (f.artifact_version_ids.some((id) => versions.has(id))) return true;
+    return false;
+  });
+  if (!items.length && !publicFindings.length) return null;
   return (
     <section className="enter-rise mt-10 max-w-2xl border-t border-rule pt-4">
       {form && form !== "reported" ? (
@@ -59,26 +70,57 @@ export function ProvenanceBlock({
                     ) : null}
                   </p>
                 )}
-                {item.version_id != null && !item.disappeared ? (
-                  <p className="mt-1 text-muted">Captured version v{item.version_id}</p>
-                ) : null}
-                {(item.version_count ?? 0) > 1 ? (
-                  <p className="mt-1 text-ink-2">
-                    Compare versions — TownReporter captured {item.version_count} versions
-                    of this record.
-                  </p>
-                ) : null}
+                <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                  {item.version_id != null ? (
+                    <Link
+                      to="/evidence/$versionId"
+                      params={{ versionId: String(item.version_id) }}
+                      className="text-rust transition-[color] duration-150 ease-out hover:text-rust-2"
+                    >
+                      View captured version
+                    </Link>
+                  ) : null}
+                  {(item.version_count ?? 0) > 1 ? (
+                    <Link
+                      to="/evidence/compare"
+                      search={{ url: item.url }}
+                      className="text-rust transition-[color] duration-150 ease-out hover:text-rust-2"
+                    >
+                      Compare versions
+                    </Link>
+                  ) : null}
+                </p>
               </li>
             ))}
           </ul>
         </>
       )}
-      {found?.trim() ? (
+      {publicFindings.length > 0 ? (
         <div className="mt-6 border border-ink bg-paper-2 p-4">
           <h2 className="text-[11px] tracking-[0.16em] text-rust uppercase">
             What TownReporter found
           </h2>
-          <p className="mt-2 whitespace-pre-wrap text-ink-2">{found.trim()}</p>
+          <ul className="mt-2 space-y-3">
+            {publicFindings.map((f) => (
+              <li key={f.text} className="text-ink-2">
+                <p className="whitespace-pre-wrap">{f.text}</p>
+                {f.source_urls[0] ? (
+                  <p className="mt-1 break-all text-sm text-muted">{f.source_urls[0]}</p>
+                ) : null}
+                {f.artifact_version_ids[0] != null ? (
+                  <p className="mt-1 text-sm">
+                    <Link
+                      to="/evidence/$versionId"
+                      params={{ versionId: String(f.artifact_version_ids[0]) }}
+                      className="text-rust transition-[color] duration-150 ease-out hover:text-rust-2"
+                    >
+                      Captured record
+                    </Link>
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
       <p className="mt-3 text-sm text-muted">

@@ -1,6 +1,6 @@
 {
   "name": "app-builder-workspace",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -15,7 +15,7 @@
     "preview": "node scripts/with-app-env.mjs vite preview",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts src/lib/news/fetch-url.test.ts src/lib/news/ingest.test.ts src/lib/news/extract.test.ts src/lib/news/search-web.test.ts src/lib/news/investigate.test.ts src/lib/news/fetch-outcome.test.ts src/lib/news/entity-resolve.test.ts src/lib/news/investigate.loop.test.ts src/lib/news/investigate.forensics.test.ts src/lib/news/investigate.nongate.test.ts src/lib/news/ocr.test.ts src/lib/news/ai.test.ts src/lib/news/report.test.ts",
+    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts src/lib/news/fetch-url.test.ts src/lib/news/ingest.test.ts src/lib/news/extract.test.ts src/lib/news/search-web.test.ts src/lib/news/investigate.test.ts src/lib/news/fetch-outcome.test.ts src/lib/news/entity-resolve.test.ts src/lib/news/investigate.loop.test.ts src/lib/news/investigate.forensics.test.ts src/lib/news/investigate.nongate.test.ts src/lib/news/ocr.test.ts src/lib/news/ai.test.ts src/lib/news/report.test.ts src/lib/news/report.pipeline.test.ts src/lib/news/evidence.public.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

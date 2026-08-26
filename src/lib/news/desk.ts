@@ -573,7 +573,7 @@ export const draftLead = createServerFn({ method: "POST" })
       values (
         ${context.userId}, ${leadId}, ${reported.headline}, ${reported.dek}, ${reported.body},
         ${reported.topic}, ${sourceUrls}, ${notes},
-        ${provenanceJson}, ${reported.form}, ${reported.found_note.slice(0, 1200)}, ${unansweredJson}
+        ${provenanceJson}, ${reported.form}, ${reported.found_note.slice(0, 8000)}, ${unansweredJson}
       )
     `;
     await sql`

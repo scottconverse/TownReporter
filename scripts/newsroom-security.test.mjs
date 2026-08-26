@@ -39,7 +39,7 @@ test("every desk and dark mutation is gated by deskMiddleware", () => {
   assert.match(desk, /assertRate\(context\.userId, "draft"\)/);
   assert.match(desk, /withTransaction/);
   assert.match(dark, /assertRate\(context\.userId, "dark"\)/);
-  assert.match(dark, /audit\(\s*context\.userId,\s*"dark"/);
+  assert.match(dark, /audit\(\s*(?:context\.)?userId,\s*"dark"/);
 });
 
 test("membership rejects a second identity (unauthorized publish path)", () => {

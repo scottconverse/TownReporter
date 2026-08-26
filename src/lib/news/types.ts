@@ -54,6 +54,7 @@ export type ArticleRow = {
   found_note?: string | null;
   unanswered?: string | null;
   provenance?: import("./report").ProvenanceItem[];
+  findings?: import("./report").StoryFinding[];
 };
 
 export type MemoryRow = {

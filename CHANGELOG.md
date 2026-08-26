@@ -1,6 +1,21 @@
 # Changelog
 
+## 0.2.1 — 2026-08-26
+
+Evidence hardening on the path from capture → reporting → story → proof. Dark Desk engine unchanged.
+
+- Paragraph collapse requires near-equivalence. A richer paragraph with new numbers, names, dates, quotes or consequences is kept.
+- Rewrite detection is near-verbatim n-gram reuse of the announcing source, not bag-of-words overlap with the evidence. Grounded reporting is not auto-downgraded to a brief.
+- Reported stories run four research lanes before writing: context/precedent, stakeholders/impact, alternative/contradiction, gap filling. Briefs skip extra lanes.
+- The writer is fed retrieved evidence chunks (cost, dates, amendments, contradictions), not only document prefixes. Context limits belong in retrieval.
+- Provenance merges field-by-field. Capture timestamps/version IDs win forensically; blank capture rows do not wipe title, organization, date or role.
+- Public captured-version and compare-versions routes. Only records already cited in a published story are visible.
+- “What TownReporter found” is a structured finding. The public module renders only when source URLs or version IDs resolve against published provenance.
+- Worth a Look is open-ended: every open/reopened frontier item is eligible. Known patterns get ranking bonuses. Ranking is not a gate.
+- First signed-in user remains owner. A second identity is not auto-granted editor.
+
 ## 0.2.0 — 2026-08-26
+
 
 The public record is only the beginning. Stories are researched before they are written. Dark Desk opens on things worth examining.
 

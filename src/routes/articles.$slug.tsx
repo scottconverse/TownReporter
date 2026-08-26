@@ -82,7 +82,7 @@ function ArticlePage() {
       </div>
       <ProvenanceBlock
         items={provenance}
-        found={article.found_note}
+        findings={article.findings}
         form={article.form}
       />
       <p className="mt-8 max-w-2xl text-sm text-muted">

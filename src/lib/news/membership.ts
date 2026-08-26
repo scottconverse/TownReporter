@@ -38,10 +38,5 @@ export async function requireEditor(userId: string): Promise<"owner" | "editor">
     `;
     return "owner";
   }
-  await sql`
-    insert into newsroom_members (user_id, role)
-    values (${userId}, 'editor')
-    on conflict (user_id) do nothing
-  `;
-  return "editor";
+  throw new ForbiddenError();
 }

@@ -4,9 +4,11 @@ import type { ArticleRow, CorrectionRow } from "./types";
 import { unpackStoredDraft } from "./coerce-draft";
 import { randomBytes } from "node:crypto";
 import { parseUrlList } from "@/lib/paper";
-import { provenanceFromUrls, type ProvenanceItem } from "./report";
+import { provenanceFromUrls, parseFindings, resolvePublicFindings, type ProvenanceItem, type StoryFinding } from "./report";
 
-function publicArticle(row: ArticleRow): ArticleRow & { provenance: ProvenanceItem[] } {
+function publicArticle(
+  row: ArticleRow,
+): ArticleRow & { provenance: ProvenanceItem[]; findings: StoryFinding[] } {
   const u = unpackStoredDraft({
     headline: row.headline,
     dek: row.dek,
@@ -21,7 +23,8 @@ function publicArticle(row: ArticleRow): ArticleRow & { provenance: ProvenanceIt
     provenance = [];
   }
   if (!provenance.length) provenance = provenanceFromUrls(parseUrlList(row.source_urls));
-  return { ...row, ...u, provenance };
+  const findings = resolvePublicFindings(parseFindings(row.found_note), provenance);
+  return { ...row, ...u, provenance, findings };
 }
 
 export const listPublishedArticles = createServerFn({ method: "GET" }).handler(

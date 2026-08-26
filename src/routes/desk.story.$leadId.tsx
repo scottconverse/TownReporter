@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { DeskShell, Field, InkButton, areaClass, inputClass } from "@/components/desk-chrome";
 import { EmptyState, WorkbenchSkeleton, BusyLine, Notice } from "@/components/states";
 import { draftLead, getLead, publishLead, saveDraft } from "@/lib/news/desk";
+import { parseFindings } from "@/lib/news/report";
 import { parseUrlList } from "@/lib/paper";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
@@ -215,11 +216,18 @@ function StoryPage() {
           Form · {data.draft.form}
         </p>
       )}
-      {data.draft?.found_note ? (
-        <p className="mt-4 max-w-2xl border border-ink bg-paper-2 p-3 text-sm">
-          <span className="tracking-[0.12em] text-muted uppercase">What we found · </span>
-          {data.draft.found_note}
-        </p>
+      {parseFindings(data.draft?.found_note).length > 0 ? (
+        <div className="mt-4 max-w-2xl border border-ink bg-paper-2 p-3 text-sm">
+          <p className="tracking-[0.12em] text-muted uppercase">What we found</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {parseFindings(data.draft?.found_note).map((f) => (
+              <li key={f.text}>
+                {f.text}
+                {f.source_urls[0] ? ` · ${f.source_urls[0]}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
       {unansweredNotes(data.draft?.unanswered).length > 0 ? (
         <div className="mt-4 max-w-2xl border border-rule bg-paper-2 p-3 text-sm">
