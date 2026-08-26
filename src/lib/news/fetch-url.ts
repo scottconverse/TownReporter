@@ -86,7 +86,7 @@ export async function fetchPublicHttpTracked(url: URL, hops = 4): Promise<Tracke
       redirect: "manual",
       headers: {
         "User-Agent":
-          "TownReporter/1.0 (+https://grok.me; civic newspaper source fetch)",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 TownReporter/1.0",
         Accept:
           "text/html,application/xhtml+xml,application/xml,text/plain,application/pdf;q=0.8,*/*;q=0.1",
       },
@@ -209,7 +209,14 @@ export async function fetchSourceText(
   const html = await res.text();
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const titleHint = titleMatch ? stripHtml(titleMatch[1]).slice(0, 140) : url.hostname;
-  const text = stripHtml(html).slice(0, 14000);
+  let text = stripHtml(html).slice(0, 14000);
+  const { needsRenderedFetch, fetchRenderedPage } = await import("./render-fetch.ts");
+  if (needsRenderedFetch(url, text, html)) {
+    const rendered = await fetchRenderedPage(url.toString());
+    if (rendered && rendered.text.length > Math.min(text.length, 400)) {
+      return { text: rendered.text.slice(0, 14000), titleHint: rendered.title || titleHint };
+    }
+  }
   if (text.length < 40) throw new Error("Page had almost no readable text");
   return { text, titleHint };
 }

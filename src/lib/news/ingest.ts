@@ -1,5 +1,6 @@
 import { looksLikeSoft404, type FetchOutcome } from "./fetch-outcome.ts";
 import { assertPublicHttpUrl, fetchPublicHttp, fetchPublicHttpTracked, fetchSourceText } from "./fetch-url.ts";
+import { fetchRenderedPage, needsRenderedFetch } from "./render-fetch.ts";
 
 /** Archive cap. Planner context is sliced at retrieval, never here. */
 export const ARCHIVE_TEXT_CAP = 2_000_000;
@@ -409,16 +410,30 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
       });
     }
     const extras = discoverDocLinks(body, url);
+    let outText = text;
+    let outTitle = title;
+    let method = "html";
+    if (needsRenderedFetch(url, text, body)) {
+      const rendered = await fetchRenderedPage(url.toString());
+      if (rendered && rendered.text.length > Math.min(text.length, 400)) {
+        outText = rendered.text.slice(0, ARCHIVE_TEXT_CAP);
+        outTitle = rendered.title || title;
+        method = "playwright";
+        for (const extra of discoverDocLinks(rendered.html, new URL(rendered.finalUrl))) {
+          if (!extras.includes(extra)) extras.push(extra);
+        }
+      }
+    }
     return empty({
-      ok: text.length >= 40,
+      ok: outText.length >= 40,
       status,
-      outcome: text.length >= 40 ? "fetched" : "parse-failed",
-      text,
-      title,
+      outcome: outText.length >= 40 ? "fetched" : "parse-failed",
+      text: outText,
+      title: outTitle,
       extras,
       contentType: ctype || "text/html",
       redirectChain: tracked.chain,
-      extractionMethod: "html",
+      extractionMethod: method,
       rawBytes: buf.byteLength <= 4_000_000 ? buf : undefined,
     });
   } catch (err) {

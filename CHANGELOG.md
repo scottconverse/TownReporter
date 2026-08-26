@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.5 — 2026-08-26
+
+Playwright render path for JavaScript civic sites. Simple GET remains the default.
+
+- After SSRF checks, HTML that is an app shell (Municode IE9 page, empty `#root`, “enable JavaScript”) is opened in headless Chromium. The captured copy is the rendered text, not the sorry-page.
+- Known JS hosts (Municode, eCode360, Granicus, Legistar, CivicClerk, BoardDocs, CivicPlus, American Legal) always try the browser.
+- PDFs and ordinary static city pages stay on the existing GET. Playwright is skipped when it is missing or still returns a shell.
+- Fetch User-Agent is a current Chrome string plus TownReporter/1.0.
+
 ## 0.2.4 — 2026-08-26
 
 Dark Desk open file puts captured records first. Designer brief checked in. Investigative engine unchanged.
