@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.3.6](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.6)** — 26 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.3.7](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.7)** — 26 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
@@ -74,7 +74,11 @@ Same six moves the paper itself describes at `/how-we-report`:
 
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
-### This release (0.3.6)
+### This release (0.3.7)
+
+- **Redraft does not die on a cookie glitch.** A TanStack sign-in helper threw `Cannot destructure property 'setCookie'` after you clicked Redraft even though you were still signed in. That click can finish now.
+
+Also in 0.3.6: primary documents first, Pull on still-to-pull, claims with URLs.
 
 - **Primary documents first.** Draft with AI searches for the named company’s or agency’s own press release before it rewrites another paper. The Ursa Major plant story should open their `/media/press-release/` page, not stop at the Longmont Leader homepage.
 - **Pull a still-to-pull line.** It searches, opens what it finds, and drops the excerpt into a box under the story that does not print. Redraft reads that box.

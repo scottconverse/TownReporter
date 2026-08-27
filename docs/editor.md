@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.3.6](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.6).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.3.7](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.7).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). This page is the whole newsroom.
 
@@ -260,6 +260,7 @@ How we report, in public: `/how-we-report`.
 | “AI is not available” | No model key | Operator: `XAI_API_KEY` or `LLM_*` ([setup.md](setup.md)) |
 | Scan fetched, filed nothing | Nothing new, or the model declined | Read the summary. Not automatically a bug. |
 | Draft with AI ran, form still empty | The click died; the writing pass may still be finishing | Stay on the page. It fills when the draft lands. Reload only if you left. |
+| Redraft shows a sign-in / setCookie error | Cookie helper threw even though you are signed in | Click Redraft again. Fixed in 0.3.7. |
 | Draft is a rewrite of the Leader | The pass never opened the company page | Pull the still-to-pull line for their press release, then redraft. |
 | Meeting has no transcript | Livestream hasn’t ended, or Playwright missing | Wait for the 6-hour recheck, or operator installs Chromium |
 | Names in a draft are wrong | Auto-captions | Check the packet. Fix the draft. Do not publish the caption. |

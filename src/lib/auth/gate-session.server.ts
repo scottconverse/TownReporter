@@ -4,6 +4,7 @@ import {
   parseSetCookieHeader,
   setRequestCookie,
   setSessionCookie,
+  toCookieOptions,
 } from "better-auth/cookies";
 import { handleOAuthUserInfo } from "better-auth/oauth2";
 import {
@@ -63,15 +64,17 @@ async function emitSessionCookie(
 
   // Primary path: TanStack Start's response cookie store (reaches the browser).
   try {
-    const { setCookie } = await import("@tanstack/react-start/server");
-    setCookie(sessionTokenName, sessionValue, {
-      path: cookieOptions.path ?? "/",
-      httpOnly: cookieOptions.httpOnly ?? true,
-      secure: cookieOptions.secure ?? true,
-      sameSite: (cookieOptions.sameSite as "lax" | "strict" | "none") ?? "lax",
-      maxAge: typeof maxAge === "number" ? maxAge : undefined,
-      domain: cookieOptions.domain,
-    });
+    const mod = await import("@tanstack/react-start/server");
+    if (typeof mod.setCookie === "function") {
+      mod.setCookie(sessionTokenName, sessionValue, {
+        path: cookieOptions.path ?? "/",
+        httpOnly: cookieOptions.httpOnly ?? true,
+        secure: cookieOptions.secure ?? true,
+        sameSite: (cookieOptions.sameSite as "lax" | "strict" | "none") ?? "lax",
+        maxAge: typeof maxAge === "number" ? maxAge : undefined,
+        domain: cookieOptions.domain,
+      });
+    }
   } catch (err) {
     console.error(`${LOG} TanStack setCookie failed`, err);
   }
@@ -106,14 +109,16 @@ async function expireSessionDataCookie(
   const path = cookie.attributes.path ?? "/";
   const secure = cookie.attributes.secure ?? true;
   try {
-    const { setCookie } = await import("@tanstack/react-start/server");
-    setCookie(cookie.name, "", {
-      path,
-      httpOnly: true,
-      secure,
-      sameSite: "lax",
-      maxAge: 0,
-    });
+    const mod = await import("@tanstack/react-start/server");
+    if (typeof mod.setCookie === "function") {
+      mod.setCookie(cookie.name, "", {
+        path,
+        httpOnly: true,
+        secure,
+        sameSite: "lax",
+        maxAge: 0,
+      });
+    }
   } catch (err) {
     console.error(`${LOG} TanStack setCookie (expire session_data) failed`, err);
   }
@@ -274,6 +279,50 @@ export function gateIdentitySessions() {
               console.error(`${LOG} gate identity session hook threw`, err);
               return;
             }
+          }),
+        },
+      ],
+    },
+  } satisfies BetterAuthPlugin;
+}
+
+/**
+ * Better Auth's stock tanstackStartCookies() does:
+ *   const { setCookie } = await import("@tanstack/react-start/server")
+ * outside a try. When that import is undefined (Vite SSR / no StartEvent),
+ * getSession throws and Redraft dies even though the editor is signed in.
+ * Same job, never throws.
+ */
+export function safeTanstackStartCookies() {
+  return {
+    id: "tanstack-start-cookies",
+    hooks: {
+      after: [
+        {
+          matcher: () => true,
+          handler: createAuthMiddleware(async (ctx) => {
+            const returned = ctx.context.responseHeaders;
+            if ("_flag" in ctx && ctx._flag === "router") return;
+            if (!(returned instanceof Headers)) return;
+            const header = returned.get("set-cookie");
+            if (!header) return;
+            let setCookie: ((name: string, value: string, opts?: object) => void) | undefined;
+            try {
+              const mod = await import("@tanstack/react-start/server");
+              if (typeof mod.setCookie === "function") setCookie = mod.setCookie;
+            } catch {
+              return;
+            }
+            if (!setCookie) return;
+            const parsed = parseSetCookieHeader(header);
+            parsed.forEach((value, key) => {
+              if (!key) return;
+              try {
+                setCookie(key, value.value, toCookieOptions(value));
+              } catch {
+                /* cookie still sits on responseHeaders */
+              }
+            });
           }),
         },
       ],

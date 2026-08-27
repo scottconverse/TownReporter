@@ -1,6 +1,6 @@
 # Dark Desk — editor UI brief (for design)
 
-As of **0.3.6** the investigative engine is unchanged from 0.3.0. This is the signed-in investigative desk at `/desk/dark`. It is **not** the public paper and **not** the reporting queue.
+As of **0.3.7** the investigative engine is unchanged from 0.3.0. This is the signed-in investigative desk at `/desk/dark`. It is **not** the public paper and **not** the reporting queue.
 
 A designer is coming in because the current page is still not a usable newsroom surface. This note is the contract. Do not treat it as finished UI.
 

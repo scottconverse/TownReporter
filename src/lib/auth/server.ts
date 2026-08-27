@@ -31,13 +31,12 @@
  */
 import { betterAuth } from "better-auth";
 import { bearer, genericOAuth } from "better-auth/plugins";
-import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { randomBytes } from "node:crypto";
 import { Pool } from "pg";
 import { ensureDbReady, getPglite } from "../db";
 import { emailAndPasswordEnabled } from "./email-password";
-import { GATE_PROVIDER_ID, gateIdentitySessions } from "./gate-session.server";
+import { GATE_PROVIDER_ID, gateIdentitySessions, safeTanstackStartCookies } from "./gate-session.server";
 import { GROK_PROVIDERS } from "./providers";
 import { pgliteDialect } from "./pglite-dialect";
 import {
@@ -248,7 +247,10 @@ export const auth = betterAuth({
 
     // Bridges Better Auth's Set-Cookie into TanStack Start responses. MUST be
     // last so it runs after every other plugin's hooks.
-    tanstackStartCookies(),
+    // Bridges Better Auth's Set-Cookie into TanStack Start responses. MUST be
+    // last so it runs after every other plugin's hooks. Safe wrapper: the stock
+    // plugin throws when setCookie is missing and kills Redraft.
+    safeTanstackStartCookies(),
   ],
 });
 

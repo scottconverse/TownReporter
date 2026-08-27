@@ -347,6 +347,9 @@ export function editorDraftError(raw: string | null | undefined): string | null 
   if (/unreadable/i.test(t)) {
     return "The draft came back in a form the desk could not read. Click Draft with AI again.";
   }
+  if (/setCookie|Cannot destructure/i.test(t)) {
+    return "Sign-in hiccup on that click — you are still signed in. Click Redraft again.";
+  }
   if (/lead not found/i.test(t)) return "That lead is not on this desk.";
   if (/restore this lead/i.test(t)) return t;
   return plainEditorText(t);

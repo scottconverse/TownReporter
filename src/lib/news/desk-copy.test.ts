@@ -270,6 +270,11 @@ describe("Worth a Look presentation", () => {
     assert.doesNotMatch(msg!, /scan/i);
     const gateway = editorDraftError("504");
     assert.match(gateway!, /Draft with AI again/i);
+    const cookie = editorDraftError(
+      "Cannot destructure property 'setCookie' of '(intermediate value)' as it is undefined.",
+    );
+    assert.match(cookie!, /Sign-in hiccup/i);
+    assert.doesNotMatch(cookie!, /setCookie/);
   });
 
   it("classifies Dark Desk stops without a new column", () => {
