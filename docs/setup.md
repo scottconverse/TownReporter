@@ -44,7 +44,7 @@ Then:
 npm run dev
 ```
 
-Open `http://localhost:8080/login`. Create an editor account (email + password). That account is stored in **your** database. The first account becomes the newsroom **owner**.
+Open `http://localhost:8080/login`. Create an editor account (email + password). That account is stored in **your** database. With no `NEWSROOM_SETUP_TOKEN`, the first account becomes the newsroom **owner**. On a public host, set `NEWSROOM_SETUP_TOKEN` and paste it on Create the desk — signup alone does not own the desk.
 
 - Paper: `http://localhost:8080/`
 - Desk: `http://localhost:8080/desk`

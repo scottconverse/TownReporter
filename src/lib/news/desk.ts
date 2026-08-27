@@ -28,6 +28,8 @@ import {
 } from "./notes";
 import { provenanceFromUrls } from "./findings";
 import { composeZeroLeadSummary, kindFromSourceUrl } from "./desk-copy";
+import { enqueueJob, findOpenJob, kickJobs, latestJob, type DeskJob } from "./jobs";
+import { DEFAULT_NEWSROOM_ID } from "./membership";
 import type {
   DraftRow,
   LeadRow,
@@ -35,6 +37,10 @@ import type {
   ScanRow,
   SourceRow,
 } from "./types";
+
+function owned(context: { newsroomId?: number }) {
+  return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
+}
 
 async function ensureDraftMemoColumn() {
   const sql = await getSql();
@@ -72,7 +78,7 @@ export const listSources = createServerFn({ method: "GET" })
     return sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
       from sources
-      where user_id = ${context.userId}
+      where newsroom_id = ${owned(context)}
       order by
         case status when 'proposed' then 0 when 'accepted' then 1 else 2 end,
         id asc
@@ -225,7 +231,7 @@ export const setSourceStatus = createServerFn({ method: "POST" })
     const sql = await getSql();
     await sql`
       update sources set status = ${data.status}
-      where id = ${data.id} and user_id = ${context.userId}
+      where id = ${data.id} and newsroom_id = ${owned(context)}
     `;
     return { ok: true as const };
   });
@@ -239,7 +245,7 @@ export const listLeads = createServerFn({ method: "GET" })
              l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug
       from leads l
       left join articles a on a.lead_id = l.id and a.status = 'published'
-      where l.user_id = ${context.userId}
+      where l.newsroom_id = ${owned(context)}
       order by l.created_at desc
       limit 80
     `;
@@ -289,23 +295,24 @@ export const getLead = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .validator((id: number) => id)
   .handler(async ({ context, data: id }) => {
+    kickJobs();
     const sql = await getSql();
     await ensureDraftMemoColumn();
     const leads = await sql<LeadRow>`
       select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at, investigation_id, notes_json
-      from leads where id = ${id} and user_id = ${context.userId} limit 1
+      from leads where id = ${id} and newsroom_id = ${owned(context)} limit 1
     `;
     const lead = leads[0];
     if (!lead) return null;
     const drafts = await sql<DraftRow>`
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
              provenance_json, form, found_note, unanswered, research_json
-      from drafts where lead_id = ${id} and user_id = ${context.userId}
+      from drafts where lead_id = ${id} and newsroom_id = ${owned(context)}
       order by updated_at desc limit 1
     `;
     const live = await sql<{ slug: string }>`
       select slug from articles
-      where lead_id = ${id} and user_id = ${context.userId} and status = 'published'
+      where lead_id = ${id} and newsroom_id = ${owned(context)} and status = 'published'
       limit 1
     `;
     const draft = drafts[0] ? unpackStoredDraft(drafts[0]) : null;
@@ -324,7 +331,7 @@ export const getLead = createServerFn({ method: "GET" })
         notes = { ...notes, todo: seeded };
         const json = JSON.stringify(notes).slice(0, 8000);
         await sql`
-          update leads set notes_json = ${json} where id = ${id} and user_id = ${context.userId}
+          update leads set notes_json = ${json} where id = ${id} and newsroom_id = ${owned(context)}
         `;
         lead.notes_json = json;
       }
@@ -333,6 +340,7 @@ export const getLead = createServerFn({ method: "GET" })
       lead,
       draft,
       articleSlug: live[0]?.slug ?? null,
+      job: await latestJob({ newsroomId: owned(context), kind: "draft", subjectId: id }),
     };
   });
 
@@ -343,7 +351,7 @@ export const listMemory = createServerFn({ method: "GET" })
     return sql<MemoryRow>`
       select id, entity, last_angle, updated_at
       from beat_memory
-      where user_id = ${context.userId}
+      where newsroom_id = ${owned(context)}
       order by updated_at desc
       limit 80
     `;
@@ -359,11 +367,12 @@ export const grokStatus = createServerFn({ method: "GET" })
 export const listScans = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
+    kickJobs();
     const sql = await getSql();
     return sql<ScanRow>`
       select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed, summary, error
       from scan_runs
-      where user_id = ${context.userId}
+      where newsroom_id = ${owned(context)}
       order by started_at desc
       limit 12
     `;
@@ -374,16 +383,48 @@ export const runScan = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     await ensureSeeds(context.userId);
     await assertRate(context.userId, "scan");
+    const newsroomId = owned(context);
+    const existing = await findOpenJob({ newsroomId, kind: "scan" });
+    if (existing) {
+      kickJobs();
+      return { ok: true as const, pending: true as const, jobId: existing.id };
+    }
     const sql = await getSql();
     const runRows = await sql<{ id: number }>`
-      insert into scan_runs (user_id) values (${context.userId}) returning id
+      insert into scan_runs (user_id, newsroom_id) values (${context.userId}, ${newsroomId}) returning id
     `;
     const runId = runRows[0]!.id;
+    const job = await enqueueJob({
+      userId: context.userId,
+      newsroomId,
+      kind: "scan",
+      subjectId: runId,
+    });
+    return { ok: true as const, pending: true as const, jobId: job.id };
+  });
+
+export async function performScanWork(job: DeskJob) {
+  const context = { userId: job.user_id, newsroomId: job.newsroom_id };
+  await ensureSeeds(context.userId);
+  const sql = await getSql();
+  let runId = job.subject_id;
+  if (runId > 0) {
+    const existing = await sql<{ id: number }>`
+      select id from scan_runs where id = ${runId} and newsroom_id = ${owned(context)} limit 1
+    `;
+    if (!existing[0]) runId = 0;
+  }
+  if (runId <= 0) {
+    const runRows = await sql<{ id: number }>`
+      insert into scan_runs (user_id, newsroom_id) values (${context.userId}, ${owned(context)}) returning id
+    `;
+    runId = runRows[0]!.id;
+  }
 
     const sources = await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
       from sources
-      where user_id = ${context.userId} and status = 'accepted'
+      where newsroom_id = ${owned(context)} and status = 'accepted'
       order by case tier when 'A' then 0 when 'B' then 1 else 2 end, id asc
     `;
 
@@ -396,7 +437,7 @@ export const runScan = createServerFn({ method: "POST" })
     const prevRuns = await sql<Pick<ScanRow, "leads_created" | "sources_fetched">>`
       select leads_created, sources_fetched
       from scan_runs
-      where user_id = ${context.userId} and id <> ${runId}
+      where newsroom_id = ${owned(context)} and id <> ${runId}
       order by started_at desc
       limit 1
     `;
@@ -423,7 +464,7 @@ export const runScan = createServerFn({ method: "POST" })
         await sql`
           update sources
           set last_fetched_at = now(), last_error = null
-          where id = ${src.id} and user_id = ${context.userId}
+          where id = ${src.id} and newsroom_id = ${owned(context)}
         `;
         pendingHashes.push({ id: src.id, hash, text, changed });
         fetchedCount += 1;
@@ -437,7 +478,7 @@ export const runScan = createServerFn({ method: "POST" })
         const msg = err instanceof Error ? err.message : "fetch failed";
         await sql`
           update sources set last_error = ${msg}, last_fetched_at = now()
-          where id = ${src.id} and user_id = ${context.userId}
+          where id = ${src.id} and newsroom_id = ${owned(context)}
         `;
         if (src.last_hash && /404|410|not found|had almost no/i.test(msg)) {
           await sql.query(
@@ -457,7 +498,7 @@ export const runScan = createServerFn({ method: "POST" })
 
     const memory = await sql<MemoryRow>`
       select id, entity, last_angle, updated_at from beat_memory
-      where user_id = ${context.userId} order by updated_at desc limit 24
+      where newsroom_id = ${owned(context)} order by updated_at desc limit 24
     `;
 
     const ranked = [...fetched].sort((a, b) => Number(b.changed) - Number(a.changed));
@@ -512,9 +553,9 @@ File civic leads when the text contains a meeting, vote, budget figure, contract
       await sql`
         update scan_runs
         set finished_at = now(), sources_fetched = ${fetchedCount}, error = ${ai.error}
-        where id = ${runId} and user_id = ${context.userId}
+        where id = ${runId} and newsroom_id = ${owned(context)}
       `;
-      return { ok: false as const, error: ai.error, runId, fetchedCount };
+      throw new Error(ai.error);
     }
 
     const raw = parseJsonBlock<unknown>(ai.text);
@@ -523,16 +564,16 @@ File civic leads when the text contains a meeting, vote, budget figure, contract
       await sql`
         update scan_runs
         set finished_at = now(), sources_fetched = ${fetchedCount}, error = ${data.parseError}
-        where id = ${runId} and user_id = ${context.userId}
+        where id = ${runId} and newsroom_id = ${owned(context)}
       `;
-      return { ok: false as const, error: data.parseError ?? "Writing pass returned no usable JSON.", runId, fetchedCount };
+      throw new Error(data.parseError ?? "Writing pass returned no usable JSON.");
     }
 
     for (const p of pendingHashes) {
       await sql`
         update sources
         set last_hash = ${p.hash}
-        where id = ${p.id} and user_id = ${context.userId}
+        where id = ${p.id} and newsroom_id = ${owned(context)}
       `;
       if (p.changed) {
         await sql`
@@ -593,133 +634,120 @@ File civic leads when the text contains a meeting, vote, budget figure, contract
           leads_created = ${leadsCreated},
           sources_proposed = ${proposed},
           summary = ${summary}
-      where id = ${runId} and user_id = ${context.userId}
+      where id = ${runId} and newsroom_id = ${owned(context)}
     `;
 
     await audit(context.userId, "scan", `run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`);
+}
 
-    return {
-      ok: true as const,
-      runId,
-      fetchedCount,
-      leadsCreated,
-      proposed,
-      summary,
-    };
+export async function performDraftWork(job: DeskJob) {
+  const context = { userId: job.user_id, newsroomId: job.newsroom_id };
+  const leadId = job.subject_id;
+  const sql = await getSql();
+  const leads = await sql<LeadRow>`
+    select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at, notes_json
+    from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
+  `;
+  const lead = leads[0];
+  if (!lead) throw new Error("Lead not found");
+  if (lead.status === "killed") throw new Error("Restore this lead before drafting.");
+  await ensureDraftMemoColumn();
+
+  let urls: string[] = [];
+  try {
+    urls = sanitizePublicUrls(JSON.parse(lead.source_urls));
+  } catch {
+    urls = [];
+  }
+
+  const memory = await sql<MemoryRow>`
+    select entity, last_angle from beat_memory
+    where newsroom_id = ${owned(context)} order by updated_at desc limit 16
+  `;
+
+  const prevNotes = parseNotes(lead.notes_json);
+  const moreUrls = prevNotes.opened.map((o) => o.url);
+  const reported = await reportAndDraft({
+    userId: context.userId,
+    lead,
+    urls: [...urls, ...moreUrls],
+    memory,
+    extraEvidence: prevNotes.scratch,
+    extraUrls: moreUrls,
   });
+  if ("error" in reported) throw new Error(reported.error);
+
+  const sourceUrls = JSON.stringify(reported.source_urls.length ? reported.source_urls : urls);
+  const notes = reported.integrity_notes;
+  const provenanceJson = JSON.stringify(reported.provenance).slice(0, 8000);
+  const unansweredJson = JSON.stringify(reported.unanswered).slice(0, 2000);
+  const researchJson = JSON.stringify(reported.research_memo ?? {}).slice(0, 8000);
+  const yours = keepHumanTodos(prevNotes);
+  const machine = machineTodosFrom([
+    reported.research_memo?.follow,
+    ...reported.unanswered,
+    ...(reported.research_memo?.questions ?? []),
+    ...(reported.research_memo?.unknowns ?? []),
+  ]);
+  const fromClaims = reported.claims.map((c) => ({
+    t: c.fact.slice(0, 800),
+    src: c.url,
+  }));
+  const fromFindings = reported.findings.slice(0, 12).map((f) => ({
+    t: f.text.slice(0, 800),
+    src: f.source_urls?.[0],
+  }));
+  const nextNotes = {
+    news: reported.research_memo?.news ?? "",
+    why: reported.research_memo?.why_it_matters ?? "",
+    angle: reported.research_memo?.angle ?? "",
+    todo: [...yours, ...machine].slice(0, 24),
+    found: [...fromClaims, ...fromFindings].slice(0, 16),
+    verify: reported.integrity_notes ? [reported.integrity_notes] : [],
+    opened: reported.research_memo?.captured ?? [],
+    scratch: prevNotes.scratch,
+  };
+  const notesJson = JSON.stringify(nextNotes).slice(0, 16000);
+
+  await sql`
+    insert into drafts (
+      user_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
+      provenance_json, form, found_note, unanswered, research_json
+    )
+    values (
+      ${context.userId}, ${leadId}, ${reported.headline}, ${reported.dek}, ${reported.body},
+      ${reported.topic}, ${sourceUrls}, ${notes},
+      ${provenanceJson}, ${reported.form}, ${reported.found_note.slice(0, 8000)}, ${unansweredJson},
+      ${researchJson}
+    )
+  `;
+  await sql`
+    update leads set status = 'drafted', notes_json = ${notesJson}
+    where id = ${leadId} and newsroom_id = ${owned(context)}
+  `;
+  await audit(context.userId, "draft", String(leadId));
+}
 
 export const draftLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((leadId: number) => leadId)
   .handler(async ({ context, data: leadId }) => {
-    try {
     const sql = await getSql();
-    const leads = await sql<LeadRow>`
-      select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at, notes_json
-      from leads where id = ${leadId} and user_id = ${context.userId} limit 1
+    const leads = await sql<{ id: number; status: string }>`
+      select id, status from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
     `;
-    const lead = leads[0];
-    if (!lead) return { ok: false as const, error: "Lead not found" };
-    if (lead.status === "killed") {
+    if (!leads[0]) return { ok: false as const, error: "Lead not found" };
+    if (leads[0].status === "killed") {
       return { ok: false as const, error: "Restore this lead before drafting." };
     }
     await assertRate(context.userId, "draft");
-    await ensureDraftMemoColumn();
-
-    let urls: string[] = [];
-    try {
-      urls = sanitizePublicUrls(JSON.parse(lead.source_urls));
-    } catch {
-      urls = [];
-    }
-
-    const memory = await sql<MemoryRow>`
-      select entity, last_angle from beat_memory
-      where user_id = ${context.userId} order by updated_at desc limit 16
-    `;
-
-    const prevNotes = parseNotes(lead.notes_json);
-    const moreUrls = prevNotes.opened.map((o) => o.url);
-    const reported = await reportAndDraft({
+    const job = await enqueueJob({
       userId: context.userId,
-      lead,
-      urls: [...urls, ...moreUrls],
-      memory,
-      extraEvidence: prevNotes.scratch,
-      extraUrls: moreUrls,
+      newsroomId: owned(context),
+      kind: "draft",
+      subjectId: leadId,
     });
-    if ("error" in reported) return { ok: false as const, error: reported.error };
-
-    const sourceUrls = JSON.stringify(reported.source_urls.length ? reported.source_urls : urls);
-    const notes = reported.integrity_notes;
-    const provenanceJson = JSON.stringify(reported.provenance).slice(0, 8000);
-    const unansweredJson = JSON.stringify(reported.unanswered).slice(0, 2000);
-    const researchJson = JSON.stringify(reported.research_memo ?? {}).slice(0, 8000);
-    const yours = keepHumanTodos(prevNotes);
-    const machine = machineTodosFrom([
-      reported.research_memo?.follow,
-      ...reported.unanswered,
-      ...(reported.research_memo?.questions ?? []),
-      ...(reported.research_memo?.unknowns ?? []),
-    ]);
-    const fromClaims = reported.claims.map((c) => ({
-      t: c.fact.slice(0, 800),
-      src: c.url,
-    }));
-    const fromFindings = reported.findings.slice(0, 12).map((f) => ({
-      t: f.text.slice(0, 800),
-      src: f.source_urls?.[0],
-    }));
-    const nextNotes = {
-      news: reported.research_memo?.news ?? "",
-      why: reported.research_memo?.why_it_matters ?? "",
-      angle: reported.research_memo?.angle ?? "",
-      todo: [...yours, ...machine].slice(0, 24),
-      found: [...fromClaims, ...fromFindings].slice(0, 16),
-      verify: reported.integrity_notes ? [reported.integrity_notes] : [],
-      opened: reported.research_memo?.captured ?? [],
-      scratch: prevNotes.scratch,
-    };
-    const notesJson = JSON.stringify(nextNotes).slice(0, 16000);
-
-    await sql`
-      insert into drafts (
-        user_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
-        provenance_json, form, found_note, unanswered, research_json
-      )
-      values (
-        ${context.userId}, ${leadId}, ${reported.headline}, ${reported.dek}, ${reported.body},
-        ${reported.topic}, ${sourceUrls}, ${notes},
-        ${provenanceJson}, ${reported.form}, ${reported.found_note.slice(0, 8000)}, ${unansweredJson},
-        ${researchJson}
-      )
-    `;
-    await sql`
-      update leads set status = 'drafted', notes_json = ${notesJson}
-      where id = ${leadId} and user_id = ${context.userId}
-    `;
-    await audit(context.userId, "draft", String(leadId));
-
-    const packed = unpackStoredDraft({
-      headline: reported.headline,
-      dek: reported.dek,
-      body: stripReporterNotebook(reported.body),
-      topic: reported.topic,
-      source_urls: sourceUrls,
-      integrity_notes: notes,
-      provenance_json: provenanceJson,
-      form: reported.form,
-      found_note: reported.found_note.slice(0, 8000),
-      unanswered: unansweredJson,
-      research_json: researchJson,
-      updated_at: new Date().toISOString(),
-    });
-    return { ok: true as const, draft: packed };
-    } catch (err) {
-      const raw = err instanceof Error ? err.message : "Draft failed";
-      console.error("[desk] draftLead failed", err);
-      return { ok: false as const, error: raw };
-    }
+    return { ok: true as const, pending: true as const, jobId: job.id };
   });
 
 export const saveReportingNotes = createServerFn({ method: "POST" })
@@ -729,7 +757,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
     const sql = await getSql();
     await ensureDraftMemoColumn();
     const rows = await sql<{ notes_json: string | null }>`
-      select notes_json from leads where id = ${data.leadId} and user_id = ${context.userId} limit 1
+      select notes_json from leads where id = ${data.leadId} and newsroom_id = ${owned(context)} limit 1
     `;
     if (!rows[0]) return { ok: false as const, error: "Lead not found" };
     const notes = applyTodoPatch(parseNotes(rows[0].notes_json), {
@@ -740,7 +768,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
     });
     const json = JSON.stringify(notes).slice(0, 16000);
     await sql`
-      update leads set notes_json = ${json} where id = ${data.leadId} and user_id = ${context.userId}
+      update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
     `;
     return { ok: true as const, notes };
   });
@@ -755,7 +783,7 @@ export const pullTodo = createServerFn({ method: "POST" })
       const sql = await getSql();
       const rows = await sql<{ notes_json: string | null; headline: string }>`
         select notes_json, headline from leads
-        where id = ${data.leadId} and user_id = ${context.userId} limit 1
+        where id = ${data.leadId} and newsroom_id = ${owned(context)} limit 1
       `;
       if (!rows[0]) return { ok: false as const, error: "Lead not found" };
       const query = data.query.trim().slice(0, 240);
@@ -800,7 +828,7 @@ export const pullTodo = createServerFn({ method: "POST" })
       notes = { ...notes, opened };
       const json = JSON.stringify(notes).slice(0, 16000);
       await sql`
-        update leads set notes_json = ${json} where id = ${data.leadId} and user_id = ${context.userId}
+        update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
       `;
       await audit(context.userId, "pull", query.slice(0, 200));
       return { ok: true as const, notes, dump, found: docs.length };
@@ -824,7 +852,7 @@ export const saveDraft = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const existing = await sql<{ id: number }>`
-      select id from drafts where lead_id = ${data.leadId} and user_id = ${context.userId}
+      select id from drafts where lead_id = ${data.leadId} and newsroom_id = ${owned(context)}
       order by updated_at desc limit 1
     `;
     const body = stripReporterNotebook(data.body);
@@ -833,7 +861,7 @@ export const saveDraft = createServerFn({ method: "POST" })
         update drafts
         set headline = ${data.headline}, dek = ${data.dek}, body = ${body},
             topic = ${data.topic}, updated_at = now()
-        where id = ${existing[0].id} and user_id = ${context.userId}
+        where id = ${existing[0].id} and newsroom_id = ${owned(context)}
       `;
     } else {
       await sql`
@@ -851,7 +879,7 @@ export const setLeadStatus = createServerFn({ method: "POST" })
     const sql = await getSql();
     await sql`
       update leads set status = ${data.status}
-      where id = ${data.id} and user_id = ${context.userId}
+      where id = ${data.id} and newsroom_id = ${owned(context)}
     `;
     return { ok: true as const };
   });
@@ -863,7 +891,7 @@ export const publishLead = createServerFn({ method: "POST" })
     const already = await getSql().then((sql) =>
       sql<{ slug: string }>`
         select slug from articles
-        where lead_id = ${leadId} and user_id = ${context.userId} and status = 'published'
+        where lead_id = ${leadId} and newsroom_id = ${owned(context)} and status = 'published'
         limit 1
       `,
     );
@@ -872,7 +900,7 @@ export const publishLead = createServerFn({ method: "POST" })
     const leads = await getSql().then((sql) =>
       sql<LeadRow>`
         select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at
-        from leads where id = ${leadId} and user_id = ${context.userId} limit 1
+        from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
       `,
     );
     const lead = leads[0];
@@ -888,7 +916,7 @@ export const publishLead = createServerFn({ method: "POST" })
       sql<DraftRow>`
         select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
                provenance_json, form, found_note, unanswered
-        from drafts where lead_id = ${leadId} and user_id = ${context.userId}
+        from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
         order by updated_at desc limit 1
       `,
     );
@@ -918,7 +946,7 @@ export const publishLead = createServerFn({ method: "POST" })
         )
       `;
       await sql`
-        update leads set status = 'published' where id = ${leadId} and user_id = ${context.userId}
+        update leads set status = 'published' where id = ${leadId} and newsroom_id = ${owned(context)}
       `;
       const entities = [draft.topic, ...draft.headline.split(/[:,—-]/).slice(0, 2)];
       for (const entity of entities.map((e) => e.trim()).filter((e) => e.length > 2)) {
@@ -988,7 +1016,7 @@ export const listPublishedDesk = createServerFn({ method: "GET" })
         l.newsworthiness as lead_score
       from articles a
       left join leads l on l.id = a.lead_id
-      where a.user_id = ${context.userId} and a.status = ${"published"}
+      where a.newsroom_id = ${owned(context)} and a.status = ${"published"}
       order by a.published_at desc nulls last, a.id desc
       limit 40
     `;
@@ -996,7 +1024,7 @@ export const listPublishedDesk = createServerFn({ method: "GET" })
     const corrs = await sql<{ article_id: number | null; body: string; created_at: string }>`
       select article_id, body, created_at
       from corrections
-      where user_id = ${context.userId} and article_id is not null
+      where newsroom_id = ${owned(context)} and article_id is not null
       order by created_at asc
     `;
     const byArt = new Map<number, { date: string; body: string }[]>();

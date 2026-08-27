@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isGrokPreviewHost, newsroomSetupToken } from "./membership.ts";
+import { isGrokPreviewHost, newsroomSetupToken, SetupRequiredError } from "./membership.ts";
 
 describe("newsroom hosts", () => {
   it("treats grok.me as preview and localhost as self-host", () => {
@@ -22,5 +22,11 @@ describe("setup token env", () => {
       if (prev === undefined) delete process.env.NEWSROOM_SETUP_TOKEN;
       else process.env.NEWSROOM_SETUP_TOKEN = prev;
     }
+  });
+
+  it("SetupRequiredError is a 403", () => {
+    const err = new SetupRequiredError();
+    assert.equal(err.status, 403);
+    assert.match(err.message, /NEWSROOM_SETUP_TOKEN/);
   });
 });

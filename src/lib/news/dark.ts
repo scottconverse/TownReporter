@@ -17,6 +17,12 @@ import type { ArticleRow, MemoryRow, SourceRow } from "./types";
 import { rankWorthItems, presentWorthItem, type WorthSeed } from "./worth-a-look";
 import { openInvestigationForEditor } from "./dark-open";
 import { titlesOverlap, topicFromText } from "./desk-copy";
+import { DEFAULT_NEWSROOM_ID } from "./membership";
+import { enqueueJob, type DeskJob } from "./jobs";
+
+function owned(context: { newsroomId?: number }) {
+  return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
+}
 
 export { openInvestigationForEditor } from "./dark-open";
 
@@ -186,7 +192,7 @@ export const listDarkSignals = createServerFn({ method: "GET" })
         observation, pattern, linkage_map, alternatives, counter_narrative,
         what_would_kill, pathway, privacy_review, handoff, created_at
       from dark_signals
-      where user_id = ${context.userId}
+      where newsroom_id = ${owned(context)}
       order by created_at desc
       limit 40
     `;
@@ -200,7 +206,7 @@ export const listDarkRuns = createServerFn({ method: "GET" })
     return sql<DarkRunRow>`
       select id, started_at, finished_at, summary, error
       from dark_runs
-      where user_id = ${context.userId}
+      where newsroom_id = ${owned(context)}
       order by started_at desc
       limit 12
     `;
@@ -214,7 +220,7 @@ export const listDarkPromises = createServerFn({ method: "GET" })
     return sql<DarkPromiseRow>`
       select id, who_promised, what, when_due, source_cite, status, created_at
       from dark_promises
-      where user_id = ${context.userId}
+      where newsroom_id = ${owned(context)}
       order by created_at desc
       limit 40
     `;
@@ -238,7 +244,7 @@ export const listInvestigations = createServerFn({ method: "GET" })
             and f.status in ('open', 'investigating', 'reopened')
         ), 0) as still_open
       from investigations i
-      where i.user_id = ${context.userId}
+      where i.newsroom_id = ${owned(context)}
       order by i.updated_at desc
       limit 40
     `;
@@ -249,16 +255,16 @@ export const listInvestigations = createServerFn({ method: "GET" })
     }));
   });
 
-async function gatherWorthALook(userId: string): Promise<WorthSeed[]> {
+async function gatherWorthALook(newsroomId: number): Promise<WorthSeed[]> {
   const sql = await getSql();
   const anomalies = await sql<{ kind: string; summary: string; url: string | null; details: string }>`
     select kind, summary, url, details from anomalies
-    where user_id = ${userId}
+    where newsroom_id = ${newsroomId}
     order by id desc limit 24
   `.catch(() => []);
   const monitors = await sql<{ url: string; title: string; last_outcome: string | null }>`
     select url, title, last_outcome from source_monitors
-    where user_id = ${userId} and enabled = true
+    where newsroom_id = ${newsroomId} and enabled = true
     order by last_check_at desc nulls last
     limit 24
   `.catch(() => []);
@@ -271,7 +277,7 @@ async function gatherWorthALook(userId: string): Promise<WorthSeed[]> {
     source_urls: string;
   }>`
     select id, headline, why, evidence, newsworthiness, source_urls from leads
-    where user_id = ${userId} and status in ('new', 'held', 'drafted')
+    where newsroom_id = ${newsroomId} and status in ('new', 'held', 'drafted')
     order by newsworthiness desc nulls last, id desc
     limit 12
   `.catch(() => []);
@@ -283,7 +289,7 @@ async function gatherWorthALook(userId: string): Promise<WorthSeed[]> {
     closed_reason: string | null;
   }>`
     select label, kind, why, status, closed_reason from frontier_items
-    where user_id = ${userId} and status in ('reopened', 'open')
+    where newsroom_id = ${newsroomId} and status in ('reopened', 'open')
     order by priority desc, id desc
     limit 16
   `.catch(() => []);
@@ -296,7 +302,7 @@ async function gatherWorthALook(userId: string): Promise<WorthSeed[]> {
     strength: number;
   }>`
     select id, name, observation, pathway, handoff, strength from dark_signals
-    where user_id = ${userId}
+    where newsroom_id = ${newsroomId}
     order by id desc limit 12
   `.catch(() => []);
   const promises = await sql<{
@@ -307,7 +313,7 @@ async function gatherWorthALook(userId: string): Promise<WorthSeed[]> {
     status: string;
   }>`
     select who_promised, what, when_due, source_cite, status from dark_promises
-    where user_id = ${userId} and status in ('open', 'unclear')
+    where newsroom_id = ${newsroomId} and status in ('open', 'unclear')
     order by id desc limit 8
   `.catch(() => []);
   return rankWorthItems({ anomalies, monitors, leads, frontier, signals, promises }).map(
@@ -319,7 +325,7 @@ export const listWorthALook = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
     await ensureDarkSchema();
-    return gatherWorthALook(context.userId);
+    return gatherWorthALook(owned(context));
   });
 
 export const getInvestigation = createServerFn({ method: "GET" })
@@ -330,7 +336,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
     const sql = await getSql();
     const inv = await sql<InvestigationRow>`
       select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at
-      from investigations where id = ${id} and user_id = ${context.userId} limit 1
+      from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
     `;
     if (!inv[0]) return null;
     const frontier = await sql<{
@@ -346,7 +352,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
     }>`
       select id, kind, label, why, priority, status, closed_reason, prior_status, reopened_at::text as reopened_at
       from frontier_items
-      where investigation_id = ${id} and user_id = ${context.userId}
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by priority desc, id desc limit 40
     `;
     const artifacts = await sql<{
@@ -363,14 +369,14 @@ export const getInvestigation = createServerFn({ method: "GET" })
       select id, url, title, classification, fetch_status, fetch_outcome, version_id,
         created_at, left(full_text, 2500) as excerpt
       from artifacts
-      where investigation_id = ${id} and user_id = ${context.userId}
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 60
     `;
     const entities = await sql<{ name: string; kind: string; why: string }>`
       select e.name, e.kind, e.why
       from investigation_entities ie
       join entities e on e.id = ie.entity_id
-      where ie.investigation_id = ${id} and ie.user_id = ${context.userId}
+      where ie.investigation_id = ${id} and ie.newsroom_id = ${owned(context)}
       order by ie.id desc limit 40
     `;
     const historicalEntities = await sql<{
@@ -383,26 +389,26 @@ export const getInvestigation = createServerFn({ method: "GET" })
       select e.name, e.kind, e.why, ie.investigation_id, m.verdict
       from entities e
       join investigation_entities ie on ie.entity_id = e.id
-      left join entity_matches m on m.user_id = ${context.userId}
+      left join entity_matches m on m.newsroom_id = ${owned(context)}
         and (
           (m.left_canonical = e.canonical and m.right_canonical in (
             select e2.canonical from investigation_entities x
             join entities e2 on e2.id = x.entity_id
-            where x.investigation_id = ${id} and x.user_id = ${context.userId}
+            where x.investigation_id = ${id} and x.newsroom_id = ${owned(context)}
           ))
           or (m.right_canonical = e.canonical and m.left_canonical in (
             select e2.canonical from investigation_entities x
             join entities e2 on e2.id = x.entity_id
-            where x.investigation_id = ${id} and x.user_id = ${context.userId}
+            where x.investigation_id = ${id} and x.newsroom_id = ${owned(context)}
           ))
         )
-      where e.user_id = ${context.userId}
+      where e.newsroom_id = ${owned(context)}
         and ie.investigation_id <> ${id}
         and (
           e.canonical in (
             select e2.canonical from investigation_entities x
             join entities e2 on e2.id = x.entity_id
-            where x.investigation_id = ${id} and x.user_id = ${context.userId}
+            where x.investigation_id = ${id} and x.newsroom_id = ${owned(context)}
           )
           or m.id is not null
         )
@@ -411,32 +417,32 @@ export const getInvestigation = createServerFn({ method: "GET" })
     `;
     const relationships = await sql<{ from_name: string; to_name: string; kind: string; evidence: string; version_id: number | null; capture_event_id: number | null; provenance_status: string | null }>`
       select from_name, to_name, kind, evidence, version_id, capture_event_id, provenance_status from relationships
-      where investigation_id = ${id} and user_id = ${context.userId}
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 40
     `;
     const claims = await sql<{ body: string; kind: string; evidence: string; confidence: number | null; version_id: number | null; capture_event_id: number | null; provenance_status: string | null }>`
       select body, kind, evidence, confidence, version_id, capture_event_id, provenance_status from claims
-      where investigation_id = ${id} and user_id = ${context.userId}
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 40
     `;
     const hypotheses = await sql<{ body: string; status: string; supporting: string; contradicting: string }>`
       select body, status, supporting, contradicting from hypotheses
-      where investigation_id = ${id} and user_id = ${context.userId}
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 20
     `;
     const anomalies = await sql<{ kind: string; summary: string; url: string | null }>`
       select kind, summary, url from anomalies
-      where investigation_id = ${id} and user_id = ${context.userId}
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 20
     `;
     const deadEnds = await sql<{ hypothesis: string; dismissed_because: string }>`
       select hypothesis, dismissed_because from dead_ends
-      where investigation_id = ${id} and user_id = ${context.userId}
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 20
     `;
     const searches = await sql<{ hop: number; query: string; state: string | null; provider: string | null; generated_json: string | null }>`
       select hop, query, state, provider, generated_json from search_log
-      where investigation_id = ${id} and user_id = ${context.userId}
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 40
     `;
     const signals = await sql<{
@@ -447,7 +453,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
       strength: number;
     }>`
       select id, name, observation, handoff, strength from dark_signals
-      where investigation_id = ${id} and user_id = ${context.userId}
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 12
     `.catch(() => []);
     return {
@@ -483,7 +489,7 @@ export const getArtifact = createServerFn({ method: "GET" })
     }>`
       select id, url, title, left(full_text, 120000) as full_text, fetch_outcome, fetch_status, created_at
       from artifacts
-      where id = ${id} and user_id = ${context.userId}
+      where id = ${id} and newsroom_id = ${owned(context)}
       limit 1
     `;
     return rows[0] ?? null;
@@ -748,11 +754,11 @@ export const findSomethingToDigInto = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
     await ensureDarkSchema();
-    const items = await gatherWorthALook(context.userId);
+    const items = await gatherWorthALook(owned(context));
     const sql = await getSql();
     const active = await sql<{ title: string }>`
       select title from investigations
-      where user_id = ${context.userId}
+      where newsroom_id = ${owned(context)}
         and status in ('open', 'investigating', 'paused')
     `;
     const top = items.find((item) => !active.some((row) => titlesOverlap(item.title, row.title)));
@@ -774,78 +780,88 @@ export const continueInvestigation = createServerFn({ method: "POST" })
     await ensureDarkSchema();
     await assertRate(context.userId, "dark");
     const sql = await getSql();
-    const inv = await sql<{ id: number }>`
-      select id from investigations where id = ${id} and user_id = ${context.userId} limit 1
+    const inv = await sql<{ id: number; user_id: string }>`
+      select id, user_id from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
     `;
     if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
-    const runRows = await sql<{ id: number }>`
-      insert into dark_runs (user_id) values (${context.userId}) returning id
+    await sql`
+      update investigations set status = ${"investigating"}, updated_at = now()
+      where id = ${id} and newsroom_id = ${owned(context)}
     `;
-    const runId = runRows[0]!.id;
-    try {
-      await checkBaselines(context.userId, id);
-      await runDueMonitors({ userId: context.userId });
-      const loop = await researchLoop({
-        userId: context.userId,
-        investigationId: id,
-        hops: 1,
-      });
-      const synth = await synthesizeSignals(context.userId, runId, id, "");
-      const names = (
-        await sql<{ name: string }>`
-          select e.name from investigation_entities ie
-          join entities e on e.id = ie.entity_id
-          where ie.investigation_id = ${id} and ie.user_id = ${context.userId}
-          order by ie.id desc limit 40
-        `
-      ).map((n) => n.name);
-      await resurfaceDeadEnds(context.userId, id, names, { foreignOnly: true });
-      const revived = await matchDeadEnds(context.userId, names);
-      const header = [
-        loop.summary,
-        synth.summary,
-        `Hops ${loop.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
-        revived.length
-          ? `Prior dead ends matched: ${revived.map((r) => r.hypothesis).join("; ")}`
-          : "",
-        synth.error ? `Synthesis: ${synth.error}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n");
-      await sql`
-        update dark_runs
-        set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null}
-        where id = ${runId} and user_id = ${context.userId}
-      `;
-      await audit(
-        context.userId,
-        "dark-continue",
-        `run ${runId} inv ${id} hops ${loop.hops} signals ${synth.stored}`,
-      );
-      if (synth.error && !loop.paused) await markInvestigationPaused(context.userId, id, synth.error);
-      return {
-        ok: true as const,
-        runId,
-        investigationId: id,
-        stored: synth.stored,
-        hops: loop.hops,
-        artifacts: loop.artifacts,
-        frontier: loop.frontier,
-        paused: loop.paused || Boolean(synth.error),
-        summary: header,
-        error: synth.error,
-      };
-    } catch (err) {
-      const error = asDarkError(err);
-      await sql`
-        update dark_runs
-        set finished_at = now(), error = ${error.slice(0, 800)}
-        where id = ${runId} and user_id = ${context.userId}
-      `;
-      await markInvestigationPaused(context.userId, id, error);
-      return { ok: false as const, runId, investigationId: id, error };
-    }
+    const job = await enqueueJob({
+      userId: inv[0].user_id || context.userId,
+      newsroomId: owned(context),
+      kind: "dark",
+      subjectId: id,
+    });
+    return { ok: true as const, pending: true as const, jobId: job.id, investigationId: id };
   });
+
+export async function performDarkRound(job: DeskJob) {
+  const context = { userId: job.user_id, newsroomId: job.newsroom_id };
+  const id = job.subject_id;
+  await ensureDarkSchema();
+  const sql = await getSql();
+  const inv = await sql<{ id: number }>`
+    select id from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
+  `;
+  if (!inv[0]) throw new Error("Investigation not found");
+  const runRows = await sql<{ id: number }>`
+    insert into dark_runs (user_id, newsroom_id) values (${context.userId}, ${owned(context)}) returning id
+  `;
+  const runId = runRows[0]!.id;
+  try {
+    await checkBaselines(context.userId, id);
+    await runDueMonitors({ userId: context.userId });
+    const loop = await researchLoop({
+      userId: context.userId,
+      investigationId: id,
+      hops: 1,
+    });
+    const synth = await synthesizeSignals(context.userId, runId, id, "");
+    const names = (
+      await sql<{ name: string }>`
+        select e.name from investigation_entities ie
+        join entities e on e.id = ie.entity_id
+        where ie.investigation_id = ${id} and ie.newsroom_id = ${owned(context)}
+        order by ie.id desc limit 40
+      `
+    ).map((n) => n.name);
+    await resurfaceDeadEnds(context.userId, id, names, { foreignOnly: true });
+    const revived = await matchDeadEnds(context.userId, names);
+    const header = [
+      loop.summary,
+      synth.summary,
+      `Hops ${loop.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
+      revived.length
+        ? `Prior dead ends matched: ${revived.map((r) => r.hypothesis).join("; ")}`
+        : "",
+      synth.error ? `Synthesis: ${synth.error}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    await sql`
+      update dark_runs
+      set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null}
+      where id = ${runId} and newsroom_id = ${owned(context)}
+    `;
+    await audit(
+      context.userId,
+      "dark-continue",
+      `run ${runId} inv ${id} hops ${loop.hops} signals ${synth.stored}`,
+    );
+    if (synth.error && !loop.paused) await markInvestigationPaused(context.userId, id, synth.error);
+  } catch (err) {
+    const error = asDarkError(err);
+    await sql`
+      update dark_runs
+      set finished_at = now(), error = ${error.slice(0, 800)}
+      where id = ${runId} and newsroom_id = ${owned(context)}
+    `;
+    await markInvestigationPaused(context.userId, id, error);
+    throw new Error(error);
+  }
+}
 
 export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
@@ -857,19 +873,19 @@ export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
       select id, run_id, investigation_id, name, posture, signal_type, strength, confidence,
         observation, pattern, linkage_map, alternatives, counter_narrative,
         what_would_kill, pathway, privacy_review, handoff, created_at
-      from dark_signals where id = ${id} and user_id = ${context.userId} limit 1
+      from dark_signals where id = ${id} and newsroom_id = ${owned(context)} limit 1
     `;
     const sig = rows[0];
     if (!sig) return { ok: false as const, error: "Signal not found" };
     const arts = sig.investigation_id
       ? await sql<{ url: string }>`
           select url from artifacts
-          where user_id = ${context.userId} and investigation_id = ${sig.investigation_id}
+          where newsroom_id = ${owned(context)} and investigation_id = ${sig.investigation_id}
           order by id desc limit 12
         `
       : await sql<{ url: string }>`
           select url from artifacts
-          where user_id = ${context.userId}
+          where newsroom_id = ${owned(context)}
           order by id desc limit 12
         `;
     const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
@@ -911,12 +927,12 @@ export const queueInvestigation = createServerFn({ method: "POST" })
     const sql = await getSql();
     const inv = await sql<InvestigationRow>`
       select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at
-      from investigations where id = ${id} and user_id = ${context.userId} limit 1
+      from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
     `;
     if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
     const already = await sql<{ id: number }>`
       select id from leads
-      where investigation_id = ${id} and user_id = ${context.userId}
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id asc limit 1
     `;
     if (already[0]) {
@@ -925,7 +941,7 @@ export const queueInvestigation = createServerFn({ method: "POST" })
     }
     const arts = await sql<{ url: string }>`
       select url from artifacts
-      where user_id = ${context.userId} and investigation_id = ${id}
+      where newsroom_id = ${owned(context)} and investigation_id = ${id}
       order by id desc limit 12
     `;
     const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
@@ -960,7 +976,7 @@ export const parkInvestigation = createServerFn({ method: "POST" })
       set status = ${"closed"},
           pause_reason = ${"Editor set this aside."},
           updated_at = now()
-      where id = ${id} and user_id = ${context.userId}
+      where id = ${id} and newsroom_id = ${owned(context)}
     `;
     await audit(context.userId, "dark", `set aside inv ${id}`);
     return { ok: true as const, investigationId: id };
@@ -974,7 +990,7 @@ export const reopenParkedInvestigation = createServerFn({ method: "POST" })
     const sql = await getSql();
     const leftover = await sql<{ c: number }>`
       select count(*)::int as c from frontier_items
-      where investigation_id = ${id} and user_id = ${context.userId}
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
         and status in ('open', 'investigating', 'reopened')
     `;
     const still = Number(leftover[0]?.c ?? 0);
@@ -983,7 +999,7 @@ export const reopenParkedInvestigation = createServerFn({ method: "POST" })
       set status = ${still > 0 ? "paused" : "open"},
           pause_reason = ${still > 0 ? `Hop budget resumed with ${still} frontier item(s) still open.` : null},
           updated_at = now()
-      where id = ${id} and user_id = ${context.userId}
+      where id = ${id} and newsroom_id = ${owned(context)}
     `;
     await audit(context.userId, "dark", `pull back inv ${id}`);
     return { ok: true as const, investigationId: id };

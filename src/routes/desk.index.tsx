@@ -43,7 +43,15 @@ function DeskHome() {
   const navigate = useNavigate();
   const sources = useQuery({ queryKey: ["sources"], queryFn: () => listSources() });
   const leads = useQuery({ queryKey: ["leads"], queryFn: () => listLeads() });
-  const scans = useQuery({ queryKey: ["scans"], queryFn: () => listScans() });
+  const scans = useQuery({
+    queryKey: ["scans"],
+    queryFn: () => listScans(),
+    refetchInterval: (q) => {
+      const row = q.state.data?.[0];
+      if (row && !row.finished_at && !row.error) return 2000;
+      return false;
+    },
+  });
   const investigations = useQuery({ queryKey: ["investigations"], queryFn: () => listInvestigations() });
   const worth = useQuery({ queryKey: ["worth-a-look"], queryFn: () => listWorthALook() });
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
@@ -101,6 +109,8 @@ function DeskHome() {
   const officialFail = accepted.filter((s) => s.last_error && sourceErrorKind(s) === "official");
   const flakyFail = accepted.filter((s) => s.last_error && sourceErrorKind(s) === "flaky");
   const last = scans.data?.[0];
+  const scanning =
+    scan.isPending || Boolean(last && !last.finished_at && !last.error);
   const invs = investigations.data ?? [];
   const onDesk = invs.filter((r) => pileForStatus(r.status) === "desk");
   const aside = invs.filter((r) => pileForStatus(r.status) === "aside");
@@ -326,12 +336,12 @@ function DeskHome() {
             <SecHead
               title="The wire"
               aside={
-                <InkButton small disabled={scan.isPending} onClick={() => scan.mutate()}>
-                  {scan.isPending ? "Scanning…" : "Run scan"}
+                <InkButton small disabled={scanning} onClick={() => scan.mutate()}>
+                  {scanning ? "Scanning…" : "Run scan"}
                 </InkButton>
               }
             />
-            {scan.isPending ? <Busy label="Fetching the watch list, then one pass for leads." /> : null}
+            {scanning ? <Busy label="Fetching the watch list, then one pass for leads." /> : null}
             {last ? (
               <>
                 <p className="wire-line">

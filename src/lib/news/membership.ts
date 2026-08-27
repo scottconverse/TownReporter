@@ -86,6 +86,9 @@ export async function requireEditor(userId: string): Promise<EditorContext> {
   }
   const n = await sql<{ c: number }>`select count(*)::int as c from newsroom_members`;
   if ((n[0]?.c ?? 0) === 0) {
+    if (newsroomSetupToken()) {
+      throw new SetupRequiredError();
+    }
     try {
       await sql`
         insert into newsroom_members (user_id, role, newsroom_id)
@@ -124,8 +127,9 @@ export async function claimOwner(userId: string, providedToken: string): Promise
   const expected = newsroomSetupToken();
   if (expected) {
     if (providedToken.trim() !== expected) throw new ForbiddenError("Setup token does not match.");
-  } else if (!providedToken.trim()) {
-    throw new SetupRequiredError();
+  } else {
+    // Preview / local without a token: first-user-owns is requireEditor's job.
+    if (!providedToken.trim()) throw new SetupRequiredError();
   }
   try {
     await sql`

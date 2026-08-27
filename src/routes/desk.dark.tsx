@@ -57,6 +57,7 @@ function DarkPage() {
   const [cardPhase, setCardPhase] = useState<string>("");
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
   const phaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wasInvestigating = useRef(false);
 
   useEffect(() => {
     try {
@@ -140,13 +141,7 @@ function DarkPage() {
         invalidate();
         return;
       }
-      if (res.error) {
-        showWorkNotice(editorError(res.error), false);
-      } else {
-        setNotice(null);
-      }
-      clearPhase();
-      setPendingCard(null);
+      setNotice(null);
       invalidate();
     },
     onError: (err) => {
@@ -315,6 +310,11 @@ function DarkPage() {
     }
   }, [openId]);
   const inv = detail.data?.investigation;
+  useEffect(() => {
+    const now = inv?.status === "investigating" || digging;
+    if (wasInvestigating.current && !now) clearPhase();
+    wasInvestigating.current = Boolean(now);
+  }, [inv?.status, digging]);
   const liveLine = progressLine({
     running: digging || inv?.status === "investigating",
     status: inv?.status ?? (digging ? "investigating" : "open"),
@@ -396,7 +396,7 @@ function DarkPage() {
           detail={detail.data ?? undefined}
           pending={detail.isPending && !detail.data}
           digging={digging || inv?.status === "investigating"}
-          keepDisabled={digging}
+          keepDisabled={digging || inv?.status === "investigating"}
           phase={cardPhase || liveLine}
           notice={noticeAt === "work" ? notice : null}
           noticeOk={noticeOk}

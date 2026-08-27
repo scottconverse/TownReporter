@@ -82,6 +82,15 @@ function StoryPage() {
   }, [data, waitingSince]);
 
   useEffect(() => {
+    if (!waitingSince) return;
+    if (data?.job?.status === "failed") {
+      setWaitingSince(null);
+      setSlowWait(false);
+      setMsg(editorDraftError(data.job.error) ?? data.job.error ?? "The draft did not finish.");
+    }
+  }, [data?.job, waitingSince]);
+
+  useEffect(() => {
     const s = parseNotes(data?.lead.notes_json).scratch ?? "";
     if (s) setScratch(s);
   }, [data?.lead.notes_json]);
@@ -109,18 +118,6 @@ function StoryPage() {
       setWaitingSince(Date.now());
     },
     onSuccess: async (res) => {
-      if (res.ok && "draft" in res && res.draft) {
-        qc.setQueryData(["lead", id], (old: typeof data) => {
-          if (!old) return old;
-          return {
-            ...old,
-            draft: { ...(old.draft ?? {}), ...res.draft },
-            lead: { ...old.lead, status: "drafted" },
-          };
-        });
-        void qc.invalidateQueries({ queryKey: ["leads"] });
-        return;
-      }
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       await qc.invalidateQueries({ queryKey: ["leads"] });
       if (res.ok) return;

@@ -4,7 +4,7 @@ Current release: **0.3.9**.
 
 ## Unreleased — 0.4.0 Hardening
 
-Backend started. Desk/Dark UI not part of this slice.
+In progress. Version stays 0.3.9 until this gate closes.
 
 - One newsroom row; members carry `newsroom_id`. Two concurrent first users can no longer both become owner.
 - Chromium aborts subrequests to private/LAN/metadata addresses. Cron with no `CRON_SECRET` is disabled.
@@ -16,6 +16,9 @@ Backend started. Desk/Dark UI not part of this slice.
 - Corrections render on the article. Published correction errors are errors. Draft text is per story.
 - Dark: no fake stage timer; Pick one does not open a blank file; send-to-queue is idempotent with a real topic; Set aside/Keep digging disabled while a round runs; findings / hypotheses / questions are separate.
 - Source URLs are links; kind/tier inferred from the host. Nested button-in-link removed. Forced-night Dark Desk hides the Light switch. Newsletter promise removed. GitHub tag is the source download.
+- Scan, Draft/Redraft, and Keep digging enqueue a persisted job and return. The UI watches `desk_jobs` / unfinished `scan_runs` / `investigating` — not a request that has to stay open.
+- `NEWSROOM_SETUP_TOKEN`: when set, creating an account does not own the desk until the token is presented. Preview with the token unset is still first-account-owns.
+- Desk and Dark lists are keyed by `newsroom_id`. Dark Start no longer dumps the last 16 snapshots into the file.
 
 ## 0.3.9 — 2026-08-26
 

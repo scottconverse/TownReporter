@@ -23,15 +23,7 @@ export async function openInvestigationForEditor(
     returning id
   `;
   const investigationId = created[0]!.id;
-  const snaps = await sql<{ title: string; url: string; excerpt: string }>`
-    select s.title, s.url, snap.excerpt
-    from snapshots snap
-    join sources s on s.id = snap.source_id
-    where snap.user_id = ${userId}
-    order by snap.id desc
-    limit 16
-  `.catch(() => []);
-  await seedInvestigation(userId, investigationId, paste, snaps);
+  await seedInvestigation(userId, investigationId, paste, []);
   await sql`
     update investigations set updated_at = now() where id = ${investigationId} and user_id = ${userId}
   `;

@@ -4,6 +4,8 @@ import { GROK_PROVIDERS, authClient, signIn } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
 import { PAPER } from "@/lib/paper";
+import { claimDesk, deskClaimState } from "@/lib/news/claim";
+import { useQuery } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/login")({ component: Login });
 
@@ -65,11 +67,22 @@ function Login() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [name, setName] = useState("");
-  if (user) return <Navigate to="/desk" />;
+  const [setupToken, setSetupToken] = useState("");
+  const claim = useQuery({ queryKey: ["desk-claim"], queryFn: () => deskClaimState() });
+  const tokenRequired = Boolean(claim.data?.tokenRequired && !claim.data?.claimed);
+  if (user && !claim.isPending && !tokenRequired) return <Navigate to="/desk" />;
 
   async function finishEmail(data?: unknown, headers?: Headers | null) {
     storePreviewBearer(tokenFromResult(data, headers));
     await authClient.getSession();
+    if (tokenRequired || setupToken.trim()) {
+      const claimed = await claimDesk({ data: setupToken });
+      if (!claimed.ok) {
+        setBusy(null);
+        setError(claimed.error);
+        return;
+      }
+    }
     await navigate({ to: "/desk" });
   }
 
@@ -154,7 +167,9 @@ function Login() {
           </h1>
           <p className="mt-2 text-sm text-muted">
             {mode === "create"
-              ? "First person in owns the newsroom. If you already created an account, submit again with the same email and password — we will sign you in."
+              ? tokenRequired
+                ? "This desk needs the operator setup token before the first editor can own it. If you already have an account, sign in."
+                : "First person in owns the newsroom. If you already created an account, submit again with the same email and password — we will sign you in."
               : "Sign in with the password you set for this desk."}
           </p>
         </div>
@@ -168,6 +183,10 @@ function Login() {
           className="space-y-3"
           onSubmit={(event) => {
             event.preventDefault();
+            if (user && tokenRequired) {
+              void finishEmail();
+              return;
+            }
             if (mode === "create") void onEmailSignUp();
             else void onEmailSignIn();
           }}
@@ -218,6 +237,20 @@ function Login() {
                 autoComplete="new-password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
+              />
+            </label>
+          ) : null}
+          {tokenRequired ? (
+            <label className="block text-sm">
+              Setup token
+              <input
+                className={inputClass + " mt-1"}
+                type="password"
+                autoComplete="off"
+                required
+                value={setupToken}
+                onChange={(e) => setSetupToken(e.target.value)}
+                placeholder="NEWSROOM_SETUP_TOKEN"
               />
             </label>
           ) : null}

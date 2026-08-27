@@ -421,6 +421,21 @@ export async function ensureInvestigateSchema() {
     `alter table artifact_versions add column if not exists extracted_sha256 text`,
     `alter table artifact_versions add column if not exists raw_sha256 text`,
     `alter table artifact_versions add column if not exists newsroom_id integer not null default 1`,
+    `alter table frontier_items add column if not exists newsroom_id integer not null default 1`,
+    `alter table entities add column if not exists newsroom_id integer not null default 1`,
+    `alter table relationships add column if not exists newsroom_id integer not null default 1`,
+    `alter table claims add column if not exists newsroom_id integer not null default 1`,
+    `alter table hypotheses add column if not exists newsroom_id integer not null default 1`,
+    `alter table anomalies add column if not exists newsroom_id integer not null default 1`,
+    `alter table dead_ends add column if not exists newsroom_id integer not null default 1`,
+    `alter table search_log add column if not exists newsroom_id integer not null default 1`,
+    `alter table recurring_baselines add column if not exists newsroom_id integer not null default 1`,
+    `alter table entity_aliases add column if not exists newsroom_id integer not null default 1`,
+    `alter table investigation_entities add column if not exists newsroom_id integer not null default 1`,
+    `alter table entity_matches add column if not exists newsroom_id integer not null default 1`,
+    `alter table search_attempts add column if not exists newsroom_id integer not null default 1`,
+    `alter table investigations add column if not exists newsroom_id integer not null default 1`,
+    `alter table artifacts add column if not exists newsroom_id integer not null default 1`,
   ]) {
     try {
       await sql.query(extra);
