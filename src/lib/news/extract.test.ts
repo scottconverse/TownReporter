@@ -8,7 +8,10 @@ import {
   extractMeetingInstant,
   extractReferences,
   leadHoursBefore,
+  namedSubjects,
   nthWeekday,
+  primarySourceQueries,
+  primarySourceScore,
   queriesForRef,
   structureSnapshot,
 } from "./extract.ts";
@@ -34,10 +37,27 @@ describe("extractReferences", () => {
 });
 
 describe("queriesForRef", () => {
-  it("turns a company into agent and contribution searches", () => {
+  it("turns a company into press-release, agent and contribution searches", () => {
     const qs = queriesForRef({ kind: "company", value: "Front Range Municipal Solutions LLC" });
+    assert.ok(qs.some((q) => /press release/i.test(q)));
     assert.ok(qs.some((q) => /registered agent/i.test(q)));
     assert.ok(qs.some((q) => /campaign contribution/i.test(q)));
+  });
+});
+
+describe("namedSubjects and primary sources", () => {
+  it("pulls Ursa Major from a sentence-case headline", () => {
+    const names = namedSubjects("Ursa Major opens new Longmont manufacturing facility");
+    assert.ok(names.some((n) => /ursa major/i.test(n)));
+  });
+
+  it("ranks the company's own press release above a news homepage", () => {
+    const pr =
+      "https://ursamajor.com/media/press-release/ursa-major-opens-new-longmont-manufacturing-facility/";
+    const listing = "https://www.longmontleader.com/";
+    const subjects = ["Ursa Major"];
+    assert.ok(primarySourceScore(pr, subjects) > primarySourceScore(listing, subjects));
+    assert.ok(primarySourceQueries("Ursa Major opens plant", subjects).some((q) => /press release/i.test(q)));
   });
 });
 

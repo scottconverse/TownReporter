@@ -10,10 +10,11 @@ export type ReportingNotes = {
   found: NoteFound[];
   verify: string[];
   opened: NoteOpened[];
+  scratch: string;
 };
 
 export function emptyNotes(): ReportingNotes {
-  return { news: "", why: "", angle: "", todo: [], found: [], verify: [], opened: [] };
+  return { news: "", why: "", angle: "", todo: [], found: [], verify: [], opened: [], scratch: "" };
 }
 
 export function parseNotes(raw: string | null | undefined): ReportingNotes {
@@ -74,6 +75,7 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
       found,
       verify: strs(o.verify),
       opened,
+      scratch: String(o.scratch ?? "").slice(0, 8000),
     };
   } catch {
     return base;
@@ -141,11 +143,31 @@ export function sanitizeTodos(raw: unknown): NoteTodo[] {
 
 export function applyTodoPatch(
   notes: ReportingNotes,
-  patch: { todos?: NoteTodo[]; toggle?: number; add?: string },
+  patch: { todos?: NoteTodo[]; toggle?: number; add?: string; scratch?: string },
 ): ReportingNotes {
   let next = notes;
   if (patch.todos && patch.todos.length) next = { ...next, todo: sanitizeTodos(patch.todos) };
   if (typeof patch.toggle === "number") next = toggleTodo(next, patch.toggle);
   if (patch.add) next = addHumanLine(next, patch.add);
+  if (typeof patch.scratch === "string") next = { ...next, scratch: patch.scratch.slice(0, 8000) };
   return next;
+}
+
+export function formatPullDump(
+  query: string,
+  rows: { title: string; url: string; excerpt: string }[],
+): string {
+  if (!rows.length) {
+    return `Pulled: ${query}\nNothing public found. Try a more specific line, or paste a URL.\n`;
+  }
+  return rows
+    .map((r) => `${r.title}\n${r.url}\n\n${r.excerpt.trim()}\n`)
+    .join("\n");
+}
+
+export function appendScratch(notes: ReportingNotes, chunk: string): ReportingNotes {
+  const add = chunk.trim();
+  if (!add) return notes;
+  const scratch = notes.scratch.trim() ? `${notes.scratch.trim()}\n\n${add}` : add;
+  return { ...notes, scratch: scratch.slice(0, 8000) };
 }

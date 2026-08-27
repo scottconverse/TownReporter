@@ -4,6 +4,7 @@ const HOURLY: Record<string, number> = {
   scan: 10,
   draft: 20,
   dark: 8,
+  pull: 40,
 };
 
 export async function assertRate(userId: string, action: string) {

@@ -54,11 +54,87 @@ export function extractReferences(text: string): ExtractedRef[] {
   return out.slice(0, 80);
 }
 
+const SUBJECT_VERBS =
+  /\s+(?:opens?|announces?|plans?|files?|launches?|builds?|breaks?|wins?|hires?|expands?|moves?|relocates?)\b/i;
+
+/** Names in a headline that are not LLC-suffixed — "Ursa Major" from "Ursa Major opens …". */
+export function namedSubjects(text: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string) => {
+    const t = raw.replace(/\s+/g, " ").trim();
+    if (t.length < 4 || t.length > 80) return;
+    if (/^(the|a|an|this|city|county|longmont|colorado|new)\b/i.test(t)) return;
+    const key = t.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(t);
+  };
+  const head = (text.split(/[\n.]/)[0] ?? text).trim();
+  const parts = head.split(SUBJECT_VERBS);
+  if (parts[0] && parts.length > 1) {
+    const name = parts[0].replace(/^[^A-Za-z]+/, "").trim();
+    if (/^[A-Z]/.test(name) && name.split(/\s+/).length <= 5) push(name);
+  }
+  const runs = text.match(/\b([A-Z][A-Za-z0-9&.-]+(?:\s+[A-Z][A-Za-z0-9&.-]+){1,3})\b/g) ?? [];
+  for (const run of runs.slice(0, 8)) {
+    if (/^(Longmont|Colorado|City Council|United States)\b/i.test(run)) continue;
+    push(run);
+  }
+  return out.slice(0, 6);
+}
+
+export function primarySourceQueries(headline: string, subjects: string[], city = "Longmont"): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (q: string) => {
+    const t = q.replace(/\s+/g, " ").trim();
+    if (t.length < 8) return;
+    const k = t.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(t);
+  };
+  if (!subjects.length) return out;
+  add(`${headline} press release`);
+  for (const s of subjects.slice(0, 4)) {
+    add(`"${s}" ${city} press release OR announcement OR newsroom`);
+    add(`"${s}" press-release OR /media/ OR /newsroom`);
+  }
+  return out.slice(0, 6);
+}
+
+export function primarySourceScore(url: string, subjects: string[]): number {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./i, "").toLowerCase();
+    const path = u.pathname.toLowerCase();
+    let s = 0;
+    if (/press[-_]?release|\/media\/|\/newsroom\/|\/news\//.test(path)) s += 4;
+    if (/\.gov$/i.test(host)) s += 3;
+    const hostKey = host.replace(/[^a-z0-9]/g, "");
+    for (const n of subjects) {
+      const slug = n.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      if (slug.length >= 4 && hostKey.includes(slug.slice(0, 10))) s += 5;
+    }
+    const pathOnly = path.replace(/\/+$/, "") || "/";
+    if (pathOnly === "/" || /^\/(local-news|news|latest)$/i.test(pathOnly)) s -= 4;
+    return s;
+  } catch {
+    return 0;
+  }
+}
+
+export function preferPrimaryUrls(urls: string[], subjects: string[]): string[] {
+  return [...urls].sort((a, b) => primarySourceScore(b, subjects) - primarySourceScore(a, subjects) || b.length - a.length);
+}
+
 export function queriesForRef(ref: ExtractedRef, city = "Longmont"): string[] {
   const v = ref.value;
   switch (ref.kind) {
     case "company":
       return [
+        `"${v}" ${city} press release OR announcement OR newsroom`,
         `"${v}" ${city}`,
         `"${v}" "registered agent" Colorado`,
         `"${v}" campaign contribution`,

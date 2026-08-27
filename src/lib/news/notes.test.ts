@@ -51,4 +51,18 @@ describe("reporting notes", () => {
     assert.equal(next.todo[1]?.done, false);
     assert.equal(next.todo.length, 2);
   });
+
+  it("keeps a pull-box scratch across a machine replace", () => {
+    const prev = parseNotes(
+      JSON.stringify({
+        news: "old",
+        scratch: "From the company PR: 155 jobs.",
+        todo: [{ t: "Call planning", done: false, src: "you" }],
+      }),
+    );
+    assert.match(prev.scratch, /155 jobs/);
+    const kept = keepHumanTodos(prev);
+    const next = { ...prev, news: "new", todo: kept, scratch: prev.scratch };
+    assert.match(next.scratch, /155 jobs/);
+  });
 });

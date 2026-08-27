@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.3.5](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.5)** — 26 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.3.6](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.6)** — 26 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
@@ -74,12 +74,13 @@ Same six moves the paper itself describes at `/how-we-report`:
 
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
-### This release (0.3.3 – 0.3.5)
+### This release (0.3.6)
 
-- **Mountain Time.** Masthead, bylines, and meeting-cadence math use `PAPER.timezone` (`America/Denver`). A Wednesday evening in Longmont no longer prints as Thursday UTC.
-- **The paper does not reprint itself.** Overlapping printed headlines collapse; the longer body stays. Archive URLs stay live.
-- **Draft with AI stays on the page.** If the click dies, the workbench keeps looking until the draft is on the lead, then fills headline / dek / body. Reload is not required.
-- **Credit the originating newsroom.** When a draft hangs on someone else’s reporting, it names them and links the **story URL**, not a homepage. How we report says so in public.
+- **Primary documents first.** Draft with AI searches for the named company’s or agency’s own press release before it rewrites another paper. The Ursa Major plant story should open their `/media/press-release/` page, not stop at the Longmont Leader homepage.
+- **Pull a still-to-pull line.** It searches, opens what it finds, and drops the excerpt into a box under the story that does not print. Redraft reads that box.
+- **Claims with URLs.** Load-bearing numbers, names, dates, and quotes are listed in notes with the document they came from.
+
+Also in 0.3.3–0.3.5: Mountain Time masthead, overlapping printed headlines collapse, Draft with AI paints without a reload, credit the originating newsroom with a story URL.
 
 ### Meetings, tapes, packets
 

@@ -624,4 +624,101 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
       false,
     );
   });
+
+  it("fetches the company's own press release, not just the listing that led there", async () => {
+    const HOME = "https://www.longmontleader.com/";
+    const PR =
+      "https://ursamajor.com/media/press-release/ursa-major-opens-new-longmont-manufacturing-facility/";
+    const writePackets: string[] = [];
+    const searches: string[] = [];
+    const ingested: string[] = [];
+    const plantLead: LeadRow = {
+      ...lead,
+      headline: "Ursa Major opens new Longmont manufacturing facility",
+      why: "Longmont Leader homepage item",
+      topic: "infrastructure",
+      source_urls: JSON.stringify([HOME]),
+    };
+    const chat: ReportChat = async (system, user) => {
+      if (system === REPORT_RESEARCH_SYSTEM) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            news: "Ursa Major opened a manufacturing facility in Longmont.",
+            why_it_matters: "Jobs and industrial tax base.",
+            angle: "company plant, not a rewrite of the Leader",
+            form: "reported",
+            questions: ["How many jobs?", "Square footage?"],
+            fetch_urls: [PR],
+            unknowns: [],
+            follow: "company press release",
+            lanes: { context: [], stakeholders: [], contradiction: [], gaps: [] },
+          }),
+        };
+      }
+      if (system === REPORT_WRITE_SYSTEM) {
+        writePackets.push(user);
+        return {
+          ok: true,
+          text: JSON.stringify({
+            headline: "Ursa Major opens a Longmont manufacturing plant",
+            dek: "The company’s own release lists the facility.",
+            body: "Ursa Major opened a manufacturing facility in Longmont, the company said in a press release. The Longmont Leader first noted the opening.",
+            topic: "infrastructure",
+            source_urls: [PR, HOME],
+            form: "reported",
+            found: null,
+            unanswered: [],
+            claims: [
+              {
+                fact: "Ursa Major opened a Longmont manufacturing facility",
+                url: PR,
+                kind: "primary",
+              },
+            ],
+            reporting_trail: [{ title: "press release", organization: "Ursa Major", url: PR, role: "primary" }],
+          }),
+        };
+      }
+      return { ok: true, text: "{}" };
+    };
+    const result = await reportAndDraft(
+      { userId: "ursa-test", lead: plantLead, urls: [HOME], memory: [] },
+      {
+        ingest: async (url) => {
+          ingested.push(url);
+          if (url === PR) {
+            return {
+              url: PR,
+              title: "Ursa Major Opens New Longmont Manufacturing Facility",
+              text: "Ursa Major Technologies today opened a new manufacturing facility in Longmont, Colorado. The plant will support propulsion production.",
+              extras: [],
+            };
+          }
+          return {
+            url,
+            title: "Longmont Leader",
+            text: "Local news. Ursa Major opens plant. Read more.",
+            extras: [],
+          };
+        },
+        search: async (q) => {
+          searches.push(q);
+          if (/press release|ursa major/i.test(q)) {
+            return [{ title: "Ursa Major press release", url: PR, snippet: "company announcement" }];
+          }
+          return [];
+        },
+        chat,
+        capture: async () => ({ version_id: 1, capture_event_id: 1 }),
+        hydrate: async () => [],
+        budgetMs: 120_000,
+      },
+    );
+    if ("error" in result) throw new Error(result.error);
+    assert.ok(searches.some((q) => /press release/i.test(q)), "should search for a press release");
+    assert.ok(ingested.includes(PR), `should fetch the company PR, got ${ingested.join(", ")}`);
+    assert.ok(writePackets.some((p) => p.includes(PR)), "write pass should see the PR URL");
+    assert.ok(result.claims.some((c) => c.kind === "primary" && c.url === PR));
+  });
 });

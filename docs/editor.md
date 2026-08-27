@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.3.5](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.5).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.3.6](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.6).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). This page is the whole newsroom.
 
@@ -110,11 +110,13 @@ This is where a lead becomes a story, or doesn’t.
 
 ### Draft
 
-**Draft with AI** runs the reporting pass: follows attachments, retrieves from the captured records (including the relevant part of a long tape, not the hold music), and writes a story into the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
+**Draft with AI** runs a research pass first: the company’s or agency’s own press release and records, then stakeholders, history, and competing accounts. It writes a story into the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
 
 Stay on the page. If the click dies before the reply comes back, the workbench keeps looking until the draft is on the lead, then fills the form. You should not need to reload. If a real failure happens, the page says so — click again.
 
-When the reporting hangs on another newsroom, the draft should name them and link the **story URL** so they get the traffic. A homepage or `/local-news` index is not that URL. If the desk only has a listing, notes ask you to pull the full URL; do not publish a paraphrase of their legal claims as if TownReporter established them.
+When the reporting hangs on another newsroom, the draft should name them and link the **story URL** so they get the traffic. A homepage or `/local-news` index is not that URL. Their rewrite is not a substitute for the company’s own announcement. If the desk only has a listing, notes ask you to pull the full URL; do not publish a paraphrase of their legal claims as if TownReporter established them.
+
+A second box under the story, **Pulled notes**, does not print. **Pull** next to a still-to-pull line searches that item, opens what it finds, and drops the excerpt there for you to cut into the story. Redraft reads that box. The checkbox only strikes the line.
 
 Draft is allowed to be wrong. Read it against the documents.
 
@@ -125,7 +127,8 @@ Reporter-notebook leftovers (`What is solid`, `Next checks are…`) are stripped
 The notes pane is the notebook:
 
 - What’s the news, why it matters, the angle
-- To-dos you can strike and restore. Lines you type are tagged **yours**; machine-suggested checks are not
+- To-dos you can strike and restore. **Pull** searches that line and drops the excerpt under the story. The checkbox only strikes it. Lines you type are tagged **yours**; machine-suggested checks are not
+- Claims and sources — load-bearing facts with URLs
 - What you found, what still needs a check
 - Pages you opened
 
@@ -257,6 +260,7 @@ How we report, in public: `/how-we-report`.
 | “AI is not available” | No model key | Operator: `XAI_API_KEY` or `LLM_*` ([setup.md](setup.md)) |
 | Scan fetched, filed nothing | Nothing new, or the model declined | Read the summary. Not automatically a bug. |
 | Draft with AI ran, form still empty | The click died; the writing pass may still be finishing | Stay on the page. It fills when the draft lands. Reload only if you left. |
+| Draft is a rewrite of the Leader | The pass never opened the company page | Pull the still-to-pull line for their press release, then redraft. |
 | Meeting has no transcript | Livestream hasn’t ended, or Playwright missing | Wait for the 6-hour recheck, or operator installs Chromium |
 | Names in a draft are wrong | Auto-captions | Check the packet. Fix the draft. Do not publish the caption. |
 | Dates look a day ahead | Host clock in UTC | Masthead uses `PAPER.timezone`. Tell the operator if it is still UTC. |

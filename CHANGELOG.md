@@ -1,6 +1,15 @@
 # Changelog
 
-Current release: **0.3.5**. GitHub: [v0.3.5](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.5).
+Current release: **0.3.6**.
+
+## 0.3.6 — 2026-08-26
+
+Draft with AI actually reports. Still-to-pull lines can be pulled into a paste box.
+
+- Research looks for the named company’s or agency’s own press release / newsroom page before it settles for another paper’s rewrite. A Leader listing is a lead, not the story.
+- Every load-bearing number, name, date, and quote is supposed to land as a claim with a URL in notes (primary document, official record, or credited news).
+- On the workbench, **Pull** next to a still-to-pull line searches that item and drops the excerpt into **Pulled notes** under the story — cut and paste, does not print. Redraft reads that box.
+- A missing company announcement becomes a still-to-pull line instead of a silent hole.
 
 ## 0.3.5 — 2026-08-26
 

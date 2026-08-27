@@ -3,7 +3,7 @@ import { getSql, withTransaction } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { PAPER, SEED_SOURCES, slugify, parseUrlList } from "@/lib/paper";
 import { assertHttpUrl, sha256 } from "./url-guard";
-import { ingestUrl, mapLimit, withRetry } from "./ingest";
+import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
 import { assertRate, audit } from "./ops";
 import { SCAN_SYSTEM, grokChat, parseJsonBlock, isGrokAvailable, GROK_UNAVAILABLE } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
@@ -15,14 +15,19 @@ import {
   shouldCommitFetchHashes,
 } from "./schema";
 import { reportAndDraft } from "./report";
-import { provenanceFromUrls } from "./findings";
-import { composeZeroLeadSummary, kindFromSourceUrl } from "./desk-copy";
+import { webSearch } from "./search-web";
+import { namedSubjects, preferPrimaryUrls } from "./extract";
 import {
   applyTodoPatch,
+  appendScratch,
+  formatPullDump,
   keepHumanTodos,
   machineTodosFrom,
   parseNotes,
+  toggleTodo,
 } from "./notes";
+import { provenanceFromUrls } from "./findings";
+import { composeZeroLeadSummary, kindFromSourceUrl } from "./desk-copy";
 import type {
   DraftRow,
   LeadRow,
@@ -633,11 +638,15 @@ export const draftLead = createServerFn({ method: "POST" })
       where user_id = ${context.userId} order by updated_at desc limit 16
     `;
 
+    const prevNotes = parseNotes(lead.notes_json);
+    const moreUrls = prevNotes.opened.map((o) => o.url);
     const reported = await reportAndDraft({
       userId: context.userId,
       lead,
-      urls,
+      urls: [...urls, ...moreUrls],
       memory,
+      extraEvidence: prevNotes.scratch,
+      extraUrls: moreUrls,
     });
     if ("error" in reported) return { ok: false as const, error: reported.error };
 
@@ -646,7 +655,6 @@ export const draftLead = createServerFn({ method: "POST" })
     const provenanceJson = JSON.stringify(reported.provenance).slice(0, 8000);
     const unansweredJson = JSON.stringify(reported.unanswered).slice(0, 2000);
     const researchJson = JSON.stringify(reported.research_memo ?? {}).slice(0, 8000);
-    const prevNotes = parseNotes(lead.notes_json);
     const yours = keepHumanTodos(prevNotes);
     const machine = machineTodosFrom([
       reported.research_memo?.follow,
@@ -654,19 +662,25 @@ export const draftLead = createServerFn({ method: "POST" })
       ...(reported.research_memo?.questions ?? []),
       ...(reported.research_memo?.unknowns ?? []),
     ]);
+    const fromClaims = reported.claims.map((c) => ({
+      t: c.fact.slice(0, 800),
+      src: c.url,
+    }));
+    const fromFindings = reported.findings.slice(0, 12).map((f) => ({
+      t: f.text.slice(0, 800),
+      src: f.source_urls?.[0],
+    }));
     const nextNotes = {
       news: reported.research_memo?.news ?? "",
       why: reported.research_memo?.why_it_matters ?? "",
       angle: reported.research_memo?.angle ?? "",
       todo: [...yours, ...machine].slice(0, 24),
-      found: reported.findings.slice(0, 12).map((f) => ({
-        t: f.text.slice(0, 800),
-        src: f.source_urls?.[0],
-      })),
+      found: [...fromClaims, ...fromFindings].slice(0, 16),
       verify: reported.integrity_notes ? [reported.integrity_notes] : [],
       opened: reported.research_memo?.captured ?? [],
+      scratch: prevNotes.scratch,
     };
-    const notesJson = JSON.stringify(nextNotes).slice(0, 8000);
+    const notesJson = JSON.stringify(nextNotes).slice(0, 16000);
 
     await sql`
       insert into drafts (
@@ -710,7 +724,7 @@ export const draftLead = createServerFn({ method: "POST" })
 
 export const saveReportingNotes = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { leadId: number; add?: string; toggle?: number; todos?: { t: string; done: boolean; src: "you" | "machine" }[] }) => input)
+  .validator((input: { leadId: number; add?: string; toggle?: number; scratch?: string; todos?: { t: string; done: boolean; src: "you" | "machine" }[] }) => input)
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     await ensureDraftMemoColumn();
@@ -722,12 +736,78 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       todos: data.todos,
       toggle: data.toggle,
       add: data.add,
+      scratch: data.scratch,
     });
-    const json = JSON.stringify(notes).slice(0, 8000);
+    const json = JSON.stringify(notes).slice(0, 16000);
     await sql`
       update leads set notes_json = ${json} where id = ${data.leadId} and user_id = ${context.userId}
     `;
     return { ok: true as const, notes };
+  });
+
+export const pullTodo = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { leadId: number; query: string; index?: number }) => input)
+  .handler(async ({ context, data }) => {
+    try {
+      await assertRate(context.userId, "pull");
+      await ensureDraftMemoColumn();
+      const sql = await getSql();
+      const rows = await sql<{ notes_json: string | null; headline: string }>`
+        select notes_json, headline from leads
+        where id = ${data.leadId} and user_id = ${context.userId} limit 1
+      `;
+      if (!rows[0]) return { ok: false as const, error: "Lead not found" };
+      const query = data.query.trim().slice(0, 240);
+      if (query.length < 4) return { ok: false as const, error: "That line is too thin to search." };
+      const subjects = namedSubjects(`${rows[0].headline}\n${query}`);
+      let hits: { title: string; url: string; snippet?: string }[] = [];
+      try {
+        hits = await webSearch(query);
+      } catch {
+        hits = [];
+      }
+      const ranked = preferPrimaryUrls(
+        hits.map((h) => h.url),
+        subjects,
+      ).slice(0, 3);
+      const docs: { title: string; url: string; excerpt: string }[] = [];
+      for (const url of ranked) {
+        try {
+          const got = await ingestDocument(url);
+          if (!got.text || got.text.trim().length < 40) continue;
+          docs.push({
+            title: (got.title || url).slice(0, 160),
+            url,
+            excerpt: got.text.replace(/\s+/g, " ").trim().slice(0, 1600),
+          });
+        } catch {
+          /* skip a dead URL */
+        }
+      }
+      const dump = formatPullDump(query, docs);
+      let notes = parseNotes(rows[0].notes_json);
+      notes = appendScratch(notes, dump);
+      if (typeof data.index === "number" && notes.todo[data.index] && !notes.todo[data.index].done) {
+        notes = toggleTodo(notes, data.index);
+      }
+      const opened = [
+        ...notes.opened,
+        ...docs.map((d) => ({ url: d.url, title: d.title })),
+      ]
+        .filter((o, i, arr) => arr.findIndex((x) => x.url === o.url) === i)
+        .slice(0, 16);
+      notes = { ...notes, opened };
+      const json = JSON.stringify(notes).slice(0, 16000);
+      await sql`
+        update leads set notes_json = ${json} where id = ${data.leadId} and user_id = ${context.userId}
+      `;
+      await audit(context.userId, "pull", query.slice(0, 200));
+      return { ok: true as const, notes, dump, found: docs.length };
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : "Pull failed";
+      return { ok: false as const, error: raw };
+    }
   });
 
 export const saveDraft = createServerFn({ method: "POST" })

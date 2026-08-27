@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, Field, InkButton, leadOrigin } from "@/components/desk-chrome";
 import { EmptyState, WorkbenchSkeleton, Notice } from "@/components/states";
-import { draftLead, getLead, publishLead, saveDraft, saveReportingNotes } from "@/lib/news/desk";
+import { draftLead, getLead, publishLead, pullTodo, saveDraft, saveReportingNotes } from "@/lib/news/desk";
 import { formatShortDate, parseUrlList } from "@/lib/paper";
 import {
   applyTodoPatch,
@@ -26,6 +26,7 @@ function StoryPage() {
   const [dek, setDek] = useState("");
   const [body, setBody] = useState("");
   const [topic, setTopic] = useState("council");
+  const [scratch, setScratch] = useState("");
   const [msg, setMsg] = useState("");
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
   const [waitingSince, setWaitingSince] = useState<number | null>(null);
@@ -79,6 +80,11 @@ function StoryPage() {
     setSlowWait(false);
     setMsg("");
   }, [data, waitingSince]);
+
+  useEffect(() => {
+    const s = parseNotes(data?.lead.notes_json).scratch ?? "";
+    if (s) setScratch(s);
+  }, [data?.lead.notes_json]);
 
   useEffect(() => {
     if (!waitingSince) return;
@@ -137,8 +143,12 @@ function StoryPage() {
   });
 
   const save = useMutation({
-    mutationFn: () =>
-      saveDraft({ data: { leadId: id, headline, dek, body, topic } }),
+    mutationFn: async () => {
+      await saveReportingNotes({
+        data: { leadId: id, scratch, todos: parseNotes(data?.lead.notes_json).todo },
+      });
+      return saveDraft({ data: { leadId: id, headline, dek, body, topic } });
+    },
     onSuccess: () => setMsg("Saved."),
   });
 
@@ -341,6 +351,15 @@ function StoryPage() {
                   disabled={onPaper}
                 />
               </Field>
+              <Field label="Pulled notes — does not print">
+                <textarea
+                  rows={8}
+                  value={scratch}
+                  onChange={(e) => setScratch(e.target.value)}
+                  disabled={onPaper}
+                  placeholder="Pull a still-to-pull line and the excerpt lands here. Cut and paste into the story. Redraft reads this box."
+                />
+              </Field>
               {data.draft?.form ? <p className="meta">Form · {data.draft.form}</p> : null}
             </form>
           ) : waiting ? null : (
@@ -424,6 +443,8 @@ function ReportingNotesPane({
 }) {
   const qc = useQueryClient();
   const [line, setLine] = useState("");
+  const [pulling, setPulling] = useState<number | null>(null);
+  const [pullMsg, setPullMsg] = useState("");
   const small = usePhoneNotes();
   const filled = notesHaveMemo(notes);
   const save = useMutation({
@@ -452,6 +473,49 @@ function ReportingNotesPane({
     },
   });
 
+  const pull = useMutation({
+    mutationFn: (input: { index: number; query: string }) =>
+      pullTodo({ data: { leadId, query: input.query, index: input.index } }),
+    onMutate: (input) => {
+      setPulling(input.index);
+      setPullMsg("");
+    },
+    onSuccess: (res) => {
+      setPulling(null);
+      if (!res.ok) {
+        setPullMsg(res.error);
+        return;
+      }
+      setPullMsg(res.found ? `Dropped ${res.found} page${res.found === 1 ? "" : "s"} under the story.` : "Nothing public found for that line.");
+      void qc.invalidateQueries({ queryKey: ["lead", leadId] });
+    },
+    onError: (err) => {
+      setPulling(null);
+      setPullMsg(err instanceof Error ? err.message : "Pull failed.");
+    },
+  });
+
+  const todoList = (prefix: string) =>
+    notes.todo.length ? (
+      <div className="note-sec">
+        <p className="side-label">Still to pull</p>
+        {notes.todo.map((t, i) => (
+          <TodoRow
+            key={`${prefix}-${t.src}-${t.t}-${i}`}
+            item={t}
+            disabled={locked}
+            pulling={pulling === i}
+            onToggle={() => save.mutate({ toggle: i, todos: notes.todo })}
+            onPull={() => pull.mutate({ index: i, query: t.t })}
+          />
+        ))}
+        <p className="note-hint">
+          Pull searches that line and drops the excerpt in the box under the story. The checkbox just strikes it.
+        </p>
+        {pullMsg ? <p className="note-one">{pullMsg}</p> : null}
+      </div>
+    ) : null;
+
   const inner = (
     <div className="notes">
       {!small ? (
@@ -469,20 +533,7 @@ function ReportingNotesPane({
               ? "This draft was written before notes were kept. Redraft fills them; lines you add stay."
               : "Draft with AI fills this. You can add a line."}
           </p>
-          {notes.todo.length ? (
-            <div className="note-sec">
-              <p className="side-label">Still to pull</p>
-              {notes.todo.map((t, i) => (
-                <TodoRow
-                  key={`${t.src}-${t.t}-${i}`}
-                  item={t}
-                  disabled={locked}
-                  onToggle={() => save.mutate({ toggle: i, todos: notes.todo })}
-                />
-              ))}
-              <p className="note-hint">Click a line to mark it pulled. It stays on the list, struck through.</p>
-            </div>
-          ) : null}
+          {todoList("empty")}
         </>
       ) : (
         <>
@@ -504,27 +555,21 @@ function ReportingNotesPane({
               <p className="note-one">{notes.angle}</p>
             </div>
           ) : null}
-          {notes.todo.length ? (
-            <div className="note-sec">
-              <p className="side-label">Still to pull</p>
-              {notes.todo.map((t, i) => (
-                <TodoRow
-                  key={`${t.src}-${t.t}-${i}`}
-                  item={t}
-                  disabled={locked}
-                  onToggle={() => save.mutate({ toggle: i, todos: notes.todo })}
-                />
-              ))}
-              <p className="note-hint">Click a line to mark it pulled. It stays on the list, struck through.</p>
-            </div>
-          ) : null}
+          {todoList("filled")}
           {notes.found.length ? (
             <div className="note-sec">
-              <p className="side-label">What we found</p>
+              <p className="side-label">Claims and sources</p>
               {notes.found.map((f) => (
                 <p key={f.t} className="note-one">
                   {f.t}
-                  {f.src ? <span className="meta-inline"> · {f.src}</span> : null}
+                  {f.src ? (
+                    <span className="meta-inline">
+                      {" · "}
+                      <a href={f.src} target="_blank" rel="noreferrer" className="inline-link">
+                        {f.src}
+                      </a>
+                    </span>
+                  ) : null}
                 </p>
               ))}
             </div>
@@ -595,24 +640,36 @@ function ReportingNotesPane({
 function TodoRow({
   item,
   disabled,
+  pulling,
   onToggle,
+  onPull,
 }: {
   item: ReportingNotes["todo"][number];
   disabled: boolean;
+  pulling: boolean;
   onToggle: () => void;
+  onPull: () => void;
 }) {
   return (
-    <button
-      type="button"
-      className={"todo" + (item.done ? " done" : "")}
-      title={item.done ? "Struck — click to restore" : "Click to mark this pulled"}
-      aria-pressed={item.done}
-      disabled={disabled}
-      onClick={onToggle}
-    >
-      <span className="todo-box" />
-      <span className="todo-t">{item.t}</span>
-      {item.src === "you" ? <span className="todo-src">yours</span> : null}
-    </button>
+    <div className={"todo-row" + (item.done ? " done" : "")}>
+      <button
+        type="button"
+        className={"todo" + (item.done ? " done" : "")}
+        title={item.done ? "Struck — click to restore" : "Click to mark this pulled"}
+        aria-pressed={item.done}
+        disabled={disabled}
+        onClick={onToggle}
+      >
+        <span className="todo-box" />
+        <span className="todo-t">{item.t}</span>
+        {item.src === "you" ? <span className="todo-src">yours</span> : null}
+      </button>
+      {!disabled && !item.done ? (
+        <button type="button" className="todo-pull" disabled={pulling} onClick={onPull}>
+          {pulling ? "Pulling…" : "Pull"}
+        </button>
+      ) : null}
+    </div>
   );
 }
+
