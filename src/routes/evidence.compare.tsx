@@ -19,6 +19,12 @@ export const Route = createFileRoute("/evidence/compare")({
   component: ComparePage,
 });
 
+function captureName(label: string | null | undefined, versionId: number | null): string {
+  if (label?.trim()) return label.trim();
+  if (versionId != null) return `Capture ${versionId}`;
+  return "—";
+}
+
 function observationLabel(kind: string, disappeared: boolean): string {
   if (disappeared || kind === "unavailable") return "source unavailable";
   if (kind === "changed") return "changed";
@@ -89,7 +95,7 @@ function ComparePage() {
       <div className="mt-6 grid gap-6 sm:grid-cols-2">
         <div className="border border-rule p-4">
           <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Previous observed state</p>
-          <p className="mt-2">{older.content_label || (older.version_id != null ? `v${older.version_id}` : "—")}</p>
+          <p className="mt-2">{captureName(older.content_label, older.version_id)}</p>
           <p className="text-sm text-muted">
             {older.captured_at ? formatDateTime(older.captured_at) : "—"}
           </p>
@@ -108,7 +114,7 @@ function ComparePage() {
         </div>
         <div className="border border-rule p-4">
           <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Latest observed state</p>
-          <p className="mt-2">{newer.content_label || (newer.version_id != null ? `v${newer.version_id}` : "—")}</p>
+          <p className="mt-2">{captureName(newer.content_label, newer.version_id)}</p>
           <p className="text-sm text-muted">
             {newer.captured_at ? formatDateTime(newer.captured_at) : "—"}
           </p>

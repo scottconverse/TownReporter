@@ -1,6 +1,12 @@
 # Changelog
 
-Current release: **0.3.8**.
+Current release: **0.3.9**.
+
+## 0.3.9 — 2026-08-26
+
+Designer pass. Paper search and newsletter inputs have borders again. Version leaves the desk masthead. Pulled notes uses the same does-not-print chip as reporting notes. Publish keeps pulled notes. Dark Desk noticed list caps; Start digging errors stay on one surface.
+
+## 0.3.8 — 2026-08-26
 
 ## 0.3.8 — 2026-08-26
 

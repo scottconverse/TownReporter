@@ -77,8 +77,6 @@ export function DeskShell({
             </Link>
             <span className="brand-sub">
               {night ? "Dark Desk — investigates, never prints" : `Editor's desk — ${PAPER.city}`}
-              {" · "}
-              {APP_VERSION}
             </span>
           </div>
           <div className="mast-date">{formatDate(new Date())}</div>
@@ -102,7 +100,7 @@ export function DeskShell({
                 Dark
               </button>
             </div>
-            {isPending ? <span className="mast-user" aria-hidden /> : user ? <span className="mast-account"><UserButton /></span> : null}
+            {isPending ? <span className="mast-user" aria-hidden /> : user ? <span className="mast-account"><UserButton /><span className="mast-ver">{APP_VERSION}</span></span> : null}
           </div>
         </div>
         <div className="rule2" />
@@ -180,21 +178,31 @@ export function InkButton({
 
 export function Field({
   label,
+  chip,
+  hint,
   children,
 }: {
   label: string;
+  chip?: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
     <label className="f">
-      <span>{label}</span>
+      <span className={chip ? "f-lab" : undefined}>
+        {label}
+        {chip ? <span className="chip dnp">{chip}</span> : null}
+      </span>
       {children}
+      {hint ? <p className="meta">{hint}</p> : null}
     </label>
   );
 }
 
-export const inputClass = "";
-export const areaClass = "";
+export const inputClass =
+  "border border-rule bg-paper px-3 py-2 text-sm text-ink focus:border-ink focus:outline-none min-h-11";
+export const areaClass =
+  "border border-rule bg-paper px-3 py-2 text-sm text-ink focus:border-ink focus:outline-none min-h-11";
 
 export function Score({ v }: { v: number }) {
   return (

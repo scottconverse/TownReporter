@@ -11,6 +11,7 @@ import {
   editorStatus,
   flakyFailureCopy,
   headlineFromUrl,
+  humanFrontierLabel,
   investigationStopKind,
   kindFromSourceUrl,
   looksLikeInternalSummary,
@@ -82,6 +83,13 @@ describe("editor copy", () => {
     assert.equal(editorStatus("investigating"), "Looking now");
     assert.equal(editorStatus("paused"), "Stopped — more to read");
     assert.equal(editorKindLabel("reopened"), "Showed up again");
+    assert.equal(editorStatus("mystery-status"), "On the desk");
+  });
+
+  it("strips engine tokens from still-unopened labels", () => {
+    assert.equal(humanFrontierLabel("frontier: Costco rebate cap"), "Costco rebate cap");
+    assert.equal(humanFrontierLabel("hop: packet PDF"), "packet PDF");
+    assert.doesNotMatch(humanFrontierLabel("frontier: next hop"), /frontier/i);
   });
 
   it("explains a stop after a round without hop or frontier", () => {

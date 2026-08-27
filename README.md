@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.3.8](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.8)** — 26 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.3.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.9)** — 26 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
@@ -74,7 +74,13 @@ Same six moves the paper itself describes at `/how-we-report`:
 
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
-### This release (0.3.8)
+### This release (0.3.9)
+
+- **Paper inputs have borders again.** Archive search and the newsletter box were drawing with no padding and no rule.
+- **Version is not in the desk masthead.** It lives in the account chip and the paper footer.
+- **Pulled notes** uses the same does-not-print chip as reporting notes. Publish saves that box.
+
+Also in 0.3.8: Start digging no longer hides the card when the open fails.
 
 - **Start digging actually starts, or says why not.** A failed open used to hide the card and the error with it. The card stays. Reload also brings vanished cards back (claims are no longer sticky for the session).
 

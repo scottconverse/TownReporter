@@ -23,6 +23,7 @@ import {
   editorPauseReason,
   editorStatus,
   headlineFromUrl,
+  humanFrontierLabel,
   looksLikeInternalSummary,
   organizationFromUrl,
   pileForStatus,
@@ -30,7 +31,6 @@ import {
   plainFinding,
   progressLine,
   recordKindFromUrl,
-  sourceLineFromUrl,
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
 import { formatDateTime, formatShortDate } from "@/lib/paper";
@@ -48,6 +48,7 @@ function DarkPage() {
   const [paste, setPaste] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeOk, setNoticeOk] = useState(false);
+  const [noticeAt, setNoticeAt] = useState<"paste" | "work">("work");
   const [openId, setOpenId] = useState<number | null>(null);
   const [queuedLead, setQueuedLead] = useState<number | null>(null);
   const [pendingCard, setPendingCard] = useState<string | null>(null);
@@ -70,6 +71,17 @@ function DarkPage() {
 
   function claimCard(id: string) {
     setClaimedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  }
+
+  function showPasteNotice(text: string | null, ok = false) {
+    setNotice(text);
+    setNoticeOk(ok);
+    setNoticeAt("paste");
+  }
+  function showWorkNotice(text: string | null, ok = false) {
+    setNotice(text);
+    setNoticeOk(ok);
+    setNoticeAt("work");
   }
 
   function rememberOpen(id: number | null) {
@@ -125,16 +137,14 @@ function DarkPage() {
       if (!res || res.ok !== true) {
         const raw = res && "error" in res ? String(res.error ?? "") : "Research failed";
         const msg = editorError(raw) || raw || "Research failed";
-        setNotice(msg);
-        setNoticeOk(false);
+        showWorkNotice(msg, false);
         setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
         clearPhase();
         invalidate();
         return;
       }
       if (res.error) {
-        setNotice(editorError(res.error));
-        setNoticeOk(false);
+        showWorkNotice(editorError(res.error), false);
       } else {
         setNotice(null);
       }
@@ -145,8 +155,7 @@ function DarkPage() {
     onError: (err) => {
       const msg =
         editorError(err instanceof Error ? err.message : "Research failed") || "Research failed";
-      setNotice(msg);
-      setNoticeOk(false);
+      showWorkNotice(msg, false);
       setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
       clearPhase();
       invalidate();
@@ -178,8 +187,6 @@ function DarkPage() {
     onSuccess: (res, item) => {
       if (!res?.ok || !res.investigationId) {
         setCardError({ id: item.id, message: "Could not open an investigation." });
-        setNotice("Could not open that file. Try Start digging again.");
-        setNoticeOk(false);
         setPendingCard(null);
         clearPhase();
         return;
@@ -190,8 +197,6 @@ function DarkPage() {
     onError: (err, item) => {
       const msg = editorError(err instanceof Error ? err.message : "Could not start") || "Could not start";
       setCardError({ id: item.id, message: msg });
-      setNotice(msg);
-      setNoticeOk(false);
       setPendingCard(null);
       clearPhase();
     },
@@ -206,8 +211,7 @@ function DarkPage() {
     },
     onSuccess: (res) => {
       if (!res?.ok || !res.investigationId) {
-        setNotice("Could not open an investigation.");
-        setNoticeOk(false);
+        showPasteNotice("Could not open an investigation.");
         clearPhase();
         return;
       }
@@ -215,8 +219,7 @@ function DarkPage() {
       afterOpen(res.investigationId, "paste");
     },
     onError: (err) => {
-      setNotice(editorError(err instanceof Error ? err.message : "Could not start"));
-      setNoticeOk(false);
+      showPasteNotice(editorError(err instanceof Error ? err.message : "Could not start"));
       clearPhase();
     },
   });
@@ -229,16 +232,14 @@ function DarkPage() {
     },
     onSuccess: (res) => {
       if (!res?.ok || !res.investigationId) {
-        setNotice("Nothing to open yet. Paste a lead to start.");
-        setNoticeOk(false);
+        showWorkNotice("Nothing to open yet. Paste a lead to start.");
         clearPhase();
         return;
       }
       afterOpen(res.investigationId, "find");
     },
     onError: (err) => {
-      setNotice(editorError(err instanceof Error ? err.message : "Find failed"));
-      setNoticeOk(false);
+      showWorkNotice(editorError(err instanceof Error ? err.message : "Find failed"));
       clearPhase();
     },
   });
@@ -249,11 +250,9 @@ function DarkPage() {
       void qc.invalidateQueries({ queryKey: ["leads"] });
       if (res?.ok) {
         setQueuedLead(res.leadId);
-        setNotice("On the working queue as a story lead. Dark Desk did not publish.");
-        setNoticeOk(true);
+        showWorkNotice("On the working queue as a story lead. Dark Desk did not publish.", true);
       } else {
-        setNotice(res?.error ?? "Could not send to the queue.");
-        setNoticeOk(false);
+        showWorkNotice(res?.error ?? "Could not send to the queue.");
       }
     },
   });
@@ -266,16 +265,14 @@ function DarkPage() {
     },
     onSuccess: (res, seed) => {
       if (!res?.ok || !res.investigationId) {
-        setNotice("Could not follow that lead.");
-        setNoticeOk(false);
+        showWorkNotice("Could not follow that lead.");
         clearPhase();
         return;
       }
       afterOpen(res.investigationId, seed.title);
     },
     onError: (err) => {
-      setNotice(editorError(err instanceof Error ? err.message : "Could not follow that lead"));
-      setNoticeOk(false);
+      showWorkNotice(editorError(err instanceof Error ? err.message : "Could not follow that lead"));
       clearPhase();
     },
   });
@@ -284,8 +281,7 @@ function DarkPage() {
     mutationFn: (id: number) => parkInvestigation({ data: id }),
     onSuccess: () => {
       rememberOpen(null);
-      setNotice("Set aside. Pull it back from that pile anytime.");
-      setNoticeOk(true);
+      showWorkNotice("Set aside. Pull it back from that pile anytime.", true);
       invalidate();
     },
   });
@@ -366,13 +362,19 @@ function DarkPage() {
             {openPaste.isPending ? "Starting…" : "Start digging"}
           </InkButton>
         </div>
-        {notice ? <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p> : null}
-        {pendingCard && cardPhase ? (
+        {notice && noticeAt === "paste" ? (
+          <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
+        ) : null}
+        {pendingCard === "paste" && cardPhase ? (
           <p className="meta" aria-live="polite">
             {cardPhase}
           </p>
         ) : null}
       </form>
+
+      {notice && noticeAt === "work" && openId == null ? (
+        <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
+      ) : null}
 
       {openId != null ? (
         <InvestigationWorkspace
@@ -382,7 +384,7 @@ function DarkPage() {
           digging={digging || inv?.status === "investigating"}
           keepDisabled={digging}
           phase={cardPhase || liveLine}
-          notice={notice}
+          notice={noticeAt === "work" ? notice : null}
           noticeOk={noticeOk}
           queuedLead={queuedLead}
           onKeepDigging={() => {
@@ -748,7 +750,7 @@ function InvestigationWorkspace({
               <div className="of-frontier">
                 {next.slice(0, frN).map((f) => (
                   <div key={f.id} className="fr-item">
-                    <p className="fr-label">{humanLabel(f.label)}</p>
+                    <p className="fr-label">{humanFrontierLabel(f.label)}</p>
                     {f.why ? <p className="fr-why">{plainEditorText(f.why)}</p> : null}
                     <InkButton
                       tone="quiet"
@@ -756,8 +758,8 @@ function InvestigationWorkspace({
                       disabled={keepDisabled}
                       onClick={() =>
                         onFollow({
-                          paste: `Followed from the “${parentTitle}” file: ${plainEditorText(f.why) || humanLabel(f.label)}.\n\n${f.label}\n${f.why}`,
-                          title: humanLabel(f.label),
+                          paste: `Followed from the “${parentTitle}” file: ${plainEditorText(f.why) || humanFrontierLabel(f.label)}.\n\n${f.label}\n${f.why}`,
+                          title: humanFrontierLabel(f.label),
                         })
                       }
                     >
@@ -782,11 +784,21 @@ function InvestigationWorkspace({
           {noticed.length > 0 ? (
             <div className="of-block">
               <p className="side-label">What Dark Desk noticed</p>
-              {noticed.map((n, i) => (
+              {noticed.slice(0, 8).map((n, i) => (
                 <p key={i} className="side-item">
                   {n}
                 </p>
               ))}
+              {noticed.length > 8 ? (
+                <details className="wire-flaky">
+                  <summary>{noticed.length - 8} more</summary>
+                  {noticed.slice(8).map((n, i) => (
+                    <p key={`more-${i}`} className="side-item">
+                      {n}
+                    </p>
+                  ))}
+                </details>
+              ) : null}
             </div>
           ) : null}
           {facts.length > 0 ? (
@@ -997,11 +1009,6 @@ function startedLine(title: string, paste: string, summary: string): string {
     return plainEditorText(summary).slice(0, 220);
   }
   return `Opened as “${title}.”`;
-}
-
-function humanLabel(label: string): string {
-  if (/^https?:/i.test(label)) return headlineFromUrl(label) || sourceLineFromUrl(label);
-  return label;
 }
 
 function openQuestionsFrom(

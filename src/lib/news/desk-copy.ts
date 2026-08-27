@@ -110,7 +110,7 @@ export function editorStatus(status: string): string {
     case "closed":
       return "Set aside";
     default:
-      return status.replace(/[-_]/g, " ");
+      return "On the desk";
   }
 }
 
@@ -577,6 +577,14 @@ export function draftHasLanded(input: {
   const t = Date.parse(input.draft?.updated_at || "");
   if (!Number.isFinite(t)) return true;
   return t >= input.startedAt - 5000;
+}
+
+/** Editor-facing label for a still-unopened line. Never show engine tokens. */
+export function humanFrontierLabel(label: string): string {
+  const cleaned = label.replace(/^\s*(?:frontier|hop)\s*[:#.\-–—]?\s*/i, "").trim();
+  const t = cleaned || label.trim();
+  if (/^https?:/i.test(t)) return headlineFromUrl(t) || sourceLineFromUrl(t) || t;
+  return t;
 }
 
 

@@ -459,7 +459,7 @@
   font-size: 14px;
   line-height: 1.5;
 }
-.desk-ltr.night, .desk-ltr .night, .desk-ltr .nightpanel {
+.desk-ltr.night, .desk-ltr .nightpanel {
   --bg: var(--n-bg);
   --bg2: var(--n-bg2);
   --fg: var(--n-fg);
@@ -472,7 +472,7 @@
 }
 .desk-ltr a:hover {color:var(--a)}
 .desk-ltr .shell {min-height:100dvh;background:var(--bg);color:var(--fg)}
-.desk-ltr .night, .desk-ltr .nightpanel {--bg:var(--n-bg);--bg2:var(--n-bg2);--fg:var(--n-fg);--fg2:var(--n-fg2);--mut:var(--n-fg2);--line:var(--n-line);--a:var(--n-a);--adeep:var(--n-adeep);--warn:var(--n-warn);background:var(--bg);color:var(--fg)}
+.desk-ltr .nightpanel {background:var(--bg);color:var(--fg)}
 .desk-ltr .masthead {padding:14px 28px 0;max-width:1420px;margin:0 auto}
 .desk-ltr .mast-row {display:flex;align-items:baseline;gap:24px;flex-wrap:wrap}
 .desk-ltr .brand {font-family:var(--fd);font-weight:700;font-size:24px;letter-spacing:-0.01em;cursor:pointer}
@@ -482,6 +482,8 @@
 .desk-ltr .mast-link {font-size:12px;color:var(--mut);cursor:pointer}
 .desk-ltr .mast-link:hover {color:var(--fg)}
 .desk-ltr .mast-user {display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--fg);border-radius:50%;font-family:var(--fd);font-weight:600;font-size:11px;cursor:default}
+.desk-ltr .mast-account {display:inline-flex;align-items:center;gap:10px}
+.desk-ltr .mast-ver {font-size:11px;letter-spacing:.08em;color:var(--mut)}
 .desk-ltr .rule2 {margin-top:10px;height:5px;border-top:3px solid var(--fg);border-bottom:1px solid var(--fg)}
 .desk-ltr .rule1 {border-bottom:1px solid var(--fg)}
 .desk-ltr .deskname {display:flex;align-items:center;gap:2px;padding:2px 0}
@@ -621,6 +623,8 @@
 .desk-ltr .form-grid {display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
 .desk-ltr .f {display:block}
 .desk-ltr .f span {display:block;font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--mut);margin-bottom:4px}
+.desk-ltr .f-lab {display:flex !important;align-items:baseline;gap:10px;justify-content:space-between}
+.desk-ltr .f-lab .chip {display:inline-flex;margin-bottom:0}
 .desk-ltr .f input, .desk-ltr .f select, .desk-ltr .f textarea, .desk-ltr .bulk, .desk-ltr .corr-form textarea, .desk-ltr .tipbox textarea {width:100%;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:13px;padding:7px 10px;min-height:34px}
 .desk-ltr .f textarea, .desk-ltr .bulk, .desk-ltr .corr-form textarea, .desk-ltr .tipbox textarea {line-height:1.55;min-height:0}
 .desk-ltr .f input:focus, .desk-ltr .f select:focus, .desk-ltr .f textarea:focus, .desk-ltr .bulk:focus, .desk-ltr .corr-form textarea:focus, .desk-ltr .tipbox textarea:focus {border-color:var(--fg);outline:none}
@@ -713,7 +717,7 @@
 .desk-ltr .of-grid .sechead {margin-top:20px}
 .desk-ltr .of-reads {margin-top:2px}
 .desk-ltr .reader {margin-top:4px}
-.desk-ltr .reader-index {max-height:220px;overflow:auto;border:1px solid var(--line);background:var(--bg)}
+.desk-ltr .reader-index {max-height:min(40vh,420px);overflow:auto;border:1px solid var(--line);background:var(--bg)}
 .desk-ltr .reader-row {display:block;width:100%;text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer}
 .desk-ltr .reader-row:last-child {border-bottom:0}
 .desk-ltr .reader-row.blocked {opacity:.72}
@@ -740,6 +744,7 @@
 .desk-ltr .of-trail.runs {margin-top:20px}
 .desk-ltr .run-row {margin-top:8px}
 .desk-ltr .paper-wrap {max-width:1000px;margin:0 auto;padding:14px 28px 60px}
+/* phase 3 — paper refresh, not yet mounted */
 .desk-ltr .ptop {display:flex;justify-content:space-between;align-items:center;gap:16px;font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--mut);border-bottom:1px solid var(--line);padding-bottom:6px}
 .desk-ltr .ptop-mid {flex:1;text-align:center}
 .desk-ltr .pmast {text-align:center;padding:34px 0 26px}
@@ -822,7 +827,9 @@
   .desk-ltr .nav-sep { display: none; }
   .desk-ltr .nav-dark { margin-left: auto; }
   .desk-ltr .mast-tools { flex-wrap: wrap; gap: 10px; }
-  .desk-ltr .mast-account .text-sm.font-medium { display: none; }
+  .desk-ltr .btn.small { min-height: 36px; padding: 8px 12px; }
+  .desk-ltr .reader-index { max-height: 220px; }
+  .desk-ltr .mast-ver { display: none; }
   .desk-ltr .needs { flex-direction: column; align-items: flex-start; gap: 6px; }
   .desk-ltr .needs-item { white-space: normal; }
   .desk-ltr .ltable thead { display: none; }

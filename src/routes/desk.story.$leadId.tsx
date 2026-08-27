@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, Field, InkButton, leadOrigin } from "@/components/desk-chrome";
 import { EmptyState, WorkbenchSkeleton, Notice } from "@/components/states";
 import { draftLead, getLead, publishLead, pullTodo, saveDraft, saveReportingNotes } from "@/lib/news/desk";
-import { formatShortDate, parseUrlList } from "@/lib/paper";
+import { formatShortDate, parseUrlList, TOPICS } from "@/lib/paper";
 import {
   applyTodoPatch,
   notesHaveMemo,
@@ -154,6 +154,9 @@ function StoryPage() {
 
   const publish = useMutation({
     mutationFn: async () => {
+      await saveReportingNotes({
+        data: { leadId: id, scratch, todos: parseNotes(data?.lead.notes_json).todo },
+      });
       await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
       return publishLead({ data: id });
     },
@@ -337,11 +340,16 @@ function StoryPage() {
                 <input value={dek} onChange={(e) => setDek(e.target.value)} disabled={onPaper} />
               </Field>
               <Field label="Topic">
-                <input
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  disabled={onPaper}
-                />
+                <select value={topic} onChange={(e) => setTopic(e.target.value)} disabled={onPaper}>
+                  {TOPICS.filter((t) => t !== "about").map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                  {topic && !TOPICS.includes(topic as (typeof TOPICS)[number]) ? (
+                    <option value={topic}>{topic}</option>
+                  ) : null}
+                </select>
               </Field>
               <Field label="Body">
                 <textarea
@@ -351,13 +359,17 @@ function StoryPage() {
                   disabled={onPaper}
                 />
               </Field>
-              <Field label="Pulled notes — does not print">
+              <Field
+                label="Pulled notes"
+                chip="does not print"
+                hint="Redraft reads this box. Nothing here prints."
+              >
                 <textarea
                   rows={8}
                   value={scratch}
                   onChange={(e) => setScratch(e.target.value)}
                   disabled={onPaper}
-                  placeholder="Pull a still-to-pull line and the excerpt lands here. Cut and paste into the story. Redraft reads this box."
+                  placeholder="Pull a still-to-pull line and the excerpt lands here. Cut and paste into the story."
                 />
               </Field>
               {data.draft?.form ? <p className="meta">Form · {data.draft.form}</p> : null}
