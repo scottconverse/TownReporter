@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.4 — 2026-08-26
+
+Draft with AI no longer looks empty when the server already wrote. Credit the originating newsroom with a story URL, not a homepage.
+
+- Workbench polls while Draft with AI is in flight. A gateway timeout no longer leaves a blank form; the draft appears when it lands, without a reload. A real failure says so and asks you to click again — not Dark Desk “Keep digging.”
+- One draft click is budgeted so the writing pass usually finishes before the request dies. Extra fetches that would hang are skipped; a matching article URL is still followed.
+- A listing page (homepage, `/local-news`) yields article URLs. When a draft hangs on another newsroom, the body names them and links the exact story. A homepage is not a story URL. If only a listing remains, notes ask for the full URL instead of paraphrasing their legal claims as TownReporter’s.
+- Printed stories render those markdown links.
+
 ## 0.3.3 — 2026-08-26
 
 Longmont edition cleanliness. Dates, cadence, and the printed paper all stay on Mountain Time and stop repeating themselves.

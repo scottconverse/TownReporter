@@ -481,4 +481,147 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
     assert.equal(result.form, "brief");
     assert.equal(searches.length, 1);
   });
+
+  it("still writes when extra fetches would hang past the draft budget", { timeout: 5000 }, async () => {
+    let extraCalls = 0;
+    const chat: ReportChat = async (system) => {
+      if (system === REPORT_RESEARCH_SYSTEM) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            news: "Airport noise rules are voluntary abatement only.",
+            why_it_matters: "Vance Brand neighbors cannot get a ban.",
+            angle: "no ban on noisy planes",
+            form: "explainer",
+            questions: [],
+            fetch_urls: [PACKET],
+            unknowns: [],
+            follow: "",
+            lanes: { context: ["hang forever"] },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        text: JSON.stringify({
+          headline: "Longmont cannot simply ban noisy planes at Vance Brand Airport",
+          dek: "Noise abatement is voluntary.",
+          body: "The city cannot impose a simple ban on noisy aircraft at Vance Brand Airport. The current path is voluntary noise abatement, not a prohibition.\n\nNeighbors have asked for a ban. The records in front of the desk do not show one.",
+          topic: "infrastructure",
+          source_urls: [ANNOUNCE],
+          form: "explainer",
+          found: [],
+          unanswered: [],
+        }),
+      };
+    };
+    const result = await reportAndDraft(
+      { userId: "budget", lead, urls: [ANNOUNCE], memory: [] },
+      {
+        budgetMs: 10_000,
+        ingest: async (url) => {
+          if (url === ANNOUNCE) return DOCS[ANNOUNCE]!;
+          extraCalls += 1;
+          await new Promise(() => {});
+          return { url, title: url, text: "", extras: [] };
+        },
+        search: async () => {
+          extraCalls += 1;
+          await new Promise(() => {});
+          return [];
+        },
+        chat,
+        capture: async () => ({ version_id: 1, capture_event_id: 2 }),
+        hydrate: async () => [],
+      },
+    );
+    assert.equal(extraCalls, 0);
+    assert.ok(!("error" in result), "error" in result ? result.error : "");
+    if ("error" in result) return;
+    assert.match(result.body, /voluntary noise/i);
+  });
+
+  it("credits the originating Leader story URL, not the homepage listing", async () => {
+    const HOME = "https://www.longmontleader.com/";
+    const INDEX = "https://www.longmontleader.com/local-news";
+    const STORY =
+      "https://www.longmontleader.com/local-news/why-longmont-cant-simply-ban-noisy-airplanes-at-vance-brand-airport-123";
+    const airportLead: LeadRow = {
+      ...lead,
+      headline: "Why Longmont Can't Simply Ban Noisy Airplanes at Vance Brand Airport",
+      why: "Leader explainer on airport noise",
+      topic: "infrastructure",
+      source_urls: JSON.stringify([HOME, INDEX]),
+    };
+    const chat: ReportChat = async (system) => {
+      if (system === REPORT_RESEARCH_SYSTEM) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            news: "The city cannot simply ban noisy aircraft at Vance Brand.",
+            why_it_matters: "Neighbors have asked for a ban.",
+            angle: "airport noise ban",
+            form: "explainer",
+            questions: [],
+            fetch_urls: [],
+            unknowns: [],
+            follow: "",
+            lanes: { context: [], stakeholders: [], contradiction: [], gaps: [] },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        text: JSON.stringify({
+          headline: "Longmont cannot simply ban noisy planes at Vance Brand Airport",
+          dek: "Noise abatement is voluntary.",
+          body: "The Longmont Leader reported that the city cannot impose a simple ban on noisy aircraft at Vance Brand Airport.",
+          topic: "infrastructure",
+          source_urls: [HOME, INDEX],
+          form: "explainer",
+          found: [],
+          unanswered: [],
+        }),
+      };
+    };
+    const result = await reportAndDraft(
+      { userId: "credit", lead: airportLead, urls: [HOME, INDEX], memory: [] },
+      {
+        ingest: async (url) => {
+          if (url === HOME || url === INDEX) {
+            return {
+              url,
+              title: "Local news",
+              text: "Local news listing. Why Longmont Can't Simply Ban Noisy Airplanes at Vance Brand Airport.",
+              extras: [STORY],
+            };
+          }
+          if (url === STORY) {
+            return {
+              url,
+              title: "Why Longmont Can't Simply Ban Noisy Airplanes at Vance Brand Airport",
+              text: "Federal rules and the airport's grant assurances mean the city cannot simply ban noisy aircraft. The current path is voluntary noise abatement.",
+              extras: [],
+            };
+          }
+          return { url, title: url, text: "", extras: [] };
+        },
+        search: async () => [],
+        chat,
+        capture: async () => ({ version_id: 3, capture_event_id: 4 }),
+        hydrate: async () => [],
+      },
+    );
+    assert.ok(!("error" in result), "error" in result ? result.error : "");
+    if ("error" in result) return;
+    assert.equal(result.source_urls[0], STORY);
+    assert.match(
+      result.body,
+      /\[Longmont Leader\]\(https:\/\/www\.longmontleader\.com\/local-news\/why-longmont/,
+    );
+    assert.equal(
+      result.unanswered.some((u) => /full url of the originating story/i.test(u)),
+      false,
+    );
+  });
 });

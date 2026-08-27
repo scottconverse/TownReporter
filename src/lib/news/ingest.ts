@@ -266,6 +266,55 @@ export function discoverDocLinks(html: string, base: URL): string[] {
   return out;
 }
 
+export function looksLikeArticlePath(pathname: string): boolean {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  if (path === "/") return false;
+  if (/^\/(local-news|local|news|newsroom|stories|latest|section|category|tag|topics?)(\/)?$/i.test(path)) {
+    return false;
+  }
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length < 2) return false;
+  const last = parts[parts.length - 1] ?? "";
+  if (last.length < 12) return false;
+  return /[-_]/.test(last) || /\d{4}/.test(path) || last.length >= 24;
+}
+
+/** Same-host article URLs on a listing page — not PDFs, not section indexes. */
+export function discoverStoryLinks(html: string, base: URL): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const re = /<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const href = m[1]!;
+    if (href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:")) continue;
+    try {
+      const abs = new URL(href, base);
+      if (abs.protocol !== "http:" && abs.protocol !== "https:") continue;
+      if (abs.hostname.replace(/^www\./i, "") !== base.hostname.replace(/^www\./i, "")) continue;
+      if (!looksLikeArticlePath(abs.pathname)) continue;
+      const key = `${abs.origin}${abs.pathname}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(abs.toString());
+    } catch {
+      /* skip */
+    }
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+function mergePageExtras(html: string, base: URL, into: string[] = []): string[] {
+  for (const u of discoverDocLinks(html, base)) {
+    if (!into.includes(u)) into.push(u);
+  }
+  for (const u of discoverStoryLinks(html, base)) {
+    if (!into.includes(u)) into.push(u);
+  }
+  return into.slice(0, 16);
+}
+
 async function ingestYoutubeIfNeeded(url: URL): Promise<YoutubeIngest | null> {
   if (!isYoutubeUrl(url)) return null;
   return ingestYoutube(url);
@@ -411,7 +460,7 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
         rawBytes: buf.byteLength <= 4_000_000 ? buf : undefined,
       });
     }
-    const extras = discoverDocLinks(body, url);
+    const extras = mergePageExtras(body, url);
     let outText = text;
     let outTitle = title;
     let method = "html";
@@ -422,9 +471,7 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
         outText = rendered.text.slice(0, ARCHIVE_TEXT_CAP);
         outTitle = rendered.title || title;
         method = "playwright";
-        for (const extra of discoverDocLinks(rendered.html, new URL(rendered.finalUrl))) {
-          if (!extras.includes(extra)) extras.push(extra);
-        }
+        mergePageExtras(rendered.html, new URL(rendered.finalUrl), extras);
       }
     }
     return empty({
@@ -499,7 +546,7 @@ export async function ingestUrl(raw: string): Promise<IngestResult> {
     .trim()
     .slice(0, 14000);
   if (text.length < 40) throw new Error("Page had almost no readable text");
-  const extras = discoverDocLinks(body, url);
+  const extras = mergePageExtras(body, url);
   const alt = body.match(/rel=["']alternate["'][^>]*type=["']application\/(rss|atom)\+xml["'][^>]*href=["']([^"']+)/i);
   if (alt?.[2]) {
     try {

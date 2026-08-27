@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   discoverDocLinks,
+  discoverStoryLinks,
   extractPdfBetter,
   extractPdfText,
   mapLimit,
@@ -61,6 +62,30 @@ describe("discoverDocLinks", () => {
     assert.ok(found.includes("https://www.longmontcolorado.gov/minutes.html"));
     assert.ok(found.includes("https://civicclerk.example/agenda.pdf"));
     assert.equal(found.some((u) => u.startsWith("javascript:")), false);
+  });
+});
+
+describe("discoverStoryLinks", () => {
+  it("picks same-host article URLs off a Leader listing and skips the section index", () => {
+    const story =
+      "/local-news/why-longmont-cant-simply-ban-noisy-airplanes-at-vance-brand-airport-123";
+    const html = [
+      '<a href="/local-news">Local news</a>',
+      `<a href="${story}">Why Longmont Can't Simply Ban Noisy Airplanes</a>`,
+      '<a href="https://www.timescall.com/2026/08/other-longmont-airport-noise-story">no</a>',
+      '<a href="/about">About</a>',
+      '<a href="javascript:void(0)">no</a>',
+    ].join("");
+    const found = discoverStoryLinks(html, new URL("https://www.longmontleader.com/local-news"));
+    assert.ok(
+      found.some((u) => u.includes("why-longmont-cant-simply-ban-noisy-airplanes")),
+      found.join(" "),
+    );
+    assert.equal(
+      found.some((u) => u === "https://www.longmontleader.com/local-news"),
+      false,
+    );
+    assert.equal(found.some((u) => u.includes("timescall.com")), false);
   });
 });
 

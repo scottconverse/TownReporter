@@ -46,6 +46,14 @@ function How() {
           Every material claim should be checkable against a document we show.
         </p>
         <p>
+          <strong className="text-ink">Credit.</strong> When a story hangs on
+          another newsroom’s reporting — the Longmont Leader, the Times-Call,
+          the Daily Camera — we name them and link the exact story, not a
+          homepage. Linking is how a reader gets to the original work. We do
+          not copy their article, and we do not treat a section index as if we
+          opened the piece.
+        </p>
+        <p>
           <strong className="text-ink">Corrections.</strong> Errors get a public
           note. We would rather look careful than look first.
         </p>

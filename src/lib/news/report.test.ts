@@ -8,9 +8,13 @@ import {
   chooseStoryForm,
   collapseRepeatedParagraphs,
   describeSourceUrl,
+  isIndexUrl,
+  linkOutletInBody,
+  looksLikeArticleUrl,
   looksLikeRewrite,
   mergeProvenanceItem,
   parseFindings,
+  preferStoryUrls,
   provenanceFromUrls,
   resolvePublicFindings,
   stripAiFiller,
@@ -34,6 +38,41 @@ describe("describeSourceUrl", () => {
   it("uses the host only when the path is a homepage", () => {
     const d = describeSourceUrl("https://www.longmontcolorado.gov/");
     assert.equal(d.title, "longmontcolorado.gov");
+  });
+});
+
+describe("story credit URLs", () => {
+  const HOME = "https://www.longmontleader.com/";
+  const INDEX = "https://www.longmontleader.com/local-news";
+  const STORY =
+    "https://www.longmontleader.com/local-news/why-longmont-cant-simply-ban-noisy-airplanes-at-vance-brand-airport-123";
+  const HEADLINE = "Why Longmont Can't Simply Ban Noisy Airplanes at Vance Brand Airport";
+
+  it("treats a homepage and /local-news as indexes, not stories", () => {
+    assert.equal(isIndexUrl(HOME), true);
+    assert.equal(isIndexUrl(INDEX), true);
+    assert.equal(isIndexUrl(STORY), false);
+    assert.equal(looksLikeArticleUrl(STORY), true);
+    assert.equal(looksLikeArticleUrl(HOME), false);
+  });
+
+  it("promotes the originating article over the Leader homepage", () => {
+    const used = preferStoryUrls([HOME, INDEX], [STORY], HEADLINE);
+    assert.equal(used[0], STORY);
+    assert.ok(used.includes(HOME) || used.includes(INDEX));
+  });
+
+  it("turns the first Longmont Leader mention into a story link, not a homepage", () => {
+    const body = "The Longmont Leader reported that the city cannot simply ban noisy planes.";
+    const out = linkOutletInBody(body, [STORY]);
+    assert.match(out, /\[Longmont Leader\]\(https:\/\/www\.longmontleader\.com\/local-news\/why-longmont/);
+    assert.doesNotMatch(out, /\]\(https:\/\/www\.longmontleader\.com\/\)/);
+  });
+
+  it("does not nest a link inside an existing markdown credit", () => {
+    const body = `The [Longmont Leader](${STORY}) reported that the city cannot simply ban noisy planes.`;
+    const out = linkOutletInBody(body, [STORY]);
+    assert.equal(out, body);
   });
 });
 

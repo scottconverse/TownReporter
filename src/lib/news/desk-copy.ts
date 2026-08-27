@@ -5,6 +5,9 @@ export function organizationFromUrl(url: string): string {
     const host = new URL(url).hostname.replace(/^www\./i, "").replace(/^assets\./i, "");
     if (/bouldercounty\.gov$/i.test(host)) return "Boulder County";
     if (/longmontcolorado\.gov$/i.test(host)) return "City of Longmont";
+    if (/longmontleader\.com$/i.test(host)) return "Longmont Leader";
+    if (/timescall\.com$/i.test(host)) return "Longmont Times-Call";
+    if (/dailycamera\.com$/i.test(host)) return "Daily Camera";
     if (/svvsd\.org$/i.test(host)) return "St. Vrain Valley Schools";
     if (/nextlight\.net$/i.test(host)) return "NextLight";
     const base = host.split(".")[0] ?? host;
@@ -313,6 +316,40 @@ export function workingLeads<T extends { status: string }>(leads: T[]): T[] {
 /** Open work for the command center: not published, not killed. */
 export function openLeads<T extends { status: string }>(leads: T[]): T[] {
   return leads.filter((l) => l.status !== "killed" && l.status !== "published");
+}
+
+/** Workbench draft errors. Not scan copy, not Dark Desk “Keep digging”. */
+export function editorDraftError(raw: string | null | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const t = raw.trim();
+  if (
+    /timeout|timed out|aborted|network|failed to fetch|504|503|502|econnreset|socket hang up|unexpected server error/i.test(
+      t,
+    )
+  ) {
+    return "The draft did not finish in time. Sources were slow or the writing pass ran long. Click Draft with AI again.";
+  }
+  if (/rate limit/i.test(t)) {
+    return "Drafting paused so the desk does not burn through the hourly allowance. Try again in a bit.";
+  }
+  if (
+    /403/.test(t) ||
+    /forbidden/i.test(t) ||
+    /xai api error/i.test(t) ||
+    /api error/i.test(t) ||
+    /AI is not available/i.test(t)
+  ) {
+    return "The writing model did not finish this draft. Click Draft with AI again.";
+  }
+  if (/empty model response/i.test(t)) {
+    return "The writing model returned nothing this pass. Click Draft with AI again.";
+  }
+  if (/unreadable/i.test(t)) {
+    return "The draft came back in a form the desk could not read. Click Draft with AI again.";
+  }
+  if (/lead not found/i.test(t)) return "That lead is not on this desk.";
+  if (/restore this lead/i.test(t)) return t;
+  return plainEditorText(t);
 }
 
 /** Scan-facing model errors. Do not reuse Dark Desk “Keep digging” copy. */

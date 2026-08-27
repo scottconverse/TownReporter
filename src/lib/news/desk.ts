@@ -607,6 +607,7 @@ export const draftLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((leadId: number) => leadId)
   .handler(async ({ context, data: leadId }) => {
+    try {
     const sql = await getSql();
     const leads = await sql<LeadRow>`
       select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at, notes_json
@@ -686,6 +687,11 @@ export const draftLead = createServerFn({ method: "POST" })
     await audit(context.userId, "draft", String(leadId));
 
     return { ok: true as const };
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : "Draft failed";
+      console.error("[desk] draftLead failed", err);
+      return { ok: false as const, error: raw };
+    }
   });
 
 export const saveReportingNotes = createServerFn({ method: "POST" })

@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, Field, InkButton, leadOrigin } from "@/components/desk-chrome";
 import { EmptyState, WorkbenchSkeleton, Notice } from "@/components/states";
 import { draftLead, getLead, publishLead, saveDraft, saveReportingNotes } from "@/lib/news/desk";
@@ -11,6 +11,7 @@ import {
   parseNotes,
   type ReportingNotes,
 } from "@/lib/news/notes";
+import { editorDraftError } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
@@ -21,17 +22,20 @@ function StoryPage() {
   const { leadId } = Route.useParams();
   const id = Number(leadId);
   const qc = useQueryClient();
-  const { data, isPending } = useQuery({
-    queryKey: ["lead", id],
-    queryFn: () => getLead({ data: id }),
-  });
-
   const [headline, setHeadline] = useState("");
   const [dek, setDek] = useState("");
   const [body, setBody] = useState("");
   const [topic, setTopic] = useState("council");
   const [msg, setMsg] = useState("");
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
+  const [draftStartedAt, setDraftStartedAt] = useState<number | null>(null);
+  const hadBodyAtStart = useRef(false);
+
+  const { data, isPending } = useQuery({
+    queryKey: ["lead", id],
+    queryFn: () => getLead({ data: id }),
+    refetchInterval: draftStartedAt ? 3000 : false,
+  });
 
   useEffect(() => {
     if (!data?.draft) return;
@@ -42,18 +46,80 @@ function StoryPage() {
     if (data.articleSlug) setPublishedSlug(data.articleSlug);
   }, [data?.draft, data?.articleSlug]);
 
+  function draftLanded(draft: { body?: string | null; updated_at?: string } | null | undefined) {
+    if (!draft?.body) return false;
+    if (!hadBodyAtStart.current) return true;
+    if (!draftStartedAt) return true;
+    const t = Date.parse(draft.updated_at || "");
+    if (!Number.isFinite(t)) return true;
+    return t >= draftStartedAt - 5000;
+  }
+
   const draft = useMutation({
     mutationFn: () => draftLead({ data: id }),
-    onSuccess: async (res) => {
-      if (!res.ok) {
-        setMsg(res.error);
-        return;
-      }
+    onMutate: () => {
       setMsg("");
+      hadBodyAtStart.current = Boolean(data?.draft?.body);
+      setDraftStartedAt(Date.now());
+    },
+    onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       await qc.invalidateQueries({ queryKey: ["leads"] });
+      if (res.ok) {
+        setDraftStartedAt(null);
+        setMsg("");
+        return;
+      }
+      const latest = qc.getQueryData(["lead", id]) as typeof data;
+      if (draftLanded(latest?.draft) || draftLanded(data?.draft)) {
+        setDraftStartedAt(null);
+        setMsg("");
+        return;
+      }
+      if (looksLikeDraftTimeout(res.error)) return;
+      setDraftStartedAt(null);
+      setMsg(editorDraftError(res.error) ?? res.error);
+    },
+    onError: async (err) => {
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      const latest = qc.getQueryData(["lead", id]) as typeof data;
+      if (draftLanded(latest?.draft) || draftLanded(data?.draft)) {
+        setDraftStartedAt(null);
+        setMsg("");
+        return;
+      }
+      const raw = err instanceof Error ? err.message : "Draft failed";
+      if (looksLikeDraftTimeout(raw)) return;
+      setDraftStartedAt(null);
+      setMsg(editorDraftError(raw) ?? "The draft did not finish. Click Draft with AI again.");
     },
   });
+
+  const waiting = draft.isPending || Boolean(draftStartedAt);
+
+  useEffect(() => {
+    if (!draftStartedAt) return;
+    if (draftLanded(data?.draft)) {
+      setDraftStartedAt(null);
+      setMsg("");
+      return;
+    }
+    const remain = 120_000 - (Date.now() - draftStartedAt);
+    const t = setTimeout(() => {
+      if (draftLanded(data?.draft)) {
+        setDraftStartedAt(null);
+        setMsg("");
+        return;
+      }
+      setDraftStartedAt(null);
+      if (!data?.draft?.body) {
+        setMsg(
+          "The draft did not finish in time. Sources were slow or the writing pass ran long. Click Draft with AI again.",
+        );
+      }
+    }, Math.max(1000, remain));
+    return () => clearTimeout(t);
+  }, [data?.draft, draftStartedAt]);
 
   const save = useMutation({
     mutationFn: () =>
@@ -173,8 +239,14 @@ function StoryPage() {
         <section className="story-work">
           <div className="work-bar">
             {!locked && !onPaper ? (
-              <InkButton disabled={draft.isPending} onClick={() => draft.mutate()}>
-                {draft.isPending ? "Drafting…" : data.draft?.body ? "Redraft" : "Draft with AI"}
+              <InkButton
+                disabled={waiting}
+                onClick={() => {
+                  if (waiting) return;
+                  draft.mutate();
+                }}
+              >
+                {waiting ? "Drafting…" : data.draft?.body ? "Redraft" : "Draft with AI"}
               </InkButton>
             ) : null}
             {data.draft && !locked && !onPaper ? (
@@ -213,8 +285,8 @@ function StoryPage() {
               </p>
             ) : null}
           </div>
-          {draft.isPending ? (
-            <Busy label="Reporting first — following the trail, then drafting." />
+          {waiting ? (
+            <Busy label="Reporting first — following the trail, then drafting. Stay on this page." />
           ) : null}
           {publish.isPending ? <Busy label="Sending this to the paper…" /> : null}
           {msg && !onPaper ? (
@@ -250,7 +322,7 @@ function StoryPage() {
               </Field>
               {data.draft.form ? <p className="meta">Form · {data.draft.form}</p> : null}
             </form>
-          ) : (
+          ) : waiting ? null : (
             <p className="meta" style={{ marginTop: 14 }}>
               {locked
                 ? "This lead was killed. Nothing to draft."
@@ -260,6 +332,12 @@ function StoryPage() {
         </section>
       </div>
     </DeskShell>
+  );
+}
+
+function looksLikeDraftTimeout(raw: string): boolean {
+  return /timeout|timed out|aborted|network|failed to fetch|504|503|502|econnreset|socket hang up|unexpected server error/i.test(
+    raw,
   );
 }
 

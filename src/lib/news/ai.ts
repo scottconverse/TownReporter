@@ -89,6 +89,9 @@ export async function grokChat(
     return { ok: false, error: `${llm.label} request timed out` };
   }
   if (res.status === 429 || res.status >= 500) {
+    if (timeoutMs < 30_000) {
+      return { ok: false, error: `${llm.label} API error ${res.status}` };
+    }
     await new Promise((r) => setTimeout(r, 800));
     try {
       res = await fetch(url, {

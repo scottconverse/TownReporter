@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   composeZeroLeadSummary,
   editorError,
+  editorDraftError,
   editorFetchError,
   editorKindLabel,
   editorPauseReason,
@@ -256,6 +257,18 @@ describe("Worth a Look presentation", () => {
     assert.match(msg, /no new leads/i);
     assert.doesNotMatch(msg, /xAI/);
     assert.doesNotMatch(msg, /Keep digging/);
+  });
+
+  it("translates a draft timeout into editor English, not Dark Desk copy", () => {
+    const msg = editorDraftError("xAI request timed out");
+    assert.ok(msg);
+    assert.match(msg!, /did not finish in time/i);
+    assert.match(msg!, /Draft with AI again/i);
+    assert.doesNotMatch(msg!, /xAI/);
+    assert.doesNotMatch(msg!, /Keep digging/);
+    assert.doesNotMatch(msg!, /scan/i);
+    const gateway = editorDraftError("504");
+    assert.match(gateway!, /Draft with AI again/i);
   });
 
   it("classifies Dark Desk stops without a new column", () => {
