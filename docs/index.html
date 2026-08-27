@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TownReporter — the public record is only the beginning</title>
+<meta name="description" content="A civic newsroom you run yourself. Public paper, signed-in editor desk. Meetings, packets, tapes. Nothing prints until a person publishes. MIT licensed.">
+<meta name="color-scheme" content="light">
+<meta property="og:title" content="TownReporter">
+<meta property="og:description" content="The public record is only the beginning. A civic newsroom you run yourself. Nothing prints until a person publishes.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://scottconverse.github.io/TownReporter/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23f6f1e7'/%3E%3Crect x='6' y='7' width='20' height='3' fill='%239b2915'/%3E%3Crect x='6' y='14' width='20' height='2' fill='%231c1410'/%3E%3Crect x='6' y='19' width='14' height='2' fill='%231c1410'/%3E%3Crect x='6' y='24' width='17' height='2' fill='%231c1410'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f6f1e7;
+    --paper-2: #efe6d6;
+    --ink: #1c1410;
+    --ink-2: #3a3129;
+    --muted: #6b5e52;
+    --rule: #cfc2ac;
+    --rust: #9b2915;
+    --rust-2: #7a1f10;
+    --blush: #e8b4a8;
+    --panel: #fffdf8;
+    --display: "Fraunces", "Source Serif 4", Georgia, serif;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation: none !important; transition: none !important; }
+  }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 18px/1.6 var(--serif);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+  a { color: inherit; }
+  :focus-visible {
+    outline: 2px solid var(--rust);
+    outline-offset: 3px;
+  }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  .skip {
+    position: absolute; left: -999px; top: 8px;
+    background: var(--ink); color: var(--paper);
+    padding: 8px 14px; z-index: 40;
+  }
+  .skip:focus { left: 8px; }
+
+  .nav {
+    position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--paper) 90%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--rule);
+  }
+  .nav-in { display: flex; align-items: center; gap: 16px; height: 58px; }
+  .brand {
+    font-family: var(--display); font-weight: 600; letter-spacing: -0.02em;
+    font-size: 1.15rem; text-decoration: none; display: inline-flex;
+    align-items: center; gap: 10px;
+  }
+  .mark { width: 18px; height: 18px; flex: none; }
+  .nav-links { display: flex; gap: 22px; margin-left: auto; align-items: center; }
+  .nav-links a {
+    font-family: var(--sans); font-size: 13.5px; color: var(--muted);
+    text-decoration: none; letter-spacing: 0.02em;
+  }
+  .nav-links a:hover { color: var(--ink); }
+  .ghost {
+    border: 1px solid var(--ink); padding: 7px 14px;
+    font-size: 13.5px; text-decoration: none; background: transparent;
+    display: inline-block; font-family: var(--sans); font-weight: 600;
+  }
+  .ghost:hover { background: var(--ink); color: var(--paper); }
+  .menu { margin-left: auto; display: none; }
+  .menu summary {
+    list-style: none; cursor: pointer; border: 1px solid var(--ink);
+    padding: 7px 13px; font-size: 13.5px; background: var(--paper);
+    font-family: var(--sans);
+  }
+  .menu summary::-webkit-details-marker { display: none; }
+  .menu[open] .menu-panel { display: flex; }
+  .menu-panel {
+    display: none; position: absolute; right: 24px; left: 24px; margin-top: 10px;
+    flex-direction: column; gap: 2px; background: var(--panel);
+    border: 1px solid var(--rule); padding: 8px;
+  }
+  .menu-panel a {
+    padding: 10px 12px; text-decoration: none; font-size: 15px;
+    font-family: var(--sans);
+  }
+  .menu-panel a:hover { background: var(--paper-2); }
+  @media (max-width: 860px) {
+    .nav-links { display: none; }
+    .menu { display: block; }
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(2.2rem, 5.4vw, 3.4rem); line-height: 1.08;
+    letter-spacing: -0.03em; margin: 0 0 18px; font-weight: 600;
+    text-wrap: balance;
+  }
+  h2 {
+    font-family: var(--display);
+    font-size: clamp(1.5rem, 3vw, 2rem); line-height: 1.2;
+    letter-spacing: -0.02em; margin: 0 0 14px; font-weight: 600;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--display); font-size: 1.15rem;
+    margin: 0 0 8px; font-weight: 600;
+  }
+  p { margin: 0 0 16px; }
+  .lede { font-size: clamp(1.05rem, 2vw, 1.22rem); color: var(--ink-2); max-width: 60ch; }
+  .eyebrow {
+    font-family: var(--sans); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.16em; color: var(--rust); font-weight: 700; margin: 0 0 12px;
+  }
+  .prose { max-width: 64ch; }
+  .prose p { color: var(--ink-2); }
+  .prose strong { color: var(--ink); font-weight: 600; }
+  section { padding: 72px 0; border-top: 1px solid var(--rule); scroll-margin-top: 70px; }
+  section:first-of-type { border-top: none; }
+
+  .hero { padding: 64px 0 56px; border-top: none; }
+  .hero-grid {
+    display: grid; grid-template-columns: 1.08fr 0.92fr; gap: 48px; align-items: center;
+  }
+  @media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; gap: 36px; } }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 26px 0 0; }
+  .btn {
+    background: var(--ink); color: var(--paper); text-decoration: none;
+    padding: 11px 20px; font-weight: 600; font-size: 15px;
+    display: inline-block; border: 1px solid var(--ink);
+    font-family: var(--sans);
+  }
+  .btn:hover { background: var(--ink-2); }
+  .btn-2 {
+    background: transparent; color: var(--ink); border: 1px solid var(--ink);
+    padding: 11px 20px; font-weight: 600; font-size: 15px;
+    text-decoration: none; display: inline-block; font-family: var(--sans);
+  }
+  .btn-2:hover { background: var(--paper-2); }
+
+  .assign {
+    background: var(--panel); border: 1px solid var(--rule); padding: 6px;
+  }
+  .assign-row {
+    display: grid; grid-template-columns: 118px 1fr; gap: 14px; align-items: start;
+    padding: 15px 14px;
+  }
+  .assign-row + .assign-row { border-top: 1px solid var(--rule); }
+  .assign-what { font-size: 15px; color: var(--muted); line-height: 1.5; }
+  .assign-what b { display: block; color: var(--ink); font-weight: 600; font-size: 15px; font-family: var(--display); }
+  .kind {
+    display: inline-block; font-size: 11px; font-weight: 700; padding: 5px 10px;
+    letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--sans);
+  }
+  .k-watch { background: var(--paper-2); color: var(--ink); border: 1px solid var(--rule); }
+  .k-dig { background: #1c1410; color: var(--paper); }
+  .k-human { background: var(--blush); color: var(--rust-2); }
+  .assign-cap {
+    font-size: 13px; color: var(--muted); padding: 12px 14px 8px;
+    border-top: 1px solid var(--rule); margin: 2px 0 0; font-family: var(--sans);
+  }
+
+  .strip { border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+  .strip-in { display: flex; flex-wrap: wrap; gap: 10px; padding: 16px 0; }
+  .fact {
+    font-size: 13px; background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 999px; padding: 5px 13px; color: var(--muted);
+    font-family: var(--sans);
+  }
+  .fact b { color: var(--ink); font-weight: 650; }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--rule); padding: 22px;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  .grid-2 > *, .grid-3 > *, .hero-grid > * { min-width: 0; }
+  @media (max-width: 900px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  }
+
+  .fails { list-style: none; margin: 0; padding: 0; }
+  .fails li {
+    padding: 15px 0; border-top: 1px solid var(--rule);
+    display: grid; grid-template-columns: 210px 1fr; gap: 18px;
+  }
+  .fails li:first-child { border-top: none; padding-top: 0; }
+  .fails b { font-weight: 600; font-family: var(--display); }
+  .fails span { color: var(--ink-2); font-size: 16px; }
+  @media (max-width: 700px) { .fails li { grid-template-columns: 1fr; gap: 5px; } }
+
+  pre {
+    background: var(--ink); color: var(--paper-2); padding: 17px 19px;
+    overflow-x: auto; font-size: 13px; line-height: 1.6; margin: 0;
+  }
+  .t-dim { color: #a89884; }
+  .t-ok { color: #d4c4a0; }
+  .cap { font-size: 14px; color: var(--muted); margin: 10px 0 0; }
+
+  .steps { counter-reset: s; list-style: none; margin: 0; padding: 0; }
+  .steps li {
+    counter-increment: s; position: relative; padding: 0 0 26px 46px;
+    border-left: 2px solid var(--rule); margin-left: 13px;
+  }
+  .steps li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .steps li::before {
+    content: counter(s); position: absolute; left: -14px; top: -2px;
+    width: 27px; height: 27px; border-radius: 50%; background: var(--paper);
+    border: 1px solid var(--rule); color: var(--muted);
+    font-size: 12.5px; font-weight: 660; display: grid; place-items: center;
+    font-family: var(--sans);
+  }
+  .steps p { color: var(--ink-2); font-size: 16px; margin: 4px 0 0; }
+
+  .rooms { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--rule); }
+  .room { padding: 22px; }
+  .room + .room { border-left: 1px solid var(--rule); }
+  @media (max-width: 700px) {
+    .rooms { grid-template-columns: 1fr; }
+    .room + .room { border-left: none; border-top: 1px solid var(--rule); }
+  }
+
+  .limits { list-style: none; margin: 0; padding: 0; }
+  .limits li {
+    padding: 13px 0; border-top: 1px solid var(--rule); color: var(--ink-2);
+    font-size: 16px;
+  }
+  .limits li:first-child { border-top: none; }
+  .limits b { color: var(--ink); font-weight: 600; }
+
+  .warn {
+    border: 1px solid var(--rust); background: color-mix(in srgb, var(--blush) 35%, var(--paper));
+    padding: 16px 18px; font-size: 15px; color: var(--ink-2);
+  }
+  .warn b { color: var(--rust-2); }
+
+  footer { border-top: 1px solid var(--rule); padding: 40px 0 60px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 12px 26px; align-items: center;
+    font-size: 14px; color: var(--muted); font-family: var(--sans);
+  }
+  .foot a { color: var(--muted); text-decoration: none; }
+  .foot a:hover { color: var(--ink); text-decoration: underline; }
+  .foot .sep { margin-left: auto; }
+</style>
+</head>
+<body>
+
+<a class="skip" href="#top">Skip to content</a>
+
+<nav class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top"><svg class="mark" viewBox="0 0 18 18" aria-hidden="true"><rect width="18" height="18" fill="#f6f1e7"/><rect x="2" y="3" width="14" height="2.2" fill="#9b2915"/><rect x="2" y="8" width="14" height="1.4" fill="#1c1410"/><rect x="2" y="11.2" width="10" height="1.4" fill="#1c1410"/><rect x="2" y="14.4" width="12" height="1.4" fill="#1c1410"/></svg> TownReporter</a>
+    <div class="nav-links">
+      <a href="#idea">The idea</a>
+      <a href="#rooms">Two rooms</a>
+      <a href="#how">How it works</a>
+      <a href="#start">Install</a>
+      <a href="#limits">Limits</a>
+      <a class="ghost" href="https://github.com/scottconverse/TownReporter">GitHub</a>
+    </div>
+    <details class="menu">
+      <summary aria-label="Menu">Menu</summary>
+      <div class="menu-panel">
+        <a href="#idea">The idea</a>
+        <a href="#rooms">Two rooms</a>
+        <a href="#how">How it works</a>
+        <a href="#start">Install</a>
+        <a href="#limits">Limits</a>
+        <a href="https://github.com/scottconverse/TownReporter">GitHub</a>
+      </div>
+    </details>
+  </div>
+</nav>
+
+<main id="top">
+
+  <header class="wrap hero">
+    <div class="hero-grid">
+      <div>
+        <p class="eyebrow">Independent civic reporting</p>
+        <h1>The public record is only the beginning.</h1>
+        <p class="lede">TownReporter is a civic newsroom you run yourself. It watches meetings, money, contracts and public records — then keeps digging when something changes, disappears or doesn’t add up. A human still decides what prints.</p>
+        <div class="cta-row">
+          <a class="btn" href="#start">Run it yourself</a>
+          <a class="btn-2" href="https://github.com/scottconverse/TownReporter">View on GitHub</a>
+          <a class="btn-2" href="https://github.com/scottconverse/TownReporter/blob/main/docs/editor.md">Editor’s manual</a>
+        </div>
+      </div>
+
+      <div class="assign" role="table" aria-label="How the newsroom is assigned">
+        <div class="assign-row" role="row">
+          <span class="kind k-watch" role="cell">Watch</span>
+          <span class="assign-what" role="cell"><b>Cheap, deterministic</b>
+          City sites, PrimeGov packets, YouTube catalogs. Fetch, hash, notice what moved. No model required until you ask for leads.</span>
+        </div>
+        <div class="assign-row" role="row">
+          <span class="kind k-dig" role="cell">Investigate</span>
+          <span class="assign-what" role="cell"><b>Variable, costs tokens</b>
+          Dark Desk. Competing hypotheses, the whole tape, trails that were dead until new evidence. It never prints.</span>
+        </div>
+        <div class="assign-row" role="row">
+          <span class="kind k-human" role="cell">Human</span>
+          <span class="assign-what" role="cell"><b>The only publisher</b>
+          Hold, kill, or put it on the paper. Captions are not minutes. Names may be wrong. You are the check.</span>
+        </div>
+        <p class="assign-cap">Same three jobs on every story. The model does not get a masthead.</p>
+      </div>
+    </div>
+  </header>
+
+  <div class="strip">
+    <div class="wrap strip-in">
+      <span class="fact"><b>MIT</b> licensed</span>
+      <span class="fact"><b>Node 22</b></span>
+      <span class="fact"><b>Grok</b> default · any OpenAI-compatible gateway</span>
+      <span class="fact">Self-host <b>email + password</b></span>
+      <span class="fact">Nothing prints until an editor <b>publishes</b></span>
+    </div>
+  </div>
+
+  <section id="idea" class="wrap">
+    <p class="eyebrow">The idea</p>
+    <h2>Most local coverage dies in the packet</h2>
+    <div class="prose">
+      <p>The agenda is public. The five-hour tape is public. The staff report is public. Almost nobody reads them, and the one story that does get written is often a rewrite of the announcing source.</p>
+      <p>TownReporter is built for the other job: watch the civic record, follow what it doesn’t say, keep a copy when it vanishes, and put a reported story in front of an editor. The Longmont edition is the working proof — city council, planning, NextLight, St. Vrain Valley Schools, Boulder County, PrimeGov, the city channel, Longmont Public Media.</p>
+      <p>It is not the Times-Call, not the city, and not a replacement for either. It is a newsroom you can clone.</p>
+    </div>
+    <ul class="fails">
+      <li><b>The rewrite</b><span>A press release, restated. TownReporter’s draft pass is supposed to follow the attachment, the prior meeting, the missing minutes — then a person still has to report it.</span></li>
+      <li><b>The 12k slice</b><span>A five-hour hearing is not its first 1,800 characters of hold music. Transcripts are stored whole. Retrieval is supposed to find the vote, not the pre-session.</span></li>
+      <li><b>Captions as minutes</b><span>Auto-captions invent names. Packets and minutes are the official record. The tape is a map. The editor is told this; the software will not save you.</span></li>
+      <li><b>Uncertainty as a stop</b><span>Dark Desk does not gate on “we’re not sure.” Unknown, weak, and previously-dead trails stay investigable. Publication is a different button, on a different page.</span></li>
+      <li><b>The intern with a masthead</b><span>Scan files leads. Draft fills a workbench. Dark Desk fills a file. None of those print. Publish is a person.</span></li>
+    </ul>
+  </section>
+
+  <section id="rooms" class="wrap">
+    <p class="eyebrow">Two rooms</p>
+    <h2>The paper is public. The desk is not.</h2>
+    <div class="rooms">
+      <div class="room">
+        <h3>The paper</h3>
+        <p class="cap" style="margin:0 0 10px">Anyone</p>
+        <p style="font-size:16px;color:var(--ink-2);margin:0">Stories a human published. Sources shown. Compare versions when a cited record moved. Corrections in the open. RSS. About and How we report say the same thing this page says, on the masthead.</p>
+      </div>
+      <div class="room">
+        <h3>The desk</h3>
+        <p class="cap" style="margin:0 0 10px">Signed-in editors</p>
+        <p style="font-size:16px;color:var(--ink-2);margin:0">Watch list, scan, queue, workbench, reporting notes, research memo, Dark Desk. First account is owner. A second identity is not auto-granted editor. Notes never print.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="how" class="wrap">
+    <p class="eyebrow">How it works</p>
+    <h2>Watch, then follow, then a human gate</h2>
+    <ol class="steps">
+      <li>
+        <h3>Watch</h3>
+        <p>A list of civic sources — city, council, PrimeGov, planning, utilities, schools, county, the YouTube tapes. Starting point, not a fence.</p>
+      </li>
+      <li>
+        <h3>Detect</h3>
+        <p>A scan fetches those pages, hashes them against the last snapshot, and flags what changed, what disappeared, and what failed to appear when it usually does.</p>
+      </li>
+      <li>
+        <h3>Follow</h3>
+        <p>Before a story is drafted, the desk asks what the announcing source leaves unexplained, then follows attachments, names, contracts, parcels, prior meetings.</p>
+      </li>
+      <li>
+        <h3>Preserve</h3>
+        <p>Significant captures are stored. If a record later vanishes, the captured version remains, and the article says so.</p>
+      </li>
+      <li>
+        <h3>Investigate</h3>
+        <p>Dark Desk is the recursive lane. Competing hypotheses. The whole tape. Trails exhausted until new evidence reopened them. It does not print.</p>
+      </li>
+      <li>
+        <h3>Write, then gate</h3>
+        <p>Drafts are reported stories, not recaps. Hold, kill, or publish is a person. Every material claim should be checkable against a document you show.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section class="wrap">
+    <p class="eyebrow">Meetings</p>
+    <h2>Three records of the same night</h2>
+    <div class="grid-3">
+      <div class="panel">
+        <h3>Packet</h3>
+        <p class="cap" style="margin:0 0 10px">PrimeGov JSON + PDFs</p>
+        <p style="font-size:15px;color:var(--ink-2);margin:0">The catalog is an API, not a crawl of a login wall. Agenda, packet, and minutes are separate documents. YouTube titles join the matching meeting.</p>
+      </div>
+      <div class="panel">
+        <h3>Tape</h3>
+        <p class="cap" style="margin:0 0 10px">City channel + Public Media</p>
+        <p style="font-size:15px;color:var(--ink-2);margin:0">Full timestamped transcript, not a slice. Upcoming livestreams stay listed with no fake captions and are rechecked. Sister channel fills a gap. Month must match.</p>
+      </div>
+      <div class="panel">
+        <h3>Minutes</h3>
+        <p class="cap" style="margin:0 0 10px">The official action</p>
+        <p style="font-size:15px;color:var(--ink-2);margin:0">Captions are a map. Names may be wrong. Quotes need a check. Minutes not posted after 36 hours is a catalog note — a reason to look, not a story by itself.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="start" class="wrap">
+    <p class="eyebrow">Install</p>
+    <h2>Clone it. Create an editor. Point it at Grok — or at anything that speaks /v1.</h2>
+    <div class="grid-2">
+      <div>
+        <pre><span class="t-dim"># Node 22+, then:</span>
+git clone https://github.com/scottconverse/TownReporter.git
+cd TownReporter
+npm install
+npx playwright install chromium
+cp .env.example .env
+<span class="t-dim"># XAI_API_KEY=xai-…   from console.x.ai</span>
+npm run dev
+<span class="t-ok"># http://localhost:8080/login — create the owner account</span></pre>
+        <p class="cap">Playwright Chromium is for <b>Show transcript</b> and JS civic sites (Municode). PrimeGov packets still work without it — they are a JSON API.</p>
+      </div>
+      <div>
+        <div class="prose">
+          <p><strong>Grok is the default</strong> because one <code>XAI_API_KEY</code> is the shortest path. Scan, Draft, and Dark Desk use it until you set a gateway.</p>
+          <p>Any OpenAI-compatible <code>/v1/chat/completions</code> endpoint works with three env vars — LiteLLM, Bifrost, Helicone, MLflow, Kong, Ollama, OpenAI, OpenRouter. No extra npm package. Bifrost’s own port is 8080; that is TownReporter — map it to 4000.</p>
+          <p>Unset <code>DATABASE_URL</code> and you get embedded PGLite. Fine for a look. <strong>Data dies when the process stops.</strong> A newsroom wants Postgres.</p>
+        </div>
+        <p class="cap"><a href="https://github.com/scottconverse/TownReporter/blob/main/docs/setup.md"><b>Operator setup</b></a>
+        · <a href="https://github.com/scottconverse/TownReporter/blob/main/docs/editor.md">Editor’s manual</a>
+        · <a href="https://github.com/scottconverse/TownReporter/blob/main/README.md">README</a></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <p class="eyebrow">Your city</p>
+    <h2>The Longmont edition is the example, not a fence</h2>
+    <div class="prose">
+      <p>There is no city-picker UI. Edit <code>src/lib/paper.ts</code> — name, city, kicker, and the seed source list — plus the YouTube channel pair if you have a city channel and a PEG sister. If the city uses PrimeGov, add the public portal URL. Rebuild.</p>
+      <p>That is the whole swap. Seeds upsert; they do not silently rewrite a watch list you already accepted. Full notes in the <a href="https://github.com/scottconverse/TownReporter/blob/main/docs/setup.md#point-it-at-another-city">operator setup</a>.</p>
+    </div>
+  </section>
+
+  <section id="limits" class="wrap">
+    <p class="eyebrow">Status and limits</p>
+    <h2>What this is not</h2>
+    <div class="warn">
+      <b>Drafts are AI-assisted.</b> Models invent facts, misattribute quotes, and mangle names — especially from auto-captions. TownReporter does not fact-check for you. You are solely responsible for everything that appears on the paper. This is not a substitute for professional journalism, not legal advice, and not the city.
+    </div>
+    <ul class="limits" style="max-width:64ch;margin-top:8px">
+      <li><b>Not a newspaper of record.</b> It is a newsroom you run. Treat every draft as a first draft you still have to report.</li>
+      <li><b>GitHub Pages is this landing page, not the app.</b> The newsroom is Node. Clone it, or deploy to a host that can run Node 22, Playwright Chromium, and Postgres.</li>
+      <li><b>Playwright on serverless is a maybe.</b> Meeting transcripts need a real Chromium. A Vercel function usually cannot open one. Packets still ingest.</li>
+      <li><b>First user is owner.</b> A second account is 403 until you insert them into <code>newsroom_members</code>. There is no invite screen yet.</li>
+      <li><b>PGLite is a demo database.</b> Use Postgres if you care about the archive.</li>
+      <li><b>City swap is code, not a dropdown.</b> Search the repo for the old city name after you change <code>PAPER.city</code>.</li>
+      <li><b>Dark Desk has no publish button.</b> That is not a missing feature.</li>
+    </ul>
+  </section>
+
+  <section class="wrap" style="text-align:center">
+    <h2>Start from the Longmont edition</h2>
+    <p class="lede" style="margin:0 auto">It already watches PrimeGov, two YouTube channels, and the usual civic beat. Clone it, then change the seed rather than starting from an empty watch list.</p>
+    <div class="cta-row" style="justify-content:center">
+      <a class="btn" href="https://github.com/scottconverse/TownReporter">View on GitHub</a>
+      <a class="btn-2" href="https://github.com/scottconverse/TownReporter/blob/main/docs/setup.md">Operator setup</a>
+      <a class="btn-2" href="https://github.com/scottconverse/TownReporter/blob/main/docs/editor.md">Editor’s manual</a>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>TownReporter</span>
+    <a href="https://github.com/scottconverse/TownReporter">Repository</a>
+    <a href="https://github.com/scottconverse/TownReporter/blob/main/README.md">README</a>
+    <a href="https://github.com/scottconverse/TownReporter/blob/main/docs/setup.md">Setup</a>
+    <a href="https://github.com/scottconverse/TownReporter/blob/main/docs/editor.md">Editor</a>
+    <a href="https://github.com/scottconverse/TownReporter/blob/main/CHANGELOG.md">Changelog</a>
+    <span class="sep"><a href="https://github.com/scottconverse/TownReporter/blob/main/LICENSE">MIT licensed</a> · Scott Converse</span>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.2 — 2026-08-26
+
+Product documentation. Clone-and-run was not a product.
+
+- Full README: pitch, disclaimer, two rooms, how it works, city swap, FAQ.
+- Operator manual: `docs/setup.md` — Node 22, env, Playwright, Postgres, gateways, Vercel limits, second editor, city swap via `paper.ts`.
+- Editor manual: `docs/editor.md` — login through publish, meetings/tapes (captions are not minutes), Dark Desk piles, corrections.
+- Marketing landing: `docs/index.html` (cream / ink / rust) for GitHub Pages from `/docs`. `docs/.nojekyll`.
+- `package.json` `engines.node` `>=22`.
+
 ## 0.3.1 — 2026-08-26
 
 Self-host pack. Clone it, run it, point it at Grok or any OpenAI-compatible gateway.
