@@ -1,6 +1,6 @@
 # Dark Desk — editor UI brief (for design)
 
-As of **0.3.9** the investigative engine is unchanged from 0.3.0. This is the signed-in investigative desk at `/desk/dark`. It is **not** the public paper and **not** the reporting queue.
+As of **0.4.0** the hop engine is the same as 0.3.0. Keep digging is a persisted job; Start digging no longer dumps the last 16 snapshots into the file. This is the signed-in investigative desk at `/desk/dark`. It is **not** the public paper and **not** the reporting queue.
 
 A designer is coming in because the current page is still not a usable newsroom surface. This note is the contract. Do not treat it as finished UI.
 

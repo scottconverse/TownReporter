@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.3.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.9)** — 26 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.4.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.4.0)** — 27 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
@@ -53,7 +53,7 @@ cp .env.example .env              # then add at least XAI_API_KEY
 npm run dev                       # http://localhost:8080
 ```
 
-Open [http://localhost:8080/login](http://localhost:8080/login) and **create an editor account** (email + password). The first account becomes the newsroom owner. That account lives in your database, not Grok’s.
+Open [http://localhost:8080/login](http://localhost:8080/login) and **create an editor account** (email + password). With no `NEWSROOM_SETUP_TOKEN`, the first account becomes the newsroom owner. On a public host, set that token — signup alone does not own the desk. The account lives in your database, not Grok’s.
 
 The public paper is `/`. The desk is `/desk`.
 
@@ -74,27 +74,15 @@ Same six moves the paper itself describes at `/how-we-report`:
 
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
-### This release (0.3.9)
+### This release (0.4.0)
 
-- **Paper inputs have borders again.** Archive search and the newsletter box were drawing with no padding and no rule.
-- **Version is not in the desk masthead.** It lives in the account chip and the paper footer.
-- **Pulled notes** uses the same does-not-print chip as reporting notes. Publish saves that box.
+- **Durable jobs.** Scan, Draft, and Keep digging persist a job and return. The desk watches the row. That drain lives in the same Node process — a Vercel function may not finish it.
+- **Setup token.** `NEWSROOM_SETUP_TOKEN` on a public host: signup is not ownership until the token is presented.
+- **One newsroom.** Desk data is keyed by `newsroom_id`. Dark Start no longer dumps 16 snapshots into a new file.
+- **Honest OCR.** Image-only PDFs are unread. There is no JPEG-as-chat OCR.
+- **Lifecycle CI.** Create the desk, file a lead, publish, post a correction.
 
-Also in 0.3.8: Start digging no longer hides the card when the open fails.
-
-- **Start digging actually starts, or says why not.** A failed open used to hide the card and the error with it. The card stays. Reload also brings vanished cards back (claims are no longer sticky for the session).
-
-Also in 0.3.7: Redraft does not die on a cookie glitch.
-
-- **Redraft does not die on a cookie glitch.** A TanStack sign-in helper threw `Cannot destructure property 'setCookie'` after you clicked Redraft even though you were still signed in. That click can finish now.
-
-Also in 0.3.6: primary documents first, Pull on still-to-pull, claims with URLs.
-
-- **Primary documents first.** Draft with AI searches for the named company’s or agency’s own press release before it rewrites another paper. The Ursa Major plant story should open their `/media/press-release/` page, not stop at the Longmont Leader homepage.
-- **Pull a still-to-pull line.** It searches, opens what it finds, and drops the excerpt into a box under the story that does not print. Redraft reads that box.
-- **Claims with URLs.** Load-bearing numbers, names, dates, and quotes are listed in notes with the document they came from.
-
-Also in 0.3.3–0.3.5: Mountain Time masthead, overlapping printed headlines collapse, Draft with AI paints without a reload, credit the originating newsroom with a story URL.
+Also in 0.3.3–0.3.8: Mountain Time masthead, overlapping printed headlines collapse, Draft with AI paints without a reload, Redraft survives the cookie glitch, Start digging keeps the card on a failed open.
 
 ### Meetings, tapes, packets
 
@@ -162,7 +150,7 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 
 ## Sign-in
 
-- **Self-host:** email + password on `/login`. First account is owner. A second identity is **not** auto-granted editor.
+- **Self-host:** email + password on `/login`. With no setup token, the first account is owner. A second identity is **not** auto-granted editor. Set `NEWSROOM_SETUP_TOKEN` on a public host.
 - **This grok.me preview:** Google / X via Grok’s broker (those buttons only show on `*.grok.me`).
 - Local with no login at all: `VITE_AUTH_ENABLED=false`. Do not do that on a public host.
 

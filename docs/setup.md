@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.3.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.9).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.4.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.4.0).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -180,15 +180,18 @@ Hosted: any Node 22 host with the env vars above. Vercel works for the paper + d
 
 Do not expect meeting-transcript Playwright to work on Vercel without extra infrastructure. See above.
 
+Scan, Draft, and Dark Keep digging persist a job and return. A worker in **this same Node process** drains the queue. That works on a long-running host. A Vercel serverless invocation may freeze after the click returns, so those jobs may not finish there. The paper and a typed draft still deploy; the in-process drain is not a substitute for a worker.
+
 ---
 
 ## Tests
 
 ```bash
 npm test
+npm run test:lifecycle   # needs the app on :8080 and Playwright Chromium
 ```
 
-Node’s built-in test runner. No network, no model calls. Coverage includes PrimeGov catalog matching, YouTube meeting join (including the June-vs-August museum false join), retrieval skipping hold-music transcript heads, draft notebook stripping, Mountain Time masthead dates, printed-headline collapse, workbench draft-landing, auth gates, and the Dark Desk loop.
+Node’s built-in test runner. No network, no model calls. Coverage includes PrimeGov catalog matching, YouTube meeting join (including the June-vs-August museum false join), retrieval skipping hold-music transcript heads, draft notebook stripping, Mountain Time masthead dates, printed-headline collapse, workbench draft-landing, auth gates, the Dark Desk loop, and durable jobs. CI also runs one Playwright lifecycle: create the desk, file a lead, publish, post a correction.
 
 ---
 

@@ -18,3 +18,33 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: File, publish, correct
+        env:
+          BETTER_AUTH_SECRET: ci-lifecycle-secret-not-for-production
+          LIFECYCLE_BASE_URL: http://127.0.0.1:8080
+        run: |
+          npm run dev > /tmp/townreporter-dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/; then
+              break
+            fi
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ || {
+            echo "dev server did not come up"
+            tail -n 80 /tmp/townreporter-dev.log || true
+            exit 1
+          }
+          node scripts/lifecycle-e2e.mjs

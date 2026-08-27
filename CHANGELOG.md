@@ -1,24 +1,24 @@
 # Changelog
 
-Current release: **0.3.9**.
+Current release: **0.4.0**.
 
-## Unreleased — 0.4.0 Hardening
+## 0.4.0 — 2026-08-27
 
-In progress. Version stays 0.3.9 until this gate closes.
+Hardening. Trustworthiness and lifecycle, not a redesign.
 
-- One newsroom row; members carry `newsroom_id`. Two concurrent first users can no longer both become owner.
+- One newsroom row; members carry `newsroom_id`. Two concurrent first users can no longer both become owner. Desk and Dark lists are keyed by that id. Investigate hops still write as the editor who opened the file.
+- `NEWSROOM_SETUP_TOKEN`: when set, creating an account does not own the desk until the token is presented. Preview with the token unset is still first-account-owns.
 - Chromium aborts subrequests to private/LAN/metadata addresses. Cron with no `CRON_SECRET` is disabled.
 - Captures store extracted vs raw hashes when bytes exist. Public provenance cannot be minted by the model for a URL we did not fetch.
 - Image-only PDFs are unread. JPEG-as-chat is not OCR.
-- `npm run typecheck` and GitHub Actions on test+types.
-- Command-center Start digging continues into research (same as Dark Desk).
-- Redraft saves Pulled notes first. Killed has Back. Queue All excludes killed.
-- Corrections render on the article. Published correction errors are errors. Draft text is per story.
-- Dark: no fake stage timer; Pick one does not open a blank file; send-to-queue is idempotent with a real topic; Set aside/Keep digging disabled while a round runs; findings / hypotheses / questions are separate.
+- Scan, Draft/Redraft, and Keep digging enqueue a persisted job and return. The UI watches `desk_jobs` / unfinished `scan_runs` / `investigating`. The drain is in-process — it runs on a long-lived Node host, not on a frozen serverless function.
+- Dark Start no longer dumps the last 16 snapshots into the file. Command-center Start digging continues into research. Keep digging / Set aside disabled while a round runs.
+- Redraft saves Pulled notes first. Killed has Back. Queue All excludes killed. Send-to-queue is idempotent with a real topic.
+- Corrections render on the article, timestamped. Published correction errors are errors.
 - Source URLs are links; kind/tier inferred from the host. Nested button-in-link removed. Forced-night Dark Desk hides the Light switch. Newsletter promise removed. GitHub tag is the source download.
-- Scan, Draft/Redraft, and Keep digging enqueue a persisted job and return. The UI watches `desk_jobs` / unfinished `scan_runs` / `investigating` — not a request that has to stay open.
-- `NEWSROOM_SETUP_TOKEN`: when set, creating an account does not own the desk until the token is presented. Preview with the token unset is still first-account-owns.
-- Desk and Dark lists are keyed by `newsroom_id`. Dark Start no longer dumps the last 16 snapshots into the file.
+- Filing a lead fills the workbench even when the first draft body is empty.
+- One Playwright lifecycle path in CI: create the desk → file a lead → publish → correction on the article. `npm run typecheck` and GitHub Actions on test+types.
+- Longmont edition. No mailer. No city picker. OCR is still unread-image, not an engine.
 
 ## 0.3.9 — 2026-08-26
 

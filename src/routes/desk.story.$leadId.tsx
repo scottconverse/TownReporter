@@ -52,10 +52,10 @@ function StoryPage() {
     if (!d) return;
     const fp = `${d.updated_at ?? ""}|${(d.body ?? "").length}|${d.headline ?? ""}`;
     if (!waitingSince) {
-      if (appliedFp.current === "" && d.body) {
+      if (appliedFp.current === "") {
         setHeadline(d.headline);
         setDek(d.dek);
-        setBody(stripReporterNotebook(d.body));
+        setBody(stripReporterNotebook(d.body ?? ""));
         setTopic(d.topic);
         appliedFp.current = fp;
       }
