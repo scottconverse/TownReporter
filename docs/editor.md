@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.3.5](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.5).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). This page is the whole newsroom.
 
@@ -242,6 +242,10 @@ Readers get:
 
 Homepages are not stand-ins for documents. Disappeared sources say so.
 
+The paper’s clock is **Mountain Time** (`America/Denver`). A Wednesday evening does not print as Thursday UTC.
+
+Overlapping printed headlines collapse; the longer body stays. Quiet-zone ×2 and survey ×2 drop. Distinct sessions (Airport Vision vs the Boulder County joint session) stay side by side. Search and live archive URLs are unchanged.
+
 How we report, in public: `/how-we-report`.
 
 ---
@@ -252,8 +256,11 @@ How we report, in public: `/how-we-report`.
 |---|---|---|
 | “AI is not available” | No model key | Operator: `XAI_API_KEY` or `LLM_*` ([setup.md](setup.md)) |
 | Scan fetched, filed nothing | Nothing new, or the model declined | Read the summary. Not automatically a bug. |
+| Draft with AI ran, form still empty | The click died; the writing pass may still be finishing | Stay on the page. It fills when the draft lands. Reload only if you left. |
 | Meeting has no transcript | Livestream hasn’t ended, or Playwright missing | Wait for the 6-hour recheck, or operator installs Chromium |
 | Names in a draft are wrong | Auto-captions | Check the packet. Fix the draft. Do not publish the caption. |
+| Dates look a day ahead | Host clock in UTC | Masthead uses `PAPER.timezone`. Tell the operator if it is still UTC. |
+| Two nearly identical headlines on the paper | Same news, two drafts published | The paper collapses overlapping headlines and keeps the longer body. |
 | Second person gets 403 | They are not in `newsroom_members` | Operator adds them. First user is owner. |
 | Desk wants sign-in again | Session expired | `/login` |
 | Notebook language on the paper | Strip failed or you pasted it | Edit the story. Kill if needed. Tell the operator. |

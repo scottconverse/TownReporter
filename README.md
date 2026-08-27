@@ -2,6 +2,8 @@
 
 > The public record is only the beginning.
 
+**Current release: [0.3.5](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.5)** — 26 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
 MIT licensed. Clone it. Point it at your city.
@@ -72,6 +74,13 @@ Same six moves the paper itself describes at `/how-we-report`:
 
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
+### This release (0.3.3 – 0.3.5)
+
+- **Mountain Time.** Masthead, bylines, and meeting-cadence math use `PAPER.timezone` (`America/Denver`). A Wednesday evening in Longmont no longer prints as Thursday UTC.
+- **The paper does not reprint itself.** Overlapping printed headlines collapse; the longer body stays. Archive URLs stay live.
+- **Draft with AI stays on the page.** If the click dies, the workbench keeps looking until the draft is on the lead, then fills headline / dek / body. Reload is not required.
+- **Credit the originating newsroom.** When a draft hangs on someone else’s reporting, it names them and links the **story URL**, not a homepage. How we report says so in public.
+
 ### Meetings, tapes, packets
 
 - **PrimeGov** (`longmont.primegov.com`) is a watched official source. The catalog comes from the public JSON API (upcoming + archived), not a headless crawl of the JS app. Agenda / packet / minutes PDFs are separate records. YouTube titles join the matching meeting.
@@ -84,7 +93,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 There is no city-picker UI. Edit the seed and rebuild.
 
-1. [`src/lib/paper.ts`](src/lib/paper.ts) — `PAPER` (name, city, state, location, kicker, deck) and `SEED_SOURCES` (your city site, council, agenda portal, school district, PEG channel).
+1. [`src/lib/paper.ts`](src/lib/paper.ts) — `PAPER` (name, city, state, location, **timezone**, kicker, deck) and `SEED_SOURCES` (your city site, council, agenda portal, school district, PEG channel).
 2. [`src/lib/news/youtube.ts`](src/lib/news/youtube.ts) — `LONGMONT_YOUTUBE_CHANNELS` if you have a city channel and a public-media sister.
 3. If the city uses PrimeGov, add `https://{city}.primegov.com/public/portal` as an official source. The ingest already speaks that API.
 
@@ -205,7 +214,7 @@ No. [docs/index.html](docs/index.html) is a static landing page. The app is Node
 npm test
 ```
 
-No network, no token spend. Meeting ingest, retrieval, draft stripping, auth, and Dark Desk loop coverage live in `src/lib/news/*.test.ts`.
+No network, no token spend. Meeting ingest, retrieval, draft stripping, Mountain Time dates, printed-headline collapse, version lock, auth, and Dark Desk loop coverage live in `src/lib/news/*.test.ts`.
 
 ---
 

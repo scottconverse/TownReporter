@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-For people who will clone, host, or retarget the newsroom. Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.3.5](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.5).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -188,13 +188,13 @@ Do not expect meeting-transcript Playwright to work on Vercel without extra infr
 npm test
 ```
 
-Node’s built-in test runner. No network, no model calls. Coverage includes PrimeGov catalog matching, YouTube meeting join (including the June-vs-August museum false join), retrieval skipping hold-music transcript heads, draft notebook stripping, auth gates, and the Dark Desk loop.
+Node’s built-in test runner. No network, no model calls. Coverage includes PrimeGov catalog matching, YouTube meeting join (including the June-vs-August museum false join), retrieval skipping hold-music transcript heads, draft notebook stripping, Mountain Time masthead dates, printed-headline collapse, workbench draft-landing, auth gates, and the Dark Desk loop.
 
 ---
 
 ## Point it at another city
 
-There is no settings screen for this. That is deliberate for v0.3 — the Longmont edition is the working proof, and a half-built city picker would lie. Edit the seed, rebuild.
+There is no settings screen for this. That is deliberate in 0.3.x — the Longmont edition is the working proof, and a half-built city picker would lie. Edit the seed, rebuild.
 
 ### 1. The masthead and the watch list
 
@@ -206,6 +206,7 @@ export const PAPER = {
   city: "YourCity",
   state: "YourState",
   location: "YourCity, YourState",
+  timezone: "America/Denver", // IANA. Masthead and meeting cadence use this, not UTC.
   tagline: "The public record is only the beginning.",
   kicker: "Independent civic reporting  ·  YourCity",
   deck: "…",

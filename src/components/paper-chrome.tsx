@@ -1,5 +1,6 @@
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { PAPER, formatDate } from "@/lib/paper";
+import { APP_VERSION } from "@/lib/version";
 import { SignedIn, SignedOut, UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 
@@ -154,7 +155,7 @@ export function PaperShell({
         </div>
         <footer className="mt-8 border-t border-ink pt-4 pb-10 text-sm text-muted">
           <p>
-            {PAPER.name} · {PAPER.location}. {PAPER.tagline} Free to reprint with
+            {PAPER.name} {APP_VERSION} · {PAPER.location}. {PAPER.tagline} Free to reprint with
             credit and a link back. Verify details against the official record.
           </p>
         </footer>

@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SourceZipBackupLink, SourceZipButton, SourceZipUrl } from "@/components/source-zip";
 import { PAPER } from "@/lib/paper";
+import { APP_VERSION } from "@/lib/version";
 
 export const Route = createFileRoute("/get-the-code")({
   component: GetTheCode,
@@ -18,7 +19,7 @@ function GetTheCode() {
         </p>
         <h1 className="font-display text-3xl font-semibold">Download the source</h1>
         <p className="text-ink-2">
-          The black button opens a real browser tab. This preview cannot save
+          This copy is TownReporter {APP_VERSION}. The black button opens a real browser tab. This preview cannot save
           files itself.
         </p>
         <SourceZipButton className="inline-flex min-h-12 w-full items-center justify-center bg-ink px-5 text-sm font-medium text-paper hover:bg-ink-2">

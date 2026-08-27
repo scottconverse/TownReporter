@@ -1,6 +1,7 @@
 import { Link, useMatchRoute, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { formatDate, PAPER } from "@/lib/paper";
+import { APP_VERSION } from "@/lib/version";
 import { UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 
@@ -76,6 +77,8 @@ export function DeskShell({
             </Link>
             <span className="brand-sub">
               {night ? "Dark Desk — investigates, never prints" : `Editor's desk — ${PAPER.city}`}
+              {" · "}
+              {APP_VERSION}
             </span>
           </div>
           <div className="mast-date">{formatDate(new Date())}</div>

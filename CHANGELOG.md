@@ -1,5 +1,7 @@
 # Changelog
 
+Current release: **0.3.5**. GitHub: [v0.3.5](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.5).
+
 ## 0.3.5 — 2026-08-26
 
 Draft with AI paints the workbench when the writing pass finishes, even if the click already died.
