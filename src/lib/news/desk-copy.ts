@@ -558,8 +558,37 @@ function properNounOverlap(a: string, b: string): boolean {
   return pa.filter((w) => pb.has(w)).length >= 2;
 }
 
-export function kindFromSourceUrl(url: string): "youtube" | "official" {
-  return /youtube\.com|youtu\.be/i.test(url) ? "youtube" : "official";
+export function kindFromSourceUrl(url: string): "youtube" | "official" | "news" | "social" {
+  if (/youtube\.com|youtu\.be/i.test(url)) return "youtube";
+  if (/twitter\.com|x\.com|facebook\.com|instagram\.com|nextdoor\.com|reddit\.com/i.test(url)) {
+    return "social";
+  }
+  if (
+    /times-?call|dailycamera|longmontleader|denverpost|bizwest|coloradopolitics|substack\.com|sentineltm|leftthandvalley/i.test(
+      url,
+    )
+  ) {
+    return "news";
+  }
+  return "official";
+}
+
+export function tierFromKind(kind: string): "A" | "B" | "C" {
+  if (kind === "official") return "A";
+  if (kind === "news" || kind === "youtube") return "B";
+  return "C";
+}
+
+export function topicFromText(text: string): string {
+  const t = text.toLowerCase();
+  if (/school|svvsd|st\.?\s*vrain|education/i.test(t)) return "schools";
+  if (/nextlight|water|utility|utilities|wastewater|power/i.test(t)) return "utilities";
+  if (/housing|zoning|land use|affordable/i.test(t)) return "housing";
+  if (/\bbudget\b|sales tax|mill levy|property tax/i.test(t)) return "budget";
+  if (/planning|comp plan|annex/i.test(t)) return "planning";
+  if (/road|bridge|infrastructure|pothole|transit/i.test(t)) return "infrastructure";
+  if (/election|ballot|mayor|council race/i.test(t)) return "elections";
+  return "council";
 }
 
 /** True when the workbench should paint a draft that arrived after Draft with AI. */

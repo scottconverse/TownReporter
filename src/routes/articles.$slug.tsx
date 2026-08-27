@@ -81,6 +81,21 @@ function ArticlePage() {
       <div className="enter-rise mt-8 max-w-2xl">
         <StoryBody body={article.body} />
       </div>
+      {article.corrections && article.corrections.length > 0 ? (
+        <section className="mt-10 max-w-2xl border-t border-rule pt-6">
+          <h2 className="font-display text-2xl font-semibold">Corrections</h2>
+          <ul className="mt-4 space-y-4">
+            {article.corrections.map((c, i) => (
+              <li key={i}>
+                <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
+                  {formatDate(c.date)}
+                </p>
+                <p className="mt-1 text-ink-2">{c.body}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <ProvenanceBlock
         items={provenance}
         findings={article.findings}

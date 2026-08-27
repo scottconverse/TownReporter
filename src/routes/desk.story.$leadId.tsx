@@ -87,14 +87,6 @@ function StoryPage() {
   }, [data?.lead.notes_json]);
 
   useEffect(() => {
-    if (!waitingSince) return;
-    const t = window.setInterval(() => {
-      void qc.refetchQueries({ queryKey: ["lead", id] });
-    }, 2000);
-    return () => window.clearInterval(t);
-  }, [waitingSince, id, qc]);
-
-  useEffect(() => {
     if (!waitingSince) {
       setSlowWait(false);
       return;
@@ -104,7 +96,12 @@ function StoryPage() {
   }, [waitingSince]);
 
   const draft = useMutation({
-    mutationFn: () => draftLead({ data: id }),
+    mutationFn: async () => {
+      await saveReportingNotes({
+        data: { leadId: id, scratch, todos: parseNotes(data?.lead.notes_json).todo },
+      });
+      return draftLead({ data: id });
+    },
     onMutate: () => {
       setMsg("");
       hadBodyAtStart.current = Boolean(data?.draft?.body);
@@ -150,6 +147,9 @@ function StoryPage() {
       return saveDraft({ data: { leadId: id, headline, dek, body, topic } });
     },
     onSuccess: () => setMsg("Saved."),
+    onError: (err) => {
+      setMsg(err instanceof Error ? err.message : "Could not save.");
+    },
   });
 
   const publish = useMutation({
@@ -170,6 +170,9 @@ function StoryPage() {
       await qc.invalidateQueries({ queryKey: ["published-desk"] });
       setPublishedSlug(res.slug);
       setMsg("On the paper.");
+    },
+    onError: (err) => {
+      setMsg(err instanceof Error ? err.message : "Could not publish.");
     },
   });
 
@@ -237,6 +240,27 @@ function StoryPage() {
           <p className="meta">
             {data.lead.topic} · filed {formatShortDate(data.lead.created_at)} · scored {score}/20 ·{" "}
             {leadOrigin(data.lead)}
+            {data.lead.investigation_id ? (
+              <>
+                {" · "}
+                <Link
+                  to="/desk/dark"
+                  className="inline-link"
+                  onClick={() => {
+                    try {
+                      sessionStorage.setItem(
+                        "townreporter.dark.openId",
+                        String(data.lead.investigation_id),
+                      );
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
+                >
+                  Open investigation
+                </Link>
+              </>
+            ) : null}
           </p>
           {fromDark ? (
             <p className="side-note">
@@ -477,8 +501,9 @@ function ReportingNotesPane({
       if (input.add) setLine("");
       return { previous };
     },
-    onError: (_err, _input, ctx) => {
+    onError: (_err, input, ctx) => {
       if (ctx?.previous) qc.setQueryData(["lead", leadId], ctx.previous);
+      if (input.add) setLine(input.add);
     },
     onSettled: async () => {
       await qc.invalidateQueries({ queryKey: ["lead", leadId] });

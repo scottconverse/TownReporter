@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton } from "@/components/states";
 import { addSource, addSourcesBulk, listSources, setSourceStatus } from "@/lib/news/desk";
-import { editorFetchError, kindFromSourceUrl } from "@/lib/news/desk-copy";
+import { editorFetchError, kindFromSourceUrl, tierFromKind } from "@/lib/news/desk-copy";
 import { formatShortDate } from "@/lib/paper";
 import type { SourceRow } from "@/lib/news/types";
 
@@ -24,7 +24,14 @@ function SourcesPage() {
   const [addedId, setAddedId] = useState<number | null>(null);
   const add = useMutation({
     mutationFn: () =>
-      addSource({ data: { url, title, kind: kindFromSourceUrl(url), tier: "A" } }),
+      addSource({
+        data: {
+          url,
+          title,
+          kind: kindFromSourceUrl(url),
+          tier: tierFromKind(kindFromSourceUrl(url)),
+        },
+      }),
     onSuccess: (res) => {
       if (!res.ok) {
         setNotice({ kind: "err", text: res.error });
@@ -234,17 +241,25 @@ function SourceTable({
       <tbody>
         {rows.map((s) => (
           <tr key={s.id} className={"lead-tr" + (addedId === s.id ? " just-added" : "")}>
-            <td className="td-hl">
+            <td className="td-hl" data-label="Source">
               <span className="src-t">{s.title}</span>
-              <span className="meta-inline block">{s.url}</span>
+              <span className="meta-inline block">
+                {/^https?:/i.test(s.url) ? (
+                  <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
+                    {s.url}
+                  </a>
+                ) : (
+                  s.url
+                )}
+              </span>
               {s.last_error ? (
                 <span className="warn-inline">{editorFetchError(s.last_error, s.url) ?? s.last_error}</span>
               ) : null}
             </td>
-            <td className="td-meta">{s.tier}</td>
-            <td className="td-meta">{s.kind}</td>
-            <td className="td-meta">{s.last_fetched_at ? formatShortDate(s.last_fetched_at) : "—"}</td>
-            <td className="td-acts">
+            <td className="td-meta" data-label="Tier">{s.tier}</td>
+            <td className="td-meta" data-label="Kind">{s.kind}</td>
+            <td className="td-meta" data-label="Last fetched">{s.last_fetched_at ? formatShortDate(s.last_fetched_at) : "—"}</td>
+            <td className="td-acts" data-label="Actions">
               <span className="row-acts">
                 {acts.includes("accepted") ? (
                   <InkButton tone="quiet" small onClick={() => onStatus(s.id, "accepted")}>

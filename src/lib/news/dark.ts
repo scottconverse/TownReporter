@@ -16,7 +16,7 @@ import { sanitizePublicUrls } from "./schema";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types";
 import { rankWorthItems, presentWorthItem, type WorthSeed } from "./worth-a-look";
 import { openInvestigationForEditor } from "./dark-open";
-import { titlesOverlap } from "./desk-copy";
+import { titlesOverlap, topicFromText } from "./desk-copy";
 
 export { openInvestigationForEditor } from "./dark-open";
 
@@ -755,11 +755,13 @@ export const findSomethingToDigInto = createServerFn({ method: "POST" })
       where user_id = ${context.userId}
         and status in ('open', 'investigating', 'paused')
     `;
-    const top =
-      items.find((item) => !active.some((row) => titlesOverlap(item.title, row.title))) ?? items[0];
+    const top = items.find((item) => !active.some((row) => titlesOverlap(item.title, row.title)));
+    if (!top?.seed?.trim() && !top?.title?.trim()) {
+      return { ok: false as const, error: "nothing-new" };
+    }
     const opened = await openInvestigationForEditor(context.userId, {
-      paste: top?.seed ?? "",
-      title: top?.title,
+      paste: top.seed,
+      title: top.title,
     });
     await audit(context.userId, "dark", `open inv ${opened.investigationId} from worth-a-look`);
     return opened;
@@ -912,19 +914,29 @@ export const queueInvestigation = createServerFn({ method: "POST" })
       from investigations where id = ${id} and user_id = ${context.userId} limit 1
     `;
     if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
+    const already = await sql<{ id: number }>`
+      select id from leads
+      where investigation_id = ${id} and user_id = ${context.userId}
+      order by id asc limit 1
+    `;
+    if (already[0]) {
+      await audit(context.userId, "dark-handoff", `inv ${id} existing lead ${already[0].id}`);
+      return { ok: true as const, leadId: already[0].id };
+    }
     const arts = await sql<{ url: string }>`
       select url from artifacts
       where user_id = ${context.userId} and investigation_id = ${id}
       order by id desc limit 12
     `;
     const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
+    const topic = topicFromText(`${inv[0].title}\n${inv[0].summary}`);
     const created = await sql<{ id: number }>`
       insert into leads (user_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
       values (
         ${context.userId},
         ${inv[0].title.slice(0, 240)},
         ${`DARK DESK notes. Publication is a separate human action.\n\n${inv[0].summary}`.slice(0, 4000)},
-        'council',
+        ${topic},
         'new',
         ${urls},
         ${inv[0].summary.slice(0, 4000)},

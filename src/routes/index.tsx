@@ -1,17 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ArrowRight, Search } from "lucide-react";
 import { twMerge } from "tailwind-merge";
 import { PaperShell, TopicChip } from "@/components/paper-chrome";
 import { StoryBody } from "@/components/story-body";
-import { EditionSkeleton, EmptyState, FetchingRule, Notice } from "@/components/states";
+import { EditionSkeleton, EmptyState, FetchingRule } from "@/components/states";
 import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
 import {
   listPublishedArticles,
   listPublishedByTopic,
   searchPublished,
-  subscribeNewsletter,
 } from "@/lib/news/public";
 import { PAPER, TOPICS, formatShortDate } from "@/lib/paper";
 
@@ -35,7 +34,6 @@ function Home() {
   const { topic, q } = Route.useSearch();
   const navigate = Route.useNavigate();
   const [query, setQuery] = useState(q ?? "");
-  const [email, setEmail] = useState("");
 
   useEffect(() => {
     setQuery(q ?? "");
@@ -53,14 +51,6 @@ function Home() {
     placeholderData: keepPreviousData,
   });
   const articles = data ?? initial;
-
-  const sub = useMutation({
-    mutationFn: (addr: string) => subscribeNewsletter({ data: addr }),
-    onSuccess: (res) => {
-      if (!res.ok) return;
-      setEmail("");
-    },
-  });
 
   const featured = articles[0];
   const rest = articles.slice(1);
@@ -261,45 +251,11 @@ function Home() {
       )}
 
       <section className="mt-14 border-t-2 border-ink pt-8">
-        <h2 className="font-display text-2xl font-semibold">In your inbox</h2>
+        <h2 className="font-display text-2xl font-semibold">The paper is this site</h2>
         <p className="mt-2 max-w-xl text-ink-2">
-          New articles when they publish. No spam. We store the address to send
-          the paper; we do not sell it.
+          There is no email list yet. New stories appear on the front page and
+          in the RSS feed when an editor publishes them.
         </p>
-        <form
-          className="mt-4 flex max-w-md flex-col gap-2 sm:flex-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            sub.mutate(email);
-          }}
-        >
-          <input
-            type="email"
-            required
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            className={inputClass + " flex-1"}
-            disabled={sub.isPending}
-          />
-          <button
-            type="submit"
-            className={inkSolid}
-            disabled={sub.isPending}
-          >
-            {sub.isPending ? "Sending…" : "Subscribe"}
-          </button>
-        </form>
-        {sub.data && (
-          <Notice kind={!sub.data.ok ? "err" : "ok"}>
-            {!sub.data.ok
-              ? sub.data.error
-              : sub.data.confirmPath
-                ? `Confirm: ${sub.data.confirmPath} (preview — production would email this).`
-                : "You’re already on the list."}
-          </Notice>
-        )}
         <p className="mt-6 text-sm text-muted">
           {PAPER.name} complements the local paper. The public record is only
           the beginning.

@@ -11,6 +11,11 @@ Backend started. Desk/Dark UI not part of this slice.
 - Captures store extracted vs raw hashes when bytes exist. Public provenance cannot be minted by the model for a URL we did not fetch.
 - Image-only PDFs are unread. JPEG-as-chat is not OCR.
 - `npm run typecheck` and GitHub Actions on test+types.
+- Command-center Start digging continues into research (same as Dark Desk).
+- Redraft saves Pulled notes first. Killed has Back. Queue All excludes killed.
+- Corrections render on the article. Published correction errors are errors. Draft text is per story.
+- Dark: no fake stage timer; Pick one does not open a blank file; send-to-queue is idempotent with a real topic; Set aside/Keep digging disabled while a round runs; findings / hypotheses / questions are separate.
+- Source URLs are links; kind/tier inferred from the host. Nested button-in-link removed. Forced-night Dark Desk hides the Light switch. Newsletter promise removed. GitHub tag is the source download.
 
 ## 0.3.9 — 2026-08-26
 

@@ -76,6 +76,7 @@ function DeskHome() {
         setDarkErr(null);
         try {
           sessionStorage.setItem(OPEN_KEY, String(res.investigationId));
+          sessionStorage.setItem("townreporter.dark.autodig", String(res.investigationId));
         } catch {
           /* ignore */
         }
@@ -297,6 +298,7 @@ function DeskHome() {
                     <div className="np-acts">
                       <Link
                         to="/desk/dark"
+                        className="btn invert small"
                         onClick={() => {
                           try {
                             sessionStorage.setItem(OPEN_KEY, String(row.id));
@@ -305,9 +307,7 @@ function DeskHome() {
                           }
                         }}
                       >
-                        <InkButton tone="invert" small>
-                          Open file
-                        </InkButton>
+                        Open file
                       </Link>
                     </div>
                   </div>

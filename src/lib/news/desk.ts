@@ -174,7 +174,7 @@ export const addSource = createServerFn({ method: "POST" })
     const parsed = parseHttpUrl(data.url);
     if (!parsed.ok) return { ok: false as const, error: parsed.error };
     const title = data.title.trim() || parsed.host;
-    const kind = kindFromSourceUrl(parsed.url) === "youtube" ? "youtube" : data.kind || "official";
+    const kind = data.kind || kindFromSourceUrl(parsed.url);
     const source = await upsertSource(
       context.userId,
       parsed.url,

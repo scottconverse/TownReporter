@@ -14,6 +14,8 @@ import {
   humanFrontierLabel,
   investigationStopKind,
   kindFromSourceUrl,
+  tierFromKind,
+  topicFromText,
   looksLikeInternalSummary,
   nearDuplicate,
   openLeads,
@@ -353,6 +355,13 @@ describe("Worth a Look presentation", () => {
   it("marks a YouTube watch URL as youtube kind", () => {
     assert.equal(kindFromSourceUrl("https://www.youtube.com/user/cityoflongmont"), "youtube");
     assert.equal(kindFromSourceUrl("https://www.longmontcolorado.gov/council"), "official");
+    assert.equal(kindFromSourceUrl("https://www.timescall.com/2026/08/01/story/"), "news");
+    assert.equal(kindFromSourceUrl("https://x.com/longmont"), "social");
+    assert.equal(tierFromKind("official"), "A");
+    assert.equal(tierFromKind("news"), "B");
+    assert.equal(tierFromKind("social"), "C");
+    assert.equal(topicFromText("St. Vrain Valley Schools board packet"), "schools");
+    assert.equal(topicFromText("NextLight fiber upgrade"), "utilities");
   });
 
   it("collapses the Longmont quiet-zone pair, keeping the longer body", () => {

@@ -1,7 +1,6 @@
 import { Link, useMatchRoute, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { formatDate, PAPER } from "@/lib/paper";
-import { APP_VERSION } from "@/lib/version";
 import { UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 
@@ -84,10 +83,12 @@ export function DeskShell({
             <Link to="/" className="mast-link">
               View paper
             </Link>
+            {night ? null : (
             <div className="seg" role="group" aria-label="Light or dark">
               <button
                 type="button"
                 className={"seg-opt" + (mode === "light" ? " on" : "")}
+                aria-pressed={mode === "light"}
                 onClick={() => choose("light")}
               >
                 Light
@@ -95,12 +96,14 @@ export function DeskShell({
               <button
                 type="button"
                 className={"seg-opt" + (mode === "dark" ? " on" : "")}
+                aria-pressed={mode === "dark"}
                 onClick={() => choose("dark")}
               >
                 Dark
               </button>
             </div>
-            {isPending ? <span className="mast-user" aria-hidden /> : user ? <span className="mast-account"><UserButton /><span className="mast-ver">{APP_VERSION}</span></span> : null}
+            )}
+            {isPending ? <span className="mast-user" aria-hidden /> : user ? <span className="mast-account"><UserButton /></span> : null}
           </div>
         </div>
         <div className="rule2" />

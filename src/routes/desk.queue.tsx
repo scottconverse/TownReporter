@@ -5,7 +5,7 @@ import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { LeadRowView } from "@/components/desk-leads";
 import { ListSkeleton, Notice } from "@/components/states";
 import { fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
-import { nearDuplicate, workingLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
+import { nearDuplicate, openLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
 import { TOPICS } from "@/lib/paper";
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
@@ -50,7 +50,7 @@ function QueuePage() {
     },
   });
 
-  const working = workingLeads(leads);
+  const working = openLeads(leads);
   const publishedCount = leads.filter((l) => l.status === "published").length;
   const last = scans.data?.[0];
   const counts = {
@@ -127,6 +127,7 @@ function QueuePage() {
             key={k}
             type="button"
             className={"filter" + (filter === k ? " on" : "")}
+            aria-pressed={filter === k}
             onClick={() => setFilter(k)}
           >
             {k} {counts[k]}

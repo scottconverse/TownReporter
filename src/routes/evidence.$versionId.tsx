@@ -103,7 +103,9 @@ function EvidencePage() {
           </div>
         ) : null}
         <div>
-          <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">SHA-256</dt>
+          <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">
+            {record.has_original_bytes ? "SHA-256 of original file" : "SHA-256 of extracted text"}
+          </dt>
           <dd className="mt-1 break-all font-mono text-xs">{record.content_hash || "—"}</dd>
         </div>
         {record.has_original_bytes ? (
@@ -139,15 +141,17 @@ function EvidencePage() {
           ? "(source unavailable at this check)"
           : record.extraction_text || "(no extractable text in this capture)"}
       </div>
-      <p className="mt-8">
-        <Link
-          to="/evidence/compare"
-          search={{ url: record.url }}
-          className="text-rust hover:text-rust-2"
-        >
-          Compare observed states of this record
-        </Link>
-      </p>
+      {record.timeline.length > 1 ? (
+        <p className="mt-8">
+          <Link
+            to="/evidence/compare"
+            search={{ url: record.url }}
+            className="text-rust hover:text-rust-2"
+          >
+            Compare observed states of this record
+          </Link>
+        </p>
+      ) : null}
     </PaperShell>
   );
 }

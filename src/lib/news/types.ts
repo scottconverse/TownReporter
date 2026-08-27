@@ -58,6 +58,7 @@ export type ArticleRow = {
   unanswered?: string | null;
   provenance?: import("./findings").ProvenanceItem[];
   findings?: import("./findings").StoryFinding[];
+  corrections?: { date: string; body: string }[];
 };
 
 export type MemoryRow = {
@@ -83,4 +84,5 @@ export type CorrectionRow = {
   body: string;
   created_at: string;
   headline: string | null;
+  slug?: string | null;
 };

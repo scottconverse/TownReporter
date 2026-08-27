@@ -13,18 +13,31 @@ function PublishedPage() {
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
   const memory = useQuery({ queryKey: ["memory"], queryFn: () => listMemory() });
   const [corrFor, setCorrFor] = useState<string | null>(null);
-  const [corrText, setCorrText] = useState("");
-  const [note, setNote] = useState<string | null>(null);
+  const [corrBySlug, setCorrBySlug] = useState<Record<string, string>>({});
+  const [note, setNote] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const corr = useMutation({
-    mutationFn: (slug: string) => addCorrection({ data: { articleSlug: slug, body: corrText } }),
-    onSuccess: (res) => {
+    mutationFn: (slug: string) =>
+      addCorrection({ data: { articleSlug: slug, body: (corrBySlug[slug] ?? "").trim() } }),
+    onSuccess: (res, slug) => {
       if (res.ok) {
-        setCorrText("");
+        setCorrBySlug((prev) => ({ ...prev, [slug]: "" }));
         setCorrFor(null);
-        setNote("Correction is public.");
+        setNote({ kind: "ok", text: "Correction is public." });
         void qc.invalidateQueries({ queryKey: ["published-desk"] });
         void qc.invalidateQueries({ queryKey: ["corrections"] });
-      } else setNote("error" in res ? String(res.error) : "Could not post that correction.");
+        void qc.invalidateQueries({ queryKey: ["article", slug] });
+      } else {
+        setNote({
+          kind: "err",
+          text: "error" in res ? String(res.error) : "Could not post that correction.",
+        });
+      }
+    },
+    onError: (err) => {
+      setNote({
+        kind: "err",
+        text: err instanceof Error ? err.message : "Could not post that correction.",
+      });
     },
   });
 
@@ -35,7 +48,7 @@ function PublishedPage() {
       <p className="lede">
         What is live on the paper, with its corrections. Corrections are public.
       </p>
-      {note ? <Notice kind="ok">{note}</Notice> : null}
+      {note ? <Notice kind={note.kind}>{note.text}</Notice> : null}
       {published.isPending && !rows.length ? (
         <ListSkeleton rows={4} />
       ) : rows.length === 0 ? (
@@ -60,14 +73,16 @@ function PublishedPage() {
                   <div className="corr-form">
                     <textarea
                       rows={3}
-                      value={corrText}
-                      onChange={(e) => setCorrText(e.target.value)}
+                      value={corrBySlug[p.slug] ?? ""}
+                      onChange={(e) =>
+                        setCorrBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }))
+                      }
                       placeholder="What was wrong, and what is right."
                     />
                     <div className="row-acts static">
                       <InkButton
                         small
-                        disabled={!corrText.trim() || corr.isPending}
+                        disabled={!(corrBySlug[p.slug] ?? "").trim() || corr.isPending}
                         onClick={() => corr.mutate(p.slug)}
                       >
                         Publish correction
@@ -108,11 +123,11 @@ function PublishedPage() {
         <tbody>
           {(memory.data ?? []).map((m) => (
             <tr key={m.id} className="lead-tr">
-              <td className="td-hl">
+              <td className="td-hl" data-label="Entity">
                 <span className="src-t">{m.entity}</span>
               </td>
-              <td className="td-meta wide">{m.last_angle}</td>
-              <td className="td-meta">{formatShortDate(m.updated_at)}</td>
+              <td className="td-meta wide" data-label="Last angle">{m.last_angle}</td>
+              <td className="td-meta" data-label="Updated">{formatShortDate(m.updated_at)}</td>
             </tr>
           ))}
         </tbody>

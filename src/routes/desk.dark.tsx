@@ -22,6 +22,7 @@ import {
   editorKindLabel,
   editorPauseReason,
   editorStatus,
+  excerptForEditor,
   headlineFromUrl,
   humanFrontierLabel,
   looksLikeInternalSummary,
@@ -50,7 +51,7 @@ function DarkPage() {
   const [noticeOk, setNoticeOk] = useState(false);
   const [noticeAt, setNoticeAt] = useState<"paste" | "work">("work");
   const [openId, setOpenId] = useState<number | null>(null);
-  const [queuedLead, setQueuedLead] = useState<number | null>(null);
+  const [queued, setQueued] = useState<{ leadId: number; invId: number } | null>(null);
   const [pendingCard, setPendingCard] = useState<string | null>(null);
   const [cardError, setCardError] = useState<{ id: string; message: string } | null>(null);
   const [cardPhase, setCardPhase] = useState<string>("");
@@ -95,11 +96,7 @@ function DarkPage() {
   }
 
   function beginDigPhase() {
-    if (phaseTimer.current) clearTimeout(phaseTimer.current);
     setCardPhase("Searching records…");
-    phaseTimer.current = setTimeout(() => {
-      setCardPhase("Opening pages. They land on the file as they are read…");
-    }, 1200);
   }
 
   function clearPhase() {
@@ -246,14 +243,17 @@ function DarkPage() {
 
   const toQueue = useMutation({
     mutationFn: (id: number) => queueInvestigation({ data: id }),
-    onSuccess: (res) => {
+    onSuccess: (res, id) => {
       void qc.invalidateQueries({ queryKey: ["leads"] });
       if (res?.ok) {
-        setQueuedLead(res.leadId);
+        setQueued({ leadId: res.leadId, invId: id });
         showWorkNotice("On the working queue as a story lead. Dark Desk did not publish.", true);
       } else {
         showWorkNotice(res?.error ?? "Could not send to the queue.");
       }
+    },
+    onError: (err) => {
+      showWorkNotice(err instanceof Error ? err.message : "Could not send to the queue.");
     },
   });
 
@@ -300,6 +300,20 @@ function DarkPage() {
   const starting = openFromCard.isPending || openPaste.isPending || find.isPending || followLead.isPending;
   const digging = advance.isPending;
   const busyStart = starting;
+
+  useEffect(() => {
+    if (openId == null || digging || starting) return;
+    try {
+      const auto = sessionStorage.getItem("townreporter.dark.autodig");
+      if (auto && Number(auto) === openId) {
+        sessionStorage.removeItem("townreporter.dark.autodig");
+        beginDigPhase();
+        advance.mutate(openId);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [openId]);
   const inv = detail.data?.investigation;
   const liveLine = progressLine({
     running: digging || inv?.status === "investigating",
@@ -386,7 +400,8 @@ function DarkPage() {
           phase={cardPhase || liveLine}
           notice={noticeAt === "work" ? notice : null}
           noticeOk={noticeOk}
-          queuedLead={queuedLead}
+          queuedLead={queued?.invId === openId ? queued.leadId : null}
+          queuePending={toQueue.isPending}
           onKeepDigging={() => {
             setNotice(null);
             beginDigPhase();
@@ -446,14 +461,19 @@ function DarkPage() {
                 row={row}
                 selected={row.id === openId}
                 digging={digging && openId === row.id}
+                locked={digging || busyStart}
                 onOpen={() => rememberOpen(row.id)}
                 onKeep={() => {
+                  if (digging || busyStart) return;
                   setNotice(null);
                   rememberOpen(row.id);
                   beginDigPhase();
                   advance.mutate(row.id);
                 }}
-                onPark={() => park.mutate(row.id)}
+                onPark={() => {
+                  if (digging) return;
+                  park.mutate(row.id);
+                }}
               />
             ))
           )}
@@ -512,6 +532,7 @@ function DeskFileCard({
   row,
   selected,
   digging,
+  locked,
   onOpen,
   onKeep,
   onPark,
@@ -519,6 +540,7 @@ function DeskFileCard({
   row: InvestigationRow;
   selected: boolean;
   digging: boolean;
+  locked: boolean;
   onOpen: () => void;
   onKeep: () => void;
   onPark: () => void;
@@ -537,10 +559,10 @@ function DeskFileCard({
         <InkButton small onClick={onOpen}>
           {selected ? "Viewing above" : "Open file"}
         </InkButton>
-        <InkButton small disabled={digging} onClick={onKeep}>
+        <InkButton small disabled={digging || locked} onClick={onKeep}>
           {digging ? "Reading…" : "Keep digging"}
         </InkButton>
-        <InkButton tone="quiet" small onClick={onPark}>
+        <InkButton tone="quiet" small disabled={digging || locked} onClick={onPark}>
           Set aside
         </InkButton>
       </div>
@@ -602,6 +624,7 @@ function InvestigationWorkspace({
   notice,
   noticeOk,
   queuedLead,
+  queuePending,
   onKeepDigging,
   onQueue,
   onClose,
@@ -617,6 +640,7 @@ function InvestigationWorkspace({
   notice: string | null;
   noticeOk: boolean;
   queuedLead: number | null;
+  queuePending: boolean;
   onKeepDigging: () => void;
   onQueue: () => void;
   onClose: () => void;
@@ -641,14 +665,13 @@ function InvestigationWorkspace({
   const signals = detail?.signals ?? [];
   const facts = claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind));
   const questions = openQuestionsFrom(detail);
-  const noticed = [
+  const findings = [
     ...signals.map((s) => plainEditorText(`${s.name}: ${s.observation}`)),
     ...anomalies.map((a) => plainFinding(a.summary, a.url)),
     ...entities.map((e) => plainEditorText(`${e.name} — ${e.why}`)),
     ...claims.filter((c) => /FINDING|PATTERN/i.test(c.kind)).map((c) => plainEditorText(c.body)),
-    ...hyps.map((h) => plainEditorText(h.body)),
-    ...questions,
   ].filter(Boolean);
+  const tests = hyps.map((h) => plainEditorText(h.body)).filter(Boolean);
   const next = frontier.filter((f) =>
     ["open", "investigating", "reopened"].includes(f.status),
   );
@@ -687,10 +710,10 @@ function InvestigationWorkspace({
           <InkButton disabled={keepDisabled} onClick={onKeepDigging}>
             {digging ? "Reading…" : "Keep digging"}
           </InkButton>
-          <InkButton tone="ghost" onClick={onQueue}>
-            Send to the queue
+          <InkButton tone="ghost" disabled={keepDisabled || queuePending} onClick={onQueue}>
+            {queuePending ? "Sending…" : "Send to the queue"}
           </InkButton>
-          <InkButton tone="quiet" onClick={onPark}>
+          <InkButton tone="quiet" disabled={keepDisabled} onClick={onPark}>
             Set aside
           </InkButton>
           <InkButton tone="quiet" onClick={onClose}>
@@ -781,24 +804,34 @@ function InvestigationWorkspace({
               ) : null}
             </>
           ) : null}
-          {noticed.length > 0 ? (
+          {findings.length > 0 ? (
             <div className="of-block">
-              <p className="side-label">What Dark Desk noticed</p>
-              {noticed.slice(0, 8).map((n, i) => (
+              <p className="side-label">On the record</p>
+              {findings.slice(0, 8).map((n, i) => (
                 <p key={i} className="side-item">
                   {n}
                 </p>
               ))}
-              {noticed.length > 8 ? (
-                <details className="wire-flaky">
-                  <summary>{noticed.length - 8} more</summary>
-                  {noticed.slice(8).map((n, i) => (
-                    <p key={`more-${i}`} className="side-item">
-                      {n}
-                    </p>
-                  ))}
-                </details>
-              ) : null}
+            </div>
+          ) : null}
+          {tests.length > 0 ? (
+            <div className="of-block">
+              <p className="side-label">Being tested</p>
+              {tests.slice(0, 6).map((n, i) => (
+                <p key={i} className="side-item">
+                  {n}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {questions.length > 0 ? (
+            <div className="of-block">
+              <p className="side-label">Still open</p>
+              {questions.slice(0, 8).map((n, i) => (
+                <p key={i} className="side-item">
+                  {n}
+                </p>
+              ))}
             </div>
           ) : null}
           {facts.length > 0 ? (
@@ -807,6 +840,9 @@ function InvestigationWorkspace({
               {facts.map((c, i) => (
                 <p key={i} className="side-item">
                   {plainEditorText(c.body)}
+                  {c.evidence ? (
+                    <span className="meta"> — {plainEditorText(c.evidence).slice(0, 160)}</span>
+                  ) : null}
                 </p>
               ))}
             </div>
@@ -944,6 +980,9 @@ function OpenedRecords({
                 {rowOrg ? ` · ${rowOrg}` : ""}
               </span>
               <span className="read-title">{rowTitle || "Captured page"}</span>
+              {preview.kind === "ok" && preview.body ? (
+                <span className="np-meta">{excerptForEditor(preview.body, 140)}</span>
+              ) : null}
             </button>
           );
         })}

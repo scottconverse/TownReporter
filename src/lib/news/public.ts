@@ -61,7 +61,17 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
       where slug = ${slug} and status = 'published'
       limit 1
     `;
-      return rows[0] ? publicArticle(rows[0]) : null;
+      if (!rows[0]) return null;
+      const article = publicArticle(rows[0]);
+      const corrs = await sql<{ body: string; created_at: string }>`
+        select body, created_at from corrections
+        where article_id = ${rows[0].id}
+        order by created_at asc
+      `;
+      return {
+        ...article,
+        corrections: corrs.map((c) => ({ date: c.created_at, body: c.body })),
+      };
     } catch (err) {
       console.error("[paper] getPublishedArticle failed", err);
       return null;
@@ -113,8 +123,8 @@ export const listPublicCorrections = createServerFn({ method: "GET" }).handler(
   async () => {
     try {
       const sql = await getSql();
-      return sql<CorrectionRow>`
-      select c.id, c.body, c.created_at, a.headline
+      return sql<CorrectionRow & { slug: string | null }>`
+      select c.id, c.body, c.created_at, a.headline, a.slug
       from corrections c
       left join articles a on a.id = c.article_id
       order by c.created_at desc

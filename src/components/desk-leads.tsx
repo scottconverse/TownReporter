@@ -53,6 +53,11 @@ export function LeadRowView({
                 Back
               </InkButton>
             ) : null}
+            {lead.status === "killed" && onBack ? (
+              <InkButton tone="quiet" small onClick={onBack}>
+                Back
+              </InkButton>
+            ) : null}
             {lead.status !== "killed" && lead.status !== "published" && onKill ? (
               <InkButton tone="quiet" small onClick={onKill}>
                 Kill

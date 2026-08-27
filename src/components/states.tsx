@@ -320,7 +320,7 @@ export function Notice({
   return (
     <p
       className={"enter-fade-fast mt-3 border px-3 py-2.5 text-sm " + color}
-      role="status"
+      role={kind === "err" ? "alert" : "status"}
     >
       {children}
     </p>

@@ -22,7 +22,9 @@ function Corrections() {
       </h1>
       <p className="enter-rise mt-4 max-w-2xl text-lg text-ink-2">
         If we got it wrong, it lives here in the open — not buried in a rewrite
-        nobody sees.
+        nobody sees. Corrections also appear on the story itself. To flag an
+        error, write the editor from the About page or post a correction from
+        Published on the desk.
       </p>
       {isPending ? (
         <div className="mt-8 max-w-2xl">
@@ -50,6 +52,17 @@ function Corrections() {
                 {c.headline ? ` · ${c.headline}` : ""}
               </p>
               <p className="mt-2 text-ink-2">{c.body}</p>
+              {c.slug ? (
+                <p className="mt-2">
+                  <Link
+                    to="/articles/$slug"
+                    params={{ slug: c.slug }}
+                    className="text-sm text-muted hover:text-ink"
+                  >
+                    Read the story
+                  </Link>
+                </p>
+              ) : null}
             </li>
           ))}
         </ul>

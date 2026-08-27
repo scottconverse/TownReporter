@@ -839,6 +839,15 @@
   .desk-ltr .ltable td { display: block; width: 100%; }
   .desk-ltr .ltable tr { border-bottom: 1px solid var(--line); padding: 8px 0 10px; }
   .desk-ltr .ltable td { border-bottom: none; padding: 2px 0; white-space: normal; }
+  .desk-ltr .ltable td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--mut);
+    margin-bottom: 2px;
+  }
   .desk-ltr .td-acts,
   .desk-ltr .td-meta { white-space: normal; }
 }
