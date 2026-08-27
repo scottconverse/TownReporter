@@ -34,6 +34,34 @@ const VITE_PREFIX = "VITE_";
  * Anything unparseable is an empty environment — a workspace without the file
  * must behave exactly like today (auth on, no overrides).
  */
+export function parseDotEnv(text) {
+  const env = {};
+  for (const raw of text.split(/\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const i = line.indexOf("=");
+    if (i < 1) continue;
+    const key = line.slice(0, i).trim();
+    let value = line.slice(i + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    env[key] = value;
+  }
+  return env;
+}
+
+export function readDotEnv(root) {
+  try {
+    return parseDotEnv(readFileSync(join(root, ".env"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
 export function parseAppEnv(text) {
   let parsed;
   try {
@@ -110,7 +138,10 @@ function main(argv) {
     console.error("usage: node scripts/with-app-env.mjs <command> [args…]");
     process.exit(2);
   }
-  const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
+  const env = mergeAppEnv(readAppEnv(projectRoot()), {
+    ...readDotEnv(projectRoot()),
+    ...process.env,
+  });
   const child = spawn(command, args, { stdio: "inherit", env });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {

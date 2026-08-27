@@ -1,6 +1,6 @@
 import { createFileRoute, Link, Navigate, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { GROK_PROVIDERS, authClient, authEnabled, signIn } from "@/lib/auth/client";
+import { GROK_PROVIDERS, authClient, signIn } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
 import { PAPER } from "@/lib/paper";
@@ -46,6 +46,13 @@ function tokenFromResult(data: unknown, headers?: Headers | null) {
     if (typeof token === "string" && token) return token;
   }
   return null;
+}
+
+function showGrokOAuth() {
+  if (import.meta.env.VITE_GROK_OAUTH === "true") return true;
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname;
+  return host === "grok.me" || host.endsWith(".grok.me") || host.endsWith(".grok-sandbox.com");
 }
 
 function Login() {
@@ -239,7 +246,7 @@ function Login() {
           </div>
         </form>
 
-        {authEnabled ? (
+        {showGrokOAuth() ? (
           <div className="space-y-2 border-t border-rule pt-4">
             <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
               Or a small window

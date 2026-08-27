@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1 — 2026-08-26
+
+Self-host pack. Clone it, run it, point it at Grok or any OpenAI-compatible gateway.
+
+- MIT license. `.env.example`. README is a clone-and-run.
+- Grok (`XAI_API_KEY`) is the default model.
+- `LLM_BASE_URL` + `LLM_API_KEY` + `LLM_MODEL` is any `/v1/chat/completions` gateway: LiteLLM, Bifrost, Helicone, MLflow AI Gateway, Kong AI Gateway, Ollama, OpenAI, OpenRouter. No extra package. Bifrost must not bind port 8080 (TownReporter).
+- Self-host desk: email + password on `/login`. Grok Google/X buttons only on `*.grok.me`.
+- `npx playwright install chromium` for meeting transcripts and JS civic sites.
+- `.env` is loaded by the dev wrapper.
+
 ## 0.3.0 — 2026-08-26
 
 Meeting records, reporting notes, and Dark Desk actually reading the tape. Draft notebook language stays off the paper.

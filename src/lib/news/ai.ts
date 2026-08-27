@@ -2,12 +2,52 @@ type GrokOk = { ok: true; text: string };
 type GrokErr = { ok: false; error: string };
 
 /** Same copy the working v1–v4 desks used when the platform key is absent. */
-export const GROK_UNAVAILABLE = "AI is not available in this environment";
+export const GROK_UNAVAILABLE =
+  "AI is not available. Set XAI_API_KEY for Grok (default), or LLM_BASE_URL for any OpenAI-compatible gateway (LiteLLM, Bifrost, Helicone, MLflow, Kong, Ollama).";
 
-/** Live lookup — Vite must not inline this as undefined at bundle time. */
-function readXaiApiKey(): string | undefined {
-  const value = process.env["XAI_API_KEY"];
+function env(key: string): string | undefined {
+  const value = process.env[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+export type LlmConfig = {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  label: string;
+};
+
+function trimSlash(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
+/**
+ * Grok is the default. Any OpenAI-compatible /v1/chat/completions gateway
+ * (LiteLLM, Bifrost, Helicone, MLflow AI Gateway, Kong AI Gateway, Ollama,
+ * OpenRouter) wins when LLM_BASE_URL or LLM_API_KEY is set.
+ */
+export function resolveLlm(): LlmConfig | null {
+  const customKey = env("LLM_API_KEY") ?? env("OPENAI_API_KEY");
+  const customBase = env("LLM_BASE_URL");
+  const customModel = env("LLM_MODEL");
+  if (customBase || (customKey && customModel)) {
+    return {
+      apiKey: customKey || "not-needed",
+      baseUrl: trimSlash(customBase || "https://api.openai.com/v1"),
+      model: customModel || "gpt-4o-mini",
+      label: "LLM",
+    };
+  }
+  const xai = env("XAI_API_KEY") ?? env("GROK_API_KEY");
+  if (xai) {
+    return {
+      apiKey: xai,
+      baseUrl: trimSlash(env("XAI_BASE_URL") || "https://api.x.ai/v1"),
+      model: env("XAI_MODEL") || "grok-4.5",
+      label: "xAI",
+    };
+  }
+  return null;
 }
 
 export async function grokChat(
@@ -16,12 +56,13 @@ export async function grokChat(
   maxTokens = 1400,
   opts?: { timeoutMs?: number },
 ): Promise<GrokOk | GrokErr> {
-  const apiKey = readXaiApiKey();
-  if (!apiKey) return { ok: false, error: GROK_UNAVAILABLE };
+  const llm = resolveLlm();
+  if (!llm) return { ok: false, error: GROK_UNAVAILABLE };
 
   const timeoutMs = opts?.timeoutMs ?? 45_000;
+  const url = `${llm.baseUrl}/chat/completions`;
   const payload = {
-    model: "grok-4.5",
+    model: llm.model,
     temperature: 0.2,
     max_tokens: maxTokens,
     messages: [
@@ -29,38 +70,38 @@ export async function grokChat(
       { role: "user", content: user },
     ],
   };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (llm.apiKey && llm.apiKey !== "not-needed") {
+    headers.Authorization = `Bearer ${llm.apiKey}`;
+  }
 
   let res: Response;
   try {
-    res = await fetch("https://api.x.ai/v1/chat/completions", {
+    res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers,
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
-    return { ok: false, error: "xAI request timed out" };
+    return { ok: false, error: `${llm.label} request timed out` };
   }
   if (res.status === 429 || res.status >= 500) {
     await new Promise((r) => setTimeout(r, 800));
     try {
-      res = await fetch("https://api.x.ai/v1/chat/completions", {
+      res = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
+        headers,
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
-      return { ok: false, error: "xAI request timed out" };
+      return { ok: false, error: `${llm.label} request timed out` };
     }
   }
-  if (!res.ok) return { ok: false, error: `xAI API error ${res.status}` };
+  if (!res.ok) return { ok: false, error: `${llm.label} API error ${res.status}` };
   const body = (await res.json()) as {
     choices?: { message?: { content?: string } }[];
   };
@@ -70,7 +111,7 @@ export async function grokChat(
 }
 
 export function isGrokAvailable(): boolean {
-  return Boolean(readXaiApiKey());
+  return Boolean(resolveLlm());
 }
 
 export function parseJsonBlock<T>(raw: string): T | null {
