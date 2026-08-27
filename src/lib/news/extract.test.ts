@@ -91,7 +91,7 @@ describe("detectPatternAnomalies", () => {
     });
     assert.ok(found.some((a) => a.kind === "attachment-omitted"));
     assert.ok(found.some((a) => a.kind === "cadence-shifted"));
-    assert.match(nthWeekday(new Date("2026-08-11T00:00:00Z")), /Tuesday/);
+    assert.equal(nthWeekday(new Date("2026-08-11T18:00:00Z")), "2-Tuesday");
   });
 
   it("flags a packet posted much later than the learned 72-hour lead", () => {

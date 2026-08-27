@@ -6,6 +6,7 @@ import { stripReporterNotebook } from "./strip-draft";
 import { randomBytes } from "node:crypto";
 import { parseUrlList } from "@/lib/paper";
 import { provenanceFromUrls, parseFindings, resolvePublicFindings, type ProvenanceItem, type StoryFinding } from "./findings";
+import { collapsePrintedDuplicates } from "./desk-copy";
 
 function publicArticle(
   row: ArticleRow,
@@ -40,7 +41,7 @@ export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
       where status = 'published'
       order by published_at desc
       limit 30
-    `.then((rows) => rows.map(publicArticle));
+    `.then((rows) => collapsePrintedDuplicates(rows.map(publicArticle)));
     } catch (err) {
       console.error("[paper] listPublishedArticles failed", err);
       return [] as ArticleRow[];
@@ -79,7 +80,7 @@ export const listPublishedByTopic = createServerFn({ method: "GET" })
       where status = 'published' and topic = ${topic}
       order by published_at desc
       limit 30
-    `.then((rows) => rows.map(publicArticle));
+    `.then((rows) => collapsePrintedDuplicates(rows.map(publicArticle)));
     } catch (err) {
       console.error("[paper] listPublishedByTopic failed", err);
       return [] as ArticleRow[];

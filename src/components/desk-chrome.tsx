@@ -75,7 +75,7 @@ export function DeskShell({
               {PAPER.name}
             </Link>
             <span className="brand-sub">
-              {night ? "Dark Desk — investigates, never prints" : "Editor's desk — Longmont"}
+              {night ? "Dark Desk — investigates, never prints" : `Editor's desk — ${PAPER.city}`}
             </span>
           </div>
           <div className="mast-date">{formatDate(new Date())}</div>

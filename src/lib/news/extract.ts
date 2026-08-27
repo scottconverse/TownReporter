@@ -1,5 +1,7 @@
 export type ExtractedRef = { kind: string; value: string };
 
+import { PAPER } from "../paper.ts";
+
 const LLC_RE =
   /\b([A-Z][A-Za-z0-9&.'-]+(?:\s+[A-Z][A-Za-z0-9&.'-]+){0,5}\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?))\b/g;
 const CONTRACT_RE =
@@ -161,8 +163,14 @@ export function detectMissingCadence(
 }
 
 export function nthWeekday(d: Date): string {
-  const n = Math.ceil(d.getUTCDate() / 7);
-  const wd = d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+  const parts = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    day: "numeric",
+    timeZone: PAPER.timezone,
+  }).formatToParts(d);
+  const day = Number(parts.find((p) => p.type === "day")?.value || "1");
+  const wd = parts.find((p) => p.type === "weekday")?.value || "Thursday";
+  const n = Math.ceil(day / 7);
   return `${n}-${wd}`;
 }
 

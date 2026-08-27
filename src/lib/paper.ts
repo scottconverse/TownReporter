@@ -3,6 +3,7 @@ export const PAPER = {
   city: "Longmont",
   state: "Colorado",
   location: "Longmont, Colorado",
+  timezone: "America/Denver",
   tagline: "The public record is only the beginning.",
   kicker: "Independent civic reporting  ·  Longmont",
   deck: "TownReporter follows Longmont's meetings, money, contracts and public records — then keeps digging when something changes, disappears or doesn't add up. Human-edited. Sources shown.",
@@ -116,46 +117,51 @@ export function parseUrlList(raw: string | null | undefined): string[] {
   }
 }
 
-export function formatDate(iso: string | Date | null | undefined) {
-  if (!iso) return "";
+function asDate(iso: string | Date | null | undefined): Date | null {
+  if (!iso) return null;
   const d = typeof iso === "string" ? new Date(iso) : iso;
-  if (Number.isNaN(d.getTime())) return "";
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function formatDate(iso: string | Date | null | undefined) {
+  const d = asDate(iso);
+  if (!d) return "";
   return d.toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",
     year: "numeric",
+    timeZone: PAPER.timezone,
   });
 }
 
 export function formatShortDate(iso: string | Date | null | undefined) {
-  if (!iso) return "";
-  const d = typeof iso === "string" ? new Date(iso) : iso;
-  if (Number.isNaN(d.getTime())) return "";
+  const d = asDate(iso);
+  if (!d) return "";
   return d.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: PAPER.timezone,
   });
 }
 
 export function formatDateTime(iso: string | Date | null | undefined) {
-  if (!iso) return "";
-  const d = typeof iso === "string" ? new Date(iso) : iso;
-  if (Number.isNaN(d.getTime())) return "";
+  const d = asDate(iso);
+  if (!d) return "";
   return d.toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: PAPER.timezone,
   });
 }
 
 export function formatAge(iso: string | Date | null | undefined) {
-  if (!iso) return "";
-  const d = typeof iso === "string" ? new Date(iso) : iso;
-  if (Number.isNaN(d.getTime())) return "";
+  const d = asDate(iso);
+  if (!d) return "";
   const h = Math.max(0, Math.round((Date.now() - d.getTime()) / 3_600_000));
   if (h < 1) return "just now";
   if (h < 24) return `${h}h`;

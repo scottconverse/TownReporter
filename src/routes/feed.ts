@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getSql } from "@/lib/db";
 import { PAPER } from "@/lib/paper";
+import { collapsePrintedDuplicates } from "@/lib/news/desk-copy";
 
 export const Route = createFileRoute("/feed")({
   server: {
@@ -19,7 +20,7 @@ export const Route = createFileRoute("/feed")({
           order by published_at desc
           limit 40
         `;
-        const items = rows
+        const items = collapsePrintedDuplicates(rows)
           .map((r) => {
             const link = `/articles/${encodeURIComponent(r.slug)}`;
             return `<item>

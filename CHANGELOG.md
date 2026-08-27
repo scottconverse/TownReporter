@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3 — 2026-08-26
+
+Longmont edition cleanliness. Dates, cadence, and the printed paper all stay on Mountain Time and stop repeating themselves.
+
+- Masthead, bylines, and desk clocks use `PAPER.timezone` (`America/Denver`). A Wednesday evening in Longmont no longer prints as Thursday UTC.
+- Meeting-cadence math (`nthWeekday`, usual weekday) uses Denver, not the host clock.
+- The public paper and RSS collapse overlapping printed headlines and keep the longer body. Quiet-zone ×2 and survey ×2 drop; Airport Vision (Sept 26) stays next to the Boulder County joint session (Sept 21). Search is unchanged. Archive URLs stay live.
+- Desk sources table no longer forces `display:block` on every table. On a phone the rows stack instead of shoving a 674px THEAD sideways.
+- Desk chrome says `Editor's desk — Longmont` from `PAPER.city`.
+
 ## 0.3.2 — 2026-08-26
 
 Product documentation. Clone-and-run was not a product.

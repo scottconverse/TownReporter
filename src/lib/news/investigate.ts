@@ -1,4 +1,5 @@
 import { getSql } from "../db.ts";
+import { PAPER } from "../paper.ts";
 import { grokChat, parseJsonBlock } from "./ai.ts";
 import { DARK_PLANNER } from "./dark-prompt.ts";
 import {
@@ -1092,7 +1093,7 @@ export async function observeBaseline(userId: string, url: string, title: string
       cadence = Math.round(((prev[0].cadence_days || 30) + gap) / 2);
     }
   }
-  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long", timeZone: PAPER.timezone });
   const nth = nthWeekday(now);
   const snap = structureSnapshot(title, "", extras);
   const meeting = extractMeetingInstant(title);

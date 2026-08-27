@@ -23,6 +23,7 @@ import {
   sourceErrorKind,
   sourceLineFromUrl,
   titlesOverlap,
+  collapsePrintedDuplicates,
   workingLeads,
   workingQueueEmptyCopy,
   worthItemOnDesk,
@@ -316,6 +317,40 @@ describe("Worth a Look presentation", () => {
   it("marks a YouTube watch URL as youtube kind", () => {
     assert.equal(kindFromSourceUrl("https://www.youtube.com/user/cityoflongmont"), "youtube");
     assert.equal(kindFromSourceUrl("https://www.longmontcolorado.gov/council"), "official");
+  });
+
+  it("collapses the Longmont quiet-zone pair, keeping the longer body", () => {
+    const kept = collapsePrintedDuplicates([
+      {
+        headline: "Group 2 railroad quiet-zone work set to start Aug. 31",
+        body: "short",
+        slug: "quiet-work",
+      },
+      {
+        headline: "Group 2 railroad quiet-zone improvements set to begin Aug. 31",
+        body: "the longer printed version with more of the packet",
+        slug: "quiet-improvements",
+      },
+    ]);
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0]!.slug, "quiet-improvements");
+  });
+
+  it("collapses the community-survey pair", () => {
+    const kept = collapsePrintedDuplicates([
+      { headline: "Longmont's 2026 community satisfaction survey closes Sept. 7", body: "aaaa" },
+      { headline: "2026 community satisfaction survey open through September 7", body: "bb" },
+    ]);
+    assert.equal(kept.length, 1);
+    assert.match(kept[0]!.headline, /closes Sept/i);
+  });
+
+  it("does not collapse Airport Vision with the Boulder County joint session", () => {
+    const kept = collapsePrintedDuplicates([
+      { headline: "Council books six-hour Airport Vision session Sept. 26 at 375 Airport Road" },
+      { headline: "Longmont council set for joint session with Boulder County on Sept. 21" },
+    ]);
+    assert.equal(kept.length, 2);
   });
 });
 

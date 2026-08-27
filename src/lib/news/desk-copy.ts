@@ -260,6 +260,23 @@ export function titlesOverlap(a: string, b: string): boolean {
   return hit >= 2 && hit / words.length >= 0.5;
 }
 
+/** Keep one story when the edition printed the same item twice. Prefer the longer body. */
+export function collapsePrintedDuplicates<T extends { headline: string; body?: string | null }>(
+  rows: T[],
+): T[] {
+  const kept: T[] = [];
+  for (const row of rows) {
+    const idx = kept.findIndex((k) => titlesOverlap(k.headline, row.headline));
+    if (idx < 0) {
+      kept.push(row);
+      continue;
+    }
+    const current = kept[idx]!;
+    if ((row.body ?? "").length > (current.body ?? "").length) kept[idx] = row;
+  }
+  return kept;
+}
+
 export function worthItemOnDesk(
   item: { id: string; title: string; source_url?: string },
   investigations: { title: string }[],
