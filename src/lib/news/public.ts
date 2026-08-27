@@ -2,9 +2,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import type { ArticleRow, CorrectionRow } from "./types";
 import { unpackStoredDraft } from "./coerce-draft";
+import { stripReporterNotebook } from "./strip-draft";
 import { randomBytes } from "node:crypto";
 import { parseUrlList } from "@/lib/paper";
-import { provenanceFromUrls, parseFindings, resolvePublicFindings, type ProvenanceItem, type StoryFinding } from "./report";
+import { provenanceFromUrls, parseFindings, resolvePublicFindings, type ProvenanceItem, type StoryFinding } from "./findings";
 
 function publicArticle(
   row: ArticleRow,
@@ -15,6 +16,7 @@ function publicArticle(
     body: row.body,
     topic: row.topic,
   });
+  u.body = stripReporterNotebook(u.body);
   let provenance: ProvenanceItem[] = [];
   try {
     const stored = JSON.parse(row.provenance_json || "[]") as ProvenanceItem[];
@@ -29,8 +31,9 @@ function publicArticle(
 
 export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
   async () => {
-    const sql = await getSql();
-    return sql<ArticleRow>`
+    try {
+      const sql = await getSql();
+      return sql<ArticleRow>`
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,
              provenance_json, form, found_note, unanswered
       from articles
@@ -38,28 +41,38 @@ export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
       order by published_at desc
       limit 30
     `.then((rows) => rows.map(publicArticle));
+    } catch (err) {
+      console.error("[paper] listPublishedArticles failed", err);
+      return [] as ArticleRow[];
+    }
   },
 );
 
 export const getPublishedArticle = createServerFn({ method: "GET" })
   .validator((slug: string) => slug)
   .handler(async ({ data: slug }) => {
-    const sql = await getSql();
-    const rows = await sql<ArticleRow>`
+    try {
+      const sql = await getSql();
+      const rows = await sql<ArticleRow>`
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,
              provenance_json, form, found_note, unanswered
       from articles
       where slug = ${slug} and status = 'published'
       limit 1
     `;
-    return rows[0] ? publicArticle(rows[0]) : null;
+      return rows[0] ? publicArticle(rows[0]) : null;
+    } catch (err) {
+      console.error("[paper] getPublishedArticle failed", err);
+      return null;
+    }
   });
 
 export const listPublishedByTopic = createServerFn({ method: "GET" })
   .validator((topic: string) => topic)
   .handler(async ({ data: topic }) => {
-    const sql = await getSql();
-    return sql<ArticleRow>`
+    try {
+      const sql = await getSql();
+      return sql<ArticleRow>`
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,
              provenance_json, form, found_note, unanswered
       from articles
@@ -67,15 +80,20 @@ export const listPublishedByTopic = createServerFn({ method: "GET" })
       order by published_at desc
       limit 30
     `.then((rows) => rows.map(publicArticle));
+    } catch (err) {
+      console.error("[paper] listPublishedByTopic failed", err);
+      return [] as ArticleRow[];
+    }
   });
 
 export const searchPublished = createServerFn({ method: "GET" })
   .validator((q: string) => q.trim().slice(0, 80))
   .handler(async ({ data: q }) => {
     if (!q) return [] as ArticleRow[];
-    const sql = await getSql();
-    const like = `%${q}%`;
-    return sql<ArticleRow>`
+    try {
+      const sql = await getSql();
+      const like = `%${q}%`;
+      return sql<ArticleRow>`
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,
              provenance_json, form, found_note, unanswered
       from articles
@@ -84,18 +102,27 @@ export const searchPublished = createServerFn({ method: "GET" })
       order by published_at desc
       limit 30
     `.then((rows) => rows.map(publicArticle));
+    } catch (err) {
+      console.error("[paper] searchPublished failed", err);
+      return [] as ArticleRow[];
+    }
   });
 
 export const listPublicCorrections = createServerFn({ method: "GET" }).handler(
   async () => {
-    const sql = await getSql();
-    return sql<CorrectionRow>`
+    try {
+      const sql = await getSql();
+      return sql<CorrectionRow>`
       select c.id, c.body, c.created_at, a.headline
       from corrections c
       left join articles a on a.id = c.article_id
       order by c.created_at desc
       limit 50
     `;
+    } catch (err) {
+      console.error("[paper] listPublicCorrections failed", err);
+      return [] as CorrectionRow[];
+    }
   },
 );
 

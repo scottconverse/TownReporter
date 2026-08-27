@@ -3,20 +3,34 @@ import { pendingMigrations } from "../../scripts/migration-plan.mjs";
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
 
-// An empty/whitespace DATABASE_URL (an easy misconfig in deploy UIs) must mean
-// "unset" — otherwise production would silently run on the PGLite fallback.
-const rawDatabaseUrl =
-  typeof process !== "undefined" ? process.env.DATABASE_URL : undefined;
-const databaseUrl =
-  rawDatabaseUrl && rawDatabaseUrl.trim() ? rawDatabaseUrl : undefined;
+function readEnv(key: string): string | undefined {
+  if (typeof process === "undefined") return undefined;
+  // Bracket access so Vite cannot replace this with `undefined` at build time.
+  const value = process.env[key];
+  return value && value.trim() ? value.trim() : undefined;
+}
+
+function isVercelRuntime(): boolean {
+  return typeof process !== "undefined" && Boolean(process.env["VERCEL"] || process.env["VERCEL_ENV"]);
+}
+
+function readDatabaseUrl(): string | undefined {
+  return readEnv("DATABASE_URL");
+}
 
 /**
- * Active backend: real **Neon** when `DATABASE_URL` is set (deployed / configured
- * sandbox), otherwise a local embedded **PGLite** (Postgres compiled to WASM) so
- * the app has a working database even with nothing configured — the live preview
- * included. Swap in Neon later by just setting `DATABASE_URL`; no code changes.
+ * Neon when DATABASE_URL is set. PGLite only in the live preview.
+ * Never PGLite on Vercel — the wasm file is not in the function and would 500
+ * every route.
  */
-export const dbSource: DbSource = databaseUrl ? "neon" : "pglite";
+export function getDbSource(): DbSource {
+  if (readDatabaseUrl()) return "neon";
+  if (isVercelRuntime()) return "neon";
+  return "pglite";
+}
+
+/** Snapshot for older imports. Prefer getDbSource() — env is read at call time. */
+export const dbSource: DbSource = getDbSource();
 
 /**
  * Minimal shared SQL surface, satisfied by both Neon and PGLite. Both the
@@ -94,7 +108,11 @@ function createNeonSql(): Promise<Sql> {
     types.setTypeParser(OID_INT8, Number);
     types.setTypeParser(OID_DATE, identity);
     types.setTypeParser(OID_INTERVAL, identity);
-    const pool = new Pool({ connectionString: databaseUrl });
+    const connectionString = readDatabaseUrl();
+    if (!connectionString) {
+      throw new Error("DATABASE_URL is not set");
+    }
+    const pool = new Pool({ connectionString });
     globalRef.__pgPool__ = pool;
     return toSql(async <T>(text: string, params: unknown[]) => {
       const res = await pool.query(text, params);
@@ -184,7 +202,7 @@ async function createSql(): Promise<Sql> {
         "or a server route loader, never from client code.",
     );
   }
-  return dbSource === "neon" ? createNeonSql() : createPgliteSql();
+  return getDbSource() === "neon" ? createNeonSql() : createPgliteSql();
 }
 
 /**
@@ -208,7 +226,7 @@ export function getSql(): Promise<Sql> {
  * Kysely dialect). Throws when `DATABASE_URL` is set (that path uses Neon).
  */
 export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite> {
-  if (dbSource !== "pglite") {
+  if (getDbSource() !== "pglite") {
     throw new Error("getPglite() is only available on the PGLite fallback (no DATABASE_URL)");
   }
   await getSql();
@@ -219,7 +237,7 @@ export async function getPglite(): Promise<import("@electric-sql/pglite").PGlite
 
 /** Run fn on a single connection (BEGIN/COMMIT). Required for Neon pools. */
 export async function withTransaction<T>(fn: (sql: Sql) => Promise<T>): Promise<T> {
-  if (dbSource === "pglite") {
+  if (getDbSource() === "pglite") {
     const pg = await getPglite();
     return pg.transaction(async (tx) => {
       const sql = toSql(async <R>(text: string, params: unknown[]) => {
@@ -265,7 +283,7 @@ export async function withTransaction<T>(fn: (sql: Sql) => Promise<T>): Promise<
  * module kick it off immediately (see bottom of file).
  */
 export function ensureDbReady(): Promise<void> {
-  if (dbSource !== "pglite") return Promise.resolve();
+  if (getDbSource() !== "pglite") return Promise.resolve();
   return getSql().then(() => undefined);
 }
 
@@ -274,10 +292,9 @@ export function ensureDbReady(): Promise<void> {
 const globalBoot = globalThis as typeof globalThis & {
   __pgBootstrapPromise__?: Promise<void>;
 };
-if (typeof window === "undefined" && dbSource === "pglite") {
+if (typeof window === "undefined" && getDbSource() === "pglite") {
   globalBoot.__pgBootstrapPromise__ ??= ensureDbReady().catch((err) => {
     globalBoot.__pgBootstrapPromise__ = undefined;
     console.error("[db] PGLite bootstrap failed:", err);
-    throw err;
   });
 }

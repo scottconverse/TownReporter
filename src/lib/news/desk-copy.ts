@@ -129,6 +129,13 @@ export function editorError(raw: string | null | undefined): string | null {
   if (/rate limit/i.test(t)) {
     return "Dark Desk paused so it does not burn through the hourly allowance. Try again in a bit.";
   }
+  if (
+    /research failed|dark desk failed|failed to fetch|aborte?d|504|503|502|econnreset|socket hang up/i.test(
+      t,
+    )
+  ) {
+    return "This round stopped before it finished. The records already captured are still on the file. Click Keep digging to continue.";
+  }
   return plainEditorText(t);
 }
 
@@ -280,3 +287,219 @@ export function excerptForEditor(text: string, max = 280): string {
   if (t.length <= max) return t;
   return t.slice(0, max - 1).replace(/\s+\S*$/, "") + "…";
 }
+
+/** Leads still on the queue: published stories live on Published. */
+export function workingLeads<T extends { status: string }>(leads: T[]): T[] {
+  return leads.filter((l) => l.status !== "published");
+}
+
+/** Open work for the command center: not published, not killed. */
+export function openLeads<T extends { status: string }>(leads: T[]): T[] {
+  return leads.filter((l) => l.status !== "killed" && l.status !== "published");
+}
+
+/** Scan-facing model errors. Do not reuse Dark Desk “Keep digging” copy. */
+export function editorScanError(raw: string | null | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const t = raw.trim();
+  if (/timeout|timed out|network/i.test(t)) {
+    return "The writing pass timed out after the sources were fetched. No new leads were filed. Run the scan again.";
+  }
+  if (
+    /403/.test(t) ||
+    /forbidden/i.test(t) ||
+    /xai api error/i.test(t) ||
+    /api error/i.test(t) ||
+    /AI is not available/i.test(t)
+  ) {
+    return "The writing model did not finish. Sources were fetched, but no new leads were filed. Run the scan again.";
+  }
+  if (/empty model response/i.test(t)) {
+    return "The writing model returned nothing this pass. Sources were fetched. Run the scan again.";
+  }
+  if (/usable JSON|could not read/i.test(t)) {
+    return "The writing pass came back in a form the desk could not read. Sources were fetched. Run the scan again.";
+  }
+  return plainEditorText(t);
+}
+
+export function editorFetchError(raw: string | null | undefined, url?: string | null): string | null {
+  if (!raw?.trim()) return null;
+  const t = raw.trim();
+  const site = socialSiteName(url);
+  const code = t.match(/\b(400|401|403|404|410|429)\b/)?.[1];
+  if (site) {
+    if (/401|login|sign in|unauthorized/i.test(t)) return "Needs a login the scanner doesn't have.";
+    if (code === "429" || /rate/i.test(t)) return `Rate-limited (${code || "429"}).`;
+    if (/could not be resolved|ENOTFOUND|getaddrinfo|DNS/i.test(t)) return "Name lookup failed (DNS).";
+    if (/timeout|timed out/i.test(t)) return "Timed out once. Usually fine.";
+    if (code === "400" || code === "403" || /forbidden|rejected|refused/i.test(t)) {
+      return `${site} refused the request (${code || "400"}). It usually does.`;
+    }
+  }
+  if (/404|not found|had almost no/i.test(t)) return "That page is gone or empty.";
+  if (/403|forbidden/i.test(t)) return "The site refused the request.";
+  if (/401/i.test(t)) return "The site asked for a login.";
+  if (/429|rate/i.test(t)) return "The site asked us to slow down.";
+  if (/could not be resolved|ENOTFOUND|getaddrinfo|DNS/i.test(t)) return "That address could not be found.";
+  if (/timeout|timed out/i.test(t)) return "The page timed out.";
+  if (/400/i.test(t)) return "The site rejected the request.";
+  if (/Fetch failed/i.test(t)) return "Could not fetch that page.";
+  return plainEditorText(t);
+}
+
+export function workingQueueEmptyCopy(input: {
+  publishedCount: number;
+  lastScan?: { leads_created: number; sources_fetched: number; error: string | null } | null;
+}): string {
+  const last = input.lastScan ?? null;
+  const paper =
+    input.publishedCount > 0 ? ` ${input.publishedCount} already on the paper.` : "";
+  if (!last && input.publishedCount === 0) {
+    return "Queue is empty — run the first scan or file a lead.";
+  }
+  if (last?.error && /timeout|timed out/i.test(last.error) && last.leads_created === 0) {
+    const n = last.sources_fetched;
+    return `Nothing open.${paper} Last scan fetched ${n} source${n === 1 ? "" : "s"} but the writing pass timed out, so no new leads were filed.`;
+  }
+  if (last?.error && last.leads_created === 0) {
+    return `Nothing open.${paper} Last scan fetched sources but did not file new leads.`;
+  }
+  if (last && last.leads_created === 0 && input.publishedCount > 0) {
+    return `Nothing open — ${input.publishedCount} already on the paper. Last scan filed no new leads.`;
+  }
+  if (input.publishedCount > 0) {
+    return "Nothing open — printed stories are on Published.";
+  }
+  return "Queue is empty — run a scan or file a lead.";
+}
+
+function socialSiteName(url?: string | null): string | null {
+  if (!url) return null;
+  try {
+    const host = new URL(url).hostname.replace(/^www\./i, "").toLowerCase();
+    if (host.includes("facebook") || host === "fb.com" || host.endsWith(".fb.com")) return "Facebook";
+    if (host === "x.com" || host.includes("twitter")) return "X";
+    if (host.includes("nextdoor")) return "Nextdoor";
+    if (host.includes("reddit")) return "Reddit";
+    if (host.includes("instagram")) return "Instagram";
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/** Official-record failures vs social/discovery flake. Desk-side; no engine change. */
+export function sourceErrorKind(source: { url: string; kind?: string; tier?: string }): "official" | "flaky" {
+  if (socialSiteName(source.url)) return "flaky";
+  const kind = (source.kind || "").toLowerCase();
+  const tier = (source.tier || "").toUpperCase();
+  if (kind === "signal" || kind === "community" || tier === "C") return "flaky";
+  return "official";
+}
+
+export function flakyFailureCopy(count: number): string {
+  return `${count} social & discovery source${count === 1 ? "" : "s"} didn't answer — they rarely do`;
+}
+
+/** Round stop vs error stop. Composed from pause_reason — no new column. */
+export function investigationStopKind(inv: {
+  status: string;
+  pause_reason?: string | null;
+}): "error" | "round" | null {
+  if (inv.status !== "paused") return null;
+  const raw = inv.pause_reason ?? "";
+  if (/editor set this aside/i.test(raw)) return "round";
+  if (/hop budget|frontier item/i.test(raw)) return "round";
+  if (!raw.trim()) return "round";
+  if (
+    /timeout|timed out|403|forbidden|xai|api error|not a function|cannot read propert|rate limit|AI is not available/i.test(
+      raw,
+    )
+  ) {
+    return "error";
+  }
+  return "round";
+}
+
+/** Thin/boilerplate worth-a-look titles → first sentence of what-changed. */
+export function worthTitle(item: { title?: string; happened?: string; why?: string }): string {
+  const t = (item.title || "").trim();
+  const words = t.split(/\s+/).filter(Boolean);
+  const boilerplate =
+    /^document changed\b/i.test(t) || /^(meeting|minutes|agenda|update|notice|page changed)$/i.test(t);
+  if (!boilerplate && words.length >= 4) return t;
+  if (!boilerplate && words.length >= 3 && t.length >= 18) return t;
+  const base = (item.happened || item.why || t).split(/[.;](?:\s|$)/)[0].trim();
+  if (!base) return t;
+  return base.length > 96 ? `${base.slice(0, 93)}…` : base;
+}
+
+export function scanCountsLine(s: {
+  sources_fetched: number;
+  leads_created: number;
+  sources_proposed: number;
+}): string {
+  if (s.leads_created > 0) {
+    return `${s.sources_fetched} fetched · ${s.leads_created} leads · ${s.sources_proposed} proposed`;
+  }
+  return `${s.sources_fetched} fetched · filed nothing`;
+}
+
+export function scanZeroWhy(input: {
+  leads_created: number;
+  sources_fetched: number;
+  summary: string | null;
+  error: string | null;
+}): string | null {
+  if (input.leads_created > 0) return input.summary;
+  if (input.error) return editorScanError(input.error);
+  const s = input.summary?.trim();
+  if (s) return s;
+  if (input.sources_fetched > 0) return "Nothing in the fetched pages crossed the filing bar.";
+  return "No sources were fetched.";
+}
+
+export function composeZeroLeadSummary(input: { fetched: number; changed: number }): string {
+  if (input.fetched <= 0) return "No sources were fetched.";
+  const same = Math.max(0, input.fetched - input.changed);
+  const sameBit =
+    same > 0
+      ? `${same} page${same === 1 ? "" : "s"} matched ${same === 1 ? "its" : "their"} last capture`
+      : "";
+  const changeBit =
+    input.changed > 0
+      ? `${input.changed} changed only in datestamps or boilerplate`
+      : "";
+  const detail = [sameBit, changeBit].filter(Boolean).join("; ");
+  return detail
+    ? `Nothing crossed the filing bar. ${detail}.`
+    : "Nothing crossed the filing bar.";
+}
+
+export type PrintedDup = { slug: string; publishedAt: string; note: string };
+
+export function nearDuplicate(
+  lead: { headline: string; topic?: string },
+  published: { slug: string; headline: string; topic?: string; published_at: string }[],
+): PrintedDup | null {
+  for (const p of published) {
+    if (titlesOverlap(lead.headline, p.headline) || properNounOverlap(lead.headline, p.headline)) {
+      return { slug: p.slug, publishedAt: p.published_at, note: p.headline };
+    }
+  }
+  return null;
+}
+
+function properNounOverlap(a: string, b: string): boolean {
+  const props = (s: string) => (s.match(/\b[A-Z][A-Za-z]{2,}\b/g) ?? []).map((w) => w.toLowerCase());
+  const pa = props(a);
+  const pb = new Set(props(b));
+  return pa.filter((w) => pb.has(w)).length >= 2;
+}
+
+export function kindFromSourceUrl(url: string): "youtube" | "official" {
+  return /youtube\.com|youtu\.be/i.test(url) ? "youtube" : "official";
+}
+
+

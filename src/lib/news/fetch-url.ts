@@ -1,66 +1,19 @@
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { assertHttpUrl, isBlockedAddress, isIP, sha256 } from "./url-guard.ts";
+import { htmlToPlainText } from "./html-text.ts";
 
-export function isBlockedAddress(ip: string): boolean {
-  const raw = ip.trim().toLowerCase().replace(/^\[|\]$/g, "");
-  if (raw.startsWith("::ffff:") && raw.includes(".")) {
-    return isBlockedAddress(raw.slice(raw.lastIndexOf(":") + 1));
-  }
-  if (raw.includes(".")) {
-    const p = raw.split(".").map(Number);
-    if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
-      return true;
-    }
-    const [a, b] = p;
-    if (a === 0 || a === 10 || a === 127) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true;
-    if (a >= 224) return true;
-    return false;
-  }
-  if (raw === "::1" || raw === "::" || raw === "0:0:0:0:0:0:0:1") return true;
-  if (raw.startsWith("fc") || raw.startsWith("fd")) return true;
-  if (raw.startsWith("fe80")) return true;
-  if (raw.startsWith("ff")) return true;
-  return false;
-}
-
-export function assertHttpUrl(raw: string): URL {
-  let url: URL;
-  try {
-    url = new URL(raw.trim());
-  } catch {
-    throw new Error("Invalid URL");
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Only http(s) URLs are allowed");
-  }
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (isIP(host) && isBlockedAddress(host)) {
-    throw new Error("That host is not fetchable");
-  }
-  if (
-    host === "localhost" ||
-    host.endsWith(".local") ||
-    host.endsWith(".internal") ||
-    host.endsWith(".localhost")
-  ) {
-    throw new Error("That host is not fetchable");
-  }
-  return url;
-}
+export { assertHttpUrl, isBlockedAddress, sha256 } from "./url-guard.ts";
 
 export async function assertPublicHttpUrl(raw: string): Promise<URL> {
   const url = assertHttpUrl(raw);
   const host = url.hostname.replace(/^\[|\]$/g, "");
-  if (isIP(host)) {
-    if (isBlockedAddress(host)) throw new Error("That host is not fetchable");
-    return url;
+  if (isIP(host) && isBlockedAddress(host)) throw new Error("That host is not fetchable");
+  if (isIP(host)) return url;
+  if (typeof window !== "undefined") {
+    throw new Error("That host could not be resolved");
   }
   let records: { address: string }[];
   try {
+    const { lookup } = await import("node:dns/promises");
     records = await lookup(host, { all: true });
   } catch {
     throw new Error("That host could not be resolved");
@@ -111,85 +64,18 @@ export async function fetchPublicHttp(url: URL, hops = 4): Promise<Response> {
   return tracked.response;
 }
 
-
 function stripHtml(html: string) {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "\u0026")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function youtubeVideoId(url: URL): string | null {
-  const host = url.hostname.replace(/^www\./, "");
-  if (host === "youtu.be") {
-    const id = url.pathname.split("/").filter(Boolean)[0];
-    return id && !id.startsWith("@") ? id : null;
-  }
-  if (host === "youtube.com" || host === "m.youtube.com") {
-    return url.searchParams.get("v");
-  }
-  return null;
-}
-
-function isYoutubeChannel(url: URL): boolean {
-  const host = url.hostname.replace(/^www\./, "");
-  if (host !== "youtube.com" && host !== "m.youtube.com") return false;
-  const p = url.pathname;
-  return (
-    p.startsWith("/@") ||
-    p.startsWith("/channel/") ||
-    p.startsWith("/c/") ||
-    p.startsWith("/user/") ||
-    p.endsWith("/videos") ||
-    p.endsWith("/streams")
-  );
-}
-
-async function fetchYoutubeCaptions(videoId: string): Promise<string | null> {
-  const timed = new URL("https://www.youtube.com/api/timedtext");
-  timed.searchParams.set("v", videoId);
-  timed.searchParams.set("lang", "en");
-  timed.searchParams.set("fmt", "srv3");
-  const res = await fetchPublicHttp(timed);
-  if (!res.ok) return null;
-  const xml = await res.text();
-  const text = stripHtml(xml);
-  return text.length > 40 ? text : null;
+  return htmlToPlainText(html);
 }
 
 export async function fetchSourceText(
   rawUrl: string,
 ): Promise<{ text: string; titleHint: string }> {
   const url = await assertPublicHttpUrl(rawUrl);
-  const videoId = youtubeVideoId(url);
-  if (videoId) {
-    const captions = await fetchYoutubeCaptions(videoId);
-    if (captions) {
-      return {
-        text: `YouTube captions (auto or manual; verify quotes against the video).\nVideo ${videoId}\n\n${captions}`,
-        titleHint: `YouTube ${videoId}`,
-      };
-    }
-  }
-  if (isYoutubeChannel(url)) {
-    const res = await fetchPublicHttp(url);
-    const html = await res.text();
-    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    const titleHint = titleMatch ? stripHtml(titleMatch[1]).slice(0, 140) : url.hostname;
-    const text = stripHtml(html).slice(0, 14000);
-    return {
-      text: `YouTube channel/listing URL — not a single video. Captions need a watch URL with v=. Do not treat this as a transcript.\n\n${text}`,
-      titleHint,
-    };
+  if (/youtube\.com|youtu\.be/i.test(url.hostname)) {
+    const { ingestYoutube } = await import("./youtube.ts");
+    const yt = await ingestYoutube(url);
+    if (yt) return { text: yt.text, titleHint: yt.title };
   }
 
   const res = await fetchPublicHttp(url);
@@ -210,20 +96,15 @@ export async function fetchSourceText(
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const titleHint = titleMatch ? stripHtml(titleMatch[1]).slice(0, 140) : url.hostname;
   let text = stripHtml(html).slice(0, 14000);
-  const { needsRenderedFetch, fetchRenderedPage } = await import("./render-fetch.ts");
-  if (needsRenderedFetch(url, text, html)) {
-    const rendered = await fetchRenderedPage(url.toString());
-    if (rendered && rendered.text.length > Math.min(text.length, 400)) {
-      return { text: rendered.text.slice(0, 14000), titleHint: rendered.title || titleHint };
+  if (typeof window === "undefined") {
+    const { needsRenderedFetch, fetchRenderedPage } = await import("./render-fetch.ts");
+    if (needsRenderedFetch(url, text, html)) {
+      const rendered = await fetchRenderedPage(url.toString());
+      if (rendered && rendered.text.length > Math.min(text.length, 400)) {
+        return { text: rendered.text.slice(0, 14000), titleHint: rendered.title || titleHint };
+      }
     }
   }
   if (text.length < 40) throw new Error("Page had almost no readable text");
   return { text, titleHint };
-}
-
-export async function sha256(text: string) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }

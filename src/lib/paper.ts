@@ -48,6 +48,12 @@ export const SEED_SOURCES: {
     tier: "A",
   },
   {
+    url: "https://longmont.primegov.com/public/portal",
+    title: "Longmont PrimeGov (agendas, packets, minutes)",
+    kind: "official",
+    tier: "A",
+  },
+  {
     url: "https://www.longmontcolorado.gov/government/departments/planning-and-development-services",
     title: "Planning and Development",
     kind: "official",
@@ -80,6 +86,12 @@ export const SEED_SOURCES: {
   {
     url: "https://www.youtube.com/@CityofLongmont",
     title: "City of Longmont on YouTube",
+    kind: "youtube",
+    tier: "A",
+  },
+  {
+    url: "https://www.youtube.com/@LongmontPublicMedia",
+    title: "Longmont Public Media on YouTube",
     kind: "youtube",
     tier: "A",
   },
@@ -138,4 +150,15 @@ export function formatDateTime(iso: string | Date | null | undefined) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+export function formatAge(iso: string | Date | null | undefined) {
+  if (!iso) return "";
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  if (Number.isNaN(d.getTime())) return "";
+  const h = Math.max(0, Math.round((Date.now() - d.getTime()) / 3_600_000));
+  if (h < 1) return "just now";
+  if (h < 24) return `${h}h`;
+  const days = Math.round(h / 24);
+  return `${days}d`;
 }

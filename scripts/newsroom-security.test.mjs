@@ -72,6 +72,15 @@ test("SSRF: fetch follows redirects manually and re-asserts each hop", () => {
   assert.match(src, /isIP\(host\) && isBlockedAddress\(host\)/);
 });
 
+test("scan does not stamp last_hash until the writing pass succeeds", () => {
+  const desk = readFileSync(join(ROOT, "src/lib/news/desk.ts"), "utf8");
+  assert.match(desk, /pendingHashes/);
+  assert.match(desk, /shouldCommitFetchHashes/);
+  assert.match(desk, /previousScanNeedsReread/);
+  assert.match(desk, /parseScanResult/);
+  assert.doesNotMatch(desk, /set last_hash = \$\{hash\}, last_fetched_at = now\(\)/);
+});
+
 test("scan never auto-promotes model URLs to official or Tier A", () => {
   const desk = readFileSync(join(ROOT, "src/lib/news/desk.ts"), "utf8");
   assert.match(desk, /'discovered', 'unclassified', 'proposed'/);

@@ -1,10 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { DeskShell, Field, InkButton, inkSolid, inputClass, areaClass } from "@/components/desk-chrome";
-import { EmptyState, ListSkeleton, Notice } from "@/components/states";
-import { fileLead, listLeads, setLeadStatus } from "@/lib/news/desk";
-import { TOPICS, formatShortDate } from "@/lib/paper";
+import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
+import { LeadRowView } from "@/components/desk-leads";
+import { ListSkeleton, Notice } from "@/components/states";
+import { fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
+import { nearDuplicate, workingLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
+import { TOPICS } from "@/lib/paper";
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
 
@@ -16,11 +18,14 @@ function QueuePage() {
     queryFn: () => listLeads(),
     placeholderData: keepPreviousData,
   });
+  const scans = useQuery({ queryKey: ["scans"], queryFn: () => listScans() });
+  const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
   const setStatus = useMutation({
     mutationFn: (input: { id: number; status: "held" | "killed" | "new" }) =>
       setLeadStatus({ data: input }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
   });
+  const [filter, setFilter] = useState<"all" | "new" | "drafted" | "held" | "killed">("all");
   const [headline, setHeadline] = useState("");
   const [why, setWhy] = useState("");
   const [topic, setTopic] = useState("council");
@@ -45,175 +50,131 @@ function QueuePage() {
     },
   });
 
+  const working = workingLeads(leads);
+  const publishedCount = leads.filter((l) => l.status === "published").length;
+  const last = scans.data?.[0];
+  const counts = {
+    all: working.length,
+    new: leads.filter((l) => l.status === "new").length,
+    drafted: leads.filter((l) => l.status === "drafted").length,
+    held: leads.filter((l) => l.status === "held").length,
+    killed: leads.filter((l) => l.status === "killed").length,
+  };
+  const printed = published.data ?? [];
+  const shown = (filter === "all" ? working : leads.filter((l) => l.status === filter)).sort(
+    (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0),
+  );
+
   return (
-    <DeskShell title="Queue" kicker="Leads">
-      <p className="max-w-2xl text-ink-2">
-        What is news. Grok can file leads from a scan when it is attached. You
-        can always file one yourself, write the recap, and put it on the paper.
+    <DeskShell title="The queue" kicker="Leads">
+      <p className="lede">
+        Everything that might be news, scored and sorted. The scanner and Dark Desk file leads
+        here; so do you. Printed stories move to Published. Nothing prints until you open a lead
+        and publish it.
       </p>
 
-      <form
-        className="mt-6 max-w-2xl space-y-3 border border-rule bg-paper p-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setFormError(null);
-          file.mutate();
-        }}
-      >
-        <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
-          File a lead
-        </p>
-        <Field label="Headline">
-          <input
-            className={inputClass}
-            value={headline}
-            onChange={(e) => setHeadline(e.target.value)}
-            required
-            minLength={8}
-            placeholder="What happened"
-          />
-        </Field>
-        <Field label="Why now">
-          <textarea
-            className={areaClass}
-            rows={3}
-            value={why}
-            onChange={(e) => setWhy(e.target.value)}
-            required
-            minLength={8}
-            placeholder="Why this is news in Longmont today"
-          />
-        </Field>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Topic">
-            <select
-              className={inputClass}
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-            >
-              {TOPICS.filter((t) => t !== "about").map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Source URL (optional)">
-            <input
-              className={inputClass}
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://"
-            />
-          </Field>
-        </div>
-        {formError ? <Notice kind="err">{formError}</Notice> : null}
-        <InkButton disabled={file.isPending} type="submit">
-          {file.isPending ? "Filing…" : "File lead"}
-        </InkButton>
-      </form>
+      <details className="file-form">
+        <summary>File a lead yourself</summary>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            setFormError(null);
+            file.mutate();
+          }}
+        >
+          <div className="form-grid">
+            <Field label="Headline">
+              <input
+                value={headline}
+                onChange={(e) => setHeadline(e.target.value)}
+                required
+                minLength={8}
+                placeholder="What happened"
+              />
+            </Field>
+            <Field label="Why now">
+              <input
+                value={why}
+                onChange={(e) => setWhy(e.target.value)}
+                required
+                minLength={8}
+                placeholder="Why this is news in Longmont today"
+              />
+            </Field>
+            <Field label="Topic">
+              <select value={topic} onChange={(e) => setTopic(e.target.value)}>
+                {TOPICS.filter((t) => t !== "about").map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Source URL (optional)">
+              <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" />
+            </Field>
+          </div>
+          {formError ? <Notice kind="err">{formError}</Notice> : null}
+          <InkButton disabled={file.isPending} type="submit">
+            {file.isPending ? "Filing…" : "File lead"}
+          </InkButton>
+        </form>
+      </details>
+
+      <div className="filters">
+        {(["all", "new", "drafted", "held", "killed"] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            className={"filter" + (filter === k ? " on" : "")}
+            onClick={() => setFilter(k)}
+          >
+            {k} {counts[k]}
+          </button>
+        ))}
+      </div>
 
       {isPending && leads.length === 0 ? (
         <ListSkeleton rows={4} />
-      ) : leads.length === 0 ? (
-        <div className="mt-6">
-          <EmptyState
-            kicker="Leads"
-            title="Queue is empty"
-            body="File a lead above, or wait until a scan with Grok attached fills this list. Nothing prints until you open a lead and publish."
-            action={
-              <Link to="/desk/scan" className={inkSolid}>
-                Scan sources
-              </Link>
-            }
-          />
-        </div>
+      ) : shown.length === 0 ? (
+        <p className="wire-sum">
+          {filter === "all" ? (
+            <>
+              {workingQueueEmptyCopy({
+                publishedCount,
+                lastScan: last
+                  ? {
+                      leads_created: last.leads_created,
+                      sources_fetched: last.sources_fetched,
+                      error: last.error,
+                    }
+                  : null,
+              })}{" "}
+              {publishedCount > 0 ? (
+                <Link to="/desk/published" className="inline-link">
+                  Published
+                </Link>
+              ) : null}
+            </>
+          ) : (
+            `No ${filter} leads.`
+          )}
+        </p>
       ) : (
-        <ul className="stagger-in mt-6 space-y-4">
-          {leads.map((l) => (
-            <li
+        <div className="lead-list roomy">
+          {shown.map((l) => (
+            <LeadRowView
               key={l.id}
-              className="story-card border border-rule bg-paper p-4"
-            >
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
-                  {l.topic} · {formatShortDate(l.created_at)}
-                  {l.newsworthiness != null ? ` · ${l.newsworthiness}/20` : ""}
-                </p>
-                <StatusChip status={l.status} />
-              </div>
-              <h2 className="mt-1 font-display text-2xl">
-                <Link
-                  to="/desk/story/$leadId"
-                  params={{ leadId: String(l.id) }}
-                  className="transition-[color] duration-150 ease-out hover:text-rust"
-                >
-                  {l.headline}
-                </Link>
-              </h2>
-              <p className="mt-2 text-ink-2">{l.why}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Link
-                  to="/desk/story/$leadId"
-                  params={{ leadId: String(l.id) }}
-                  className={inkSolid}
-                >
-                  Open
-                </Link>
-                {l.article_slug ? (
-                  <Link
-                    to="/articles/$slug"
-                    params={{ slug: l.article_slug }}
-                    className="pressable inline-flex min-h-11 items-center border border-ink px-4 text-sm hover:bg-paper-2"
-                  >
-                    On the paper
-                  </Link>
-                ) : null}
-                {l.status !== "held" && l.status !== "published" && (
-                  <InkButton
-                    tone="ghost"
-                    disabled={setStatus.isPending}
-                    onClick={() => setStatus.mutate({ id: l.id, status: "held" })}
-                  >
-                    Hold
-                  </InkButton>
-                )}
-                {l.status !== "killed" && l.status !== "published" && (
-                  <InkButton
-                    tone="danger"
-                    disabled={setStatus.isPending}
-                    onClick={() => setStatus.mutate({ id: l.id, status: "killed" })}
-                  >
-                    Kill
-                  </InkButton>
-                )}
-              </div>
-            </li>
+              lead={l}
+              dup={nearDuplicate(l, printed)}
+              roomy
+              onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
+              onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
+              onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}
+            />
           ))}
-        </ul>
+        </div>
       )}
     </DeskShell>
-  );
-}
-
-function StatusChip({ status }: { status: string }) {
-  const tone =
-    status === "published"
-      ? "border-rust text-rust"
-      : status === "killed"
-        ? "border-danger text-danger"
-        : status === "held"
-          ? "border-rule text-muted"
-          : "border-ink text-ink";
-  return (
-    <span
-      className={
-        "inline-flex items-center border px-2 py-0.5 text-[11px] tracking-[0.12em] uppercase " +
-        tone
-      }
-    >
-      {status}
-    </span>
   );
 }

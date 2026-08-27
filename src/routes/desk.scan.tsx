@@ -1,15 +1,17 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { DeskShell, InkButton, inkSolid } from "@/components/desk-chrome";
-import { BusyLine, EmptyState, ListSkeleton, Notice } from "@/components/states";
-import { listScans, runScan } from "@/lib/news/desk";
-import { formatDate } from "@/lib/paper";
+import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { ListSkeleton, Notice } from "@/components/states";
+import { listScans, listSources, runScan } from "@/lib/news/desk";
+import { editorScanError, scanCountsLine, scanZeroWhy } from "@/lib/news/desk-copy";
+import { formatDateTime } from "@/lib/paper";
 
 export const Route = createFileRoute("/desk/scan")({ component: ScanPage });
 
 function ScanPage() {
   const qc = useQueryClient();
   const scans = useQuery({ queryKey: ["scans"], queryFn: () => listScans() });
+  const sources = useQuery({ queryKey: ["sources"], queryFn: () => listSources() });
   const scan = useMutation({
     mutationFn: () => runScan(),
     onSuccess: () => {
@@ -20,73 +22,88 @@ function ScanPage() {
   });
 
   const history = scans.data ?? [];
+  const watch = (sources.data ?? []).filter((s) => s.status === "accepted").length;
+  const last = history[0];
 
   return (
     <DeskShell title="Scan" kicker="Reporter pass">
-      <p className="max-w-2xl text-ink-2">
-        Fetches every accepted source on the watch list (up to 200), then
-        Grok files leads and proposed official URLs. You review them in the
-        queue, draft with Grok, edit, and print. This is the expensive button
-        — not a loop.
+      <p className="lede">
+        One pass over the watch list: fetch every accepted source, then one AI read for leads and
+        proposed sources. It runs only when you click — this is the expensive button, not a loop.
       </p>
-      <div className="mt-6 flex flex-wrap items-center gap-3">
+      <div className="scan-bar">
         <InkButton disabled={scan.isPending} onClick={() => scan.mutate()}>
           {scan.isPending ? "Scanning sources…" : "Run scan"}
         </InkButton>
+        <p className="meta">
+          {watch} sources on watch
+          {last ? ` · last ran ${formatDateTime(last.started_at)}` : ""}
+        </p>
       </div>
-      {scan.isPending && (
-        <div className="enter-fade-fast mt-6 border border-rule bg-paper-2 p-4">
-          <BusyLine
-            label="Fetching accepted sources, then one Grok pass for leads. Stay on this page."
-          />
-        </div>
-      )}
-      {scan.data && scan.data.ok && (
-        <div className="enter-fade-fast mt-6 border border-ink bg-paper p-4">
-          <p className="font-medium">
-            Fetched {scan.data.fetchedCount} · leads {scan.data.leadsCreated} ·
-            proposed {scan.data.proposed}
+      {scan.isPending ? (
+        <Busy label="Fetching accepted sources, then one pass for leads. Stay on this page." />
+      ) : null}
+      {scan.data && scan.data.ok && scan.data.leadsCreated > 0 ? (
+        <div className="scan-result">
+          <p className="wire-line">
+            <b>Done.</b> {scan.data.fetchedCount} fetched · {scan.data.leadsCreated} leads filed ·{" "}
+            {scan.data.proposed} source proposed
           </p>
-          <p className="mt-2 text-ink-2">{scan.data.summary}</p>
-          <Link to="/desk/queue" className={inkSolid + " mt-4"}>
-            Open the queue
-            {scan.data.leadsCreated ? ` (${scan.data.leadsCreated} leads)` : ""}
+          {scan.data.summary ? <p className="wire-sum">{scan.data.summary}</p> : null}
+          <Link to="/desk/queue">
+            <InkButton small>Open the queue</InkButton>
           </Link>
         </div>
-      )}
-      {scan.data && !scan.data.ok && (
-        <Notice kind="err">{scan.data.error}</Notice>
-      )}
-      {scan.error && (
-        <Notice kind="err">
-          {scan.error instanceof Error ? scan.error.message : "Scan failed"}
-        </Notice>
-      )}
+      ) : null}
+      {scan.data && scan.data.ok && scan.data.leadsCreated === 0 ? (
+        <div className="scan-result zero">
+          <p className="wire-line">
+            <b>Fetched {scan.data.fetchedCount}. Filed nothing.</b>
+          </p>
+          <p className="wire-sum">
+            {scanZeroWhy({
+              leads_created: 0,
+              sources_fetched: scan.data.fetchedCount,
+              summary: scan.data.summary,
+              error: null,
+            })}
+          </p>
+          <InkButton tone="ghost" small disabled={scan.isPending} onClick={() => scan.mutate()}>
+            Run again
+          </InkButton>
+        </div>
+      ) : null}
+      {scan.data && !scan.data.ok ? <Notice kind="err">{editorScanError(scan.data.error)}</Notice> : null}
+      {scan.error ? (
+        <Notice kind="err">{scan.error instanceof Error ? scan.error.message : "Scan failed"}</Notice>
+      ) : null}
 
-      <h2 className="mt-10 font-display text-2xl">Previous scans</h2>
+      <SecHead title="Previous scans" count={history.length} />
       {scans.isPending && history.length === 0 ? (
         <ListSkeleton rows={3} />
       ) : history.length === 0 ? (
-        <div className="mt-3">
-          <EmptyState
-            kicker="Reporter pass"
-            title="No scans yet"
-            body="Nothing has been fetched. Click Run scan when you want a new edition — not on a loop."
-          />
-        </div>
+        <p className="wire-sum">No scans yet. Click Run scan when you want a new pass — not on a loop.</p>
       ) : (
-        <ul className="stagger-in mt-3 divide-y divide-rule border border-rule bg-paper">
+        <div className="scan-hist">
           {history.map((s) => (
-            <li key={s.id} className="px-4 py-3">
-              <p className="text-sm text-muted">{formatDate(s.started_at)}</p>
-              <p className="mt-1">
-                {s.sources_fetched} sources · {s.leads_created} leads
-                {s.error ? ` · ${s.error}` : ""}
+            <div key={s.id} className="scan-row">
+              <p className="meta">{formatDateTime(s.started_at)}</p>
+              <p className="scan-line">
+                {scanCountsLine({
+                  sources_fetched: s.sources_fetched,
+                  leads_created: s.leads_created,
+                  sources_proposed: s.sources_proposed,
+                })}
               </p>
-              {s.summary && <p className="mt-1 text-ink-2">{s.summary}</p>}
-            </li>
+              {s.leads_created > 0 && s.summary ? <p className="wire-sum">{s.summary}</p> : null}
+              {s.leads_created === 0 ? (
+                <p className="wire-sum">{scanZeroWhy(s)}</p>
+              ) : s.error ? (
+                <p className="wire-warn">{editorScanError(s.error)}</p>
+              ) : null}
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </DeskShell>
   );

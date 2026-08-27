@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { formatDateTime, formatShortDate } from "@/lib/paper";
-import type { ProvenanceItem, StoryFinding } from "@/lib/news/report";
+import type { ProvenanceItem, StoryFinding } from "@/lib/news/findings";
 
 export function ProvenanceBlock({
   items,

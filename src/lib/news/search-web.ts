@@ -1,4 +1,5 @@
-import { assertHttpUrl, fetchPublicHttp } from "./fetch-url.ts";
+import { fetchPublicHttp } from "./fetch-url.ts";
+import { assertHttpUrl } from "./url-guard.ts";
 import { classifySearchHtml, type SearchState } from "./fetch-outcome.ts";
 
 export type WebHit = { title: string; url: string; snippet: string };

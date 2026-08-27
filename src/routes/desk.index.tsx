@@ -1,109 +1,413 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { DeskShell, inkGhost, inkSolid } from "@/components/desk-chrome";
-import { EmptyState, StatSkeleton } from "@/components/states";
-import { listLeads, listScans, listSources } from "@/lib/news/desk";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Busy, InkButton, SecHead } from "@/components/desk-chrome";
+import { LeadRowView } from "@/components/desk-leads";
+import { DeskShell } from "@/components/desk-chrome";
+import { ListSkeleton } from "@/components/states";
+import {
+  listLeads,
+  listMemory,
+  listPublishedDesk,
+  listScans,
+  listSources,
+  runScan,
+  setLeadStatus,
+  setSourceStatus,
+} from "@/lib/news/desk";
+import { listInvestigations, listWorthALook, openDarkInvestigation } from "@/lib/news/dark";
+import {
+  editorKindLabel,
+  editorFetchError,
+  editorScanError,
+  editorStatus,
+  flakyFailureCopy,
+  investigationStopKind,
+  nearDuplicate,
+  openLeads,
+  pileForStatus,
+  scanCountsLine,
+  scanZeroWhy,
+  sourceErrorKind,
+  workingQueueEmptyCopy,
+  worthItemOnDesk,
+} from "@/lib/news/desk-copy";
+import { formatDateTime, formatShortDate } from "@/lib/paper";
 
 export const Route = createFileRoute("/desk/")({ component: DeskHome });
 
+const OPEN_KEY = "townreporter.dark.openId";
+
 function DeskHome() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
   const sources = useQuery({ queryKey: ["sources"], queryFn: () => listSources() });
   const leads = useQuery({ queryKey: ["leads"], queryFn: () => listLeads() });
   const scans = useQuery({ queryKey: ["scans"], queryFn: () => listScans() });
+  const investigations = useQuery({ queryKey: ["investigations"], queryFn: () => listInvestigations() });
+  const worth = useQuery({ queryKey: ["worth-a-look"], queryFn: () => listWorthALook() });
+  const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
+  const memory = useQuery({ queryKey: ["memory"], queryFn: () => listMemory() });
 
-  const booting =
-    (sources.isPending && !sources.data) ||
-    (leads.isPending && !leads.data) ||
-    (scans.isPending && !scans.data);
+  const setStatus = useMutation({
+    mutationFn: (input: { id: number; status: "held" | "killed" | "new" }) =>
+      setLeadStatus({ data: input }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+  });
+  const srcStatus = useMutation({
+    mutationFn: (input: { id: number; status: "accepted" | "rejected" }) =>
+      setSourceStatus({ data: input }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources"] }),
+  });
+  const scan = useMutation({
+    mutationFn: () => runScan(),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["scans"] });
+      void qc.invalidateQueries({ queryKey: ["leads"] });
+      void qc.invalidateQueries({ queryKey: ["sources"] });
+    },
+  });
+  const startDark = useMutation({
+    mutationFn: (item: { seed: string; title: string }) =>
+      openDarkInvestigation({ data: { paste: item.seed, title: item.title } }),
+    onSuccess: (res) => {
+      if (res?.ok && res.investigationId) {
+        try {
+          sessionStorage.setItem(OPEN_KEY, String(res.investigationId));
+        } catch {
+          /* ignore */
+        }
+        void navigate({ to: "/desk/dark" });
+      }
+    },
+  });
 
-  const accepted = (sources.data ?? []).filter((s) => s.status === "accepted").length;
-  const proposed = (sources.data ?? []).filter((s) => s.status === "proposed").length;
-  const openLeads = (leads.data ?? []).filter(
-    (l) => l.status === "new" || l.status === "drafted",
-  ).length;
+  const src = sources.data ?? [];
+  const allLeads = leads.data ?? [];
+  const queue = openLeads(allLeads).sort(
+    (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0),
+  );
+  const publishedCount = allLeads.filter((l) => l.status === "published").length;
+  const accepted = src.filter((s) => s.status === "accepted");
+  const proposed = src.filter((s) => s.status === "proposed");
+  const officialFail = accepted.filter((s) => s.last_error && sourceErrorKind(s) === "official");
+  const flakyFail = accepted.filter((s) => s.last_error && sourceErrorKind(s) === "flaky");
   const last = scans.data?.[0];
+  const invs = investigations.data ?? [];
+  const onDesk = invs.filter((r) => pileForStatus(r.status) === "desk");
+  const aside = invs.filter((r) => pileForStatus(r.status) === "aside");
+  const inbox = (worth.data ?? []).filter((item) => !worthItemOnDesk(item, invs));
+  const errStops = onDesk.filter((i) => investigationStopKind(i) === "error");
+  const roundStops = onDesk.filter((i) => investigationStopKind(i) === "round");
+  const drafted = allLeads.filter((l) => l.status === "drafted").length;
+  const scanStale =
+    last?.error ||
+    (last?.started_at && Date.now() - new Date(last.started_at).getTime() > 24 * 3600_000);
+  const printed = published.data ?? [];
+
+  const needs: { t: string; to: string; openDark?: number; quiet?: boolean }[] = [];
+  if (drafted) needs.push({ t: `${drafted} draft${drafted > 1 ? "s" : ""} ready to publish`, to: "/desk/queue" });
+  if (errStops.length) {
+    needs.push({
+      t: `${errStops.length} Dark Desk file${errStops.length === 1 ? "" : "s"} stopped on an error — what it found is saved`,
+      to: "/desk/dark",
+      openDark: errStops[0]!.id,
+    });
+  }
+  if (proposed.length) {
+    needs.push({
+      t: `${proposed.length} proposed source${proposed.length === 1 ? "" : "s"} await${proposed.length === 1 ? "s" : ""} review`,
+      to: "/desk/sources",
+    });
+  }
+  if (officialFail.length) {
+    needs.push({
+      t: `${officialFail.length} official source${officialFail.length === 1 ? "" : "s"} failing to fetch`,
+      to: "/desk/sources",
+    });
+  }
+  if (scanStale && last?.error) {
+    needs.push({
+      t:
+        last.sources_fetched > 0
+          ? "Last scan fetched sources but did not file leads"
+          : "Last scan failed",
+      to: "/desk/scan",
+    });
+  } else if (scanStale) needs.push({ t: "No scan in the last day", to: "/desk/scan", quiet: true });
+  if (roundStops.length) {
+    needs.push({
+      t: `${roundStops.length} Dark Desk file${roundStops.length === 1 ? "" : "s"} ready for another round`,
+      to: "/desk/dark",
+      openDark: roundStops[0]!.id,
+      quiet: true,
+    });
+  }
+
+  const booting = (leads.isPending && !leads.data) || (sources.isPending && !sources.data);
 
   return (
-    <DeskShell title="The desk" kicker="Editor-in-chief">
-      <p className="max-w-2xl text-ink-2">
-        You are the editor. Grok fetches Longmont’s public sources, files leads,
-        and drafts recaps. Nothing prints until you say so. Scans and drafts
-        spend your Grok quota — they only run when you click.
-      </p>
-      {booting ? (
-        <div className="mt-8">
-          <StatSkeleton />
-        </div>
-      ) : (
-        <dl className="stagger-in mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Stat label="Sources on watch" value={accepted} />
-          <Stat label="Proposed sources" value={proposed} />
-          <Stat label="Open leads" value={openLeads} />
-          <Stat label="Scans run" value={scans.data?.length ?? 0} />
-        </dl>
-      )}
-      {last ? (
-        <section className="enter-fade-fast mt-8 border border-rule bg-paper p-4">
-          <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
-            Last scan
-          </p>
-          {last.summary ? (
-            <p className="mt-2 text-ink-2">{last.summary}</p>
-          ) : last.error ? (
-            <p className="mt-2 text-danger">{last.error}</p>
-          ) : (
-            <p className="mt-2 text-ink-2">
-              {last.sources_fetched} sources · {last.leads_created} leads
-            </p>
-          )}
-          {last.leads_created > 0 && (
+    <DeskShell title="The desk" kicker="Command center">
+      {needs.length > 0 ? (
+        <div className="needs">
+          <span className="needs-label">Needs you</span>
+          {needs.map((n) => (
             <Link
-              to="/desk/queue"
-              className="mt-3 inline-flex min-h-11 items-center text-sm text-rust transition-[color] duration-150 ease-out hover:text-rust-2"
+              key={n.t}
+              to={n.to}
+              className={"needs-item" + (n.quiet ? " quiet" : "")}
+              onClick={() => {
+                if (n.openDark == null) return;
+                try {
+                  sessionStorage.setItem(OPEN_KEY, String(n.openDark));
+                } catch {
+                  /* ignore */
+                }
+              }}
             >
-              {last.leads_created} leads in the queue
+              {n.t}
             </Link>
-          )}
-        </section>
-      ) : !booting ? (
-        <div className="mt-8">
-          <EmptyState
-            kicker="Reporter pass"
-            title="No scans yet"
-            body="The watch list is ready. Run a scan when you want a new edition — not on a loop."
-            action={
-              <Link to="/desk/scan" className={inkSolid}>
-                Run the first scan
-              </Link>
-            }
-          />
+          ))}
         </div>
       ) : null}
-      <div className="mt-8 flex flex-wrap gap-3">
-        {booting || last ? (
-          <Link to="/desk/scan" className={inkSolid}>
-            Run a scan
-          </Link>
-        ) : null}
-        <Link to="/desk/queue" className={inkGhost}>
-          Open the queue
-        </Link>
-        <Link to="/desk/dark" className={inkSolid}>
-          Dark desk
-        </Link>
-        <Link to="/desk/sources" className={inkGhost}>
-          Review sources
-        </Link>
-      </div>
-    </DeskShell>
-  );
-}
 
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="border border-rule bg-paper p-4">
-      <dt className="text-[11px] tracking-[0.12em] text-muted uppercase">{label}</dt>
-      <dd className="mt-1 font-display text-3xl tabular-nums">{value}</dd>
-    </div>
+      {booting ? (
+        <ListSkeleton rows={6} />
+      ) : (
+        <div className="front">
+          <section>
+            <SecHead
+              title="The queue"
+              count={queue.length}
+              aside={
+                <Link to="/desk/queue" className="np-link">
+                  Full queue
+                </Link>
+              }
+            />
+            {queue.length === 0 ? (
+              !last && publishedCount === 0 ? (
+                <p className="wire-sum">
+                  Queue is empty —{" "}
+                  <Link to="/desk/scan" className="inline-link">
+                    run the first scan
+                  </Link>{" "}
+                  or{" "}
+                  <Link to="/desk/queue" className="inline-link">
+                    file a lead
+                  </Link>
+                  .
+                </p>
+              ) : (
+                <p className="wire-sum">
+                  {workingQueueEmptyCopy({
+                    publishedCount,
+                    lastScan: last
+                      ? {
+                          leads_created: last.leads_created,
+                          sources_fetched: last.sources_fetched,
+                          error: last.error,
+                        }
+                      : null,
+                  })}{" "}
+                  <Link to="/desk/scan" className="inline-link">
+                    Run the scan again
+                  </Link>
+                  {publishedCount > 0 ? (
+                    <>
+                      {" · "}
+                      <Link to="/desk/published" className="inline-link">
+                        Published
+                      </Link>
+                    </>
+                  ) : null}
+                  .
+                </p>
+              )
+            ) : (
+              <div className="lead-list">
+                {queue.slice(0, 8).map((l) => (
+                  <LeadRowView
+                    key={l.id}
+                    lead={l}
+                    dup={nearDuplicate(l, printed)}
+                    onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
+                    onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
+                    onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="nightpanel">
+            <SecHead
+              title="Dark Desk"
+              aside={
+                <Link to="/desk/dark" className="np-link">
+                  Open the desk
+                </Link>
+              }
+            />
+            <p className="np-note">Investigates. Never prints.</p>
+            {inbox.length === 0 && onDesk.length === 0 ? (
+              <p className="wire-sum">
+                Nothing new tonight.{" "}
+                <Link to="/desk/dark" className="inline-link">
+                  Start from a tip
+                </Link>
+                .
+              </p>
+            ) : (
+              <>
+                <p className="np-pile">To look at · {inbox.length}</p>
+                {inbox.slice(0, 3).map((item) => (
+                  <div key={item.id} className="np-item">
+                    <p className="np-kind">{editorKindLabel(item.kind)}</p>
+                    <p className="np-title">{item.title}</p>
+                    {item.source_line ? <p className="np-meta">{item.source_line}</p> : null}
+                    <div className="np-acts">
+                      <InkButton
+                        tone="invert"
+                        small
+                        disabled={startDark.isPending}
+                        onClick={() => startDark.mutate({ seed: item.seed, title: item.title })}
+                      >
+                        Start digging
+                      </InkButton>
+                    </div>
+                  </div>
+                ))}
+                <p className="np-pile">On the desk · {onDesk.length}</p>
+                {onDesk.slice(0, 3).map((row) => (
+                  <div key={row.id} className="np-item">
+                    <p className="np-kind">{editorStatus(row.status)}</p>
+                    <p className="np-title">{row.title}</p>
+                    <p className="np-meta">
+                      {Number(row.records ?? 0)} records · {Number(row.still_open ?? 0)} still to open
+                    </p>
+                    <div className="np-acts">
+                      <Link
+                        to="/desk/dark"
+                        onClick={() => {
+                          try {
+                            sessionStorage.setItem(OPEN_KEY, String(row.id));
+                          } catch {
+                            /* ignore */
+                          }
+                        }}
+                      >
+                        <InkButton tone="invert" small>
+                          Open file
+                        </InkButton>
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+                <p className="np-pile">
+                  Set aside · {aside.length}{" "}
+                  <Link to="/desk/dark" className="np-link">
+                    see the pile
+                  </Link>
+                </p>
+              </>
+            )}
+          </section>
+
+          <section className="wirecol">
+            <SecHead
+              title="The wire"
+              aside={
+                <InkButton small disabled={scan.isPending} onClick={() => scan.mutate()}>
+                  {scan.isPending ? "Scanning…" : "Run scan"}
+                </InkButton>
+              }
+            />
+            {scan.isPending ? <Busy label="Fetching the watch list, then one pass for leads." /> : null}
+            {last ? (
+              <>
+                <p className="wire-line">
+                  <b>Last scan</b> · {formatDateTime(last.started_at)} ·{" "}
+                  {last.leads_created > 0 ? (
+                    scanCountsLine(last)
+                  ) : (
+                    <>
+                      {last.sources_fetched} fetched · <b>filed nothing</b>
+                    </>
+                  )}
+                </p>
+                {scanZeroWhy(last) ? <p className="wire-sum">{scanZeroWhy(last)}</p> : null}
+                {last.error && last.leads_created > 0 ? (
+                  <p className="wire-warn">{editorScanError(last.error)}</p>
+                ) : null}
+              </>
+            ) : (
+              <p className="wire-sum">No scans yet — the watch list is ready.</p>
+            )}
+            <div className="wire-block">
+              <p className="wire-line">
+                <b>Source health</b> · {accepted.length} on watch
+                {officialFail.length + flakyFail.length
+                  ? ` · ${officialFail.length + flakyFail.length} failing`
+                  : ""}
+              </p>
+              {officialFail.map((s) => (
+                <p key={s.id} className="wire-warn">
+                  {s.title} — {editorFetchError(s.last_error, s.url) ?? s.last_error}
+                </p>
+              ))}
+              {flakyFail.length ? (
+                <details className="wire-flaky">
+                  <summary>{flakyFailureCopy(flakyFail.length)}</summary>
+                  {flakyFail.map((s) => (
+                    <p key={s.id}>
+                      {s.title} — {editorFetchError(s.last_error, s.url) ?? s.last_error}
+                    </p>
+                  ))}
+                </details>
+              ) : null}
+              {proposed.map((s) => (
+                <p key={s.id} className="wire-row">
+                  Proposed: {s.title}{" "}
+                  <InkButton tone="quiet" small onClick={() => srcStatus.mutate({ id: s.id, status: "accepted" })}>
+                    Accept
+                  </InkButton>
+                  <InkButton tone="quiet" small onClick={() => srcStatus.mutate({ id: s.id, status: "rejected" })}>
+                    Drop
+                  </InkButton>
+                </p>
+              ))}
+              {!officialFail.length && !flakyFail.length && !proposed.length ? <p className="meta">All quiet.</p> : null}
+            </div>
+            <div className="wire-block">
+              <p className="wire-line">
+                <b>On the paper</b>
+              </p>
+              {(published.data ?? []).slice(0, 3).map((p) => (
+                <p key={p.id} className="wire-row">
+                  <Link to="/desk/published" className="hl-link sm">
+                    {p.headline}
+                  </Link>
+                  <span className="meta-inline">
+                    {formatShortDate(p.published_at)}
+                    {p.corrections.length ? " · corrected" : ""}
+                  </span>
+                </p>
+              ))}
+              {(published.data ?? []).length === 0 ? <p className="meta">Empty until you publish.</p> : null}
+            </div>
+            <div className="wire-block">
+              <p className="wire-line">
+                <b>Beat memory</b> · what we already covered
+              </p>
+              {(memory.data ?? []).slice(0, 4).map((m) => (
+                <p key={m.id} className="wire-row">
+                  <b className="mem-e">{m.entity}</b> <span className="meta-inline">{m.last_angle}</span>
+                </p>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+    </DeskShell>
   );
 }

@@ -1,6 +1,9 @@
 import { looksLikeSoft404, type FetchOutcome } from "./fetch-outcome.ts";
-import { assertPublicHttpUrl, fetchPublicHttp, fetchPublicHttpTracked, fetchSourceText } from "./fetch-url.ts";
-import { fetchRenderedPage, needsRenderedFetch } from "./render-fetch.ts";
+import { assertPublicHttpUrl, fetchPublicHttp, fetchPublicHttpTracked } from "./fetch-url.ts";
+import { htmlToPlainText } from "./html-text.ts";
+import { needsRenderedFetch } from "./render-detect.ts";
+import { ingestYoutube, isYoutubeUrl, type YoutubeIngest } from "./youtube.ts";
+import { ingestPrimeGov } from "./primegov.ts";
 
 /** Archive cap. Planner context is sliced at retrieval, never here. */
 export const ARCHIVE_TEXT_CAP = 2_000_000;
@@ -263,30 +266,9 @@ export function discoverDocLinks(html: string, base: URL): string[] {
   return out;
 }
 
-function youtubeChannelId(html: string): string | null {
-  return (
-    html.match(/"channelId":"(UC[\w-]+)"/)?.[1] ??
-    html.match(/https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)/)?.[1] ??
-    null
-  );
-}
-
-function youtubeVideoIdsFromRss(xml: string): string[] {
-  const ids: string[] = [];
-  const re = /<yt:videoId>([\w-]+)<\/yt:videoId>/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml))) {
-    if (!ids.includes(m[1]!)) ids.push(m[1]!);
-    if (ids.length >= 3) break;
-  }
-  if (ids.length === 0) {
-    const alt = /watch\?v=([\w-]{6,})/g;
-    while ((m = alt.exec(xml))) {
-      if (!ids.includes(m[1]!)) ids.push(m[1]!);
-      if (ids.length >= 3) break;
-    }
-  }
-  return ids;
+async function ingestYoutubeIfNeeded(url: URL): Promise<YoutubeIngest | null> {
+  if (!isYoutubeUrl(url)) return null;
+  return ingestYoutube(url);
 }
 
 export type IngestResult = { text: string; titleHint: string; extras: string[] };
@@ -324,6 +306,34 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
   });
   try {
     const url = await assertPublicHttpUrl(raw);
+    const yt = await ingestYoutubeIfNeeded(url);
+    if (yt) {
+      return empty({
+        ok: yt.text.length >= 40,
+        status: 200,
+        outcome: yt.text.length >= 40 ? "fetched" : "parse-failed",
+        text: yt.text,
+        title: yt.title,
+        contentType: "text/plain",
+        redirectChain: [url.toString()],
+        extractionMethod: "youtube",
+        extras: yt.extras ?? [],
+      });
+    }
+    const pg = await ingestPrimeGov(url);
+    if (pg) {
+      return empty({
+        ok: pg.text.length >= 40,
+        status: 200,
+        outcome: "fetched",
+        text: pg.text,
+        title: pg.title,
+        contentType: "text/plain",
+        redirectChain: [url.toString()],
+        extractionMethod: "primegov",
+        extras: pg.extras,
+      });
+    }
     const tracked = await fetchPublicHttpTracked(url);
     const res = tracked.response;
     const status = res.status;
@@ -332,23 +342,21 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
     const path = url.pathname.toLowerCase();
 
     if (!res.ok) {
-      const title = url.hostname;
-      let text = "";
-      try {
-        text = new TextDecoder("utf-8", { fatal: false }).decode(buf).slice(0, 4000);
-      } catch {
-        text = "";
-      }
       const outcome: FetchOutcome =
         status === 404 || status === 410 ? "not-found" : "fetch-failed";
+      const why =
+        status === 429
+          ? "The site returned 429 Too Many Requests. No article was captured."
+          : `The site returned HTTP ${status}. No article was captured.`;
       return empty({
         ok: false,
         status,
         outcome,
-        text,
-        title,
+        text: why,
+        title: status === 429 ? "Too many requests" : url.hostname,
         contentType: ctype,
         redirectChain: tracked.chain,
+        extractionMethod: "http-error",
       });
     }
 
@@ -389,13 +397,7 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
     const title = titleMatch
       ? titleMatch[1]!.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().slice(0, 140)
       : url.hostname;
-    const text = body
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, ARCHIVE_TEXT_CAP);
+    const text = htmlToPlainText(body).slice(0, ARCHIVE_TEXT_CAP);
     if (looksLikeSoft404(title, text)) {
       return empty({
         ok: false,
@@ -413,7 +415,8 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
     let outText = text;
     let outTitle = title;
     let method = "html";
-    if (needsRenderedFetch(url, text, body)) {
+    if (needsRenderedFetch(url, text, body) && typeof window === "undefined") {
+      const { fetchRenderedPage } = await import("./render-fetch.ts");
       const rendered = await fetchRenderedPage(url.toString());
       if (rendered && rendered.text.length > Math.min(text.length, 400)) {
         outText = rendered.text.slice(0, ARCHIVE_TEXT_CAP);
@@ -448,54 +451,14 @@ export async function ingestDocument(raw: string): Promise<IngestDocument> {
   }
 }
 
-async function ingestYoutubeChannel(url: URL): Promise<IngestResult> {
-  const page = await fetchPublicHttp(url);
-  const html = await page.text();
-  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  const titleHint = titleMatch
-    ? titleMatch[1]!.replace(/<[^>]+>/g, "").trim().slice(0, 140)
-    : url.hostname;
-  const channelId = youtubeChannelId(html);
-  const parts = [
-    `YouTube channel ${url.toString()}. Listing only — captions are pulled from recent watch URLs.`,
-  ];
-  if (channelId) {
-    const rssUrl = new URL(
-      `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`,
-    );
-    const rssRes = await fetchPublicHttp(rssUrl);
-    const xml = await rssRes.text();
-    const ids = youtubeVideoIdsFromRss(xml);
-    parts.push(`Recent videos: ${ids.join(", ") || "(none parsed)"}`);
-    for (const id of ids) {
-      try {
-        const cap = await fetchSourceText(`https://www.youtube.com/watch?v=${id}`);
-        parts.push(`--- video ${id} ---\n${cap.text.slice(0, 2500)}`);
-      } catch {
-        parts.push(`--- video ${id} --- (no captions)`);
-      }
-    }
-  } else {
-    parts.push(html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 4000));
-  }
-  return { text: parts.join("\n\n").slice(0, 14000), titleHint, extras: [] };
-}
-
 export async function ingestUrl(raw: string): Promise<IngestResult> {
   const url = await assertPublicHttpUrl(raw);
+  const yt = await ingestYoutubeIfNeeded(url);
+  if (yt) return { text: yt.text, titleHint: yt.title, extras: yt.extras ?? [] };
+  const pg = await ingestPrimeGov(url);
+  if (pg) return { text: pg.text, titleHint: pg.title, extras: pg.extras };
   const host = url.hostname.replace(/^www\./, "");
   const path = url.pathname.toLowerCase();
-  if (
-    (host === "youtube.com" || host === "m.youtube.com") &&
-    (path.startsWith("/@") ||
-      path.startsWith("/channel/") ||
-      path.startsWith("/c/") ||
-      path.startsWith("/user/") ||
-      path.endsWith("/videos") ||
-      path.endsWith("/streams"))
-  ) {
-    return ingestYoutubeChannel(url);
-  }
 
   const res = await fetchPublicHttp(url);
   if (!res.ok) throw new Error(`Fetch failed (${res.status})`);

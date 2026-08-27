@@ -1,12 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { DeskShell, InkButton, areaClass } from "@/components/desk-chrome";
-import { BusyLine, ListSkeleton, Notice } from "@/components/states";
+import { useEffect, useRef, useState } from "react";
+import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { ListSkeleton } from "@/components/states";
 import {
   continueInvestigation,
   findSomethingToDigInto,
   getInvestigation,
+  getArtifact,
   listDarkRuns,
   listInvestigations,
   listWorthALook,
@@ -21,7 +22,6 @@ import {
   editorKindLabel,
   editorPauseReason,
   editorStatus,
-  excerptForEditor,
   headlineFromUrl,
   looksLikeInternalSummary,
   organizationFromUrl,
@@ -34,6 +34,7 @@ import {
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
 import { formatDateTime, formatShortDate } from "@/lib/paper";
+import { readableCapture } from "@/lib/news/html-text";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
 
 export const Route = createFileRoute("/desk/dark")({
@@ -65,12 +66,14 @@ function DarkPage() {
   const qc = useQueryClient();
   const [paste, setPaste] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeOk, setNoticeOk] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
   const [queuedLead, setQueuedLead] = useState<number | null>(null);
   const [pendingCard, setPendingCard] = useState<string | null>(null);
   const [cardError, setCardError] = useState<{ id: string; message: string } | null>(null);
   const [cardPhase, setCardPhase] = useState<string>("");
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
+  const phaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     try {
@@ -80,6 +83,9 @@ function DarkPage() {
       /* ignore */
     }
     setClaimedIds(readClaimed());
+    return () => {
+      if (phaseTimer.current) clearTimeout(phaseTimer.current);
+    };
   }, []);
 
   function claimCard(id: string) {
@@ -98,6 +104,19 @@ function DarkPage() {
     } catch {
       /* ignore */
     }
+  }
+
+  function beginDigPhase() {
+    if (phaseTimer.current) clearTimeout(phaseTimer.current);
+    setCardPhase("Searching records…");
+    phaseTimer.current = setTimeout(() => {
+      setCardPhase("Opening pages. They land on the file as they are read…");
+    }, 1200);
+  }
+
+  function clearPhase() {
+    if (phaseTimer.current) clearTimeout(phaseTimer.current);
+    setCardPhase("");
   }
 
   const worth = useQuery({ queryKey: ["worth-a-look"], queryFn: () => listWorthALook() });
@@ -131,22 +150,29 @@ function DarkPage() {
         const raw = res && "error" in res ? String(res.error ?? "") : "Research failed";
         const msg = editorError(raw) || raw || "Research failed";
         setNotice(msg);
+        setNoticeOk(false);
         setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
-        setCardPhase("");
+        clearPhase();
         invalidate();
         return;
       }
-      if (res.error) setNotice(editorError(res.error));
-      else setNotice(null);
-      setCardPhase("");
+      if (res.error) {
+        setNotice(editorError(res.error));
+        setNoticeOk(false);
+      } else {
+        setNotice(null);
+      }
+      clearPhase();
       setPendingCard(null);
       invalidate();
     },
     onError: (err) => {
-      const msg = editorError(err instanceof Error ? err.message : "Research failed") || "Research failed";
+      const msg =
+        editorError(err instanceof Error ? err.message : "Research failed") || "Research failed";
       setNotice(msg);
+      setNoticeOk(false);
       setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
-      setCardPhase("");
+      clearPhase();
       invalidate();
     },
   });
@@ -154,10 +180,12 @@ function DarkPage() {
   function afterOpen(id: number, cardId?: string) {
     rememberOpen(id);
     setNotice(null);
-    setCardPhase("Searching records…");
+    beginDigPhase();
     invalidate();
     requestAnimationFrame(() => {
-      document.getElementById("investigation-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document
+        .getElementById("investigation-workspace")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
     advance.mutate(id);
     if (cardId) setPendingCard(cardId);
@@ -175,16 +203,15 @@ function DarkPage() {
     onSuccess: (res, item) => {
       if (!res?.ok || !res.investigationId) {
         setCardError({ id: item.id, message: "Could not open an investigation." });
-        setCardPhase("");
+        clearPhase();
         return;
       }
-      setCardPhase("Investigation started. Searching records…");
       afterOpen(res.investigationId, item.id);
     },
     onError: (err, item) => {
       const msg = editorError(err instanceof Error ? err.message : "Could not start") || "Could not start";
       setCardError({ id: item.id, message: msg });
-      setCardPhase("");
+      clearPhase();
     },
   });
 
@@ -193,20 +220,22 @@ function DarkPage() {
     onMutate: () => {
       setPendingCard("paste");
       setCardError(null);
-      setCardPhase("Starting investigation…");
+      setCardPhase("Starting…");
     },
     onSuccess: (res) => {
       if (!res?.ok || !res.investigationId) {
         setNotice("Could not open an investigation.");
-        setCardPhase("");
+        setNoticeOk(false);
+        clearPhase();
         return;
       }
-      setCardPhase("Investigation started. Searching records…");
+      setPaste("");
       afterOpen(res.investigationId, "paste");
     },
     onError: (err) => {
       setNotice(editorError(err instanceof Error ? err.message : "Could not start"));
-      setCardPhase("");
+      setNoticeOk(false);
+      clearPhase();
     },
   });
 
@@ -214,20 +243,21 @@ function DarkPage() {
     mutationFn: () => findSomethingToDigInto(),
     onMutate: () => {
       setPendingCard("find");
-      setCardPhase("Starting investigation…");
+      setCardPhase("Starting…");
     },
     onSuccess: (res) => {
       if (!res?.ok || !res.investigationId) {
         setNotice("Nothing to open yet. Paste a lead to start.");
-        setCardPhase("");
+        setNoticeOk(false);
+        clearPhase();
         return;
       }
-      setCardPhase("Investigation started. Searching records…");
       afterOpen(res.investigationId, "find");
     },
     onError: (err) => {
       setNotice(editorError(err instanceof Error ? err.message : "Find failed"));
-      setCardPhase("");
+      setNoticeOk(false);
+      clearPhase();
     },
   });
 
@@ -238,7 +268,11 @@ function DarkPage() {
       if (res?.ok) {
         setQueuedLead(res.leadId);
         setNotice("On the working queue as a story lead. Dark Desk did not publish.");
-      } else setNotice(res?.error ?? "Could not send to the queue.");
+        setNoticeOk(true);
+      } else {
+        setNotice(res?.error ?? "Could not send to the queue.");
+        setNoticeOk(false);
+      }
     },
   });
 
@@ -246,20 +280,21 @@ function DarkPage() {
     mutationFn: (seed: { paste: string; title: string }) => openDarkInvestigation({ data: seed }),
     onMutate: () => {
       setPendingCard("follow");
-      setCardPhase("Starting investigation…");
+      setCardPhase("Starting…");
     },
     onSuccess: (res, seed) => {
       if (!res?.ok || !res.investigationId) {
         setNotice("Could not follow that lead.");
-        setCardPhase("");
+        setNoticeOk(false);
+        clearPhase();
         return;
       }
-      setCardPhase("Investigation started. Searching records…");
       afterOpen(res.investigationId, seed.title);
     },
     onError: (err) => {
       setNotice(editorError(err instanceof Error ? err.message : "Could not follow that lead"));
-      setCardPhase("");
+      setNoticeOk(false);
+      clearPhase();
     },
   });
 
@@ -268,6 +303,7 @@ function DarkPage() {
     onSuccess: () => {
       rememberOpen(null);
       setNotice("Set aside. Pull it back from that pile anytime.");
+      setNoticeOk(true);
       invalidate();
     },
   });
@@ -304,16 +340,60 @@ function DarkPage() {
   );
 
   return (
-    <DeskShell night title="Dark desk" kicker="Investigative desk">
-      <p className="max-w-2xl text-paper-2">
-        Three piles. <span className="text-paper">To look at</span> is new
-        material nobody has opened yet. <span className="text-paper">On the desk</span> is
-        what you started — including files that stopped because there is more to
-        read. <span className="text-paper">Set aside</span> is finished or parked;
-        you can pull any of it back. Dark Desk investigates. It does not print.
-      </p>
+    <DeskShell
+      night
+      title="Dark Desk"
+      kicker="Investigative desk"
+      lede={
+        <>
+          Three piles. <b>To look at</b> is new. <b>On the desk</b> is started.{" "}
+          <b>Set aside</b> is parked — nothing is deleted. It digs; it never prints.
+        </>
+      }
+    >
+      <form
+        className="tipbox top"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!paste.trim() || busyStart || digging) return;
+          openPaste.mutate();
+        }}
+      >
+        <p className="side-label">Start a file</p>
+        <p className="meta">
+          Paste a URL, a subject, a person, an LLC, a contract number, a rumor, or a chunk of text.
+          It opens a new file on the desk.
+        </p>
+        <textarea
+          rows={3}
+          value={paste}
+          onChange={(e) => setPaste(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              if (paste.trim() && !busyStart && !digging) openPaste.mutate();
+            }
+          }}
+          placeholder="https://…  ·  Costco rebate cap  ·  Front Range Civic Partners LLC"
+          aria-label="Tip, URL, or subject to investigate"
+        />
+        <div className="row-acts static">
+          <InkButton
+            small
+            type="submit"
+            disabled={busyStart || digging || !paste.trim()}
+          >
+            {openPaste.isPending ? "Starting…" : "Start digging"}
+          </InkButton>
+        </div>
+        {pendingCard === "paste" && cardPhase ? (
+          <p className="meta" aria-live="polite">
+            {cardPhase}
+          </p>
+        ) : null}
+      </form>
 
-      {openId != null && (
+      {openId != null ? (
         <InvestigationWorkspace
           openId={openId}
           detail={detail.data ?? undefined}
@@ -322,9 +402,11 @@ function DarkPage() {
           keepDisabled={digging}
           phase={cardPhase || liveLine}
           notice={notice}
+          noticeOk={noticeOk}
           queuedLead={queuedLead}
           onKeepDigging={() => {
-            setCardPhase("Searching records…");
+            setNotice(null);
+            beginDigPhase();
             advance.mutate(openId);
           }}
           onQueue={() => toQueue.mutate(openId)}
@@ -332,175 +414,113 @@ function DarkPage() {
           onPark={() => park.mutate(openId)}
           onFollow={(seed) => followLead.mutate(seed)}
         />
-      )}
+      ) : null}
 
-      <section className="mt-10 grid items-start gap-6 lg:grid-cols-3">
-        <div>
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <h2 className="font-display text-2xl">To look at</h2>
-              <p className="mt-1 text-sm text-paper-2">Not opened yet.</p>
-            </div>
-            <p className="text-sm tabular-nums text-paper-2">{inbox.length}</p>
-          </div>
+      <div className="piles">
+        <section>
+          <SecHead
+            title="To look at"
+            count={inbox.length}
+            sub="New material. Nobody has opened it yet."
+          />
           {worth.isPending && !inbox.length ? (
             <ListSkeleton rows={3} night />
           ) : inbox.length === 0 ? (
-            <p className="mt-3 text-sm text-paper-2">
-              Nothing new tonight, or everything interesting is already on the desk.
-            </p>
+            <p className="meta">Nothing new tonight — everything interesting is already on the desk.</p>
           ) : (
-            <ul className="stagger-in mt-4 space-y-3">
-              {inbox.map((item) => (
-                <WorthCard
-                  key={item.id}
-                  item={item}
-                  busy={busyStart || digging}
-                  active={false}
-                  phase=""
-                  error={cardError?.id === item.id ? cardError.message : null}
-                  onStart={() => openFromCard.mutate(item)}
-                  canOpen={false}
-                  openId={null}
-                />
-              ))}
-            </ul>
+            inbox.map((item) => (
+              <WorthCard
+                key={item.id}
+                item={item}
+                busy={busyStart || digging}
+                phase={pendingCard === item.id ? cardPhase : ""}
+                error={cardError?.id === item.id ? cardError.message : null}
+                onStart={() => openFromCard.mutate(item)}
+              />
+            ))
           )}
-          <div className="mt-4">
-            <InkButton tone="invert" disabled={busyStart || digging} onClick={() => find.mutate()}>
+          <div className="np-acts">
+            <InkButton tone="quiet" small disabled={busyStart || digging} onClick={() => find.mutate()}>
               {find.isPending ? "Starting…" : "Pick one for me"}
             </InkButton>
           </div>
-        </div>
+        </section>
 
-        <div>
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <h2 className="font-display text-2xl">On the desk</h2>
-              <p className="mt-1 text-sm text-paper-2">Started. Still in play.</p>
-            </div>
-            <p className="text-sm tabular-nums text-paper-2">{active.length}</p>
-          </div>
+        <section>
+          <SecHead
+            title="On the desk"
+            count={active.length}
+            sub="Started. A stop mid-file is normal — it means more to read, not a failure."
+          />
           {investigations.isPending && !active.length ? (
             <ListSkeleton rows={3} night />
           ) : active.length === 0 ? (
-            <p className="mt-3 text-sm text-paper-2">
-              Empty. Start digging on a card and it moves here.
-            </p>
+            <p className="meta">Empty. Paste a tip above, or start digging on a card.</p>
           ) : (
-            <ul className="mt-4 space-y-3">
-              {active.map((row) => (
-                <DeskFileCard
-                  key={row.id}
-                  row={row}
-                  selected={row.id === openId}
-                  digging={digging && openId === row.id}
-                  onOpen={() => rememberOpen(row.id)}
-                  onKeep={() => {
-                    rememberOpen(row.id);
-                    setCardPhase("Searching records…");
-                    advance.mutate(row.id);
-                  }}
-                  onPark={() => park.mutate(row.id)}
-                />
-              ))}
-            </ul>
+            active.map((row) => (
+              <DeskFileCard
+                key={row.id}
+                row={row}
+                selected={row.id === openId}
+                digging={digging && openId === row.id}
+                onOpen={() => rememberOpen(row.id)}
+                onKeep={() => {
+                  setNotice(null);
+                  rememberOpen(row.id);
+                  beginDigPhase();
+                  advance.mutate(row.id);
+                }}
+                onPark={() => park.mutate(row.id)}
+              />
+            ))
           )}
-        </div>
+        </section>
 
-        <div>
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <h2 className="font-display text-2xl">Set aside</h2>
-              <p className="mt-1 text-sm text-paper-2">Finished or parked. Pull back anytime.</p>
-            </div>
-            <p className="text-sm tabular-nums text-paper-2">{parked.length}</p>
-          </div>
-          {parked.length === 0 ? (
-            <p className="mt-3 text-sm text-paper-2">Nothing set aside yet.</p>
-          ) : (
-            <ul className="mt-4 space-y-3">
-              {parked.map((row) => (
-                <li key={row.id} className="border border-ink-2 px-4 py-3">
-                  <p className="text-[11px] tracking-[0.14em] text-rust uppercase">
-                    {editorStatus(row.status)}
-                  </p>
-                  <p className="mt-1 font-medium">{row.title || `File ${row.id}`}</p>
-                  <p className="mt-1 text-sm text-paper-2">
-                    {Number(row.records ?? 0)} records · last touched {formatShortDate(row.updated_at)}
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <InkButton
-                      tone="invert"
-                      disabled={pullBack.isPending}
-                      onClick={() => pullBack.mutate(row.id)}
-                    >
-                      Pull back
-                    </InkButton>
-                    <InkButton tone="invert" onClick={() => rememberOpen(row.id)}>
-                      Read
-                    </InkButton>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </section>
-
-      <section className="mt-10 border border-ink-2 p-4">
-        <h2 className="font-display text-2xl">Start from a tip</h2>
-        <p className="mt-1 text-sm text-paper-2">
-          Paste a URL, person, organization, contract number, RFP, parcel, or a
-          question. That opens a new file on the desk.
-        </p>
-        <label className="mt-3 block space-y-1.5">
-          <span className="sr-only">Tip</span>
-          <textarea
-            className={areaClass + " min-h-28"}
-            value={paste}
-            onChange={(e) => setPaste(e.target.value)}
-            placeholder="Transcript, staff report, an LLC, an RFP number…"
+        <section>
+          <SecHead
+            title="Set aside"
+            count={parked.length}
+            sub="Parked or finished. Pull anything back."
           />
-        </label>
-        <div className="mt-3">
-          <InkButton
-            tone="invert"
-            disabled={busyStart || digging || !paste.trim()}
-            onClick={() => openPaste.mutate()}
-          >
-            {openPaste.isPending ? "Starting…" : "Start digging"}
-          </InkButton>
-        </div>
-        {pendingCard === "paste" && cardPhase ? (
-          <p className="mt-2 text-sm text-paper-2" aria-live="polite">
-            {cardPhase}
-          </p>
-        ) : null}
-      </section>
-
-      {(runs.data ?? []).length > 0 && (
-        <details className="mt-10">
-          <summary className="min-h-11 cursor-pointer font-display text-xl">
-            What Dark Desk did
-          </summary>
-          <ul className="mt-3 divide-y divide-ink-2 border border-ink-2">
-            {(runs.data ?? []).map((r) => (
-              <li key={r.id} className="px-4 py-3 text-sm">
-                <p className="text-paper-2">{formatDateTime(r.started_at)}</p>
-                {r.error ? (
-                  <p className="mt-1 text-blush">{editorError(r.error)}</p>
+          {parked.length === 0 ? (
+            <p className="meta">Nothing set aside yet.</p>
+          ) : (
+            parked.map((row) => (
+              <div key={row.id} className="deskfile dim">
+                <p className="worth-t">{row.title || `File ${row.id}`}</p>
+                <p className="np-meta">
+                  {Number(row.records ?? 0)} records · last touched {formatShortDate(row.updated_at)}
+                </p>
+                {!looksLikeInternalSummary(row.summary) && row.summary ? (
+                  <p className="np-meta">{plainEditorText(row.summary)}</p>
                 ) : null}
-                {r.summary ? (
-                  <p className="mt-1 whitespace-pre-wrap text-paper-2">
-                    {plainEditorText(r.summary)}
-                  </p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+                <div className="np-acts">
+                  <InkButton small disabled={pullBack.isPending} onClick={() => pullBack.mutate(row.id)}>
+                    Pull back
+                  </InkButton>
+                  <InkButton tone="quiet" small onClick={() => rememberOpen(row.id)}>
+                    Read
+                  </InkButton>
+                </div>
+              </div>
+            ))
+          )}
+          {(runs.data ?? []).length > 0 ? (
+            <details className="of-trail runs">
+              <summary>What Dark Desk did — {(runs.data ?? []).length} recent runs</summary>
+              {(runs.data ?? []).map((r) => (
+                <div key={r.id} className="run-row">
+                  <p className="meta">{formatDateTime(r.started_at)}</p>
+                  {r.error ? <p className="side-item">{editorError(r.error)}</p> : null}
+                  {r.summary ? (
+                    <p className="side-item">{plainEditorText(r.summary)}</p>
+                  ) : null}
+                </div>
+              ))}
+            </details>
+          ) : null}
+        </section>
+      </div>
     </DeskShell>
   );
 }
@@ -522,37 +542,307 @@ function DeskFileCard({
 }) {
   const records = Number(row.records ?? 0);
   const still = Number(row.still_open ?? 0);
-  const internal = !row.summary || looksLikeInternalSummary(row.summary);
   return (
-    <li className={"border px-4 py-3 " + (selected ? "border-paper-2 bg-ink" : "border-ink-2")}>
-      <p className="text-[11px] tracking-[0.14em] text-rust uppercase">
-        {editorStatus(row.status)}
-      </p>
-      <p className="mt-1 font-medium">{row.title || `File ${row.id}`}</p>
-      <p className="mt-1 text-sm text-paper-2">
+    <div className={"deskfile" + (selected ? " sel" : "")}>
+      <p className="np-kind">{editorStatus(row.status)}</p>
+      <p className="worth-t">{row.title || `File ${row.id}`}</p>
+      <p className="np-meta">
         {records} records on file
-        {still > 0 ? ` · ${still} still to open` : ""}
+        {still > 0 ? ` · ${still} still to open` : ""} · last touched {formatShortDate(row.updated_at)}
       </p>
-      <p className="mt-1 text-sm text-paper-2">Last touched {formatShortDate(row.updated_at)}</p>
-      {!internal ? (
-        <p className="mt-1 line-clamp-2 text-sm text-paper-2">{plainEditorText(row.summary)}</p>
-      ) : row.status === "paused" && still > 0 ? (
-        <p className="mt-1 text-sm text-paper-2">
-          Stopped after a round. {still} things have not been opened yet.
-        </p>
-      ) : null}
-      <div className="mt-2 flex flex-wrap gap-2">
-        <InkButton tone="invert" onClick={onOpen}>
-          {selected ? "Viewing" : "Open file"}
+      <div className="np-acts">
+        <InkButton small onClick={onOpen}>
+          {selected ? "Viewing above" : "Open file"}
         </InkButton>
-        <InkButton tone="invert" disabled={digging} onClick={onKeep}>
-          {digging ? "Looking…" : "Keep digging"}
+        <InkButton small disabled={digging} onClick={onKeep}>
+          {digging ? "Reading…" : "Keep digging"}
         </InkButton>
-        <InkButton tone="invert" onClick={onPark}>
+        <InkButton tone="quiet" small onClick={onPark}>
           Set aside
         </InkButton>
       </div>
-    </li>
+    </div>
+  );
+}
+
+function WorthCard({
+  item,
+  busy,
+  phase,
+  error,
+  onStart,
+}: {
+  item: WorthSeed;
+  busy: boolean;
+  phase: string;
+  error: string | null;
+  onStart: () => void;
+}) {
+  return (
+    <div className="worth">
+      <p className="np-kind">{item.badge || editorKindLabel(item.kind)}</p>
+      <p className="worth-t">{item.title}</p>
+      <p className="worth-line">
+        <b>Why it matters</b> — {item.why}
+      </p>
+      <p className="worth-line">
+        <b>What changed</b> — {item.happened}
+      </p>
+      <p className="worth-q">First question: {item.question}</p>
+      {item.source_line ? <p className="meta">{item.source_line}</p> : null}
+      <div className="np-acts">
+        <InkButton small disabled={busy} onClick={onStart}>
+          {phase.startsWith("Starting") ? "Starting…" : phase ? "Digging…" : "Start digging"}
+        </InkButton>
+      </div>
+      {phase ? (
+        <p className="meta" aria-live="polite">
+          {phase}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="note err" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function InvestigationWorkspace({
+  openId,
+  detail,
+  pending,
+  digging,
+  keepDisabled,
+  phase,
+  notice,
+  noticeOk,
+  queuedLead,
+  onKeepDigging,
+  onQueue,
+  onClose,
+  onPark,
+  onFollow,
+}: {
+  openId: number;
+  detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
+  pending: boolean;
+  digging: boolean;
+  keepDisabled: boolean;
+  phase: string;
+  notice: string | null;
+  noticeOk: boolean;
+  queuedLead: number | null;
+  onKeepDigging: () => void;
+  onQueue: () => void;
+  onClose: () => void;
+  onPark: () => void;
+  onFollow: (seed: { paste: string; title: string }) => void;
+}) {
+  const [frN, setFrN] = useState(6);
+  useEffect(() => {
+    setFrN(6);
+  }, [openId]);
+  const inv = detail?.investigation;
+  const allArtifacts = detail?.artifacts ?? [];
+  const artifacts = allArtifacts.filter((a) => !a.url.startsWith("editor://"));
+  const pasteArt = allArtifacts.find((a) => a.url.startsWith("editor://"));
+  const claims = detail?.claims ?? [];
+  const hyps = detail?.hypotheses ?? [];
+  const searches = detail?.searches ?? [];
+  const frontier = detail?.frontier ?? [];
+  const deadEnds = detail?.deadEnds ?? [];
+  const anomalies = detail?.anomalies ?? [];
+  const entities = detail?.entities ?? [];
+  const signals = detail?.signals ?? [];
+  const facts = claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind));
+  const questions = openQuestionsFrom(detail);
+  const noticed = [
+    ...signals.map((s) => plainEditorText(`${s.name}: ${s.observation}`)),
+    ...anomalies.map((a) => plainFinding(a.summary, a.url)),
+    ...entities.map((e) => plainEditorText(`${e.name} — ${e.why}`)),
+    ...claims.filter((c) => /FINDING|PATTERN/i.test(c.kind)).map((c) => plainEditorText(c.body)),
+    ...hyps.map((h) => plainEditorText(h.body)),
+    ...questions,
+  ].filter(Boolean);
+  const next = frontier.filter((f) =>
+    ["open", "investigating", "reopened"].includes(f.status),
+  );
+  const leftover = next.length;
+  const pauseText = editorPauseReason(inv?.pause_reason);
+  const parentTitle = inv?.title || `File ${openId}`;
+  const started = startedLine(parentTitle, pasteArt?.excerpt ?? "", inv?.summary ?? "");
+  const statusBit = !inv
+    ? "Opening…"
+    : inv.status === "paused"
+      ? leftover > 0
+        ? "Stopped — more to read"
+        : editorStatus(inv.status)
+      : editorStatus(inv.status);
+  const round = inv?.hops ?? 0;
+  const budget = inv?.budget ?? 5;
+  const statusLine = [
+    statusBit,
+    `${artifacts.length} records on file`,
+    leftover > 0 ? `${leftover} still to open` : null,
+    `round ${round} of ${budget}`,
+    inv?.updated_at ? `last touched ${formatShortDate(inv.updated_at)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <section id="investigation-workspace" className="openfile">
+      <div className="of-head">
+        <div>
+          <p className="kick">Open file</p>
+          <h2 className="of-title">{parentTitle}</h2>
+          <p className="meta">{statusLine}</p>
+        </div>
+        <div className="row-acts static">
+          <InkButton disabled={keepDisabled} onClick={onKeepDigging}>
+            {digging ? "Reading…" : "Keep digging"}
+          </InkButton>
+          <InkButton tone="ghost" onClick={onQueue}>
+            Send to the queue
+          </InkButton>
+          <InkButton tone="quiet" onClick={onPark}>
+            Set aside
+          </InkButton>
+          <InkButton tone="quiet" onClick={onClose}>
+            Close file
+          </InkButton>
+        </div>
+      </div>
+      {digging ? <Busy label={phase || "Searching records…"} /> : null}
+      {notice && !digging ? <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p> : null}
+      {queuedLead != null ? (
+        <p className="note">
+          On the working queue as a story lead. Dark Desk did not publish.{" "}
+          <Link
+            to="/desk/story/$leadId"
+            params={{ leadId: String(queuedLead) }}
+            className="inline-link"
+          >
+            Open the story lead
+          </Link>
+          {" · "}
+          <Link to="/desk/queue" className="inline-link">
+            Open the queue
+          </Link>
+        </p>
+      ) : null}
+      {pending ? <p className="meta">Getting this ready…</p> : null}
+      {started ? <p className="of-started">{started}</p> : null}
+      {inv?.status === "paused" && pauseText && !digging ? (
+        <p className="of-stop">
+          <b>Why it stopped:</b> {pauseText}
+        </p>
+      ) : null}
+
+      <div className="of-grid">
+        <div>
+          <SecHead
+            title="What to read"
+            count={artifacts.length}
+            sub="Click a title. The captured page opens below — that is the file."
+          />
+          {artifacts.length > 0 ? (
+            <OpenedRecords artifacts={artifacts} />
+          ) : digging ? (
+            <p className="meta">Opening pages now. They land on the file as they are read…</p>
+          ) : (
+            <p className="meta">Nothing captured yet. Keep digging starts the first round.</p>
+          )}
+        </div>
+        <div>
+          {next.length > 0 ? (
+            <>
+              <SecHead
+                title="Still unopened"
+                count={next.length}
+                sub="Names, pages, and documents mentioned in the records. Not read yet."
+              />
+              <div className="of-frontier">
+                {next.slice(0, frN).map((f) => (
+                  <div key={f.id} className="fr-item">
+                    <p className="fr-label">{humanLabel(f.label)}</p>
+                    {f.why ? <p className="fr-why">{plainEditorText(f.why)}</p> : null}
+                    <InkButton
+                      tone="quiet"
+                      small
+                      disabled={keepDisabled}
+                      onClick={() =>
+                        onFollow({
+                          paste: `Followed from the “${parentTitle}” file: ${plainEditorText(f.why) || humanLabel(f.label)}.\n\n${f.label}\n${f.why}`,
+                          title: humanLabel(f.label),
+                        })
+                      }
+                    >
+                      Follow this lead
+                    </InkButton>
+                  </div>
+                ))}
+              </div>
+              {next.length > frN ? (
+                <InkButton tone="quiet" small onClick={() => setFrN((n) => n + 10)}>
+                  Next 10 — {next.length - frN} more
+                </InkButton>
+              ) : null}
+              {Number(inv?.still_open ?? leftover) > next.length ? (
+                <p className="meta">
+                  {Number(inv?.still_open ?? leftover) - next.length} more were mentioned but not yet
+                  named. They surface as rounds read them.
+                </p>
+              ) : null}
+            </>
+          ) : null}
+          {noticed.length > 0 ? (
+            <div className="of-block">
+              <p className="side-label">What Dark Desk noticed</p>
+              {noticed.map((n, i) => (
+                <p key={i} className="side-item">
+                  {n}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {facts.length > 0 ? (
+            <div className="of-block">
+              <p className="side-label">What we know</p>
+              {facts.map((c, i) => (
+                <p key={i} className="side-item">
+                  {plainEditorText(c.body)}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          <details className="of-trail">
+            <summary>Research trail — {searches.length} searches</summary>
+            {searches.length ? (
+              searches.map((s, i) => (
+                <p key={`${s.hop}-${i}`} className="side-item">
+                  “{s.query}”
+                </p>
+              ))
+            ) : (
+              <p className="side-item">No searches logged yet.</p>
+            )}
+          </details>
+          {deadEnds.length > 0 ? (
+            <details className="of-trail">
+              <summary>Dead ends — {deadEnds.length}</summary>
+              {deadEnds.map((d, i) => (
+                <p key={i} className="side-item">
+                  <b>{d.hypothesis}</b> — {plainEditorText(d.dismissed_because)}
+                </p>
+              ))}
+            </details>
+          ) : null}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -571,406 +861,161 @@ function OpenedRecords({
     excerpt?: string;
   }[];
 }) {
-  const [showAll, setShowAll] = useState(false);
-  const visible = showAll ? artifacts : artifacts.slice(0, 12);
+  const ordered = artifacts.slice().reverse();
+  function previewOf(a: (typeof ordered)[number]) {
+    return readableCapture({
+      text: a.excerpt ?? "",
+      status: a.fetch_status,
+      outcome: a.fetch_outcome,
+      title: a.title,
+    });
+  }
+  function firstReadableId(list: typeof ordered) {
+    return list.find((a) => previewOf(a).kind === "ok")?.id ?? list[0]?.id ?? null;
+  }
+  const [openId, setOpenId] = useState<number | null>(() => firstReadableId(ordered));
+  const idKey = ordered.map((a) => a.id).join(",");
+  useEffect(() => {
+    const list = ordered;
+    if (openId != null && list.some((a) => a.id === openId)) return;
+    setOpenId(firstReadableId(list));
+    // ordered is derived from artifacts; idKey is the stable fingerprint
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idKey, openId]);
+
+  const selected = ordered.find((a) => a.id === openId) ?? ordered[0];
+  const idx = selected ? ordered.findIndex((a) => a.id === selected.id) : -1;
+  const body = useQuery({
+    queryKey: ["artifact", selected?.id ?? 0],
+    queryFn: () => getArtifact({ data: selected!.id }),
+    enabled: selected != null,
+  });
+
+  if (!ordered.length) return null;
+
+  function go(delta: number) {
+    const next = idx + delta;
+    if (next < 0 || next >= ordered.length) return;
+    setOpenId(ordered[next]!.id);
+  }
+
+  const cap = selected
+    ? readableCapture({
+        text: body.data?.full_text ?? selected.excerpt ?? "",
+        status: body.data?.fetch_status ?? selected.fetch_status,
+        outcome: body.data?.fetch_outcome ?? selected.fetch_outcome,
+        title: selected.title,
+      })
+    : null;
+  const title = selected
+    ? cap?.kind === "blocked"
+      ? selected.fetch_status === 429
+        ? "Too many requests — not the article"
+        : "Capture failed — not the article"
+      : selected.title && !/^https?:/i.test(selected.title)
+        ? selected.title
+        : headlineFromUrl(selected.url) || selected.title || selected.url
+    : "";
+  const kind = selected ? recordKindFromUrl(selected.url) : "";
+  const org = selected ? organizationFromUrl(selected.url) : "";
+
   return (
-    <div id="opened-records" className="mt-6 scroll-mt-6">
-      <h3 className="font-display text-xl">What to read ({artifacts.length})</h3>
-      <p className="mt-1 text-sm text-paper-2">
-        These are the pages and documents Dark Desk already opened. This is the
-        file. Click a title to read the captured copy.
-      </p>
-      <ul className="mt-3 space-y-3">
-        {visible.map((a) => {
-          const title =
-            a.title && !/^https?:/i.test(a.title) ? a.title : headlineFromUrl(a.url) || a.title;
-          const excerpt = excerptForEditor(a.excerpt ?? "");
-          const captured = (a.excerpt ?? "").trim();
-          const kind = recordKindFromUrl(a.url);
-          const org = organizationFromUrl(a.url);
+    <div className="reader">
+      <div className="reader-index" role="list">
+        {ordered.map((a, i) => {
+          const preview = previewOf(a);
+          const rowTitle =
+            preview.kind === "blocked"
+              ? a.fetch_status === 429
+                ? "Too many requests — not the article"
+                : `Capture failed${a.fetch_status ? ` (${a.fetch_status})` : ""} — not the article`
+              : a.title && !/^https?:/i.test(a.title)
+                ? a.title
+                : headlineFromUrl(a.url) || a.title || a.url;
+          const rowOrg = organizationFromUrl(a.url);
           return (
-            <li key={a.id} className="border border-ink p-3">
-              <p className="text-[11px] tracking-[0.14em] text-paper-2 uppercase">
-                {kind}
-                {org ? ` · ${org}` : ""}
-                {a.created_at ? ` · captured ${formatShortDate(a.created_at)}` : ""}
-              </p>
-              <p className="mt-1 font-medium">{title}</p>
-              {excerpt ? (
-                <p className="mt-2 text-sm text-paper-2">{excerpt}</p>
-              ) : (
-                <p className="mt-2 text-sm text-paper-2">
-                  Opened, but no readable text was extracted. Use the original link.
-                </p>
-              )}
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                {a.url.startsWith("http") ? (
-                  <a href={a.url} className="text-blush hover:text-paper" target="_blank" rel="noreferrer">
-                    Open original
-                  </a>
-                ) : null}
-                {captured ? (
-                  <details>
-                    <summary className="min-h-11 cursor-pointer text-blush">Read captured copy</summary>
-                    <p className="mt-2 whitespace-pre-wrap text-paper-2">{captured}</p>
-                  </details>
-                ) : null}
-              </div>
-              <details className="mt-1 text-sm text-paper-2">
-                <summary className="cursor-pointer">Address</summary>
-                <p className="mt-1 break-all">{a.url}</p>
-              </details>
-            </li>
+            <button
+              key={a.id}
+              type="button"
+              role="listitem"
+              className={
+                "reader-row" +
+                (a.id === selected?.id ? " on" : "") +
+                (preview.kind === "blocked" ? " blocked" : "")
+              }
+              aria-current={a.id === selected?.id ? "true" : undefined}
+              onClick={() => setOpenId(a.id)}
+            >
+              <span className="read-kind">
+                {i + 1} · {preview.kind === "blocked" ? "Blocked" : recordKindFromUrl(a.url)}
+                {rowOrg ? ` · ${rowOrg}` : ""}
+              </span>
+              <span className="read-title">{rowTitle || "Captured page"}</span>
+            </button>
           );
         })}
-      </ul>
-      {artifacts.length > 12 && !showAll ? (
-        <div className="mt-3">
-          <InkButton tone="invert" onClick={() => setShowAll(true)}>
-            Show all {artifacts.length} records
-          </InkButton>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function WorthCard({
-  item,
-  busy,
-  active,
-  phase,
-  error,
-  onStart,
-  canOpen,
-  openId,
-}: {
-  item: WorthSeed;
-  busy: boolean;
-  active: boolean;
-  phase: string;
-  error: string | null;
-  onStart: () => void;
-  canOpen: boolean;
-  openId: number | null;
-}) {
-  return (
-    <li className="border border-ink-2 bg-ink-2 p-4">
-      <p className="text-[11px] tracking-[0.14em] text-rust uppercase">
-        {item.badge || editorKindLabel(item.kind)}
-      </p>
-      <h3 className="mt-1 font-display text-xl">{item.title}</h3>
-      <p className="mt-3 text-sm uppercase tracking-[0.14em] text-paper-2">Why it’s worth a look</p>
-      <p className="mt-1 text-paper-2">{item.why}</p>
-      <p className="mt-3 text-sm uppercase tracking-[0.14em] text-paper-2">What changed</p>
-      <p className="mt-1 text-paper-2">{item.happened}</p>
-      <p className="mt-3 text-sm italic text-paper-2">First question: {item.question}</p>
-      {item.source_line ? (
-        <p className="mt-2 text-sm text-paper-2">Source: {item.source_line}</p>
-      ) : null}
-      {item.source_url ? (
-        <details className="mt-2 text-sm text-paper-2">
-          <summary className="min-h-11 cursor-pointer">Technical details</summary>
-          <p className="break-all">{item.source_url}</p>
-        </details>
-      ) : null}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <InkButton tone="invert" disabled={busy} onClick={onStart}>
-          {active && phase.startsWith("Starting")
-            ? "Starting…"
-            : active && phase
-              ? "Digging…"
-              : "Start digging"}
-        </InkButton>
-        {canOpen && openId != null ? (
-          <a href="#investigation-workspace" className="inline-flex min-h-11 items-center text-sm text-blush">
-            View results
-          </a>
-        ) : null}
       </div>
-      {active && phase ? (
-        <p className="mt-2 text-sm text-paper-2" aria-live="polite">
-          {phase}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="mt-2 text-sm text-blush" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </li>
-  );
-}
 
-function InvestigationWorkspace({
-  openId,
-  detail,
-  pending,
-  digging,
-  keepDisabled,
-  phase,
-  notice,
-  queuedLead,
-  onKeepDigging,
-  onQueue,
-  onClose,
-  onPark,
-  onFollow,
-}: {
-  openId: number;
-  detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
-  pending: boolean;
-  digging: boolean;
-  keepDisabled: boolean;
-  phase: string;
-  notice: string | null;
-  queuedLead: number | null;
-  onKeepDigging: () => void;
-  onQueue: () => void;
-  onClose: () => void;
-  onPark: () => void;
-  onFollow: (seed: { paste: string; title: string }) => void;
-}) {
-  const inv = detail?.investigation;
-  const artifacts = detail?.artifacts ?? [];
-  const claims = detail?.claims ?? [];
-  const hyps = detail?.hypotheses ?? [];
-  const searches = detail?.searches ?? [];
-  const frontier = detail?.frontier ?? [];
-  const deadEnds = detail?.deadEnds ?? [];
-  const anomalies = detail?.anomalies ?? [];
-  const entities = detail?.entities ?? [];
-  const signals = detail?.signals ?? [];
-  const progress = progressLine({
-    running: digging,
-    status: inv?.status ?? "investigating",
-    hops: inv?.hops ?? 0,
-    budget: inv?.budget ?? 5,
-    artifacts: artifacts.length,
-    searches: searches.length,
-    claims: claims.length,
-  });
-  const facts = claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind));
-  const questions = openQuestionsFrom(detail);
-  const found = [
-    ...signals.map((s) => plainEditorText(`${s.name}: ${s.observation}`)),
-    ...anomalies.map((a) => plainFinding(a.summary, a.url)),
-    ...entities.map((e) => plainEditorText(`${e.name} — ${e.why}`)),
-    ...claims.filter((c) => /FINDING|PATTERN/i.test(c.kind)).map((c) => plainEditorText(c.body)),
-  ].filter(Boolean);
-  const next = frontier.filter((f) =>
-    ["open", "investigating", "reopened"].includes(f.status),
-  );
-  const seedSummary = !inv?.summary || looksLikeInternalSummary(inv.summary);
-  const whyMatters = !seedSummary && inv?.summary ? plainEditorText(inv.summary) : "";
-  const pauseText = editorPauseReason(inv?.pause_reason);
-  const leftover = next.length;
-  const subtitle = !inv
-    ? "Opening…"
-    : inv.status === "paused"
-      ? leftover > 0
-        ? `${editorStatus(inv.status)} · ${leftover} still to open`
-        : editorStatus(inv.status)
-      : `${editorStatus(inv.status)} · ${progress}`;
-
-  return (
-    <section
-      id="investigation-workspace"
-      className="enter-rise mt-10 scroll-mt-6 border border-paper-2 bg-ink-2 p-5"
-    >
-      <p className="text-[11px] tracking-[0.16em] text-rust uppercase">Open file</p>
-      <h2 className="mt-2 font-display text-3xl">
-        {inv?.title || `File ${openId}`}
-      </h2>
-      <p className="mt-2 text-sm text-paper-2">{subtitle}</p>
-      <p className="mt-1 text-sm text-paper-2">
-        {artifacts.length > 0 ? (
-          <a href="#opened-records" className="text-blush hover:text-paper">
-            {artifacts.length} records on file — read them below
-          </a>
-        ) : (
-          "No records captured yet."
-        )}
-        {leftover > 0 ? ` · ${leftover} still to open` : ""}
-        {inv?.updated_at ? ` · last touched ${formatShortDate(inv.updated_at)}` : ""}
-      </p>
-      {digging ? (
-        <div className="mt-4">
-          <BusyLine night label={phase || progress} />
-        </div>
-      ) : null}
-      {notice ? (
-        <div className="mt-4">
-          <Notice kind="err" night>
-            {notice}
-          </Notice>
-        </div>
-      ) : null}
-      {pending ? (
-        <p className="mt-4 text-sm text-paper-2">Getting this ready…</p>
-      ) : null}
-
-      {artifacts.length > 0 ? (
-        <OpenedRecords artifacts={artifacts} />
-      ) : digging ? (
-        <p className="mt-6 text-sm text-paper-2">Opening pages now. They will land here.</p>
-      ) : (
-        <p className="mt-6 text-sm text-paper-2">
-          Nothing captured yet. Keep digging starts the first round.
-        </p>
-      )}
-
-      {found.length > 0 ? (
-        <BlockList title="What Dark Desk noticed" items={found} />
-      ) : null}
-      {facts.length > 0 ? (
-        <BlockList title="What we know" items={facts.map((c) => c.body)} />
-      ) : null}
-
-      {next.length > 0 && (
-        <div className="mt-6">
-          <h3 className="font-display text-xl">Still unopened ({next.length})</h3>
-          <p className="mt-1 text-sm text-paper-2">
-            These names and links showed up in the records above. Dark Desk has
-            not opened them yet. Keep digging reads the next batch.
+      {selected ? (
+        <article className="reader-doc">
+          <p className="read-kind">
+            Reading {idx + 1} of {ordered.length} ·{" "}
+            {cap?.kind === "blocked" ? "Blocked" : kind}
+            {org ? ` · ${org}` : ""}
+            {selected.created_at ? ` · captured ${formatShortDate(selected.created_at)}` : ""}
           </p>
-          <ul className="mt-2 space-y-2">
-            {next.slice(0, 8).map((f) => (
-              <li key={f.id} className="border border-ink px-3 py-2">
-                <p className="text-sm text-paper-2">
-                  {humanLabel(f.label)}
-                  {f.why ? ` — ${plainEditorText(f.why)}` : ""}
-                </p>
-                <div className="mt-2">
-                  <InkButton
-                    tone="invert"
-                    disabled={keepDisabled}
-                    onClick={() =>
-                      onFollow({
-                        paste: `${f.label}\n${f.why}`,
-                        title: humanLabel(f.label),
-                      })
-                    }
-                  >
-                    Follow this lead
-                  </InkButton>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {pauseText ? <Block title="Why it stopped" text={pauseText} /> : null}
-      {inv?.status === "paused" && !digging ? (
-        <div className="mt-4">
-          <InkButton tone="invert" disabled={keepDisabled} onClick={onKeepDigging}>
-            Keep digging
-          </InkButton>
-        </div>
-      ) : null}
-
-      {whyMatters ? <Block title="Why it matters" text={whyMatters} /> : null}
-      {hyps.length > 0 ? (
-        <BlockList title="What we’re testing" items={hyps.map((h) => h.body)} />
-      ) : null}
-      {questions.length > 0 ? <BlockList title="Open questions" items={questions} /> : null}
-
-      <details className="mt-6">
-        <summary className="min-h-11 cursor-pointer font-display text-xl">Research trail</summary>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-paper-2">
-          {searches.length ? (
-            searches.map((s, i) => (
-              <li key={`${s.hop}-${i}`}>
-                {s.query}
-              </li>
-            ))
+          <h3 className="read-doc-title">{title || "Captured page"}</h3>
+          <p className="read-acts">
+            {selected.url.startsWith("http") ? (
+              <a href={selected.url} className="inline-link" target="_blank" rel="noreferrer">
+                Open original
+              </a>
+            ) : null}
+            <button type="button" className="inline-link" disabled={idx <= 0} onClick={() => go(-1)}>
+              Previous
+            </button>
+            <button
+              type="button"
+              className="inline-link"
+              disabled={idx >= ordered.length - 1}
+              onClick={() => go(1)}
+            >
+              Next
+            </button>
+          </p>
+          {selected.url.startsWith("http") ? <p className="read-url">{selected.url}</p> : null}
+          {body.isPending && !body.data ? (
+            <p className="meta">Opening the captured copy…</p>
+          ) : cap?.kind === "blocked" ? (
+            <p className="note err">{cap.note}</p>
+          ) : cap?.kind === "empty" ? (
+            <p className="read-ex">{cap.note}</p>
+          ) : cap?.body ? (
+            <div className="read-full">{cap.body}</div>
           ) : (
-            <li>No searches logged yet.</li>
+            <p className="read-ex">
+              Opened, but no readable text was extracted. Use Open original to read the live page.
+            </p>
           )}
-        </ul>
-      </details>
-      <BlockList
-        title="Dead ends"
-        items={deadEnds.map((d) => `${d.hypothesis} — ${plainEditorText(d.dismissed_because)}`)}
-      />
-
-      <div className="mt-6 flex flex-wrap gap-2">
-        <InkButton tone="invert" disabled={keepDisabled} onClick={onKeepDigging}>
-          {digging ? "Looking…" : "Keep digging"}
-        </InkButton>
-        <InkButton tone="invert" onClick={onQueue}>
-          Send to reporting queue
-        </InkButton>
-        {artifacts[0]?.url?.startsWith("http") ? (
-          <a
-            href={artifacts[0].url}
-            className="inline-flex min-h-11 items-center px-4 text-sm text-paper hover:text-blush"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Open source
-          </a>
-        ) : null}
-        <InkButton tone="invert" onClick={onClose}>
-          Close file
-        </InkButton>
-        <InkButton tone="invert" onClick={onPark}>
-          Set aside
-        </InkButton>
-      </div>
-      {queuedLead != null ? (
-        <p className="mt-3 flex flex-wrap gap-4 text-sm">
-          <Link
-            to="/desk/story/$leadId"
-            params={{ leadId: String(queuedLead) }}
-            className="text-blush hover:text-paper"
-          >
-            Open the story lead
-          </Link>
-          <Link to="/desk/queue" className="text-paper-2 hover:text-paper">
-            Working queue
-          </Link>
-        </p>
+        </article>
       ) : null}
-    </section>
-  );
-}
-
-function Block({ title, text }: { title: string; text: string }) {
-  if (!text.trim()) return null;
-  return (
-    <div className="mt-6">
-      <h3 className="font-display text-xl">{title}</h3>
-      <p className="mt-2 whitespace-pre-wrap text-paper-2">{text}</p>
     </div>
   );
 }
 
-function BlockList({
-  title,
-  items,
-  empty,
-}: {
-  title: string;
-  items: string[];
-  empty?: string;
-}) {
-  if (!items.length && !empty) return null;
-  return (
-    <div className="mt-6">
-      <h3 className="font-display text-xl">{title}</h3>
-      {items.length ? (
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-paper-2">
-          {items.map((t, i) => (
-            <li key={i}>{t}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-2 text-sm text-paper-2">{empty}</p>
-      )}
-    </div>
-  );
+function startedLine(title: string, paste: string, summary: string): string {
+  const text = paste.trim();
+  if (/^followed from the/i.test(text)) {
+    return text.split("\n")[0]!.slice(0, 280);
+  }
+  if (text) {
+    const first = text.split("\n")[0]!.replace(/\s+/g, " ").trim();
+    if (first && !looksLikeInternalSummary(first)) return first.slice(0, 220);
+  }
+  if (summary && !looksLikeInternalSummary(summary)) {
+    return plainEditorText(summary).slice(0, 220);
+  }
+  return `Opened as “${title}.”`;
 }
 
 function humanLabel(label: string): string {

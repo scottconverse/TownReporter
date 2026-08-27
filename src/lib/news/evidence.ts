@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
-import type { ProvenanceItem } from "./report.ts";
+import type { ProvenanceItem } from "./findings.ts";
+
 import { describeTextChanges, type VersionDiff } from "./retrieve.ts";
 
 export type CaptureObservationKind =

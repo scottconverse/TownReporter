@@ -9,6 +9,9 @@ import { webSearch } from "./search-web.ts";
 import { getSql } from "../db.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import type { LeadRow, MemoryRow } from "./types.ts";
+import { stripReporterNotebook } from "./strip-draft.ts";
+
+export { stripReporterNotebook } from "./strip-draft.ts";
 
 export const STORY_FORMS = ["brief", "reported", "explainer", "investigation"] as const;
 export type StoryForm = (typeof STORY_FORMS)[number];
@@ -48,6 +51,18 @@ export type ReportedDraft = {
   found_note: string;
   findings: StoryFinding[];
   unanswered: string[];
+  research_memo: ResearchMemo;
+};
+
+export type ResearchMemo = {
+  news: string;
+  why_it_matters: string;
+  angle: string;
+  form: string;
+  questions: string[];
+  unknowns: string[];
+  follow: string;
+  captured: { url: string; title: string }[];
 };
 
 export type FetchedDoc = {
@@ -111,7 +126,8 @@ This is a newspaper story for a smart, busy Longmont resident — not a rewrite 
 Headline: the actual news. Specific nouns, active verbs, a number/location/deadline when useful. No agency-speak.
 Lede: the most important new fact immediately. A reader who stops after paragraph one knows what happened and why it matters.
 Nut graf: within the first few paragraphs, why someone in Longmont should care. From the reporting, not filler.
-Body: order of reader value — details, impact, money, people affected, history/context, disagreement or uncertainty, what TownReporter found by following the trail, what happens next.
+Body: order of reader value — details, impact, money, people affected, history/context, disagreement or uncertainty, what TownReporter found in the captured records.
+Do not write a "Next checks are…" closer. Do not write "What is solid / What is not solid yet" scorekeeping. Those belong in reporting notes, never in the story. Stop when the story is told.
 Each paragraph must add information. Never restate the same fact in consecutive paragraphs to create length.
 Ban filler: "This development marks…", "The announcement comes as…", "Residents are encouraged to…", "This initiative underscores…", "In a move that…", "It remains to be seen…" unless the sentence contains actual reporting.
 Explain government terms on first use (consent agenda, RFP, ordinance).
@@ -145,6 +161,7 @@ Checklist:
 5. Strip generic AI filler.
 6. Important numbers/dates/names present?
 7. Unknowns stated as unknowns?
+8. Delete any "Next checks are…" or "What is solid / not solid yet" closer. That is reporter homework, not the story.
 Factual vocabulary that appears in the sources is not plagiarism. Near-verbatim copying is.
 Return ONLY JSON with the same keys as the draft: headline, dek, body, topic, source_urls, integrity_notes, memory_entities, form, found, unanswered, reporting_trail.`;
 
@@ -905,7 +922,7 @@ ${researchEvidence || docs.map((d) => `URL ${d.url}\n${d.text.slice(0, 1200)}`).
   const parsed = parseJsonBlock<Record<string, unknown>>(writeAi.text) ?? {};
   const announcing = docs[0]?.text ?? "";
   const beforeParas = coerced.body.split(/\n{2,}/).filter((p) => p.trim()).length;
-  let body = collapseRepeatedParagraphs(stripAiFiller(coerced.body));
+  let body = collapseRepeatedParagraphs(stripReporterNotebook(stripAiFiller(coerced.body)));
   const afterParas = body.split(/\n{2,}/).filter(Boolean).length;
   if (looksLikeRewrite(body, announcing) || afterParas < beforeParas) {
     const editAi = await chat(
@@ -930,7 +947,7 @@ ${researchEvidence || docs.map((d) => `URL ${d.url}\n${d.text.slice(0, 1200)}`).
         topic: coerced.topic,
       });
       if (edited.body) {
-        body = collapseRepeatedParagraphs(stripAiFiller(edited.body));
+        body = collapseRepeatedParagraphs(stripReporterNotebook(stripAiFiller(edited.body)));
         const editedUrls = sanitizePublicUrls(edited.source_urls);
         Object.assign(coerced, {
           headline: edited.headline,
@@ -1019,5 +1036,18 @@ ${researchEvidence || docs.map((d) => `URL ${d.url}\n${d.text.slice(0, 1200)}`).
     found_note: serializeFindings(findings),
     findings,
     unanswered,
+    research_memo: {
+      news: String(research?.news ?? opts.lead.headline).slice(0, 500),
+      why_it_matters: String(research?.why_it_matters ?? opts.lead.why).slice(0, 800),
+      angle: String(research?.angle ?? opts.lead.headline).slice(0, 400),
+      form,
+      questions: stringsFrom(research?.questions),
+      unknowns: stringsFrom(research?.unknowns),
+      follow: String(research?.follow ?? "").slice(0, 800),
+      captured: docs
+        .filter((d) => d.text)
+        .slice(0, 16)
+        .map((d) => ({ url: d.url, title: (d.title || d.url).slice(0, 160) })),
+    },
   };
 }

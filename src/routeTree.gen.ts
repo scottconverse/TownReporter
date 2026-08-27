@@ -22,6 +22,7 @@ import { Route as ArticlesSlugRouteImport } from './routes/articles.$slug'
 import { Route as DeskIndexRouteImport } from './routes/desk.index'
 import { Route as DeskDarkRouteImport } from './routes/desk.dark'
 import { Route as DeskMemoryRouteImport } from './routes/desk.memory'
+import { Route as DeskPublishedRouteImport } from './routes/desk.published'
 import { Route as DeskQueueRouteImport } from './routes/desk.queue'
 import { Route as DeskScanRouteImport } from './routes/desk.scan'
 import { Route as DeskSourcesRouteImport } from './routes/desk.sources'
@@ -97,6 +98,11 @@ const DeskMemoryRoute = DeskMemoryRouteImport.update({
   path: '/memory',
   getParentRoute: () => DeskRoute,
 } as any)
+const DeskPublishedRoute = DeskPublishedRouteImport.update({
+  id: '/published',
+  path: '/published',
+  getParentRoute: () => DeskRoute,
+} as any)
 const DeskQueueRoute = DeskQueueRouteImport.update({
   id: '/queue',
   path: '/queue',
@@ -156,6 +162,7 @@ export interface FileRoutesByFullPath {
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
   '/desk/memory': typeof DeskMemoryRoute
+  '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
   '/desk/sources': typeof DeskSourcesRoute
@@ -179,6 +186,7 @@ export interface FileRoutesByTo {
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
   '/desk/memory': typeof DeskMemoryRoute
+  '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
   '/desk/sources': typeof DeskSourcesRoute
@@ -204,6 +212,7 @@ export interface FileRoutesById {
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
   '/desk/memory': typeof DeskMemoryRoute
+  '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
   '/desk/sources': typeof DeskSourcesRoute
@@ -230,6 +239,7 @@ export interface FileRouteTypes {
     | '/articles/$slug'
     | '/desk/dark'
     | '/desk/memory'
+    | '/desk/published'
     | '/desk/queue'
     | '/desk/scan'
     | '/desk/sources'
@@ -253,6 +263,7 @@ export interface FileRouteTypes {
     | '/articles/$slug'
     | '/desk/dark'
     | '/desk/memory'
+    | '/desk/published'
     | '/desk/queue'
     | '/desk/scan'
     | '/desk/sources'
@@ -277,6 +288,7 @@ export interface FileRouteTypes {
     | '/articles/$slug'
     | '/desk/dark'
     | '/desk/memory'
+    | '/desk/published'
     | '/desk/queue'
     | '/desk/scan'
     | '/desk/sources'
@@ -400,6 +412,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskMemoryRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/desk/published': {
+      id: '/desk/published'
+      path: '/published'
+      fullPath: '/desk/published'
+      preLoaderRoute: typeof DeskPublishedRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/desk/queue': {
       id: '/desk/queue'
       path: '/queue'
@@ -469,6 +488,7 @@ declare module '@tanstack/react-router' {
 interface DeskRouteChildren {
   DeskDarkRoute: typeof DeskDarkRoute
   DeskMemoryRoute: typeof DeskMemoryRoute
+  DeskPublishedRoute: typeof DeskPublishedRoute
   DeskQueueRoute: typeof DeskQueueRoute
   DeskScanRoute: typeof DeskScanRoute
   DeskSourcesRoute: typeof DeskSourcesRoute
@@ -479,6 +499,7 @@ interface DeskRouteChildren {
 const DeskRouteChildren: DeskRouteChildren = {
   DeskDarkRoute: DeskDarkRoute,
   DeskMemoryRoute: DeskMemoryRoute,
+  DeskPublishedRoute: DeskPublishedRoute,
   DeskQueueRoute: DeskQueueRoute,
   DeskScanRoute: DeskScanRoute,
   DeskSourcesRoute: DeskSourcesRoute,

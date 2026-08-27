@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 — 2026-08-26
+
+Meeting records, reporting notes, and Dark Desk actually reading the tape. Draft notebook language stays off the paper.
+
+- **PrimeGov.** `longmont.primegov.com` is a watched official source. Catalog comes from the public JSON API (upcoming + archived), not Crawl4AI. Agenda/packet/minutes PDFs are separate records via `CompiledDocument`. YouTube titles join the matching meeting (206 S. Main ↔ Avis notice; council 08/25/2026 ↔ that packet). Minutes not posted after 36 hours is a catalog note.
+- **YouTube meetings.** Channel page is a catalog. Full timestamped transcripts live on each watch URL (Show transcript; no 12k slice). Upcoming livestreams stay listed with no fake transcript and are rechecked every 6 hours. `@LongmontPublicMedia` is the second tape; same-meeting titles are merged; if the city tape has no captions we use theirs.
+- **Dark Desk.** Planner no longer feeds the first 1,800 characters of a five-hour tape (hold music). Retrieval picks the vote, the aside, “skip it all.” Captions are a map, not minutes; names may be wrong; quotes need a check.
+- **Reporting notes** on the story workbench (designer 2): to-dos strike/restore, human lines tagged “yours,” add-a-line, research memo persists across redrafts and never prints.
+- Draft with AI strips reporter-notebook leftovers (`What is solid`, `Next checks are…`) from the story body.
+- Playwright civic hosts now include PrimeGov. SSR export patch after build. Site walkthrough script checked in.
+
 ## 0.2.5 — 2026-08-26
 
 Playwright render path for JavaScript civic sites. Simple GET remains the default.

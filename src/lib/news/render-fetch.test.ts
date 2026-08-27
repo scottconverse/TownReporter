@@ -13,6 +13,7 @@ describe("rendered fetch detection", () => {
       true,
     );
     assert.equal(hostNeedsRendering(new URL("https://longmont.legistar.com/Calendar.aspx")), true);
+    assert.equal(hostNeedsRendering(new URL("https://longmont.primegov.com/public/portal")), true);
     assert.equal(hostNeedsRendering(new URL("https://www.longmontcolorado.gov/agendas")), false);
   });
 

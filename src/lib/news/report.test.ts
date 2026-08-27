@@ -14,6 +14,7 @@ import {
   provenanceFromUrls,
   resolvePublicFindings,
   stripAiFiller,
+  stripReporterNotebook,
   type ProvenanceItem,
 } from "./report.ts";
 import type { LeadRow } from "./types.ts";
@@ -76,6 +77,42 @@ describe("stripAiFiller", () => {
       "This development marks the first time Longmont has split a $2.4 million water contract across two fiscal years.",
     );
     assert.match(out, /\$2\.4 million/);
+  });
+});
+
+describe("stripReporterNotebook", () => {
+  it("drops a Next checks closer that is reporter homework, not the story", () => {
+    const out = stripReporterNotebook(
+      [
+        "Ursa Major said it will expand the Berthoud campus.",
+        "Next checks are the full Leader open and IPO stories, Ursa Major’s own release and any SEC/SPAC filing, Longmont planning or ED files on the site, and Berthoud notices on the expansion.",
+      ].join("\n\n"),
+    );
+    assert.match(out, /Berthoud campus/);
+    assert.doesNotMatch(out, /Next checks/);
+    assert.doesNotMatch(out, /SEC\/SPAC/);
+  });
+
+  it("drops a solid/not-solid scorecard paragraph", () => {
+    const out = stripReporterNotebook(
+      [
+        "Ursa Major said it will expand the Berthoud campus.",
+        "**What is solid from local headlines:** a Longmont facility opening reported Aug. 21. **What is not solid yet:** address and operations detail.",
+      ].join("\n\n"),
+    );
+    assert.match(out, /Berthoud campus/);
+    assert.doesNotMatch(out, /What is solid/);
+    assert.doesNotMatch(out, /not solid yet/);
+  });
+
+  it("cuts trailers even when they share a graf or use single newlines", () => {
+    const out = stripReporterNotebook(
+      "City incentives do not show up in the snippets reviewed.\n**What is solid from local headlines:** a Longmont facility opening reported Aug. 21.\nNext checks are the full Leader open and IPO stories, Ursa Major’s own release and any SEC/SPAC filing.",
+    );
+    assert.match(out, /City incentives/);
+    assert.doesNotMatch(out, /What is solid/);
+    assert.doesNotMatch(out, /Next checks/);
+    assert.doesNotMatch(out, /SEC\/SPAC/);
   });
 });
 
@@ -367,6 +404,26 @@ describe("large-document retrieval", () => {
     assert.ok(
       chunks.some((c) => c.page_number === 60 || c.page_number === 140 || c.page_number === 180),
     );
+  });
+
+  it("finds the vote in a long meeting tape instead of the hold music", () => {
+    const hold = Array.from({ length: 120 }, (_, i) => `[${i}:00] Hey, hey, hey. Heat. Heat. I love you.`).join("\n");
+    const vote = `[4:59:47] And that carries 4 to 2 with council member Christ and council member Prito in opposition and Mayor Prom not voting.
+[5:00:02] Okay, I'm going to skip it all. We're going to the end.`;
+    const chunks = retrieveRelevantChunks(
+      [
+        {
+          url: "https://www.youtube.com/watch?v=7OdoRvfRArI",
+          title: "City Council Regular Session - 08/25/2026",
+          text: `YouTube transcript from More → Show transcript\n${hold}\n${vote}`,
+        },
+      ],
+      ["skip it all", "Christ", "4 to 2", "vote"],
+    );
+    const blob = chunks.map((c) => c.excerpt).join("\n");
+    assert.match(blob, /skip it all/i);
+    assert.match(blob, /Christ/);
+    assert.doesNotMatch(chunks[0]?.excerpt ?? "", /^\[0:00\] Hey, hey, hey/);
   });
 });
 

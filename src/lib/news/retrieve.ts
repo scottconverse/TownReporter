@@ -98,7 +98,10 @@ export function retrieveRelevantChunks(
       .sort((a, b) => b.score - a.score);
     const keep: RetrievedChunk[] = [];
     const first = chunks[0];
-    if (first) {
+    const transcriptHead =
+      /YouTube transcript/i.test(doc.text.slice(0, 500)) ||
+      /\[\d+:\d{2}(?::\d{2})?\]/.test(doc.text.slice(0, 800));
+    if (first && !(transcriptHead && scoreExcerpt(first.excerpt, queries) <= 0)) {
       keep.push({
         url: doc.url,
         title: doc.title,

@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { DeskShell, Field, InkButton, areaClass, inputClass } from "@/components/desk-chrome";
-import { EmptyState, ListSkeleton, Notice } from "@/components/states";
+import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
+import { ListSkeleton } from "@/components/states";
 import { addSource, addSourcesBulk, listSources, setSourceStatus } from "@/lib/news/desk";
+import { editorFetchError, kindFromSourceUrl } from "@/lib/news/desk-copy";
 import { formatShortDate } from "@/lib/paper";
+import type { SourceRow } from "@/lib/news/types";
 
 export const Route = createFileRoute("/desk/sources")({ component: SourcesPage });
 
@@ -18,14 +20,11 @@ function SourcesPage() {
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [bulk, setBulk] = useState("");
-  const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(
-    null,
-  );
+  const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [addedId, setAddedId] = useState<number | null>(null);
   const add = useMutation({
     mutationFn: () =>
-      addSource({
-        data: { url, title, kind: "official", tier: "A" },
-      }),
+      addSource({ data: { url, title, kind: kindFromSourceUrl(url), tier: "A" } }),
     onSuccess: (res) => {
       if (!res.ok) {
         setNotice({ kind: "err", text: res.error });
@@ -33,17 +32,25 @@ function SourcesPage() {
       }
       setUrl("");
       setTitle("");
-      setNotice({ kind: "ok", text: `On watch: ${res.source.title}` });
+      setAddedId(res.source.id);
+      setNotice({
+        kind: "ok",
+        text: `On watch: ${res.source.title} — ${res.source.url}`,
+      });
+      qc.setQueryData(["sources"], (old: SourceRow[] | undefined) => {
+        if (!old) return [res.source];
+        return [res.source, ...old.filter((s) => s.id !== res.source.id && s.url !== res.source.url)];
+      });
       void qc.invalidateQueries({ queryKey: ["sources"] });
+      requestAnimationFrame(() => {
+        document.getElementById("on-watch")?.scrollIntoView({ block: "start", behavior: "smooth" });
+      });
     },
     onError: (err) => {
       const msg = err instanceof Error ? err.message : "Could not add that source.";
       setNotice({
         kind: "err",
-        text:
-          msg === "Unauthorized"
-            ? "Session expired. Sign in again, then retry."
-            : msg,
+        text: msg === "Unauthorized" ? "Session expired. Sign in again, then retry." : msg,
       });
     },
   });
@@ -66,22 +73,40 @@ function SourcesPage() {
       const msg = err instanceof Error ? err.message : "Bulk add failed.";
       setNotice({
         kind: "err",
-        text:
-          msg === "Unauthorized"
-            ? "Session expired. Sign in again, then retry."
-            : msg,
+        text: msg === "Unauthorized" ? "Session expired. Sign in again, then retry." : msg,
       });
     },
   });
   const setStatus = useMutation({
-    mutationFn: (input: { id: number; status: "accepted" | "rejected" }) =>
-      setSourceStatus({ data: input }),
+    mutationFn: (input: { id: number; status: "accepted" | "rejected" }) => setSourceStatus({ data: input }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sources"] }),
   });
 
-  const proposed = sources.filter((s) => s.status === "proposed");
-  const watch = sources.filter((s) => s.status === "accepted");
-  const rejected = sources.filter((s) => s.status === "rejected");
+  const groups: {
+    k: string;
+    title: string;
+    sub: string | null;
+    acts: ("accepted" | "rejected")[];
+  }[] = [
+    {
+      k: "accepted",
+      title: "On watch",
+      sub: "What the scanner is allowed to fetch. Tier A is official record; B is journalism; C is a discovery clue, never treated as fact.",
+      acts: ["rejected"],
+    },
+    {
+      k: "proposed",
+      title: "Proposed",
+      sub: "Turned up by scans and Dark Desk. Nothing is fetched until you accept it.",
+      acts: ["accepted", "rejected"],
+    },
+    {
+      k: "rejected",
+      title: "Rejected",
+      sub: null,
+      acts: ["accepted"],
+    },
+  ];
 
   async function onPickFile(file: File | undefined) {
     if (!file) return;
@@ -93,13 +118,12 @@ function SourcesPage() {
 
   return (
     <DeskShell title="Sources" kicker="Watch list">
-      <p className="max-w-2xl text-ink-2">
-        Official pages Grok is allowed to fetch. Paste a registry or pick a
-        .txt / .md / .csv. TIER A/B/C headers are honored. Community URLs stay
-        on the list as signals and are not scanned.
+      <p className="lede">
+        The pages the scanner reads on every pass. Add one, paste a whole registry, or review what
+        the machine proposes.
       </p>
       <form
-        className="mt-6 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+        className="src-add"
         onSubmit={(e) => {
           e.preventDefault();
           setNotice(null);
@@ -108,8 +132,11 @@ function SourcesPage() {
       >
         <Field label="URL">
           <input
-            className={inputClass}
-            type="url"
+            type="text"
+            inputMode="url"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://www.longmontcolorado.gov/…"
@@ -117,50 +144,27 @@ function SourcesPage() {
           />
         </Field>
         <Field label="Name">
-          <input
-            className={inputClass}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="City Council packets"
-          />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="City Council packets" />
         </Field>
-        <InkButton type="submit" disabled={add.isPending || !url.trim()}>
+        <InkButton type="submit" small disabled={add.isPending || !url.trim()}>
           {add.isPending ? "Adding…" : "Add source"}
         </InkButton>
       </form>
-      <form
-        className="mt-8 max-w-3xl space-y-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setNotice(null);
-          addBulk.mutate(bulk);
-        }}
-      >
-        <Field label="Bulk paste or file">
-          <textarea
-            className={areaClass + " min-h-36"}
-            value={bulk}
-            onChange={(e) => setBulk(e.target.value)}
-            placeholder={`TIER A — OFFICIAL RECORD
-* City Council: https://www.longmontcolorado.gov/departments/departments-a-d/city-council
-TIER B — JOURNALISM
-* Times-Call: https://www.timescall.com/`}
-          />
-        </Field>
-        <p className="text-sm text-muted">
-          Markdown bullets, Title | URL, or CSV. Up to 400 URLs. Duplicate URLs
-          update in place.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <InkButton type="submit" disabled={addBulk.isPending || !bulk.trim()}>
+      <details className="file-form">
+        <summary>Bulk paste a registry (.txt, .md, .csv — TIER A/B/C headers honored)</summary>
+        <textarea
+          rows={5}
+          className="bulk"
+          value={bulk}
+          onChange={(e) => setBulk(e.target.value)}
+          placeholder={"TIER A — OFFICIAL RECORD\n* City Council: https://www.longmontcolorado.gov/…\nTIER B — JOURNALISM\n* Times-Call: https://www.timescall.com/"}
+        />
+        <div className="row-acts static">
+          <InkButton small disabled={addBulk.isPending || !bulk.trim()} onClick={() => addBulk.mutate(bulk)}>
             {addBulk.isPending ? "Adding list…" : "Add list"}
           </InkButton>
-          <InkButton
-            tone="ghost"
-            disabled={addBulk.isPending}
-            onClick={() => fileRef.current?.click()}
-          >
-            Pick a .txt or .csv
+          <InkButton tone="ghost" small disabled={addBulk.isPending} onClick={() => fileRef.current?.click()}>
+            Pick a file
           </InkButton>
           <input
             ref={fileRef}
@@ -174,57 +178,32 @@ TIER B — JOURNALISM
             }}
           />
         </div>
-      </form>
-      {notice && (
-        <Notice kind={notice.kind}>{notice.text}</Notice>
-      )}
-      {listError && (
-        <Notice kind="err">
-          Could not load sources.
-          {listError instanceof Error && listError.message === "Unauthorized"
-            ? " Sign in again."
-            : ""}
-        </Notice>
-      )}
+      </details>
+      {notice ? <p className={"note" + (notice.kind === "err" ? " err" : "")}>{notice.text}</p> : null}
+      {listError ? <p className="note err">Could not load sources.</p> : null}
 
       {isPending && sources.length === 0 ? (
-        <div className="mt-10">
-          <ListSkeleton rows={5} />
-        </div>
+        <ListSkeleton rows={5} />
       ) : (
-        <>
-      {proposed.length > 0 && (
-        <section className="mt-10">
-          <h2 className="font-display text-2xl">Proposed by Grok</h2>
-          <SourceTable
-            rows={proposed}
-            onAccept={(id) => setStatus.mutate({ id, status: "accepted" })}
-            onReject={(id) => setStatus.mutate({ id, status: "rejected" })}
-          />
-        </section>
-      )}
-      <section className="mt-10">
-        <h2 className="font-display text-2xl">On watch</h2>
-        <p className="mt-1 text-sm text-muted">
-          The starting list, not the universe. Tier C is fetched as a clue.
-        </p>
-        <SourceTable
-          rows={watch}
-          onReject={(id) => setStatus.mutate({ id, status: "rejected" })}
-          emptyTitle="Nothing on watch"
-          emptyBody="Add an official URL above, or paste a registry. Scans only fetch accepted sources."
-        />
-      </section>
-      {rejected.length > 0 && (
-        <section className="mt-10">
-          <h2 className="font-display text-2xl">Rejected</h2>
-          <SourceTable
-            rows={rejected}
-            onAccept={(id) => setStatus.mutate({ id, status: "accepted" })}
-          />
-        </section>
-      )}
-        </>
+        groups.map((g) => {
+          const rows = sources.filter((s) => s.status === g.k);
+          if (!rows.length && g.k !== "accepted") return null;
+          return (
+            <section key={g.k} id={g.k === "accepted" ? "on-watch" : undefined} className="src-sec">
+              <SecHead title={g.title} count={rows.length} sub={g.sub ?? undefined} />
+              {g.k === "accepted" && !rows.length ? (
+                <p className="wire-sum">Nothing on watch yet — add a URL above.</p>
+              ) : (
+                <SourceTable
+                  rows={rows}
+                  acts={g.acts}
+                  addedId={addedId}
+                  onStatus={(id, status) => setStatus.mutate({ id, status })}
+                />
+              )}
+            </section>
+          );
+        })
       )}
     </DeskShell>
   );
@@ -232,65 +211,56 @@ TIER B — JOURNALISM
 
 function SourceTable({
   rows,
-  onAccept,
-  onReject,
-  emptyTitle,
-  emptyBody,
+  acts,
+  addedId,
+  onStatus,
 }: {
-  rows: Awaited<ReturnType<typeof listSources>>;
-  onAccept?: (id: number) => void;
-  onReject?: (id: number) => void;
-  emptyTitle?: string;
-  emptyBody?: string;
+  rows: SourceRow[];
+  acts: ("accepted" | "rejected")[];
+  addedId?: number | null;
+  onStatus: (id: number, status: "accepted" | "rejected") => void;
 }) {
-  if (rows.length === 0) {
-    return (
-      <div className="mt-3">
-        <EmptyState
-          kicker="Watch list"
-          title={emptyTitle ?? "None"}
-          body={emptyBody ?? "Nothing in this list."}
-        />
-      </div>
-    );
-  }
   return (
-    <ul className="stagger-in mt-3 divide-y divide-rule border border-rule bg-paper">
-      {rows.map((s) => (
-        <li
-          key={s.id}
-          className="flex flex-col gap-2 px-4 py-3 transition-[background-color] duration-150 ease-out hover:bg-paper-2 sm:flex-row sm:items-start sm:justify-between"
-        >
-          <div className="min-w-0">
-            <p className="font-medium">{s.title}</p>
-            <a
-              href={s.url}
-              className="break-all text-sm text-rust transition-[color] duration-150 ease-out hover:text-rust-2"
-              target="_blank"
-              rel="noreferrer"
-            >
-              {s.url}
-            </a>
-            <p className="mt-1 text-[12px] text-muted">
-              Tier {s.tier} · {s.kind}
-              {s.last_fetched_at ? ` · fetched ${formatShortDate(s.last_fetched_at)}` : ""}
-              {s.last_error ? ` · ${s.last_error}` : ""}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            {onAccept && (
-              <InkButton tone="ghost" onClick={() => onAccept(s.id)}>
-                Accept
-              </InkButton>
-            )}
-            {onReject && (
-              <InkButton tone="ghost" onClick={() => onReject(s.id)}>
-                Drop
-              </InkButton>
-            )}
-          </div>
-        </li>
-      ))}
-    </ul>
+    <table className="ltable">
+      <thead>
+        <tr>
+          <th>Source</th>
+          <th>Tier</th>
+          <th>Kind</th>
+          <th>Last fetched</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((s) => (
+          <tr key={s.id} className={"lead-tr" + (addedId === s.id ? " just-added" : "")}>
+            <td className="td-hl">
+              <span className="src-t">{s.title}</span>
+              <span className="meta-inline block">{s.url}</span>
+              {s.last_error ? (
+                <span className="warn-inline">{editorFetchError(s.last_error, s.url) ?? s.last_error}</span>
+              ) : null}
+            </td>
+            <td className="td-meta">{s.tier}</td>
+            <td className="td-meta">{s.kind}</td>
+            <td className="td-meta">{s.last_fetched_at ? formatShortDate(s.last_fetched_at) : "—"}</td>
+            <td className="td-acts">
+              <span className="row-acts">
+                {acts.includes("accepted") ? (
+                  <InkButton tone="quiet" small onClick={() => onStatus(s.id, "accepted")}>
+                    Accept
+                  </InkButton>
+                ) : null}
+                {acts.includes("rejected") ? (
+                  <InkButton tone="quiet" small onClick={() => onStatus(s.id, "rejected")}>
+                    Drop
+                  </InkButton>
+                ) : null}
+              </span>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

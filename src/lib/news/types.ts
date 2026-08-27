@@ -21,6 +21,8 @@ export type LeadRow = {
   newsworthiness: number | null;
   created_at: string;
   article_slug?: string | null;
+  investigation_id?: number | null;
+  notes_json?: string | null;
 };
 
 export type DraftRow = {
@@ -37,6 +39,7 @@ export type DraftRow = {
   form?: string | null;
   found_note?: string | null;
   unanswered?: string | null;
+  research_json?: string | null;
 };
 
 export type ArticleRow = {
@@ -53,8 +56,8 @@ export type ArticleRow = {
   form?: string | null;
   found_note?: string | null;
   unanswered?: string | null;
-  provenance?: import("./report").ProvenanceItem[];
-  findings?: import("./report").StoryFinding[];
+  provenance?: import("./findings").ProvenanceItem[];
+  findings?: import("./findings").StoryFinding[];
 };
 
 export type MemoryRow = {

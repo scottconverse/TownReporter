@@ -14,9 +14,21 @@ export async function grokChat(
   system: string,
   user: string,
   maxTokens = 1400,
+  opts?: { timeoutMs?: number },
 ): Promise<GrokOk | GrokErr> {
   const apiKey = readXaiApiKey();
   if (!apiKey) return { ok: false, error: GROK_UNAVAILABLE };
+
+  const timeoutMs = opts?.timeoutMs ?? 45_000;
+  const payload = {
+    model: "grok-4.5",
+    temperature: 0.2,
+    max_tokens: maxTokens,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+  };
 
   let res: Response;
   try {
@@ -26,16 +38,8 @@ export async function grokChat(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: "grok-4.5",
-        temperature: 0.2,
-        max_tokens: maxTokens,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      }),
-      signal: AbortSignal.timeout(45000),
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     return { ok: false, error: "xAI request timed out" };
@@ -49,16 +53,8 @@ export async function grokChat(
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model: "grok-4.5",
-          temperature: 0.2,
-          max_tokens: maxTokens,
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-        }),
-        signal: AbortSignal.timeout(45000),
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       return { ok: false, error: "xAI request timed out" };

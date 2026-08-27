@@ -466,6 +466,29 @@ export const getInvestigation = createServerFn({ method: "GET" })
     };
   });
 
+export const getArtifact = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((id: number) => id)
+  .handler(async ({ context, data: id }) => {
+    await ensureDarkSchema();
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number;
+      url: string;
+      title: string;
+      full_text: string;
+      fetch_outcome: string | null;
+      fetch_status: number | null;
+      created_at: string;
+    }>`
+      select id, url, title, left(full_text, 120000) as full_text, fetch_outcome, fetch_status, created_at
+      from artifacts
+      where id = ${id} and user_id = ${context.userId}
+      limit 1
+    `;
+    return rows[0] ?? null;
+  });
+
 async function synthesizeSignals(
   userId: string,
   runId: number,
@@ -631,7 +654,7 @@ async function executeDarkRun(
     const loop = await researchLoop({
       userId,
       investigationId,
-      hops: 5,
+      hops: 1,
     });
 
     const synth = await synthesizeSignals(userId, runId, investigationId, paste);
@@ -758,7 +781,7 @@ export const continueInvestigation = createServerFn({ method: "POST" })
       const loop = await researchLoop({
         userId: context.userId,
         investigationId: id,
-        hops: 5,
+        hops: 1,
       });
       const synth = await synthesizeSignals(context.userId, runId, id, "");
       const names = (

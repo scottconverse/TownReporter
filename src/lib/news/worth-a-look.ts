@@ -6,6 +6,7 @@ import {
   organizationFromUrl,
   sourceLineFromUrl,
   withoutUrls,
+  worthTitle,
 } from "./desk-copy.ts";
 
 export type WorthSeed = {
@@ -263,7 +264,7 @@ export function presentWorthItem(item: WorthSeed): WorthSeed {
   }
   return {
     ...item,
-    title: title || item.title,
+    title: worthTitle({ title: title || item.title, happened, why }),
     happened,
     why,
     badge,

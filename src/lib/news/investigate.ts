@@ -16,7 +16,7 @@ import {
   type ExtractedRef,
   type StructureSnapshot,
 } from "./extract.ts";
-import { sha256 } from "./fetch-url.ts";
+import { sha256 } from "./url-guard.ts";
 import { classifyFetchedPage, canonicalPublicUrl, type FetchOutcome } from "./fetch-outcome.ts";
 import {
   ARCHIVE_TEXT_CAP,
@@ -26,6 +26,7 @@ import {
   type PdfPage,
 } from "./ingest.ts";
 import { searchWithFallback, waybackCopies, type SearchAttempt, type WebHit } from "./search-web.ts";
+import { retrieveRelevantChunks } from "./retrieve.ts";
 import { identityKey, isConfirmedSame, resolveEntityName } from "./entity-resolve.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import {
@@ -942,7 +943,15 @@ export async function rememberCapture(opts: {
   }
 
   if (opts.outcome === "fetched" || opts.outcome === "changed" || opts.outcome === "unchanged") {
-    await maybeWatch(opts.userId, url, opts.title, opts.investigationId, versionId, opts.extras ?? []);
+    await maybeWatch(
+      opts.userId,
+      url,
+      opts.title,
+      opts.investigationId,
+      versionId,
+      opts.extras ?? [],
+      opts.text,
+    );
   }
 
   return { versionId, captureEventId, contentHash: opts.hash, url };
@@ -955,11 +964,13 @@ async function maybeWatch(
   investigationId: number | null,
   versionId: number | null,
   extras: string[],
+  text = "",
 ) {
   const spec = baselineSpec(url, title);
   if (!spec) return;
   const sql = await getSql();
-  const cadenceHours = spec.kind === "meeting" ? 24 : spec.kind === "report" ? 48 : 72;
+  const awaitingTape = /no transcript yet|upcoming live stream/i.test(text);
+  const cadenceHours = awaitingTape ? 6 : spec.kind === "meeting" ? 24 : spec.kind === "report" ? 48 : 72;
   const structure = JSON.stringify(structureSnapshot(title, "", extras));
   const existing = await sql<{ id: number }>`
     select id from source_monitors where user_id = ${userId} and url = ${url} limit 1
@@ -971,6 +982,11 @@ async function maybeWatch(
       set title = ${title.slice(0, 200)}, last_version_id = ${versionId},
           last_success_at = now(), last_outcome = ${"fetched"},
           typical_structure = ${structure},
+          cadence_hours = ${cadenceHours},
+          next_check_at = case
+            when ${awaitingTape} then least(next_check_at, ${next}::timestamptz)
+            else next_check_at
+          end,
           investigation_id = coalesce(investigation_id, ${investigationId})
       where id = ${existing[0].id}
     `;
@@ -1026,7 +1042,13 @@ export async function watchSource(opts: {
 function baselineSpec(url: string, title: string): { key: string; kind: string } | null {
   const blob = `${url} ${title}`.toLowerCase();
   let kind = "";
-  if (/agenda|minutes|city.?council|board.?meeting/.test(blob)) kind = "meeting";
+  if (
+    /agenda|minutes|city.?council|board.?meeting|neighborhood.?meeting|primegov|youtube\.com\/watch|youtu\.be\//.test(
+      blob,
+    )
+  ) {
+    kind = "meeting";
+  }
   else if (/(water|utility|wastewater|drinking).{0,40}(report|quality)/.test(blob)) kind = "report";
   else if (/budget|cafr|financial.?report/.test(blob)) kind = "report";
   else if (/staff.?report|packet/.test(blob)) kind = "packet";
@@ -1288,7 +1310,15 @@ export async function retrievePack(
     `RELEVANT ARTIFACTS:\n${picked
       .map((a) => {
         const rec = a as { version_id?: number | null; capture_event_id?: number | null; content_hash?: string };
-        return `### [capture:${rec.capture_event_id ?? "—"} version:${rec.version_id ?? "—"} hash:${(rec.content_hash ?? "").slice(0, 12)}] ${a.title}\n${a.url}\n${a.full_text.slice(0, PLANNER_TEXT_CAP)}`;
+        const head = `### [capture:${rec.capture_event_id ?? "—"} version:${rec.version_id ?? "—"} hash:${(rec.content_hash ?? "").slice(0, 12)}] ${a.title}\n${a.url}\n`;
+        if (a.full_text.length <= PLANNER_TEXT_CAP) return head + a.full_text;
+        const hits = retrieveRelevantChunks([{ url: a.url, title: a.title, text: a.full_text }], terms, {
+          budgetChars: PLANNER_TEXT_CAP,
+          perDoc: 6,
+        });
+        const body =
+          hits.map((c) => `[${c.locator}] ${c.excerpt}`).join("\n") || a.full_text.slice(0, PLANNER_TEXT_CAP);
+        return head + body;
       })
       .join("\n\n") || "(none)"}`,
     `CHUNK HITS:\n${matchedChunks.map((c) => `[version:${c.version_id} page:${c.page_number ?? "—"} ${c.locator}] ${c.excerpt.slice(0, 500)}`).join("\n") || "(none)"}`,

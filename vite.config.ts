@@ -195,6 +195,31 @@ function darkDeskMonitorPlugin(): Plugin {
   };
 }
 
+function stubPlaywrightOnClient(): Plugin {
+  return {
+    name: "stub-playwright-on-client",
+    enforce: "pre",
+    resolveId(id, _importer, options) {
+      if (options?.ssr) return;
+      if (
+        id === "playwright" ||
+        id === "playwright-core" ||
+        id.startsWith("playwright/") ||
+        id.startsWith("playwright-core/") ||
+        id === "chromium-bidi" ||
+        id.startsWith("chromium-bidi/")
+      ) {
+        return "\0stub-playwright";
+      }
+    },
+    load(id) {
+      if (id === "\0stub-playwright") {
+        return "export const chromium = { launch: async () => null }; export default {};";
+      }
+    },
+  };
+}
+
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
@@ -224,6 +249,7 @@ export default defineConfig(({ command, isPreview }) => ({
     appEnvPlugin(),
     // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
     grokPwaPlugin(),
+    stubPlaywrightOnClient(),
     tailwindcss(),
     tanstackStart(),
     ...(command === "build" || isPreview
