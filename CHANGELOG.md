@@ -7,7 +7,7 @@ Product documentation. Clone-and-run was not a product.
 - Full README: pitch, disclaimer, two rooms, how it works, city swap, FAQ.
 - Operator manual: `docs/setup.md` — Node 22, env, Playwright, Postgres, gateways, Vercel limits, second editor, city swap via `paper.ts`.
 - Editor manual: `docs/editor.md` — login through publish, meetings/tapes (captions are not minutes), Dark Desk piles, corrections.
-- Marketing landing: `docs/index.html` (cream / ink / rust) for GitHub Pages from `/docs`. `docs/.nojekyll`.
+- Marketing landing: `docs/index.html` (cream / ink / rust) for GitHub Pages from `/docs`. `docs/.nojekyll`. Enable Pages: Settings → Pages → branch `main` / `/docs`.
 - `package.json` `engines.node` `>=22`.
 
 ## 0.3.1 — 2026-08-26
