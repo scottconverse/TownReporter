@@ -686,7 +686,21 @@ export const draftLead = createServerFn({ method: "POST" })
     `;
     await audit(context.userId, "draft", String(leadId));
 
-    return { ok: true as const };
+    const packed = unpackStoredDraft({
+      headline: reported.headline,
+      dek: reported.dek,
+      body: stripReporterNotebook(reported.body),
+      topic: reported.topic,
+      source_urls: sourceUrls,
+      integrity_notes: notes,
+      provenance_json: provenanceJson,
+      form: reported.form,
+      found_note: reported.found_note.slice(0, 8000),
+      unanswered: unansweredJson,
+      research_json: researchJson,
+      updated_at: new Date().toISOString(),
+    });
+    return { ok: true as const, draft: packed };
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Draft failed";
       console.error("[desk] draftLead failed", err);

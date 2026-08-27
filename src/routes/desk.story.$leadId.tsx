@@ -11,7 +11,7 @@ import {
   parseNotes,
   type ReportingNotes,
 } from "@/lib/news/notes";
-import { editorDraftError } from "@/lib/news/desk-copy";
+import { editorDraftError, draftHasLanded } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
@@ -28,98 +28,113 @@ function StoryPage() {
   const [topic, setTopic] = useState("council");
   const [msg, setMsg] = useState("");
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
-  const [draftStartedAt, setDraftStartedAt] = useState<number | null>(null);
+  const [waitingSince, setWaitingSince] = useState<number | null>(null);
+  const [slowWait, setSlowWait] = useState(false);
   const hadBodyAtStart = useRef(false);
+  const bodyAtStart = useRef("");
+  const appliedFp = useRef("");
+
+  const waiting = waitingSince !== null;
 
   const { data, isPending } = useQuery({
     queryKey: ["lead", id],
     queryFn: () => getLead({ data: id }),
-    refetchInterval: draftStartedAt ? 3000 : false,
+    refetchInterval: waiting ? 2000 : false,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
   useEffect(() => {
-    if (!data?.draft) return;
-    setHeadline(data.draft.headline);
-    setDek(data.draft.dek);
-    setBody(stripReporterNotebook(data.draft.body));
-    setTopic(data.draft.topic);
-    if (data.articleSlug) setPublishedSlug(data.articleSlug);
-  }, [data?.draft, data?.articleSlug]);
+    if (data?.articleSlug) setPublishedSlug(data.articleSlug);
+    const d = data?.draft;
+    if (!d) return;
+    const fp = `${d.updated_at ?? ""}|${(d.body ?? "").length}|${d.headline ?? ""}`;
+    if (!waitingSince) {
+      if (appliedFp.current === "" && d.body) {
+        setHeadline(d.headline);
+        setDek(d.dek);
+        setBody(stripReporterNotebook(d.body));
+        setTopic(d.topic);
+        appliedFp.current = fp;
+      }
+      return;
+    }
+    if (
+      !draftHasLanded({
+        hadBodyAtStart: hadBodyAtStart.current,
+        bodyAtStart: bodyAtStart.current,
+        startedAt: waitingSince,
+        draft: d,
+      })
+    ) {
+      return;
+    }
+    setHeadline(d.headline);
+    setDek(d.dek);
+    setBody(stripReporterNotebook(d.body));
+    setTopic(d.topic);
+    appliedFp.current = fp;
+    setWaitingSince(null);
+    setSlowWait(false);
+    setMsg("");
+  }, [data, waitingSince]);
 
-  function draftLanded(draft: { body?: string | null; updated_at?: string } | null | undefined) {
-    if (!draft?.body) return false;
-    if (!hadBodyAtStart.current) return true;
-    if (!draftStartedAt) return true;
-    const t = Date.parse(draft.updated_at || "");
-    if (!Number.isFinite(t)) return true;
-    return t >= draftStartedAt - 5000;
-  }
+  useEffect(() => {
+    if (!waitingSince) return;
+    const t = window.setInterval(() => {
+      void qc.refetchQueries({ queryKey: ["lead", id] });
+    }, 2000);
+    return () => window.clearInterval(t);
+  }, [waitingSince, id, qc]);
+
+  useEffect(() => {
+    if (!waitingSince) {
+      setSlowWait(false);
+      return;
+    }
+    const slow = window.setTimeout(() => setSlowWait(true), 20_000);
+    return () => window.clearTimeout(slow);
+  }, [waitingSince]);
 
   const draft = useMutation({
     mutationFn: () => draftLead({ data: id }),
     onMutate: () => {
       setMsg("");
       hadBodyAtStart.current = Boolean(data?.draft?.body);
-      setDraftStartedAt(Date.now());
+      bodyAtStart.current = data?.draft?.body ?? "";
+      setWaitingSince(Date.now());
     },
     onSuccess: async (res) => {
+      if (res.ok && "draft" in res && res.draft) {
+        qc.setQueryData(["lead", id], (old: typeof data) => {
+          if (!old) return old;
+          return {
+            ...old,
+            draft: { ...(old.draft ?? {}), ...res.draft },
+            lead: { ...old.lead, status: "drafted" },
+          };
+        });
+        void qc.invalidateQueries({ queryKey: ["leads"] });
+        return;
+      }
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       await qc.invalidateQueries({ queryKey: ["leads"] });
-      if (res.ok) {
-        setDraftStartedAt(null);
-        setMsg("");
-        return;
-      }
-      const latest = qc.getQueryData(["lead", id]) as typeof data;
-      if (draftLanded(latest?.draft) || draftLanded(data?.draft)) {
-        setDraftStartedAt(null);
-        setMsg("");
-        return;
-      }
+      if (res.ok) return;
       if (looksLikeDraftTimeout(res.error)) return;
-      setDraftStartedAt(null);
+      setWaitingSince(null);
+      setSlowWait(false);
       setMsg(editorDraftError(res.error) ?? res.error);
     },
     onError: async (err) => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
-      const latest = qc.getQueryData(["lead", id]) as typeof data;
-      if (draftLanded(latest?.draft) || draftLanded(data?.draft)) {
-        setDraftStartedAt(null);
-        setMsg("");
-        return;
-      }
       const raw = err instanceof Error ? err.message : "Draft failed";
       if (looksLikeDraftTimeout(raw)) return;
-      setDraftStartedAt(null);
+      setWaitingSince(null);
+      setSlowWait(false);
       setMsg(editorDraftError(raw) ?? "The draft did not finish. Click Draft with AI again.");
     },
   });
-
-  const waiting = draft.isPending || Boolean(draftStartedAt);
-
-  useEffect(() => {
-    if (!draftStartedAt) return;
-    if (draftLanded(data?.draft)) {
-      setDraftStartedAt(null);
-      setMsg("");
-      return;
-    }
-    const remain = 120_000 - (Date.now() - draftStartedAt);
-    const t = setTimeout(() => {
-      if (draftLanded(data?.draft)) {
-        setDraftStartedAt(null);
-        setMsg("");
-        return;
-      }
-      setDraftStartedAt(null);
-      if (!data?.draft?.body) {
-        setMsg(
-          "The draft did not finish in time. Sources were slow or the writing pass ran long. Click Draft with AI again.",
-        );
-      }
-    }, Math.max(1000, remain));
-    return () => clearTimeout(t);
-  }, [data?.draft, draftStartedAt]);
 
   const save = useMutation({
     mutationFn: () =>
@@ -286,14 +301,20 @@ function StoryPage() {
             ) : null}
           </div>
           {waiting ? (
-            <Busy label="Reporting first — following the trail, then drafting. Stay on this page." />
+            <Busy
+              label={
+                slowWait
+                  ? "The click dropped. The writing pass is still finishing — this page is pulling the draft in."
+                  : "Reporting first — following the trail, then drafting. Stay on this page."
+              }
+            />
           ) : null}
           {publish.isPending ? <Busy label="Sending this to the paper…" /> : null}
           {msg && !onPaper ? (
             <Notice kind={msg === "Saved." ? "ok" : "err"}>{msg}</Notice>
           ) : null}
 
-          {data.draft ? (
+          {data.draft || body ? (
             <form className="work-form" onSubmit={(e) => e.preventDefault()}>
               <Field label="Headline">
                 <input
@@ -320,7 +341,7 @@ function StoryPage() {
                   disabled={onPaper}
                 />
               </Field>
-              {data.draft.form ? <p className="meta">Form · {data.draft.form}</p> : null}
+              {data.draft?.form ? <p className="meta">Form · {data.draft.form}</p> : null}
             </form>
           ) : waiting ? null : (
             <p className="meta" style={{ marginTop: 14 }}>
@@ -336,7 +357,7 @@ function StoryPage() {
 }
 
 function looksLikeDraftTimeout(raw: string): boolean {
-  return /timeout|timed out|aborted|network|failed to fetch|504|503|502|econnreset|socket hang up|unexpected server error/i.test(
+  return /timeout|timed out|aborted|abort|network|failed to fetch|load failed|504|503|502|econnreset|socket hang up|unexpected server error|gateway/i.test(
     raw,
   );
 }

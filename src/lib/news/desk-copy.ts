@@ -556,4 +556,21 @@ export function kindFromSourceUrl(url: string): "youtube" | "official" {
   return /youtube\.com|youtu\.be/i.test(url) ? "youtube" : "official";
 }
 
+/** True when the workbench should paint a draft that arrived after Draft with AI. */
+export function draftHasLanded(input: {
+  hadBodyAtStart: boolean;
+  bodyAtStart?: string;
+  startedAt: number | null;
+  draft: { body?: string | null; updated_at?: string | null } | null | undefined;
+}): boolean {
+  const body = (input.draft?.body ?? "").trim();
+  if (!body) return false;
+  if (!input.hadBodyAtStart) return true;
+  if (body !== (input.bodyAtStart ?? "").trim()) return true;
+  if (!input.startedAt) return true;
+  const t = Date.parse(input.draft?.updated_at || "");
+  if (!Number.isFinite(t)) return true;
+  return t >= input.startedAt - 5000;
+}
+
 

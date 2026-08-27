@@ -25,6 +25,7 @@ import {
   sourceLineFromUrl,
   titlesOverlap,
   collapsePrintedDuplicates,
+  draftHasLanded,
   workingLeads,
   workingQueueEmptyCopy,
   worthItemOnDesk,
@@ -364,6 +365,57 @@ describe("Worth a Look presentation", () => {
       { headline: "Longmont council set for joint session with Boulder County on Sept. 21" },
     ]);
     assert.equal(kept.length, 2);
+  });
+
+  it("treats a first body as landed even when the HTTP click already died", () => {
+    assert.equal(
+      draftHasLanded({
+        hadBodyAtStart: false,
+        bodyAtStart: "",
+        startedAt: Date.now() - 60_000,
+        draft: { body: "Council meets Tuesday.", updated_at: new Date().toISOString() },
+      }),
+      true,
+    );
+    assert.equal(
+      draftHasLanded({
+        hadBodyAtStart: false,
+        startedAt: Date.now(),
+        draft: { body: "", updated_at: new Date().toISOString() },
+      }),
+      false,
+    );
+  });
+
+  it("treats a redraft as landed when the body changed, not by waiting out a timer", () => {
+    const startedAt = Date.parse("2026-08-27T02:00:00.000Z");
+    assert.equal(
+      draftHasLanded({
+        hadBodyAtStart: true,
+        bodyAtStart: "old brief",
+        startedAt,
+        draft: { body: "Council meets Tuesday at 7.", updated_at: "2026-08-27T01:00:00.000Z" },
+      }),
+      true,
+    );
+    assert.equal(
+      draftHasLanded({
+        hadBodyAtStart: true,
+        bodyAtStart: "old brief",
+        startedAt,
+        draft: { body: "old brief", updated_at: "2026-08-27T01:00:00.000Z" },
+      }),
+      false,
+    );
+    assert.equal(
+      draftHasLanded({
+        hadBodyAtStart: true,
+        bodyAtStart: "old brief",
+        startedAt,
+        draft: { body: "old brief", updated_at: "2026-08-27T02:00:10.000Z" },
+      }),
+      true,
+    );
   });
 });
 

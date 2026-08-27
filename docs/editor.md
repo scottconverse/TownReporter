@@ -112,7 +112,7 @@ This is where a lead becomes a story, or doesn’t.
 
 **Draft with AI** runs the reporting pass: follows attachments, retrieves from the captured records (including the relevant part of a long tape, not the hold music), and writes a story into the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
 
-Stay on the page. If the click dies before the reply comes back, the workbench keeps looking for about two minutes; the draft often appears without a reload. If it still does not, the page says so — click again.
+Stay on the page. If the click dies before the reply comes back, the workbench keeps looking until the draft is on the lead, then fills the form. You should not need to reload. If a real failure happens, the page says so — click again.
 
 When the reporting hangs on another newsroom, the draft should name them and link the **story URL** so they get the traffic. A homepage or `/local-news` index is not that URL. If the desk only has a listing, notes ask you to pull the full URL; do not publish a paraphrase of their legal claims as if TownReporter established them.
 

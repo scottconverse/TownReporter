@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.5 — 2026-08-26
+
+Draft with AI paints the workbench when the writing pass finishes, even if the click already died.
+
+- The workbench no longer stops looking after two minutes. It polls until a body is actually on the lead, then fills headline / dek / body without a reload.
+- The click returning the finished draft writes it straight into the form. A dropped connection is not treated as "nothing happened."
+- The "Drafting…" state stays up and keeps checking. Reload is not required.
+
 ## 0.3.4 — 2026-08-26
 
 Draft with AI no longer looks empty when the server already wrote. Credit the originating newsroom with a story URL, not a homepage.
