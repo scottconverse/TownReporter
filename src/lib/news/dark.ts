@@ -733,10 +733,15 @@ export const openDarkInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: { paste: string; title?: string }) => input)
   .handler(async ({ context, data }) => {
-    await ensureDarkSchema();
-    const opened = await openInvestigationForEditor(context.userId, data);
-    await audit(context.userId, "dark", `open inv ${opened.investigationId}`);
-    return opened;
+    try {
+      await ensureDarkSchema();
+      const opened = await openInvestigationForEditor(context.userId, data);
+      await audit(context.userId, "dark", `open inv ${opened.investigationId}`);
+      return opened;
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : "Could not open an investigation";
+      return { ok: false as const, error: raw };
+    }
   });
 
 export const findSomethingToDigInto = createServerFn({ method: "POST" })

@@ -54,6 +54,15 @@ describe("editor copy", () => {
     assert.match(msg!, /unavailable|Keep digging/i);
   });
 
+  it("does not dump a setCookie crash as editor copy", () => {
+    const msg = editorError(
+      "Cannot destructure property 'setCookie' of '(intermediate value)' as it is undefined.",
+    );
+    assert.ok(msg);
+    assert.match(msg!, /Start digging again/i);
+    assert.doesNotMatch(msg!, /setCookie/);
+  });
+
   it("does not show a TypeError as editor copy", () => {
     const msg = editorError("Cannot read properties of undefined (reading 'ok')");
     assert.ok(msg);

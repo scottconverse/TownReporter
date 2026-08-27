@@ -42,25 +42,6 @@ export const Route = createFileRoute("/desk/dark")({
 });
 
 const OPEN_KEY = "townreporter.dark.openId";
-const CLAIM_KEY = "townreporter.dark.claimed";
-
-function readClaimed(): string[] {
-  try {
-    const raw = sessionStorage.getItem(CLAIM_KEY);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-    return Array.isArray(parsed) ? parsed.map(String) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeClaimed(ids: string[]) {
-  try {
-    sessionStorage.setItem(CLAIM_KEY, JSON.stringify(ids.slice(-40)));
-  } catch {
-    /* ignore */
-  }
-}
 
 function DarkPage() {
   const qc = useQueryClient();
@@ -82,18 +63,13 @@ function DarkPage() {
     } catch {
       /* ignore */
     }
-    setClaimedIds(readClaimed());
     return () => {
       if (phaseTimer.current) clearTimeout(phaseTimer.current);
     };
   }, []);
 
   function claimCard(id: string) {
-    setClaimedIds((prev) => {
-      const next = prev.includes(id) ? prev : [...prev, id];
-      writeClaimed(next);
-      return next;
-    });
+    setClaimedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
   }
 
   function rememberOpen(id: number | null) {
@@ -198,19 +174,25 @@ function DarkPage() {
       setPendingCard(item.id);
       setCardError(null);
       setCardPhase("Starting…");
-      claimCard(item.id);
     },
     onSuccess: (res, item) => {
       if (!res?.ok || !res.investigationId) {
         setCardError({ id: item.id, message: "Could not open an investigation." });
+        setNotice("Could not open that file. Try Start digging again.");
+        setNoticeOk(false);
+        setPendingCard(null);
         clearPhase();
         return;
       }
+      claimCard(item.id);
       afterOpen(res.investigationId, item.id);
     },
     onError: (err, item) => {
       const msg = editorError(err instanceof Error ? err.message : "Could not start") || "Could not start";
       setCardError({ id: item.id, message: msg });
+      setNotice(msg);
+      setNoticeOk(false);
+      setPendingCard(null);
       clearPhase();
     },
   });
@@ -335,9 +317,7 @@ function DarkPage() {
   const allInv = investigations.data ?? [];
   const active = allInv.filter((row) => pileForStatus(row.status) === "desk");
   const parked = allInv.filter((row) => pileForStatus(row.status) === "aside");
-  const inbox = (worth.data ?? []).filter(
-    (item) => !worthItemOnDesk(item, allInv, claimedIds) && pendingCard !== item.id,
-  );
+  const inbox = (worth.data ?? []).filter((item) => !worthItemOnDesk(item, allInv, claimedIds));
 
   return (
     <DeskShell
@@ -386,7 +366,8 @@ function DarkPage() {
             {openPaste.isPending ? "Starting…" : "Start digging"}
           </InkButton>
         </div>
-        {pendingCard === "paste" && cardPhase ? (
+        {notice ? <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p> : null}
+        {pendingCard && cardPhase ? (
           <p className="meta" aria-live="polite">
             {cardPhase}
           </p>

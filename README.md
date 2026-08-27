@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.3.7](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.7)** — 26 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.3.8](https://github.com/scottconverse/TownReporter/releases/tag/v0.3.8)** — 26 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
@@ -74,7 +74,11 @@ Same six moves the paper itself describes at `/how-we-report`:
 
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
-### This release (0.3.7)
+### This release (0.3.8)
+
+- **Start digging actually starts, or says why not.** A failed open used to hide the card and the error with it. The card stays. Reload also brings vanished cards back (claims are no longer sticky for the session).
+
+Also in 0.3.7: Redraft does not die on a cookie glitch.
 
 - **Redraft does not die on a cookie glitch.** A TanStack sign-in helper threw `Cannot destructure property 'setCookie'` after you clicked Redraft even though you were still signed in. That click can finish now.
 

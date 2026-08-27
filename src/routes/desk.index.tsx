@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Busy, InkButton, SecHead } from "@/components/desk-chrome";
 import { LeadRowView } from "@/components/desk-leads";
 import { DeskShell } from "@/components/desk-chrome";
@@ -66,18 +67,25 @@ function DeskHome() {
       void qc.invalidateQueries({ queryKey: ["sources"] });
     },
   });
+  const [darkErr, setDarkErr] = useState<string | null>(null);
   const startDark = useMutation({
     mutationFn: (item: { seed: string; title: string }) =>
       openDarkInvestigation({ data: { paste: item.seed, title: item.title } }),
     onSuccess: (res) => {
       if (res?.ok && res.investigationId) {
+        setDarkErr(null);
         try {
           sessionStorage.setItem(OPEN_KEY, String(res.investigationId));
         } catch {
           /* ignore */
         }
         void navigate({ to: "/desk/dark" });
+        return;
       }
+      setDarkErr(res && "error" in res && res.error ? String(res.error) : "Could not open that file.");
+    },
+    onError: (err) => {
+      setDarkErr(err instanceof Error ? err.message : "Could not open that file.");
     },
   });
 
@@ -249,6 +257,7 @@ function DeskHome() {
               }
             />
             <p className="np-note">Investigates. Never prints.</p>
+            {darkErr ? <p className="note err">{darkErr}</p> : null}
             {inbox.length === 0 && onDesk.length === 0 ? (
               <p className="wire-sum">
                 Nothing new tonight.{" "}

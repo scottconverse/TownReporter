@@ -1,6 +1,12 @@
 # Changelog
 
-Current release: **0.3.7**.
+Current release: **0.3.8**.
+
+## 0.3.8 — 2026-08-26
+
+Start digging no longer swallows a failed open. The card stays put, says so, and you can click again. A previous click that died on the cookie glitch had hidden the card for the rest of the session.
+
+## 0.3.7 — 2026-08-26
 
 ## 0.3.7 — 2026-08-26
 

@@ -117,6 +117,9 @@ export function editorStatus(status: string): string {
 export function editorError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  if (/setCookie|Cannot destructure/i.test(t)) {
+    return "Sign-in hiccup on that click — you are still signed in. Click Start digging again.";
+  }
   if (/cannot read propert/i.test(t) || /undefined \(reading/i.test(t) || /is not a function/i.test(t)) {
     return "Something broke after the records were already saved. Nothing was thrown away. Click Keep digging to continue.";
   }
