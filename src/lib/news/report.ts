@@ -552,7 +552,8 @@ export function provenanceFromUrls(
   }
   for (const extra of extras) {
     if (!extra.url) continue;
-    const cur = byUrl.get(extra.url) ?? blankProvenance(extra.url);
+    const cur = byUrl.get(extra.url);
+    if (!cur) continue;
     byUrl.set(extra.url, mergeProvenanceItem(cur, extra));
   }
   return [...byUrl.values()].map(finalizeProvenance);

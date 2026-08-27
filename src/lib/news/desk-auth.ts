@@ -15,6 +15,6 @@ export const deskMiddleware = createMiddleware({ type: "function" })
     const { requireEditor } = await import("./membership");
     assertSameSiteRequest();
     const userId = await requireUserId(context.bearerToken);
-    await requireEditor(userId);
-    return next({ context: { userId } });
+    const editor = await requireEditor(userId);
+    return next({ context: { userId, newsroomId: editor.newsroomId, role: editor.role } });
   });

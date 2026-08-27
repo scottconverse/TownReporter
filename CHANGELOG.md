@@ -2,6 +2,18 @@
 
 Current release: **0.3.9**.
 
+## Unreleased — 0.4.0 Hardening
+
+Backend started. Desk/Dark UI not part of this slice.
+
+- One newsroom row; members carry `newsroom_id`. Two concurrent first users can no longer both become owner.
+- Chromium aborts subrequests to private/LAN/metadata addresses. Cron with no `CRON_SECRET` is disabled.
+- Captures store extracted vs raw hashes when bytes exist. Public provenance cannot be minted by the model for a URL we did not fetch.
+- Image-only PDFs are unread. JPEG-as-chat is not OCR.
+- `npm run typecheck` and GitHub Actions on test+types.
+
+## 0.3.9 — 2026-08-26
+
 ## 0.3.9 — 2026-08-26
 
 Designer pass. Paper search and newsletter inputs have borders again. Version leaves the desk masthead. Pulled notes uses the same does-not-print chip as reporting notes. Publish keeps pulled notes. Dark Desk noticed list caps; Start digging errors stay on one surface.

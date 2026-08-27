@@ -6,11 +6,12 @@ export const Route = createFileRoute("/api/cron/monitors")({
     handlers: {
       GET: async ({ request }) => {
         const secret = process.env.CRON_SECRET?.trim();
-        if (secret) {
-          const hdr = request.headers.get("authorization") ?? "";
-          if (hdr !== `Bearer ${secret}`) {
-            return new Response("forbidden", { status: 403 });
-          }
+        if (!secret) {
+          return new Response("cron disabled", { status: 503 });
+        }
+        const hdr = request.headers.get("authorization") ?? "";
+        if (hdr !== `Bearer ${secret}`) {
+          return new Response("forbidden", { status: 403 });
         }
         const result = await tickAllDueMonitors();
         return Response.json(result);

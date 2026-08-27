@@ -86,13 +86,18 @@ export async function fetchRenderedPage(raw: string): Promise<RenderedPage | nul
     const ctx = await br.newContext({ userAgent: UA, javaScriptEnabled: true });
     const page = await ctx.newPage();
     try {
-      await page.route("**/*", (route) => {
+      await page.route("**/*", async (route) => {
         const u = route.request().url();
         if (!/^https?:/i.test(u)) {
-          void route.abort();
+          await route.abort();
           return;
         }
-        void route.continue();
+        try {
+          await assertPublicHttpUrl(u);
+          await route.continue();
+        } catch {
+          await route.abort();
+        }
       });
       await page.goto(start.toString(), { waitUntil: "domcontentloaded", timeout: 25000 });
       try {

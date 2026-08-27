@@ -66,4 +66,13 @@ export async function sha256(text: string) {
     .join("");
 }
 
+export async function sha256Bytes(bytes: Uint8Array) {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const buf = await crypto.subtle.digest("SHA-256", copy);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export { isIP };

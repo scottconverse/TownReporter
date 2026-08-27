@@ -229,6 +229,18 @@ describe("provenance merge", () => {
     assert.equal(items[0]!.version_count, 3);
   });
 
+  it("does not let the model mint a provenance URL we did not fetch", () => {
+    const used = "https://longmontcolorado.gov/water/group-2-notice.html";
+    const invented = "https://invented.example/press-release";
+    const items = provenanceFromUrls(
+      [used],
+      [{ url: invented, title: "A press release the model dreamed", role: "primary" }],
+    );
+    assert.equal(items.length, 1);
+    assert.equal(items[0]!.url, used);
+    assert.ok(!items.some((i) => i.url === invented));
+  });
+
   it("lets forensic disappearance win while keeping the reported title", () => {
     const base: ProvenanceItem = {
       title: "August water report",

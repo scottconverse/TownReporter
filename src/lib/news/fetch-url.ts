@@ -1,7 +1,7 @@
 import { assertHttpUrl, isBlockedAddress, isIP, sha256 } from "./url-guard.ts";
 import { htmlToPlainText } from "./html-text.ts";
 
-export { assertHttpUrl, isBlockedAddress, sha256 } from "./url-guard.ts";
+export { assertHttpUrl, isBlockedAddress, sha256, sha256Bytes } from "./url-guard.ts";
 
 export async function assertPublicHttpUrl(raw: string): Promise<URL> {
   const url = assertHttpUrl(raw);

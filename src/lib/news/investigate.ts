@@ -17,7 +17,7 @@ import {
   type ExtractedRef,
   type StructureSnapshot,
 } from "./extract.ts";
-import { sha256 } from "./url-guard.ts";
+import { sha256, sha256Bytes } from "./url-guard.ts";
 import { classifyFetchedPage, canonicalPublicUrl, type FetchOutcome } from "./fetch-outcome.ts";
 import {
   ARCHIVE_TEXT_CAP,
@@ -415,6 +415,17 @@ export async function ensureInvestigateSchema() {
       await sql.query(stmt);
     } catch {
       /* already exists / older PGLite */
+    }
+  }
+  for (const extra of [
+    `alter table artifact_versions add column if not exists extracted_sha256 text`,
+    `alter table artifact_versions add column if not exists raw_sha256 text`,
+    `alter table artifact_versions add column if not exists newsroom_id integer not null default 1`,
+  ]) {
+    try {
+      await sql.query(extra);
+    } catch {
+      /* older process */
     }
   }
 }
@@ -825,9 +836,12 @@ export async function rememberCapture(opts: {
     /* keep raw */
   }
   const fullText = (opts.text ?? "").slice(0, ARCHIVE_TEXT_CAP);
+  const extractedHash = opts.hash || (await sha256(fullText || url));
+  const rawHash = opts.rawBytes && opts.rawBytes.byteLength > 0 ? await sha256Bytes(opts.rawBytes) : null;
+  const versionHash = rawHash ?? extractedHash;
   const existing = await sql<{ id: number }>`
     select id from artifact_versions
-    where user_id = ${opts.userId} and url = ${url} and content_hash = ${opts.hash}
+    where user_id = ${opts.userId} and url = ${url} and content_hash = ${versionHash}
     limit 1
   `;
   let versionId = existing[0]?.id ?? null;
@@ -839,7 +853,7 @@ export async function rememberCapture(opts: {
           user_id, url, content_hash, title, full_text, fetch_status, fetch_outcome,
           content_type, extraction_method, page_count
         ) values (
-          ${opts.userId}, ${url}, ${opts.hash}, ${opts.title.slice(0, 200)},
+          ${opts.userId}, ${url}, ${versionHash}, ${opts.title.slice(0, 200)},
           ${fullText}, ${opts.status}, ${opts.outcome},
           ${opts.contentType ?? "html"}, ${opts.extractionMethod ?? ""},
           ${opts.pages?.length ?? null}
@@ -852,7 +866,7 @@ export async function rememberCapture(opts: {
     } catch {
       const again = await sql<{ id: number }>`
         select id from artifact_versions
-        where user_id = ${opts.userId} and url = ${url} and content_hash = ${opts.hash}
+        where user_id = ${opts.userId} and url = ${url} and content_hash = ${versionHash}
         limit 1
       `;
       versionId = again[0]?.id ?? null;
@@ -861,7 +875,7 @@ export async function rememberCapture(opts: {
           insert into artifact_versions (
             user_id, url, content_hash, title, full_text, fetch_status, fetch_outcome
           ) values (
-            ${opts.userId}, ${url}, ${opts.hash}, ${opts.title.slice(0, 200)},
+            ${opts.userId}, ${url}, ${versionHash}, ${opts.title.slice(0, 200)},
             ${fullText}, ${opts.status}, ${opts.outcome}
           )
           returning id
@@ -869,6 +883,17 @@ export async function rememberCapture(opts: {
         versionId = created[0]?.id ?? null;
         createdVersion = Boolean(versionId);
       }
+    }
+  }
+  if (versionId) {
+    try {
+      await sql`
+        update artifact_versions
+        set extracted_sha256 = ${extractedHash}, raw_sha256 = ${rawHash}
+        where id = ${versionId}
+      `;
+    } catch {
+      /* columns may not exist yet */
     }
   }
   if (versionId && (createdVersion || !existing[0]) && fullText) {
@@ -901,7 +926,7 @@ export async function rememberCapture(opts: {
       ${opts.userId}, ${opts.investigationId}, ${url}, ${observed}::timestamptz,
       ${opts.status}, ${opts.outcome}, ${JSON.stringify(opts.redirectChain ?? [])},
       ${versionId}, ${disappearance}, ${soft404}, ${opts.triggerKind ?? "investigation"},
-      ${opts.monitorId ?? null}, ${opts.hash}, ${opts.contentType ?? ""},
+      ${opts.monitorId ?? null}, ${versionHash}, ${opts.contentType ?? ""},
       ${opts.extractionMethod ?? ""}
     )
     returning id
@@ -919,7 +944,7 @@ export async function rememberCapture(opts: {
           insert into artifact_blobs (
             version_id, user_id, sha256, mime, original_url, redirect_chain, byte_length, body_b64
           ) values (
-            ${versionId}, ${opts.userId}, ${opts.hash}, ${opts.contentType ?? "application/octet-stream"},
+            ${versionId}, ${opts.userId}, ${rawHash ?? extractedHash}, ${opts.contentType ?? "application/octet-stream"},
             ${url}, ${JSON.stringify(opts.redirectChain ?? [])}, ${opts.rawBytes.byteLength}, ${b64}
           )
         `;
@@ -936,7 +961,7 @@ export async function rememberCapture(opts: {
         classification, fetch_status, fetch_outcome, version_id, capture_event_id, extraction_method
       ) values (
         ${opts.userId}, ${opts.investigationId}, ${url}, ${opts.title.slice(0, 200)},
-        ${opts.hash}, ${fullText}, ${opts.classification ?? "discovered"},
+        ${versionHash}, ${fullText}, ${opts.classification ?? "discovered"},
         ${opts.status}, ${opts.outcome}, ${versionId}, ${captureEventId},
         ${opts.extractionMethod ?? ""}
       )
