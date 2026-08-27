@@ -108,9 +108,9 @@ function EvidencePage() {
         </div>
         {record.has_original_bytes ? (
           <div>
-            <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">Original artifact</dt>
+            <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">Original file</dt>
             <dd className="mt-1">
-              Original bytes retained by TownReporter. Extracted text is shown below.
+              TownReporter kept the original bytes. The extracted text is below.
             </dd>
           </div>
         ) : null}

@@ -32,7 +32,7 @@ If any of those require database language, the UI is not done.
 | **On the desk** | Started. Includes files that stopped because there is more to read. | Open file / Keep digging / Set aside |
 | **Set aside** | Parked or finished. Nothing is deleted. | Pull back / Read |
 
-Start digging **moves** a card from To look at onto the desk. Close file leaves it on the desk. Set aside files it. Pull back restores it.
+Start digging **moves** a card from To look at onto the desk. The card stays visible, with a status line, until the file exists. A failed click says so on the card and at the top of the page; it does not vanish for the rest of the session. Close file leaves it on the desk. Set aside files it. Pull back restores it.
 
 A research round is a short batch, then a stop. Remaining pages stay on the file. That stop is not a failure and not “too many leads.” Keep digging reads the next batch.
 

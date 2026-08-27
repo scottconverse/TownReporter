@@ -189,7 +189,7 @@ An editor points it at a person, document, URL, rumor, or gap. It searches, fetc
 | **On the desk** | Started. Includes files that stopped because there is more to read. | Open file / Keep digging / Set aside |
 | **Set aside** | Parked or finished. Nothing is deleted. | Pull back / Read |
 
-Start digging **moves** a card from To look at onto the desk. Close file leaves it on the desk. Set aside files it. Pull back restores it.
+Start digging **moves** a card from To look at onto the desk. The card stays on To look at, with a status line, until the file actually opens. A failed click says so — it does not vanish. Close file leaves it on the desk. Set aside files it. Pull back restores it.
 
 A research round is a short batch, then a stop. Remaining pages stay on the file. That stop is **not a failure** and not “too many leads.” Keep digging reads the next batch.
 
@@ -261,6 +261,7 @@ How we report, in public: `/how-we-report`.
 | Scan fetched, filed nothing | Nothing new, or the model declined | Read the summary. Not automatically a bug. |
 | Draft with AI ran, form still empty | The click died; the writing pass may still be finishing | Stay on the page. It fills when the draft lands. Reload only if you left. |
 | Redraft shows a sign-in / setCookie error | Cookie helper threw even though you are signed in | Click Redraft again. Fixed in 0.3.7. |
+| Start digging does nothing | The card was hidden after a failed open (fixed in 0.3.8) | Reload. The card should be back. Click again — it stays until the file exists. |
 | Draft is a rewrite of the Leader | The pass never opened the company page | Pull the still-to-pull line for their press release, then redraft. |
 | Meeting has no transcript | Livestream hasn’t ended, or Playwright missing | Wait for the 6-hour recheck, or operator installs Chromium |
 | Names in a draft are wrong | Auto-captions | Check the packet. Fix the draft. Do not publish the caption. |

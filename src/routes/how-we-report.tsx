@@ -26,8 +26,10 @@ function How() {
           <strong className="text-ink">Follow.</strong> Before a story is
           drafted, the desk asks what the announcing source leaves unexplained,
           then follows attachments, names, companies, contracts, parcels, prior
-          meetings and historical versions. A useful story often lives one or
-          two documents beyond the press release.
+          meetings and historical versions. If a company or agency is named, we
+          look for their own press release or newsroom page — not a rewrite of
+          someone else's coverage. A useful story often lives one or two
+          documents beyond the listing that led us there.
         </p>
         <p>
           <strong className="text-ink">Preserve.</strong> Significant captures

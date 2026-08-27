@@ -8,11 +8,7 @@ Start digging no longer swallows a failed open. The card stays put, says so, and
 
 ## 0.3.7 — 2026-08-26
 
-## 0.3.7 — 2026-08-26
-
 Redraft no longer dies on a sign-in cookie glitch (`Cannot destructure property 'setCookie'`). You stay signed in; the click can finish.
-
-## 0.3.6 — 2026-08-26
 
 ## 0.3.6 — 2026-08-26
 
