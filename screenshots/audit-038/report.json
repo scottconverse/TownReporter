@@ -1,0 +1,185 @@
+{
+  "findings": [
+    {
+      "ok": true,
+      "where": "paper /",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 202"
+    },
+    {
+      "ok": true,
+      "where": "masthead name",
+      "detail": "Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNE"
+    },
+    {
+      "ok": true,
+      "where": "masthead city",
+      "detail": "Longmont on the paper"
+    },
+    {
+      "ok": true,
+      "where": "paper chrome",
+      "detail": "version may live on the desk, not the paper"
+    },
+    {
+      "ok": true,
+      "where": "masthead timezone",
+      "detail": "expected Wednesday Mountain"
+    },
+    {
+      "ok": false,
+      "where": "printed duplicates",
+      "detail": "a civic paper for longmont edited by a human"
+    },
+    {
+      "ok": true,
+      "where": "notebook leak on paper",
+      "detail": "no reporter-notebook leftovers"
+    },
+    {
+      "ok": true,
+      "where": "city leftovers",
+      "detail": "no other-city edition copy"
+    },
+    {
+      "ok": true,
+      "where": "paper /about",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 202"
+    },
+    {
+      "ok": true,
+      "where": "about heading",
+      "detail": "present"
+    },
+    {
+      "ok": true,
+      "where": "paper /how-we-report",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 202"
+    },
+    {
+      "ok": true,
+      "where": "how heading",
+      "detail": "present"
+    },
+    {
+      "ok": true,
+      "where": "how credit",
+      "detail": "credits the originating story URL"
+    },
+    {
+      "ok": true,
+      "where": "how primary",
+      "detail": "promises the company's own announcement"
+    },
+    {
+      "ok": true,
+      "where": "paper /corrections",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 202"
+    },
+    {
+      "ok": true,
+      "where": "corrections heading",
+      "detail": "present"
+    },
+    {
+      "ok": true,
+      "where": "rss /feed",
+      "detail": "HTTP 200"
+    },
+    {
+      "ok": true,
+      "where": "paper /login",
+      "detail": "HTTP 200; TOWNREPORTER Create the desk First person in owns the newsroom. If you already c"
+    },
+    {
+      "ok": true,
+      "where": "login copy",
+      "detail": "present"
+    },
+    {
+      "ok": true,
+      "where": "desk gate",
+      "detail": "HTTP 200; EDITOR DESK Opening the desk If this sits here, use Sign in. Sign in"
+    },
+    {
+      "ok": true,
+      "where": "desk home",
+      "detail": "Skip to desk TownReporterEDITOR'S DESK — LONGMONT · 0.3.8 Wednesday, August 26, "
+    },
+    {
+      "ok": true,
+      "where": "desk version chrome",
+      "detail": "0.3.8 on the desk"
+    },
+    {
+      "ok": true,
+      "where": "desk Sources",
+      "detail": "/desk/sources"
+    },
+    {
+      "ok": true,
+      "where": "desk Scan",
+      "detail": "/desk/scan"
+    },
+    {
+      "ok": true,
+      "where": "desk Queue",
+      "detail": "/desk/queue"
+    },
+    {
+      "ok": true,
+      "where": "desk Published",
+      "detail": "/desk/published"
+    },
+    {
+      "ok": true,
+      "where": "desk Dark Desk",
+      "detail": "/desk/dark"
+    },
+    {
+      "ok": true,
+      "where": "dark start label",
+      "detail": "Start digging is on the page"
+    },
+    {
+      "ok": true,
+      "where": "dark jargon",
+      "detail": "no hop/frontier/artifact in copy"
+    },
+    {
+      "ok": true,
+      "where": "file lead → workbench",
+      "detail": "http://127.0.0.1:8080/desk/story/1"
+    },
+    {
+      "ok": true,
+      "where": "pulled notes box",
+      "detail": "second box under the story"
+    },
+    {
+      "ok": true,
+      "where": "draft button",
+      "detail": "present"
+    },
+    {
+      "ok": true,
+      "where": "notes dnp",
+      "detail": "reporting notes marked does not print"
+    },
+    {
+      "ok": true,
+      "where": "paper 390px overflow",
+      "detail": "extra 0px"
+    },
+    {
+      "ok": true,
+      "where": "desk 390px overflow",
+      "detail": "extra 0px"
+    },
+    {
+      "ok": true,
+      "where": "console",
+      "detail": "no page errors"
+    }
+  ],
+  "failed": 1
+}

@@ -1,6 +1,49 @@
 # Changelog
 
-Current release: **0.4.3**.
+Current release: **0.5.0**.
+
+## 0.5.0 — 2026-08-28
+
+Self-hosted. Runs on the operator's Claude Code login instead of an API key. Ten review findings fixed, plus five things that stopped the software running on Windows at all.
+
+**Deployment**
+
+- Builds to a plain Node server (`node-server`) rather than Vercel. A long-lived process means the Chromium page reader works and background jobs are not chopped up. `NITRO_PRESET=vercel` still builds for Vercel.
+- App output is captured to `logs/`, readable while the server runs.
+
+**Model**
+
+- The desk talks to Claude through the local Claude Code CLI — no API key. The harness is stripped per call; `--setting-sources ""` keeps the operator's own CLAUDE.md and skills out of the newsroom's prompts. An API key or a local OpenAI-compatible gateway still take precedence when set.
+- Draft budgets come from the provider. 38 seconds was sized for an HTTP API; the CLI needs minutes, so every draft failed before the writing pass ever ran.
+
+**Correctness**
+
+- Jobs no longer run twice. Nothing refreshed `updated_at` mid-run, so any job past the two-minute stale line was re-claimed and run alongside the original. Heartbeat plus a claim token.
+- SSRF is closed at connect time. The guard resolved DNS and then let the request resolve again; the address approved is now the address connected to.
+- Newsletter signup was a site-wide lockout lever and never counted repeats of an existing address. Now per-address, with a much higher global backstop.
+- The signup response no longer reveals whether an address is already subscribed.
+- RSS emits absolute links and escapes titles. A CDATA terminator in a headline used to break the entire feed, not just one item.
+- The rate limiter records before it decides, so two concurrent clicks cannot both pass.
+- A crashed Chromium is dropped rather than cached, which had silently degraded every later fetch for the life of the process.
+- Slug collisions are checked until free; the single-retry fallback could still hit the unique index and throw a 500.
+- PDF escape decoding is single-pass. Chained replaces turned an escaped backslash into a line break.
+
+**Desk**
+
+- The queue orders by score within a batch. Ordering on the timestamp alone put a 14-point lead below an 8-point one.
+- Clicking Draft once is enough. A stale failed job cancelled the new draft the instant it started, so the first click looked dead.
+- Three seed source URLs were dead, including NextLight pointing at a domain that does not exist. Corrected against the city's own site.
+- Source-line parsing moved out of `desk.ts` and given tests. A `TIER` header on the same line as a URL was ignored, silently filing a news outlet as an official record. Bare hostnames are now accepted.
+
+**Windows**
+
+- `npm run dev` and `npm run build` both failed: spawn cannot execute npm's `.cmd` shim.
+- Every route returned 500 on a self-hosted build; the SSR barrel repair only knew the Vercel output path.
+- PGLite's binaries were never copied into the build, so the first database read hit ENOENT.
+- The scripts test glob matched nothing, so 170 tests had never run.
+- No favicon link at all, so every page load 404'd on `/favicon.ico`.
+
+Not in 0.5.0: real OCR, city picker, mailer, invite.
 
 ## 0.4.3 — 2026-08-28
 

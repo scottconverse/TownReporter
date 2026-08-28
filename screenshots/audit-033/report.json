@@ -1,0 +1,247 @@
+{
+  "ok": false,
+  "failed": 1,
+  "total": 48,
+  "findings": [
+    {
+      "ok": true,
+      "where": "/",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT THURSDAY, AUGUST 27, 2026"
+    },
+    {
+      "ok": true,
+      "where": "paper 1280 overflow",
+      "detail": "0px"
+    },
+    {
+      "ok": true,
+      "where": "paper has stories",
+      "detail": "1 article links"
+    },
+    {
+      "ok": true,
+      "where": "/articles/welcome-to-townreporter",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT THURSDAY, AUGUST 27, 2026"
+    },
+    {
+      "ok": true,
+      "where": "/articles/welcome-to-townreporter",
+      "detail": "no notebook trailer"
+    },
+    {
+      "ok": true,
+      "where": "/about",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT THURSDAY, AUGUST 27, 2026"
+    },
+    {
+      "ok": true,
+      "where": "/how-we-report",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT THURSDAY, AUGUST 27, 2026"
+    },
+    {
+      "ok": true,
+      "where": "/corrections",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT THURSDAY, AUGUST 27, 2026"
+    },
+    {
+      "ok": true,
+      "where": "/feed",
+      "detail": "HTTP 200; <?xml version=\"1.0\" encoding=\"UTF-8\"?> <rss version=\"2.0\"> <channel> <title>Town"
+    },
+    {
+      "ok": true,
+      "where": "/login",
+      "detail": "HTTP 200; TOWNREPORTER Create the desk First person in owns the newsroom. If you already c"
+    },
+    {
+      "ok": true,
+      "where": "/",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT SIGN IN TownReporter LONG"
+    },
+    {
+      "ok": true,
+      "where": "paper 390 overflow",
+      "detail": "0px widest=DIV.min-h-dvh bg-paper text-ink 390"
+    },
+    {
+      "ok": true,
+      "where": "/login",
+      "detail": "HTTP 200; TOWNREPORTER Create the desk First person in owns the newsroom. If you already c"
+    },
+    {
+      "ok": true,
+      "where": "signup",
+      "detail": "http://127.0.0.1:8080/desk"
+    },
+    {
+      "ok": true,
+      "where": "/desk",
+      "detail": "HTTP 200; Skip to desk TownReporterEDITOR'S DESK — LONGMONT Thursday, August 27, 2026 View"
+    },
+    {
+      "ok": true,
+      "where": "desk /desk",
+      "detail": "copy ok"
+    },
+    {
+      "ok": true,
+      "where": "/desk/sources",
+      "detail": "HTTP 200; Skip to desk TownReporterEDITOR'S DESK — LONGMONT Thursday, August 27, 2026 View"
+    },
+    {
+      "ok": true,
+      "where": "desk /desk/sources",
+      "detail": "copy ok"
+    },
+    {
+      "ok": true,
+      "where": "/desk/scan",
+      "detail": "HTTP 200; Skip to desk TownReporterEDITOR'S DESK — LONGMONT Thursday, August 27, 2026 View"
+    },
+    {
+      "ok": true,
+      "where": "desk /desk/scan",
+      "detail": "copy ok"
+    },
+    {
+      "ok": true,
+      "where": "/desk/queue",
+      "detail": "HTTP 200; Skip to desk TownReporterEDITOR'S DESK — LONGMONT Thursday, August 27, 2026 View"
+    },
+    {
+      "ok": true,
+      "where": "desk /desk/queue",
+      "detail": "copy ok"
+    },
+    {
+      "ok": true,
+      "where": "/desk/published",
+      "detail": "HTTP 200; Skip to desk TownReporterEDITOR'S DESK — LONGMONT Thursday, August 27, 2026 View"
+    },
+    {
+      "ok": true,
+      "where": "desk /desk/published",
+      "detail": "copy ok"
+    },
+    {
+      "ok": true,
+      "where": "/desk/dark",
+      "detail": "HTTP 200; Skip to desk TownReporterDARK DESK — INVESTIGATES, NEVER PRINTS Thursday, August"
+    },
+    {
+      "ok": true,
+      "where": "desk /desk/dark",
+      "detail": "copy ok"
+    },
+    {
+      "ok": true,
+      "where": "/desk/sources",
+      "detail": "HTTP 200; Skip to desk TownReporterEDITOR'S DESK — LONGMONT Thursday, August 27, 2026 View"
+    },
+    {
+      "ok": true,
+      "where": "seed longmont.primegov.com",
+      "detail": "present"
+    },
+    {
+      "ok": true,
+      "where": "seed City of Longmont",
+      "detail": "present"
+    },
+    {
+      "ok": true,
+      "where": "seed @CityofLongmont",
+      "detail": "present"
+    },
+    {
+      "ok": true,
+      "where": "seed Longmont Public Media",
+      "detail": "present"
+    },
+    {
+      "ok": true,
+      "where": "seed St. Vrain",
+      "detail": "present"
+    },
+    {
+      "ok": true,
+      "where": "seed NextLight",
+      "detail": "present"
+    },
+    {
+      "ok": true,
+      "where": "seed Boulder County",
+      "detail": "present"
+    },
+    {
+      "ok": true,
+      "where": "/desk/queue",
+      "detail": "HTTP 200; Skip to desk TownReporterEDITOR'S DESK — LONGMONT Thursday, August 27, 2026 View"
+    },
+    {
+      "ok": true,
+      "where": "file lead",
+      "detail": "http://127.0.0.1:8080/desk/story/1"
+    },
+    {
+      "ok": true,
+      "where": "workbench",
+      "detail": "Skip to desk TownReporterEDITOR'S DESK — LONGMONT Thursday, August 27, 2026 View paper LIGHT DARK A Audit Editor Sign ou"
+    },
+    {
+      "ok": true,
+      "where": "/desk",
+      "detail": "HTTP 200; Skip to desk TownReporter View paper LIGHT DARK Sign out DESK SOURCES SCAN QUEUE"
+    },
+    {
+      "ok": true,
+      "where": "desk 390 /desk",
+      "detail": "0px extra; widest DIV.min-h-dvh 390px"
+    },
+    {
+      "ok": true,
+      "where": "/desk/queue",
+      "detail": "HTTP 200; Skip to desk TownReporter View paper LIGHT DARK Sign out DESK SOURCES SCAN QUEUE"
+    },
+    {
+      "ok": true,
+      "where": "desk 390 /desk/queue",
+      "detail": "0px extra; widest DIV.min-h-dvh 390px"
+    },
+    {
+      "ok": true,
+      "where": "/desk/dark",
+      "detail": "HTTP 200; Skip to desk TownReporter View paper LIGHT DARK Sign out DESK SOURCES SCAN QUEUE"
+    },
+    {
+      "ok": true,
+      "where": "desk 390 /desk/dark",
+      "detail": "0px extra; widest DIV.min-h-dvh 390px"
+    },
+    {
+      "ok": true,
+      "where": "/desk/sources",
+      "detail": "HTTP 200; Skip to desk TownReporter View paper LIGHT DARK Sign out DESK SOURCES SCAN QUEUE"
+    },
+    {
+      "ok": true,
+      "where": "desk 390 /desk/sources",
+      "detail": "0px extra; widest THEAD. 674px"
+    },
+    {
+      "ok": true,
+      "where": "/",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT THURSDAY, AUGUST 27, 2026"
+    },
+    {
+      "ok": false,
+      "where": "masthead Mountain date",
+      "detail": "want Wednesday, August 26, 2026; saw Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT THURSDAY, AUGUST 27, 2026 DESK A Audit Editor Sign out TownReporter LONGMONT, COLORAD"
+    },
+    {
+      "ok": true,
+      "where": "console",
+      "detail": "no page errors"
+    }
+  ]
+}

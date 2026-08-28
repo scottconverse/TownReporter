@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import pg from "pg";
 import { pendingMigrations } from "./migration-plan.mjs";
+import { maybeFactoryReset } from "./factory-reset.mjs";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -74,6 +75,10 @@ async function main() {
       count += 1;
     }
     console.log(count ? `[migrate] done — ${count} migration(s) applied.` : "[migrate] up to date.");
+    const appliedNow = (
+      await client.query("SELECT name FROM _migrations")
+    ).rows.map((r) => r.name);
+    await maybeFactoryReset(client, appliedNow);
   } finally {
     client.release();
     await pool.end();

@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/how-we-report",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "TownReporter — Longmont, Colorado",
+      "hasCanvas": false,
+      "bodyTextLen": 1590,
+      "bodyTextHash": "d6764a9d5a551352c089db14afeab35abbd85a8849489effce7202c8c5649bd5",
+      "bodyTextPrefix": "Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT THURSDAY,",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/audit-how.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "TownReporter — Longmont, Colorado",
+      "hasCanvas": false,
+      "bodyTextLen": 1564,
+      "bodyTextHash": "a28db79b9122f5bd5a85ab98cca36d76959ae546157f32c057351edf47465047",
+      "bodyTextPrefix": "Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT SIGN IN T",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/audit-how-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/audit-how.json"
+}

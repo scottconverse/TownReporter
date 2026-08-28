@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.4.3](https://github.com/scottconverse/TownReporter/releases/tag/v0.4.3).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.5.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.0).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -118,7 +118,7 @@ BETTER_AUTH_SECRET=generate-a-long-random-string
 
 The first signed-in user is inserted into `newsroom_members` as `owner`. After that, Create editor account is gone and new accounts are rejected.
 
-There is no invite UI yet (0.4.3 has not named it). Do not turn auth off to “fix” this. Share the owner login, or wait for invite.
+There is no invite UI yet (0.5.0 has not named it). Do not turn auth off to “fix” this. Share the owner login, or wait for invite.
 
 ### Cron (source monitors)
 
@@ -190,7 +190,7 @@ Node’s built-in test runner. No network, no model calls. Coverage includes Pri
 
 ## Point it at another city
 
-There is no settings screen for this. That is deliberate in 0.4.3 — the Longmont edition is the working proof, and a half-built city picker would lie. Edit the seed, rebuild.
+There is no settings screen for this. That is deliberate in 0.5.0 — the Longmont edition is the working proof, and a half-built city picker would lie. Edit the seed, rebuild.
 
 ### 1. The masthead and the watch list
 

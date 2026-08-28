@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.4.3](https://github.com/scottconverse/TownReporter/releases/tag/v0.4.3)** — 28 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.5.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.0)** — 28 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
@@ -74,12 +74,22 @@ Same six moves the paper itself describes at `/how-we-report`:
 
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
-### This release (0.4.3)
+### This release (0.5.0)
+
+- **Self-hosted.** Builds to a plain Node server instead of Vercel. A long-lived process means the Chromium page reader works and background jobs are not chopped into pieces. `NITRO_PRESET=vercel` still builds for Vercel.
+- **Runs on your Claude Code login.** No API key. The desk shells out to the local CLI, with the coding harness stripped — including your own `CLAUDE.md` and skills, which have no business in a news prompt. An API key or a local OpenAI-compatible gateway still win if set.
+- **Jobs no longer run twice.** Nothing refreshed the liveness stamp mid-run, so any job past the two-minute stale line was re-claimed and run alongside the original — duplicate drafts, double spend.
+- **SSRF is closed at connect time.** The old guard resolved DNS and then let the request resolve again. The address approved is now the address connected to.
+- **The queue puts the best lead first.** Ordering on the timestamp alone buried a 14-point story under an 8-point one.
+- **One click drafts.** A stale failure used to cancel the new draft the instant it started.
+- **The feed works in a reader.** Absolute links, escaped titles. A `]]>` in a headline used to break the whole feed.
+- **Runs on Windows at all.** `npm run dev` and `npm run build` both failed, every route 500'd on a self-hosted build, and 170 tests had never run.
+
+Full detail, including the newsletter and rate-limiter fixes, is in [CHANGELOG.md](CHANGELOG.md). Setup for your own machine: [SELF-HOSTING.md](SELF-HOSTING.md).
+
+### Earlier (0.4.x)
 
 - **URL history, watches, and names belong to the newsroom.** A later editor reuses the captured page, the watch list, and the name graph. Who clicked is still stored.
-- **Quotes with no excerpt are unresolved.** Naming a capture id is not enough.
-- **Jobs cannot be claimed twice.** Two drainers, one winner.
-- **The paper lists this newsroom.** Create editor / Leave / claimed-door already did; the public list and `deskIsClaimed` now match.
 - **Quotes have to be in the document.** `resolved` means the captured text contains the evidence.
 - **Mapped IPv6 loopback is blocked.** `http://[::ffff:7f00:1]/` is 127.0.0.1.
 - **Dark hops belong to the file.** A later editor continues the same trail.

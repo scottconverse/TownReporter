@@ -1,0 +1,302 @@
+{
+  "ok": false,
+  "failed": 1,
+  "total": 59,
+  "findings": [
+    {
+      "ok": true,
+      "where": "local /",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local /about",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local /how-we-report",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local /corrections",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local /login",
+      "detail": "HTTP 200; TOWNREPORTER Create the desk First person in owns the newsroom. If you already created an "
+    },
+    {
+      "ok": true,
+      "where": "local /feed",
+      "detail": "HTTP 200; <?xml version=\"1.0\" encoding=\"UTF-8\"?> <rss version=\"2.0\"> <channel> <title>TownReporter —"
+    },
+    {
+      "ok": true,
+      "where": "local /get-the-code",
+      "detail": "HTTP 200; TOWNREPORTER Download the source The black button opens a real browser tab. This preview c"
+    },
+    {
+      "ok": true,
+      "where": "local /desk",
+      "detail": "HTTP 200; TOWNREPORTER Create the desk First person in owns the newsroom. If you already created an "
+    },
+    {
+      "ok": true,
+      "where": "local /?topic=council",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local /?topic=budget",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local /?topic=housing",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local /?topic=utilities",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local /?topic=schools",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local /?topic=planning",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local /?topic=infrastructure",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local /?topic=elections",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local /articles/welcome-to-townreporter",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "local console",
+      "detail": "no page errors"
+    },
+    {
+      "ok": true,
+      "where": "live /",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /about",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /how-we-report",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /corrections",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /login",
+      "detail": "HTTP 200; TOWNREPORTER Create the desk First person in owns the newsroom. If you already created an "
+    },
+    {
+      "ok": true,
+      "where": "live /feed",
+      "detail": "HTTP 200; <?xml version=\"1.0\" encoding=\"UTF-8\"?> <rss version=\"2.0\"> <channel> <title>TownReporter —"
+    },
+    {
+      "ok": true,
+      "where": "live /get-the-code",
+      "detail": "HTTP 200; TOWNREPORTER Download the source The black button opens a real browser tab. This preview c"
+    },
+    {
+      "ok": true,
+      "where": "live /desk",
+      "detail": "HTTP 200; TOWNREPORTER Create the desk First person in owns the newsroom. If you already created an "
+    },
+    {
+      "ok": true,
+      "where": "live /?topic=council",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /?topic=budget",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /?topic=housing",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /?topic=utilities",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /?topic=schools",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /?topic=planning",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /?topic=infrastructure",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /?topic=elections",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /articles/council-books-six-hour-airport-vision-session-sept-26-at-375-airport-roa",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /articles/longmont-council-set-for-joint-session-with-boulder-county-on-sept-21",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /articles/group-2-railroad-quiet-zone-work-set-to-start-aug-31",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /articles/nelson-road-paving-and-fox-creek-village-driveway-closure-overlap-aug-25",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /articles/longmont-s-2026-community-satisfaction-survey-closes-sept-7",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /articles/group-2-railroad-quiet-zone-improvements-set-to-begin-aug-31",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /articles/2026-community-satisfaction-survey-open-through-september-7",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /articles/longmont-city-council-meets-aug-25-joint-session-with-boulder-county-com",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live /articles/welcome-to-townreporter",
+      "detail": "HTTP 200; Skip to stories INDEPENDENT CIVIC REPORTING · LONGMONT WEDNESDAY, AUGUST 26, 2026 SIGN IN "
+    },
+    {
+      "ok": true,
+      "where": "live console",
+      "detail": "no page errors"
+    },
+    {
+      "ok": true,
+      "where": "local /desk (pre-auth)",
+      "detail": "HTTP 200; TOWNREPORTER Create the desk First person in owns the newsroom. If you already created an "
+    },
+    {
+      "ok": true,
+      "where": "local signup",
+      "detail": "email qa-1787779683459@townreporter.test; now http://127.0.0.1:8080/desk"
+    },
+    {
+      "ok": true,
+      "where": "local desk home",
+      "detail": "command center visible"
+    },
+    {
+      "ok": true,
+      "where": "desk nav Desk",
+      "detail": "/desk"
+    },
+    {
+      "ok": true,
+      "where": "desk nav Sources",
+      "detail": "/desk/sources"
+    },
+    {
+      "ok": true,
+      "where": "desk nav Scan",
+      "detail": "/desk/scan"
+    },
+    {
+      "ok": true,
+      "where": "desk nav Queue",
+      "detail": "/desk/queue"
+    },
+    {
+      "ok": true,
+      "where": "desk nav Published",
+      "detail": "/desk/published"
+    },
+    {
+      "ok": true,
+      "where": "desk nav Dark Desk",
+      "detail": "/desk/dark"
+    },
+    {
+      "ok": true,
+      "where": "desk memory redirect",
+      "detail": "http://127.0.0.1:8080/desk/published"
+    },
+    {
+      "ok": true,
+      "where": "file lead",
+      "detail": "http://127.0.0.1:8080/desk/story/1"
+    },
+    {
+      "ok": true,
+      "where": "story crumb",
+      "detail": "http://127.0.0.1:8080/desk/queue"
+    },
+    {
+      "ok": true,
+      "where": "view paper",
+      "detail": "http://127.0.0.1:8080/"
+    },
+    {
+      "ok": false,
+      "where": "desk 390px overflow",
+      "detail": "extra width 135px"
+    },
+    {
+      "ok": true,
+      "where": "desk console",
+      "detail": "no page errors"
+    }
+  ]
+}
