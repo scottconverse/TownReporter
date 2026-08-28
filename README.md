@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.4.2](https://github.com/scottconverse/TownReporter/releases/tag/v0.4.2)** — 27 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.4.3](https://github.com/scottconverse/TownReporter/releases/tag/v0.4.3)** — 28 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
@@ -74,15 +74,13 @@ Same six moves the paper itself describes at `/how-we-report`:
 
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
-### This release (0.4.2)
+### This release (0.4.3)
 
-- **Quotes have to be in the document.** `resolved` means the captured text contains the evidence, not that the model named an id that exists.
-- **Mapped IPv6 loopback is blocked.** `http://[::ffff:7f00:1]/` is 127.0.0.1.
-- **Leave** clears this newsroom’s members, not every row.
-- **Create editor** on the paper until someone owns the desk. **Leave as editor** hands it back. The paper stays.
-- **Dark hops belong to the file.** A later editor continues the same trail.
-- **Jobs wake up.** Scan / Draft / Keep digging persist, then finish in this process or on the monitors ping (`CRON_SECRET`). A host that sleeps after the click needs that ping.
-- **Honest OCR.** Image-only PDFs are unread. There is no JPEG-as-chat OCR.
+- **This newsroom, not whoever clicked.** Captures, monitors, names, and URL history key on the newsroom. A second identity cannot publish. Two people cannot both own the desk.
+- **An empty excerpt is unresolved.** A real capture id is not proof if there is no quote. The version id is kept.
+- **File → publish → correct** is the CI gate.
+- **Two drainers cannot run the same job.** Cron with no secret is off. A hostname that resolves to mapped loopback is refused before fetch.
+- **No newsletter tokens.** There is no mailer. GitHub Pages no longer prints a version number.
 
 Also in 0.3.3–0.3.8: Mountain Time masthead, overlapping printed headlines collapse, Draft with AI paints without a reload, Redraft survives the cookie glitch, Start digging keeps the card on a failed open.
 
