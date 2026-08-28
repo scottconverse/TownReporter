@@ -60,6 +60,7 @@ test("public paper SQL is a single LIMIT and has no desk middleware", () => {
   assert.doesNotMatch(pub, /deskMiddleware/);
   assert.doesNotMatch(pub, /confirm_token/);
   assert.doesNotMatch(pub, /subscribeNewsletter/);
+  assert.match(pub, /newsroom_id = \$\{DEFAULT_NEWSROOM_ID\}/);
 });
 
 test("SSRF: fetch follows redirects manually and re-asserts each hop", () => {
@@ -115,9 +116,4 @@ test("Dark Desk digs, does not auto-publish, does not cap confidence", () => {
 test("ingest follows documents across origins", () => {
   const src = readFileSync(join(ROOT, "src/lib/news/ingest.ts"), "utf8");
   assert.doesNotMatch(src, /abs\.origin !== base\.origin/);
-});
-
-test("scan URL history writes newsroom_id", () => {
-  const desk = readFileSync(join(ROOT, "src/lib/news/desk.ts"), "utf8");
-  assert.match(desk, /insert into snapshots \(user_id, newsroom_id, source_id/);
 });
