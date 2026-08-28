@@ -17,32 +17,26 @@ describe("Longmont dates", () => {
 });
 
 describe("version", () => {
-  it("matches package.json so the chrome and the tag cannot drift", () => {
-    const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
-      version: string;
-    };
-    assert.equal(APP_VERSION, pkg.version);
-  });
-
-  it("keeps 0.4.3 in lockstep files and off the Pages landing", () => {
+  it("stays in lockstep across the ship files, and Pages has no version stamp", () => {
     const root = new URL("../../", import.meta.url);
-    const files = [
-      "package.json",
-      "package-lock.json",
-      "src/lib/version.ts",
-      "src/lib/source-zip-url.ts",
-      "CHANGELOG.md",
-      "README.md",
-      "docs/setup.md",
-      "docs/editor.md",
-      "docs/dark-desk-editor.md",
-    ];
-    for (const rel of files) {
-      const text = readFileSync(new URL(rel, root), "utf8");
-      assert.match(text, /0\.4\.3/, rel);
-    }
-    const pages = readFileSync(new URL("docs/index.html", root), "utf8");
+    const read = (rel: string) => readFileSync(new URL(rel, root), "utf8");
+    const pkg = JSON.parse(read("package.json")) as { version: string; name: string };
+    assert.equal(pkg.name, "app-builder-workspace");
+    assert.equal(APP_VERSION, pkg.version);
+    const lock = JSON.parse(read("package-lock.json")) as {
+      packages: { "": { version: string } };
+    };
+    assert.equal(lock.packages[""].version, pkg.version);
+    assert.ok(read("src/lib/source-zip-url.ts").includes("/tags/v" + pkg.version + ".zip"));
+    assert.ok(read("CHANGELOG.md").includes("Current release: **" + pkg.version + "**"));
+    assert.ok(read("README.md").includes("[" + pkg.version + "]"));
+    assert.ok(read("docs/setup.md").includes("[" + pkg.version + "]"));
+    assert.ok(read("docs/editor.md").includes("[" + pkg.version + "]"));
+    assert.ok(read("docs/dark-desk-editor.md").includes(pkg.version));
+    const pages = read("docs/index.html");
     assert.doesNotMatch(pages, /\bv?\d+\.\d+\.\d+\b/);
     assert.doesNotMatch(pages, /TownReporter \d/);
+    assert.match(pages, /The Civic Desk/);
+    assert.match(pages, /https:\/\/scottconverse\.github\.io\/CivicNewspaper\//);
   });
 });
