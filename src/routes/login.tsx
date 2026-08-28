@@ -5,7 +5,7 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
 import { PAPER } from "@/lib/paper";
 import { claimDesk, deskClaimState } from "@/lib/news/claim";
-import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
+import { createEditorLoginCopy, deskTakenLoginCopy } from "@/lib/news/desk-copy";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/login")({ component: Login });
@@ -71,10 +71,11 @@ function Login() {
   const [name, setName] = useState("");
   const [setupToken, setSetupToken] = useState("");
   const claim = useQuery({ queryKey: ["desk-claim"], queryFn: () => deskClaimState() });
-  const claimed = Boolean(claim.data?.claimed);
+  const claimed = claim.isError || Boolean(claim.data?.claimed);
   const tokenRequired = Boolean(claim.data?.tokenRequired && !claimed);
   const mode: "create" | "signin" = claimed ? "signin" : wantCreate ? "create" : "signin";
   const taken = deskTakenLoginCopy();
+  const created = createEditorLoginCopy();
   if (user && !claim.isPending && !tokenRequired) return <Navigate to="/desk" />;
 
   async function finishEmail(data?: unknown, headers?: Headers | null) {
@@ -116,7 +117,7 @@ function Login() {
         looksLikeMissingAccount(raw)
           ? claimed
             ? taken.unknownEmail
-            : "No editor account with that email yet. Use Create editor account — this is not your Grok password."
+            : created.missingEmail
           : raw,
       );
     }
@@ -166,7 +167,7 @@ function Login() {
   }
 
   const heading =
-    claim.isPending ? "Editor desk" : mode === "create" ? "Create the desk" : taken.title;
+    claim.isPending ? "Editor desk" : mode === "create" ? created.title : taken.title;
   const blurb = claim.isPending
     ? "One moment."
     : mode === "create"
@@ -270,7 +271,7 @@ function Login() {
                 required
                 value={setupToken}
                 onChange={(e) => setSetupToken(e.target.value)}
-                placeholder="NEWSROOM_SETUP_TOKEN"
+                placeholder={created.setupPlaceholder}
               />
             </label>
           ) : null}
@@ -280,10 +281,10 @@ function Login() {
               {mode === "create"
                 ? busy === "email-up" || busy === "email-in"
                   ? "Opening the desk…"
-                  : "Create editor account"
+                  : created.submit
                 : busy === "email-in"
                   ? "Signing in…"
-                  : "Sign in with email"}
+                  : taken.submit}
             </button>
             {claimed ? null : (
             <button
@@ -295,7 +296,7 @@ function Login() {
                 setWantCreate(!wantCreate);
               }}
             >
-              {mode === "create" ? "I already have an account" : "Create an editor account"}
+              {mode === "create" ? created.ghost : created.reverseGhost}
             </button>
             )}
           </div>
