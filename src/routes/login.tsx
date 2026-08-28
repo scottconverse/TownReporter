@@ -71,7 +71,7 @@ function Login() {
   const [name, setName] = useState("");
   const [setupToken, setSetupToken] = useState("");
   const claim = useQuery({ queryKey: ["desk-claim"], queryFn: () => deskClaimState() });
-  const claimed = claim.isError || Boolean(claim.data?.claimed);
+  const claimed = Boolean(claim.data?.claimed);
   const tokenRequired = Boolean(claim.data?.tokenRequired && !claimed);
   const mode: "create" | "signin" = claimed ? "signin" : wantCreate ? "create" : "signin";
   const taken = deskTakenLoginCopy();
