@@ -5,7 +5,7 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
 import { PAPER } from "@/lib/paper";
 import { claimDesk, deskClaimState } from "@/lib/news/claim";
-import { createEditorLoginCopy, deskTakenLoginCopy } from "@/lib/news/desk-copy";
+import { createEditorCopy, deskTakenLoginCopy } from "@/lib/news/desk-copy";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/login")({ component: Login });
@@ -75,7 +75,7 @@ function Login() {
   const tokenRequired = Boolean(claim.data?.tokenRequired && !claimed);
   const mode: "create" | "signin" = claimed ? "signin" : wantCreate ? "create" : "signin";
   const taken = deskTakenLoginCopy();
-  const created = createEditorLoginCopy();
+  const create = createEditorCopy();
   if (user && !claim.isPending && !tokenRequired) return <Navigate to="/desk" />;
 
   async function finishEmail(data?: unknown, headers?: Headers | null) {
@@ -117,7 +117,7 @@ function Login() {
         looksLikeMissingAccount(raw)
           ? claimed
             ? taken.unknownEmail
-            : created.missingEmail
+            : "No editor account with that email yet. Use Create editor — this is not your Grok password."
           : raw,
       );
     }
@@ -167,7 +167,7 @@ function Login() {
   }
 
   const heading =
-    claim.isPending ? "Editor desk" : mode === "create" ? created.title : taken.title;
+    claim.isPending ? "Opening…" : mode === "create" ? create.heading : taken.title;
   const blurb = claim.isPending
     ? "One moment."
     : mode === "create"
@@ -271,7 +271,7 @@ function Login() {
                 required
                 value={setupToken}
                 onChange={(e) => setSetupToken(e.target.value)}
-                placeholder={created.setupPlaceholder}
+                placeholder="NEWSROOM_SETUP_TOKEN"
               />
             </label>
           ) : null}
@@ -281,7 +281,7 @@ function Login() {
               {mode === "create"
                 ? busy === "email-up" || busy === "email-in"
                   ? "Opening the desk…"
-                  : created.submit
+                  : create.submit
                 : busy === "email-in"
                   ? "Signing in…"
                   : taken.submit}
@@ -296,7 +296,7 @@ function Login() {
                 setWantCreate(!wantCreate);
               }}
             >
-              {mode === "create" ? created.ghost : created.reverseGhost}
+              {mode === "create" ? create.ghost : create.signinGhost}
             </button>
             )}
           </div>
