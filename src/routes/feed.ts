@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { getSql } from "@/lib/db";
 import { PAPER } from "@/lib/paper";
 import { collapsePrintedDuplicates } from "@/lib/news/desk-copy";
+import { DEFAULT_NEWSROOM_ID } from "@/lib/news/membership";
 
 export const Route = createFileRoute("/feed")({
   server: {
@@ -16,7 +17,7 @@ export const Route = createFileRoute("/feed")({
         }>`
           select slug, headline, dek, published_at
           from articles
-          where status = 'published'
+          where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
           order by published_at desc
           limit 40
         `;
