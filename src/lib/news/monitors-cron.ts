@@ -2,6 +2,19 @@ import { getSql } from "@/lib/db";
 import { runDueMonitors } from "./investigate.ts";
 import { drainQueuedJobs } from "./jobs.ts";
 
+/** Null means the request is allowed. Empty CRON_SECRET is 503. */
+export function cronAuthResponse(request: Request): Response | null {
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!secret) {
+    return new Response("cron disabled", { status: 503 });
+  }
+  const hdr = request.headers.get("authorization") ?? "";
+  if (hdr !== `Bearer ${secret}`) {
+    return new Response("forbidden", { status: 403 });
+  }
+  return null;
+}
+
 /** Recheck due monitors and finish waiting desk jobs. Does not require an editor to be signed in. */
 export async function tickAllDueMonitors(): Promise<{
   users: number;
@@ -10,9 +23,11 @@ export async function tickAllDueMonitors(): Promise<{
   jobs: number;
 }> {
   const sql = await getSql();
-  const rooms = await sql<{ newsroom_id: number }>`
-    select distinct newsroom_id from source_monitors
+  const rooms = await sql<{ newsroom_id: number; user_id: string }>`
+    select newsroom_id, min(user_id) as user_id
+    from source_monitors
     where enabled = true and next_check_at <= now()
+    group by newsroom_id
     limit 40
   `;
   let checked = 0;
@@ -20,8 +35,7 @@ export async function tickAllDueMonitors(): Promise<{
   for (const r of rooms) {
     try {
       const result = await runDueMonitors({
-        userId: "cron",
-        newsroomId: r.newsroom_id,
+        userId: r.user_id,
         limit: 12,
       });
       checked += result.checked;
@@ -41,14 +55,8 @@ export async function tickAllDueMonitors(): Promise<{
 
 /** Production HTTP handler. Empty CRON_SECRET fails closed. */
 export async function handleMonitorsCron(request: Request): Promise<Response> {
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) {
-    return new Response("cron disabled", { status: 503 });
-  }
-  const hdr = request.headers.get("authorization") ?? "";
-  if (hdr !== `Bearer ${secret}`) {
-    return new Response("forbidden", { status: 403 });
-  }
+  const denied = cronAuthResponse(request);
+  if (denied) return denied;
   const result = await tickAllDueMonitors();
   return Response.json(result);
 }
