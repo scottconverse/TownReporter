@@ -201,6 +201,22 @@ describe("researchLoop integration", { timeout: 120000 }, () => {
     assert.equal(asLater[0]?.label, "Acme Holdings LLC");
 
     await researchLoop({
+      userId: opener,
+      investigationId: id,
+      hops: 1,
+      search: async () => [{ title: "Acme", url: PAGE_C, snippet: "Acme Holdings LLC" }],
+      fetch: fetchDoc,
+      planner: async () => {
+        const p = emptyPlan();
+        p.searches = ["Acme Holdings Longmont"];
+        p.fetch_urls = [PAGE_C];
+        p.summary = "Opener follows Acme";
+        return p;
+      },
+      archives: async () => [],
+    });
+
+    await researchLoop({
       userId: later,
       investigationId: id,
       hops: 1,
@@ -223,6 +239,14 @@ describe("researchLoop integration", { timeout: 120000 }, () => {
       select url from artifacts where investigation_id = ${id}
     `;
     assert.ok(arts.some((a) => a.url.includes("sos.state.co.us")), arts.map((a) => a.url).join("\n"));
+    const versions = await sql<{ c: number }>`
+      select count(*)::int as c from artifact_versions where url = ${PAGE_C}
+    `;
+    assert.equal(versions[0]?.c, 1, "later editor reuses the newsroom URL history, not a second row");
+    const watches = await sql<{ c: number }>`
+      select count(*)::int as c from source_monitors where url = ${PAGE_C}
+    `;
+    assert.equal(watches[0]?.c, 1, "later editor reuses the newsroom watch, not a second row");
   });
 
   it("keeps the original water report when the live URL later 404s, and records disappearance", async () => {

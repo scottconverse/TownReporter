@@ -30,6 +30,7 @@ import { searchWithFallback, waybackCopies, type SearchAttempt, type WebHit } fr
 import { retrieveRelevantChunks } from "./retrieve.ts";
 import { identityKey, isConfirmedSame, resolveEntityName } from "./entity-resolve.ts";
 import { sanitizePublicUrls } from "./schema.ts";
+import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import {
   queryFingerprint,
   remainingStrategies,
@@ -436,6 +437,20 @@ export async function ensureInvestigateSchema() {
     `alter table search_attempts add column if not exists newsroom_id integer not null default 1`,
     `alter table investigations add column if not exists newsroom_id integer not null default 1`,
     `alter table artifacts add column if not exists newsroom_id integer not null default 1`,
+    `alter table source_monitors add column if not exists newsroom_id integer not null default 1`,
+    `alter table capture_events add column if not exists newsroom_id integer not null default 1`,
+    `alter table artifact_versions drop constraint if exists artifact_versions_user_id_url_content_hash_key`,
+    `drop index if exists artifact_versions_user_id_url_content_hash_key`,
+    `create unique index if not exists artifact_versions_newsroom_url_hash on artifact_versions (newsroom_id, url, content_hash)`,
+    `alter table entities drop constraint if exists entities_user_id_canonical_key`,
+    `drop index if exists entities_user_id_canonical_key`,
+    `create unique index if not exists entities_newsroom_canonical on entities (newsroom_id, canonical)`,
+    `alter table source_monitors drop constraint if exists source_monitors_user_id_url_key`,
+    `drop index if exists source_monitors_user_id_url_key`,
+    `create unique index if not exists source_monitors_newsroom_url on source_monitors (newsroom_id, url)`,
+    `alter table recurring_baselines drop constraint if exists recurring_baselines_user_id_key_key`,
+    `drop index if exists recurring_baselines_user_id_key_key`,
+    `create unique index if not exists recurring_baselines_newsroom_key on recurring_baselines (newsroom_id, key)`,
   ]) {
     try {
       await sql.query(extra);
@@ -856,7 +871,7 @@ export async function rememberCapture(opts: {
   const versionHash = rawHash ?? extractedHash;
   const existing = await sql<{ id: number }>`
     select id from artifact_versions
-    where user_id = ${opts.userId} and url = ${url} and content_hash = ${versionHash}
+    where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url} and content_hash = ${versionHash}
     limit 1
   `;
   let versionId = existing[0]?.id ?? null;
@@ -865,15 +880,15 @@ export async function rememberCapture(opts: {
     try {
       const created = await sql<{ id: number }>`
         insert into artifact_versions (
-          user_id, url, content_hash, title, full_text, fetch_status, fetch_outcome,
+          user_id, newsroom_id, url, content_hash, title, full_text, fetch_status, fetch_outcome,
           content_type, extraction_method, page_count
         ) values (
-          ${opts.userId}, ${url}, ${versionHash}, ${opts.title.slice(0, 200)},
+          ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${url}, ${versionHash}, ${opts.title.slice(0, 200)},
           ${fullText}, ${opts.status}, ${opts.outcome},
           ${opts.contentType ?? "html"}, ${opts.extractionMethod ?? ""},
           ${opts.pages?.length ?? null}
         )
-        on conflict (user_id, url, content_hash) do update set title = excluded.title
+        on conflict (newsroom_id, url, content_hash) do update set title = excluded.title
         returning id
       `;
       versionId = created[0]?.id ?? null;
@@ -881,16 +896,16 @@ export async function rememberCapture(opts: {
     } catch {
       const again = await sql<{ id: number }>`
         select id from artifact_versions
-        where user_id = ${opts.userId} and url = ${url} and content_hash = ${versionHash}
+        where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url} and content_hash = ${versionHash}
         limit 1
       `;
       versionId = again[0]?.id ?? null;
       if (!versionId) {
         const created = await sql<{ id: number }>`
           insert into artifact_versions (
-            user_id, url, content_hash, title, full_text, fetch_status, fetch_outcome
+            user_id, newsroom_id, url, content_hash, title, full_text, fetch_status, fetch_outcome
           ) values (
-            ${opts.userId}, ${url}, ${versionHash}, ${opts.title.slice(0, 200)},
+            ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${url}, ${versionHash}, ${opts.title.slice(0, 200)},
             ${fullText}, ${opts.status}, ${opts.outcome}
           )
           returning id
@@ -934,11 +949,11 @@ export async function rememberCapture(opts: {
   const observed = (opts.observedAt ?? new Date()).toISOString();
   const cap = await sql<{ id: number }>`
     insert into capture_events (
-      user_id, investigation_id, source_url, observed_at, http_status, fetch_outcome,
+      user_id, newsroom_id, investigation_id, source_url, observed_at, http_status, fetch_outcome,
       redirect_chain, version_id, disappearance, soft_404, trigger_kind, monitor_id,
       content_hash, content_type, extraction_method
     ) values (
-      ${opts.userId}, ${opts.investigationId}, ${url}, ${observed}::timestamptz,
+      ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${opts.investigationId}, ${url}, ${observed}::timestamptz,
       ${opts.status}, ${opts.outcome}, ${JSON.stringify(opts.redirectChain ?? [])},
       ${versionId}, ${disappearance}, ${soft404}, ${opts.triggerKind ?? "investigation"},
       ${opts.monitorId ?? null}, ${versionHash}, ${opts.contentType ?? ""},
@@ -1014,7 +1029,7 @@ async function maybeWatch(
   const cadenceHours = awaitingTape ? 6 : spec.kind === "meeting" ? 24 : spec.kind === "report" ? 48 : 72;
   const structure = JSON.stringify(structureSnapshot(title, "", extras));
   const existing = await sql<{ id: number }>`
-    select id from source_monitors where user_id = ${userId} and url = ${url} limit 1
+    select id from source_monitors where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url} limit 1
   `;
   const next = new Date(Date.now() + cadenceHours * 3600 * 1000).toISOString();
   if (existing[0]) {
@@ -1035,16 +1050,16 @@ async function maybeWatch(
   }
   await sql`
     insert into source_monitors (
-      user_id, url, title, enabled, cadence_hours, next_check_at, last_success_at,
+      user_id, newsroom_id, url, title, enabled, cadence_hours, next_check_at, last_success_at,
       last_outcome, last_version_id, expected_cadence_days, importance,
       disappearance_sensitive, investigation_id, typical_structure
     ) values (
-      ${userId}, ${url}, ${title.slice(0, 200)}, ${true}, ${cadenceHours},
+      ${userId}, ${DEFAULT_NEWSROOM_ID}, ${url}, ${title.slice(0, 200)}, ${true}, ${cadenceHours},
       ${next}::timestamptz, now(), ${"fetched"},
       ${versionId}, ${Math.round(cadenceHours / 24)}, ${8}, ${true},
       ${investigationId}, ${structure}
     )
-    on conflict (user_id, url) do update set last_success_at = now()
+    on conflict (newsroom_id, url) do update set last_success_at = now()
   `;
 }
 
@@ -1067,13 +1082,13 @@ export async function watchSource(opts: {
   const next = (opts.nextCheckAt ?? new Date()).toISOString();
   await sql`
     insert into source_monitors (
-      user_id, url, title, enabled, cadence_hours, next_check_at,
+      user_id, newsroom_id, url, title, enabled, cadence_hours, next_check_at,
       disappearance_sensitive, investigation_id, importance
     ) values (
-      ${opts.userId}, ${url}, ${(opts.title ?? url).slice(0, 200)}, ${true}, ${cadence},
+      ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${url}, ${(opts.title ?? url).slice(0, 200)}, ${true}, ${cadence},
       ${next}::timestamptz, ${true}, ${opts.investigationId ?? null}, ${8}
     )
-    on conflict (user_id, url) do update
+    on conflict (newsroom_id, url) do update
       set enabled = true,
           next_check_at = excluded.next_check_at,
           investigation_id = coalesce(source_monitors.investigation_id, excluded.investigation_id)
@@ -1122,7 +1137,7 @@ export async function observeBaseline(userId: string, url: string, title: string
   }>`
     select last_seen::text as last_seen, sightings, cadence_days, usual_nth_weekday,
            usual_attachment_count, usual_lead_hours, typical_structure_json
-    from recurring_baselines where user_id = ${userId} and key = ${spec.key} limit 1
+    from recurring_baselines where newsroom_id = ${DEFAULT_NEWSROOM_ID} and key = ${spec.key} limit 1
   `;
   const now = at ?? new Date();
   let cadence = prev[0]?.cadence_days ?? 30;
@@ -1150,19 +1165,19 @@ export async function observeBaseline(userId: string, url: string, title: string
           cadence_days = ${cadence}, sightings = ${sightings}, usual_weekday = ${weekday},
           usual_nth_weekday = ${nth}, usual_attachment_count = ${snap.attachmentCount},
           usual_lead_hours = ${lead}, typical_structure_json = ${JSON.stringify(snap)}
-      where user_id = ${userId} and key = ${spec.key}
+      where newsroom_id = ${DEFAULT_NEWSROOM_ID} and key = ${spec.key}
     `;
   } else {
     await sql`
       insert into recurring_baselines (
-        user_id, key, kind, cadence_days, last_seen, typical_title, typical_url, sightings,
+        user_id, newsroom_id, key, kind, cadence_days, last_seen, typical_title, typical_url, sightings,
         usual_weekday, usual_nth_weekday, usual_attachment_count, usual_lead_hours, typical_structure_json
       ) values (
-        ${userId}, ${spec.key}, ${spec.kind}, ${cadence}, ${seen}::timestamptz,
+        ${userId}, ${DEFAULT_NEWSROOM_ID}, ${spec.key}, ${spec.kind}, ${cadence}, ${seen}::timestamptz,
         ${title.slice(0, 200)}, ${url.slice(0, 500)}, ${1}, ${weekday}, ${nth},
         ${snap.attachmentCount}, ${lead}, ${JSON.stringify(snap)}
       )
-      on conflict (user_id, key) do update set last_seen = excluded.last_seen, sightings = recurring_baselines.sightings + 1
+      on conflict (newsroom_id, key) do update set last_seen = excluded.last_seen, sightings = recurring_baselines.sightings + 1
     `;
   }
 }
@@ -1189,7 +1204,7 @@ async function flagPatternAnomalies(opts: {
       usual_lead_hours: number | null;
     }>`
       select usual_nth_weekday, usual_attachment_count, usual_lead_hours
-      from recurring_baselines where user_id = ${opts.userId} and key = ${spec.key} limit 1
+      from recurring_baselines where newsroom_id = ${DEFAULT_NEWSROOM_ID} and key = ${spec.key} limit 1
     `;
     usualNth = b[0]?.usual_nth_weekday ?? null;
     usualAtt = b[0]?.usual_attachment_count ?? null;
@@ -1291,7 +1306,7 @@ export async function retrievePack(
     select e.name, e.kind, e.why, ie.investigation_id, m.verdict
     from entities e
     join investigation_entities ie on ie.entity_id = e.id
-    left join entity_matches m on m.user_id = ${userId}
+    left join entity_matches m on m.newsroom_id = ${DEFAULT_NEWSROOM_ID}
       and (
         (m.left_canonical = e.canonical and m.right_canonical in (
           select e2.canonical from investigation_entities x
@@ -1304,7 +1319,7 @@ export async function retrievePack(
           where x.investigation_id = ${investigationId}
         ))
       )
-    where e.user_id = ${userId}
+    where e.newsroom_id = ${DEFAULT_NEWSROOM_ID}
       and ie.investigation_id <> ${investigationId}
       and (
         e.canonical in (
@@ -1686,7 +1701,7 @@ export async function researchLoop(opts: {
         select ce.content_hash, ce.http_status as fetch_status, av.full_text
         from capture_events ce
         left join artifact_versions av on av.id = ce.version_id
-        where ce.user_id = ${opts.userId} and ce.source_url = ${url}
+        where ce.newsroom_id = ${DEFAULT_NEWSROOM_ID} and ce.source_url = ${url}
         order by ce.id desc limit 1
       `;
       const prior =
@@ -1694,7 +1709,7 @@ export async function researchLoop(opts: {
         (
           await sql<{ content_hash: string; full_text: string; fetch_status: number | null }>`
             select content_hash, full_text, fetch_status from artifact_versions
-            where user_id = ${opts.userId} and url = ${url}
+            where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url}
             order by id desc limit 1
           `
         )[0];
@@ -1818,7 +1833,7 @@ export async function researchLoop(opts: {
         let prevSnap: StructureSnapshot | null = null;
         try {
           const mon = await sql<{ typical_structure: string | null }>`
-            select typical_structure from source_monitors where user_id = ${opts.userId} and url = ${url} limit 1
+            select typical_structure from source_monitors where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url} limit 1
           `;
           if (mon[0]?.typical_structure) prevSnap = JSON.parse(mon[0].typical_structure) as StructureSnapshot;
         } catch {
@@ -1959,7 +1974,7 @@ async function resolveProvenance(
     locator: string | null;
   }) {
     const quote = (hint.excerpt ?? "").trim();
-    if (!quote) return { ...hit, status: "resolved" as const };
+    if (!quote) return { ...hit, status: "unresolved" as const };
     let body = "";
     if (hit.versionId) {
       const rows = await sql<{ full_text: string }>`
@@ -2075,7 +2090,7 @@ async function resolveProvenance(
 async function persistPlan(userId: string, investigationId: number, plan: HopPlan) {
   const sql = await getSql();
   const known = await sql<{ canonical: string; name: string }>`
-    select canonical, name from entities where user_id = ${userId}
+    select canonical, name from entities where newsroom_id = ${DEFAULT_NEWSROOM_ID}
   `;
   for (const e of plan.entities) {
     const resolved = resolveEntityName(e.name, known);
@@ -2086,27 +2101,27 @@ async function persistPlan(userId: string, investigationId: number, plan: HopPla
     let entityId: number | null = null;
     try {
       const created = await sql<{ id: number }>`
-        insert into entities (user_id, canonical, name, kind, why)
-        values (${userId}, ${c}, ${e.name.slice(0, 200)}, ${e.kind.slice(0, 40)}, ${e.why.slice(0, 800)})
-        on conflict (user_id, canonical) do update set why = excluded.why
+        insert into entities (user_id, newsroom_id, canonical, name, kind, why)
+        values (${userId}, ${DEFAULT_NEWSROOM_ID}, ${c}, ${e.name.slice(0, 200)}, ${e.kind.slice(0, 40)}, ${e.why.slice(0, 800)})
+        on conflict (newsroom_id, canonical) do update set why = excluded.why
         returning id
       `;
       entityId = created[0]?.id ?? null;
     } catch {
       try {
         const created = await sql<{ id: number }>`
-          insert into entities (user_id, canonical, name, kind, why)
-          values (${userId}, ${c}, ${e.name.slice(0, 200)}, ${e.kind.slice(0, 40)}, ${e.why.slice(0, 800)})
+          insert into entities (user_id, newsroom_id, canonical, name, kind, why)
+          values (${userId}, ${DEFAULT_NEWSROOM_ID}, ${c}, ${e.name.slice(0, 200)}, ${e.kind.slice(0, 40)}, ${e.why.slice(0, 800)})
           returning id
         `;
         entityId = created[0]?.id ?? null;
       } catch {
         await sql`
           update entities set why = ${e.why.slice(0, 800)}
-          where user_id = ${userId} and canonical = ${c}
+          where newsroom_id = ${DEFAULT_NEWSROOM_ID} and canonical = ${c}
         `;
         const found = await sql<{ id: number }>`
-          select id from entities where user_id = ${userId} and canonical = ${c} limit 1
+          select id from entities where newsroom_id = ${DEFAULT_NEWSROOM_ID} and canonical = ${c} limit 1
         `;
         entityId = found[0]?.id ?? null;
       }
@@ -2338,7 +2353,7 @@ export async function matchDeadEnds(userId: string, names: string[]) {
     investigation_id: number | null;
   }>`
     select id, hypothesis, dismissed_because, entities, investigation_id from dead_ends
-    where user_id = ${userId} order by created_at desc limit 80
+    where newsroom_id = ${DEFAULT_NEWSROOM_ID} order by created_at desc limit 80
   `;
   const lower = names.map((n) => n.toLowerCase());
   return rows.filter((r) => {
@@ -2415,7 +2430,7 @@ export async function checkBaselines(userId: string, investigationId: number, no
   }>`
     select key, typical_title, typical_url, cadence_days, last_seen::text as last_seen,
            usual_weekday, usual_nth_weekday, sightings
-    from recurring_baselines where user_id = ${userId}
+    from recurring_baselines where newsroom_id = ${DEFAULT_NEWSROOM_ID}
   `;
   let flagged = 0;
   for (const r of rows) {
@@ -2499,7 +2514,7 @@ export async function runDueMonitors(opts: {
   }>`
     select id, url, title, investigation_id, cadence_hours, last_version_id, typical_structure
     from source_monitors
-    where user_id = ${opts.userId} and enabled = true and next_check_at <= ${now.toISOString()}::timestamptz
+    where newsroom_id = ${DEFAULT_NEWSROOM_ID} and enabled = true and next_check_at <= ${now.toISOString()}::timestamptz
     order by next_check_at asc
   `;
   const due = dueRows.slice(0, opts.limit ?? 20);
@@ -2520,7 +2535,7 @@ export async function runDueMonitors(opts: {
       select ce.content_hash, ce.http_status as fetch_status, av.full_text, ce.fetch_outcome
       from capture_events ce
       left join artifact_versions av on av.id = ce.version_id
-      where ce.user_id = ${opts.userId} and ce.source_url = ${url}
+      where ce.newsroom_id = ${DEFAULT_NEWSROOM_ID} and ce.source_url = ${url}
       order by ce.id desc limit 1
     `;
     const got = asFetched(await fetchDoc(url), url);

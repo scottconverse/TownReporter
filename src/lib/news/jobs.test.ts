@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { enqueueJob, findOpenJob, latestJob, drainQueuedJobs } from "./jobs.ts";
+import { enqueueJob, findOpenJob, latestJob, drainQueuedJobs, executeJob } from "./jobs.ts";
 
 describe("desk jobs", () => {
   it("reuses a queued/running job for the same subject", async () => {
@@ -62,5 +62,22 @@ describe("desk jobs", () => {
     if (latest.status === "failed") {
       assert.ok((latest.error ?? "").length > 0);
     }
+  });
+
+  it("two drainers cannot both run the same queued job", async () => {
+    const user = `job-cas-${Date.now()}`;
+    const newsroomId = 91004;
+    const job = await enqueueJob({
+      userId: user,
+      newsroomId,
+      kind: "draft",
+      subjectId: 77,
+      kick: false,
+    });
+    const [a, b] = await Promise.all([executeJob(job), executeJob(job)]);
+    assert.equal([a, b].filter(Boolean).length, 1);
+    const latest = await latestJob({ newsroomId, kind: "draft", subjectId: 77 });
+    assert.ok(latest);
+    assert.notEqual(latest.status, "queued");
   });
 });

@@ -1,6 +1,17 @@
 # Changelog
 
-Current release: **0.4.2**.
+Current release: **0.4.3**.
+
+## 0.4.3 — 2026-08-28
+
+URL history, watches, cadence, and names belong to the newsroom. Two drainers cannot both run the same job. An empty quote is unresolved.
+
+- `artifact_versions`, `source_monitors`, `recurring_baselines`, and `entities` unique keys and lookups are `(newsroom_id, …)`. A later editor reuses the captured page, the watch, the cadence, and the name graph. Who clicked is still stored.
+- Job claim is compare-and-set: only one drainer can take a queued (or stale-running) row. The loser walks away.
+- Provenance with no excerpt is unresolved even when the model named a real capture id. The cited version is kept so you can see what it pointed at.
+- `deskIsClaimed`, first-user-owns, and the public paper / RSS list this newsroom, not a global count.
+
+Not in 0.4.3: real OCR, city picker, mailer, invite.
 
 ## 0.4.2 — 2026-08-27
 

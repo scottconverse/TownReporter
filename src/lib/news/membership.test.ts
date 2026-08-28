@@ -7,6 +7,7 @@ import {
   newsroomSetupToken,
   SetupRequiredError,
   ForbiddenError,
+  deskIsClaimed,
   leaveAsEditor,
 } from "./membership.ts";
 
@@ -65,6 +66,7 @@ describe("setup token env", () => {
     `;
     assert.equal(left.some((r) => r.user_id === owner), false);
     assert.equal(left.some((r) => r.user_id === decoy && r.newsroom_id === 99), true);
+    assert.equal(await deskIsClaimed(), false);
     await sql`delete from newsroom_members where user_id = ${decoy}`;
   });
 });

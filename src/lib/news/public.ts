@@ -7,6 +7,7 @@ import { randomBytes } from "node:crypto";
 import { parseUrlList } from "@/lib/paper";
 import { provenanceFromUrls, parseFindings, resolvePublicFindings, type ProvenanceItem, type StoryFinding } from "./findings";
 import { collapsePrintedDuplicates } from "./desk-copy";
+import { DEFAULT_NEWSROOM_ID } from "./membership";
 
 function publicArticle(
   row: ArticleRow,
@@ -38,7 +39,7 @@ export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,
              provenance_json, form, found_note, unanswered
       from articles
-      where status = 'published'
+      where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
       order by published_at desc
       limit 30
     `.then((rows) => collapsePrintedDuplicates(rows.map(publicArticle)));
@@ -58,7 +59,7 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,
              provenance_json, form, found_note, unanswered
       from articles
-      where slug = ${slug} and status = 'published'
+      where slug = ${slug} and status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
       limit 1
     `;
       if (!rows[0]) return null;
@@ -87,7 +88,7 @@ export const listPublishedByTopic = createServerFn({ method: "GET" })
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,
              provenance_json, form, found_note, unanswered
       from articles
-      where status = 'published' and topic = ${topic}
+      where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID} and topic = ${topic}
       order by published_at desc
       limit 30
     `.then((rows) => collapsePrintedDuplicates(rows.map(publicArticle)));
@@ -108,7 +109,7 @@ export const searchPublished = createServerFn({ method: "GET" })
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,
              provenance_json, form, found_note, unanswered
       from articles
-      where status = 'published'
+      where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
         and (headline ilike ${like} or dek ilike ${like} or body ilike ${like})
       order by published_at desc
       limit 30

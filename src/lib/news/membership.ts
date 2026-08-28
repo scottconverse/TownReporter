@@ -85,7 +85,9 @@ export async function requireEditor(userId: string): Promise<EditorContext> {
   if (mine[0]?.role === "owner" || mine[0]?.role === "editor") {
     return { role: mine[0].role, newsroomId: mine[0].newsroom_id ?? DEFAULT_NEWSROOM_ID };
   }
-  const n = await sql<{ c: number }>`select count(*)::int as c from newsroom_members`;
+  const n = await sql<{ c: number }>`
+    select count(*)::int as c from newsroom_members where newsroom_id = ${DEFAULT_NEWSROOM_ID}
+  `;
   if ((n[0]?.c ?? 0) === 0) {
     if (newsroomSetupToken()) {
       throw new SetupRequiredError();
@@ -113,7 +115,9 @@ export async function requireEditor(userId: string): Promise<EditorContext> {
 export async function deskIsClaimed(): Promise<boolean> {
   await ensureNewsroomSchema();
   const sql = await getSql();
-  const n = await sql<{ c: number }>`select count(*)::int as c from newsroom_members`;
+  const n = await sql<{ c: number }>`
+    select count(*)::int as c from newsroom_members where newsroom_id = ${DEFAULT_NEWSROOM_ID}
+  `;
   return (n[0]?.c ?? 0) > 0;
 }
 
@@ -150,7 +154,9 @@ export async function claimOwner(userId: string, providedToken: string): Promise
   if (mine[0]?.role === "owner" || mine[0]?.role === "editor") {
     return { role: mine[0].role, newsroomId: mine[0].newsroom_id ?? DEFAULT_NEWSROOM_ID };
   }
-  const n = await sql<{ c: number }>`select count(*)::int as c from newsroom_members`;
+  const n = await sql<{ c: number }>`
+    select count(*)::int as c from newsroom_members where newsroom_id = ${DEFAULT_NEWSROOM_ID}
+  `;
   if ((n[0]?.c ?? 0) > 0) throw new ForbiddenError();
   const expected = newsroomSetupToken();
   if (expected) {

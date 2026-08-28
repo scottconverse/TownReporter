@@ -179,6 +179,12 @@ describe("exact provenance", { timeout: 120000 }, () => {
             evidence: "The mayor secretly sold the water plant to a holding company.",
             source_url: URL_A,
           });
+          p.claims.push({
+            text: "Cited the packet with no quote",
+            kind: "FACT",
+            evidence: "",
+            source_url: URL_A,
+          });
           p.relationships.push({
             from: "Civic Paving LLC",
             to: "Jane Roe",
@@ -214,7 +220,8 @@ describe("exact provenance", { timeout: 120000 }, () => {
     const fromB = claims.find((c) => /registered agent/i.test(c.body));
     const unresolved = claims.find((c) => /no supporting document/i.test(c.body));
     const invented = claims.find((c) => /invented/i.test(c.body));
-    assert.ok(fromA && fromB && unresolved && invented);
+    const noQuote = claims.find((c) => /no quote/i.test(c.body));
+    assert.ok(fromA && fromB && unresolved && invented && noQuote);
     assert.equal(fromA.version_id, verA.id);
     assert.equal(fromB.version_id, verB.id);
     assert.notEqual(fromA.version_id, fromB.version_id);
@@ -227,6 +234,8 @@ describe("exact provenance", { timeout: 120000 }, () => {
     assert.equal(unresolved.capture_event_id, null);
     assert.equal(invented.provenance_status, "unresolved");
     assert.equal(invented.version_id, verA.id);
+    assert.equal(noQuote.provenance_status, "unresolved");
+    assert.equal(noQuote.version_id, verA.id);
 
     const rels = await sql<{ from_name: string; version_id: number | null; provenance_status: string | null }>`
       select from_name, version_id, provenance_status from relationships

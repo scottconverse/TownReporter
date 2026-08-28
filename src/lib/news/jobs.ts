@@ -159,8 +159,8 @@ export async function drainQueuedJobs(): Promise<{ ran: number }> {
         limit 1
       `;
       if (!next[0]) break;
-      await executeJob(next[0]);
-      ran += 1;
+      const took = await executeJob(next[0]);
+      if (took) ran += 1;
     }
   } catch (err) {
     console.error("[jobs] drain failed", err);
@@ -170,13 +170,19 @@ export async function drainQueuedJobs(): Promise<{ ran: number }> {
   return { ran };
 }
 
-async function executeJob(job: DeskJob) {
+export async function executeJob(job: DeskJob): Promise<boolean> {
   const sql = await getSql();
-  await sql`
+  const claimed = await sql<{ id: number }>`
     update desk_jobs
     set status = ${"running"}, stage = ${"Working…"}, started_at = coalesce(started_at, now()), updated_at = now()
     where id = ${job.id}
+      and (
+        status = ${"queued"}
+        or (status = ${"running"} and updated_at < now() - interval '2 minutes')
+      )
+    returning id
   `;
+  if (!claimed[0]) return false;
   try {
     if (job.kind === "draft") {
       const { performDraftWork } = await import("./desk.ts");
@@ -201,6 +207,7 @@ async function executeJob(job: DeskJob) {
       where id = ${job.id}
     `;
   }
+  return true;
 }
 
 export function jobIsOpen(job: DeskJob | null | undefined) {
