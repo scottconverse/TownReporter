@@ -17,3 +17,6 @@ create unique index if not exists recurring_baselines_newsroom_key
 
 alter table subscribers drop column if exists confirm_token;
 alter table subscribers drop column if exists status;
+
+create index if not exists snapshots_newsroom_source
+  on snapshots (newsroom_id, source_id, created_at desc);
