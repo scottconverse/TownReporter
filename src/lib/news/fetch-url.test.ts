@@ -2,7 +2,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   assertHttpUrl,
+  assertPublicHttpUrl,
   fetchPublicHttp,
+  dnsLookup,
   isBlockedAddress,
 } from "./fetch-url.ts";
 
@@ -136,6 +138,29 @@ describe("fetchPublicHttp redirect SSRF", () => {
       assert.equal(await res.text(), "ok");
     } finally {
       globalThis.fetch = original;
+    }
+  });
+});
+
+describe("DNS mapped loopback", () => {
+  it("throws before fetch when lookup returns mapped loopback", async () => {
+    const origLookup = dnsLookup.resolve;
+    const origFetch = globalThis.fetch;
+    let fetched = 0;
+    dnsLookup.resolve = async () => [{ address: "::ffff:7f00:1" }];
+    globalThis.fetch = (async () => {
+      fetched += 1;
+      return new Response("should-not-fetch", { status: 200 });
+    }) as typeof fetch;
+    try {
+      await assert.rejects(
+        () => assertPublicHttpUrl("https://example.com/civic"),
+        /not fetchable/,
+      );
+      assert.equal(fetched, 0);
+    } finally {
+      dnsLookup.resolve = origLookup;
+      globalThis.fetch = origFetch;
     }
   });
 });
