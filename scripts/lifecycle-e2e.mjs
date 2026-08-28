@@ -47,7 +47,7 @@ async function main() {
   await page.locator("body").waitFor();
 
   await page.goto(`${base}/login`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "Create editor" }).waitFor();
+  await page.getByRole("heading", { name: /Create editor|Editor sign-in/ }).waitFor();
   await page.getByLabel("Name").fill("E2E Editor");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
