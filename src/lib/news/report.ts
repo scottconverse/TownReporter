@@ -1,4 +1,4 @@
-import { grokChat, parseJsonBlock } from "./ai.ts";
+import { grokChat, parseJsonBlock, providerBudget } from "./ai.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { extractReferences, queriesForRef, namedSubjects, primarySourceQueries, preferPrimaryUrls, primarySourceScore } from "./extract.ts";
 import { sha256 } from "./fetch-url.ts";
@@ -104,7 +104,12 @@ export type ReportDeps = {
   budgetMs?: number;
 };
 
-/** Default budget so a draft returns before a ~60s gateway kills the click. */
+/**
+ * Fallback budget for the fast HTTP path. The real numbers come from
+ * providerBudget() at call time — the Claude Code CLI needs an order of
+ * magnitude more wall clock than an API, and hardcoding 38s meant every draft
+ * on that path died before the writing pass.
+ */
 export const DRAFT_WALL_MS = 38_000;
 export const DRAFT_WRITE_RESERVE_MS = 12_000;
 
@@ -961,9 +966,11 @@ export async function reportAndDraft(
   deps: ReportDeps = {},
 ): Promise<ReportedDraft | { error: string }> {
   const started = Date.now();
-  const budget = deps.budgetMs ?? DRAFT_WALL_MS;
+  const limits = providerBudget();
+  const budget = deps.budgetMs ?? limits.wallMs;
+  const reserve = deps.budgetMs ? DRAFT_WRITE_RESERVE_MS : limits.reserveMs;
   const timeLeft = () => budget - (Date.now() - started);
-  const canFollow = () => timeLeft() > DRAFT_WRITE_RESERVE_MS + 4_000;
+  const canFollow = () => timeLeft() > reserve + 4_000;
   const ingest = deps.ingest ?? defaultIngest;
   const search = deps.search ?? (async (q: string) => webSearch(q));
   const capture = deps.capture ?? defaultCapture;
@@ -971,8 +978,10 @@ export async function reportAndDraft(
   const chat: ReportChat =
     deps.chat ??
     (async (system, user, maxTokens) => {
-      const ms = Math.min(20_000, Math.max(6_000, timeLeft() - 2_000));
-      if (timeLeft() < 5_000) return { ok: false, error: "xAI request timed out" };
+      const ms = Math.min(limits.callMs, Math.max(6_000, timeLeft() - 2_000));
+      if (timeLeft() < 5_000) {
+        return { ok: false, error: "The draft ran out of time before this step." };
+      }
       return grokChat(system, user, maxTokens, { timeoutMs: ms });
     });
 
@@ -984,7 +993,7 @@ export async function reportAndDraft(
     if (!required && !canFollow()) return;
     const fresh = urls.filter((u) => !seen.has(u)).slice(0, cap);
     if (!fresh.length) return;
-    const perUrl = Math.min(12_000, Math.max(3_000, timeLeft() - DRAFT_WRITE_RESERVE_MS));
+    const perUrl = Math.min(12_000, Math.max(3_000, timeLeft() - reserve));
     const got = await fetchDocs(fresh, ingest, perUrl);
     for (const d of got) {
       seen.add(d.url);
@@ -1025,7 +1034,7 @@ export async function reportAndDraft(
 
   const primaryUrls: string[] = [];
   for (const q of primarySourceQueries(opts.lead.headline, subjects).slice(0, 3)) {
-    if (timeLeft() < DRAFT_WRITE_RESERVE_MS) break;
+    if (timeLeft() < reserve) break;
     try {
       const hits = await search(q);
       for (const u of preferPrimaryUrls(

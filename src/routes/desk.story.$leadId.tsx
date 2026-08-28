@@ -83,11 +83,19 @@ function StoryPage() {
 
   useEffect(() => {
     if (!waitingSince) return;
-    if (data?.job?.status === "failed") {
-      setWaitingSince(null);
-      setSlowWait(false);
-      setMsg(editorDraftError(data.job.error) ?? data.job.error ?? "The draft did not finish.");
-    }
+    if (data?.job?.status !== "failed") return;
+    // Ignore a failure that finished BEFORE this click.
+    //
+    // `data.job` is whatever the last query returned, which on the first click
+    // is still the previous attempt. A stale failed job used to cancel the
+    // draft the instant it started and re-show the old error — so the first
+    // click looked dead and only the second one "worked", because by then the
+    // query had caught up. Only a failure from this attempt should stop it.
+    const finished = data.job.finished_at ? Date.parse(data.job.finished_at) : 0;
+    if (finished && finished < waitingSince) return;
+    setWaitingSince(null);
+    setSlowWait(false);
+    setMsg(editorDraftError(data.job.error) ?? data.job.error ?? "The draft did not finish.");
   }, [data?.job, waitingSince]);
 
   useEffect(() => {

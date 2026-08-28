@@ -235,11 +235,15 @@ export async function grokChat(
     const { claudeCodeChat } = await import("./ai-claude-code.server.ts");
     // The CLI spawns a process and reloads its preamble each call, so give it
     // more room than an HTTP request would need.
+    // Honour the caller's timeout. Silently raising it (this used to force a
+    // 120s floor) let one call outlive the wall-clock budget the caller was
+    // pacing against, so a draft "timed out" while a model call was still
+    // happily running. Callers size their budget with `providerBudget()`.
     return claudeCodeChat({
       system,
       user,
       model: provider.model,
-      timeoutMs: Math.max(timeoutMs, 120_000),
+      timeoutMs,
     });
   }
   const llm = provider;
@@ -298,6 +302,33 @@ export async function grokChat(
 
 export function isGrokAvailable(): boolean {
   return Boolean(resolveProvider());
+}
+
+export type ProviderBudget = {
+  /** Wall clock for a whole multi-call pipeline, e.g. one draft. */
+  wallMs: number;
+  /** Ceiling for a single model call. */
+  callMs: number;
+  /** Time to hold back for the final write so it is never the pass that dies. */
+  reserveMs: number;
+};
+
+/**
+ * How long the active provider actually needs.
+ *
+ * An HTTP API answers in a few seconds. The Claude Code CLI spawns a process
+ * and reloads a ~25k-token preamble on every call — measured 2.5s at best and
+ * 8s for a real prompt — and a draft makes three calls plus document fetches.
+ * The original 38s draft budget was sized for the fast path, so on the CLI
+ * every draft failed with "did not finish in time" before the writing pass
+ * ever ran. Budgets have to come from the provider, not a constant.
+ */
+export function providerBudget(): ProviderBudget {
+  const provider = resolveProvider();
+  if (provider?.kind === "claude-code") {
+    return { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 };
+  }
+  return { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 };
 }
 
 export function parseJsonBlock<T>(raw: string): T | null {
