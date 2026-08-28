@@ -74,10 +74,13 @@ async function main() {
   await page.getByRole("heading", { level: 1, name: /water plant/i }).waitFor();
   await page.getByText(/Longmont City Council set a special session on the water plant/i).waitFor();
 
-  await page.goto(`${base}/desk/published`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "Post correction" }).first().click();
+  await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Leave as editor" }).waitFor();
+  await page.getByRole("link", { name: "Published", exact: true }).first().click();
+  await page.waitForURL(/\/desk\/published/);
+  await page.getByRole("button", { name: "Post correction" }).first().click({ force: true });
   await page.getByPlaceholder("What was wrong").fill(correction);
-  await page.getByRole("button", { name: "Publish correction" }).click();
+  await page.getByRole("button", { name: "Publish correction" }).click({ force: true });
   // Toast can miss if the desk remounts. The article is the record.
   await page.goto(articleUrl, { waitUntil: "domcontentloaded" });
   for (let i = 0; i < 20; i++) {
