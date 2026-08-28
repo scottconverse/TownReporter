@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { enqueueJob, findOpenJob, latestJob, drainQueuedJobs, claimNextJob } from "./jobs.ts";
+import { enqueueJob, findOpenJob, latestJob, drainQueuedJobs, claimJob } from "./jobs.ts";
 
 describe("desk jobs", () => {
   it("reuses a queued/running job for the same subject", async () => {
@@ -66,21 +66,22 @@ describe("desk jobs", () => {
 });
 
 describe("job drain CAS", () => {
-  it("two claimNextJob calls cannot both win the same row", async () => {
+  it("two claimers cannot both run the same job", async () => {
     const user = `job-cas-${Date.now()}`;
     const newsroomId = 91004;
     const job = await enqueueJob({
       userId: user,
       newsroomId,
-      kind: "scan",
-      subjectId: 777001,
+      kind: "draft",
+      subjectId: 77,
       kick: false,
     });
-    const [x, y] = await Promise.all([claimNextJob(), claimNextJob()]);
-    if (x && y) {
-      assert.notEqual(x.id, y.id);
-    }
-    const ours = [x, y].filter((row) => row?.id === job.id);
-    assert.ok(ours.length <= 1);
+    assert.equal(job.status, "queued");
+    const [a, b] = await Promise.all([claimJob(job.id), claimJob(job.id)]);
+    const won = [a, b].filter(Boolean);
+    assert.equal(won.length, 1);
+    assert.equal(won[0]!.status, "running");
+    const lost = [a, b].filter((row) => row == null);
+    assert.equal(lost.length, 1);
   });
 });
