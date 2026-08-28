@@ -9,3 +9,4 @@ logs/
 .vercel/
 .tanstack/
 .node_modules.lock
+attachments/
