@@ -36,5 +36,8 @@ describe("version", () => {
     const pages = read("docs/index.html");
     assert.doesNotMatch(pages, /\bv?\d+\.\d+\.\d+\b/);
     assert.doesNotMatch(pages, /TownReporter \d/);
+    assert.match(pages, /The Civic Desk/);
+    assert.match(pages, /https:\/\/scottconverse\.github\.io\/CivicNewspaper\//);
+    assert.doesNotMatch(pages, /Read the Longmont paper/);
   });
 });
