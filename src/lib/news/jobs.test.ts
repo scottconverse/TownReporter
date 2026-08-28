@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { enqueueJob, findOpenJob, latestJob, drainQueuedJobs } from "./jobs.ts";
+import { enqueueJob, findOpenJob, latestJob, drainQueuedJobs, claimNextJob } from "./jobs.ts";
 
 describe("desk jobs", () => {
   it("reuses a queued/running job for the same subject", async () => {
@@ -62,5 +62,25 @@ describe("desk jobs", () => {
     if (latest.status === "failed") {
       assert.ok((latest.error ?? "").length > 0);
     }
+  });
+});
+
+describe("job drain CAS", () => {
+  it("two claimNextJob calls cannot both win the same row", async () => {
+    const user = `job-cas-${Date.now()}`;
+    const newsroomId = 91004;
+    const job = await enqueueJob({
+      userId: user,
+      newsroomId,
+      kind: "scan",
+      subjectId: 777001,
+      kick: false,
+    });
+    const [x, y] = await Promise.all([claimNextJob(), claimNextJob()]);
+    if (x && y) {
+      assert.notEqual(x.id, y.id);
+    }
+    const ours = [x, y].filter((row) => row?.id === job.id);
+    assert.ok(ours.length <= 1);
   });
 });

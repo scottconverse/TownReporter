@@ -3,6 +3,13 @@ import { htmlToPlainText } from "./html-text.ts";
 
 export { assertHttpUrl, isBlockedAddress, sha256, sha256Bytes } from "./url-guard.ts";
 
+export const dnsLookups = {
+  async lookup(host: string): Promise<{ address: string }[]> {
+    const { lookup } = await import("node:dns/promises");
+    return lookup(host, { all: true });
+  },
+};
+
 export async function assertPublicHttpUrl(raw: string): Promise<URL> {
   const url = assertHttpUrl(raw);
   const host = url.hostname.replace(/^\[|\]$/g, "");
@@ -13,8 +20,7 @@ export async function assertPublicHttpUrl(raw: string): Promise<URL> {
   }
   let records: { address: string }[];
   try {
-    const { lookup } = await import("node:dns/promises");
-    records = await lookup(host, { all: true });
+    records = await dnsLookups.lookup(host);
   } catch {
     throw new Error("That host could not be resolved");
   }
