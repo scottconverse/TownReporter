@@ -17,10 +17,24 @@ describe("Longmont dates", () => {
 });
 
 describe("version", () => {
-  it("matches package.json so the chrome and the tag cannot drift", () => {
-    const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
-      version: string;
-    };
+  it("stays in lockstep across the ship files, and Pages has no version stamp", () => {
+    const root = new URL("../../", import.meta.url);
+    const read = (rel: string) => readFileSync(new URL(rel, root), "utf8");
+    const pkg = JSON.parse(read("package.json")) as { version: string; name: string };
+    assert.equal(pkg.name, "app-builder-workspace");
     assert.equal(APP_VERSION, pkg.version);
+    const lock = JSON.parse(read("package-lock.json")) as {
+      packages: { "": { version: string } };
+    };
+    assert.equal(lock.packages[""].version, pkg.version);
+    assert.ok(read("src/lib/source-zip-url.ts").includes("/tags/v" + pkg.version + ".zip"));
+    assert.ok(read("CHANGELOG.md").includes("Current release: **" + pkg.version + "**"));
+    assert.ok(read("README.md").includes("[" + pkg.version + "]"));
+    assert.ok(read("docs/setup.md").includes("[" + pkg.version + "]"));
+    assert.ok(read("docs/editor.md").includes("[" + pkg.version + "]"));
+    assert.ok(read("docs/dark-desk-editor.md").includes(pkg.version));
+    const pages = read("docs/index.html");
+    assert.doesNotMatch(pages, /\bv?\d+\.\d+\.\d+\b/);
+    assert.doesNotMatch(pages, /TownReporter \d/);
   });
 });
