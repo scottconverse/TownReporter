@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { enqueueJob, findOpenJob, latestJob } from "./jobs.ts";
+import { enqueueJob, findOpenJob, latestJob, drainQueuedJobs } from "./jobs.ts";
 
 describe("desk jobs", () => {
   it("reuses a queued/running job for the same subject", async () => {
@@ -40,5 +40,27 @@ describe("desk jobs", () => {
     assert.ok(found);
     assert.equal(found.id, a.id);
     assert.equal(found.kind, "scan");
+  });
+
+  it("a wake-up finishes a queued job even if kick never ran", async () => {
+    const user = `job-drain-${Date.now()}`;
+    const newsroomId = 91003;
+    const job = await enqueueJob({
+      userId: user,
+      newsroomId,
+      kind: "draft",
+      subjectId: 1,
+      kick: false,
+    });
+    assert.equal(job.status, "queued");
+    const { ran } = await drainQueuedJobs();
+    assert.ok(ran >= 1);
+    const latest = await latestJob({ newsroomId, kind: "draft", subjectId: 1 });
+    assert.ok(latest);
+    assert.ok(latest.status === "completed" || latest.status === "failed", latest.status);
+    assert.notEqual(latest.status, "queued");
+    if (latest.status === "failed") {
+      assert.ok((latest.error ?? "").length > 0);
+    }
   });
 });

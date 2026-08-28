@@ -22,5 +22,5 @@ export function extractEmbeddedJpegs(buf: Uint8Array, max = 4): Uint8Array[] {
   return out;
 }
 
-/** Image-only PDFs stay unread. JPEG-as-text-chat is not OCR. Real OCR is 0.4.1. */
+/** Image-only PDFs stay unread. JPEG-as-text-chat is not OCR. Real OCR is later. */
 export const productionOcr: OcrImpl = async () => ({ text: "", pages: [] });

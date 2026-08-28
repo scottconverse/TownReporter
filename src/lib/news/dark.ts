@@ -236,11 +236,11 @@ export const listInvestigations = createServerFn({ method: "GET" })
         i.created_at, i.updated_at,
         coalesce((
           select count(*)::int from artifacts a
-          where a.investigation_id = i.id and a.user_id = i.user_id
+          where a.investigation_id = i.id
         ), 0) as records,
         coalesce((
           select count(*)::int from frontier_items f
-          where f.investigation_id = i.id and f.user_id = i.user_id
+          where f.investigation_id = i.id
             and f.status in ('open', 'investigating', 'reopened')
         ), 0) as still_open
       from investigations i
@@ -504,46 +504,46 @@ async function synthesizeSignals(
   const sql = await getSql();
   const sources = await sql<SourceRow>`
     select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
-    from sources where user_id = ${userId} order by id asc
+    from sources where newsroom_id = ${DEFAULT_NEWSROOM_ID} order by id asc
   `;
   const arts = await sql<{ title: string; url: string; full_text: string }>`
     select title, url, full_text from artifacts
-    where investigation_id = ${investigationId} and user_id = ${userId}
+    where investigation_id = ${investigationId}
     order by id desc limit 12
   `;
   const frontier = await sql<{ label: string; kind: string; why: string }>`
     select label, kind, why from frontier_items
-    where investigation_id = ${investigationId} and user_id = ${userId} and status in ('open', 'investigating', 'reopened')
+    where investigation_id = ${investigationId} and status in ('open', 'investigating', 'reopened')
     order by priority desc limit 16
   `;
   const rels = await sql<{ from_name: string; to_name: string; kind: string }>`
     select from_name, to_name, kind from relationships
-    where investigation_id = ${investigationId} and user_id = ${userId} limit 20
+    where investigation_id = ${investigationId} limit 20
   `;
   const claims = await sql<{ body: string; kind: string }>`
     select body, kind from claims
-    where investigation_id = ${investigationId} and user_id = ${userId} order by id desc limit 12
+    where investigation_id = ${investigationId} order by id desc limit 12
   `;
   const hyps = await sql<{ body: string; status: string }>`
     select body, status from hypotheses
-    where investigation_id = ${investigationId} and user_id = ${userId} order by id desc limit 12
+    where investigation_id = ${investigationId} order by id desc limit 12
   `;
   const anoms = await sql<{ kind: string; summary: string }>`
     select kind, summary from anomalies
-    where investigation_id = ${investigationId} and user_id = ${userId} order by id desc limit 10
+    where investigation_id = ${investigationId} order by id desc limit 10
   `;
   const leads = await sql<{ headline: string; why: string; topic: string; status: string }>`
-    select headline, why, topic, status from leads where user_id = ${userId} order by created_at desc limit 8
+    select headline, why, topic, status from leads where newsroom_id = ${DEFAULT_NEWSROOM_ID} order by created_at desc limit 8
   `;
   const articles = await sql<Pick<ArticleRow, "headline" | "topic" | "published_at">>`
     select headline, topic, published_at from articles
-    where user_id = ${userId} and status = 'published' order by published_at desc limit 6
+    where newsroom_id = ${DEFAULT_NEWSROOM_ID} and status = 'published' order by published_at desc limit 6
   `;
   const memory = await sql<MemoryRow>`
-    select entity, last_angle from beat_memory where user_id = ${userId} order by updated_at desc limit 12
+    select entity, last_angle from beat_memory where newsroom_id = ${DEFAULT_NEWSROOM_ID} order by updated_at desc limit 12
   `;
   const searches = await sql<{ query: string }>`
-    select query from search_log where investigation_id = ${investigationId} and user_id = ${userId} order by id desc limit 20
+    select query from search_log where investigation_id = ${investigationId} order by id desc limit 20
   `;
 
   const pack = [
@@ -632,7 +632,7 @@ async function markInvestigationPaused(userId: string, investigationId: number, 
   await sql`
     update investigations
     set status = ${"paused"}, pause_reason = ${error.slice(0, 800)}, updated_at = now()
-    where id = ${investigationId} and user_id = ${userId}
+    where id = ${investigationId}
   `;
 }
 
@@ -668,7 +668,7 @@ async function executeDarkRun(
       await sql<{ name: string }>`
         select e.name from investigation_entities ie
         join entities e on e.id = ie.entity_id
-        where ie.investigation_id = ${investigationId} and ie.user_id = ${userId}
+        where ie.investigation_id = ${investigationId}
         order by ie.id desc limit 40
       `
     ).map((n) => n.name);
@@ -688,7 +688,7 @@ async function executeDarkRun(
     await sql`
       update dark_runs
       set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null}
-      where id = ${runId} and user_id = ${userId}
+      where id = ${runId}
     `;
     await audit(userId, "dark", `run ${runId} inv ${investigationId} hops ${loop.hops} signals ${synth.stored}`);
     if (synth.error && !loop.paused) {
@@ -711,7 +711,7 @@ async function executeDarkRun(
     await sql`
       update dark_runs
       set finished_at = now(), error = ${error.slice(0, 800)}
-      where id = ${runId} and user_id = ${userId}
+      where id = ${runId}
     `;
     await markInvestigationPaused(userId, investigationId, error);
     return {
@@ -780,8 +780,8 @@ export const continueInvestigation = createServerFn({ method: "POST" })
     await ensureDarkSchema();
     await assertRate(context.userId, "dark");
     const sql = await getSql();
-    const inv = await sql<{ id: number; user_id: string }>`
-      select id, user_id from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
+    const inv = await sql<{ id: number }>`
+      select id from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
     `;
     if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
     await sql`
@@ -789,7 +789,7 @@ export const continueInvestigation = createServerFn({ method: "POST" })
       where id = ${id} and newsroom_id = ${owned(context)}
     `;
     const job = await enqueueJob({
-      userId: inv[0].user_id || context.userId,
+      userId: context.userId,
       newsroomId: owned(context),
       kind: "dark",
       subjectId: id,

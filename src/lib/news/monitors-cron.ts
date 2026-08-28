@@ -1,11 +1,13 @@
 import { getSql } from "@/lib/db";
 import { runDueMonitors } from "./investigate.ts";
+import { drainQueuedJobs } from "./jobs.ts";
 
-/** Recheck due monitors for every desk. Does not require an editor to open Dark Desk. */
+/** Recheck due monitors and finish waiting desk jobs. Does not require an editor to be signed in. */
 export async function tickAllDueMonitors(): Promise<{
   users: number;
   checked: number;
   anomalies: number;
+  jobs: number;
 }> {
   const sql = await getSql();
   const users = await sql<{ user_id: string }>`
@@ -24,5 +26,11 @@ export async function tickAllDueMonitors(): Promise<{
       /* one desk failing must not stop the others */
     }
   }
-  return { users: users.length, checked, anomalies };
+  let jobs = 0;
+  try {
+    jobs = (await drainQueuedJobs()).ran;
+  } catch {
+    /* monitors still count even if a job drain throws */
+  }
+  return { users: users.length, checked, anomalies, jobs };
 }

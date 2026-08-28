@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.4.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.4.0)** — 27 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.4.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.4.1)** — 27 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
@@ -74,13 +74,12 @@ Same six moves the paper itself describes at `/how-we-report`:
 
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
-### This release (0.4.0)
+### This release (0.4.1)
 
-- **Durable jobs.** Scan, Draft, and Keep digging persist a job and return. The desk watches the row. That drain lives in the same Node process — a Vercel function may not finish it.
-- **Setup token.** `NEWSROOM_SETUP_TOKEN` on a public host: signup is not ownership until the token is presented.
-- **One newsroom.** Desk data is keyed by `newsroom_id`. Dark Start no longer dumps 16 snapshots into a new file.
+- **Create editor** on the paper until someone owns the desk. **Leave as editor** hands it back. The paper stays.
+- **Dark hops belong to the file.** A later editor continues the same trail.
+- **Jobs wake up.** Scan / Draft / Keep digging persist, then finish in this process or on the monitors ping (`CRON_SECRET`). A host that sleeps after the click needs that ping.
 - **Honest OCR.** Image-only PDFs are unread. There is no JPEG-as-chat OCR.
-- **Lifecycle CI.** Create the desk, file a lead, publish, post a correction.
 
 Also in 0.3.3–0.3.8: Mountain Time masthead, overlapping printed headlines collapse, Draft with AI paints without a reload, Redraft survives the cookie glitch, Start digging keeps the card on a failed open.
 

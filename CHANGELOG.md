@@ -1,17 +1,16 @@
 # Changelog
 
-Current release: **0.4.0**.
+Current release: **0.4.1**.
 
-## Unreleased — 0.4.1
+## 0.4.1 — 2026-08-27
 
-Not tagged. Honesty and the two leftovers that still lie about how the desk is built.
+Dark hops belong to the file. Jobs finish after the click even if this program goes to sleep.
 
-- After the desk is claimed, `/login` is sign-in only. Create editor account is gone. The paper stays public. New accounts are rejected, not parked as useless logins.
-- Paper top-right **Create editor** only while the newsroom has no owner. After claim it is gone. **Leave as editor** on the desk (top left) drops the owner, signs them out, and puts Create editor back. The paper stays. Next person in owns the desk.
-- Dark Desk hops keyed by the newsroom, not the editor who opened the file.
-- Scan / Draft / Keep digging keep working after the click even if this program would otherwise go to sleep (a wake-up that finishes waiting jobs, not only this one process).
+- After the desk is claimed, `/login` is sign-in only. Paper top-right **Create editor** only while nobody owns the desk. **Leave as editor** on the desk drops the owner, signs them out, and puts Create editor back. The paper stays. Next person in owns it. Signed-in but not the editor sees the desk is taken, not an empty Scan page.
+- Dark Desk hops (frontier, captures, search log, claims) are the file's, not whoever opened it. A later editor on the same newsroom continues the trail. Who clicked is still stored.
+- Scan, Draft, and Keep digging still write a job and return. A wake-up finishes waiting jobs: the same monitors ping (`GET /api/cron/monitors` with `CRON_SECRET`), and this long-lived process also drains on its own. A frozen serverless host needs that ping. Documented.
 
-Not in 0.4.1 unless named separately: real OCR, city picker, mailer, invite a second editor.
+Not in 0.4.1: real OCR, city picker, mailer, invite a second editor.
 
 ## 0.4.0 — 2026-08-27
 

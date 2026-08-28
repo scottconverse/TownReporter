@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.4.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.4.0).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.4.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.4.1).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -128,7 +128,7 @@ Background monitors tick in dev on an interval, and on demand:
 GET /api/cron/monitors
 ```
 
-If `CRON_SECRET` is set, send `Authorization: Bearer <CRON_SECRET>`. Point an external cron (or Vercel Cron) at that URL so missing packets and late minutes still get noticed when nobody has the desk open.
+If `CRON_SECRET` is set, send `Authorization: Bearer <CRON_SECRET>`. Point an external cron (or Vercel Cron) at that URL so missing packets still get noticed **and** Scan / Draft / Keep digging finish after the click even if this program went to sleep. One ping does both. This long-lived preview drains jobs on its own; a host that freezes after the request needs the ping.
 
 ---
 
@@ -173,7 +173,7 @@ Hosted: any Node 22 host with the env vars above. Vercel works for the paper + d
 
 Do not expect meeting-transcript Playwright to work on Vercel without extra infrastructure. See above.
 
-Scan, Draft, and Dark Keep digging persist a job and return. A worker in **this same Node process** drains the queue. That works on a long-running host. A Vercel serverless invocation may freeze after the click returns, so those jobs may not finish there. The paper and a typed draft still deploy; the in-process drain is not a substitute for a worker.
+Scan, Draft, and Dark Keep digging persist a job and return. This long-lived process drains waiting jobs. A Vercel serverless invocation may freeze after the click returns — those jobs finish when the monitors ping (`GET /api/cron/monitors` with `CRON_SECRET`) hits. The paper and a typed draft still deploy without that ping; Scan / Draft / Keep digging need it on a host that sleeps.
 
 ---
 
@@ -190,7 +190,7 @@ Node’s built-in test runner. No network, no model calls. Coverage includes Pri
 
 ## Point it at another city
 
-There is no settings screen for this. That is deliberate in 0.3.x — the Longmont edition is the working proof, and a half-built city picker would lie. Edit the seed, rebuild.
+There is no settings screen for this. That is deliberate in 0.4.1 — the Longmont edition is the working proof, and a half-built city picker would lie. Edit the seed, rebuild.
 
 ### 1. The masthead and the watch list
 

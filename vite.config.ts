@@ -154,8 +154,9 @@ function authPopupPlugin(): Plugin {
 }
 
 /**
- * Dark Desk monitors must recapture due URLs even if no editor is signed in.
- * Ticks after boot, then every 5 minutes. Production can also hit GET /api/cron/monitors.
+ * Dark Desk monitors recapture due URLs even if no editor is signed in.
+ * Desk jobs drain here too if the click's process would have gone to sleep.
+ * Ticks after boot, then on an interval. Production: GET /api/cron/monitors.
  */
 function darkDeskMonitorPlugin(): Plugin {
   return {
@@ -179,6 +180,23 @@ function darkDeskMonitorPlugin(): Plugin {
           ticking = false;
         }
       };
+      let jobsTicking = false;
+      const tickJobs = async () => {
+        if (jobsTicking) return;
+        jobsTicking = true;
+        try {
+          const mod = (await server.ssrLoadModule("/src/lib/news/jobs.ts")) as {
+            drainQueuedJobs?: () => Promise<unknown>;
+          };
+          if (typeof mod.drainQueuedJobs === "function") {
+            await mod.drainQueuedJobs();
+          }
+        } catch (err) {
+          console.error("[townreporter] job drain failed:", err);
+        } finally {
+          jobsTicking = false;
+        }
+      };
       const intervalMs = 5 * 60 * 1000;
       const first = setTimeout(() => {
         void tick();
@@ -186,9 +204,17 @@ function darkDeskMonitorPlugin(): Plugin {
       const id = setInterval(() => {
         void tick();
       }, intervalMs);
+      const jobsFirst = setTimeout(() => {
+        void tickJobs();
+      }, 8_000);
+      const jobsId = setInterval(() => {
+        void tickJobs();
+      }, 20_000);
       const stop = () => {
         clearTimeout(first);
         clearInterval(id);
+        clearTimeout(jobsFirst);
+        clearInterval(jobsId);
       };
       server.httpServer?.once("close", stop);
     },

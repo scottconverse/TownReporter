@@ -8,6 +8,7 @@ import {
   emptyPlan,
   ensureInvestigateSchema,
   observeBaseline,
+  persistDiscovery,
   researchLoop,
   seedInvestigation,
   type FetchFn,
@@ -180,6 +181,48 @@ describe("researchLoop integration", { timeout: 120000 }, () => {
     assert.ok(claims.length > 0, "claims should be persisted from the plan");
     assert.equal(claims[0]!.investigation_id, id);
     assert.ok(claims.some((c) => c.version_id != null), "claims must point at an artifact version");
+  });
+
+  it("a later editor on the same file sees the hops", async () => {
+    const opener = `hops-opener-${Date.now()}`;
+    const later = `hops-later-${Date.now()}`;
+    const { sql, id } = await bootInv(opener, "Shared trail");
+    await persistDiscovery(opener, id, {
+      kind: "company",
+      label: "Acme Holdings LLC",
+      why: "Named in the packet",
+      evidence: "Council packet",
+      priority: 9,
+      query: "Acme Holdings Longmont",
+    });
+    const asLater = await sql<{ label: string }>`
+      select label from frontier_items where investigation_id = ${id}
+    `;
+    assert.equal(asLater[0]?.label, "Acme Holdings LLC");
+
+    await researchLoop({
+      userId: later,
+      investigationId: id,
+      hops: 1,
+      search: async () => [{ title: "Acme", url: PAGE_C, snippet: "Acme Holdings LLC" }],
+      fetch: fetchDoc,
+      planner: async () => {
+        const p = emptyPlan();
+        p.searches = ["Acme Holdings Longmont"];
+        p.fetch_urls = [PAGE_C];
+        p.summary = "Follow Acme";
+        return p;
+      },
+      archives: async () => [],
+    });
+    const log = await sql<{ query: string }>`
+      select query from search_log where investigation_id = ${id}
+    `;
+    assert.ok(log.length > 0, "later editor should write hops onto the same file");
+    const arts = await sql<{ url: string }>`
+      select url from artifacts where investigation_id = ${id}
+    `;
+    assert.ok(arts.some((a) => a.url.includes("sos.state.co.us")), arts.map((a) => a.url).join("\n"));
   });
 
   it("keeps the original water report when the live URL later 404s, and records disappearance", async () => {

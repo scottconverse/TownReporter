@@ -129,7 +129,7 @@ export async function enqueueJob(opts: {
 
 export function kickJobs() {
   setTimeout(() => {
-    void drainJobs();
+    void drainQueuedJobs();
   }, 0);
 }
 
@@ -140,9 +140,11 @@ export async function setJobStage(id: number, stage: string) {
   `;
 }
 
-async function drainJobs() {
-  if (draining) return;
+/** Finish queued (or stale running) jobs. Same process, or a cron wake-up. */
+export async function drainQueuedJobs(): Promise<{ ran: number }> {
+  if (draining) return { ran: 0 };
   draining = true;
+  let ran = 0;
   try {
     await ensureJobsSchema();
     const sql = await getSql();
@@ -158,12 +160,14 @@ async function drainJobs() {
       `;
       if (!next[0]) break;
       await executeJob(next[0]);
+      ran += 1;
     }
   } catch (err) {
     console.error("[jobs] drain failed", err);
   } finally {
     draining = false;
   }
+  return { ran };
 }
 
 async function executeJob(job: DeskJob) {

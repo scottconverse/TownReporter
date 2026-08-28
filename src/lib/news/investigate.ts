@@ -689,7 +689,7 @@ export async function persistDiscovery(
     why: string;
   }>`
     select id, queries_tried, status, evidence, closed_reason, why from frontier_items
-    where investigation_id = ${investigationId} and user_id = ${userId} and label = ${label}
+    where investigation_id = ${investigationId} and label = ${label}
     limit 1
   `;
   if (existing[0]) {
@@ -771,7 +771,7 @@ async function markFrontier(
   await sql`
     update frontier_items
     set status = ${status}, closed_reason = ${reason.slice(0, 800)}
-    where investigation_id = ${investigationId} and user_id = ${userId}
+    where investigation_id = ${investigationId}
       and label = ${label.slice(0, 240)} and status in ('open', 'investigating', 'reopened')
   `;
 }
@@ -795,7 +795,7 @@ async function recordStrategyTried(
   }>`
     select id, strategies_tried, strategies_budget, search_zero_count, kind, queries_tried
     from frontier_items
-    where investigation_id = ${investigationId} and user_id = ${userId} and label = ${label.slice(0, 240)}
+    where investigation_id = ${investigationId} and label = ${label.slice(0, 240)}
     limit 1
   `;
   const row = rows[0];
@@ -913,7 +913,7 @@ export async function rememberCapture(opts: {
   }
   if (versionId && (createdVersion || !existing[0]) && fullText) {
     const already = await sql<{ c: number }>`
-      select count(*)::int as c from artifact_chunks where version_id = ${versionId} and user_id = ${opts.userId}
+      select count(*)::int as c from artifact_chunks where version_id = ${versionId}
     `;
     if ((already[0]?.c ?? 0) === 0) {
       const chunks = chunksFromEvidence(fullText, opts.pages);
@@ -950,7 +950,7 @@ export async function rememberCapture(opts: {
 
   if (versionId && opts.rawBytes && opts.rawBytes.byteLength > 0 && opts.rawBytes.byteLength <= 4_000_000) {
     const alreadyBlob = await sql<{ c: number }>`
-      select count(*)::int as c from artifact_blobs where version_id = ${versionId} and user_id = ${opts.userId}
+      select count(*)::int as c from artifact_blobs where version_id = ${versionId}
     `;
     if ((alreadyBlob[0]?.c ?? 0) === 0) {
       const b64 = Buffer.from(opts.rawBytes).toString("base64");
@@ -1227,7 +1227,7 @@ export async function retrievePack(
   const sql = await getSql();
   const seeds = await sql<{ url: string; title: string; full_text: string }>`
     select url, title, full_text from artifacts
-    where investigation_id = ${investigationId} and user_id = ${userId} and classification = 'watch'
+    where investigation_id = ${investigationId} and classification = 'watch'
     order by id asc limit 3
   `;
   const recent = await sql<{
@@ -1239,7 +1239,7 @@ export async function retrievePack(
     content_hash: string;
   }>`
     select url, title, full_text, version_id, capture_event_id, content_hash from artifacts
-    where investigation_id = ${investigationId} and user_id = ${userId}
+    where investigation_id = ${investigationId}
     order by id desc limit 40
   `;
   const lowered = terms.map((t) => t.toLowerCase()).filter((t) => t.length > 3);
@@ -1258,10 +1258,9 @@ export async function retrievePack(
           select c.excerpt, c.page_number, c.locator, c.version_id, av.url
           from artifact_chunks c
           join artifact_versions av on av.id = c.version_id
-          where av.user_id = ${userId}
-            and exists (
+          where exists (
               select 1 from artifacts a
-              where a.version_id = av.id and a.investigation_id = ${investigationId} and a.user_id = ${userId}
+              where a.version_id = av.id and a.investigation_id = ${investigationId}
             )
           order by c.id desc
           limit 80
@@ -1273,19 +1272,19 @@ export async function retrievePack(
 
   const frontier = await sql<{ label: string; kind: string; why: string; priority: number; next_steps: string; status: string }>`
     select label, kind, why, priority, next_steps, status from frontier_items
-    where investigation_id = ${investigationId} and user_id = ${userId}
+    where investigation_id = ${investigationId}
     order by priority desc, id asc limit 16
   `;
   const hyps = await sql<{ body: string; status: string; supporting: string; contradicting: string }>`
     select body, status, supporting, contradicting from hypotheses
-    where investigation_id = ${investigationId} and user_id = ${userId}
+    where investigation_id = ${investigationId}
     order by id desc limit 12
   `;
   const ents = await sql<{ name: string; kind: string; why: string; canonical: string }>`
     select e.name, e.kind, e.why, e.canonical
     from investigation_entities ie
     join entities e on e.id = ie.entity_id
-    where ie.investigation_id = ${investigationId} and ie.user_id = ${userId}
+    where ie.investigation_id = ${investigationId}
     order by ie.id desc limit 20
   `;
   const historical = await sql<{ name: string; kind: string; why: string; investigation_id: number; verdict: string | null }>`
@@ -1297,12 +1296,12 @@ export async function retrievePack(
         (m.left_canonical = e.canonical and m.right_canonical in (
           select e2.canonical from investigation_entities x
           join entities e2 on e2.id = x.entity_id
-          where x.investigation_id = ${investigationId} and x.user_id = ${userId}
+          where x.investigation_id = ${investigationId}
         ))
         or (m.right_canonical = e.canonical and m.left_canonical in (
           select e2.canonical from investigation_entities x
           join entities e2 on e2.id = x.entity_id
-          where x.investigation_id = ${investigationId} and x.user_id = ${userId}
+          where x.investigation_id = ${investigationId}
         ))
       )
     where e.user_id = ${userId}
@@ -1311,7 +1310,7 @@ export async function retrievePack(
         e.canonical in (
           select e2.canonical from investigation_entities x
           join entities e2 on e2.id = x.entity_id
-          where x.investigation_id = ${investigationId} and x.user_id = ${userId}
+          where x.investigation_id = ${investigationId}
         )
         or m.id is not null
       )
@@ -1320,23 +1319,23 @@ export async function retrievePack(
   `;
   const rels = await sql<{ from_name: string; to_name: string; kind: string; evidence: string }>`
     select from_name, to_name, kind, evidence from relationships
-    where investigation_id = ${investigationId} and user_id = ${userId} limit 16
+    where investigation_id = ${investigationId} limit 16
   `;
   const claims = await sql<{ body: string; kind: string; evidence: string }>`
     select body, kind, evidence from claims
-    where investigation_id = ${investigationId} and user_id = ${userId} order by id desc limit 12
+    where investigation_id = ${investigationId} order by id desc limit 12
   `;
   const anoms = await sql<{ kind: string; summary: string }>`
     select kind, summary from anomalies
-    where investigation_id = ${investigationId} and user_id = ${userId} order by id desc limit 10
+    where investigation_id = ${investigationId} order by id desc limit 10
   `;
   const dead = await sql<{ hypothesis: string; dismissed_because: string }>`
     select hypothesis, dismissed_because from dead_ends
-    where investigation_id = ${investigationId} and user_id = ${userId} order by id desc limit 8
+    where investigation_id = ${investigationId} order by id desc limit 8
   `;
   const searches = await sql<{ query: string; state: string | null }>`
     select query, state from search_log
-    where investigation_id = ${investigationId} and user_id = ${userId} order by id desc limit 24
+    where investigation_id = ${investigationId} order by id desc limit 24
   `;
   return [
     `FRONTIER:\n${frontier.map((f) => `${f.status} ${f.priority} ${f.kind}: ${f.label} — ${f.why}`).join("\n") || "(empty)"}`,
@@ -1373,10 +1372,9 @@ export async function findEvidenceChunks(userId: string, investigationId: number
     select c.excerpt, c.locator, c.page_number, c.version_id
     from artifact_chunks c
     join artifact_versions av on av.id = c.version_id
-    where av.user_id = ${userId}
-      and exists (
+    where exists (
         select 1 from artifacts a
-        where a.version_id = av.id and a.investigation_id = ${investigationId} and a.user_id = ${userId}
+        where a.version_id = av.id and a.investigation_id = ${investigationId}
       )
       and lower(c.excerpt) like ${"%" + n + "%"}
     order by c.id asc
@@ -1399,14 +1397,14 @@ export async function researchLoop(opts: {
   const planner = opts.planner;
   const tried = new Set<string>();
   const priorQueries = await sql<{ query: string }>`
-    select query from search_log where investigation_id = ${opts.investigationId} and user_id = ${opts.userId}
+    select query from search_log where investigation_id = ${opts.investigationId}
   `;
   for (const q of priorQueries) tried.add(queryFingerprint(q.query));
 
   await sql`
     update investigations
     set status = ${"investigating"}, updated_at = now()
-    where id = ${opts.investigationId} and user_id = ${opts.userId}
+    where id = ${opts.investigationId}
   `;
 
   let hopsDone = 0;
@@ -1452,7 +1450,7 @@ export async function researchLoop(opts: {
       strategies_tried: string | null;
     }>`
       select id, label, kind, next_steps, strategies_tried from frontier_items
-      where investigation_id = ${opts.investigationId} and user_id = ${opts.userId}
+      where investigation_id = ${opts.investigationId}
         and status in ('open', 'investigating', 'reopened')
       order by priority desc limit 16
     `;
@@ -1620,7 +1618,7 @@ export async function researchLoop(opts: {
         ) {
           await sql`
             update frontier_items set status = 'investigating'
-            where investigation_id = ${opts.investigationId} and user_id = ${opts.userId}
+            where investigation_id = ${opts.investigationId}
               and label = ${f.label} and status in ('open', 'reopened')
           `;
           await persistDiscovery(opts.userId, opts.investigationId, {
@@ -1873,7 +1871,7 @@ export async function researchLoop(opts: {
               urls: plan.fetch_urls,
               questions: plan.questions,
             }).slice(0, 4000)}
-        where investigation_id = ${opts.investigationId} and user_id = ${opts.userId} and hop = ${hop + 1}
+        where investigation_id = ${opts.investigationId} and hop = ${hop + 1}
       `;
     }
 
@@ -1881,12 +1879,12 @@ export async function researchLoop(opts: {
     await sql`
       update investigations
       set hops = hops + 1, summary = ${lastSummary.slice(0, 2500)}, updated_at = now()
-      where id = ${opts.investigationId} and user_id = ${opts.userId}
+      where id = ${opts.investigationId}
     `;
 
     const open = await sql<{ c: number }>`
       select count(*)::int as c from frontier_items
-      where investigation_id = ${opts.investigationId} and user_id = ${opts.userId}
+      where investigation_id = ${opts.investigationId}
         and status in ('open', 'investigating', 'reopened')
     `;
     if (plan.stop && (open[0]?.c ?? 0) === 0) break;
@@ -1894,12 +1892,12 @@ export async function researchLoop(opts: {
 
   const open = await sql<{ c: number }>`
     select count(*)::int as c from frontier_items
-    where investigation_id = ${opts.investigationId} and user_id = ${opts.userId}
+    where investigation_id = ${opts.investigationId}
       and status in ('open', 'investigating', 'reopened')
   `;
   const artsN = await sql<{ c: number }>`
     select count(*)::int as c from artifacts
-    where investigation_id = ${opts.investigationId} and user_id = ${opts.userId}
+    where investigation_id = ${opts.investigationId}
   `;
   const paused = (open[0]?.c ?? 0) > 0;
   const pauseReason = paused
@@ -1910,7 +1908,7 @@ export async function researchLoop(opts: {
     set status = ${paused ? "paused" : "open"},
         pause_reason = ${pauseReason || null},
         updated_at = now()
-    where id = ${opts.investigationId} and user_id = ${opts.userId}
+    where id = ${opts.investigationId}
   `;
   return {
     hops: hopsDone,
@@ -1954,7 +1952,7 @@ async function resolveProvenance(
     }>`
       select id, version_id, source_url, content_hash, observed_at::text as observed_at
       from capture_events
-      where id = ${hint.capture_event_id} and user_id = ${userId}
+      where id = ${hint.capture_event_id}
       limit 1
     `;
     if (row[0]) {
@@ -1973,13 +1971,13 @@ async function resolveProvenance(
     const row = await sql<{ id: number; url: string; content_hash: string; captured_at: string }>`
       select id, url, content_hash, captured_at::text as captured_at
       from artifact_versions
-      where id = ${hint.artifact_version_id} and user_id = ${userId}
+      where id = ${hint.artifact_version_id}
       limit 1
     `;
     if (row[0]) {
       const cap = await sql<{ id: number; observed_at: string }>`
         select id, observed_at::text as observed_at from capture_events
-        where version_id = ${row[0].id} and user_id = ${userId}
+        where version_id = ${row[0].id}
           and (investigation_id = ${investigationId} or investigation_id is null)
         order by id desc limit 1
       `;
@@ -2010,7 +2008,7 @@ async function resolveProvenance(
     }>`
       select id, version_id, source_url, content_hash, observed_at::text as observed_at
       from capture_events
-      where user_id = ${userId} and investigation_id = ${investigationId} and source_url = ${source}
+      where investigation_id = ${investigationId} and source_url = ${source}
       order by id desc limit 1
     `;
     if (cap[0]) {
@@ -2026,7 +2024,7 @@ async function resolveProvenance(
     }
     const art = await sql<{ version_id: number | null; capture_event_id: number | null; content_hash: string; url: string }>`
       select version_id, capture_event_id, content_hash, url from artifacts
-      where investigation_id = ${investigationId} and user_id = ${userId} and url = ${source}
+      where investigation_id = ${investigationId} and url = ${source}
       order by id desc limit 1
     `;
     if (art[0]?.version_id || art[0]?.capture_event_id) {
@@ -2090,7 +2088,7 @@ async function persistPlan(userId: string, investigationId: number, plan: HopPla
         url: string;
       }>`
         select version_id, capture_event_id, url from artifacts
-        where investigation_id = ${investigationId} and user_id = ${userId}
+        where investigation_id = ${investigationId}
           and (
             lower(full_text) like ${"%" + e.name.toLowerCase().slice(0, 80) + "%"}
             or lower(title) like ${"%" + e.name.toLowerCase().slice(0, 80) + "%"}
@@ -2119,7 +2117,7 @@ async function persistPlan(userId: string, investigationId: number, plan: HopPla
               first_seen_capture_id = coalesce(first_seen_capture_id, ${hit[0].capture_event_id}),
               first_seen_url = coalesce(first_seen_url, ${hit[0].url})
           where investigation_id = ${investigationId} and entity_id = ${entityId}
-            and user_id = ${userId} and first_seen_capture_id is null
+            and first_seen_capture_id is null
         `;
       }
     }
@@ -2202,7 +2200,7 @@ async function persistPlan(userId: string, investigationId: number, plan: HopPla
         : "active";
     const existing = await sql<{ id: number }>`
       select id from hypotheses
-      where investigation_id = ${investigationId} and user_id = ${userId} and body = ${h.text.slice(0, 2000)}
+      where investigation_id = ${investigationId} and body = ${h.text.slice(0, 2000)}
       limit 1
     `;
     if (existing[0]) {
@@ -2279,7 +2277,7 @@ async function persistPlan(userId: string, investigationId: number, plan: HopPla
     const entNames = await sql<{ name: string }>`
       select e.name from investigation_entities ie
       join entities e on e.id = ie.entity_id
-      where ie.investigation_id = ${investigationId} and ie.user_id = ${userId}
+      where ie.investigation_id = ${investigationId}
       limit 40
     `;
     const blob = [d.hypothesis, ...entNames.map((n) => n.name)].join(", ").slice(0, 2000);
@@ -2294,7 +2292,7 @@ async function persistPlan(userId: string, investigationId: number, plan: HopPla
     await sql`
       update hypotheses
       set status = 'dead-end', transition_note = ${d.reason.slice(0, 800)}
-      where investigation_id = ${investigationId} and user_id = ${userId}
+      where investigation_id = ${investigationId}
         and body = ${d.hypothesis.slice(0, 2000)}
     `;
   }
@@ -2335,7 +2333,7 @@ export async function resurfaceDeadEnds(
     const label = h.hypothesis.slice(0, 240);
     const existing = await sql<{ id: number; status: string }>`
       select id, status from frontier_items
-      where user_id = ${userId} and investigation_id = ${investigationId} and label = ${label}
+      where investigation_id = ${investigationId} and label = ${label}
       limit 1
     `;
     if (existing[0]) {
@@ -2366,7 +2364,7 @@ export async function resurfaceDeadEnds(
     await sql`
       update hypotheses
       set status = ${"reopened"}, transition_note = ${"New evidence revived this dead end"}
-      where user_id = ${userId} and investigation_id = ${investigationId}
+      where investigation_id = ${investigationId}
         and status = ${"dead-end"} and body = ${h.hypothesis.slice(0, 2000)}
     `;
   }
@@ -2404,7 +2402,7 @@ export async function checkBaselines(userId: string, investigationId: number, no
     for (const m of missing) {
       const already = await sql<{ id: number }>`
         select id from anomalies
-        where user_id = ${userId} and investigation_id = ${investigationId}
+        where investigation_id = ${investigationId}
           and kind = ${"missing-cadence"} and url is not distinct from ${m.url || null}
         limit 1
       `;
@@ -2584,7 +2582,7 @@ export async function runDueMonitors(opts: {
         if (invId) {
           const rows = await sql<{ id: number }>`
             select id from frontier_items
-            where user_id = ${opts.userId} and investigation_id = ${invId} and label = ${url}
+            where investigation_id = ${invId} and label = ${url}
               and status in ('dead-end', 'exhausted', 'deferred')
             limit 1
           `;
