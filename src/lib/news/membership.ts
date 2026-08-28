@@ -127,13 +127,13 @@ export async function assertSignupOpen() {
 export async function leaveAsEditor(userId: string): Promise<void> {
   await ensureNewsroomSchema();
   const sql = await getSql();
-  const mine = await sql<{ role: string }>`
-    select role from newsroom_members where user_id = ${userId} limit 1
+  const mine = await sql<{ role: string; newsroom_id: number }>`
+    select role, newsroom_id from newsroom_members where user_id = ${userId} limit 1
   `;
   if (!mine[0] || (mine[0].role !== "owner" && mine[0].role !== "editor")) {
     throw new ForbiddenError();
   }
-  await sql`delete from newsroom_members`;
+  await sql`delete from newsroom_members where newsroom_id = ${mine[0].newsroom_id}`;
 }
 
 /**

@@ -6,6 +6,7 @@ import { extractPdfBetter } from "./ingest.ts";
 import {
   emptyPlan,
   ensureInvestigateSchema,
+  evidenceAppearsInText,
   findEvidenceChunks,
   rememberCapture,
   researchLoop,
@@ -33,6 +34,15 @@ const fetchOk = (text: string, title: string, extras: string[] = []): Awaited<Re
   text,
   title,
   extras,
+});
+
+describe("quote in document", () => {
+  it("does not treat a paraphrase or a short string as a quote", () => {
+    const body = "Packet A awards a sidewalk contract to Civic Paving LLC.";
+    assert.equal(evidenceAppearsInText("Packet A awards a sidewalk contract to Civic Paving LLC.", body), true);
+    assert.equal(evidenceAppearsInText("Packet A awards the contract", body), false);
+    assert.equal(evidenceAppearsInText("no locator", body), false);
+  });
 });
 
 describe("forensic chronology", { timeout: 120000 }, () => {
@@ -139,14 +149,14 @@ describe("exact provenance", { timeout: 120000 }, () => {
           p.claims.push({
             text: "Civic Paving won the sidewalk contract",
             kind: "FACT",
-            evidence: "Packet A awards the contract",
+            evidence: "Packet A awards a sidewalk contract to Civic Paving LLC.",
             source_url: URL_A,
           });
           p.relationships.push({
             from: "City of Longmont",
             to: "Civic Paving LLC",
             kind: "contract",
-            evidence: "award in packet A",
+            evidence: "Packet A awards a sidewalk contract",
             source_url: URL_A,
           });
           p.summary = "fetch A";
@@ -155,7 +165,7 @@ describe("exact provenance", { timeout: 120000 }, () => {
           p.claims.push({
             text: "Jane Roe is registered agent",
             kind: "FACT",
-            evidence: "Packet B agent record",
+            evidence: "Packet B names Jane Roe as registered agent for Civic Paving LLC.",
             source_url: URL_B,
           });
           p.claims.push({
@@ -163,11 +173,17 @@ describe("exact provenance", { timeout: 120000 }, () => {
             kind: "INFERENCE",
             evidence: "no locator",
           });
+          p.claims.push({
+            text: "A quote the model invented",
+            kind: "FACT",
+            evidence: "The mayor secretly sold the water plant to a holding company.",
+            source_url: URL_A,
+          });
           p.relationships.push({
             from: "Civic Paving LLC",
             to: "Jane Roe",
             kind: "agent",
-            evidence: "agent in packet B",
+            evidence: "Jane Roe as registered agent for Civic Paving LLC.",
             source_url: URL_B,
           });
           p.summary = "fetch B";
@@ -197,15 +213,20 @@ describe("exact provenance", { timeout: 120000 }, () => {
     const fromA = claims.find((c) => /sidewalk/i.test(c.body));
     const fromB = claims.find((c) => /registered agent/i.test(c.body));
     const unresolved = claims.find((c) => /no supporting document/i.test(c.body));
-    assert.ok(fromA && fromB && unresolved);
+    const invented = claims.find((c) => /invented/i.test(c.body));
+    assert.ok(fromA && fromB && unresolved && invented);
     assert.equal(fromA.version_id, verA.id);
     assert.equal(fromB.version_id, verB.id);
     assert.notEqual(fromA.version_id, fromB.version_id);
     assert.ok(fromA.capture_event_id != null && fromB.capture_event_id != null);
     assert.notEqual(fromA.capture_event_id, fromB.capture_event_id);
+    assert.equal(fromA.provenance_status, "resolved");
+    assert.equal(fromB.provenance_status, "resolved");
     assert.equal(unresolved.provenance_status, "unresolved");
     assert.equal(unresolved.version_id, null);
     assert.equal(unresolved.capture_event_id, null);
+    assert.equal(invented.provenance_status, "unresolved");
+    assert.equal(invented.version_id, verA.id);
 
     const rels = await sql<{ from_name: string; version_id: number | null; provenance_status: string | null }>`
       select from_name, version_id, provenance_status from relationships
@@ -215,6 +236,8 @@ describe("exact provenance", { timeout: 120000 }, () => {
     const relB = rels.find((r) => r.from_name === "Civic Paving LLC");
     assert.equal(relA?.version_id, verA.id);
     assert.equal(relB?.version_id, verB.id);
+    assert.equal(relA?.provenance_status, "resolved");
+    assert.equal(relB?.provenance_status, "resolved");
   });
 });
 

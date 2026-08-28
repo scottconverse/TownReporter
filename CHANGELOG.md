@@ -1,6 +1,16 @@
 # Changelog
 
-Current release: **0.4.1**.
+Current release: **0.4.2**.
+
+## 0.4.2 — 2026-08-27
+
+The cited document has to contain the quote. Mapped IPv6 loopback is blocked. Leave only clears this newsroom.
+
+- Provenance `resolved` means the quoted evidence is in the captured text (or a stored chunk of it), not that the model named an id that exists. A real capture with an invented quote stays unresolved. The cited version is still stored so you can see what it pointed at.
+- `http://[::ffff:7f00:1]/` and `http://[::ffff:a9fe:a9fa]/` are blocked. The URL parser emits the hex form; the guard was only unwrapping dotted `::ffff:127.0.0.1`, which production never sees. Tests hit the production function, not a copy.
+- **Leave as editor** deletes members of this newsroom, not every row in the table.
+
+Not in 0.4.2: real OCR, city picker, mailer, invite, newsroom-keyed URL history / monitors / names.
 
 ## 0.4.1 — 2026-08-27
 

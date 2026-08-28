@@ -8,11 +8,27 @@ function isIP(host: string): boolean {
   return false;
 }
 
+/** `::ffff:7f00:1` and `::ffff:127.0.0.1` are 127.0.0.1. URL parsers emit the hex form. */
+function v4FromMapped6(raw: string): string | null {
+  const dotted = raw.match(/^(?:(?:0:){1,5}|::)ffff:((?:\d{1,3}\.){3}\d{1,3})$/);
+  if (dotted?.[1]) return dotted[1];
+  const hex = raw.match(/^(?:(?:0:){1,5}|::)ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (!hex) return null;
+  const hi = Number.parseInt(hex[1]!, 16);
+  const lo = Number.parseInt(hex[2]!, 16);
+  if (!Number.isFinite(hi) || !Number.isFinite(lo)) return null;
+  return `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`;
+}
+
+function looksIPv4Mapped(raw: string): boolean {
+  return raw.startsWith("::ffff:") || /^(?:0:){1,5}ffff:/.test(raw);
+}
+
 export function isBlockedAddress(ip: string): boolean {
   const raw = ip.trim().toLowerCase().replace(/^\[|\]$/g, "");
-  if (raw.startsWith("::ffff:") && raw.includes(".")) {
-    return isBlockedAddress(raw.slice(raw.lastIndexOf(":") + 1));
-  }
+  const mapped = v4FromMapped6(raw);
+  if (mapped) return isBlockedAddress(mapped);
+  if (looksIPv4Mapped(raw)) return true;
   if (raw.includes(".")) {
     const p = raw.split(".").map(Number);
     if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {

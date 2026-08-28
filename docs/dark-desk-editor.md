@@ -1,6 +1,6 @@
 # Dark Desk — editor UI brief (for design)
 
-As of **0.4.1** the hop engine is the same as 0.3.0, and hops belong to the file — not whoever opened it. Keep digging is a persisted job; Start digging no longer dumps the last 16 snapshots into the file. This is the signed-in investigative desk at `/desk/dark`. It is **not** the public paper and **not** the reporting queue.
+As of **0.4.2** the hop engine is the same as 0.3.0, hops belong to the file, and a claim is `resolved` only when the quoted evidence is in the captured document. Keep digging is a persisted job; Start digging no longer dumps the last 16 snapshots into the file. This is the signed-in investigative desk at `/desk/dark`. It is **not** the public paper and **not** the reporting queue.
 
 A designer is coming in because the current page is still not a usable newsroom surface. This note is the contract. Do not treat it as finished UI.
 

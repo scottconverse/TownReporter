@@ -1,6 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isGrokPreviewHost, newsroomSetupToken, SetupRequiredError, ForbiddenError, leaveAsEditor } from "./membership.ts";
+import { getSql } from "../db.ts";
+import {
+  ensureNewsroomSchema,
+  isGrokPreviewHost,
+  newsroomSetupToken,
+  SetupRequiredError,
+  ForbiddenError,
+  leaveAsEditor,
+} from "./membership.ts";
 
 describe("newsroom hosts", () => {
   it("treats grok.me as preview and localhost as self-host", () => {
@@ -35,5 +43,28 @@ describe("setup token env", () => {
       assert.ok(err instanceof ForbiddenError);
       return true;
     });
+  });
+
+  it("leave as editor deletes this newsroom's members, not every row", async () => {
+    await ensureNewsroomSchema();
+    const sql = await getSql();
+    const owner = `leave-owner-${Date.now()}`;
+    const decoy = `leave-decoy-${Date.now()}`;
+    await sql`
+      insert into newsroom_members (user_id, role, newsroom_id)
+      values (${owner}, ${"owner"}, ${1})
+    `;
+    await sql`
+      insert into newsroom_members (user_id, role, newsroom_id)
+      values (${decoy}, ${"editor"}, ${99})
+    `;
+    await leaveAsEditor(owner);
+    const left = await sql<{ user_id: string; newsroom_id: number }>`
+      select user_id, newsroom_id from newsroom_members
+      where user_id = ${owner} or user_id = ${decoy}
+    `;
+    assert.equal(left.some((r) => r.user_id === owner), false);
+    assert.equal(left.some((r) => r.user_id === decoy && r.newsroom_id === 99), true);
+    await sql`delete from newsroom_members where user_id = ${decoy}`;
   });
 });

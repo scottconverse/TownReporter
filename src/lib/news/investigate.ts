@@ -1381,6 +1381,13 @@ export async function findEvidenceChunks(userId: string, investigationId: number
   `;
 }
 
+/** Quoted evidence is in the captured text. Not a citation of an id that happens to exist. */
+export function evidenceAppearsInText(evidence: string, text: string): boolean {
+  const q = evidence.toLowerCase().replace(/\s+/g, " ").trim();
+  if (q.length < 12) return false;
+  return text.toLowerCase().replace(/\s+/g, " ").includes(q);
+}
+
 export async function researchLoop(opts: {
   userId: string;
   investigationId: number;
@@ -1942,6 +1949,33 @@ async function resolveProvenance(
     status: "unresolved" as const,
     locator: hint.locator ?? null,
   };
+
+  async function confirm(hit: {
+    versionId: number | null;
+    captureEventId: number | null;
+    sourceUrl: string | null;
+    contentHash: string | null;
+    capturedAt: string | null;
+    locator: string | null;
+  }) {
+    const quote = (hint.excerpt ?? "").trim();
+    if (!quote) return { ...hit, status: "resolved" as const };
+    let body = "";
+    if (hit.versionId) {
+      const rows = await sql<{ full_text: string }>`
+        select full_text from artifact_versions where id = ${hit.versionId} limit 1
+      `;
+      body = rows[0]?.full_text ?? "";
+    }
+    if (evidenceAppearsInText(quote, body)) return { ...hit, status: "resolved" as const };
+    const chunks = await findEvidenceChunks(userId, investigationId, quote);
+    const chunk = chunks.find((c) => evidenceAppearsInText(quote, c.excerpt));
+    if (chunk) {
+      return { ...hit, locator: hit.locator ?? chunk.locator, status: "resolved" as const };
+    }
+    return { ...hit, status: "unresolved" as const };
+  }
+
   if (hint.capture_event_id) {
     const row = await sql<{
       id: number;
@@ -1956,15 +1990,14 @@ async function resolveProvenance(
       limit 1
     `;
     if (row[0]) {
-      return {
+      return confirm({
         versionId: row[0].version_id,
         captureEventId: row[0].id,
         sourceUrl: row[0].source_url,
         contentHash: row[0].content_hash,
         capturedAt: row[0].observed_at,
-        status: "resolved",
         locator: hint.locator ?? null,
-      };
+      });
     }
   }
   if (hint.artifact_version_id) {
@@ -1981,15 +2014,14 @@ async function resolveProvenance(
           and (investigation_id = ${investigationId} or investigation_id is null)
         order by id desc limit 1
       `;
-      return {
+      return confirm({
         versionId: row[0].id,
         captureEventId: cap[0]?.id ?? null,
         sourceUrl: row[0].url,
         contentHash: row[0].content_hash,
         capturedAt: cap[0]?.observed_at ?? row[0].captured_at,
-        status: "resolved",
         locator: hint.locator ?? null,
-      };
+      });
     }
   }
   if (hint.source_url) {
@@ -2012,15 +2044,14 @@ async function resolveProvenance(
       order by id desc limit 1
     `;
     if (cap[0]) {
-      return {
+      return confirm({
         versionId: cap[0].version_id,
         captureEventId: cap[0].id,
         sourceUrl: cap[0].source_url,
         contentHash: cap[0].content_hash,
         capturedAt: cap[0].observed_at,
-        status: "resolved",
         locator: hint.locator ?? null,
-      };
+      });
     }
     const art = await sql<{ version_id: number | null; capture_event_id: number | null; content_hash: string; url: string }>`
       select version_id, capture_event_id, content_hash, url from artifacts
@@ -2028,15 +2059,14 @@ async function resolveProvenance(
       order by id desc limit 1
     `;
     if (art[0]?.version_id || art[0]?.capture_event_id) {
-      return {
+      return confirm({
         versionId: art[0].version_id,
         captureEventId: art[0].capture_event_id,
         sourceUrl: art[0].url,
         contentHash: art[0].content_hash,
         capturedAt: null,
-        status: "resolved",
         locator: hint.locator ?? null,
-      };
+      });
     }
   }
   return unresolved;

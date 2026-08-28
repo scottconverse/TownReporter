@@ -28,15 +28,22 @@ describe("isBlockedAddress", () => {
       "ff02::1",
       "::ffff:127.0.0.1",
       "::ffff:10.1.2.3",
+      "::ffff:7f00:1",
+      "::ffff:a9fe:a9fa",
+      "::ffff:a9fe:a9fe",
+      "::ffff:a00:1",
+      "0:0:0:0:0:ffff:7f00:1",
     ]) {
       assert.equal(isBlockedAddress(ip), true, ip);
     }
   });
 
-  it("allows public v4", () => {
+  it("allows public v4 and public IPv4-mapped v6", () => {
     assert.equal(isBlockedAddress("1.1.1.1"), false);
     assert.equal(isBlockedAddress("8.8.8.8"), false);
     assert.equal(isBlockedAddress("104.18.32.1"), false);
+    assert.equal(isBlockedAddress("::ffff:808:808"), false);
+    assert.equal(isBlockedAddress("::ffff:8.8.8.8"), false);
   });
 });
 
@@ -59,6 +66,10 @@ describe("assertHttpUrl", () => {
     assert.throws(() => assertHttpUrl("http://169.254.169.254/latest/meta-data/"), /not fetchable/);
     assert.throws(() => assertHttpUrl("http://[::1]/"), /not fetchable/);
     assert.throws(() => assertHttpUrl("http://10.0.0.5/admin"), /not fetchable/);
+    assert.throws(() => assertHttpUrl("http://[::ffff:7f00:1]/"), /not fetchable/);
+    assert.throws(() => assertHttpUrl("http://[::ffff:a9fe:a9fa]/latest/meta-data/"), /not fetchable/);
+    assert.throws(() => assertHttpUrl("http://[::ffff:a9fe:a9fe]/latest/meta-data/"), /not fetchable/);
+    assert.throws(() => assertHttpUrl("http://[::ffff:127.0.0.1]/"), /not fetchable/);
   });
 
   it("accepts public https civic hosts", () => {

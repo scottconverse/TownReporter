@@ -107,6 +107,8 @@ describe("public URL gate", () => {
     for (const u of keep) assert.equal(assertHttpUrl(u).toString(), new URL(u).toString());
     assert.throws(() => assertHttpUrl("http://127.0.0.1/secret"));
     assert.throws(() => assertHttpUrl("http://169.254.169.254/latest/meta-data/"));
+    assert.throws(() => assertHttpUrl("http://[::ffff:7f00:1]/"));
+    assert.throws(() => assertHttpUrl("http://[::ffff:a9fe:a9fa]/latest/meta-data/"));
     assert.throws(() => assertHttpUrl("javascript:alert(1)"));
     assert.throws(() => assertHttpUrl("file:///etc/passwd"));
   });
