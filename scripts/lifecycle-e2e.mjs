@@ -78,9 +78,14 @@ async function main() {
   await page.getByRole("button", { name: "Post correction" }).first().click();
   await page.getByPlaceholder("What was wrong").fill(correction);
   await page.getByRole("button", { name: "Publish correction" }).click();
-  await page.getByText("Correction is public.").waitFor();
-
+  // Toast can miss if the desk remounts. The article is the record.
   await page.goto(articleUrl, { waitUntil: "domcontentloaded" });
+  for (let i = 0; i < 20; i++) {
+    if ((await page.getByText(/Tuesday evening/).count()) > 0) break;
+    if (i === 19) throw new Error("correction did not appear on the article");
+    await new Promise((r) => setTimeout(r, 1000));
+    await page.reload({ waitUntil: "domcontentloaded" });
+  }
   await page.getByRole("heading", { name: "Corrections" }).waitFor();
   await page.getByText(/Tuesday evening/).waitFor();
 
