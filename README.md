@@ -76,11 +76,13 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### This release (0.4.3)
 
-- **This newsroom, not whoever clicked.** Captures, monitors, names, and URL history key on the newsroom. A second identity cannot publish. Two people cannot both own the desk.
-- **An empty excerpt is unresolved.** A real capture id is not proof if there is no quote. The version id is kept.
-- **File → publish → correct** is the CI gate.
-- **Two drainers cannot run the same job.** Cron with no secret is off. A hostname that resolves to mapped loopback is refused before fetch.
-- **No newsletter tokens.** There is no mailer. GitHub Pages no longer prints a version number.
+- **One newsroom’s files stay in that newsroom.** Captures, watches, names, and the public paper are keyed on it. Who clicked is still stored. A second identity cannot publish.
+- **Empty excerpt is unresolved.** A real capture id with no quote is not `resolved`.
+- **File → publish → correct** is the lifecycle CI actually runs.
+- **Job drain is a database claim.** Two drainers cannot run the same job.
+- **Cron with no secret is 503.** Confirm-token newsletter code is gone; there is no mailer.
+- **Mapped loopback via DNS is blocked before fetch.** `::ffff:7f00:1` is 127.0.0.1.
+- **Honest OCR.** Image-only PDFs are unread. There is no JPEG-as-chat OCR.
 
 Also in 0.3.3–0.3.8: Mountain Time masthead, overlapping printed headlines collapse, Draft with AI paints without a reload, Redraft survives the cookie glitch, Start digging keeps the card on a failed open.
 
