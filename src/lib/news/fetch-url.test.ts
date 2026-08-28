@@ -2,9 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   assertHttpUrl,
-  assertPublicHttpUrl,
+  dnsLookups,
   fetchPublicHttp,
-  dnsLookup,
   isBlockedAddress,
 } from "./fetch-url.ts";
 
@@ -142,25 +141,51 @@ describe("fetchPublicHttp redirect SSRF", () => {
   });
 });
 
-describe("DNS mapped loopback", () => {
-  it("throws before fetch when lookup returns mapped loopback", async () => {
-    const origLookup = dnsLookup.resolve;
-    const origFetch = globalThis.fetch;
-    let fetched = 0;
-    dnsLookup.resolve = async () => [{ address: "::ffff:7f00:1" }];
-    globalThis.fetch = (async () => {
-      fetched += 1;
+describe("DNS lookup SSRF", () => {
+  it("stubbed lookup of mapped loopback throws before fetch", async () => {
+    const originalLookup = dnsLookups.lookup;
+    const originalFetch = globalThis.fetch;
+    const fetched: string[] = [];
+    dnsLookups.lookup = async () => [{ address: "::ffff:7f00:1" }];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      fetched.push(url);
       return new Response("should-not-fetch", { status: 200 });
     }) as typeof fetch;
     try {
       await assert.rejects(
-        () => assertPublicHttpUrl("https://example.com/civic"),
+        () => fetchPublicHttp(new URL("http://example.com/")),
         /not fetchable/,
       );
-      assert.equal(fetched, 0);
+      assert.equal(fetched.length, 0);
     } finally {
-      dnsLookup.resolve = origLookup;
-      globalThis.fetch = origFetch;
+      dnsLookups.lookup = originalLookup;
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("literal mapped-loopback SSRF", () => {
+  it("http://[::ffff:7f00:1]/ throws before fetch", async () => {
+    const original = globalThis.fetch;
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return new Response("should-not-fetch", { status: 200 });
+    }) as typeof fetch;
+    try {
+      await assert.rejects(
+        () => fetchPublicHttp(new URL("http://[::ffff:7f00:1]/")),
+        /not fetchable/,
+      );
+      assert.equal(called, false);
+    } finally {
+      globalThis.fetch = original;
     }
   });
 });
