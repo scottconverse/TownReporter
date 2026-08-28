@@ -18,6 +18,25 @@ export const Route = createFileRoute("/desk/story/$leadId")({
   component: StoryPage,
 });
 
+/**
+ * A server function that answered with something other than a result.
+ *
+ * The desk restarting, the tunnel returning its own error page, a proxy
+ * timeout — none of those come back as JSON, so the call resolves to
+ * `undefined` and reading `.ok` on it throws
+ * "Cannot read properties of undefined (reading 'ok')". That message names a
+ * property, not a cause, and it appears with nothing in the server log because
+ * the server never saw the request. Publishing a story failed this way and the
+ * error pointed at nothing.
+ *
+ * Editors get a sentence they can act on instead.
+ */
+const NO_ANSWER = "The desk did not answer that click. It may have been restarting — try again.";
+
+function answered<T>(res: T | undefined | null): res is T {
+  return res !== undefined && res !== null && typeof res === "object";
+}
+
 function StoryPage() {
   const { leadId } = Route.useParams();
   const id = Number(leadId);
@@ -128,6 +147,12 @@ function StoryPage() {
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       await qc.invalidateQueries({ queryKey: ["leads"] });
+      if (!answered(res)) {
+        setWaitingSince(null);
+        setSlowWait(false);
+        setMsg(NO_ANSWER);
+        return;
+      }
       if (res.ok) return;
       if (looksLikeDraftTimeout(res.error)) return;
       setWaitingSince(null);
@@ -166,6 +191,10 @@ function StoryPage() {
       return publishLead({ data: id });
     },
     onSuccess: async (res) => {
+      if (!answered(res)) {
+        setMsg(NO_ANSWER);
+        return;
+      }
       if (!res.ok) {
         setMsg(res.error);
         return;
@@ -524,6 +553,10 @@ function ReportingNotesPane({
     },
     onSuccess: (res) => {
       setPulling(null);
+      if (!answered(res)) {
+        setPullMsg(NO_ANSWER);
+        return;
+      }
       if (!res.ok) {
         setPullMsg(res.error);
         return;
