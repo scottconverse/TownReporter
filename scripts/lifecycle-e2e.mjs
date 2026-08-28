@@ -47,12 +47,13 @@ async function main() {
   await page.locator("body").waitFor();
 
   await page.goto(`${base}/login`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: /Create editor|Editor sign-in/ }).waitFor();
+  await page.getByRole("button", { name: "Create editor account" }).waitFor();
+  await page.getByRole("heading", { name: "Create the desk" }).waitFor();
   await page.getByLabel("Name").fill("E2E Editor");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create editor" }).click();
+  await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
 
   await page.getByRole("link", { name: "Queue", exact: true }).click();
