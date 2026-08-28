@@ -548,6 +548,18 @@ export function deskTakenLoginCopy() {
   };
 }
 
+/** Paper CTA while the newsroom has no owner, and the desk escape hatch. */
+export function createEditorCopy() {
+  return {
+    paper: "Create editor",
+    leave: "Leave as editor",
+    confirm:
+      "Really leave? The paper stays. Anyone can Create editor and own the desk.",
+    confirmYes: "Leave",
+    confirmNo: "Stay",
+  };
+}
+
 export type PrintedDup = { slug: string; publishedAt: string; note: string };
 
 export function nearDuplicate(

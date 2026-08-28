@@ -1,8 +1,11 @@
 import { Link, useMatchRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { PAPER, formatDate } from "@/lib/paper";
 import { APP_VERSION } from "@/lib/version";
 import { SignedIn, SignedOut, UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { deskClaimState } from "@/lib/news/claim";
+import { createEditorCopy } from "@/lib/news/desk-copy";
 
 export function Masthead({ compact = false }: { compact?: boolean }) {
   const today = formatDate(new Date());
@@ -103,13 +106,29 @@ function PaperNav() {
 
 function AuthSlot() {
   const { user, isPending } = useCurrentUserState();
-  if (isPending) {
+  const claim = useQuery({
+    queryKey: ["desk-claim"],
+    queryFn: () => deskClaimState(),
+    staleTime: 15_000,
+  });
+  const unclaimed = claim.data && !claim.data.claimed;
+  if (isPending || claim.isPending) {
     return (
       <div
         className="skeleton-rule h-11 w-16"
         aria-hidden
         title="Checking sign-in"
       />
+    );
+  }
+  if (unclaimed) {
+    return (
+      <Link
+        to="/login"
+        className="pressable inline-flex min-h-11 items-center bg-ink px-3 text-[11px] tracking-[0.12em] text-paper uppercase hover:bg-ink-2"
+      >
+        {createEditorCopy().paper}
+      </Link>
     );
   }
   if (user) {

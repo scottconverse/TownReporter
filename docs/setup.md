@@ -44,7 +44,7 @@ Then:
 npm run dev
 ```
 
-Open `http://localhost:8080/login`. Create an editor account (email + password). That account is stored in **your** database. With no `NEWSROOM_SETUP_TOKEN`, the first account becomes the newsroom **owner**. After that, Create editor account disappears — signup is not a second desk. On a public host, set `NEWSROOM_SETUP_TOKEN` and paste it on Create the desk — signup alone does not own the desk.
+Open the paper. Top right: **Create editor**. Email + password. That account is stored in **your** database. With no `NEWSROOM_SETUP_TOKEN`, that account becomes the newsroom **owner** and the button disappears. **Leave as editor** on the desk gives the hatch back. On a public host, set `NEWSROOM_SETUP_TOKEN` and paste it on Create the desk — signup alone does not own the desk.
 
 - Paper: `http://localhost:8080/`
 - Desk: `http://localhost:8080/desk`

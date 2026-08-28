@@ -36,6 +36,7 @@ import {
   recordKindFromUrl,
   excerptForEditor,
   deskTakenLoginCopy,
+  createEditorCopy,
 } from "./desk-copy.ts";
 import { presentWorthItem, rankWorthItems } from "./worth-a-look.ts";
 
@@ -458,6 +459,14 @@ describe("Worth a Look presentation", () => {
     assert.doesNotMatch(copy.body, /Create editor/i);
     assert.match(copy.unknownEmail, /already claimed/i);
     assert.doesNotMatch(copy.unknownEmail, /Create editor/i);
+  });
+
+  it("names the paper Create editor CTA and the desk leave hatch", () => {
+    const copy = createEditorCopy();
+    assert.equal(copy.paper, "Create editor");
+    assert.equal(copy.leave, "Leave as editor");
+    assert.match(copy.confirm, /paper stays/i);
+    assert.match(copy.confirm, /Create editor/i);
   });
 });
 

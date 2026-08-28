@@ -7,6 +7,7 @@ Current release: **0.4.0**.
 Not tagged. Honesty and the two leftovers that still lie about how the desk is built.
 
 - After the desk is claimed, `/login` is sign-in only. Create editor account is gone. The paper stays public. New accounts are rejected, not parked as useless logins.
+- Paper top-right **Create editor** only while the newsroom has no owner. After claim it is gone. **Leave as editor** on the desk (top left) drops the owner, signs them out, and puts Create editor back. The paper stays. Next person in owns the desk.
 - Dark Desk hops keyed by the newsroom, not the editor who opened the file.
 - Scan / Draft / Keep digging keep working after the click even if this program would otherwise go to sleep (a wake-up that finishes waiting jobs, not only this one process).
 

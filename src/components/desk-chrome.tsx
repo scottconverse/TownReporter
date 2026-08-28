@@ -1,8 +1,12 @@
-import { Link, useMatchRoute, useRouterState } from "@tanstack/react-router";
+import { Link, useMatchRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDate, PAPER } from "@/lib/paper";
 import { UserButton } from "@/lib/auth/gates";
+import { signOut } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { leaveEditor } from "@/lib/news/claim";
+import { createEditorCopy } from "@/lib/news/desk-copy";
 
 const LINKS = [
   { to: "/desk", label: "Desk", exact: true },
@@ -77,6 +81,7 @@ export function DeskShell({
             <span className="brand-sub">
               {night ? "Dark Desk — investigates, never prints" : `Editor's desk — ${PAPER.city}`}
             </span>
+            <LeaveEditorControl />
           </div>
           <div className="mast-date">{formatDate(new Date())}</div>
           <div className="mast-tools">
@@ -123,6 +128,57 @@ export function DeskShell({
         {children}
       </main>
     </div>
+  );
+}
+
+function LeaveEditorControl() {
+  const [ask, setAsk] = useState(false);
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const copy = createEditorCopy();
+  const leave = useMutation({
+    mutationFn: async () => {
+      const res = await leaveEditor();
+      if (!res.ok) throw new Error(res.error);
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["desk-claim"] });
+      await qc.invalidateQueries({ queryKey: ["my-desk"] });
+      try {
+        await signOut();
+      } catch {
+        /* still go back to the paper */
+      }
+      await navigate({ to: "/" });
+    },
+  });
+  if (ask) {
+    return (
+      <span className="leave-ask">
+        <span>{copy.confirm}</span>
+        <button
+          type="button"
+          className="leave-yes"
+          disabled={leave.isPending}
+          onClick={() => leave.mutate()}
+        >
+          {leave.isPending ? "Leaving…" : copy.confirmYes}
+        </button>
+        <button
+          type="button"
+          className="leave-no"
+          disabled={leave.isPending}
+          onClick={() => setAsk(false)}
+        >
+          {copy.confirmNo}
+        </button>
+      </span>
+    );
+  }
+  return (
+    <button type="button" className="leave-editor" onClick={() => setAsk(true)}>
+      {copy.leave}
+    </button>
   );
 }
 

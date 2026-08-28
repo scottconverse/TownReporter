@@ -123,6 +123,19 @@ export async function assertSignupOpen() {
   }
 }
 
+/** Owner/editor drops the desk. Paper stays. Next sign-in owns it. */
+export async function leaveAsEditor(userId: string): Promise<void> {
+  await ensureNewsroomSchema();
+  const sql = await getSql();
+  const mine = await sql<{ role: string }>`
+    select role from newsroom_members where user_id = ${userId} limit 1
+  `;
+  if (!mine[0] || (mine[0].role !== "owner" && mine[0].role !== "editor")) {
+    throw new ForbiddenError();
+  }
+  await sql`delete from newsroom_members`;
+}
+
 /**
  * Claim an unclaimed desk with the operator's setup token.
  * Preview (no token in env) still uses requireEditor's first-user-owns path.

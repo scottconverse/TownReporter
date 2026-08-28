@@ -7,6 +7,7 @@ import {
   deskIsClaimed,
   ensureNewsroomSchema,
   ForbiddenError,
+  leaveAsEditor,
   newsroomSetupToken,
   SetupRequiredError,
 } from "./membership";
@@ -48,6 +49,20 @@ export const claimDesk = createServerFn({ method: "POST" })
       return { ok: true as const, role: editor.role, newsroomId: editor.newsroomId };
     } catch (err) {
       if (err instanceof SetupRequiredError || err instanceof ForbiddenError) {
+        return { ok: false as const, error: err.message };
+      }
+      throw err;
+    }
+  });
+
+export const leaveEditor = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    try {
+      await leaveAsEditor(context.userId);
+      return { ok: true as const };
+    } catch (err) {
+      if (err instanceof ForbiddenError) {
         return { ok: false as const, error: err.message };
       }
       throw err;

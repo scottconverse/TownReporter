@@ -6,7 +6,7 @@ import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
 import { PAPER } from "@/lib/paper";
 import { claimDesk, deskClaimState } from "@/lib/news/claim";
 import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/login")({ component: Login });
 
@@ -61,6 +61,7 @@ function showGrokOAuth() {
 function Login() {
   const { user } = useCurrentUserState();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [wantCreate, setWantCreate] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +88,8 @@ function Login() {
         return;
       }
     }
+    await qc.invalidateQueries({ queryKey: ["desk-claim"] });
+    await qc.invalidateQueries({ queryKey: ["my-desk"] });
     await navigate({ to: "/desk" });
   }
 

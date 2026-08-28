@@ -18,15 +18,15 @@ A draft, a reporting note, a research memo, a Dark Desk file — none of that is
 
 ## Sign in
 
-1. Open `/login`.
-2. **Create an editor account** (email + password) the first time only. That is the owner. After the desk is claimed, that button is gone — later visits are **Sign in**. Anyone can still read the paper without an account.
-3. You land on `/desk`.
+1. On a new paper, top right: **Create editor**. That opens `/login`. Email + password. You own the desk. The button is gone after that.
+2. Later visits: **Editor desk** or **Sign in**. Anyone can still read the paper without an account.
+3. **Leave as editor** (desk, top left) drops the owner. The paper stays. Create editor comes back. The next person in owns the desk.
 
 Notes:
 
 - Self-host uses email + password. Google / X buttons only appear on the grok.me preview.
 - With no `NEWSROOM_SETUP_TOKEN`, the first account is owner. If the operator set that token, Create the desk asks for it — an account without it does not own the newsroom.
-- A second person cannot create an account. There is no invite button yet. See [setup.md](setup.md#a-second-editor).
+- A second person cannot create an account unless the editor has left. There is no invite button yet. See [setup.md](setup.md#a-second-editor).
 - If the desk sits on “Opening the desk,” use Sign in again. Session expired.
 
 ---

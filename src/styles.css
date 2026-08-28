@@ -477,6 +477,23 @@
 .desk-ltr .mast-row {display:flex;align-items:baseline;gap:24px;flex-wrap:wrap}
 .desk-ltr .brand {font-family:var(--fd);font-weight:700;font-size:24px;letter-spacing:-0.01em;cursor:pointer}
 .desk-ltr .brand-sub {margin-left:12px;font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--mut)}
+.desk-ltr .leave-editor {
+  display:inline-flex;align-items:center;min-height:44px;margin-left:12px;
+  font-size:12px;letter-spacing:.04em;color:var(--mut);background:transparent;border:0;padding:0;cursor:pointer;
+}
+.desk-ltr .leave-editor:hover {color:var(--fg)}
+.desk-ltr .leave-ask {
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-left:12px;
+  max-width:28rem;font-size:12px;color:var(--mut);
+}
+.desk-ltr .leave-yes,
+.desk-ltr .leave-no {
+  display:inline-flex;align-items:center;min-height:44px;padding:0 12px;font-size:12px;cursor:pointer;
+}
+.desk-ltr .leave-yes {background:var(--fg);color:var(--bg);border:0}
+.desk-ltr .leave-no {background:transparent;color:var(--fg);border:1px solid var(--fg)}
+.desk-ltr .leave-yes:disabled,
+.desk-ltr .leave-no:disabled {opacity:.5;cursor:wait}
 .desk-ltr .mast-date {flex:1;text-align:center;font-size:12px;font-style:italic;color:var(--mut)}
 .desk-ltr .mast-tools {display:flex;align-items:center;gap:16px}
 .desk-ltr .mast-link {font-size:12px;color:var(--mut);cursor:pointer}

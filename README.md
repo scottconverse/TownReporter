@@ -150,7 +150,7 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 
 ## Sign-in
 
-- **Self-host:** email + password on `/login`. With no setup token, the first account is owner. After that, Create editor account is gone. Set `NEWSROOM_SETUP_TOKEN` on a public host.
+- **Self-host:** first visit, **Create editor** on the paper (top right). After that the button is gone. **Leave as editor** on the desk hands the newsroom back. Set `NEWSROOM_SETUP_TOKEN` on a public host.
 - **This grok.me preview:** Google / X via Grok’s broker (those buttons only show on `*.grok.me`).
 - Local with no login at all: `VITE_AUTH_ENABLED=false`. Do not do that on a public host.
 
