@@ -41,7 +41,7 @@ Stack: TanStack Start + Vite + React, Better Auth (email/password, optional Grok
 1. **No cosmetic redesign.** No volunteer UI pass. A designer exists for Dark Desk; `docs/dark-desk-editor.md` is the contract for that person, not a license for you to restyle.
 2. **Docs stay honest.** If it is not in the product, it is not in the README. There is no mailer, no city picker, no invite, no OCR. Image-only PDFs are unread. JPEG-as-chat is not OCR. The edition is Longmont.
 3. **Do not retag a shipped release.** 0.4.0, 0.4.1, 0.4.2 are closed. New work is a new version.
-4. **Version lockstep** on every ship: `package.json`, `package-lock.json` root only, `src/lib/version.ts`, `src/lib/source-zip-url.ts`, `CHANGELOG.md`, `README.md`, `docs/setup.md`, `docs/editor.md`, `docs/dark-desk-editor.md`. Enforced by `src/lib/paper.test.ts`. GitHub Pages `docs/index.html` has never carried a version stamp. Do not add one unless he asks.
+4. **Version lockstep** on every ship: `package.json`, `package-lock.json` root only, `src/lib/version.ts`, `src/lib/source-zip-url.ts`, `CHANGELOG.md`, `README.md`, `docs/setup.md`, `docs/editor.md`, `docs/dark-desk-editor.md`. Enforced by `src/lib/paper.test.ts`. GitHub Pages `docs/index.html` does not carry a version stamp. Do not add one.
 5. **Auth is not a dead door.** After the desk is claimed, `/login` is sign-in only. Paper top-right **Create editor** only while nobody owns the desk. Signed-in but not the editor sees “taken,” not an empty Scan page.
 6. **Preview PGLite is in-memory.** Restarting Vite wipes the desk, the paper, membership, jobs, everything. Do not restart Vite to pick up a server-module HMR if you can avoid it. If you do restart, tell him the paper is empty because the database died, not because publish failed.
 7. **First-user-owns** when `NEWSROOM_SETUP_TOKEN` is unset (preview). When the token is set (public host), signup does not own the desk until the token is presented.
@@ -195,6 +195,10 @@ Ship checklist (every version):
 - If Scan files nothing and Publish bounces: someone (often you, from a prior test) already claimed the desk. `myDesk` then 403s the actual user. Leave, or wipe PGLite by restarting Vite, or use the claimed-copy path. Do not “fix” by auto-claiming every signed-in user.
 - Playwright “Create editor still visible after claim” was SSR pending copy containing “already has an editor.” Copy was tightened. Do not put “editor” in the unclaimed pending string.
 - Signup after claim must 403 (`assertSignupOpen`). There is a `databaseHooks.user.create.before` path and `POST /api/auth/sign-up/email`. Keep both.
+- GitHub Pages `docs/index.html` had a stale **v0.3.9** chip. It is gone. Do not paint 0.4.x on that landing.
+- Login heading is **Create the desk**. Paper CTA is **Create editor**. Button is **Create editor account**. The lifecycle gate that went red after 0.4.2 died on the last `Read on the paper` click, not the heading. Do not “fix” CI by renaming the heading in the test. After the correction, `goto` the article URL already opened.
+
+A later Grok opened [PR 1](https://github.com/scottconverse/TownReporter/pull/1) (Pages stamp — keep) and `v0.4.3-quality` (lifecycle heading guess — discard). He said Grok Bot is not good at this yet. Do not invent a 0.4.3 from leftover audit items.
 
 ---
 

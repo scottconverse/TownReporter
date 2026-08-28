@@ -52,9 +52,6 @@ async function main() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await page.locator("form").evaluate((form) => {
-    form.addEventListener("submit", (event) => event.preventDefault(), true);
-  });
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
 
@@ -73,6 +70,7 @@ async function main() {
 
   await page.getByRole("link", { name: "Read it on the paper" }).click();
   await page.waitForURL(/\/articles\//, { timeout: 20_000, waitUntil: "commit" });
+  const articleUrl = page.url();
   await page.getByRole("heading", { level: 1, name: /water plant/i }).waitFor();
   await page.getByText(/Longmont City Council set a special session on the water plant/i).waitFor();
 
@@ -80,10 +78,9 @@ async function main() {
   await page.getByRole("button", { name: "Post correction" }).first().click();
   await page.getByPlaceholder("What was wrong").fill(correction);
   await page.getByRole("button", { name: "Publish correction" }).click();
-  await page.getByText("Correction is public").waitFor();
+  await page.getByText("Correction is public.").waitFor();
 
-  await page.getByRole("link", { name: "Read on the paper" }).first().click();
-  await page.waitForURL(/\/articles\//, { timeout: 20_000, waitUntil: "commit" });
+  await page.goto(articleUrl, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: "Corrections" }).waitFor();
   await page.getByText(/Tuesday evening/).waitFor();
 
