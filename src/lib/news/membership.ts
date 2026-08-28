@@ -85,26 +85,30 @@ export async function requireEditor(userId: string): Promise<EditorContext> {
   if (mine[0]?.role === "owner" || mine[0]?.role === "editor") {
     return { role: mine[0].role, newsroomId: mine[0].newsroom_id ?? DEFAULT_NEWSROOM_ID };
   }
-  const n = await sql<{ c: number }>`select count(*)::int as c from newsroom_members`;
+  const n = await sql<{ c: number }>`
+    select count(*)::int as c from newsroom_members where newsroom_id = ${DEFAULT_NEWSROOM_ID}
+  `;
   if ((n[0]?.c ?? 0) === 0) {
     if (newsroomSetupToken()) {
       throw new SetupRequiredError();
     }
-    try {
-      await sql`
-        insert into newsroom_members (user_id, role, newsroom_id)
-        values (${userId}, 'owner', ${DEFAULT_NEWSROOM_ID})
-      `;
-      return { role: "owner", newsroomId: DEFAULT_NEWSROOM_ID };
-    } catch {
-      const again = await sql<{ role: string; newsroom_id: number }>`
-        select role, newsroom_id from newsroom_members where user_id = ${userId} limit 1
-      `;
-      if (again[0]?.role === "owner" || again[0]?.role === "editor") {
-        return { role: again[0].role, newsroomId: again[0].newsroom_id ?? DEFAULT_NEWSROOM_ID };
-      }
-      throw new ForbiddenError();
+    const inserted = await sql<{ user_id: string }>`
+      insert into newsroom_members (user_id, role, newsroom_id)
+      select ${userId}, ${"owner"}, ${DEFAULT_NEWSROOM_ID}
+      where not exists (
+        select 1 from newsroom_members
+        where newsroom_id = ${DEFAULT_NEWSROOM_ID} and role = 'owner'
+      )
+      returning user_id
+    `;
+    if (inserted[0]) return { role: "owner", newsroomId: DEFAULT_NEWSROOM_ID };
+    const again = await sql<{ role: string; newsroom_id: number }>`
+      select role, newsroom_id from newsroom_members where user_id = ${userId} limit 1
+    `;
+    if (again[0]?.role === "owner" || again[0]?.role === "editor") {
+      return { role: again[0].role, newsroomId: again[0].newsroom_id ?? DEFAULT_NEWSROOM_ID };
     }
+    throw new ForbiddenError();
   }
   throw new ForbiddenError();
 }
@@ -113,7 +117,9 @@ export async function requireEditor(userId: string): Promise<EditorContext> {
 export async function deskIsClaimed(): Promise<boolean> {
   await ensureNewsroomSchema();
   const sql = await getSql();
-  const n = await sql<{ c: number }>`select count(*)::int as c from newsroom_members`;
+  const n = await sql<{ c: number }>`
+    select count(*)::int as c from newsroom_members where newsroom_id = ${DEFAULT_NEWSROOM_ID}
+  `;
   return (n[0]?.c ?? 0) > 0;
 }
 
@@ -150,7 +156,9 @@ export async function claimOwner(userId: string, providedToken: string): Promise
   if (mine[0]?.role === "owner" || mine[0]?.role === "editor") {
     return { role: mine[0].role, newsroomId: mine[0].newsroom_id ?? DEFAULT_NEWSROOM_ID };
   }
-  const n = await sql<{ c: number }>`select count(*)::int as c from newsroom_members`;
+  const n = await sql<{ c: number }>`
+    select count(*)::int as c from newsroom_members where newsroom_id = ${DEFAULT_NEWSROOM_ID}
+  `;
   if ((n[0]?.c ?? 0) > 0) throw new ForbiddenError();
   const expected = newsroomSetupToken();
   if (expected) {
@@ -159,13 +167,15 @@ export async function claimOwner(userId: string, providedToken: string): Promise
     // Preview / local without a token: first-user-owns is requireEditor's job.
     if (!providedToken.trim()) throw new SetupRequiredError();
   }
-  try {
-    await sql`
-      insert into newsroom_members (user_id, role, newsroom_id)
-      values (${userId}, 'owner', ${DEFAULT_NEWSROOM_ID})
-    `;
-    return { role: "owner", newsroomId: DEFAULT_NEWSROOM_ID };
-  } catch {
-    throw new ForbiddenError();
-  }
+  const inserted = await sql<{ user_id: string }>`
+    insert into newsroom_members (user_id, role, newsroom_id)
+    select ${userId}, ${"owner"}, ${DEFAULT_NEWSROOM_ID}
+    where not exists (
+      select 1 from newsroom_members
+      where newsroom_id = ${DEFAULT_NEWSROOM_ID} and role = 'owner'
+    )
+    returning user_id
+  `;
+  if (!inserted[0]) throw new ForbiddenError();
+  return { role: "owner", newsroomId: DEFAULT_NEWSROOM_ID };
 }
