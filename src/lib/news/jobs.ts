@@ -164,15 +164,27 @@ export async function claimJob(id: number): Promise<DeskJob | null> {
 export async function claimNextJob(): Promise<DeskJob | null> {
   await ensureJobsSchema();
   const sql = await getSql();
-  const next = await sql<{ id: number }>`
-    select id from desk_jobs
-    where status = 'queued'
-       or (status = 'running' and updated_at < now() - interval '2 minutes')
-    order by id asc
-    limit 1
+  const claimed = await sql<DeskJob>`
+    update desk_jobs
+    set status = ${"running"},
+        stage = ${"Working…"},
+        started_at = coalesce(started_at, now()),
+        updated_at = now()
+    where id = (
+      select id from desk_jobs
+      where status = 'queued'
+         or (status = 'running' and updated_at < now() - interval '2 minutes')
+      order by id asc
+      limit 1
+    )
+    and (
+      status = 'queued'
+      or (status = 'running' and updated_at < now() - interval '2 minutes')
+    )
+    returning id, newsroom_id, user_id, kind, subject_id, status, stage, error,
+              created_at, updated_at, started_at, finished_at
   `;
-  if (!next[0]) return null;
-  return claimJob(next[0].id);
+  return claimed[0] ?? null;
 }
 
 /** Finish queued (or stale running) jobs. Same process, or a cron wake-up. */
