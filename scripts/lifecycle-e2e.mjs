@@ -81,8 +81,16 @@ async function main() {
   await page.getByRole("button", { name: "Post correction" }).first().click({ force: true });
   await page.getByPlaceholder("What was wrong").fill(correction);
   await page.getByRole("button", { name: "Publish correction" }).click({ force: true });
-  // Toast can miss if the desk remounts. The article is the record.
-  await page.goto(articleUrl, { waitUntil: "domcontentloaded" });
+  await page.getByText(/Tuesday evening/).waitFor({ timeout: 20_000 }).catch(() => {});
+  for (let i = 0; i < 4; i++) {
+    try {
+      await page.goto(articleUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+      break;
+    } catch (err) {
+      const m = err instanceof Error ? err.message : String(err);
+      if (i === 3 || !/ERR_ABORTED|interrupted/i.test(m)) throw err;
+    }
+  }
   for (let i = 0; i < 20; i++) {
     if ((await page.getByText(/Tuesday evening/).count()) > 0) break;
     if (i === 19) throw new Error("correction did not appear on the article");
