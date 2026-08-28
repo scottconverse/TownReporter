@@ -5,7 +5,8 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
 import { PAPER } from "@/lib/paper";
 import { claimDesk, deskClaimState } from "@/lib/news/claim";
-import { createEditorCopy, deskTakenLoginCopy } from "@/lib/news/desk-copy";
+import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
+import { claimedLoginCopy, setupTokenPlaceholder, unclaimedLoginCopy } from "@/lib/news/desk-locked";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/login")({ component: Login });
@@ -71,11 +72,12 @@ function Login() {
   const [name, setName] = useState("");
   const [setupToken, setSetupToken] = useState("");
   const claim = useQuery({ queryKey: ["desk-claim"], queryFn: () => deskClaimState() });
-  const claimed = claim.isError || Boolean(claim.data?.claimed);
+  const claimed = Boolean(claim.data?.claimed);
   const tokenRequired = Boolean(claim.data?.tokenRequired && !claimed);
   const mode: "create" | "signin" = claimed ? "signin" : wantCreate ? "create" : "signin";
   const taken = deskTakenLoginCopy();
-  const create = createEditorCopy();
+  const unclaimed = unclaimedLoginCopy();
+  const signed = claimedLoginCopy();
   if (user && !claim.isPending && !tokenRequired) return <Navigate to="/desk" />;
 
   async function finishEmail(data?: unknown, headers?: Headers | null) {
@@ -167,7 +169,7 @@ function Login() {
   }
 
   const heading =
-    claim.isPending ? "Opening…" : mode === "create" ? create.heading : taken.title;
+    claim.isPending ? "Editor desk" : claimed ? signed.title : unclaimed.title;
   const blurb = claim.isPending
     ? "One moment."
     : mode === "create"
@@ -271,7 +273,7 @@ function Login() {
                 required
                 value={setupToken}
                 onChange={(e) => setSetupToken(e.target.value)}
-                placeholder="NEWSROOM_SETUP_TOKEN"
+                placeholder={setupTokenPlaceholder()}
               />
             </label>
           ) : null}
@@ -281,10 +283,10 @@ function Login() {
               {mode === "create"
                 ? busy === "email-up" || busy === "email-in"
                   ? "Opening the desk…"
-                  : create.submit
+                  : unclaimed.submit
                 : busy === "email-in"
                   ? "Signing in…"
-                  : taken.submit}
+                  : signed.submit}
             </button>
             {claimed ? null : (
             <button
@@ -296,7 +298,7 @@ function Login() {
                 setWantCreate(!wantCreate);
               }}
             >
-              {mode === "create" ? create.ghost : create.signinGhost}
+              {mode === "create" ? unclaimed.ghost : unclaimed.submit}
             </button>
             )}
           </div>
