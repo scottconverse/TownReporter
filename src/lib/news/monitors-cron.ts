@@ -10,18 +10,22 @@ export async function tickAllDueMonitors(): Promise<{
   jobs: number;
 }> {
   const sql = await getSql();
-  const users = await sql<{ user_id: string }>`
-    select distinct user_id from source_monitors
+  const rooms = await sql<{ newsroom_id: number }>`
+    select distinct newsroom_id from source_monitors
     where enabled = true and next_check_at <= now()
     limit 40
   `;
   let checked = 0;
   let anomalies = 0;
-  for (const u of users) {
+  for (const r of rooms) {
     try {
-      const r = await runDueMonitors({ userId: u.user_id, limit: 12 });
-      checked += r.checked;
-      anomalies += r.anomalies;
+      const result = await runDueMonitors({
+        userId: "cron",
+        newsroomId: r.newsroom_id,
+        limit: 12,
+      });
+      checked += result.checked;
+      anomalies += result.anomalies;
     } catch {
       /* one desk failing must not stop the others */
     }
@@ -32,5 +36,19 @@ export async function tickAllDueMonitors(): Promise<{
   } catch {
     /* monitors still count even if a job drain throws */
   }
-  return { users: users.length, checked, anomalies, jobs };
+  return { users: rooms.length, checked, anomalies, jobs };
+}
+
+/** Production HTTP handler. Empty CRON_SECRET fails closed. */
+export async function handleMonitorsCron(request: Request): Promise<Response> {
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!secret) {
+    return new Response("cron disabled", { status: 503 });
+  }
+  const hdr = request.headers.get("authorization") ?? "";
+  if (hdr !== `Bearer ${secret}`) {
+    return new Response("forbidden", { status: 403 });
+  }
+  const result = await tickAllDueMonitors();
+  return Response.json(result);
 }
