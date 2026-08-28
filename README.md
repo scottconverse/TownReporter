@@ -42,18 +42,18 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Run it (about five minutes)
 
-You need **Node 22+** and an [xAI API key](https://console.x.ai) (or any OpenAI-compatible gateway — see below).
+You need **Node 22+**. You do **not** need an AI key if [Claude Code](https://code.claude.com) is installed and signed in — the desk uses that login. Otherwise see [Model](#model--your-claude-code-login-by-default) below.
 
 ```bash
 git clone https://github.com/scottconverse/TownReporter.git
 cd TownReporter
 npm install
 npx playwright install chromium   # meeting transcripts + JS civic sites
-cp .env.example .env              # then add at least XAI_API_KEY
+cp .env.example .env              # no AI key needed if Claude Code is signed in
 npm run dev                       # http://localhost:8080
 ```
 
-Open [http://localhost:8080/login](http://localhost:8080/login) and **create an editor account** (email + password). With no `NEWSROOM_SETUP_TOKEN`, the first account becomes the newsroom owner. On a public host, set that token — signup alone does not own the desk. The account lives in your database, not Grok’s.
+Open [http://localhost:8080/login](http://localhost:8080/login) and **create an editor account** (email + password). With no `NEWSROOM_SETUP_TOKEN`, the first account becomes the newsroom owner. On a public host, set that token — signup alone does not own the desk. The account lives in your database.
 
 The public paper is `/`. The desk is `/desk`.
 
@@ -118,13 +118,22 @@ Details and the honest limits of a city swap are in [docs/setup.md](docs/setup.m
 
 ---
 
-## Model — Grok by default
+## Model — your Claude Code login, by default
 
-```
-XAI_API_KEY=xai-...          # https://console.x.ai
-```
+**Nothing to set.** If the [Claude Code](https://code.claude.com) CLI is installed and signed in, Scan, Draft and Dark Desk use it. Your subscription does the work; there is no key to buy or paste.
 
-Scan, Draft, and Dark Desk use Grok unless you set a gateway.
+Your own `CLAUDE.md`, skills and plugins are **not** loaded into news prompts — the harness is stripped on every call.
+
+First match wins:
+
+| Set this | What runs |
+|---|---|
+| `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint, including a local model |
+| `ANTHROPIC_API_KEY` | Claude, billed to that key |
+| *nothing* | **Claude, through your Claude Code login** |
+| `XAI_API_KEY` | Grok |
+
+The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
 ### Other models — one OpenAI-compatible URL
 
@@ -205,8 +214,8 @@ No. Scan files leads. Draft writes a story into the workbench. Publish is a pers
 **Can I use this for any city?**
 Yes, by editing `paper.ts` (and the YouTube channel list). There is no config UI yet. See [docs/setup.md](docs/setup.md#point-it-at-another-city).
 
-**Do I have to use Grok?**
-No. Grok is the default because one `XAI_API_KEY` is the shortest path. Any OpenAI-compatible `/v1/chat/completions` gateway works. Ollama counts.
+**Do I have to pay for an AI key?**
+No. If Claude Code is signed in on the machine, the desk uses that login and there is no key at all. Set `ANTHROPIC_API_KEY` if you would rather bill a key, or point `LLM_BASE_URL` at any OpenAI-compatible endpoint — Ollama and other local models count, and cost nothing per word. `XAI_API_KEY` still runs Grok.
 
 **Are YouTube captions the official record?**
 No. Captions are a map of the tape. Minutes and the packet are the official record. Names in captions are often wrong. Dark Desk is told this; drafts still need a human check.

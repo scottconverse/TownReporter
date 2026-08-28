@@ -32,11 +32,13 @@ npx playwright install chromium
 cp .env.example .env
 ```
 
-Edit `.env`. The minimum that produces a working desk:
+Edit `.env`. **The minimum that produces a working desk is nothing at all** — if the [Claude Code](https://code.claude.com) CLI is installed and signed in, the desk uses that login. Check with:
 
+```bash
+claude --version
 ```
-XAI_API_KEY=xai-...
-```
+
+If you would rather use a key, or you do not have Claude Code, see [Model](#model) below.
 
 Then:
 
@@ -57,7 +59,50 @@ Open the paper. Top right: **Create editor**. Email + password. That account is 
 
 All of these are documented in [`.env.example`](../.env.example).
 
-### Model — Grok default
+### Model
+
+Resolution order, first match wins:
+
+| # | Set this | What runs |
+|---|---|---|
+| 1 | `LLM_BASE_URL` or `LLM_API_KEY` + `LLM_MODEL` | any OpenAI-compatible endpoint, including a local model |
+| 2 | `ANTHROPIC_API_KEY` | Claude, billed to that key |
+| 3 | *nothing* | **Claude, through your local Claude Code login** |
+| 4 | `XAI_API_KEY` | Grok |
+
+#### Claude Code — the default, no key
+
+Install the CLI and sign in once:
+
+```bash
+npm i -g @anthropic-ai/claude-code
+claude          # then /login
+```
+
+That is the whole setup. Your Max or Pro subscription powers the desk.
+
+```
+# ANTHROPIC_MODEL=claude-opus-5   # the default
+# CLAUDE_CLI_PATH=...             # only if the binary is somewhere unusual
+# TOWNREPORTER_CLAUDE_CODE=0      # take the CLI out of the chain entirely
+```
+
+Two things worth knowing:
+
+- **Your personal config is kept out of the newsroom.** Every call passes `--setting-sources ""`, so your own `CLAUDE.md`, skills and plugins are not loaded. Without that, your developer instructions get prepended to every news prompt.
+- **It is slower than an API.** The CLI spawns a process and reloads a fixed preamble per call — a couple of seconds at best, longer for a real prompt. A draft takes minutes rather than seconds. Time budgets adjust automatically; you do not need to tune anything.
+
+#### Claude by API key
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+# ANTHROPIC_MODEL=claude-opus-5
+# ANTHROPIC_EFFORT=high           # low | medium | high | xhigh | max
+```
+
+`ANTHROPIC_EFFORT` is the cost dial, and applies to the API path only. Lower is cheaper and faster; higher reads better.
+
+#### Grok
 
 ```
 XAI_API_KEY=xai-...
@@ -67,9 +112,9 @@ XAI_API_KEY=xai-...
 
 `GROK_API_KEY` is accepted as an alias for `XAI_API_KEY`.
 
-### Other models — three vars, no extra package
+#### Any other model — three vars, no extra package
 
-TownReporter POSTs to `{LLM_BASE_URL}/chat/completions` with `Authorization: Bearer {LLM_API_KEY}`. If `LLM_BASE_URL` or `LLM_API_KEY` is set, that **wins over Grok**.
+TownReporter POSTs to `{LLM_BASE_URL}/chat/completions` with `Authorization: Bearer {LLM_API_KEY}`. If `LLM_BASE_URL` or `LLM_API_KEY` is set, that **wins over everything above** — which is how you point the desk at a local model.
 
 ```
 LLM_BASE_URL=http://127.0.0.1:4000/v1
@@ -90,7 +135,7 @@ LLM_MODEL=claude-sonnet-4-5
 
 `OPENAI_API_KEY` is accepted as an alias for `LLM_API_KEY`. You do **not** install LiteLLM, Bifrost, Helicone, MLflow, or Kong as npm dependencies of this repo. Run the gateway next to TownReporter and point the three vars at it.
 
-Resolution lives in `src/lib/news/ai.ts` (`resolveLlm()`).
+Resolution lives in `src/lib/news/ai.ts` (`resolveProvider()`); the Claude Code path is `ai-claude-code.server.ts`.
 
 ### Database
 
@@ -162,16 +207,34 @@ npm run build
 npm run preview    # serves the built app (this repo’s preview script)
 ```
 
-`build` runs Vite, patches SSR exports, then migrates the database.
+`build` runs Vite, patches SSR exports, copies runtime assets, then migrates the database.
 
-Hosted: any Node 22 host with the env vars above. Vercel works for the paper + desk **if** you set:
+**The default build target is a plain Node server** (`node-server`), which produces `.output/server/index.mjs`. Run it with `npm start`. Any Node 22 host works — a VPS, a home box, a container.
 
-- `DATABASE_URL` (Postgres; PGLite will not survive)
+That default is deliberate. A long-lived process is what makes the Chromium page reader usable and keeps background jobs whole. See [SELF-HOSTING.md](../SELF-HOSTING.md) for a worked example on a home machine behind a Cloudflare Tunnel.
+
+Whatever the host, set:
+
+- `DATABASE_URL` (Postgres; PGLite will not survive a restart)
 - `BETTER_AUTH_SECRET`
 - `BETTER_AUTH_URL` = the public `https://…` origin
-- `XAI_API_KEY` or the `LLM_*` trio
+- `BETTER_AUTH_TRUSTED_ORIGINS` = every **other** origin the desk is reached from, comma-separated. A missing origin is rejected at sign-in with "Invalid origin" while pages still load normally, which reads like a wrong password.
+- A model, or nothing at all if Claude Code is signed in on that machine
 
-Do not expect meeting-transcript Playwright to work on Vercel without extra infrastructure. See above.
+### Vercel
+
+Still supported:
+
+```bash
+NITRO_PRESET=vercel npm run build
+```
+
+Two things stop working there, both by design:
+
+- **Chromium does not run.** Playwright needs a real browser on the machine; a serverless function cannot open one. Transcripts and JavaScript-heavy civic sites (Municode) will not be read.
+- **Background jobs get chopped up.** A serverless invocation may freeze once the click returns, so Scan / Draft / Keep digging only finish when the monitors ping arrives.
+
+Also note there is no Claude Code CLI on a serverless host — set `ANTHROPIC_API_KEY` or the `LLM_*` trio instead.
 
 Scan, Draft, and Dark Keep digging persist a job and return. This long-lived process drains waiting jobs. A Vercel serverless invocation may freeze after the click returns — those jobs finish when the monitors ping (`GET /api/cron/monitors` with `CRON_SECRET`) hits. The paper and a typed draft still deploy without that ping; Scan / Draft / Keep digging need it on a host that sleeps.
 
@@ -251,7 +314,7 @@ If the city uses Legistar, Granicus, CivicClerk, BoardDocs, or Municode instead,
 TownReporter/
 ├── src/lib/paper.ts           # city, masthead, seed sources
 ├── src/lib/news/              # ingest, PrimeGov, YouTube, Dark Desk, draft
-├── src/lib/news/ai.ts         # Grok default + gateway
+├── src/lib/news/ai.ts         # provider resolution + budgets
 ├── src/lib/auth/              # email/password + optional Grok OAuth
 ├── src/routes/                # paper + desk pages
 ├── migrations/                # Postgres / PGLite schema

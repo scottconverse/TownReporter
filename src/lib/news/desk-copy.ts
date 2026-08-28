@@ -126,7 +126,14 @@ export function editorError(raw: string | null | undefined): string | null {
   if (/403/.test(t) || /forbidden/i.test(t)) {
     return "The writing model was unavailable. Searches and captures already ran are kept. Click Keep digging to retry.";
   }
-  if (/xai api error/i.test(t) || /api error/i.test(t) || /AI is not available/i.test(t)) {
+  if (
+    /xai api error/i.test(t) ||
+    /api error/i.test(t) ||
+    // Claude Code path. Timeouts fall through to the timeout copy below,
+    // which says something more useful.
+    (/claude code/i.test(t) && !/timed out/i.test(t)) ||
+    /AI is not available/i.test(t)
+  ) {
     return "The writing model did not finish this round. Searches and captures already ran are kept. Click Keep digging to continue.";
   }
   if (/timeout|timed out|network/i.test(t)) {
@@ -218,6 +225,14 @@ export function plainEditorText(text: string): string {
     .replace(/\bhops?\b/gi, "rounds")
     .replace(/\bSynthesis:\s*/gi, "")
     .replace(/xAI API error \d+/gi, "the writing model did not finish")
+    // The Claude Code path returns its own wording. Without these the editor
+    // sees the provider's raw text where every other failure gets plain
+    // English.
+    .replace(/Claude Code rate limit[^.]*/gi, "the writing model is rate limited — try again shortly")
+    .replace(/Claude Code request timed out/gi, "the writing model did not finish in time")
+    .replace(/Claude Code (?:API )?error[^.]*/gi, "the writing model did not finish")
+    .replace(/Claude Code declined this request[^.]*/gi, "the writing model declined this request")
+    .replace(/Claude Code CLI not found[^.]*/gi, "the writing model is not set up on this machine")
     .replace(/Previously parked\s*\([^)]*\)\.?\s*/gi, "")
     .replace(/Reopened from resolved:?\s*/gi, "")
     .replace(/Prior:\s*Fetched\.?/gi, "")
@@ -335,12 +350,21 @@ export function editorDraftError(raw: string | null | undefined): string | null 
   if (/rate limit/i.test(t)) {
     return "Drafting paused so the desk does not burn through the hourly allowance. Try again in a bit.";
   }
+  // Setup and refusal are NOT "try again" failures. Telling an editor to click
+  // again when the model is not installed, or has declined the request, sends
+  // them round a loop that cannot succeed.
+  if (/cli not found/i.test(t) || /AI is not available/i.test(t)) {
+    return "The writing model is not set up on this machine. Nothing you click will fix it — that is an operator job.";
+  }
+  if (/declined this request/i.test(t)) {
+    return "The writing model declined this request. Clicking again will not change that; try rewording the lead, or draft it yourself.";
+  }
   if (
     /403/.test(t) ||
     /forbidden/i.test(t) ||
     /xai api error/i.test(t) ||
     /api error/i.test(t) ||
-    /AI is not available/i.test(t)
+    /claude code/i.test(t)
   ) {
     return "The writing model did not finish this draft. Click Draft with AI again.";
   }
@@ -370,6 +394,7 @@ export function editorScanError(raw: string | null | undefined): string | null {
     /forbidden/i.test(t) ||
     /xai api error/i.test(t) ||
     /api error/i.test(t) ||
+    /claude code/i.test(t) ||
     /AI is not available/i.test(t)
   ) {
     return "The writing model did not finish. Sources were fetched, but no new leads were filed. Run the scan again.";

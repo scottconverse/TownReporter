@@ -81,7 +81,7 @@ One pass: fetch every **accepted** source, then one model read for leads and pro
 - Stay on the page while it runs.
 - When it files leads, open the queue. When it files nothing, that can be “nothing moved,” not a crash. The page will say which.
 
-If AI is unavailable you will get a straight error: set `XAI_API_KEY` or a gateway. That is an operator problem ([setup.md](setup.md)).
+If AI is unavailable you will get a straight error. Usually that means the Claude Code CLI is not installed or not signed in on the machine running the desk, and no key is set instead. That is an operator problem ([setup.md](setup.md)).
 
 ---
 
@@ -258,7 +258,7 @@ How we report, in public: `/how-we-report`.
 
 | You see | Likely | What to do |
 |---|---|---|
-| “AI is not available” | No model key | Operator: `XAI_API_KEY` or `LLM_*` ([setup.md](setup.md)) |
+| “AI is not available” | No model configured | Operator: sign in to Claude Code on that machine, or set `ANTHROPIC_API_KEY` / `LLM_*` ([setup.md](setup.md)) |
 | Scan fetched, filed nothing | Nothing new, or the model declined | Read the summary. Not automatically a bug. |
 | Draft with AI ran, form still empty | The click died; the writing pass may still be finishing | Stay on the page. It fills when the draft lands. Reload only if you left. |
 | Redraft shows a sign-in / setCookie error | Cookie helper threw even though you are signed in | Click Redraft again. Fixed in 0.3.7. |

@@ -330,7 +330,7 @@
     <div class="wrap strip-in">
       <span class="fact"><b>MIT</b> licensed</span>
       <span class="fact"><b>Node 22</b></span>
-      <span class="fact"><b>Grok</b> default · any OpenAI-compatible gateway</span>
+      <span class="fact"><b>Claude Code</b> login, or any API key · no key required</span>
       <span class="fact">Self-host <b>email + password</b></span>
       <span class="fact">Nothing prints until an editor <b>publishes</b></span>
     </div>
@@ -429,7 +429,7 @@
 
   <section id="start" class="wrap">
     <p class="eyebrow">Install</p>
-    <h2>Clone it. Create an editor. Point it at Grok — or at anything that speaks /v1.</h2>
+    <h2>Clone it. Create an editor. It uses the Claude Code you already have.</h2>
     <div class="grid-2">
       <div>
         <pre><span class="t-dim"># Node 22+, then:</span>
@@ -438,15 +438,16 @@ cd TownReporter
 npm install
 npx playwright install chromium
 cp .env.example .env
-<span class="t-dim"># XAI_API_KEY=xai-…   from console.x.ai</span>
+<span class="t-dim"># no AI key needed — it uses your Claude Code login</span>
 npm run dev
 <span class="t-ok"># http://localhost:8080/login — create the owner account</span></pre>
         <p class="cap">Playwright Chromium is for <b>Show transcript</b> and JS civic sites (Municode). PrimeGov packets still work without it — they are a JSON API.</p>
       </div>
       <div>
         <div class="prose">
-          <p><strong>Grok is the default</strong> because one <code>XAI_API_KEY</code> is the shortest path. Scan, Draft, and Dark Desk use it until you set a gateway.</p>
-          <p>Any OpenAI-compatible <code>/v1/chat/completions</code> endpoint works with three env vars — LiteLLM, Bifrost, Helicone, MLflow, Kong, Ollama, OpenAI, OpenRouter. No extra npm package. Bifrost’s own port is 8080; that is TownReporter — map it to 4000.</p>
+          <p><strong>No API key by default.</strong> If the <a href="https://code.claude.com">Claude Code</a> CLI is installed and signed in, Scan, Draft and Dark Desk use that login. Your subscription does the work; nothing to buy, nothing to paste.</p>
+          <p>The coding harness is stripped from every call — including your own <code>CLAUDE.md</code> and skills, which have no business inside a news prompt.</p>
+          <p>Prefer a key? Set <code>ANTHROPIC_API_KEY</code> and it wins. Prefer something else entirely? Any OpenAI-compatible <code>/v1/chat/completions</code> endpoint works with three env vars — LiteLLM, Bifrost, Helicone, MLflow, Kong, Ollama, OpenAI, OpenRouter, or a local model. That wins over both. <code>XAI_API_KEY</code> still runs Grok.</p>
           <p>Unset <code>DATABASE_URL</code> and you get embedded PGLite. Fine for a look. <strong>Data dies when the process stops.</strong> A newsroom wants Postgres.</p>
         </div>
         <p class="cap"><a href="https://github.com/scottconverse/TownReporter/blob/main/docs/setup.md"><b>Operator setup</b></a>
