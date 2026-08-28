@@ -10,9 +10,11 @@ export async function tickAllDueMonitors(): Promise<{
   jobs: number;
 }> {
   const sql = await getSql();
-  const rooms = await sql<{ newsroom_id: number }>`
-    select distinct newsroom_id from source_monitors
+  const rooms = await sql<{ newsroom_id: number; user_id: string }>`
+    select newsroom_id, min(user_id) as user_id
+    from source_monitors
     where enabled = true and next_check_at <= now()
+    group by newsroom_id
     limit 40
   `;
   let checked = 0;
@@ -20,7 +22,7 @@ export async function tickAllDueMonitors(): Promise<{
   for (const r of rooms) {
     try {
       const result = await runDueMonitors({
-        userId: "cron",
+        userId: r.user_id,
         newsroomId: r.newsroom_id,
         limit: 12,
       });
