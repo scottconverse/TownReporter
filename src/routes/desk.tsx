@@ -6,7 +6,7 @@ import { signOut } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { ScreenPending, EmptyState } from "@/components/states";
 import { myDesk } from "@/lib/news/claim";
-import { deskTakenCopy } from "@/lib/news/desk-copy";
+import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
 
 export const Route = createFileRoute("/desk")({
   component: DeskGate,
@@ -56,11 +56,11 @@ function DeskGate() {
     }
     const taken = desk.data && !desk.data.ok && desk.data.claimed;
     if (taken) {
-      const copy = deskTakenCopy();
+      const copy = deskTakenLoginCopy();
       return (
         <EmptyState
           kicker="Editor desk"
-          title={copy.title}
+          title={copy.deskTitle}
           body={copy.body}
           action={
             <span className="flex flex-wrap gap-2">
