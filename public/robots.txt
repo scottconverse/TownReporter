@@ -1,0 +1,21 @@
+# TownReporter — Longmont, Colorado
+#
+# The paper is meant to be indexed. The desk is not: it is the editor's
+# working area, and drafts, leads and reporting notes live behind sign-in.
+# Blocking it here keeps unfinished work out of search results even if a
+# link leaks.
+
+User-agent: *
+Allow: /
+
+# Editor-only areas.
+Disallow: /desk
+Disallow: /desk/
+Disallow: /login
+
+# Internals. Nothing here is a page.
+Disallow: /api/
+Disallow: /_serverFn/
+
+# The newsletter confirmation link is single-use and personal.
+Disallow: /newsletter/confirm

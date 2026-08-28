@@ -3,9 +3,10 @@ import { getSql, withTransaction } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { PAPER, SEED_SOURCES, slugify, parseUrlList } from "@/lib/paper";
 import { assertHttpUrl, sha256 } from "./url-guard";
+import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
 import { assertRate, audit } from "./ops";
-import { SCAN_SYSTEM, grokChat, parseJsonBlock, isGrokAvailable, GROK_UNAVAILABLE } from "./ai";
+import { SCAN_SYSTEM, grokChat, parseJsonBlock, probeProvider } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
 import { stripReporterNotebook } from "./strip-draft";
 import {
@@ -84,77 +85,6 @@ export const listSources = createServerFn({ method: "GET" })
         id asc
     `;
   });
-
-function parseHttpUrl(raw: string): { ok: true; url: string; host: string } | { ok: false; error: string } {
-  let value = raw.trim();
-  if (!value) return { ok: false, error: "Empty URL" };
-  if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
-  try {
-    const parsed = assertHttpUrl(value);
-    return { ok: true, url: parsed.toString(), host: parsed.hostname };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "That is not a valid URL." };
-  }
-}
-
-function parseSourceLines(text: string): {
-  title: string;
-  url: string;
-  tier: string;
-  kind: string;
-}[] {
-  let currentTier: "A" | "B" | "C" = "A";
-  const out: { title: string; url: string; tier: string; kind: string }[] = [];
-  const seen = new Set<string>();
-  const urlRe = /https?:\/\/[^\s<>"'\\)\]]+/gi;
-
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-
-    const header = line.match(/^TIER\s*([ABC])\b/i);
-    if (header && !/https?:\/\//i.test(line)) {
-      currentTier = header[1]!.toUpperCase() as "A" | "B" | "C";
-      continue;
-    }
-
-    urlRe.lastIndex = 0;
-    const found = line.match(urlRe);
-    if (!found?.length) continue;
-
-    const first = found[0]!.replace(/[.,;:]+$/, "");
-    const parsed = parseHttpUrl(first);
-    if (!parsed.ok) continue;
-    if (seen.has(parsed.url)) continue;
-    seen.add(parsed.url);
-
-    let title = line
-      .replace(urlRe, " ")
-      .replace(/^[\s*•\-–—\d.)]+/, "")
-      .replace(/\s*\([^)]*@[^)]*\)\s*/g, " ")
-      .replace(/\s*[|:]\s*$/g, "")
-      .replace(/\s{2,}/g, " ")
-      .trim()
-      .replace(/[:：]\s*$/, "");
-
-    const kind =
-      /youtube\.com|youtu\.be/i.test(parsed.url)
-        ? "youtube"
-        : currentTier === "B"
-          ? "news"
-          : currentTier === "C"
-            ? "community"
-            : "official";
-
-    out.push({
-      title: title || parsed.host,
-      url: parsed.url,
-      tier: currentTier,
-      kind,
-    });
-  }
-  return out.slice(0, 400);
-}
 
 async function upsertSource(
   userId: string,
@@ -246,7 +176,18 @@ export const listLeads = createServerFn({ method: "GET" })
       from leads l
       left join articles a on a.lead_id = l.id and a.status = 'published'
       where l.newsroom_id = ${owned(context)}
-      order by l.created_at desc
+      -- Newest batch first, best story first WITHIN the batch.
+      --
+      -- Ordering on the raw timestamp alone put a 14-point "no minutes posted
+      -- for any 2026 council session" below an 8-point flag-committee item:
+      -- a scan writes all its leads inside the same second, so the tie was
+      -- broken arbitrarily and newsworthiness never entered into it. For a
+      -- queue whose entire job is "what should I work on next", the score has
+      -- to lead. Truncating to the minute keeps one scan's output together
+      -- instead of interleaving batches by millisecond.
+      order by date_trunc('minute', l.created_at) desc,
+               l.newsworthiness desc,
+               l.id desc
       limit 80
     `;
   });
@@ -360,8 +301,12 @@ export const listMemory = createServerFn({ method: "GET" })
 export const grokStatus = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async () => {
-    if (isGrokAvailable()) return { available: true as const };
-    return { available: false as const, message: GROK_UNAVAILABLE };
+    // Real check, not just "is something configured": on the Claude Code path
+    // this confirms the CLI is actually installed, so the desk never shows a
+    // green light that turns into a failed draft.
+    const probe = await probeProvider();
+    if (probe.ok) return { available: true as const };
+    return { available: false as const, message: probe.error };
   });
 
 export const listScans = createServerFn({ method: "GET" })
@@ -929,11 +874,23 @@ export const publishLead = createServerFn({ method: "POST" })
       provenanceJson = JSON.stringify(provenanceFromUrls(parseUrlList(draft.source_urls)));
     }
 
-    let slug = slugify(draft.headline);
+    const baseSlug = slugify(draft.headline);
+    let slug = baseSlug;
 
     const published = await withTransaction(async (sql) => {
-      const clash = await sql<{ slug: string }>`select slug from articles where slug = ${slug}`;
-      if (clash[0]) slug = `${slug}-${leadId}`;
+      // `articles.slug` is UNIQUE. The old code checked once and, on a clash,
+      // appended the lead id without re-checking — so a second collision (a
+      // headline that slugifies to an existing "<base>-<leadId>", or a
+      // re-publish after the first article was deleted) hit the constraint and
+      // threw a raw 500 out of the server function. Keep looking until free.
+      slug = baseSlug;
+      for (let n = 0; n < 50; n += 1) {
+        const clash = await sql<{ slug: string }>`
+          select slug from articles where slug = ${slug} limit 1
+        `;
+        if (!clash[0]) break;
+        slug = n === 0 ? `${baseSlug}-${leadId}` : `${baseSlug}-${leadId}-${n + 1}`;
+      }
       await sql`
         insert into articles (
           user_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,

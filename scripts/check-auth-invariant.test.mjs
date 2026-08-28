@@ -15,6 +15,26 @@ import {
 import { projectRoot } from "./with-app-env.mjs";
 
 /**
+ * Windows refuses symlink creation to unprivileged processes unless Developer
+ * Mode is on, so this fixture cannot be built there. That is an environment
+ * limit, not a defect — skip rather than fail, so the whole suite is not held
+ * hostage by it.
+ */
+function symlinkSupported() {
+  try {
+    const dir = mkdtempSync(join(tmpdir(), "symlink-probe-"));
+    symlinkSync(dir, join(dir, "self"), "dir");
+    return true;
+  } catch {
+    return false;
+  }
+}
+const SKIP_SYMLINK = symlinkSupported()
+  ? undefined
+  : { skip: "symlinks not permitted on this platform (Windows Developer Mode is off)" };
+
+
+/**
  * The JSON body `/__app-env` would serve. Do not start a real Vite server —
  * `import { createServer } from "vite"` loads rolldown native bindings that
  * SIGSEGV the test worker under qemu-user (amd64 image builds).
@@ -95,7 +115,7 @@ test("the build side resolves this app's auth-on env", () => {
   assert.equal(buildAuthEnabled(projectRoot(), { VITE_AUTH_ENABLED: "false" }), false);
 });
 
-test("the CLI reports rather than silently passing when run via a symlink", async () => {
+test("the CLI reports rather than silently passing when run via a symlink", SKIP_SYMLINK, async () => {
   // A check whose exit code is the whole signal must never no-op to 0 because
   // process.argv[1] came in through a symlinked path.
   const link = join(mkdtempSync(join(tmpdir(), "auth-invariant-link-")), "scripts");

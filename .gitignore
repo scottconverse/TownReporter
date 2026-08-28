@@ -4,3 +4,8 @@ node_modules/
 .env
 .env.*
 !.env.example
+logs/
+.output/
+.vercel/
+.tanstack/
+.node_modules.lock

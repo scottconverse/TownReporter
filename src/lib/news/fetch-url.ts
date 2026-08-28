@@ -31,11 +31,123 @@ export type TrackedFetch = {
   finalUrl: string;
 };
 
+export type FetchLike = (url: URL, init: RequestInit) => Promise<Response>;
+
+let fetchOverride: FetchLike | null = null;
+
+/**
+ * Test seam. Outbound requests go through undici's `fetch` (see
+ * `resolveFetch`), so replacing `globalThis.fetch` no longer intercepts them —
+ * a test that stubs the global would silently make real network calls instead.
+ * Pass `null` to restore normal behaviour.
+ */
+export function setFetchImplForTests(impl: FetchLike | null) {
+  fetchOverride = impl;
+}
+
+export class BlockedAddressError extends Error {
+  constructor(address: string) {
+    super(`That host is not fetchable (resolved to ${address})`);
+    this.name = "BlockedAddressError";
+  }
+}
+
+type LookupCb = (
+  err: NodeJS.ErrnoException | null,
+  address: string | { address: string; family: number }[],
+  family?: number,
+) => void;
+
+/**
+ * `dns.lookup` with a private-range rejection welded on, for use as the
+ * connector's own lookup.
+ *
+ * `assertPublicHttpUrl` resolves a hostname, checks the addresses, and then
+ * hands the HOSTNAME to fetch — which resolves it a SECOND time. A hostile
+ * authoritative server can answer those two lookups differently and land the
+ * connection on a private address. That is DNS rebinding, and this desk is
+ * exposed to it because the scan pipeline follows URLs the model extracted from
+ * source text, unattended. Checking inside the connector removes the second
+ * lookup: the address approved here is the address connected to.
+ */
+export async function guardedLookup(
+  hostname: string,
+  options: Record<string, unknown>,
+  callback: LookupCb,
+): Promise<void> {
+  const spec = "node:dns";
+  const dns = (await import(/* @vite-ignore */ spec)) as typeof import("node:dns");
+  dns.lookup(hostname, options, (err, address, family) => {
+    if (err) {
+      callback(err, address as string, family);
+      return;
+    }
+    const list = Array.isArray(address)
+      ? address
+      : [{ address: address as string, family: family as number }];
+    for (const entry of list) {
+      if (isBlockedAddress(entry.address)) {
+        callback(new BlockedAddressError(entry.address), "", undefined);
+        return;
+      }
+    }
+    callback(null, address as string, family);
+  });
+}
+
+let guardedFetchImpl: FetchLike | null | undefined;
+
+/**
+ * A fetch that re-checks the resolved address at connect time.
+ *
+ * Uses **undici's** fetch, not the global one: Node bundles its own copy of
+ * undici and rejects a dispatcher built from the standalone package (it fails
+ * with `invalid onRequestStart method` rather than honouring the guard), so
+ * both halves have to come from the same package.
+ *
+ * The specifier is a variable behind `@vite-ignore` — the same trick this
+ * codebase uses for Playwright in `render-fetch.ts` — so undici is never traced
+ * into the client bundle. `fetch-url` is reachable from client code, and a
+ * `.server.ts` module is rejected outright by TanStack's import protection.
+ */
+async function buildGuardedFetch(): Promise<FetchLike | null> {
+  try {
+    const spec = "undici";
+    const undici = (await import(/* @vite-ignore */ spec)) as typeof import("undici");
+    const agent = new undici.Agent({
+      connect: { lookup: guardedLookup as unknown as undefined },
+      // Hops are re-validated one by one below; keep sockets short-lived so a
+      // pooled connection cannot long outlive its DNS check.
+      keepAliveTimeout: 10_000,
+      keepAliveMaxTimeout: 30_000,
+    });
+    return async (url, init) =>
+      (await undici.fetch(url, {
+        ...(init as Record<string, unknown>),
+        dispatcher: agent,
+      } as Parameters<typeof undici.fetch>[1])) as unknown as Response;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The guarded fetch, or plain `fetch` when it cannot be built — still guarded
+ * by `assertPublicHttpUrl`, just without the rebinding protection.
+ */
+export async function resolveFetch(): Promise<FetchLike> {
+  if (fetchOverride) return fetchOverride;
+  if (typeof window !== "undefined") return (u, i) => fetch(u, i);
+  if (guardedFetchImpl === undefined) guardedFetchImpl = await buildGuardedFetch();
+  return guardedFetchImpl ?? ((u, i) => fetch(u, i));
+}
+
 export async function fetchPublicHttpTracked(url: URL, hops = 4): Promise<TrackedFetch> {
   const chain: string[] = [url.toString()];
+  const doFetch = await resolveFetch();
   async function go(u: URL, left: number): Promise<Response> {
     await assertPublicHttpUrl(u.toString());
-    const res = await fetch(u, {
+    const res = await doFetch(u, {
       redirect: "manual",
       headers: {
         "User-Agent":

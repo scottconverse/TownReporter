@@ -4,6 +4,7 @@ import {
   assertHttpUrl,
   fetchPublicHttp,
   isBlockedAddress,
+  setFetchImplForTests,
 } from "./fetch-url.ts";
 
 describe("isBlockedAddress", () => {
@@ -80,9 +81,9 @@ describe("assertHttpUrl", () => {
 
 describe("fetchPublicHttp redirect SSRF", () => {
   it("re-validates each hop and refuses a redirect onto loopback", async () => {
-    const original = globalThis.fetch;
+    const original = null;
     const fetched: string[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    setFetchImplForTests((async (input: RequestInfo | URL) => {
       const url =
         typeof input === "string"
           ? input
@@ -97,7 +98,7 @@ describe("fetchPublicHttp redirect SSRF", () => {
         });
       }
       return new Response("should-not-fetch-blocked-host", { status: 200 });
-    }) as typeof fetch;
+    }) as unknown as import("./fetch-url.ts").FetchLike);
     try {
       await assert.rejects(
         () => fetchPublicHttp(new URL("http://1.1.1.1/page")),
@@ -106,13 +107,13 @@ describe("fetchPublicHttp redirect SSRF", () => {
       assert.equal(fetched.length, 1);
       assert.match(fetched[0]!, /^http:\/\/1\.1\.1\.1/);
     } finally {
-      globalThis.fetch = original;
+      setFetchImplForTests(original);
     }
   });
 
   it("follows a same-origin public redirect", async () => {
-    const original = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const original = null;
+    setFetchImplForTests((async (input: RequestInfo | URL) => {
       const url =
         typeof input === "string"
           ? input
@@ -129,13 +130,13 @@ describe("fetchPublicHttp redirect SSRF", () => {
         return new Response("ok", { status: 200, headers: { "content-type": "text/plain" } });
       }
       return new Response("unexpected " + url, { status: 500 });
-    }) as typeof fetch;
+    }) as unknown as import("./fetch-url.ts").FetchLike);
     try {
       const res = await fetchPublicHttp(new URL("http://1.1.1.1/from"));
       assert.equal(res.status, 200);
       assert.equal(await res.text(), "ok");
     } finally {
-      globalThis.fetch = original;
+      setFetchImplForTests(original);
     }
   });
 });

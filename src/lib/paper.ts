@@ -43,8 +43,8 @@ export const SEED_SOURCES: {
     tier: "A",
   },
   {
-    url: "https://www.longmontcolorado.gov/government/agendas-minutes-and-videos",
-    title: "Agendas, minutes, and videos",
+    url: "https://longmontcolorado.gov/city-clerk/",
+    title: "Longmont City Clerk (agendas, minutes, videos)",
     kind: "official",
     tier: "A",
   },
@@ -55,13 +55,13 @@ export const SEED_SOURCES: {
     tier: "A",
   },
   {
-    url: "https://www.longmontcolorado.gov/government/departments/planning-and-development-services",
+    url: "https://www.longmontcolorado.gov/departments/departments-n-z/planning-and-development-services",
     title: "Planning and Development",
     kind: "official",
     tier: "A",
   },
   {
-    url: "https://www.nextlight.net/",
+    url: "https://mynextlight.com/",
     title: "NextLight",
     kind: "official",
     tier: "A",
@@ -102,8 +102,10 @@ export function slugify(input: string) {
   const s = input
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 72);
+    .slice(0, 72)
+    // Trim AFTER the length cut: cutting at 72 can land mid-separator and
+    // leave a trailing dash, which then shows up in the public URL.
+    .replace(/^-+|-+$/g, "");
   return s || "item";
 }
 

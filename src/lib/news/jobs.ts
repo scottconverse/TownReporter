@@ -44,6 +44,22 @@ export async function ensureJobsSchema() {
     create index if not exists desk_jobs_open_idx
       on desk_jobs (newsroom_id, kind, subject_id, status, id desc)
   `);
+  // Identifies WHICH execution owns a running row. Without it a stale-reclaim
+  // and the original executor both write results for the same job.
+  await sql.query(`alter table desk_jobs add column if not exists claim_token text`);
+}
+
+/**
+ * How long a `running` row may go without a heartbeat before another drainer
+ * treats it as abandoned. The heartbeat below fires far more often than this,
+ * so only a genuinely dead process trips it.
+ */
+export const STALE_RUNNING_SECONDS = 120;
+const HEARTBEAT_MS = 30_000;
+
+/** Unique per execution. `randomUUID` is available on every supported runtime. */
+function mintClaimToken(): string {
+  return globalThis.crypto.randomUUID();
 }
 
 export async function latestJob(opts: {
@@ -154,7 +170,7 @@ export async function drainQueuedJobs(): Promise<{ ran: number }> {
                created_at, updated_at, started_at, finished_at
         from desk_jobs
         where status = 'queued'
-           or (status = 'running' and updated_at < now() - interval '2 minutes')
+           or (status = 'running' and updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
         order by id asc
         limit 1
       `;
@@ -172,17 +188,38 @@ export async function drainQueuedJobs(): Promise<{ ran: number }> {
 
 export async function executeJob(job: DeskJob): Promise<boolean> {
   const sql = await getSql();
+  const token = mintClaimToken();
   const claimed = await sql<{ id: number }>`
     update desk_jobs
-    set status = ${"running"}, stage = ${"Working…"}, started_at = coalesce(started_at, now()), updated_at = now()
+    set status = ${"running"}, stage = ${"Working…"}, claim_token = ${token},
+        started_at = coalesce(started_at, now()), updated_at = now()
     where id = ${job.id}
       and (
         status = ${"queued"}
-        or (status = ${"running"} and updated_at < now() - interval '2 minutes')
+        or (status = ${"running"} and updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
       )
     returning id
   `;
   if (!claimed[0]) return false;
+
+  /**
+   * Keep `updated_at` fresh for as long as this execution is alive.
+   *
+   * Nothing else moved it during a run — `setJobStage` had no callers — so any
+   * job slower than the stale window (an LLM draft routinely is) was re-claimed
+   * by the next drainer and run a SECOND time while the first was still going,
+   * producing duplicate drafts and doubled model spend. The `claim_token` guard
+   * below is the backstop for the case where this process really did stall.
+   */
+  const beat = setInterval(() => {
+    void sql`
+      update desk_jobs set updated_at = now()
+      where id = ${job.id} and claim_token = ${token}
+    `.catch(() => undefined);
+  }, HEARTBEAT_MS);
+  // Never hold the process open on this timer alone.
+  (beat as unknown as { unref?: () => void }).unref?.();
+
   try {
     if (job.kind === "draft") {
       const { performDraftWork } = await import("./desk.ts");
@@ -194,18 +231,22 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
       const { performDarkRound } = await import("./dark.ts");
       await performDarkRound(job);
     }
+    // `claim_token` guard: if we were declared stale and someone else took the
+    // job, this write must not clobber their result.
     await sql`
       update desk_jobs
       set status = ${"completed"}, stage = ${"Done"}, error = null, finished_at = now(), updated_at = now()
-      where id = ${job.id}
+      where id = ${job.id} and claim_token = ${token}
     `;
   } catch (err) {
     const raw = err instanceof Error ? err.message : "Job failed";
     await sql`
       update desk_jobs
       set status = ${"failed"}, error = ${raw.slice(0, 800)}, finished_at = now(), updated_at = now()
-      where id = ${job.id}
+      where id = ${job.id} and claim_token = ${token}
     `;
+  } finally {
+    clearInterval(beat);
   }
   return true;
 }

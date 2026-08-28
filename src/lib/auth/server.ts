@@ -97,11 +97,33 @@ const previewAllowedHosts: string[] = [...PREVIEW_ALLOWED_HOSTS];
 // Local `npm run dev` (port 8080 contract). Browsers may send Origin as any of
 // these for the same server — trusting only `localhost` rejects `127.0.0.1` and
 // breaks email/password with "Invalid origin".
+// `npm run dev` uses 8080; a self-hosted `npm start` uses whatever PORT says
+// (3000 by default). Trust both, or signing in on the deployed port fails with
+// "Invalid origin" even though the site loads fine.
+const localPort = process.env.PORT?.trim() || "3000";
 const LOCAL_DEV_ORIGINS: string[] = [
-  "http://localhost:8080",
-  "http://127.0.0.1:8080",
-  "http://[::1]:8080",
+  ...new Set([
+    `http://localhost:${localPort}`,
+    `http://127.0.0.1:${localPort}`,
+    `http://[::1]:${localPort}`,
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://[::1]:8080",
+  ]),
 ];
+
+/**
+ * Extra origins the operator explicitly trusts, comma-separated.
+ *
+ * `BETTER_AUTH_URL` names ONE origin. A self-hosted paper is reached from more
+ * than one — the public domain, `www`, and localhost on the box itself — and an
+ * origin missing here is rejected at sign-in with "Invalid origin" while every
+ * page still renders, which reads like a broken password rather than config.
+ */
+const extraTrustedOrigins: string[] = (env("BETTER_AUTH_TRUSTED_ORIGINS") ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 const baseURL = explicitBaseURL ?? {
   // Include loopback hosts so dynamic baseURL resolves for local email/password
   // (not only the preview wildcard).
@@ -115,12 +137,13 @@ const baseURL = explicitBaseURL ?? {
 // Origins Better Auth accepts on credentialed POSTs (sign-up/sign-in, etc.).
 // Missing entries here surface as FORBIDDEN "Invalid origin".
 const trustedOrigins: string[] = explicitBaseURL
-  ? [explicitBaseURL, ...LOCAL_DEV_ORIGINS]
+  ? [explicitBaseURL, ...extraTrustedOrigins, ...LOCAL_DEV_ORIGINS]
   : [
       // Host wildcards (matched against Origin's host)
       ...previewAllowedHosts,
       // Full-origin wildcards (matched against Origin)
       ...previewAllowedHosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
+      ...extraTrustedOrigins,
       ...LOCAL_DEV_ORIGINS,
     ];
 

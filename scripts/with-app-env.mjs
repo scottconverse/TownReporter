@@ -132,6 +132,24 @@ export function isMainModule(moduleUrl) {
   }
 }
 
+/**
+ * Whether `command` has to go through a shell to be executable.
+ *
+ * On Windows npm installs bin entries as `vite.cmd` / `vite.ps1` shims. Bare
+ * `spawn("vite")` cannot execute either — it fails with ENOENT, which took
+ * down `npm run dev` and `npm run build` on every Windows box. Node also
+ * refuses to spawn a `.cmd` without a shell (CVE-2024-27980), so the shell is
+ * the only route to a shim.
+ *
+ * Scope it to bare command NAMES: an absolute path is spawnable as-is, and
+ * routing one through the shell would re-split it on spaces — which is exactly
+ * how `C:\Program Files\nodejs\node.exe` breaks. POSIX never needs the shell.
+ */
+export function needsShell(command) {
+  if (process.platform !== "win32") return false;
+  return !/[\\/]/.test(command);
+}
+
 function main(argv) {
   const [command, ...args] = argv;
   if (!command) {
@@ -142,7 +160,14 @@ function main(argv) {
     ...readDotEnv(projectRoot()),
     ...process.env,
   });
-  const child = spawn(command, args, { stdio: "inherit", env });
+  // `node` is this very runtime — use its real path rather than a PATH lookup.
+  // Avoids the shell entirely (and its DEP0190 warning on every run).
+  const resolved = command === "node" ? process.execPath : command;
+  const child = spawn(resolved, args, {
+    stdio: "inherit",
+    env,
+    shell: needsShell(resolved),
+  });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     process.on(signal, () => child.kill(signal));

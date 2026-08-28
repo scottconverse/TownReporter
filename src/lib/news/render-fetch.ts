@@ -11,6 +11,7 @@ export type RenderedPage = {
 };
 
 type ChromiumBrowser = {
+  isConnected?: () => boolean;
   newContext: (opts: {
     userAgent: string;
     javaScriptEnabled: boolean;
@@ -50,10 +51,28 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * Forget the cached browser so the next call launches a fresh one.
+ *
+ * Chromium dies for ordinary reasons — an OOM kill under memory pressure is the
+ * common one. The handle was cached forever, so after the first crash every
+ * later render threw inside the caller's try/catch and silently returned null:
+ * JS-heavy sources (Municode, PrimeGov) quietly degraded to app-shell HTML for
+ * the rest of the process lifetime, with nothing in the logs saying why.
+ */
+function dropBrowser(reason: string) {
+  if (browser) console.warn(`[render] dropping Chromium handle: ${reason}`);
+  browser = null;
+}
+
 async function getBrowser(): Promise<ChromiumBrowser | null> {
   if (typeof window !== "undefined") return null;
   if (process.env["VERCEL"] || process.env["TOWNREPORTER_NO_PLAYWRIGHT"] === "1") return null;
-  if (browser) return browser;
+  if (browser) {
+    // `isConnected` is false once the browser process is gone.
+    if (browser.isConnected?.() === false) dropBrowser("browser disconnected");
+    else return browser;
+  }
   if (launching) return launching;
   launching = (async () => {
     try {
@@ -83,7 +102,15 @@ export async function fetchRenderedPage(raw: string): Promise<RenderedPage | nul
   const br = await getBrowser();
   if (!br) return null;
   return withSlot(async () => {
-    const ctx = await br.newContext({ userAgent: UA, javaScriptEnabled: true });
+    let ctx: Awaited<ReturnType<ChromiumBrowser["newContext"]>>;
+    try {
+      ctx = await br.newContext({ userAgent: UA, javaScriptEnabled: true });
+    } catch (err) {
+      // A dead browser fails right here. Drop it so the next caller relaunches
+      // instead of inheriting the corpse.
+      dropBrowser(err instanceof Error ? err.message : "newContext failed");
+      return null;
+    }
     const page = await ctx.newPage();
     try {
       await page.route("**/*", async (route) => {
@@ -144,11 +171,17 @@ export async function scrapeYoutubeShowTranscript(videoId: string): Promise<stri
   const br = await getBrowser();
   if (!br) return "";
   return withSlot(async () => {
-    const ctx = await br.newContext({
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      javaScriptEnabled: true,
-    });
+    let ctx: Awaited<ReturnType<ChromiumBrowser["newContext"]>>;
+    try {
+      ctx = await br.newContext({
+        userAgent:
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        javaScriptEnabled: true,
+      });
+    } catch (err) {
+      dropBrowser(err instanceof Error ? err.message : "newContext failed");
+      return "";
+    }
     const page = await ctx.newPage();
     const p = page as unknown as {
       goto: (url: string, opts: { waitUntil: string; timeout: number }) => Promise<unknown>;

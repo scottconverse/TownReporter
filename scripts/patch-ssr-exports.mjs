@@ -13,14 +13,30 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const func = join(root, ".vercel/output/functions/__server.func");
-const ssrDir = join(func, "_ssr");
-const barrel = join(ssrDir, "ssr.mjs");
 
-if (!existsSync(barrel)) {
+/**
+ * Where the server bundle lands depends on the Nitro preset, and the barrel bug
+ * is identical in both. `node-server` (self-hosted, the default) writes
+ * `.output/server/`; `vercel` writes `.vercel/output/functions/__server.func/`.
+ * Hardcoding the Vercel path made this script silently no-op on a self-hosted
+ * build — it printed "skip" and every route then 500'd with
+ * `Export 'ssr_exports' is not defined in module`.
+ */
+const SERVER_DIRS = [
+  join(root, ".output/server"),
+  join(root, ".vercel/output/functions/__server.func"),
+];
+
+const serverDir = SERVER_DIRS.find((dir) => existsSync(join(dir, "_ssr/ssr.mjs")));
+
+if (!serverDir) {
   console.log("[patch-ssr] no ssr.mjs — skip");
   process.exit(0);
 }
+
+const ssrDir = join(serverDir, "_ssr");
+const barrel = join(ssrDir, "ssr.mjs");
+console.log(`[patch-ssr] server bundle: ${serverDir}`);
 
 let changed = 0;
 let barrelSrc = readFileSync(barrel, "utf8");

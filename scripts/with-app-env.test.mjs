@@ -13,6 +13,26 @@ import {
   readAppEnv,
 } from "./with-app-env.mjs";
 
+/**
+ * Windows refuses symlink creation to unprivileged processes unless Developer
+ * Mode is on, so this fixture cannot be built there. That is an environment
+ * limit, not a defect — skip rather than fail, so the whole suite is not held
+ * hostage by it.
+ */
+function symlinkSupported() {
+  try {
+    const dir = mkdtempSync(join(tmpdir(), "symlink-probe-"));
+    symlinkSync(dir, join(dir, "self"), "dir");
+    return true;
+  } catch {
+    return false;
+  }
+}
+const SKIP_SYMLINK = symlinkSupported()
+  ? undefined
+  : { skip: "symlinks not permitted on this platform (Windows Developer Mode is off)" };
+
+
 const execFileAsync = promisify(execFile);
 const WRAPPER = join(projectRoot(), "scripts/with-app-env.mjs");
 const PRINT_FLAG = "process.stdout.write(String(process.env.VITE_AUTH_ENABLED));";
@@ -113,7 +133,7 @@ test("a signal-killed command is never reported as success", async () => {
   );
 });
 
-test("the CLI still runs when invoked through a symlinked path", async () => {
+test("the CLI still runs when invoked through a symlinked path", SKIP_SYMLINK, async () => {
   // node realpaths import.meta.url but not process.argv[1], so a raw comparison
   // turns the wrapper into a no-op that exits 0 without starting anything.
   const link = join(mkdtempSync(join(tmpdir(), "app-env-link-")), "scripts");

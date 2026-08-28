@@ -39,15 +39,37 @@ export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-function decodePdfString(raw: string): string {
-  return raw
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "\r")
-    .replace(/\\t/g, "\t")
-    .replace(/\\\(/g, "(")
-    .replace(/\\\)/g, ")")
-    .replace(/\\\\/g, "\\")
-    .replace(/\\(\d{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
+/**
+ * Decode one PDF literal string's escapes.
+ *
+ * Single pass, deliberately. Chained `.replace()` calls re-scan text they have
+ * already produced, so `\\n` (an escaped backslash followed by the letter n)
+ * was consumed by the `\n` rule and became a newline — `C:\\newdocs` came out
+ * as `C:` + newline + `ewdocs` and went to the model as evidence that way.
+ * Matching each backslash-escape exactly once removes the ordering question.
+ */
+export function decodePdfString(raw: string): string {
+  return raw.replace(/\\(\d{1,3}|[\s\S])/g, (_, esc: string) => {
+    if (/^\d{1,3}$/.test(esc)) return String.fromCharCode(parseInt(esc, 8) & 0xff);
+    switch (esc) {
+      case "n":
+        return "\n";
+      case "r":
+        return "\r";
+      case "t":
+        return "\t";
+      case "b":
+        return "\b";
+      case "f":
+        return "\f";
+      case "\n":
+      case "\r":
+        return ""; // line continuation inside a literal string
+      default:
+        // Covers \( \) \\ and, per spec, any other escaped char is itself.
+        return esc;
+    }
+  });
 }
 
 /** Best-effort text from a PDF without a native parser. Civic packets are often uncompressed. */

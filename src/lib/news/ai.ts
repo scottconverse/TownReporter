@@ -3,7 +3,7 @@ type GrokErr = { ok: false; error: string };
 
 /** Same copy the working v1–v4 desks used when the platform key is absent. */
 export const GROK_UNAVAILABLE =
-  "AI is not available. Set XAI_API_KEY for Grok (default), or LLM_BASE_URL for any OpenAI-compatible gateway (LiteLLM, Bifrost, Helicone, MLflow, Kong, Ollama).";
+  "AI is not available. Set ANTHROPIC_API_KEY for Claude (default), or XAI_API_KEY for Grok, or LLM_BASE_URL for any OpenAI-compatible gateway (LiteLLM, Bifrost, Helicone, MLflow, Kong, Ollama).";
 
 function env(key: string): string | undefined {
   const value = process.env[key];
@@ -17,37 +17,203 @@ export type LlmConfig = {
   label: string;
 };
 
+/** How hard Claude thinks before answering. Higher costs more and reads better. */
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+const EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
+
+export type AnthropicConfig = {
+  apiKey: string;
+  model: string;
+  effort: Effort;
+  label: string;
+};
+
+export type ClaudeCodeConfig = {
+  model: string;
+  label: string;
+};
+
+/** The desk speaks to exactly one of these per call. */
+export type Provider =
+  | ({ kind: "anthropic" } & AnthropicConfig)
+  | ({ kind: "claude-code" } & ClaudeCodeConfig)
+  | ({ kind: "openai" } & LlmConfig);
+
 function trimSlash(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
-/**
- * Grok is the default. Any OpenAI-compatible /v1/chat/completions gateway
- * (LiteLLM, Bifrost, Helicone, MLflow AI Gateway, Kong AI Gateway, Ollama,
- * OpenRouter) wins when LLM_BASE_URL or LLM_API_KEY is set.
- */
-export function resolveLlm(): LlmConfig | null {
+/** An OpenAI-compatible gateway the operator named explicitly. Beats everything. */
+function customGateway(): LlmConfig | null {
   const customKey = env("LLM_API_KEY") ?? env("OPENAI_API_KEY");
   const customBase = env("LLM_BASE_URL");
   const customModel = env("LLM_MODEL");
-  if (customBase || (customKey && customModel)) {
-    return {
-      apiKey: customKey || "not-needed",
-      baseUrl: trimSlash(customBase || "https://api.openai.com/v1"),
-      model: customModel || "gpt-4o-mini",
-      label: "LLM",
-    };
-  }
+  if (!customBase && !(customKey && customModel)) return null;
+  return {
+    apiKey: customKey || "not-needed",
+    baseUrl: trimSlash(customBase || "https://api.openai.com/v1"),
+    model: customModel || "gpt-4o-mini",
+    label: "LLM",
+  };
+}
+
+function xaiGateway(): LlmConfig | null {
   const xai = env("XAI_API_KEY") ?? env("GROK_API_KEY");
-  if (xai) {
-    return {
-      apiKey: xai,
-      baseUrl: trimSlash(env("XAI_BASE_URL") || "https://api.x.ai/v1"),
-      model: env("XAI_MODEL") || "grok-4.5",
-      label: "xAI",
-    };
-  }
+  if (!xai) return null;
+  return {
+    apiKey: xai,
+    baseUrl: trimSlash(env("XAI_BASE_URL") || "https://api.x.ai/v1"),
+    model: env("XAI_MODEL") || "grok-4.5",
+    label: "xAI",
+  };
+}
+
+/**
+ * The OpenAI-compatible leg only. Unchanged contract: an explicitly named
+ * gateway wins, otherwise Grok. Claude is resolved separately because it is
+ * NOT an OpenAI-compatible endpoint — see `resolveAnthropic`.
+ */
+export function resolveLlm(): LlmConfig | null {
+  return customGateway() ?? xaiGateway();
+}
+
+/**
+ * Claude via the native Messages API (the official SDK, not a chat-completions
+ * shim). `ANTHROPIC_EFFORT` dials thinking depth: `low` is cheapest, `max` is
+ * for when a story has to be right. Default `high`.
+ */
+export function resolveAnthropic(): AnthropicConfig | null {
+  const apiKey = env("ANTHROPIC_API_KEY");
+  if (!apiKey) return null;
+  const raw = env("ANTHROPIC_EFFORT")?.toLowerCase();
+  const effort = (EFFORTS as readonly string[]).includes(raw ?? "")
+    ? (raw as Effort)
+    : "high";
+  return {
+    apiKey,
+    model: env("ANTHROPIC_MODEL") || "claude-opus-5",
+    effort,
+    label: "Claude",
+  };
+}
+
+/**
+ * Claude through the operator's local Claude Code login — no API key.
+ *
+ * Server-only by construction: the CLI cannot exist in a browser. Set
+ * `TOWNREPORTER_CLAUDE_CODE=0` to take this out of the chain. Availability is
+ * NOT probed here (that needs the filesystem, and this function is sync and
+ * client-safe) — `probeProvider()` does the real check, and a call against a
+ * missing CLI returns an actionable error rather than failing silently.
+ */
+export function resolveClaudeCode(): ClaudeCodeConfig | null {
+  if (typeof window !== "undefined") return null;
+  if (env("TOWNREPORTER_CLAUDE_CODE") === "0") return null;
+  return {
+    model: env("ANTHROPIC_MODEL") || "claude-opus-5",
+    label: "Claude Code",
+  };
+}
+
+/**
+ * Claude is the default brain, and it prefers the operator's existing Claude
+ * Code login over an API key — this desk is run by someone who does not keep
+ * API keys. An explicitly configured gateway still wins, so a local model on
+ * the box can take over without touching code; Grok stays as the last fallback
+ * for an existing XAI_API_KEY.
+ */
+export function resolveProvider(): Provider | null {
+  const custom = customGateway();
+  if (custom) return { kind: "openai", ...custom };
+  const claude = resolveAnthropic();
+  if (claude) return { kind: "anthropic", ...claude };
+  const cli = resolveClaudeCode();
+  if (cli) return { kind: "claude-code", ...cli };
+  const xai = xaiGateway();
+  if (xai) return { kind: "openai", ...xai };
   return null;
+}
+
+/**
+ * Availability the desk can trust. `resolveProvider` says what is *configured*;
+ * this says whether it can actually run — which for the CLI means the binary is
+ * on disk. Async because that is a filesystem question.
+ */
+export async function probeProvider(): Promise<
+  { ok: true; label: string } | { ok: false; error: string }
+> {
+  const provider = resolveProvider();
+  if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
+  if (provider.kind !== "claude-code") return { ok: true, label: provider.label };
+  const { findClaudeCli, CLAUDE_CLI_MISSING } = await import("./ai-claude-code.server.ts");
+  const bin = await findClaudeCli();
+  return bin ? { ok: true, label: provider.label } : { ok: false, error: CLAUDE_CLI_MISSING };
+}
+
+/**
+ * Callers size `maxTokens` for the ANSWER. Claude thinks inside the same
+ * ceiling, so the answer budget alone would truncate mid-JSON. Give the
+ * thinking room and keep a floor, so a 2,200-token draft is not cut off.
+ */
+function anthropicCeiling(requested: number): number {
+  return Math.min(32_000, Math.max(requested * 4, 8_000));
+}
+
+async function anthropicChat(
+  cfg: AnthropicConfig,
+  system: string,
+  user: string,
+  maxTokens: number,
+  timeoutMs: number,
+): Promise<GrokOk | GrokErr> {
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  const client = new Anthropic({
+    apiKey: cfg.apiKey,
+    timeout: timeoutMs, // milliseconds in the TS SDK
+    maxRetries: 1,
+  });
+  try {
+    const res = await client.messages.create({
+      model: cfg.model,
+      max_tokens: anthropicCeiling(maxTokens),
+      // Array form so the desk's stable system prompt can be cached. Prompts
+      // under the ~1k-token minimum simply will not cache — no error, no cost.
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      thinking: { type: "adaptive" },
+      output_config: { effort: cfg.effort },
+      messages: [{ role: "user", content: user }],
+    });
+
+    if (res.stop_reason === "refusal") {
+      const why = res.stop_details?.category ?? "unspecified";
+      return { ok: false, error: `${cfg.label} declined this request (${why})` };
+    }
+    const text = res.content
+      .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim();
+    if (res.stop_reason === "max_tokens" && !text) {
+      return { ok: false, error: `${cfg.label} hit the token ceiling before answering` };
+    }
+    if (!text) return { ok: false, error: "Empty model response" };
+    return { ok: true, text };
+  } catch (err) {
+    const A = (await import("@anthropic-ai/sdk")).default;
+    if (err instanceof A.AuthenticationError) {
+      return { ok: false, error: `${cfg.label} rejected the API key` };
+    }
+    if (err instanceof A.RateLimitError) {
+      return { ok: false, error: `${cfg.label} rate limit — try again shortly` };
+    }
+    if (err instanceof A.APIConnectionTimeoutError) {
+      return { ok: false, error: `${cfg.label} request timed out` };
+    }
+    if (err instanceof A.APIError) {
+      return { ok: false, error: `${cfg.label} API error ${err.status ?? ""}`.trim() };
+    }
+    return { ok: false, error: `${cfg.label} request failed` };
+  }
 }
 
 export async function grokChat(
@@ -56,10 +222,27 @@ export async function grokChat(
   maxTokens = 1400,
   opts?: { timeoutMs?: number },
 ): Promise<GrokOk | GrokErr> {
-  const llm = resolveLlm();
-  if (!llm) return { ok: false, error: GROK_UNAVAILABLE };
+  const provider = resolveProvider();
+  if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
 
   const timeoutMs = opts?.timeoutMs ?? 45_000;
+  if (provider.kind === "anthropic") {
+    return anthropicChat(provider, system, user, maxTokens, timeoutMs);
+  }
+  if (provider.kind === "claude-code") {
+    // Server-only module — dynamic import keeps node:child_process out of the
+    // browser bundle (same pattern as isolation.server.ts / render-fetch.ts).
+    const { claudeCodeChat } = await import("./ai-claude-code.server.ts");
+    // The CLI spawns a process and reloads its preamble each call, so give it
+    // more room than an HTTP request would need.
+    return claudeCodeChat({
+      system,
+      user,
+      model: provider.model,
+      timeoutMs: Math.max(timeoutMs, 120_000),
+    });
+  }
+  const llm = provider;
   const url = `${llm.baseUrl}/chat/completions`;
   const payload = {
     model: llm.model,
@@ -114,7 +297,7 @@ export async function grokChat(
 }
 
 export function isGrokAvailable(): boolean {
-  return Boolean(resolveLlm());
+  return Boolean(resolveProvider());
 }
 
 export function parseJsonBlock<T>(raw: string): T | null {

@@ -281,7 +281,14 @@ export default defineConfig(({ command, isPreview }) => ({
     ...(command === "build" || isPreview
       ? [
           nitro({
-            preset: "vercel",
+            // Self-hosted by default: `node-server` emits a standalone Node
+            // server (.output/server/index.mjs) that runs anywhere — the home
+            // box, a VPS, a container. Unlike the Vercel preset this keeps a
+            // long-lived process, so Playwright rendering and the desk job
+            // drain actually work (see src/lib/news/render-fetch.ts, which
+            // disables Chromium whenever it sees a VERCEL env var).
+            // Set NITRO_PRESET=vercel to build for Vercel again.
+            preset: process.env.NITRO_PRESET || "node-server",
             // Auto-registers server/middleware/* (the PWA install page +
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.
