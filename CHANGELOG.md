@@ -2,6 +2,16 @@
 
 Current release: **0.4.0**.
 
+## Unreleased — 0.4.1
+
+Not tagged. Honesty and the two leftovers that still lie about how the desk is built.
+
+- After the desk is claimed, `/login` is sign-in only. Create editor account is gone. The paper stays public. New accounts are rejected, not parked as useless logins.
+- Dark Desk hops keyed by the newsroom, not the editor who opened the file.
+- Scan / Draft / Keep digging keep working after the click even if this program would otherwise go to sleep (a wake-up that finishes waiting jobs, not only this one process).
+
+Not in 0.4.1 unless named separately: real OCR, city picker, mailer, invite a second editor.
+
 ## 0.4.0 — 2026-08-27
 
 Hardening. Trustworthiness and lifecycle, not a redesign.

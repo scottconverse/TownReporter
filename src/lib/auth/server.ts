@@ -212,6 +212,24 @@ export const auth = betterAuth({
   // Local email/password — toggled only via `./email-password` (not a plugin).
   ...(emailAndPasswordEnabled ? { emailAndPassword: { enabled: true } } : {}),
 
+  // After the newsroom has an owner, new Better Auth users (email or OAuth) are
+  // a dead door. Existing editor sign-in is unchanged.
+  databaseHooks: {
+    user: {
+      create: {
+        async before(user) {
+          const { deskIsClaimed } = await import("../news/membership");
+          if (await deskIsClaimed()) {
+            throw new Error(
+              "This desk already has an editor. Sign in if that's you.",
+            );
+          }
+          return { data: user };
+        },
+      },
+    },
+  },
+
   // `__Host-` prefixed cookies: the browser REFUSES any same-named cookie that
   // carries a `Domain` attribute, so a sibling `*.grok.me` app cannot "toss" a
   // `Domain=.grok.me` session cookie onto this app. `__Host-` requires Secure +

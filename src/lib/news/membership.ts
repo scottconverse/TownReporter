@@ -1,4 +1,5 @@
 import { getSql } from "../db.ts";
+import { deskTakenLoginCopy } from "./desk-copy.ts";
 
 export const DEFAULT_NEWSROOM_ID = 1;
 
@@ -106,6 +107,20 @@ export async function requireEditor(userId: string): Promise<EditorContext> {
     }
   }
   throw new ForbiddenError();
+}
+
+/** True once any owner/editor row exists. Signup after that is a dead door. */
+export async function deskIsClaimed(): Promise<boolean> {
+  await ensureNewsroomSchema();
+  const sql = await getSql();
+  const n = await sql<{ c: number }>`select count(*)::int as c from newsroom_members`;
+  return (n[0]?.c ?? 0) > 0;
+}
+
+export async function assertSignupOpen() {
+  if (await deskIsClaimed()) {
+    throw new ForbiddenError(deskTakenLoginCopy().api);
+  }
 }
 
 /**

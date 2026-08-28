@@ -5,6 +5,7 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
 import { PAPER } from "@/lib/paper";
 import { claimDesk, deskClaimState } from "@/lib/news/claim";
+import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
 import { useQuery } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/login")({ component: Login });
@@ -60,7 +61,7 @@ function showGrokOAuth() {
 function Login() {
   const { user } = useCurrentUserState();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"create" | "signin">("create");
+  const [wantCreate, setWantCreate] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState("");
@@ -69,17 +70,20 @@ function Login() {
   const [name, setName] = useState("");
   const [setupToken, setSetupToken] = useState("");
   const claim = useQuery({ queryKey: ["desk-claim"], queryFn: () => deskClaimState() });
-  const tokenRequired = Boolean(claim.data?.tokenRequired && !claim.data?.claimed);
+  const claimed = claim.isError || Boolean(claim.data?.claimed);
+  const tokenRequired = Boolean(claim.data?.tokenRequired && !claimed);
+  const mode: "create" | "signin" = claimed ? "signin" : wantCreate ? "create" : "signin";
+  const taken = deskTakenLoginCopy();
   if (user && !claim.isPending && !tokenRequired) return <Navigate to="/desk" />;
 
   async function finishEmail(data?: unknown, headers?: Headers | null) {
     storePreviewBearer(tokenFromResult(data, headers));
     await authClient.getSession();
     if (tokenRequired || setupToken.trim()) {
-      const claimed = await claimDesk({ data: setupToken });
-      if (!claimed.ok) {
+      const claimedDesk = await claimDesk({ data: setupToken });
+      if (!claimedDesk.ok) {
         setBusy(null);
-        setError(claimed.error);
+        setError(claimedDesk.error);
         return;
       }
     }
@@ -107,7 +111,9 @@ function Login() {
       const raw = failMessage(err, "Sign-in failed");
       setError(
         looksLikeMissingAccount(raw)
-          ? "No editor account with that email yet. Use Create editor account — this is not your Grok password."
+          ? claimed
+            ? taken.unknownEmail
+            : "No editor account with that email yet. Use Create editor account — this is not your Grok password."
           : raw,
       );
     }
@@ -115,6 +121,10 @@ function Login() {
 
   async function onEmailSignUp() {
     setError(null);
+    if (claimed) {
+      setError(taken.api);
+      return;
+    }
     if (password.length < 8) {
       setError("Password must be at least 8 characters.");
       return;
@@ -152,6 +162,18 @@ function Login() {
     }
   }
 
+  const heading =
+    claim.isPending ? "Editor desk" : mode === "create" ? "Create the desk" : taken.title;
+  const blurb = claim.isPending
+    ? "One moment."
+    : mode === "create"
+      ? tokenRequired
+        ? "This desk needs the operator setup token before the first editor can own it. If you already have an account, sign in."
+        : "First person in owns the newsroom. If you already created an account, submit again with the same email and password — we will sign you in."
+      : claimed
+        ? taken.body
+        : "Sign in with the password you set for this desk.";
+
   return (
     <main
       className="grid min-h-dvh place-items-center bg-paper px-6 py-10 text-ink"
@@ -162,16 +184,8 @@ function Login() {
           <p className="text-[11px] tracking-[0.18em] text-rust uppercase">
             {PAPER.name}
           </p>
-          <h1 className="mt-2 font-display text-3xl font-semibold">
-            {mode === "create" ? "Create the desk" : "Editor sign-in"}
-          </h1>
-          <p className="mt-2 text-sm text-muted">
-            {mode === "create"
-              ? tokenRequired
-                ? "This desk needs the operator setup token before the first editor can own it. If you already have an account, sign in."
-                : "First person in owns the newsroom. If you already created an account, submit again with the same email and password — we will sign you in."
-              : "Sign in with the password you set for this desk."}
-          </p>
+          <h1 className="mt-2 font-display text-3xl font-semibold">{heading}</h1>
+          <p className="mt-2 text-sm text-muted">{blurb}</p>
         </div>
         {error ? (
           <p className="border border-rust/40 bg-paper-2 px-3 py-2 text-sm text-ink">
@@ -179,6 +193,9 @@ function Login() {
           </p>
         ) : null}
 
+        {claim.isPending ? (
+          <p className="text-sm text-muted">Opening…</p>
+        ) : (
         <form
           className="space-y-3"
           onSubmit={(event) => {
@@ -265,21 +282,24 @@ function Login() {
                   ? "Signing in…"
                   : "Sign in with email"}
             </button>
+            {claimed ? null : (
             <button
               type="button"
               disabled={busy !== null}
               className={inkGhost}
               onClick={() => {
                 setError(null);
-                setMode(mode === "create" ? "signin" : "create");
+                setWantCreate(!wantCreate);
               }}
             >
               {mode === "create" ? "I already have an account" : "Create an editor account"}
             </button>
+            )}
           </div>
         </form>
+        )}
 
-        {showGrokOAuth() ? (
+        {showGrokOAuth() && !claim.isPending ? (
           <div className="space-y-2 border-t border-rule pt-4">
             <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
               Or a small window

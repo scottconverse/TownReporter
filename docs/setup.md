@@ -44,7 +44,7 @@ Then:
 npm run dev
 ```
 
-Open `http://localhost:8080/login`. Create an editor account (email + password). That account is stored in **your** database. With no `NEWSROOM_SETUP_TOKEN`, the first account becomes the newsroom **owner**. On a public host, set `NEWSROOM_SETUP_TOKEN` and paste it on Create the desk — signup alone does not own the desk.
+Open `http://localhost:8080/login`. Create an editor account (email + password). That account is stored in **your** database. With no `NEWSROOM_SETUP_TOKEN`, the first account becomes the newsroom **owner**. After that, Create editor account disappears — signup is not a second desk. On a public host, set `NEWSROOM_SETUP_TOKEN` and paste it on Create the desk — signup alone does not own the desk.
 
 - Paper: `http://localhost:8080/`
 - Desk: `http://localhost:8080/desk`
@@ -116,16 +116,9 @@ BETTER_AUTH_SECRET=generate-a-long-random-string
 
 ### A second editor
 
-The first signed-in user is inserted into `newsroom_members` as `owner`. Everyone else is 403 until they have a row.
+The first signed-in user is inserted into `newsroom_members` as `owner`. After that, Create editor account is gone and new accounts are rejected.
 
-There is no invite UI yet. To add an editor after they have created an account (so you know their `user_id`):
-
-```sql
-insert into newsroom_members (user_id, role)
-values ('the-better-auth-user-id', 'editor');
-```
-
-Or share the owner login. Do not turn auth off to “fix” this.
+There is no invite UI yet (0.4.1 has not named it). Do not turn auth off to “fix” this. Share the owner login, or wait for invite.
 
 ### Cron (source monitors)
 
@@ -274,6 +267,6 @@ TownReporter/
 - **Forgot Playwright** → YouTube meetings ingest as titles with “no transcript yet.” PrimeGov PDFs still work.
 - **PGLite in production** → archive vanishes on restart / scale-to-zero.
 - **Bifrost on 8080** → it steals TownReporter’s port. Map 4000:8080.
-- **Second Google account on a self-host box** → 403. First user is owner. See [A second editor](#a-second-editor).
+- **Second Google account on a self-host box** → cannot create an account once the desk is claimed. See [A second editor](#a-second-editor).
 - **`VITE_AUTH_ENABLED=false` on the public internet** → the desk is open. Don’t.
 - **Captions in a published story as if they were minutes** → that’s on the editor. The software will not save you. See [editor.md](editor.md#meetings-and-tapes).

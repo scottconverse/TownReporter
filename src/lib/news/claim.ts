@@ -1,20 +1,16 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getSql } from "../db.ts";
 import { authMiddleware } from "@/lib/auth/middleware";
 import {
   claimOwner,
-  ensureNewsroomSchema,
+  deskIsClaimed,
   ForbiddenError,
   newsroomSetupToken,
   SetupRequiredError,
 } from "./membership";
 
 export const deskClaimState = createServerFn({ method: "GET" }).handler(async () => {
-  await ensureNewsroomSchema();
-  const sql = await getSql();
-  const n = await sql<{ c: number }>`select count(*)::int as c from newsroom_members`;
   return {
-    claimed: (n[0]?.c ?? 0) > 0,
+    claimed: await deskIsClaimed(),
     tokenRequired: Boolean(newsroomSetupToken()),
   };
 });

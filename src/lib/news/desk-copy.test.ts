@@ -35,6 +35,7 @@ import {
   worthTitle,
   recordKindFromUrl,
   excerptForEditor,
+  deskTakenLoginCopy,
 } from "./desk-copy.ts";
 import { presentWorthItem, rankWorthItems } from "./worth-a-look.ts";
 
@@ -447,6 +448,16 @@ describe("Worth a Look presentation", () => {
       }),
       true,
     );
+  });
+
+  it("tells a claimed desk the paper is open and create is gone", () => {
+    const copy = deskTakenLoginCopy();
+    assert.match(copy.title, /sign-in/i);
+    assert.match(copy.body, /already has an editor/i);
+    assert.match(copy.body, /paper/i);
+    assert.doesNotMatch(copy.body, /Create editor/i);
+    assert.match(copy.unknownEmail, /already claimed/i);
+    assert.doesNotMatch(copy.unknownEmail, /Create editor/i);
   });
 });
 

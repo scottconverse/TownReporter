@@ -537,6 +537,17 @@ export function composeZeroLeadSummary(input: { fetched: number; changed: number
     : "Nothing crossed the filing bar.";
 }
 
+/** Login copy after the newsroom already has an owner. Not a second-editor product. */
+export function deskTakenLoginCopy() {
+  return {
+    title: "Editor sign-in",
+    body: "This desk already has an editor. Sign in if that's you. Anyone can read the paper without an account.",
+    unknownEmail:
+      "No editor with that email. This desk is already claimed — read the paper without an account.",
+    api: "This desk already has an editor. Sign in if that's you.",
+  };
+}
+
 export type PrintedDup = { slug: string; publishedAt: string; note: string };
 
 export function nearDuplicate(
