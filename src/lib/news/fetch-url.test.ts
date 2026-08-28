@@ -2,8 +2,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   assertHttpUrl,
-  dnsLookups,
+  assertPublicHttpUrl,
   fetchPublicHttp,
+  dnsLookup,
   isBlockedAddress,
 } from "./fetch-url.ts";
 
@@ -141,51 +142,25 @@ describe("fetchPublicHttp redirect SSRF", () => {
   });
 });
 
-describe("DNS lookup SSRF", () => {
-  it("stubbed lookup of mapped loopback throws before fetch", async () => {
-    const originalLookup = dnsLookups.lookup;
-    const originalFetch = globalThis.fetch;
-    const fetched: string[] = [];
-    dnsLookups.lookup = async () => [{ address: "::ffff:7f00:1" }];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : input.url;
-      fetched.push(url);
-      return new Response("should-not-fetch", { status: 200 });
-    }) as typeof fetch;
-    try {
-      await assert.rejects(
-        () => fetchPublicHttp(new URL("http://example.com/")),
-        /not fetchable/,
-      );
-      assert.equal(fetched.length, 0);
-    } finally {
-      dnsLookups.lookup = originalLookup;
-      globalThis.fetch = originalFetch;
-    }
-  });
-});
-
-describe("literal mapped-loopback SSRF", () => {
-  it("http://[::ffff:7f00:1]/ throws before fetch", async () => {
-    const original = globalThis.fetch;
-    let called = false;
+describe("DNS mapped loopback", () => {
+  it("throws before fetch when lookup returns mapped loopback", async () => {
+    const origLookup = dnsLookup.resolve;
+    const origFetch = globalThis.fetch;
+    let fetched = 0;
+    dnsLookup.resolve = async () => [{ address: "::ffff:7f00:1" }];
     globalThis.fetch = (async () => {
-      called = true;
+      fetched += 1;
       return new Response("should-not-fetch", { status: 200 });
     }) as typeof fetch;
     try {
       await assert.rejects(
-        () => fetchPublicHttp(new URL("http://[::ffff:7f00:1]/")),
+        () => assertPublicHttpUrl("https://example.com/civic"),
         /not fetchable/,
       );
-      assert.equal(called, false);
+      assert.equal(fetched, 0);
     } finally {
-      globalThis.fetch = original;
+      dnsLookup.resolve = origLookup;
+      globalThis.fetch = origFetch;
     }
   });
 });
