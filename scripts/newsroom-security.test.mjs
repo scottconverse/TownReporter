@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -141,4 +141,59 @@ test("Dark Desk digs, does not auto-publish, does not cap confidence", () => {
 test("ingest follows documents across origins", () => {
   const src = readFileSync(join(ROOT, "src/lib/news/ingest.ts"), "utf8");
   assert.doesNotMatch(src, /abs\.origin !== base\.origin/);
+});
+
+/*
+  The default test suite must not call a paid model.
+
+  `scan-pass.test.ts` used to run a real 90-second Claude request whenever a
+  CLI happened to be installed. An audit ran the documented `npm test` on a
+  clean machine and got 494/495 with a timeout — so the "495 tests pass" claim
+  in the docs was not reproducible, and every contributor and CI runner with a
+  discoverable provider paid for it.
+
+  A default suite is deterministic, offline and free. Live evaluation is
+  quality telemetry, behind RUN_LIVE_MODEL_TESTS=1.
+
+  Audit findings TE-01 / ENG-006 / QA-003.
+*/
+test("no test in the default suite can reach a live model unasked", () => {
+  const dir = join(ROOT, "src", "lib", "news");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".test.ts"));
+  for (const name of files) {
+    const src = readFileSync(join(dir, name), "utf8");
+    if (!/\bgrokChat\s*\(|\bclaudeCodeChat\s*\(/.test(src)) continue;
+    // Two honest ways to call the entry point without spending anything: gate
+    // the test behind the opt-in, or take the provider out of the chain first
+    // so the call resolves to "unavailable" without a process or a request.
+    const gated = /RUN_LIVE_MODEL_TESTS/.test(src);
+    const providerDisabled = /TOWNREPORTER_CLAUDE_CODE\s*=\s*["']0["']/.test(src);
+    assert.ok(
+      gated || providerDisabled,
+      `${name} calls a model — gate it behind RUN_LIVE_MODEL_TESTS, or disable the provider in the test`,
+    );
+  }
+});
+
+/*
+  Test discovery is a glob, not a hand-maintained list.
+
+  package.json used to name all 44 test files explicitly. A 45th existed on
+  disk — coerce-draft.test.ts, covering the code that stops a model's raw JSON
+  reaching the page as the story body — written against vitest, which this repo
+  does not install. It could not run, so instead of being fixed it was left off
+  the list, where its absence was invisible. An audit found it (TE-02).
+
+  A list you edit by hand is a place for things to quietly not run.
+*/
+test("every test file on disk is discovered by npm test", () => {
+  const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+  const cmd = pkg.scripts.test;
+  assert.doesNotMatch(
+    cmd,
+    /\.test\.ts(?!")/,
+    "npm test must not name individual test files — use a glob",
+  );
+  assert.match(cmd, /src\/\*\*\/\*\.test\.ts/, "the src glob must be present");
+  assert.match(cmd, /scripts\/\*\*\/\*\.test\.mjs/, "the scripts glob must be present");
 });
