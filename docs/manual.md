@@ -392,7 +392,7 @@ The editorial writer is Opus deliberately: it is the one call where the writing
 npm test
 ```
 
-485 tests, no network and no token spend. They cover meeting ingest, retrieval,
+487 tests, no network and no token spend. They cover meeting ingest, retrieval,
 draft stripping, timezone handling, the SSRF guard, the job lifecycle, the Dark
 Desk loop, the dials, claim hygiene, the editorial parser, and the ops action
 allowlist.
@@ -675,7 +675,7 @@ flowchart TB
 npm run dev          # http://localhost:8080
 npm run build        # build, then migrate
 npm start            # run the built server
-npm test             # 485 tests, no network
+npm test             # 487 tests, no network
 npm run typecheck
 npm run db:migrate
 npx playwright install chromium

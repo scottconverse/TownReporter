@@ -71,7 +71,7 @@ export function parseEditorial(raw: string): Editorial {
   let headline = "";
   let i = 0;
   for (; i < lines.length; i++) {
-    const t = lines[i]!.replace(/^#+\s*/, "").trim();
+    const t = bareHeadline(lines[i]!);
     if (!t) continue;
     if (DELIVERY_PREAMBLE.test(t) && lines.slice(i + 1).some((l) => l.trim())) continue;
     headline = t;
@@ -85,6 +85,24 @@ export function parseEditorial(raw: string): Editorial {
     factSheet: factSheet.trim(),
     imagePrompt: imagePrompt.trim(),
   };
+}
+
+/**
+ * A headline with the markup taken off.
+ *
+ * The voice file bans markup in the delivered piece, and mostly there is none.
+ * A real run still returned `**Longmont Has the Answers. Publish Them.**`, and
+ * the asterisks went all the way to the desk — they would have gone onto the
+ * masthead. Hashes were already stripped; emphasis was not.
+ */
+function bareHeadline(line: string): string {
+  return line
+    .replace(/^#+\s*/, "")
+    .trim()
+    .replace(/^\*\*(.+)\*\*$/, "$1")
+    .replace(/^\*(.+)\*$/, "$1")
+    .replace(/^_(.+)_$/, "$1")
+    .trim();
 }
 
 /**

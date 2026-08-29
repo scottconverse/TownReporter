@@ -123,6 +123,29 @@ describe("parseEditorial", () => {
     assert.equal(parseEditorial("# A headline\n\nBody.").headline, "A headline");
   });
 
+  /**
+   * A real delivery came back as `**Longmont Has the Answers. Publish Them.**`
+   * and the asterisks reached the desk. Hashes were stripped; emphasis was not.
+   */
+  it("strips emphasis from the headline too", () => {
+    const cases: [string, string][] = [
+      ["**Longmont Has the Answers. Publish Them.**", "Longmont Has the Answers. Publish Them."],
+      ["*A headline*", "A headline"],
+      ["_A headline_", "A headline"],
+      ["## **A headline**", "A headline"],
+    ];
+    for (const [raw, want] of cases) {
+      assert.equal(parseEditorial(raw + "\n\nBody.").headline, want);
+    }
+  });
+
+  it("leaves emphasis that is only part of the headline", () => {
+    assert.equal(
+      parseEditorial("The **rail** district wants your money\n\nBody.").headline,
+      "The **rail** district wants your money",
+    );
+  });
+
   it("never loses the body to a missing section", () => {
     for (const raw of [DELIVERED, "H\n\nB", "H\n\nB\n\nEDITOR'S FACT SHEET\n\nx"]) {
       assert.ok(parseEditorial(raw).body.trim().length > 0, "body vanished");
