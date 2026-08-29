@@ -284,7 +284,7 @@ What comes back:
 - An editor's fact sheet and an image prompt that **do not print** — they are
   for you.
 
-It takes **ten to twenty minutes**, because it goes and reads the records before
+It takes **ten to forty minutes**, because it goes and reads the records before
 it writes a word. The row shows a clock counting up and a moving rule; at 3:40
 that is normal, not stuck. The page rechecks every twenty seconds.
 

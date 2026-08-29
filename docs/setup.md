@@ -162,10 +162,19 @@ else on the desk works.
 defaults to Opus deliberately: it is the only call in the newsroom where the
 writing *is* the product.
 
-Note the length. A piece takes ten to twenty minutes, because the voice fetches
-its own records before it writes. Measured: 9m53s and 32 turns for a piece with
-one document pointer. The desk enqueues a job and returns at once; nothing waits
-on the model.
+Note the length, and the cost. A piece takes ten to forty minutes, because the
+voice researches before it writes. Three measured runs:
+
+| Wall clock | Cost | Notes |
+|---|---|---|
+| 9m53s | $2.66 | one document pointer, 32 turns |
+| 24m06s | $23.76 | one pointer; it dispatched research agents of its own |
+| >30m | — | same subject again, killed at the old cap |
+
+The writer's ceiling is 45 minutes, set above the slowest run seen rather than
+just above the fastest. The desk enqueues a job and returns at once; nothing
+waits on the model. This is the most expensive call the newsroom makes — set a
+spending limit at the provider.
 
 ---
 

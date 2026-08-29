@@ -3,7 +3,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 
 /**
  * "editorial" is the slow one. The voice fetches its own records before it
- * writes, so a piece takes ten to twenty minutes — far longer than any other
+ * writes, so a piece takes ten to forty minutes — far longer than any other
  * job here. It survives that on the same heartbeat as the rest; nothing needed
  * to change except knowing it is normal.
  */

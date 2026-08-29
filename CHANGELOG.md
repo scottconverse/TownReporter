@@ -40,7 +40,7 @@ the investigative desk finally does the thing it was built to do.
 - An Opinion desk (`/desk/opinion`). Give it a subject, a sentence or a URL and
   it writes an unsigned editorial — OPINION in the headline, no byline, the
   paper's own position — with a claims-and-sources appendix at the end. It
-  fetches its own records before it writes, so it takes ten to twenty minutes;
+  fetches its own records before it writes, so it takes ten to forty minutes;
   the page shows a running clock rather than a frozen word.
 - The editorial voice is a file on disk, named by path in the environment. Only
   the path ever reaches a command line, and the file is never read into the

@@ -18,7 +18,7 @@ export const Route = createFileRoute("/desk/opinion")({
  * paper's own position, and the one thing that must never happen is picking one
  * up mid-edit and mistaking it for a report.
  *
- * Writing takes ten to twenty minutes — the voice fetches its own records
+ * Writing takes ten to forty minutes — the voice fetches its own records
  * before it writes a word — so this page never waits on the model. It asks, and
  * then shows the piece when it lands.
  */
@@ -51,7 +51,7 @@ function OpinionPage() {
       }
       setSubject("");
       setAskedFor("");
-      setNotice("Writing. It fetches its own records first, so give it 10–20 minutes.");
+      setNotice("Writing. It fetches its own records first, so give it 10–40 minutes.");
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
     onError: (err) => setNotice(err instanceof Error ? err.message : "That did not start."),
@@ -234,7 +234,7 @@ function OpinionPage() {
 /**
  * A clock that counts up while a piece is being written.
  *
- * An editorial takes ten to twenty minutes, and for all of it the only signal
+ * An editorial takes ten to forty minutes, and for all of it the only signal
  * was the static word "Writing…" — indistinguishable from a hung job. A number
  * that changes every second is the cheapest possible proof of life, and it also
  * sets the expectation: at 3:40 the editor can see this is normal, not stuck.

@@ -63,7 +63,7 @@ export function parseEditorial(raw: string): Editorial {
   const [beforeFact, factSheet] = cut(beforeImage, HEAD.factSheet);
   const [beforeAppendix, appendix] = cut(beforeFact, HEAD.appendix);
 
-  const lines = beforeAppendix.trim().split("\n");
+  const lines = stripPreamble(beforeAppendix.trim()).split("\n");
   // The first non-empty line is the headline; markdown hashes are stripped
   // because the voice file bans markup in the delivered piece. A line that
   // hands the piece over rather than titling it is skipped, and only when
@@ -85,6 +85,37 @@ export function parseEditorial(raw: string): Editorial {
     factSheet: factSheet.trim(),
     imagePrompt: imagePrompt.trim(),
   };
+}
+
+/**
+ * Drop a working note the voice sometimes writes before the piece.
+ *
+ * Two real runs opened with one. The first was a single sentence ending
+ * "Here's the piece." The second was a whole note followed by a rule:
+ *
+ *     Agent 2 came back with a provable absence, a precedent, and one
+ *     correction to my premise. Rewriting around it.
+ *
+ *     ---
+ *
+ *     Longmont published thirty news releases in August. …
+ *
+ * Both times that first line became the headline and the real headline was
+ * pushed into the body. A rule inside the opening few lines is the reliable
+ * tell — a delivered piece has no reason to open with one — so everything up
+ * to and including it is a note to the desk rather than the piece.
+ */
+export function stripPreamble(text: string): string {
+  const lines = text.split("\n");
+  // Only the top. A rule further down is part of the writing.
+  const limit = Math.min(lines.length, 8);
+  for (let i = 0; i < limit; i++) {
+    if (!/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i]!)) continue;
+    const rest = lines.slice(i + 1).join("\n").trim();
+    // Never trade the whole piece for the rule.
+    if (rest) return rest;
+  }
+  return text;
 }
 
 /**

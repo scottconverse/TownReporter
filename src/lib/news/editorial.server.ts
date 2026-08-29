@@ -22,14 +22,23 @@ import {
  */
 
 /**
- * Editorials take minutes, not seconds. The voice fetches before it writes.
+ * Editorials take tens of minutes, not seconds. The voice researches first.
  *
- * Measured, not guessed: a piece with one document pointer took 9m53s and 32
- * turns. Fifteen minutes left almost no headroom, and the first real request on
- * the Opinion desk died at the cap with the work already paid for. Thirty gives
- * a piece with several pointers room to finish.
+ * Three measured runs, not a guess:
+ *
+ *   9m53s   32 turns   $2.66    one document pointer
+ *   24m06s             $23.76   one pointer, and it dispatched its own agents
+ *   >30m                        the same subject again, killed at the cap
+ *
+ * Fifteen minutes killed the first real request on the desk with the work
+ * already paid for; thirty killed the second. The spread is wide because the
+ * voice decides for itself how much to go and read, so the cap has to sit well
+ * above the slowest run seen rather than just above the fastest.
+ *
+ * This is a ceiling, not a target. Nothing waits on it: the desk enqueues a job
+ * and returns at once, and the page counts up while it works.
  */
-const EDITORIAL_TIMEOUT_MS = 1_800_000;
+const EDITORIAL_TIMEOUT_MS = 2_700_000;
 
 export async function ensureEditorialSchema() {
   const sql = await getSql();

@@ -14,7 +14,7 @@ import { siteUrl } from "@/lib/paper";
  * the paper's position must never be picked up mid-edit and mistaken for a
  * report. Separate page, separate list, OPINION in the headline.
  *
- * Every call here only ever ENQUEUES. Writing one takes ten to twenty minutes
+ * Every call here only ever ENQUEUES. Writing one takes ten to forty minutes
  * because the voice fetches its own records first, so nothing on this desk
  * waits on the model.
  */

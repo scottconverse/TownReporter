@@ -69,6 +69,41 @@ describe("parseEditorial", () => {
     assert.doesNotMatch(e.body, /Here's the piece/, "the preamble must not survive into the body");
   });
 
+  /**
+   * The second real run. A whole working note, then a rule, then the piece.
+   * The note became the headline and "Longmont published thirty news releases
+   * in August" — the actual headline — was pushed into the body.
+   */
+  it("drops a working note that ends in a rule", () => {
+    const e = parseEditorial(
+      "Agent 2 came back with a provable absence and one correction to my premise.\n\n" +
+        "---\n\n" +
+        "Longmont published thirty news releases in August. Not one mentioned the house that exploded.\n\n" +
+        "Open the city's news release page and count.",
+    );
+    assert.equal(
+      e.headline,
+      "Longmont published thirty news releases in August. Not one mentioned the house that exploded.",
+    );
+    assert.match(e.body, /Open the city/);
+    assert.doesNotMatch(e.body, /Agent 2/, "the note must not survive into the body");
+  });
+
+  it("keeps a rule that belongs to the piece", () => {
+    const e = parseEditorial(
+      "A real headline\n\nFirst paragraph.\n\nSecond.\n\nThird.\n\n" +
+        "Fourth.\n\nFifth.\n\n---\n\nAn afterword.",
+    );
+    assert.equal(e.headline, "A real headline");
+    assert.match(e.body, /First paragraph/);
+  });
+
+  it("never trades the whole piece for a trailing rule", () => {
+    const e = parseEditorial("A headline\n\nBody.\n\n---");
+    assert.equal(e.headline, "A headline");
+    assert.match(e.body, /Body/);
+  });
+
   /** Never trade a headline for a preamble rule. */
   it("keeps a preamble as the headline when it is all there is", () => {
     assert.equal(parseEditorial("Here's the piece.").headline, "Here's the piece.");

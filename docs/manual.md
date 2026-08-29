@@ -185,9 +185,14 @@ the headline and there is no byline, because an unsigned editorial is the
 paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
 
-It fetches its own records before it writes a word, so it takes **ten to twenty
-minutes**. The page shows a running clock rather than a frozen word, and checks
-every twenty seconds. Editorials are drafts until you publish one.
+It fetches its own records before it writes a word, so it takes **ten to forty
+minutes** — three measured runs came in at 9m53s, 24m06s, and one still going at
+30. The page shows a running clock rather than a frozen word, and checks every
+twenty seconds. Editorials are drafts until you publish one.
+
+It is also the most expensive thing the newsroom does. Those same two finished
+runs cost **$2.66 and $23.76**; the second decided to dispatch research agents
+of its own. Budget for a piece, not for a paragraph.
 
 ## The Server page
 
@@ -387,7 +392,7 @@ The editorial writer is Opus deliberately: it is the one call where the writing
 npm test
 ```
 
-482 tests, no network and no token spend. They cover meeting ingest, retrieval,
+485 tests, no network and no token spend. They cover meeting ingest, retrieval,
 draft stripping, timezone handling, the SSRF guard, the job lifecycle, the Dark
 Desk loop, the dials, claim hygiene, the editorial parser, and the ops action
 allowlist.
@@ -662,7 +667,7 @@ flowchart TB
 | `scan` | Scan page | minutes |
 | `draft` | Queue or workbench | minutes |
 | `dark` | Dark Desk — start, or Keep digging | minutes per round |
-| `editorial` | Opinion desk | 10–20 minutes |
+| `editorial` | Opinion desk | 10–40 minutes |
 
 ## Commands
 
@@ -670,7 +675,7 @@ flowchart TB
 npm run dev          # http://localhost:8080
 npm run build        # build, then migrate
 npm start            # run the built server
-npm test             # 482 tests, no network
+npm test             # 485 tests, no network
 npm run typecheck
 npm run db:migrate
 npx playwright install chromium
