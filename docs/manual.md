@@ -342,6 +342,7 @@ The working edition runs on one Windows machine behind a Cloudflare Tunnel. The
 | `ops/status.ps1` | Is it up? Read-only, and it answers when the paper is down and `/desk/ops` cannot |
 | `ops/TownReporter Control.cmd` | The same, for someone who does not want a terminal. Double-click, pick a number. |
 | `ops/run-hidden.vbs` | Runs the five-minute tasks with no console window |
+| `ops/install-tasks.ps1` | Registers all six scheduled tasks. Idempotent, `-WhatIf` supported, and refuses to repoint another install's tasks. |
 
 Restart and tunnel-restart run as Windows scheduled tasks rather than as child
 processes of the app — a restart cannot be performed by the process being

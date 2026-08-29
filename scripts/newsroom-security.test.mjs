@@ -229,3 +229,27 @@ test("the smoke script actually opens a browser", () => {
   assert.match(smoke, /pageerror|console/, "it must read the console");
   assert.match(smoke, /Opening/, "it must catch the hydration dead-end specifically");
 });
+
+/*
+  The 0.5.1 flows are exercised by something that runs again.
+
+  Opinion, delete, Undo, the trash and its restore, the Server page and the
+  Dark Desk dials shipped with no browser coverage at all. A locator leak and
+  an editorial that could not be edited both reached the paper, because those
+  screens were verified once by an agent looking at them. Audit finding TE-04.
+*/
+test("CI walks the 0.5.1 desk flows in a browser", () => {
+  const ci = readFileSync(join(ROOT, ".github", "workflows", "ci.yml"), "utf8");
+  assert.match(ci, /desk-flows-e2e\.mjs/, "CI must run the desk flows walk");
+  const walk = readFileSync(join(ROOT, "scripts", "desk-flows-e2e.mjs"), "utf8");
+  for (const flow of [
+    "desk/opinion",
+    "Recently deleted",
+    "Undo",
+    "Restore",
+    "How hard to dig",
+    "row-acts",
+  ]) {
+    assert.ok(walk.includes(flow), `the walk must cover: ${flow}`);
+  }
+});

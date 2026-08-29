@@ -49,6 +49,18 @@ jobs:
           }
           node scripts/lifecycle-e2e.mjs
 
+      # Everything 0.5.1 shipped had no browser coverage: Opinion, delete,
+      # Undo, the trash and its restore, the Server page, the Dark Desk dials.
+      # A locator leak and an unreachable editorial both reached the paper
+      # because those screens were looked at once by an agent rather than
+      # exercised by anything that runs again. Audit finding TE-04.
+      - name: The 0.5.1 desk flows
+        env:
+          BETTER_AUTH_SECRET: ci-lifecycle-secret-not-for-production
+          DESK_FLOWS_BASE_URL: http://127.0.0.1:8080
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/desk-flows-e2e.mjs
+
   # The gap that let two Blockers past a green pipeline.
   #
   # CI ran typecheck, the unit suite, and a lifecycle test against `npm run

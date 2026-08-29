@@ -2,7 +2,7 @@
   Starts the Cloudflare tunnel with no visible console.
 
   The scheduled task used to run `cloudflared.exe` directly, so Windows gave it
-  a console window that sat open on the desktop for as long as the tunnel ran —
+  a console window that sat open on the desktop for as long as the tunnel ran -
   a wall of connection logs with nowhere to go and nothing to do but be closed
   by accident, which takes the paper offline.
 

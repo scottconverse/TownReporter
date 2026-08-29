@@ -4,7 +4,7 @@
 
   Registered as a logon scheduled task by ops/install-tasks.ps1.
 
-  Postgres lives on 5433, NOT the default 5432 — another Postgres that does not
+  Postgres lives on 5433, NOT the default 5432 - another Postgres that does not
   belong to this project already owns 5432 on this machine. Do not "fix" that by
   moving back; the split is what stops the desk writing to the wrong cluster.
 #>
@@ -57,7 +57,7 @@ if (-not (Test-Port 3000)) {
   # the thing you wanted to debug was happening. Redirected process handles allow
   # concurrent reads.
   #
-  # node.exe directly rather than the `npm` shim — Start-Process cannot execute
+  # node.exe directly rather than the `npm` shim - Start-Process cannot execute
   # a .cmd shim, and this is exactly what `npm start` runs anyway.
   $node = (Get-Command node -ErrorAction Stop).Source
   Start-Process -FilePath $node `

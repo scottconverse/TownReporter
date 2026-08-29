@@ -46,6 +46,19 @@ restart.
 | `TownReporter Tunnel Restart` | on demand | stops and starts the tunnel |
 | (Postgres) | — | started by the first task, not separately registered |
 
+### Registering them
+
+```
+powershell -ExecutionPolicy Bypass -File ops\install-tasks.ps1
+```
+
+Idempotent — safe to run again after a path change or a rename. Add `-WhatIf`
+to see what it would do first.
+
+It refuses if the tasks already point at a different checkout, because this
+machine has both a production install and a development one and running it
+from the wrong folder would silently repoint the live paper at the dev copy.
+
 The two five-minute tasks are launched through `ops/run-hidden.vbs` rather than
 `powershell.exe` directly. `-WindowStyle Hidden` does not stop the flash:
 Task Scheduler creates the console host in the interactive session and shows it
