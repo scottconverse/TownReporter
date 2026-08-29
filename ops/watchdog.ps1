@@ -59,7 +59,10 @@ if (-not $pgUp) {
   try {
     Start-Process -FilePath "$bin\pg_ctl.exe" `
       -ArgumentList "-D", "`"$data`"", "-l", "`"$pgLog`"", "start" -NoNewWindow
-    for ($i = 0; $i -lt 30 -and -not (Test-Port 5433); $i++) { Start-Sleep -Seconds 1 }
+    # Three minutes, for the same reason as start-townreporter.ps1: crash
+    # recovery after an unclean shutdown outran a thirty second wait on this
+    # machine by twenty-three seconds.
+    for ($i = 0; $i -lt 180 -and -not (Test-Port 5433); $i++) { Start-Sleep -Seconds 1 }
     $pgUp = Test-Port 5433
     if ($pgUp) { $repaired += "postgres" }
   } catch {

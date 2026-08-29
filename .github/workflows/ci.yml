@@ -134,3 +134,40 @@ jobs:
             echo "dev server did not come up"; tail -n 80 /tmp/dev.log; exit 1;
           }
           node scripts/smoke-built-server.mjs
+
+  # The unit suite runs against PGLite, which has no pg_trgm, so the archive
+  # search's index checks skip there and announce it. Skipping is honest but it
+  # is not coverage: without this job the claim that /?q= is an indexed lookup
+  # is only ever asserted on a developer's machine.
+  #
+  # This runs the real migrations against a real Postgres, then re-runs the
+  # 20,000-story benchmark from scratch and fails if the index does not help.
+  search-index:
+    name: Archive search is indexed, on a real Postgres
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: townreporter_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:ci@127.0.0.1:5432/townreporter_ci
+      BETTER_AUTH_SECRET: ci-search-secret-not-for-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: node scripts/migrate.mjs
+      - name: The indexes exist and can serve the query
+        run: node --experimental-strip-types --test src/lib/news/search-index.test.ts
+      - name: The index actually makes the search cheaper
+        run: node scripts/search-index-proof.mjs

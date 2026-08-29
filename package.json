@@ -23,7 +23,8 @@
     "test": "node --test \"scripts/**/*.test.mjs\" && node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
-    "test:live-model": "node scripts/with-app-env.mjs node --experimental-strip-types --test src/lib/news/scan-pass.test.ts"
+    "test:live-model": "node scripts/with-app-env.mjs node --experimental-strip-types --test src/lib/news/scan-pass.test.ts",
+    "proof:search": "node scripts/with-app-env.mjs node scripts/search-index-proof.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

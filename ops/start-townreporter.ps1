@@ -23,7 +23,21 @@ function Test-Port($p) {
 if (-not (Test-Port 5433)) {
   Start-Process -FilePath "$bin\pg_ctl.exe" `
     -ArgumentList "-D","`"$data`"","-l","`"$log`"","start" -NoNewWindow
-  for ($i = 0; $i -lt 30 -and -not (Test-Port 5433); $i++) { Start-Sleep -Seconds 1 }
+  <#
+    Wait up to three minutes, not thirty seconds.
+
+    Measured on this machine after a reboot on 2026-08-29: the logon task ran
+    at 17:40:15, gave up at 17:40:45, and Postgres finished crash recovery and
+    accepted connections at 17:41:08 -- twenty-three seconds later. The task
+    exited 1, the paper never started, and the site served 502 until someone
+    noticed. Postgres logged an end-of-recovery checkpoint that alone took
+    5.2 seconds; a cold boot with a dirty shutdown is simply slower than a
+    start on a warm machine, which is where thirty seconds was chosen.
+
+    The loop exits the moment the port answers, so a healthy machine pays
+    nothing for the larger number.
+  #>
+  for ($i = 0; $i -lt 180 -and -not (Test-Port 5433); $i++) { Start-Sleep -Seconds 1 }
 }
 if (-not (Test-Port 5433)) { throw "Postgres did not come up on 5433" }
 

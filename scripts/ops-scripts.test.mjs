@@ -133,3 +133,26 @@ test("PowerShell ops scripts parse", { skip: !onWindows ? "PowerShell only" : fa
     }
   }
 });
+
+/**
+ * The wait for Postgres must survive a cold boot.
+ *
+ * Measured on this machine on 2026-08-29: the logon task ran at 17:40:15, gave
+ * up after thirty seconds, and Postgres accepted connections at 17:41:08. The
+ * task exited 1 and the paper served 502 until someone looked. The number is
+ * therefore load-bearing, and it is one character away from being wrong again.
+ */
+test("both start paths wait long enough for a cold Postgres", () => {
+  for (const name of ["start-townreporter.ps1", "watchdog.ps1"]) {
+    const text = readFileSync(join(OPS, name), "utf8");
+    const waits = [...text.matchAll(/\$i -lt (\d+) -and -not \(Test-Port 5433\)/g)];
+    assert.ok(waits.length > 0, `ops/${name}: no wait loop for Postgres on 5433 found`);
+    for (const [, seconds] of waits) {
+      assert.ok(
+        Number(seconds) >= 120,
+        `ops/${name}: waits only ${seconds}s for Postgres — a cold boot took 53s here, ` +
+          `and crash recovery on a larger database takes longer`,
+      );
+    }
+  }
+});

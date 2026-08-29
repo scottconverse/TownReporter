@@ -97,6 +97,16 @@ export const listPublishedByTopic = createServerFn({ method: "GET" })
     }
   });
 
+/**
+ * The shortest query a trigram index can answer.
+ *
+ * pg_trgm builds three-character grams, so a one or two character pattern has
+ * no gram to look up and the planner falls back to reading every row. Below
+ * this length the search stays off the bodies and touches only the two short
+ * columns, which bounds the work a stranger can ask for.
+ */
+export const SEARCH_MIN_INDEXED = 3;
+
 export const searchPublished = createServerFn({ method: "GET" })
   .validator((q: string) => q.trim().slice(0, 80))
   .handler(async ({ data: q }) => {
@@ -104,12 +114,28 @@ export const searchPublished = createServerFn({ method: "GET" })
     try {
       const sql = await getSql();
       const like = `%${q}%`;
+      /*
+        ENG-008: this was an unindexed `ilike '%q%'` across every published
+        body, reachable by anyone with no session and no rate limit -- one
+        cheap request, one full read of the archive. Measured at 20,000
+        stories: 220 ms and 666 buffers per request.
+
+        Migration 0018 adds GIN trigram indexes on the three columns, which
+        keeps substring matching exactly as it was and makes it a lookup: the
+        same query is 0.1 ms and 34 buffers. `npm run proof:search` re-runs
+        that measurement from scratch.
+
+        Two characters or fewer cannot use those indexes at all, so a query
+        that short is answered from the headline and dek only.
+      */
+      const wide = q.length >= SEARCH_MIN_INDEXED;
       return sql<ArticleRow>`
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,
              provenance_json, form, found_note, unanswered
       from articles
       where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
-        and (headline ilike ${like} or dek ilike ${like} or body ilike ${like})
+        and (headline ilike ${like} or dek ilike ${like}
+             or (${wide} and body ilike ${like}))
       order by published_at desc
       limit 30
     `.then((rows) => rows.map(publicArticle));
