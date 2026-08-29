@@ -28,6 +28,7 @@
  * separate CLI processes. Latency floor is ~2.5s per call.
  */
 import { spawn } from "node:child_process";
+import { assertNotAnArgument } from "./voice.server.ts";
 
 export type ClaudeCodeResult = { ok: true; text: string } | { ok: false; error: string };
 
@@ -96,26 +97,54 @@ export const CLAUDE_CLI_MISSING =
  * sends packs up to ~28k characters and Windows caps a command line at ~32k.
  */
 export async function claudeCodeChat(opts: {
+  /** Inline system prompt. Ignored when `systemPromptFile` is given. */
   system: string;
   user: string;
   model: string;
   timeoutMs: number;
+  /**
+   * Read the system prompt from this file instead of passing it inline.
+   *
+   * For the editorial voice this is not an optimisation, it is the mechanism
+   * that keeps it private: only the PATH reaches the command line, and command
+   * lines are readable by every process on this machine. It also sidesteps
+   * Windows' 32,767-character argument limit, which a 98KB voice file exceeds
+   * three times over.
+   */
+  systemPromptFile?: string;
+  /**
+   * Tools the call may use. Empty by default — most desk calls are text in,
+   * text out. The editorial writer needs WebSearch and WebFetch because its
+   * whole posture is receipts, and without them it is instructed to drop its
+   * own claims appendix.
+   */
+  allowedTools?: string[];
 }): Promise<ClaudeCodeResult> {
   const bin = await findClaudeCli();
   if (!bin) return { ok: false, error: CLAUDE_CLI_MISSING };
 
+  /*
+    A long prompt must never become an argument. Arguments are visible to any
+    process that can list processes, and Windows caps them at 32,767 characters
+    anyway. `assertNotAnArgument` makes that a refusal rather than a habit.
+  */
+  const usingFile = Boolean(opts.systemPromptFile);
+  if (!usingFile) assertNotAnArgument(opts.system, "system prompt");
+
   const args = [
     "-p",
-    "--system-prompt",
-    opts.system,
+    ...(usingFile
+      ? ["--system-prompt-file", opts.systemPromptFile!]
+      : ["--system-prompt", opts.system]),
     // Drop the harness preamble the newsroom has no use for.
     "--exclude-dynamic-system-prompt-sections",
     // Do NOT inherit the operator's CLAUDE.md, skills, or plugins.
     "--setting-sources",
     "",
-    // No file access, no bash, no web. This is a text-in/text-out call.
+    // No file access and no bash, ever. Web tools only when the caller asks:
+    // the editorial writer needs them, the planner and synthesis do not.
     "--allowed-tools",
-    "",
+    (opts.allowedTools ?? []).join(","),
     "--model",
     opts.model,
     "--output-format",

@@ -1,7 +1,13 @@
 import { getSql } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 
-export type JobKind = "scan" | "draft" | "dark";
+/**
+ * "editorial" is the slow one. The voice fetches its own records before it
+ * writes, so a piece takes ten to twenty minutes — far longer than any other
+ * job here. It survives that on the same heartbeat as the rest; nothing needed
+ * to change except knowing it is normal.
+ */
+export type JobKind = "scan" | "draft" | "dark" | "editorial";
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
 export type DeskJob = {
@@ -230,6 +236,9 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
     } else if (job.kind === "dark") {
       const { performDarkRound } = await import("./dark.ts");
       await performDarkRound(job);
+    } else if (job.kind === "editorial") {
+      const { performEditorialWork } = await import("./editorial.server.ts");
+      await performEditorialWork(job);
     }
     // `claim_token` guard: if we were declared stale and someone else took the
     // job, this write must not clobber their result.

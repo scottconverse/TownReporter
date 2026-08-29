@@ -5,6 +5,17 @@ const HOURLY: Record<string, number> = {
   draft: 20,
   dark: 8,
   pull: 40,
+  // Restarts and rebuilds. Cheap to ask for, expensive to repeat, and a stuck
+  // finger on a restart button should not be able to hold the paper down.
+  "ops-action": 30,
+  // Reddit's budget, not ours: ~10 requests a minute per IP, shared with
+  // everything else on this machine. Three feeds a run, a few runs an hour.
+  reddit: 6,
+  // One model call, and an editor may reasonably re-read a file.
+  brief: 40,
+  // Fifteen minutes and a few dollars each. A slip of the finger should not
+  // start six of them.
+  editorial: 6,
 };
 
 /**

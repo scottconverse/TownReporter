@@ -561,7 +561,17 @@ function ReportingNotesPane({
         setPullMsg(res.error);
         return;
       }
-      setPullMsg(res.found ? `Dropped ${res.found} page${res.found === 1 ? "" : "s"} under the story.` : "Nothing public found for that line.");
+      // Say when pages were found and rejected. "Nothing found" and "found
+      // four documents, none of them about this story" are different answers,
+      // and the second one means the line needs rewording, not retrying.
+      const off = res.offSubject
+        ? ` Skipped ${res.offSubject} page${res.offSubject === 1 ? "" : "s"} that named neither the city nor the subject.`
+        : "";
+      setPullMsg(
+        res.found
+          ? `Dropped ${res.found} page${res.found === 1 ? "" : "s"} under the story.${off}`
+          : `Nothing public found for that line.${off}`,
+      );
       void qc.invalidateQueries({ queryKey: ["lead", leadId] });
     },
     onError: (err) => {
