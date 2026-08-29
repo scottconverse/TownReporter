@@ -1,12 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { ArrowRight, Search } from "lucide-react";
-import { twMerge } from "tailwind-merge";
+import { ArrowRight } from "lucide-react";
 import { PaperShell, TopicChip } from "@/components/paper-chrome";
 import { StoryBody } from "@/components/story-body";
 import { EditionSkeleton, EmptyState, FetchingRule } from "@/components/states";
-import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
+import { inkGhost, inkSolid } from "@/components/desk-chrome";
 import {
   listPublishedArticles,
   listPublishedByTopic,
@@ -32,13 +30,6 @@ export const Route = createFileRoute("/")({
 
 function Home() {
   const { topic, q } = Route.useSearch();
-  const navigate = Route.useNavigate();
-  const [query, setQuery] = useState(q ?? "");
-
-  useEffect(() => {
-    setQuery(q ?? "");
-  }, [q]);
-
   const initial = Route.useLoaderData();
   const { data, isPending, isFetching, isPlaceholderData } = useQuery({
     queryKey: ["paper", topic, q],
@@ -70,11 +61,6 @@ function Home() {
       "That beat is quiet in this edition. See everything that has printed, or pick another topic.";
   }
 
-  function clearSearch() {
-    setQuery("");
-    void navigate({ search: {} });
-  }
-
   return (
     <PaperShell>
       <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -94,47 +80,14 @@ function Home() {
             <TopicChip key={t} topic={t} active={topic === t} />
           ))}
         </div>
-        <form
-          className="flex min-h-11 flex-col gap-2 sm:flex-row"
-          aria-label="Search the archive"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void navigate({
-              search: { q: query.trim() || undefined, topic: undefined },
-            });
-          }}
-        >
-          <label className="relative block min-w-0 flex-1 sm:w-56 sm:flex-none">
-            <span className="sr-only">Search the archive</span>
-            <Search
-              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted"
-              strokeWidth={1.75}
-              aria-hidden
-            />
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search the archive"
-              enterKeyHint="search"
-              className={twMerge(inputClass, "w-full pl-10")}
-            />
-          </label>
-          <div className="flex gap-2">
-            <button type="submit" className={inkGhost + " flex-1 sm:flex-none"}>
-              {isFetching && q ? "Searching…" : "Search"}
-            </button>
-            {q ? (
-              <button
-                type="button"
-                onClick={clearSearch}
-                className={inkGhost + " flex-1 sm:flex-none"}
-              >
-                Clear
-              </button>
-            ) : null}
-          </div>
-        </form>
+        {/*
+          The archive search lives in the top bar now, as a magnifying glass.
+
+          It used to sit here permanently, taking a row of the paper's most
+          valuable space to serve the thing readers do least often — and only on
+          this page. As a glass it is one click from every page, and the front
+          page gets the room back for stories.
+        */}
       </div>
       {q ? (
         <p className="enter-fade-fast mb-3 text-sm text-muted">
