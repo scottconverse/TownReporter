@@ -17,7 +17,6 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import pg from "pg";
 import { pendingMigrations } from "./migration-plan.mjs";
-import { maybeFactoryReset } from "./factory-reset.mjs";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -75,10 +74,22 @@ async function main() {
       count += 1;
     }
     console.log(count ? `[migrate] done — ${count} migration(s) applied.` : "[migrate] up to date.");
-    const appliedNow = (
-      await client.query("SELECT name FROM _migrations")
-    ).rows.map((r) => r.name);
-    await maybeFactoryReset(client, appliedNow);
+    /*
+      Migration applies schema. It does not delete data — ever.
+
+      This is where `maybeFactoryReset` used to run: a one-shot wipe for one
+      populated box, triggered by the presence of two hard-coded article slugs
+      and the absence of a marker row. `npm run build` ends in `db:migrate`, so
+      an ordinary build could TRUNCATE articles, drafts, leads, investigations,
+      subscribers, membership and the whole Better Auth identity set — on a
+      clone, a fork, or a restored backup that happened to contain those two
+      stories. The marker lived in the same database a backup would restore, so
+      restoring a backup re-armed it.
+
+      It never fired on this machine and it is gone now. See
+      `scripts/no-destructive-migrate.test.mjs`, which fails the build if any
+      destructive statement returns to this path.
+    */
   } finally {
     client.release();
     await pool.end();
