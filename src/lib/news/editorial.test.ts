@@ -50,6 +50,40 @@ describe("parseEditorial", () => {
     assert.equal(e.appendix, "");
   });
 
+  /**
+   * From the first real run on the Opinion desk. The voice file bans a
+   * preamble; this piece opened with one anyway, and the handover sentence
+   * became the headline while the real headline was pushed into the body.
+   */
+  it("skips a line that hands the piece over instead of titling it", () => {
+    const e = parseEditorial(
+      "Two portals, one lead that didn't survive contact with the record. Here's the piece.\n\n" +
+        "The golf course advisory board posts its minutes. The city council doesn't.\n\n" +
+        "Open the city's agenda portal and pull up the Water Board meeting.",
+    );
+    assert.equal(
+      e.headline,
+      "The golf course advisory board posts its minutes. The city council doesn't.",
+    );
+    assert.match(e.body, /Water Board meeting/);
+    assert.doesNotMatch(e.body, /Here's the piece/, "the preamble must not survive into the body");
+  });
+
+  /** Never trade a headline for a preamble rule. */
+  it("keeps a preamble as the headline when it is all there is", () => {
+    assert.equal(parseEditorial("Here's the piece.").headline, "Here's the piece.");
+  });
+
+  it("does not mistake an ordinary headline for a preamble", () => {
+    for (const h of [
+      "The rail district wants your money twice",
+      "Here is what the packet does not say",
+      "A piece of the budget nobody reads",
+    ]) {
+      assert.equal(parseEditorial(h + "\n\nBody.").headline, h);
+    }
+  });
+
   it("strips markdown hashes the voice bans anyway", () => {
     assert.equal(parseEditorial("# A headline\n\nBody.").headline, "A headline");
   });

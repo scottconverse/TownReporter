@@ -65,16 +65,18 @@ export function parseEditorial(raw: string): Editorial {
 
   const lines = beforeAppendix.trim().split("\n");
   // The first non-empty line is the headline; markdown hashes are stripped
-  // because the voice file bans markup in the delivered piece.
+  // because the voice file bans markup in the delivered piece. A line that
+  // hands the piece over rather than titling it is skipped, and only when
+  // there is another line left to be the headline — never at the cost of one.
   let headline = "";
   let i = 0;
   for (; i < lines.length; i++) {
     const t = lines[i]!.replace(/^#+\s*/, "").trim();
-    if (t) {
-      headline = t;
-      i++;
-      break;
-    }
+    if (!t) continue;
+    if (DELIVERY_PREAMBLE.test(t) && lines.slice(i + 1).some((l) => l.trim())) continue;
+    headline = t;
+    i++;
+    break;
   }
   return {
     headline,
@@ -84,6 +86,21 @@ export function parseEditorial(raw: string): Editorial {
     imagePrompt: imagePrompt.trim(),
   };
 }
+
+/**
+ * A line that is the model talking to the editor, not the piece.
+ *
+ * The voice file bans a preamble, and the delivered piece is supposed to begin
+ * with the headline. It does not always. A real run opened with "Two portals,
+ * one lead that didn't survive contact with the record. Here's the piece." and
+ * that sentence became the headline, pushing the real one into the body.
+ *
+ * Matched on the phrase rather than the position, because the tell is at the
+ * END of that line, and kept narrow: a headline that announces it is handing
+ * over a piece is not a headline anyone would print.
+ */
+const DELIVERY_PREAMBLE =
+  /\b(here'?s|here is|below is|attached is|i'?ve written|i have written)\s+(the|my|a|an)\s+(piece|editorial|column|draft|op-?ed)\b/i;
 
 /**
  * OPINION, once, at the front.

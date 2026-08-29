@@ -21,8 +21,15 @@ import {
  * CLI, which reads it directly. See `voice.server.ts` for why that matters.
  */
 
-/** Editorials take minutes, not seconds. The voice fetches before it writes. */
-const EDITORIAL_TIMEOUT_MS = 900_000;
+/**
+ * Editorials take minutes, not seconds. The voice fetches before it writes.
+ *
+ * Measured, not guessed: a piece with one document pointer took 9m53s and 32
+ * turns. Fifteen minutes left almost no headroom, and the first real request on
+ * the Opinion desk died at the cap with the work already paid for. Thirty gives
+ * a piece with several pointers room to finish.
+ */
+const EDITORIAL_TIMEOUT_MS = 1_800_000;
 
 export async function ensureEditorialSchema() {
   const sql = await getSql();
