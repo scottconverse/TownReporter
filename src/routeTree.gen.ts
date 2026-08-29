@@ -31,7 +31,6 @@ import { Route as DeskScanRouteImport } from './routes/desk.scan'
 import { Route as DeskSourcesRouteImport } from './routes/desk.sources'
 import { Route as EvidenceVersionIdRouteImport } from './routes/evidence.$versionId'
 import { Route as EvidenceCompareRouteImport } from './routes/evidence.compare'
-import { Route as NewsletterConfirmRouteImport } from './routes/newsletter.confirm'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiCronMonitorsRouteImport } from './routes/api/cron.monitors'
 import { Route as DeskStoryLeadIdRouteImport } from './routes/desk.story.$leadId'
@@ -147,11 +146,6 @@ const EvidenceCompareRoute = EvidenceCompareRouteImport.update({
   path: '/evidence/compare',
   getParentRoute: () => rootRouteImport,
 } as any)
-const NewsletterConfirmRoute = NewsletterConfirmRouteImport.update({
-  id: '/newsletter/confirm',
-  path: '/newsletter/confirm',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -195,7 +189,6 @@ export interface FileRoutesByFullPath {
   '/desk/sources': typeof DeskSourcesRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
-  '/newsletter/confirm': typeof NewsletterConfirmRoute
   '/desk/': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
@@ -223,7 +216,6 @@ export interface FileRoutesByTo {
   '/desk/sources': typeof DeskSourcesRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
-  '/newsletter/confirm': typeof NewsletterConfirmRoute
   '/desk': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
@@ -253,7 +245,6 @@ export interface FileRoutesById {
   '/desk/sources': typeof DeskSourcesRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
-  '/newsletter/confirm': typeof NewsletterConfirmRoute
   '/desk/': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
@@ -284,7 +275,6 @@ export interface FileRouteTypes {
     | '/desk/sources'
     | '/evidence/$versionId'
     | '/evidence/compare'
-    | '/newsletter/confirm'
     | '/desk/'
     | '/api/auth/$'
     | '/api/cron/monitors'
@@ -312,7 +302,6 @@ export interface FileRouteTypes {
     | '/desk/sources'
     | '/evidence/$versionId'
     | '/evidence/compare'
-    | '/newsletter/confirm'
     | '/desk'
     | '/api/auth/$'
     | '/api/cron/monitors'
@@ -341,7 +330,6 @@ export interface FileRouteTypes {
     | '/desk/sources'
     | '/evidence/$versionId'
     | '/evidence/compare'
-    | '/newsletter/confirm'
     | '/desk/'
     | '/api/auth/$'
     | '/api/cron/monitors'
@@ -363,7 +351,6 @@ export interface RootRouteChildren {
   ArticlesSlugRoute: typeof ArticlesSlugRoute
   EvidenceVersionIdRoute: typeof EvidenceVersionIdRoute
   EvidenceCompareRoute: typeof EvidenceCompareRoute
-  NewsletterConfirmRoute: typeof NewsletterConfirmRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCronMonitorsRoute: typeof ApiCronMonitorsRoute
 }
@@ -524,13 +511,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EvidenceCompareRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/newsletter/confirm': {
-      id: '/newsletter/confirm'
-      path: '/newsletter/confirm'
-      fullPath: '/newsletter/confirm'
-      preLoaderRoute: typeof NewsletterConfirmRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -606,7 +586,6 @@ const rootRouteChildren: RootRouteChildren = {
   ArticlesSlugRoute: ArticlesSlugRoute,
   EvidenceVersionIdRoute: EvidenceVersionIdRoute,
   EvidenceCompareRoute: EvidenceCompareRoute,
-  NewsletterConfirmRoute: NewsletterConfirmRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCronMonitorsRoute: ApiCronMonitorsRoute,
 }

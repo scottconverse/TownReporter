@@ -3,7 +3,6 @@ import { getSql } from "../db.ts";
 import type { ArticleRow, CorrectionRow } from "./types.ts";
 import { unpackStoredDraft } from "./coerce-draft.ts";
 import { stripReporterNotebook } from "./strip-draft.ts";
-import { createHash, randomBytes } from "node:crypto";
 import { parseUrlList } from "../paper.ts";
 import { provenanceFromUrls, parseFindings, resolvePublicFindings, type ProvenanceItem, type StoryFinding } from "./findings.ts";
 import { collapsePrintedDuplicates } from "./desk-copy.ts";
@@ -138,115 +137,27 @@ export const listPublicCorrections = createServerFn({ method: "GET" }).handler(
   },
 );
 
-/** Per-address ceiling per hour. Stops one address being hammered. */
-export const SUBSCRIBE_PER_EMAIL_HOURLY = 5;
-/**
- * Site-wide backstop per hour. Deliberately far above any real signup rate:
- * the old code capped at 40 and counted `subscribers` rows, so ~41 throwaway
- * addresses locked every genuine visitor out for an hour. A global limit can
- * only ever be a spam ceiling, never the primary control.
- */
-export const SUBSCRIBE_GLOBAL_HOURLY = 300;
+/*
+  The newsletter lived here and is gone.
 
-/** Attempts are keyed by hash — the rate table has no reason to hold addresses. */
-function emailKey(email: string): string {
-  return createHash("sha256").update(email).digest("hex");
-}
+  It was dormant — no signup form anywhere in the paper — but the server
+  function was still compiled and reachable, and an outside audit found three
+  problems with it at once. It ran ALTER TABLE and CREATE TABLE on every call
+  instead of in a migration. It inserted a rate-limit row before checking the
+  ceiling, so rejected requests still wrote forever with no retention. And it
+  returned the fresh confirmation token straight to the unauthenticated caller,
+  which meant anyone could confirm anyone else's address without ever holding
+  that mailbox.
 
-export type SubscribeResult =
-  | { ok: true; confirmPath: string }
-  | { ok: false; error: string };
+  It also broke the documented development path. These functions were the only
+  reason `node:crypto` was imported into this module, and this module is
+  imported by `/`, `/articles/$slug` and `/corrections` — so Node crypto landed
+  in the browser bundle and `npm run dev` died on hydration before a new
+  operator could reach the sign-in form at all.
 
-/**
- * The signup itself, callable without the server-function wrapper so it can be
- * tested directly (`createServerFn` handlers need the Start request context).
- */
-export async function subscribeEmail(raw: string): Promise<SubscribeResult> {
-  const email = raw.trim().toLowerCase();
-  {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return { ok: false as const, error: "That does not look like an email." };
-    }
-    const sql = await getSql();
-    await sql.query(`
-      alter table subscribers add column if not exists status text not null default 'pending'
-    `);
-    await sql.query(`
-      alter table subscribers add column if not exists confirm_token text
-    `);
-    // Every attempt lands here, including repeats of an address that already
-    // exists. Counting `subscribers` instead meant a re-subscribe took the
-    // UPDATE branch, wrote no new row, and was never rate limited at all.
-    await sql.query(`
-      create table if not exists newsletter_attempts (
-        id serial primary key,
-        email_key text not null,
-        created_at timestamptz not null default now()
-      )
-    `);
-    await sql.query(`
-      create index if not exists newsletter_attempts_recent_idx
-        on newsletter_attempts (created_at desc)
-    `);
+  If a newsletter is ever wanted: schema in a migration, the confirmation link
+  sent to the mailbox and never returned to the caller, the rate-limit check
+  before the write, and a consent record.
 
-    const key = emailKey(email);
-    await sql`insert into newsletter_attempts (email_key) values (${key})`;
-
-    const mine = await sql<{ c: number }>`
-      select count(*)::int as c from newsletter_attempts
-      where email_key = ${key} and created_at > now() - interval '1 hour'
-    `;
-    if ((mine[0]?.c ?? 0) > SUBSCRIBE_PER_EMAIL_HOURLY) {
-      return { ok: false as const, error: "Too many signup attempts. Try later." };
-    }
-    const all = await sql<{ c: number }>`
-      select count(*)::int as c from newsletter_attempts
-      where created_at > now() - interval '1 hour'
-    `;
-    if ((all[0]?.c ?? 0) > SUBSCRIBE_GLOBAL_HOURLY) {
-      return { ok: false as const, error: "Too many signup attempts. Try later." };
-    }
-
-    const token = randomBytes(24).toString("hex");
-    const existing = await sql<{ id: number }>`
-      select id from subscribers where email = ${email} limit 1
-    `;
-    if (existing[0]) {
-      await sql`
-        update subscribers set confirm_token = ${token}, status = 'pending'
-        where id = ${existing[0].id}
-      `;
-    } else {
-      await sql`
-        insert into subscribers (email, status, confirm_token)
-        values (${email}, 'pending', ${token})
-      `;
-    }
-    // One response shape for every address. Returning `confirmPath: null` for
-    // an already-confirmed subscriber turned this public form into a
-    // "is this person subscribed?" oracle. Re-confirming is harmless, so an
-    // existing subscriber simply gets a fresh link like anyone else.
-    return { ok: true as const, confirmPath: `/newsletter/confirm?token=${token}` };
-  }
-}
-
-export const subscribeNewsletter = createServerFn({ method: "POST" })
-  .validator((email: string) => email.trim().toLowerCase())
-  .handler(async ({ data: email }) => subscribeEmail(email));
-
-export const confirmNewsletter = createServerFn({ method: "GET" })
-  .validator((token: string) => token.trim())
-  .handler(async ({ data: token }) => {
-    if (token.length < 16) return { ok: false as const };
-    const sql = await getSql();
-    const rows = await sql<{ id: number }>`
-      select id from subscribers where confirm_token = ${token} limit 1
-    `;
-    if (!rows[0]) return { ok: false as const };
-    await sql`
-      update subscribers set status = 'confirmed', confirm_token = null
-      where id = ${rows[0].id}
-    `;
-    return { ok: true as const };
-  });
-
+  Audit findings ENG-007 (Major), UIUX-01 / QA-001 (Blocker).
+*/

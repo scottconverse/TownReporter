@@ -58,8 +58,34 @@ test("public paper SQL is a single LIMIT and has no desk middleware", () => {
   const pub = readFileSync(join(ROOT, "src/lib/news/public.ts"), "utf8");
   assert.doesNotMatch(pub, /limit 30\s*\n\s*limit /);
   assert.doesNotMatch(pub, /deskMiddleware/);
-  assert.match(pub, /confirm_token/);
-  assert.match(pub, /status = 'pending'/);
+});
+
+/*
+  This module is imported by `/`, `/articles/$slug` and `/corrections`, so
+  anything it imports lands in the browser bundle. It imported `node:crypto`
+  for the newsletter's token hashing, which externalized in the client and
+  killed hydration: `npm run dev` — the path the README gives a new
+  contributor — showed "Opening..." forever with no sign-in form.
+
+  The newsletter is gone (it also returned its confirmation token straight to
+  the caller). These assertions keep both problems from coming back.
+
+  Audit findings UIUX-01 / QA-001 (Blocker) and ENG-007 (Major).
+*/
+test("the public module keeps Node-only imports out of the browser bundle", () => {
+  const pub = readFileSync(join(ROOT, "src/lib/news/public.ts"), "utf8");
+  const code = pub.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  for (const mod of ["node:crypto", "node:fs", "node:child_process", "node:os", "node:path"]) {
+    assert.doesNotMatch(code, new RegExp(`from ["']${mod}["']`), `${mod} must not reach the client`);
+  }
+});
+
+test("the newsletter RPC that handed out its own confirmation token stays gone", () => {
+  const pub = readFileSync(join(ROOT, "src/lib/news/public.ts"), "utf8");
+  const code = pub.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(code, /confirm_token/);
+  assert.doesNotMatch(code, /subscribeNewsletter|confirmNewsletter/);
+  assert.doesNotMatch(code, /create table if not exists|alter table/i, "schema belongs in migrations/");
 });
 
 test("SSRF: fetch follows redirects manually and re-asserts each hop", () => {
