@@ -17,19 +17,35 @@ visitor -> Cloudflare edge -> tunnel -> 127.0.0.1:3000 (this box)
                                             +-- Claude Code CLI (your login)
 ```
 
-Nothing listens on a public port. The machine dials **out** to Cloudflare and
-holds that connection open, so the home IP never appears in DNS.
+Nothing listens on a port the internet can reach. The machine dials **out** to
+Cloudflare and holds that connection open, so the home IP never appears in DNS
+and the router has no port forwarded.
+
+**On the local network it is a different story.** The server binds `0.0.0.0:3000`,
+not loopback, so any device on this Wi-Fi can reach the paper and the desk
+directly at `http://<this-machine>:3000` — sign-in still applies, but Cloudflare
+is not in front of it. Measured, not assumed: `netstat` shows `0.0.0.0:3000`
+LISTENING, and a request to the LAN address answers 200. If you want the tunnel
+to be the only route, bind the server to `127.0.0.1` and restart it.
 
 ---
 
-## Four scheduled tasks
+## Six scheduled tasks
 
 | Task | When | Does |
 |---|---|---|
 | `TownReporter` | at logon | starts Postgres, applies migrations, serves the app |
 | `TownReporter Tunnel` | at logon | connects the Cloudflare Tunnel |
 | `TownReporter Monitors` | every 5 min | rechecks watched sources, drains desk jobs |
+| `TownReporter Watchdog` | every 5 min | checks the app, the tunnel and the public URL; restarts what is down; appends to `logs/watchdog.log` |
+| `TownReporter Restart` | on demand | stops and starts the paper |
+| `TownReporter Tunnel Restart` | on demand | stops and starts the tunnel |
 | (Postgres) | — | started by the first task, not separately registered |
+
+The last two are tasks rather than child processes of the app for two reasons
+learned the hard way: a process cannot restart itself, and a tunnel restart
+cannot deliver its own result over the tunnel it has just killed. The Server
+page at `/desk/ops` triggers them and reads the watchdog log.
 
 Everything comes back by itself after a reboot. Tested by stopping the lot and
 letting the task restart it.
