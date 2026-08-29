@@ -18,10 +18,13 @@ import { Route as FeedRouteImport } from './routes/feed'
 import { Route as GetTheCodeRouteImport } from './routes/get-the-code'
 import { Route as HowWeReportRouteImport } from './routes/how-we-report'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ArticlesSlugRouteImport } from './routes/articles.$slug'
 import { Route as DeskIndexRouteImport } from './routes/desk.index'
 import { Route as DeskDarkRouteImport } from './routes/desk.dark'
 import { Route as DeskMemoryRouteImport } from './routes/desk.memory'
+import { Route as DeskOpinionRouteImport } from './routes/desk.opinion'
+import { Route as DeskOpsRouteImport } from './routes/desk.ops'
 import { Route as DeskPublishedRouteImport } from './routes/desk.published'
 import { Route as DeskQueueRouteImport } from './routes/desk.queue'
 import { Route as DeskScanRouteImport } from './routes/desk.scan'
@@ -78,6 +81,11 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ArticlesSlugRoute = ArticlesSlugRouteImport.update({
   id: '/articles/$slug',
   path: '/articles/$slug',
@@ -96,6 +104,16 @@ const DeskDarkRoute = DeskDarkRouteImport.update({
 const DeskMemoryRoute = DeskMemoryRouteImport.update({
   id: '/memory',
   path: '/memory',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskOpinionRoute = DeskOpinionRouteImport.update({
+  id: '/opinion',
+  path: '/opinion',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskOpsRoute = DeskOpsRouteImport.update({
+  id: '/ops',
+  path: '/ops',
   getParentRoute: () => DeskRoute,
 } as any)
 const DeskPublishedRoute = DeskPublishedRouteImport.update({
@@ -159,9 +177,12 @@ export interface FileRoutesByFullPath {
   '/get-the-code': typeof GetTheCodeRoute
   '/how-we-report': typeof HowWeReportRoute
   '/login': typeof LoginRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
   '/desk/memory': typeof DeskMemoryRoute
+  '/desk/opinion': typeof DeskOpinionRoute
+  '/desk/ops': typeof DeskOpsRoute
   '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
@@ -183,9 +204,12 @@ export interface FileRoutesByTo {
   '/get-the-code': typeof GetTheCodeRoute
   '/how-we-report': typeof HowWeReportRoute
   '/login': typeof LoginRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
   '/desk/memory': typeof DeskMemoryRoute
+  '/desk/opinion': typeof DeskOpinionRoute
+  '/desk/ops': typeof DeskOpsRoute
   '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
@@ -209,9 +233,12 @@ export interface FileRoutesById {
   '/get-the-code': typeof GetTheCodeRoute
   '/how-we-report': typeof HowWeReportRoute
   '/login': typeof LoginRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
   '/desk/memory': typeof DeskMemoryRoute
+  '/desk/opinion': typeof DeskOpinionRoute
+  '/desk/ops': typeof DeskOpsRoute
   '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
@@ -236,9 +263,12 @@ export interface FileRouteTypes {
     | '/get-the-code'
     | '/how-we-report'
     | '/login'
+    | '/sitemap.xml'
     | '/articles/$slug'
     | '/desk/dark'
     | '/desk/memory'
+    | '/desk/opinion'
+    | '/desk/ops'
     | '/desk/published'
     | '/desk/queue'
     | '/desk/scan'
@@ -260,9 +290,12 @@ export interface FileRouteTypes {
     | '/get-the-code'
     | '/how-we-report'
     | '/login'
+    | '/sitemap.xml'
     | '/articles/$slug'
     | '/desk/dark'
     | '/desk/memory'
+    | '/desk/opinion'
+    | '/desk/ops'
     | '/desk/published'
     | '/desk/queue'
     | '/desk/scan'
@@ -285,9 +318,12 @@ export interface FileRouteTypes {
     | '/get-the-code'
     | '/how-we-report'
     | '/login'
+    | '/sitemap.xml'
     | '/articles/$slug'
     | '/desk/dark'
     | '/desk/memory'
+    | '/desk/opinion'
+    | '/desk/ops'
     | '/desk/published'
     | '/desk/queue'
     | '/desk/scan'
@@ -311,6 +347,7 @@ export interface RootRouteChildren {
   GetTheCodeRoute: typeof GetTheCodeRoute
   HowWeReportRoute: typeof HowWeReportRoute
   LoginRoute: typeof LoginRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ArticlesSlugRoute: typeof ArticlesSlugRoute
   EvidenceVersionIdRoute: typeof EvidenceVersionIdRoute
   EvidenceCompareRoute: typeof EvidenceCompareRoute
@@ -384,6 +421,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/articles/$slug': {
       id: '/articles/$slug'
       path: '/articles/$slug'
@@ -410,6 +454,20 @@ declare module '@tanstack/react-router' {
       path: '/memory'
       fullPath: '/desk/memory'
       preLoaderRoute: typeof DeskMemoryRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/desk/opinion': {
+      id: '/desk/opinion'
+      path: '/opinion'
+      fullPath: '/desk/opinion'
+      preLoaderRoute: typeof DeskOpinionRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/desk/ops': {
+      id: '/desk/ops'
+      path: '/ops'
+      fullPath: '/desk/ops'
+      preLoaderRoute: typeof DeskOpsRouteImport
       parentRoute: typeof DeskRoute
     }
     '/desk/published': {
@@ -488,6 +546,8 @@ declare module '@tanstack/react-router' {
 interface DeskRouteChildren {
   DeskDarkRoute: typeof DeskDarkRoute
   DeskMemoryRoute: typeof DeskMemoryRoute
+  DeskOpinionRoute: typeof DeskOpinionRoute
+  DeskOpsRoute: typeof DeskOpsRoute
   DeskPublishedRoute: typeof DeskPublishedRoute
   DeskQueueRoute: typeof DeskQueueRoute
   DeskScanRoute: typeof DeskScanRoute
@@ -499,6 +559,8 @@ interface DeskRouteChildren {
 const DeskRouteChildren: DeskRouteChildren = {
   DeskDarkRoute: DeskDarkRoute,
   DeskMemoryRoute: DeskMemoryRoute,
+  DeskOpinionRoute: DeskOpinionRoute,
+  DeskOpsRoute: DeskOpsRoute,
   DeskPublishedRoute: DeskPublishedRoute,
   DeskQueueRoute: DeskQueueRoute,
   DeskScanRoute: DeskScanRoute,
@@ -519,6 +581,7 @@ const rootRouteChildren: RootRouteChildren = {
   GetTheCodeRoute: GetTheCodeRoute,
   HowWeReportRoute: HowWeReportRoute,
   LoginRoute: LoginRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   ArticlesSlugRoute: ArticlesSlugRoute,
   EvidenceVersionIdRoute: EvidenceVersionIdRoute,
   EvidenceCompareRoute: EvidenceCompareRoute,
