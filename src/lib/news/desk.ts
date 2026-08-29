@@ -1141,14 +1141,33 @@ export const deleteLead = createServerFn({ method: "POST" })
       deleted — deliberately. Removing something from the paper is a separate,
       louder action.
     */
+    const { keepACopy, snapshotLead } = await import("./trash");
+    const snapshot = await snapshotLead(sql, leadId);
+    if (!snapshot) return { ok: false as const, error: "That lead is already gone." };
+
+    // Copy first, then delete. The other order loses the row if the delete
+    // succeeds and the copy throws.
+    const trashId = await keepACopy({
+      sql,
+      newsroomId: owned(context),
+      userId: context.userId,
+      kind: "lead",
+      refId: leadId,
+      label: String(snapshot.row.headline ?? "A lead"),
+      snapshot,
+    });
+
     const gone = await sql<{ id: number; headline: string }>`
       delete from leads
       where id = ${leadId} and newsroom_id = ${owned(context)}
       returning id, headline
     `;
-    if (!gone[0]) return { ok: false as const, error: "That lead is already gone." };
+    if (!gone[0]) {
+      await sql`delete from deleted_items where id = ${trashId}`.catch(() => undefined);
+      return { ok: false as const, error: "That lead is already gone." };
+    }
     await audit(context.userId, "delete-lead", gone[0].headline.slice(0, 120));
-    return { ok: true as const };
+    return { ok: true as const, trashId };
   });
 
 /**
@@ -1168,12 +1187,33 @@ export const deleteArticle = createServerFn({ method: "POST" })
   .validator((slug: string) => slug)
   .handler(async ({ context, data: slug }) => {
     const sql = await getSql();
+    const found = await sql<{ id: number }>`
+      select id from articles where slug = ${slug} and newsroom_id = ${owned(context)} limit 1
+    `;
+    if (!found[0]) return { ok: false as const, error: "That story is already gone." };
+
+    const { keepACopy, snapshotArticle } = await import("./trash");
+    const snapshot = await snapshotArticle(sql, found[0].id);
+    if (!snapshot) return { ok: false as const, error: "That story is already gone." };
+    const trashId = await keepACopy({
+      sql,
+      newsroomId: owned(context),
+      userId: context.userId,
+      kind: "article",
+      refId: found[0].id,
+      label: String(snapshot.row.headline ?? slug),
+      snapshot,
+    });
+
     const gone = await sql<{ id: number; headline: string; lead_id: number | null }>`
       delete from articles
       where slug = ${slug} and newsroom_id = ${owned(context)}
       returning id, headline, lead_id
     `;
-    if (!gone[0]) return { ok: false as const, error: "That story is already gone." };
+    if (!gone[0]) {
+      await sql`delete from deleted_items where id = ${trashId}`.catch(() => undefined);
+      return { ok: false as const, error: "That story is already gone." };
+    }
     await sql`delete from corrections where article_id = ${gone[0].id}`.catch(() => undefined);
     if (gone[0].lead_id != null) {
       await sql`
@@ -1182,5 +1222,5 @@ export const deleteArticle = createServerFn({ method: "POST" })
       `.catch(() => undefined);
     }
     await audit(context.userId, "delete-article", `${slug} — ${gone[0].headline.slice(0, 100)}`);
-    return { ok: true as const };
+    return { ok: true as const, trashId };
   });

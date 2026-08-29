@@ -325,17 +325,36 @@ export const deleteEditorial = createServerFn({ method: "POST" })
   .validator((draftId: number) => draftId)
   .handler(async ({ context, data: draftId }) => {
     const sql = await getSql();
+    const { keepACopy, snapshotDraft } = await import("./trash");
+    const snapshot = await snapshotDraft(sql, draftId);
+    if (!snapshot) return { ok: false as const, error: "That draft is already gone." };
+
+    // Copy first. An editorial draft has no copy anywhere else — not a lead,
+    // not a printed piece — so losing it to a mis-click is losing the piece.
+    const trashId = await keepACopy({
+      sql,
+      newsroomId: owned(context),
+      userId: context.userId,
+      kind: "draft",
+      refId: draftId,
+      label: String(snapshot.row.headline ?? "An editorial"),
+      snapshot,
+    });
+
     const gone = await sql<{ id: number; headline: string }>`
       delete from drafts
       where id = ${draftId} and newsroom_id = ${owned(context)}
       returning id, headline
     `;
-    if (!gone[0]) return { ok: false as const, error: "That draft is already gone." };
+    if (!gone[0]) {
+      await sql`delete from deleted_items where id = ${trashId}`.catch(() => undefined);
+      return { ok: false as const, error: "That draft is already gone." };
+    }
     await sql`delete from editorial_extras where draft_id = ${draftId}`.catch(() => undefined);
     await sql`
       update editorial_requests set draft_id = null
       where draft_id = ${draftId} and newsroom_id = ${owned(context)}
     `.catch(() => undefined);
     await audit(context.userId, "delete-editorial", gone[0].headline.slice(0, 120));
-    return { ok: true as const };
+    return { ok: true as const, trashId };
   });

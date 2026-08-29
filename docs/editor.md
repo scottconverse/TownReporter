@@ -341,6 +341,20 @@ That last one is the loud one. The paper's normal answer to being wrong is a
 never have existed — the wrong name, the private detail, the piece filed against
 someone it should not have been.
 
+### It is not gone yet
+
+Nothing you delete disappears immediately.
+
+- An **Undo** link appears right where you deleted it. One click and it is back.
+- After that, it waits **30 days** under **Recently deleted** on the Server
+  page (`/desk/ops`). **Restore** puts it back exactly where it was — a story
+  keeps its URL, its corrections come back with it, an editorial keeps its fact
+  sheet.
+- **Delete for good** on that list is the one with nothing behind it. It says so.
+- After 30 days it goes on its own.
+
+So the only truly final button in the newsroom is *Delete for good*.
+
 ---
 
 ## Published and corrections (`/desk/published`)

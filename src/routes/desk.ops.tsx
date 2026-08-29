@@ -6,6 +6,8 @@ import { ListSkeleton } from "@/components/states";
 import { getOpsHealth, runOpsAction } from "@/lib/ops/dashboard";
 import { OPS_ACTIONS, type OpsActionId } from "@/lib/ops/actions";
 import { formatAgo, overallState, type HealthState } from "@/lib/ops/health";
+import { TRASH_DAYS, listTrash, purgeTrashItem, restoreTrashItem } from "@/lib/news/trash";
+import { formatDateTime } from "@/lib/paper";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -213,6 +215,8 @@ function OpsPage() {
         ) : null}
       </section>
 
+      <RecentlyDeleted />
+
       <section className="mt-12">
         <SecHead title="Logs" sub="The last few lines of each. Newest at the bottom." />
         <div className="mt-4 space-y-6">
@@ -239,5 +243,117 @@ function OpsPage() {
         every five minutes and restarts whatever has stopped. Its log is above.
       </p>
     </DeskShell>
+  );
+}
+
+/**
+ * Recently deleted.
+ *
+ * Delete is one click away from the whole desk, which is what the operator
+ * asked for; this is the floor under it. A lead takes its drafts with it and an
+ * editorial draft has no copy anywhere, so before this a mis-click was final.
+ *
+ * The row says what restoring it would bring back, because "a lead" and "a lead
+ * and the two drafts on it" are different things to get back.
+ */
+function RecentlyDeleted() {
+  const qc = useQueryClient();
+  const [note, setNote] = useState("");
+  const [confirmPurge, setConfirmPurge] = useState<number | null>(null);
+
+  const list = useQuery({ queryKey: ["trash"], queryFn: () => listTrash() });
+
+  const invalidateEverything = () => {
+    for (const key of ["trash", "leads", "editorials", "published-desk", "articles"]) {
+      void qc.invalidateQueries({ queryKey: [key] });
+    }
+  };
+
+  const restore = useMutation({
+    mutationFn: (id: number) => restoreTrashItem({ data: id }),
+    onSuccess: (r) => {
+      setNote(r?.ok ? "Back on the desk." : (r?.error ?? "That would not go back."));
+      invalidateEverything();
+    },
+    onError: (e) => setNote(e instanceof Error ? e.message : "That would not go back."),
+  });
+
+  const purge = useMutation({
+    mutationFn: (id: number) => purgeTrashItem({ data: id }),
+    onSuccess: (r) => {
+      setConfirmPurge(null);
+      setNote(r?.ok ? "Gone for good." : (r?.error ?? "That did not work."));
+      void qc.invalidateQueries({ queryKey: ["trash"] });
+    },
+    onError: (e) => setNote(e instanceof Error ? e.message : "That did not work."),
+  });
+
+  const rows = list.data ?? [];
+
+  return (
+    <section className="mt-12">
+      <SecHead
+        title="Recently deleted"
+        count={rows.length || null}
+        sub={`Anything deleted from the desk waits here for ${TRASH_DAYS} days, then goes for good. Restoring puts it back where it was.`}
+      />
+      {note ? <p className="mt-3 text-sm text-muted">{note}</p> : null}
+      {list.isPending ? (
+        <ListSkeleton rows={2} />
+      ) : rows.length === 0 ? (
+        <p className="mt-4 text-ink-2">Nothing deleted.</p>
+      ) : (
+        <ul className="mt-4 divide-y divide-rule border-y border-rule">
+          {rows.map((r) => (
+            <li key={r.id} className="py-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-3">
+                <span className="min-w-0 flex-1">
+                  <span className="text-[11px] tracking-[0.14em] text-rust uppercase">
+                    {r.kind === "article" ? "Was on the paper" : r.kind === "lead" ? "Lead" : "Editorial"}
+                  </span>{" "}
+                  <span className="font-display text-lg">{r.label}</span>
+                  {r.extra ? <span className="ml-2 text-sm text-muted">with {r.extra}</span> : null}
+                </span>
+                <span className="row-acts static">
+                  <InkButton
+                    tone="quiet"
+                    small
+                    disabled={restore.isPending}
+                    onClick={() => restore.mutate(r.id)}
+                  >
+                    Restore
+                  </InkButton>
+                  {confirmPurge === r.id ? (
+                    <>
+                      <InkButton
+                        tone="ghost"
+                        small
+                        disabled={purge.isPending}
+                        onClick={() => purge.mutate(r.id)}
+                      >
+                        Yes, for good
+                      </InkButton>
+                      <InkButton tone="quiet" small onClick={() => setConfirmPurge(null)}>
+                        Keep
+                      </InkButton>
+                    </>
+                  ) : (
+                    <InkButton tone="quiet" small onClick={() => setConfirmPurge(r.id)}>
+                      Delete for good
+                    </InkButton>
+                  )}
+                </span>
+              </div>
+              <p className="mt-1 text-sm text-muted">Deleted {formatDateTime(r.deleted_at)}</p>
+              {confirmPurge === r.id ? (
+                <p className="mt-1 text-sm text-rust">
+                  This is the copy. After this there is nothing to restore.
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice } from "@/components/states";
 import { addCorrection, deleteArticle, listMemory, listPublishedDesk } from "@/lib/news/desk";
+import { restoreTrashItem } from "@/lib/news/trash";
 import { formatShortDate } from "@/lib/paper";
 
 export const Route = createFileRoute("/desk/published")({ component: PublishedPage });
@@ -17,6 +18,8 @@ function PublishedPage() {
   const [note, setNote] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   // Which story is asking to be taken off the paper. Null when none is.
   const [killFor, setKillFor] = useState<string | null>(null);
+  // The trash id of the last removal, so Undo is right here.
+  const [undo, setUndo] = useState<number | null>(null);
   const corr = useMutation({
     mutationFn: (slug: string) =>
       addCorrection({ data: { articleSlug: slug, body: (corrBySlug[slug] ?? "").trim() } }),
@@ -56,7 +59,8 @@ function PublishedPage() {
     onSuccess: (res) => {
       setKillFor(null);
       if (res?.ok) {
-        setNote({ kind: "ok", text: "Taken off the paper." });
+        setUndo(res.trashId);
+        setNote({ kind: "ok", text: "Taken off the paper, and kept for 30 days." });
         void qc.invalidateQueries({ queryKey: ["published-desk"] });
         void qc.invalidateQueries({ queryKey: ["leads"] });
         void qc.invalidateQueries({ queryKey: ["articles"] });
@@ -71,6 +75,25 @@ function PublishedPage() {
       }),
   });
 
+  const undoRemove = useMutation({
+    mutationFn: (id: number) => restoreTrashItem({ data: id }),
+    onSuccess: (res) => {
+      setUndo(null);
+      setNote(
+        res?.ok
+          ? { kind: "ok", text: "Back on the paper." }
+          : { kind: "err", text: res?.error ?? "That would not go back." },
+      );
+      void qc.invalidateQueries({ queryKey: ["published-desk"] });
+      void qc.invalidateQueries({ queryKey: ["trash"] });
+    },
+    onError: (err) =>
+      setNote({
+        kind: "err",
+        text: err instanceof Error ? err.message : "That would not go back.",
+      }),
+  });
+
   const rows = published.data ?? [];
 
   return (
@@ -78,7 +101,24 @@ function PublishedPage() {
       <p className="lede">
         What is live on the paper, with its corrections. Corrections are public.
       </p>
-      {note ? <Notice kind={note.kind}>{note.text}</Notice> : null}
+      {note ? (
+        <Notice kind={note.kind}>
+          {note.text}
+          {undo != null ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="inline-link"
+                disabled={undoRemove.isPending}
+                onClick={() => undoRemove.mutate(undo)}
+              >
+                {undoRemove.isPending ? "Putting it back…" : "Undo"}
+              </button>
+            </>
+          ) : null}
+        </Notice>
+      ) : null}
       {published.isPending && !rows.length ? (
         <ListSkeleton rows={4} />
       ) : rows.length === 0 ? (

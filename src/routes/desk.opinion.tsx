@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead, areaClass, inputClass } from "@/components/desk-chrome";
 import { ListSkeleton } from "@/components/states";
 import { deleteEditorial, getEditorial, listEditorials, startEditorial } from "@/lib/news/opinion";
+import { restoreTrashItem } from "@/lib/news/trash";
 import { formatDateTime } from "@/lib/paper";
 
 export const Route = createFileRoute("/desk/opinion")({
@@ -30,6 +31,8 @@ function OpinionPage() {
   const [notice, setNotice] = useState("");
   // Which row is asking "are you sure". Null when nothing is.
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  // The trash id of the last delete, so Undo is here rather than on Server.
+  const [undo, setUndo] = useState<number | null>(null);
 
   const list = useQuery({
     queryKey: ["editorials"],
@@ -68,10 +71,22 @@ function OpinionPage() {
         return;
       }
       if (openId === draftId) setOpenId(null);
-      setNotice("Deleted.");
+      setNotice("");
+      setUndo(res.trashId);
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
     onError: (err) => setNotice(err instanceof Error ? err.message : "That did not delete."),
+  });
+
+  const undoDelete = useMutation({
+    mutationFn: (id: number) => restoreTrashItem({ data: id }),
+    onSuccess: (res) => {
+      setUndo(null);
+      if (!res?.ok) setNotice(res?.error ?? "That would not go back.");
+      void qc.invalidateQueries({ queryKey: ["editorials"] });
+      void qc.invalidateQueries({ queryKey: ["trash"] });
+    },
+    onError: (err) => setNotice(err instanceof Error ? err.message : "That would not go back."),
   });
 
   const rows = list.data ?? [];
@@ -131,6 +146,20 @@ function OpinionPage() {
           </div>
         </div>
       </section>
+
+      {undo != null ? (
+        <p className="mt-6 text-sm text-muted">
+          Deleted, and kept for 30 days.{" "}
+          <button
+            type="button"
+            className="inline-link"
+            disabled={undoDelete.isPending}
+            onClick={() => undoDelete.mutate(undo)}
+          >
+            {undoDelete.isPending ? "Putting it back…" : "Undo"}
+          </button>
+        </p>
+      ) : null}
 
       <section className="mt-12">
         <SecHead

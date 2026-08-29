@@ -74,6 +74,14 @@ the investigative desk finally does the thing it was built to do.
   confirms in place and says what it costs — taking a story off the paper says
   plainly that its URL becomes a 404 and that a correction is what the paper
   normally does instead.
+- **Nothing deleted is gone straight away.** A copy of anything removed waits
+  30 days under *Recently deleted* on the Server page, and an Undo appears
+  where the delete happened. Restoring puts the row back with its original id,
+  so a story keeps its URL and its corrections, and an editorial keeps its fact
+  sheet, rather than coming back orphaned. It is a snapshot table rather than a
+  `deleted_at` flag on purpose: a flag means every list, the feed, the sitemap
+  and the public article route must each remember to filter, and the one that
+  forgets serves something the editor believes is gone.
 - **Row actions are visible.** Open, Hold, Kill and Delete used to fade in on
   hover, so an editor scanning twenty leads had to sweep the mouse along the
   list to discover they existed. Touch screens already showed them; now

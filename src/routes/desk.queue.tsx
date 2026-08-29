@@ -5,6 +5,7 @@ import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { LeadRowView } from "@/components/desk-leads";
 import { ListSkeleton, Notice } from "@/components/states";
 import { deleteLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
+import { restoreTrashItem } from "@/lib/news/trash";
 import { nearDuplicate, openLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
 import { TOPICS } from "@/lib/paper";
 
@@ -28,12 +29,31 @@ function QueuePage() {
   const remove = useMutation({
     mutationFn: (id: number) => deleteLead({ data: id }),
     onSuccess: (res) => {
-      if (!res?.ok) setDeleteError(res?.error ?? "That did not delete.");
+      if (!res?.ok) {
+        setDeleteError(res?.error ?? "That did not delete.");
+        setUndo(null);
+      } else {
+        // Undo where the delete happened. The trash on the Server page is the
+        // durable net; this is the one an editor will actually reach for.
+        setDeleteError("");
+        setUndo(res.trashId);
+      }
       void qc.invalidateQueries({ queryKey: ["leads"] });
     },
     onError: (e) => setDeleteError(e instanceof Error ? e.message : "That did not delete."),
   });
   const [deleteError, setDeleteError] = useState("");
+  const [undo, setUndo] = useState<number | null>(null);
+  const undoDelete = useMutation({
+    mutationFn: (id: number) => restoreTrashItem({ data: id }),
+    onSuccess: (res) => {
+      setUndo(null);
+      if (!res?.ok) setDeleteError(res?.error ?? "That would not go back.");
+      void qc.invalidateQueries({ queryKey: ["leads"] });
+      void qc.invalidateQueries({ queryKey: ["trash"] });
+    },
+    onError: (e) => setDeleteError(e instanceof Error ? e.message : "That would not go back."),
+  });
   const [filter, setFilter] = useState<"all" | "new" | "drafted" | "held" | "killed">("all");
   const [headline, setHeadline] = useState("");
   const [why, setWhy] = useState("");
@@ -145,6 +165,19 @@ function QueuePage() {
       </div>
 
       {deleteError ? <Notice kind="err">{deleteError}</Notice> : null}
+      {undo != null ? (
+        <Notice kind="ok">
+          Deleted, and kept for 30 days.{" "}
+          <button
+            type="button"
+            className="inline-link"
+            disabled={undoDelete.isPending}
+            onClick={() => undoDelete.mutate(undo)}
+          >
+            {undoDelete.isPending ? "Putting it back…" : "Undo"}
+          </button>
+        </Notice>
+      ) : null}
 
       {isPending && leads.length === 0 ? (
         <ListSkeleton rows={4} />

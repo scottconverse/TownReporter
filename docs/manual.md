@@ -74,6 +74,11 @@ Killed. Delete removes the thing. Each one confirms in place and says what it
 costs; taking a story off the paper says plainly that its URL becomes a 404 and
 that a correction is what the paper normally does instead.
 
+**Nothing deleted is gone straight away.** A copy waits 30 days under *Recently
+deleted* on the Server page, and an **Undo** appears where the delete happened.
+Restoring puts the row back with its original id, so an article's corrections
+and an editorial's fact sheet come back attached rather than orphaned.
+
 ![A published story](images/02-article.png)
 
 ## What it will not do
@@ -403,7 +408,7 @@ The editorial writer is Opus deliberately: it is the one call where the writing
 npm test
 ```
 
-490 tests, no network and no token spend. They cover meeting ingest, retrieval,
+494 tests, no network and no token spend. They cover meeting ingest, retrieval,
 draft stripping, timezone handling, the SSRF guard, the job lifecycle, the Dark
 Desk loop, the dials, claim hygiene, the editorial parser, and the ops action
 allowlist.
@@ -613,6 +618,7 @@ erDiagram
     EDITORIAL_REQUESTS ||--o| DRAFTS : "written into"
     DRAFTS ||--o| EDITORIAL_EXTRAS : "fact sheet, not printed"
     DESK_JOBS }o--|| NEWSROOMS : "scan draft dark editorial"
+    DELETED_ITEMS }o--|| NEWSROOMS : "a copy, for 30 days"
 ```
 
 ## Choosing a provider, at call time
@@ -688,7 +694,7 @@ flowchart TB
 npm run dev          # http://localhost:8080
 npm run build        # build, then migrate
 npm start            # run the built server
-npm test             # 490 tests, no network
+npm test             # 494 tests, no network
 npm run typecheck
 npm run db:migrate
 npx playwright install chromium
