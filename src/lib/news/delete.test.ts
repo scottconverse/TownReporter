@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { getPglite, getSql } from "../db.ts";
-import { reinsert, snapshotArticle, snapshotDraft, snapshotLead } from "./trash-store.ts";
+import {
+  reinsert,
+  repointRequests,
+  snapshotArticle,
+  snapshotDraft,
+  snapshotLead,
+} from "./trash-store.ts";
 
 /**
  * Apply the real migrations, from disk.
@@ -253,5 +259,68 @@ describe("the trash puts things back", () => {
     const back = await sql<{ headline: string }>`select headline from leads where id = ${lead[0]!.id}`;
     assert.equal(back.length, 1, "a stale column broke the restore");
     await sql`delete from leads where id = ${lead[0]!.id}`;
+  });
+});
+
+/**
+ * The bug that only showed up by clicking Undo.
+ *
+ * `editorial_requests.draft_id` is a plain integer with no foreign key, and
+ * deleting the draft nulls it. Restoring the draft alone put the piece back in
+ * the database and left it invisible on the Opinion desk, because that list is
+ * driven by the pointer rather than by the draft.
+ */
+describe("restoring an editorial", () => {
+  it("points the Opinion desk back at it", async () => {
+    const sql = await getSql();
+    /*
+      `editorial_requests` is created by `ensureEditorialRequestSchema()`, which
+      lives in a `.server.ts` file full of path aliases that `node --test`
+      cannot resolve. What is under test here is the pointer repair, not that
+      table's full shape, so the two columns it turns on are declared locally.
+    */
+    await getPglite().then((pg) =>
+      pg.exec(`create table if not exists editorial_requests (
+        id serial primary key,
+        user_id text not null,
+        newsroom_id integer not null default 1,
+        subject text not null,
+        draft_id integer,
+        error text
+      )`),
+    );
+
+    const user = `repoint-${Math.random().toString(36).slice(2, 8)}`;
+    const made = await sql<{ id: number }>`
+      insert into drafts (user_id, lead_id, headline, dek, body, topic, form)
+      values (${user}, ${null}, ${"OPINION: A piece"}, ${""}, ${"Body"}, ${"opinion"}, ${"editorial"})
+      returning id
+    `;
+    const draftId = made[0]!.id;
+    const req = await sql<{ id: number }>`
+      insert into editorial_requests (user_id, subject, draft_id)
+      values (${user}, ${"A subject"}, ${draftId})
+      returning id
+    `;
+    const requestId = req[0]!.id;
+
+    const snap = await snapshotDraft(sql, draftId);
+    assert.deepEqual(snap?.requestIds, [requestId], "the pointer was not captured");
+
+    // What the delete does.
+    await sql`delete from drafts where id = ${draftId}`;
+    await sql`update editorial_requests set draft_id = null where draft_id = ${draftId}`;
+
+    // What the restore does.
+    await reinsert(sql, "drafts", snap!.row);
+    await repointRequests(sql, draftId, snap!.requestIds ?? []);
+
+    const back = await sql<{ draft_id: number | null }>`
+      select draft_id from editorial_requests where id = ${requestId}
+    `;
+    assert.equal(back[0]!.draft_id, draftId, "the desk still points at nothing");
+
+    await sql`delete from editorial_requests where id = ${requestId}`;
+    await sql`delete from drafts where id = ${draftId}`;
   });
 });

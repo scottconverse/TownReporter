@@ -3,6 +3,7 @@ import { getSql, type Sql } from "@/lib/db";
 import {
   keepACopy,
   reinsert,
+  repointRequests,
   type Snapshot,
   type TrashKind,
   type TrashRow,
@@ -135,6 +136,11 @@ export const restoreTrashItem = createServerFn({ method: "POST" })
         } else {
           await reinsert(tx, "drafts", snap.row);
           if (snap.extras) await reinsert(tx, "editorial_extras", snap.extras);
+          // The draft is back; the Opinion desk still has to be told.
+          const draftId = Number(snap.row.id);
+          if (Number.isFinite(draftId) && snap.requestIds?.length) {
+            await repointRequests(tx, draftId, snap.requestIds);
+          }
         }
       });
     } catch (err) {

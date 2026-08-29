@@ -25,6 +25,16 @@ export type Snapshot = {
   drafts?: Record<string, unknown>[];
   corrections?: Record<string, unknown>[];
   extras?: Record<string, unknown> | null;
+  /**
+   * The Opinion desk rows that pointed at this draft.
+   *
+   * `editorial_requests.draft_id` is a plain integer with no foreign key, and
+   * deleting the draft nulls it. Restoring the draft alone put the piece back
+   * in the database and left it invisible on the desk, because that list is
+   * driven by the pointer, not by the draft. Caught by clicking Undo and
+   * watching the piece not come back.
+   */
+  requestIds?: number[];
 };
 
 /** One row, as JSON, or null when it is not there. */
@@ -127,10 +137,39 @@ export async function snapshotArticle(sql: Sql, articleId: number): Promise<Snap
   return { row, corrections: await rowsAsJson(sql, "corrections", "article_id", articleId) };
 }
 
-/** An editorial draft and the desk-only material beside it. */
+/** An editorial draft, the desk-only material beside it, and who pointed at it. */
 export async function snapshotDraft(sql: Sql, draftId: number): Promise<Snapshot | null> {
   const row = await rowAsJson(sql, "drafts", "id", draftId);
   if (!row) return null;
-  return { row, extras: await rowAsJson(sql, "editorial_extras", "draft_id", draftId) };
+  // Taken before the delete, which is the only moment the pointers still exist.
+  const requests = await sql
+    .query<{ id: number }>(`select id from editorial_requests where draft_id = $1`, [draftId])
+    .catch(() => []);
+  return {
+    row,
+    extras: await rowAsJson(sql, "editorial_extras", "draft_id", draftId),
+    requestIds: requests.map((r) => r.id),
+  };
+}
+
+/**
+ * Point the Opinion desk back at a restored draft.
+ *
+ * Separate from `reinsert` because this is an update to a row that never went
+ * away, not a row coming back.
+ */
+export async function repointRequests(
+  sql: Sql,
+  draftId: number,
+  requestIds: number[],
+): Promise<void> {
+  for (const id of requestIds) {
+    await sql
+      .query(`update editorial_requests set draft_id = $1, error = null where id = $2`, [
+        draftId,
+        id,
+      ])
+      .catch(() => undefined);
+  }
 }
 
