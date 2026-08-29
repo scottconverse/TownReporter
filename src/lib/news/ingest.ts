@@ -1,6 +1,7 @@
 import { looksLikeSoft404, type FetchOutcome } from "./fetch-outcome.ts";
 import { assertPublicHttpUrl, fetchPublicHttp, fetchPublicHttpTracked } from "./fetch-url.ts";
 import { htmlToPlainText } from "./html-text.ts";
+import { storableText } from "./storable-text.ts";
 import { needsRenderedFetch } from "./render-detect.ts";
 import { ingestYoutube, isYoutubeUrl, type YoutubeIngest } from "./youtube.ts";
 import { ingestPrimeGov } from "./primegov.ts";
@@ -359,7 +360,27 @@ export type IngestDocument = {
   rawBytes?: Uint8Array;
 };
 
+/**
+ * Every string this module hands out passes through here first.
+ *
+ * A NUL byte in one fetched PDF is enough for Postgres to reject the insert,
+ * and the dark desk lost a whole round to exactly that after reading 21
+ * documents. Cleaning at the door means no downstream writer has to remember.
+ */
+function clean(doc: IngestDocument): IngestDocument {
+  return {
+    ...doc,
+    text: storableText(doc.text),
+    title: storableText(doc.title),
+    extras: doc.extras.map((e) => storableText(e)),
+  };
+}
+
 export async function ingestDocument(raw: string): Promise<IngestDocument> {
+  return clean(await ingestDocumentRaw(raw));
+}
+
+async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
   const empty = (over: Partial<IngestDocument>): IngestDocument => ({
     ok: false,
     status: 0,

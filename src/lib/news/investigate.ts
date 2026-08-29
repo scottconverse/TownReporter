@@ -1,6 +1,11 @@
 import { getSql } from "../db.ts";
 import { PAPER } from "../paper.ts";
-import { grokChat, parseJsonBlock } from "./ai.ts";
+import { grokChat, parseJsonBlock, plannerModel, providerBudget } from "./ai.ts";
+import {
+  CLAIM_HYGIENE_RULES,
+  isSelfReferential,
+  labelAfterCitationCheck,
+} from "./claim-hygiene.ts";
 import { DARK_PLANNER } from "./dark-prompt.ts";
 import {
   classifyClaimKind,
@@ -81,6 +86,15 @@ export type HopPlan = {
   questions: string[];
   stop: boolean;
   summary: string;
+  /**
+   * Set when the model never answered and this plan came from the heuristic.
+   *
+   * The fallback used to be silent. Every hop of every run had been running on
+   * the keyword heuristic — zero entities, zero claims, zero hypotheses across
+   * the whole database — while the run summary read like a successful dig. A
+   * fallback that does not announce itself is indistinguishable from working.
+   */
+  planner_error?: string;
 };
 
 export type HopPlanClaim = HopPlan["claims"][number];
@@ -481,6 +495,33 @@ export function emptyPlan(): HopPlan {
   };
 }
 
+/**
+ * A claim may not be more certain than its own label allows.
+ *
+ * Measured across Opus, Sonnet and Haiku on the same real pack: every one of
+ * them produced claims labelled ALLEGATION or INFERENCE carrying confidence
+ * above 0.8 — Opus four of eight, Haiku five of six. That is not a small-model
+ * problem, it is a missing rule, and it is the specific way a desk like this
+ * turns "somebody said" into "we know".
+ *
+ * The prompt now states the ceilings, and this enforces them, because a prompt
+ * is a request and this needs to be a guarantee.
+ */
+export const CONFIDENCE_CEILING: Record<string, number> = {
+  FACT: 1,
+  OBSERVATION: 0.9,
+  INFERENCE: 0.7,
+  ALLEGATION: 0.6,
+  HYPOTHESIS: 0.5,
+  UNKNOWN: 0.3,
+};
+
+export function clampConfidenceToLabel(kind: string, raw: unknown): number | undefined {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+  const ceiling = CONFIDENCE_CEILING[String(kind).toUpperCase()] ?? 0.3;
+  return Math.max(0, Math.min(ceiling, raw));
+}
+
 export function heuristicPlan(text: string, tried: Set<string>): HopPlan {
   const h = heuristicFromText(text, tried, SEARCHES_PER_HOP, FETCHES_PER_HOP);
   const plan = emptyPlan();
@@ -534,13 +575,38 @@ function parsePlan(raw: unknown): HopPlan {
     }
   }
   for (const c of arr<Record<string, unknown>>("claims")) {
+    /*
+      A claim about the investigation is not a claim.
+
+      Every model tested filed several per hop — "X remains unexamined after 20
+      hops", "this hop invoked the fetch tool" — and they crowd the real
+      findings out of the file and the brief. What is still unchecked belongs in
+      the frontier, which already tracks exactly that.
+    */
+    if (c?.text && isSelfReferential(String(c.text))) continue;
     if (c?.text) {
       plan.claims.push({
         text: String(c.text),
-        kind: classifyClaimKind(String(c.kind ?? "UNKNOWN")),
+        /*
+          Two hygiene rules, applied here because the prompt cannot guarantee
+          them. A FACT with no document behind it becomes an INFERENCE, and the
+          confidence is then capped by whatever label survives that.
+        */
+        kind: labelAfterCitationCheck(classifyClaimKind(String(c.kind ?? "UNKNOWN")), {
+          source_url: c.source_url ? String(c.source_url) : null,
+          artifact_version_id: numOrUndef(c.artifact_version_id) ?? null,
+          capture_event_id: numOrUndef(c.capture_event_id) ?? null,
+        }),
         evidence: String(c.evidence ?? ""),
         source_url: c.source_url ? String(c.source_url) : undefined,
-        confidence: typeof c.confidence === "number" ? c.confidence : undefined,
+        confidence: clampConfidenceToLabel(
+          labelAfterCitationCheck(classifyClaimKind(String(c.kind ?? "UNKNOWN")), {
+            source_url: c.source_url ? String(c.source_url) : null,
+            artifact_version_id: numOrUndef(c.artifact_version_id) ?? null,
+            capture_event_id: numOrUndef(c.capture_event_id) ?? null,
+          }),
+          c.confidence,
+        ),
         artifact_version_id: numOrUndef(c.artifact_version_id),
         capture_event_id: numOrUndef(c.capture_event_id),
         locator: c.locator ? String(c.locator) : undefined,
@@ -576,9 +642,31 @@ function parsePlan(raw: unknown): HopPlan {
 }
 
 export async function grokPlanner(pack: string): Promise<HopPlan> {
-  const ai = await grokChat(DARK_PLANNER, pack.slice(0, 24000), 2200);
-  if (!ai?.ok) return heuristicPlan(pack, new Set());
-  return parsePlan(parseJsonBlock<unknown>(ai.text));
+  /*
+    The provider's own per-call budget, not the 45-second default.
+
+    This is the call that decides every hop, and it was being given 45 seconds
+    to read a 24,000-character pack and return a plan. Against the local Claude
+    Code CLI it timed out every time, fell back to the keyword heuristic without
+    a word, and the desk produced no entities, claims or hypotheses at all while
+    its summaries read like successful digs. `providerBudget()` has said 150
+    seconds for this provider the whole time; nothing passed it.
+  */
+  const { callMs } = providerBudget();
+  // The cheap half of the split. See `plannerModel`.
+  const ai = await grokChat(DARK_PLANNER, pack.slice(0, 24000), 2200, {
+    timeoutMs: callMs,
+    model: plannerModel(),
+  });
+  if (!ai?.ok) {
+    const why = ai && "error" in ai ? ai.error : "no response";
+    return { ...heuristicPlan(pack, new Set()), planner_error: why };
+  }
+  const parsed = parsePlan(parseJsonBlock<unknown>(ai.text));
+  if (!parsed.searches.length && !parsed.fetch_urls.length) {
+    return { ...parsed, planner_error: "model replied but the plan had no next step" };
+  }
+  return parsed;
 }
 
 async function defaultFetch(url: string): ReturnType<FetchFn> {
@@ -1412,12 +1500,21 @@ export async function researchLoop(opts: {
   fetch?: FetchFn;
   planner?: PlannerFn;
   archives?: (url: string) => Promise<string[]>;
-}): Promise<{ hops: number; artifacts: number; frontier: number; paused: boolean; summary: string }> {
+}): Promise<{
+  hops: number;
+  artifacts: number;
+  frontier: number;
+  paused: boolean;
+  summary: string;
+  plannerFailures: number;
+}> {
   const sql = await getSql();
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
   const fetchDoc = opts.fetch ?? defaultFetch;
   const planner = opts.planner;
   const tried = new Set<string>();
+  /** Every hop that had to fall back, so the run can say so. */
+  const plannerFailures: string[] = [];
   const priorQueries = await sql<{ query: string }>`
     select query from search_log where investigation_id = ${opts.investigationId}
   `;
@@ -1491,11 +1588,15 @@ export async function researchLoop(opts: {
       const grok = await grokPlanner(pack);
       const heur = heuristicPlan(graph, tried);
       plan = grok.searches.length || grok.fetch_urls.length ? grok : heur;
+      if (grok.planner_error) plan.planner_error = grok.planner_error;
       if (!plan.searches.length && heur.searches.length) plan.searches = heur.searches;
       if (!plan.fetch_urls.length && heur.fetch_urls.length) plan.fetch_urls = heur.fetch_urls;
       plan.frontier = [...plan.frontier, ...heur.frontier];
     }
 
+    // Say it out loud. A run that dug with the heuristic must not read like a
+    // run that dug with the model.
+    if (plan.planner_error) plannerFailures.push(plan.planner_error);
     lastSummary = plan.summary;
 
     for (const url of plan.fetch_urls) {
@@ -1932,12 +2033,23 @@ export async function researchLoop(opts: {
         updated_at = now()
     where id = ${opts.investigationId}
   `;
+  /*
+    A run that dug with the heuristic must not read like a run that dug with
+    the model. The whole database had zero entities, claims and hypotheses
+    while every summary described a successful dig.
+  */
+  const fellBack = plannerFailures.length
+    ? `
+Planner fell back on ${plannerFailures.length} of ${hopsDone} hop${hopsDone === 1 ? "" : "s"}: ${[...new Set(plannerFailures)].join("; ")}`
+    : "";
+
   return {
     hops: hopsDone,
     artifacts: artsN[0]?.c ?? 0,
     frontier: open[0]?.c ?? 0,
     paused,
-    summary: lastSummary,
+    summary: lastSummary + fellBack,
+    plannerFailures: plannerFailures.length,
   };
 }
 

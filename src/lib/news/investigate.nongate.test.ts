@@ -568,3 +568,72 @@ describe("investigative freedom", { timeout: 120000 }, () => {
     );
   });
 });
+
+describe("planner failure is never silent", () => {
+  /**
+   * The whole database held zero entities, zero claims and zero hypotheses
+   * while every run summary read like a successful dig. The planner was timing
+   * out on a 45-second default, falling back to the keyword heuristic, and
+   * saying nothing. A fallback that does not announce itself is
+   * indistinguishable from working.
+   */
+  it("carries a reason on the plan type", async () => {
+    const mod = await import("./investigate.ts");
+    const plan = mod.heuristicPlan("Longmont city council packet", new Set());
+    const marked = { ...plan, planner_error: "Claude Code request timed out" };
+    assert.equal(marked.planner_error, "Claude Code request timed out");
+    assert.ok(Array.isArray(marked.searches));
+  });
+
+  /** The call budget must come from the provider, not a hard-coded default. */
+  it("asks the provider what a call may cost", async () => {
+    const { providerBudget } = await import("./ai.ts");
+    const b = providerBudget();
+    assert.ok(b.callMs >= 20_000, "a call budget under 20s cannot read a 24k pack");
+    assert.ok(b.callMs <= b.wallMs, "one call may not outlive the whole run");
+  });
+});
+
+describe("confidence is capped by its own label", () => {
+  /**
+   * Measured across Opus, Sonnet and Haiku on the same real pack: every model
+   * produced claims labelled ALLEGATION or INFERENCE carrying confidence above
+   * 0.8. Opus four of eight, Haiku five of six. Adding the ceilings to the
+   * prompt helped — Haiku went five to one — but Opus still returned
+   * UNKNOWN=0.9 and INFERENCE=0.8 in the very next run.
+   *
+   * A prompt is a request. This is the guarantee.
+   */
+  it("pulls an over-certain allegation down to its ceiling", async () => {
+    const { clampConfidenceToLabel } = await import("./investigate.ts");
+    assert.equal(clampConfidenceToLabel("ALLEGATION", 0.95), 0.6);
+    assert.equal(clampConfidenceToLabel("INFERENCE", 0.8), 0.7);
+    assert.equal(clampConfidenceToLabel("UNKNOWN", 0.9), 0.3);
+    assert.equal(clampConfidenceToLabel("HYPOTHESIS", 0.75), 0.5);
+  });
+
+  it("leaves an honest score alone", async () => {
+    const { clampConfidenceToLabel } = await import("./investigate.ts");
+    assert.equal(clampConfidenceToLabel("FACT", 0.95), 0.95);
+    assert.equal(clampConfidenceToLabel("OBSERVATION", 0.85), 0.85);
+    assert.equal(clampConfidenceToLabel("ALLEGATION", 0.15), 0.15);
+  });
+
+  it("never invents a score where the model gave none", async () => {
+    const { clampConfidenceToLabel } = await import("./investigate.ts");
+    assert.equal(clampConfidenceToLabel("FACT", undefined), undefined);
+    assert.equal(clampConfidenceToLabel("FACT", "high"), undefined);
+    assert.equal(clampConfidenceToLabel("FACT", NaN), undefined);
+  });
+
+  it("treats an unknown label as the most cautious one", async () => {
+    const { clampConfidenceToLabel } = await import("./investigate.ts");
+    assert.equal(clampConfidenceToLabel("SOMETHING_NEW", 0.99), 0.3);
+  });
+
+  it("states the ceilings in the prompt too, so the model aims low", async () => {
+    const { DARK_SYSTEM } = await import("./dark-prompt.ts");
+    assert.match(DARK_SYSTEM, /CONFIDENCE IS CAPPED BY LABEL/);
+    assert.match(DARK_SYSTEM, /ALLEGATION at 0\.9 is not a confident allegation/);
+  });
+});

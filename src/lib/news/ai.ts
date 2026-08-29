@@ -220,14 +220,18 @@ export async function grokChat(
   system: string,
   user: string,
   maxTokens = 1400,
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; model?: string },
 ): Promise<GrokOk | GrokErr> {
   const provider = resolveProvider();
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
 
   const timeoutMs = opts?.timeoutMs ?? 45_000;
+  // A caller may name a cheaper or stronger model for its own step. See
+  // PLANNER_MODEL: planning and judging are different jobs with different
+  // prices, and one provider setting for both overpays for one of them.
+  const model = opts?.model?.trim() || provider.model;
   if (provider.kind === "anthropic") {
-    return anthropicChat(provider, system, user, maxTokens, timeoutMs);
+    return anthropicChat({ ...provider, model }, system, user, maxTokens, timeoutMs);
   }
   if (provider.kind === "claude-code") {
     // Server-only module — dynamic import keeps node:child_process out of the
@@ -242,14 +246,14 @@ export async function grokChat(
     return claudeCodeChat({
       system,
       user,
-      model: provider.model,
+      model,
       timeoutMs,
     });
   }
   const llm = provider;
   const url = `${llm.baseUrl}/chat/completions`;
   const payload = {
-    model: llm.model,
+    model,
     temperature: 0.2,
     max_tokens: maxTokens,
     messages: [
@@ -323,6 +327,28 @@ export type ProviderBudget = {
  * every draft failed with "did not finish in time" before the writing pass
  * ever ran. Budgets have to come from the provider, not a constant.
  */
+/**
+ * The model that plans a hop, when the provider allows a choice.
+ *
+ * Planning and judging are different jobs. The planner writes the next
+ * searches and extracts entities; the synthesis decides what the evidence
+ * actually shows. Measured on one real pack from a live investigation, Haiku
+ * produced the same search volume as Opus (15 vs 14) and more claims (9 vs 6),
+ * with the same single overconfident claim — which the confidence clamp pulls
+ * to its ceiling either way — at a quarter of the cost:
+ *
+ *   Opus  $0.2836 per hop   Haiku $0.0710 per hop
+ *
+ * Over a 25-hop round that is $7.09 against $1.77. Synthesis and the brief stay
+ * on the default model, because that is where the judgment concentrates.
+ *
+ * Override with TOWNREPORTER_PLANNER_MODEL; set it to the same value as
+ * ANTHROPIC_MODEL to turn the split off.
+ */
+export function plannerModel(): string {
+  return (env("TOWNREPORTER_PLANNER_MODEL") || "claude-haiku-4-5-20251001").trim();
+}
+
 export function providerBudget(): ProviderBudget {
   const provider = resolveProvider();
   if (provider?.kind === "claude-code") {
@@ -370,5 +396,6 @@ No filler ("This development marks", "The announcement comes as", "Residents are
 If something important is unknown, say so.
 Attributed claims. No invented facts. Source quality determines confidence and attribution, not whether you may report.
 Return ONLY JSON with keys: headline, dek, body, topic, source_urls (exact document URLs you used, never a homepage stand-in), integrity_notes, memory_entities, form (brief|reported|explainer), found, unanswered, reporting_trail.
+Each "unanswered" entry names ONE document or ONE fact, in under 20 words. The desk searches these lines verbatim, so a line that asks for six documents at once finds none of them.
 topic must be one of: council, budget, housing, utilities, schools, planning, infrastructure, elections, about.
 Body: markdown paragraphs, no h1, not JSON. Brief = 150–350 words. Reported = 400–900. Do not inflate a thin item.`;
