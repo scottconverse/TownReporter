@@ -10,3 +10,19 @@ logs/
 .tanstack/
 .node_modules.lock
 attachments/
+
+# Transient capture and build output. An audit found 150 screenshots (11 MB)
+# and 25 browser captures plus five duplicate source archives (3.9 MB) tracked
+# here (ENG-010). Clones pay for those forever, and a committed source archive
+# can be mistaken for canonical code.
+#
+# docs/images/ stays tracked on purpose: eleven curated manual screenshots that
+# the documentation links to. That is the deliberate exception.
+screenshots/
+artifacts/browsed_files/
+artifacts/imagine_images/
+artifacts/*.zip
+artifacts/*.tar.gz
+artifacts/*.bin
+artifacts/*.html
+artifacts/RENAME-TO-ZIP.txt
