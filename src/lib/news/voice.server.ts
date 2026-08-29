@@ -1,5 +1,5 @@
-import { stat } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { isAbsolute, relative, resolve } from "node:path";
 
 /**
  * The editorial voice, kept at arm's length.
@@ -60,20 +60,49 @@ export async function findVoiceFile(): Promise<
     };
   }
 
-  const inRepo = path.replace(/\\/g, "/").toLowerCase().startsWith(
-    process.cwd().replace(/\\/g, "/").toLowerCase() + "/",
-  );
+  /*
+    Canonicalise BOTH sides before comparing.
+
+    This was a lexical `startsWith` on the raw strings, which an audit noted
+    could be walked around (ENG-009): an absolute path outside the checkout
+    that is a symlink or a junction back to a file inside it passes the string
+    test, and `stat` follows links — so the "outside this repository" promise
+    was stronger than the check enforcing it.
+
+    `realpath` resolves links on both sides and `relative` then answers the
+    containment question properly, instead of a prefix match that would also
+    treat a sibling directory sharing the repository's name as inside it.
+
+    A path that does not exist yet cannot be canonicalised; that case falls
+    through to the `stat` below, which reports it honestly.
+  */
+  let realCandidate = path;
+  let realRepo = process.cwd();
+  try {
+    realCandidate = await realpath(path);
+  } catch {
+    /* not there yet — stat reports it below */
+  }
+  try {
+    realRepo = await realpath(process.cwd());
+  } catch {
+    /* cwd resolves in practice */
+  }
+
+  const rel = relative(realRepo, realCandidate);
+  const inRepo = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
   if (inRepo) {
     return {
       ok: false,
       error:
-        `${VOICE_ENV} points inside this repository, which is public. ` +
-        `Move the voice file somewhere outside it and update the path.`,
+        `${VOICE_ENV} resolves to a file inside this repository, which is public. ` +
+        `Move the voice file somewhere outside it and update the path. ` +
+        `A link that points back inside counts as inside.`,
     };
   }
 
   try {
-    const info = await stat(path);
+    const info = await stat(realCandidate);
     if (!info.isFile()) return { ok: false, error: `${VOICE_ENV} does not point at a file.` };
     if (info.size < 500) {
       return { ok: false, error: `The voice file at ${VOICE_ENV} looks empty or truncated.` };
