@@ -1,8 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
-import { grokChat, parseJsonBlock } from "./ai";
-import { DARK_SYSTEM } from "./dark-prompt";
+import { grokChat, parseJsonBlock, providerBudget } from "./ai";
+import { DARK_SYSTEM, darkSystemFor } from "./dark-prompt";
 import { assertRate, audit } from "./ops";
 import {
   checkBaselines,
@@ -18,6 +18,24 @@ import { rankWorthItems, presentWorthItem, type WorthSeed } from "./worth-a-look
 import { openInvestigationForEditor } from "./dark-open";
 import { titlesOverlap, topicFromText } from "./desk-copy";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
+import { TIP_SUBREDDIT, TIP_SUBREDDIT_QUERIES } from "@/lib/paper";
+import {
+  BRIEF_SYSTEM,
+  briefIsUseful,
+  briefPack,
+  parseBrief,
+  type InvestigationBrief,
+} from "./dark-brief";
+import {
+  PRESETS,
+  SCOPE_LABEL,
+  budgetFor,
+  clampDials,
+  describeDials,
+  estimateMinutes,
+  stanceFor,
+  type DarkDials,
+} from "./dark-dials";
 import { enqueueJob, type DeskJob } from "./jobs";
 
 function owned(context: { newsroomId?: number }) {
@@ -120,6 +138,23 @@ type DarkJson = {
 
 async function ensureDarkSchema() {
   const sql = await getSql();
+  await sql.query(`
+    create table if not exists investigation_briefs (
+      investigation_id integer primary key,
+      newsroom_id integer not null default 1,
+      brief_json text not null default '{}',
+      generated_at timestamptz not null default now()
+    )
+  `);
+  await sql.query(`
+    create table if not exists dark_settings (
+      newsroom_id integer primary key,
+      dig integer not null default 4,
+      nerve integer not null default 5,
+      scope text not null default 'city',
+      updated_at timestamptz not null default now()
+    )
+  `);
   await sql.query(`
     create table if not exists dark_runs (
       id serial primary key,
@@ -456,8 +491,23 @@ export const getInvestigation = createServerFn({ method: "GET" })
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 12
     `.catch(() => []);
+    const briefRow = await sql<{ brief_json: string }>`
+      select brief_json from investigation_briefs where investigation_id = ${id} limit 1
+    `.catch(() => []);
+    let brief: InvestigationBrief | null = null;
+    try {
+      // Re-parsed rather than trusted: a stored brief from an older shape must
+      // render or be dropped, never break the page it sits on.
+      brief = briefRow[0] ? parseBrief(JSON.parse(briefRow[0].brief_json)) : null;
+    } catch {
+      // A brief that will not parse is the same as no brief. The four lists
+      // below are the real content; this only ever helps.
+      brief = null;
+    }
+
     return {
       investigation: inv[0],
+      brief,
       frontier,
       artifacts,
       entities,
@@ -500,6 +550,7 @@ async function synthesizeSignals(
   runId: number,
   investigationId: number,
   paste: string,
+  dials: DarkDials,
 ) {
   const sql = await getSql();
   const sources = await sql<SourceRow>`
@@ -562,7 +613,22 @@ async function synthesizeSignals(
     paste ? `EDITOR PASTE:\n${paste.slice(0, 8000)}` : "EDITOR PASTE: (none)",
   ].join("\n\n");
 
-  const ai = await grokChat(DARK_SYSTEM, pack.slice(0, 28000), 3200);
+  /*
+    The prompt is built from the dials, not fixed.
+
+    Depth, appetite and map all change what this pass is allowed to do, and the
+    model has to be told which run it is on — a desk set to Black Sky that is
+    still reading the Careful prompt is just a slower Careful desk.
+  */
+  /*
+    Same missing budget as the planner. This call reads a 28,000-character pack
+    against an 11,500-character system prompt and had 45 seconds to do it — the
+    default — while `providerBudget()` allows 150 for this provider. Run 1 of
+    the dark desk failed with "Claude Code request timed out" for exactly this.
+  */
+  const ai = await grokChat(darkSystemFor(dials), pack.slice(0, 28000), 3200, {
+    timeoutMs: providerBudget().callMs,
+  });
   if (!ai?.ok) return { stored: 0, summary: "", error: (ai && "error" in ai ? ai.error : "Empty model response") as string | undefined };
 
   const parsed = parseJsonBlock<DarkJson>(ai.text) ?? {};
@@ -657,13 +723,17 @@ async function executeDarkRun(
     await checkBaselines(userId, investigationId);
     await runDueMonitors({ userId });
 
+    // Same setting as a continued round: an editor who turned the desk up
+    // expects the file they open next to dig that hard too.
+    const dials = await readDarkDials(DEFAULT_NEWSROOM_ID);
+    const budget = budgetFor(dials);
     const loop = await researchLoop({
       userId,
       investigationId,
-      hops: 1,
+      hops: budget.hops,
     });
 
-    const synth = await synthesizeSignals(userId, runId, investigationId, paste);
+    const synth = await synthesizeSignals(userId, runId, investigationId, paste, dials);
     const names = (
       await sql<{ name: string }>`
         select e.name from investigation_entities ie
@@ -678,7 +748,8 @@ async function executeDarkRun(
     const header = [
       loop.summary,
       synth.summary,
-      `Hops ${loop.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
+      `Hops ${loop.hops} of ${budget.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
+      `Setting: dig ${dials.dig}/10, nerve ${dials.nerve}/10 (${stanceFor(dials).label}), scope ${dials.scope}.`,
       revived.length ? `Prior dead ends matched: ${revived.map((r) => r.hypothesis).join("; ")}` : "",
       synth.error ? `Synthesis: ${synth.error}` : "",
     ]
@@ -813,12 +884,21 @@ export async function performDarkRound(job: DeskJob) {
   try {
     await checkBaselines(context.userId, id);
     await runDueMonitors({ userId: context.userId });
+    /*
+      Depth comes from the desk's own setting.
+
+      This was `hops: 1` — one hop per press, whatever the investigation needed
+      and whatever the editor wanted. The machinery underneath could always
+      chase a trail; nothing could ask it to.
+    */
+    const dials = await readDarkDials(owned(context));
+    const budget = budgetFor(dials);
     const loop = await researchLoop({
       userId: context.userId,
       investigationId: id,
-      hops: 1,
+      hops: budget.hops,
     });
-    const synth = await synthesizeSignals(context.userId, runId, id, "");
+    const synth = await synthesizeSignals(context.userId, runId, id, "", dials);
     const names = (
       await sql<{ name: string }>`
         select e.name from investigation_entities ie
@@ -832,7 +912,8 @@ export async function performDarkRound(job: DeskJob) {
     const header = [
       loop.summary,
       synth.summary,
-      `Hops ${loop.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
+      `Hops ${loop.hops} of ${budget.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
+      `Setting: dig ${dials.dig}/10, nerve ${dials.nerve}/10 (${stanceFor(dials).label}), scope ${dials.scope}.`,
       revived.length
         ? `Prior dead ends matched: ${revived.map((r) => r.hypothesis).join("; ")}`
         : "",
@@ -850,6 +931,20 @@ export async function performDarkRound(job: DeskJob) {
       "dark-continue",
       `run ${runId} inv ${id} hops ${loop.hops} signals ${synth.stored}`,
     );
+    /*
+      Write the brief while the round is still warm.
+
+      Not on page load: it is a model call, and an editor refreshing a file
+      should not pay for one. Failure is deliberately swallowed — the four
+      lists are the real content and a missing summary must never fail a round
+      that otherwise dug successfully.
+    */
+    try {
+      await buildBrief(context.userId, owned(context), id);
+    } catch {
+      /* the file is still readable without it */
+    }
+
     if (synth.error && !loop.paused) await markInvestigationPaused(context.userId, id, synth.error);
   } catch (err) {
     const error = asDarkError(err);
@@ -1003,4 +1098,210 @@ export const reopenParkedInvestigation = createServerFn({ method: "POST" })
     `;
     await audit(context.userId, "dark", `pull back inv ${id}`);
     return { ok: true as const, investigationId: id };
+  });
+
+/**
+ * Read the town's subreddit and file anything that looks like a record.
+ *
+ * Lands in `anomalies`, which is what "Worth a look" already reads, so a tip
+ * competes with every other lead on the desk instead of getting its own pile.
+ * Everything filed is marked UNVERIFIED and carries its permalink: a resident's
+ * account is a reason to go looking, never a citation.
+ *
+ * Deduplicated on the permalink, so running this twice in a day adds only what
+ * is new. Rate-limited harder than the rest of the desk because the budget it
+ * spends is Reddit's, shared with everything else on this machine.
+ */
+export const scanTipSubreddit = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    await ensureDarkSchema();
+    await assertRate(context.userId, "reddit");
+    const { sweepRedditFeeds } = await import("./reddit.server");
+    const { subredditNewFeed, subredditSearchFeed, pickCivicPosts, redditAnomaly, civicScore } =
+      await import("./reddit");
+    const sub = TIP_SUBREDDIT;
+
+    const feeds = [
+      subredditNewFeed(sub),
+      ...TIP_SUBREDDIT_QUERIES.map((q) => subredditSearchFeed(sub, q)),
+    ];
+    const sweep = await sweepRedditFeeds(feeds, 3);
+    const picked = pickCivicPosts(sweep.posts);
+
+    const sql = await getSql();
+    let filed = 0;
+    const already: string[] = [];
+    for (const post of picked) {
+      const seen = await sql<{ id: number }>`
+        select id from anomalies
+        where newsroom_id = ${owned(context)} and url = ${post.url}
+        limit 1
+      `;
+      if (seen[0]) {
+        already.push(post.title);
+        continue;
+      }
+      const a = redditAnomaly(post, sub);
+      await sql`
+        insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
+        values (${context.userId}, ${owned(context)}, ${a.kind}, ${a.summary}, ${a.url}, ${a.details})
+      `;
+      filed += 1;
+    }
+
+    await audit(
+      context.userId,
+      "reddit",
+      `r/${sub} read ${sweep.posts.length} filed ${filed}`,
+    );
+
+    return {
+      ok: true as const,
+      subreddit: sub,
+      read: sweep.posts.length,
+      civic: picked.length,
+      filed,
+      alreadyKnown: already.length,
+      incomplete: sweep.incomplete,
+      reason: sweep.reason ?? "",
+      log: sweep.log,
+      // Shown to the editor so a thin result is explainable rather than mysterious.
+      topScores: picked.slice(0, 5).map((p) => ({ title: p.title, score: civicScore(p), url: p.url })),
+    };
+  });
+
+
+/**
+ * The dials, as stored for this newsroom.
+ *
+ * Read on every round rather than captured at investigation time: an editor who
+ * turns the desk up expects the next round to dig harder, not the next
+ * investigation they happen to start.
+ */
+export async function readDarkDials(newsroomId: number): Promise<DarkDials> {
+  const sql = await getSql();
+  const rows = await sql<{ dig: number; nerve: number; scope: string }>`
+    select dig, nerve, scope from dark_settings where newsroom_id = ${newsroomId} limit 1
+  `.catch(() => []);
+  return clampDials(rows[0] as Partial<DarkDials> | undefined);
+}
+
+export const getDarkDials = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    await ensureDarkSchema();
+    const dials = await readDarkDials(owned(context));
+    return {
+      dials,
+      budget: budgetFor(dials),
+      stance: stanceFor(dials),
+      description: describeDials(dials),
+      minutes: estimateMinutes(dials),
+      presets: PRESETS,
+      scopeLabel: SCOPE_LABEL,
+    };
+  });
+
+export const saveDarkDials = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { dig: number; nerve: number; scope: string }) => input)
+  .handler(async ({ context, data }) => {
+    await ensureDarkSchema();
+    // Clamped on the way in as well as on the way out: a stored 40 would be a
+    // very expensive typo.
+    const d = clampDials(data as Partial<DarkDials>);
+    const sql = await getSql();
+    await sql`
+      insert into dark_settings (newsroom_id, dig, nerve, scope, updated_at)
+      values (${owned(context)}, ${d.dig}, ${d.nerve}, ${d.scope}, now())
+      on conflict (newsroom_id) do update
+        set dig = excluded.dig, nerve = excluded.nerve, scope = excluded.scope,
+            updated_at = now()
+    `;
+    await audit(context.userId, "dark-dials", `dig ${d.dig} nerve ${d.nerve} scope ${d.scope}`);
+    return {
+      ok: true as const,
+      dials: d,
+      description: describeDials(d),
+      minutes: estimateMinutes(d),
+    };
+  });
+
+
+/**
+ * Write the read-me-first block for one investigation.
+ *
+ * Runs after a round rather than on page load: it is a model call, and an
+ * editor refreshing a file should not pay for one. Failure is silent by design
+ * — the four lists below it are the real content, and a missing summary must
+ * never stop the file opening.
+ */
+export async function buildBrief(userId: string, newsroomId: number, id: number) {
+  const sql = await getSql();
+  const inv = await sql<{ title: string }>`
+    select title from investigations where id = ${id} and newsroom_id = ${newsroomId} limit 1
+  `;
+  if (!inv[0]) return { ok: false as const, error: "not found" };
+
+  const claims = await sql<{ body: string; kind: string; evidence: string | null }>`
+    select body, kind, evidence from claims where investigation_id = ${id}
+    order by confidence desc nulls last, id desc limit 40
+  `.catch(() => []);
+  const hyps = await sql<{ body: string }>`
+    select body from hypotheses where investigation_id = ${id} order by id desc limit 20
+  `.catch(() => []);
+  const front = await sql<{ label: string; why: string }>`
+    select label, why from frontier_items where investigation_id = ${id}
+      and status in ('open', 'reopened')
+    order by priority desc, id desc limit 25
+  `.catch(() => []);
+  const ents = await sql<{ name: string; kind: string }>`
+    select e.name, e.kind from investigation_entities ie
+    join entities e on e.id = ie.entity_id
+    where ie.investigation_id = ${id} order by ie.id desc limit 40
+  `.catch(() => []);
+  const arts = await sql<{ title: string; url: string }>`
+    select title, url from artifacts where investigation_id = ${id} order by id desc limit 30
+  `.catch(() => []);
+  const anoms = await sql<{ kind: string; summary: string }>`
+    select kind, summary from anomalies where investigation_id = ${id} order by id desc limit 20
+  `.catch(() => []);
+
+  const pack = briefPack({
+    title: inv[0].title,
+    facts: claims
+      .filter((c) => /FACT|OBSERVATION/i.test(c.kind))
+      .map((c) => ({ body: c.body, evidence: c.evidence ?? "" })),
+    hypotheses: hyps.map((h) => h.body),
+    questions: front.map((f) => `${f.label}${f.why ? ` — ${f.why}` : ""}`),
+    findings: anoms.map((a) => `${a.kind}: ${a.summary}`),
+    entities: ents,
+    artifacts: arts,
+  });
+
+  const ai = await grokChat(BRIEF_SYSTEM, pack.slice(0, 22000), 1200, {
+    timeoutMs: providerBudget().callMs,
+  });
+  if (!ai?.ok) return { ok: false as const, error: "error" in ai ? ai.error : "no response" };
+
+  const brief = parseBrief(parseJsonBlock<unknown>(ai.text));
+  if (!briefIsUseful(brief)) return { ok: false as const, error: "brief was empty" };
+
+  await sql`
+    insert into investigation_briefs (investigation_id, newsroom_id, brief_json, generated_at)
+    values (${id}, ${newsroomId}, ${JSON.stringify(brief).slice(0, 12000)}, now())
+    on conflict (investigation_id) do update
+      set brief_json = excluded.brief_json, generated_at = now()
+  `;
+  return { ok: true as const, brief };
+}
+
+export const refreshBrief = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((id: number) => id)
+  .handler(async ({ context, data: id }) => {
+    await ensureDarkSchema();
+    await assertRate(context.userId, "brief");
+    return buildBrief(context.userId, owned(context), id);
   });

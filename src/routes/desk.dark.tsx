@@ -14,7 +14,9 @@ import {
   openDarkInvestigation,
   parkInvestigation,
   queueInvestigation,
+  refreshBrief,
   reopenParkedInvestigation,
+  scanTipSubreddit,
   type InvestigationRow,
 } from "@/lib/news/dark";
 import {
@@ -35,6 +37,11 @@ import {
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
 import { formatDateTime, formatShortDate } from "@/lib/paper";
+import { DarkDialsPanel } from "@/components/dark-dials-panel";
+import {
+  InvestigationBriefCard,
+  SectionTldr,
+} from "@/components/investigation-brief";
 import { readableCapture } from "@/lib/news/html-text";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
 
@@ -292,6 +299,48 @@ function DarkPage() {
     },
   });
 
+  /**
+   * Read the town's subreddit for tips.
+   *
+   * Its own button rather than part of the scan, because it spends a budget
+   * that is not ours: Reddit allows about ten requests a minute per address,
+   * shared with everything else on this machine, so this runs when an editor
+   * asks and not on a timer.
+   */
+  const reddit = useMutation({
+    mutationFn: () => scanTipSubreddit(),
+    onSuccess: (res) => {
+      if (!res?.ok) {
+        showWorkNotice("Reddit did not answer. Try again in a few minutes.");
+        return;
+      }
+      const parts: string[] = [];
+      parts.push(
+        res.filed
+          ? `Filed ${res.filed} tip${res.filed === 1 ? "" : "s"} from r/${res.subreddit}.`
+          : `Nothing new in r/${res.subreddit}.`,
+      );
+      parts.push(`Read ${res.read} posts, ${res.civic} looked civic.`);
+      if (res.alreadyKnown) parts.push(`${res.alreadyKnown} already on the desk.`);
+      if (res.incomplete && res.reason) parts.push(res.reason);
+      showWorkNotice(parts.join(" "), Boolean(res.filed));
+      invalidate();
+    },
+    onError: (err) => {
+      showWorkNotice(err instanceof Error ? err.message : "Reddit did not answer.");
+    },
+  });
+
+  const writeBrief = useMutation({
+    mutationFn: (id: number) => refreshBrief({ data: id }),
+    onSuccess: (res) => {
+      if (!res?.ok) showWorkNotice(res?.error ? `No brief: ${res.error}` : "No brief written.");
+      invalidate();
+    },
+    onError: (err) =>
+      showWorkNotice(err instanceof Error ? err.message : "Could not write the brief."),
+  });
+
   const starting = openFromCard.isPending || openPaste.isPending || find.isPending || followLead.isPending;
   const digging = advance.isPending;
   const busyStart = starting;
@@ -411,6 +460,8 @@ function DarkPage() {
           onClose={() => rememberOpen(null)}
           onPark={() => park.mutate(openId)}
           onFollow={(seed) => followLead.mutate(seed)}
+          onWriteBrief={() => writeBrief.mutate(openId)}
+          briefPending={writeBrief.isPending}
         />
       ) : null}
 
@@ -437,11 +488,24 @@ function DarkPage() {
               />
             ))
           )}
+          <DarkDialsPanel />
           <div className="np-acts">
             <InkButton tone="quiet" small disabled={busyStart || digging} onClick={() => find.mutate()}>
               {find.isPending ? "Starting…" : "Pick one for me"}
             </InkButton>
+            <InkButton
+              tone="quiet"
+              small
+              disabled={busyStart || digging || reddit.isPending}
+              onClick={() => reddit.mutate()}
+            >
+              {reddit.isPending ? "Reading r/longmont…" : "Check r/longmont"}
+            </InkButton>
           </div>
+          <p className="mt-2 text-sm text-muted">
+            Tips from the subreddit arrive here as unverified cards. They are a
+            reason to go looking for the record, never a source to cite.
+          </p>
         </section>
 
         <section>
@@ -630,6 +694,8 @@ function InvestigationWorkspace({
   onClose,
   onPark,
   onFollow,
+  onWriteBrief,
+  briefPending,
 }: {
   openId: number;
   detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
@@ -646,6 +712,8 @@ function InvestigationWorkspace({
   onClose: () => void;
   onPark: () => void;
   onFollow: (seed: { paste: string; title: string }) => void;
+  onWriteBrief: () => void;
+  briefPending: boolean;
 }) {
   const [frN, setFrN] = useState(6);
   useEffect(() => {
@@ -663,6 +731,7 @@ function InvestigationWorkspace({
   const anomalies = detail?.anomalies ?? [];
   const entities = detail?.entities ?? [];
   const signals = detail?.signals ?? [];
+  const brief = detail?.brief ?? null;
   const facts = claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind));
   const questions = openQuestionsFrom(detail);
   const findings = [
@@ -804,9 +873,20 @@ function InvestigationWorkspace({
               ) : null}
             </>
           ) : null}
+          {/*
+            Above the four lists, because the question an editor opens a file
+            with — is there something here, is it worth an hour — is the one
+            thing the lists cannot answer.
+          */}
+          <InvestigationBriefCard
+            brief={brief}
+            onRefresh={onWriteBrief}
+            refreshing={briefPending}
+          />
           {findings.length > 0 ? (
             <div className="of-block">
               <p className="side-label">On the record</p>
+              <SectionTldr text={brief?.sections?.record ?? ""} />
               {findings.slice(0, 8).map((n, i) => (
                 <p key={i} className="side-item">
                   {n}
@@ -817,6 +897,7 @@ function InvestigationWorkspace({
           {tests.length > 0 ? (
             <div className="of-block">
               <p className="side-label">Being tested</p>
+              <SectionTldr text={brief?.sections?.tested ?? ""} />
               {tests.slice(0, 6).map((n, i) => (
                 <p key={i} className="side-item">
                   {n}
@@ -827,6 +908,7 @@ function InvestigationWorkspace({
           {questions.length > 0 ? (
             <div className="of-block">
               <p className="side-label">Still open</p>
+              <SectionTldr text={brief?.sections?.open ?? ""} />
               {questions.slice(0, 8).map((n, i) => (
                 <p key={i} className="side-item">
                   {n}
@@ -837,6 +919,7 @@ function InvestigationWorkspace({
           {facts.length > 0 ? (
             <div className="of-block">
               <p className="side-label">What we know</p>
+              <SectionTldr text={brief?.sections?.known ?? ""} />
               {facts.map((c, i) => (
                 <p key={i} className="side-item">
                   {plainEditorText(c.body)}
