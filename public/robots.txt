@@ -19,3 +19,7 @@ Disallow: /_serverFn/
 
 # The newsletter confirmation link is single-use and personal.
 Disallow: /newsletter/confirm
+
+# Every published story, with its date. The front page lists only the newest,
+# so without this the archive is reachable only by following links.
+Sitemap: https://townreporter.org/sitemap.xml

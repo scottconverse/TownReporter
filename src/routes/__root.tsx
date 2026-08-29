@@ -7,7 +7,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
-import { PAPER } from "@/lib/paper";
+import { PAPER, siteUrl } from "@/lib/paper";
 import appCss from "../styles.css?url";
 import { useState } from "react";
 
@@ -23,14 +23,24 @@ export const Route = createRootRoute({
           "Independent civic reporting for Longmont, Colorado. The public record is only the beginning. Human-edited. Sources shown.",
       },
       { name: "theme-color", content: "#F6F1E7" },
+      // Site-wide share card. Article routes override the title, description
+      // and URL; the image is the same for all of them.
+      { property: "og:type", content: "website" },
+      { property: "og:site_name", content: PAPER.name },
+      { property: "og:image", content: siteUrl("/og.jpg") },
+      { name: "twitter:image", content: siteUrl("/og.jpg") },
     ],
     links: [
-      { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400;1,600&display=swap",
-      },
+      /*
+        The fonts are served from this origin, not from Google.
+
+        Linking `fonts.googleapis.com` meant every reader's browser announced
+        itself to Google before a word of the story rendered — the same kind of
+        leak as the analytics beacon, on a paper whose whole pitch is that it
+        does not sell its readers. The files live in `public/fonts` and the
+        @font-face rules in `src/fonts.css`; regenerate with
+        `node scripts/fetch-fonts.mjs`.
+      */
       { rel: "stylesheet", href: appCss },
       { rel: "manifest", href: "/__grok/manifest.webmanifest" },
       { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },

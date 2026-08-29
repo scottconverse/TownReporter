@@ -2,7 +2,15 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PaperShell } from "@/components/paper-chrome";
 import { PAPER } from "@/lib/paper";
 
-export const Route = createFileRoute("/about")({ component: About });
+export const Route = createFileRoute("/about")({
+  /*
+    Its own title. Every standing page shared the site's title, so a reader with
+    the paper open in several tabs could not tell them apart, and search results
+    listed them all under one name.
+  */
+  head: () => ({ meta: [{ title: `About this paper — ${PAPER.name}` }] }),
+  component: About,
+});
 
 function About() {
   return (

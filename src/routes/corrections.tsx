@@ -4,9 +4,15 @@ import { PaperShell } from "@/components/paper-chrome";
 import { EmptyState, ListSkeleton } from "@/components/states";
 import { inkGhost } from "@/components/desk-chrome";
 import { listPublicCorrections } from "@/lib/news/public";
-import { formatShortDate } from "@/lib/paper";
+import { PAPER, formatShortDate } from "@/lib/paper";
 
 export const Route = createFileRoute("/corrections")({
+  /*
+    Its own title. Every standing page shared the site's title, so a reader with
+    the paper open in several tabs could not tell them apart, and search results
+    listed them all under one name.
+  */
+  head: () => ({ meta: [{ title: `Corrections — ${PAPER.name}` }] }),
   component: Corrections,
 });
 

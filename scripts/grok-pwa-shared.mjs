@@ -375,6 +375,32 @@ export function grokOgHeadTags({
   return tags;
 }
 
+/**
+ * Which share-card keys the document already sets for itself.
+ *
+ * The page is the authority on its own head. This module used to strip every
+ * share meta and replace it with one set derived from the app name, so a paper
+ * where each story sets its own `og:title` and `og:description` shipped every
+ * story with the site's name and nothing else — links pasted into chat all
+ * looked identical, whatever the story was about.
+ */
+export function definedShareMetaKeys(html) {
+  const keys = new Set();
+  for (const tag of String(html).matchAll(/<meta\b[^>]*>/gi)) {
+    for (const match of tag[0].matchAll(/\b(?:property|name)\s*=\s*["']([^"']+)["']/gi)) {
+      const key = String(match[1]).toLowerCase();
+      if (SHARE_META_KEYS.has(key)) keys.add(key);
+    }
+  }
+  return keys;
+}
+
+/** The key a generated tag would occupy, for comparison against the document. */
+export function shareMetaKeyOf(tag) {
+  const match = /\b(?:property|name)\s*=\s*["']([^"']+)["']/i.exec(String(tag));
+  return match ? String(match[1]).toLowerCase() : "";
+}
+
 export function stripShareMetaTags(html) {
   return String(html).replace(/<meta\b[^>]*>/gi, (tag) => {
     const attrs = [...tag.matchAll(/\b(?:property|name)\s*=\s*["']([^"']+)["']/gi)];
@@ -432,7 +458,10 @@ export function injectGrokPwaHead(html, ctx = {}) {
     host,
     documentTitle,
   );
-  let next = stripShareMetaTags(html);
+  // Keep whatever the document set for itself and fill only the gaps.
+  // See `definedShareMetaKeys`.
+  const ownKeys = definedShareMetaKeys(html);
+  let next = html;
 
   const missing = grokPwaHeadTags(appName)
     .filter(([key]) => {
@@ -442,12 +471,20 @@ export function injectGrokPwaHead(html, ctx = {}) {
     })
     .map(([, tag]) => tag);
 
-  next = insertAfterHeadOpen(
-    next,
-    grokOgHeadTags({ host, appName, site, documentTitle, cwd }).join(""),
+  const ogTags = grokOgHeadTags({ host, appName, site, documentTitle, cwd }).filter(
+    (tag) => !ownKeys.has(shareMetaKeyOf(tag)),
   );
+  if (ogTags.length) next = insertAfterHeadOpen(next, ogTags.join(""));
 
-  if (!next.includes("/grok-app-builder/extensions.js")) {
+  /*
+    The builder's extension script belongs to pages running inside the Grok app
+    builder, which is what a project id means. A self-hosted deployment has no
+    project id and was still loading
+    `https://grok.com/grok-app-builder/extensions.js` on every page view — a
+    third-party request made by every reader of the paper, for a harness that
+    does nothing outside the builder.
+  */
+  if (projectId && !next.includes("/grok-app-builder/extensions.js")) {
     missing.push(...grokExtensionsHeadTags(projectId));
   } else if (projectId && !next.includes('name="grok-project-id"')) {
     missing.push(`<meta name="grok-project-id" content="${escapeHtml(projectId)}">`);

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { formatDate, formatDateTime, formatShortDate } from "./paper.ts";
+import { formatDate, formatDateTime, formatShortDate, slugify } from "./paper.ts";
 import { APP_VERSION } from "./version.ts";
 
 describe("Longmont dates", () => {
@@ -22,5 +22,29 @@ describe("version", () => {
       version: string;
     };
     assert.equal(APP_VERSION, pkg.version);
+  });
+});
+
+describe("slugify length cut", () => {
+  it("does not end a slug on a severed word", () => {
+    const slug = slugify(
+      "San Lazaro residents have until December to match a $42.5 million offer. Their public fundraiser has $8,600.",
+    );
+    assert.equal(slug.endsWith("-t"), false);
+    assert.ok(slug.length <= 72);
+    assert.match(slug, /^san-lazaro-residents/);
+  });
+
+  it("leaves a short headline exactly as it is", () => {
+    assert.equal(slugify("Council raises the water rate"), "council-raises-the-water-rate");
+  });
+
+  it("keeps a short real word when the headline was not cut", () => {
+    // Well under the limit, so nothing is dropped even though it ends short.
+    assert.equal(slugify("City drops the tax"), "city-drops-the-tax");
+  });
+
+  it("never returns empty", () => {
+    assert.equal(slugify("!!!"), "item");
   });
 });

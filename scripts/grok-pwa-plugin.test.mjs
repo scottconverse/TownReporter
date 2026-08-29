@@ -25,19 +25,26 @@ test("injects before </head>", () => {
   const out = injectGrokPwaHead("<html><head><title>x</title></head><body></body></html>");
   assert.match(out, /rel="manifest"/);
   assert.match(out, /apple-touch-icon/);
-  assert.match(out, /grok-app-builder\/extensions\.js/);
   assert.ok(out.indexOf("manifest") < out.indexOf("</head>"));
 });
 
-test("injects the extensions script without a project id", () => {
+/**
+ * A project id is what marks a page as running inside the Grok app builder.
+ * Without one, the builder's extension script has nothing to do — and this was
+ * loading it anyway, so a self-hosted site made a request to grok.com on every
+ * page view, for every reader.
+ */
+test("does not load the builder script when there is no project id", () => {
   const out = injectGrokPwaHead("<html><head></head></html>", {
     appName: "Demo",
     projectId: "",
   });
-  assert.match(out, /src="https:\/\/grok\.com\/grok-app-builder\/extensions\.js" defer/);
+  assert.doesNotMatch(out, /grok-app-builder\/extensions\.js/);
   assert.doesNotMatch(out, /grok-project-id/);
   assert.doesNotMatch(out, /data-project-id/);
   assert.doesNotMatch(out, /property="grok:app_id"/);
+  // The PWA chrome is unrelated and must still be applied.
+  assert.match(out, /rel="manifest"/);
 });
 
 test("injects project id on the script and meta when provided", () => {
@@ -102,16 +109,31 @@ test("does not duplicate x:creator tags", () => {
   assert.equal(twice.split('property="x:creator:id"').length - 1, 1);
 });
 
-test("platform chrome overwrites share-card metas and always sets og:title", () => {
+/**
+ * The page owns its own share card; the platform only fills gaps.
+ *
+ * This used to overwrite, so a paper that gives every story its own `og:title`
+ * and `og:description` published every story under the site's name. Links to
+ * different stories were indistinguishable wherever they were pasted.
+ */
+test("platform chrome fills missing share metas and keeps the page's own", () => {
   const html =
-    '<html><head><title>Hello World</title><meta property="og:title" content="Old"><meta name="twitter:card" content="summary"></head></html>';
+    '<html><head><title>Hello World</title><meta property="og:title" content="A story headline"><meta name="twitter:card" content="summary"></head></html>';
   const out = injectGrokPwaHead(html, { appName: "Wild Race" });
-  assert.match(out, /name="twitter:card" content="summary_large_image"/);
-  assert.match(out, /property="og:title" content="TownReporter"/);
-  assert.doesNotMatch(out, /content="Old"/);
-  assert.doesNotMatch(out, /content="summary"/);
+  assert.match(out, /property="og:title" content="A story headline"/);
+  assert.match(out, /name="twitter:card" content="summary"/);
+  // The app name still names the PWA; it just no longer replaces the story.
+  assert.doesNotMatch(out, /property="og:title" content="TownReporter"/);
   assert.equal(out.split('name="twitter:card"').length - 1, 1);
   assert.equal(out.split('property="og:title"').length - 1, 1);
+});
+
+test("still supplies share metas to a page that sets none", () => {
+  const out = injectGrokPwaHead("<html><head><title>Hello World</title></head></html>", {
+    appName: "Wild Race",
+  });
+  assert.match(out, /name="twitter:card" content="summary_large_image"/);
+  assert.match(out, /property="og:title" content="TownReporter"/);
 });
 
 test("does not duplicate twitter:card or og:title", () => {
@@ -207,7 +229,8 @@ test("snapshotOgIdentity stamps banner from public/x-banner.jpg", () => {
 });
 
 test("emits x:game:image for a public host when site.banner is set", () => {
-  const html = "<html><head><meta property=\"x:game:image\" content=\"old\"></head></html>";
+  // The page sets none of these, so the platform supplies them.
+  const html = "<html><head></head></html>";
   const out = injectGrokPwaHead(html, {
     host: "wild-race.grok.me",
     site: { title: "Wild Race", type: "x:game", card: "custom", banner: "/x-banner.jpg" },
@@ -218,7 +241,6 @@ test("emits x:game:image for a public host when site.banner is set", () => {
   );
   assert.match(out, /property="x:game:image:width" content="1200"/);
   assert.match(out, /property="x:game:image:height" content="264"/);
-  assert.doesNotMatch(out, /content="old"/);
   assert.equal(out.split('property="x:game:image"').length - 1, 1);
 });
 

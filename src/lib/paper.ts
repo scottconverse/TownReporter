@@ -19,8 +19,26 @@ export const TOPICS = [
   "planning",
   "infrastructure",
   "elections",
+  /*
+    Opinion is deliberately absent from every model prompt.
+
+    The scanner and the reporting pass each enumerate the topics they may
+    assign, and this is not among them: an opinion piece is a human writing in
+    their own voice, and a machine that could file one would be doing the one
+    thing this paper does not do. It exists here so the section, the filter and
+    the chip work.
+  */
+  "opinion",
   "about",
 ] as const;
+
+/**
+ * Where the council's own vote record lives.
+ *
+ * An outside site, linked rather than absorbed: it is somebody else's work and
+ * the paper should send readers to it, not quietly reproduce it.
+ */
+export const COUNCIL_VOTES_URL = "https://longmontcitycouncil.org/";
 
 export type Topic = (typeof TOPICS)[number];
 
@@ -106,7 +124,18 @@ export function slugify(input: string) {
     // Trim AFTER the length cut: cutting at 72 can land mid-separator and
     // leave a trailing dash, which then shows up in the public URL.
     .replace(/^-+|-+$/g, "");
-  return s || "item";
+  /*
+    Drop a final fragment of a word.
+
+    The cut lands wherever 72 characters land, so a headline ending "...match a
+    $42.5 million offer. Their public fundraiser..." produced a URL ending
+    `-offer-t`. Readers see these addresses — in the browser bar, in a shared
+    link, read aloud — and a severed word reads as a broken link. Only a short
+    tail is dropped: a two- or three-letter last word is usually a real word
+    ("a", "no", "tax"), and losing it would be the worse edit.
+  */
+  const cut = s.replace(/-[a-z0-9]{1,3}$/, "");
+  return (s.length === 72 && cut ? cut : s) || "item";
 }
 
 export function parseUrlList(raw: string | null | undefined): string[] {
@@ -170,3 +199,47 @@ export function formatAge(iso: string | Date | null | undefined) {
   const days = Math.round(h / 24);
   return `${days}d`;
 }
+
+/**
+ * The origin readers actually see, for links that must survive leaving the page:
+ * canonical URLs, Open Graph tags, the feed.
+ *
+ * Falls back to the relative form when nothing is configured (local dev), which
+ * is correct: a canonical or an `og:url` pointing at `localhost` is worse than
+ * none at all, because a crawler that reads it will follow it nowhere.
+ */
+export function siteUrl(path = "/"): string {
+  const configured = (
+    process.env.PUBLIC_SITE_URL ||
+    process.env.BETTER_AUTH_URL ||
+    ""
+  ).trim();
+  if (!configured) return path;
+  try {
+    return new URL(path, configured).toString();
+  } catch {
+    return path;
+  }
+}
+
+/**
+ * The town's subreddit, read as a tip line.
+ *
+ * Not a source in the watch-list sense: nothing from here is ever cited. It is
+ * where a road closure, a rent increase or a notice taped to a door shows up
+ * days before any record does, and every item it produces is a question for a
+ * reporter, not an answer.
+ */
+export const TIP_SUBREDDIT = "longmont";
+
+/**
+ * Searches run against the subreddit, alongside its newest posts.
+ *
+ * Kept short on purpose: each one is a request against a rate limit shared by
+ * everything on this machine, so the list is the few angles that actually turn
+ * up records rather than conversation.
+ */
+export const TIP_SUBREDDIT_QUERIES = [
+  "city council OR ordinance OR public hearing",
+  "closure OR construction OR detour",
+] as const;
