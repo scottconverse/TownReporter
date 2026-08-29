@@ -48,8 +48,18 @@ the investigative desk finally does the thing it was built to do.
 - The writer gets its own timeout. Measured: 9m53s and 32 turns for a piece
   with one document pointer. Fifteen minutes had no headroom and the first real
   request died at the cap with the work already paid for.
-- A piece that opens by handing itself over ("…Here's the piece.") no longer
-  loses its headline to that sentence.
+- **No editorial could ever have been filed.** `drafts.lead_id` was declared
+  not null in the newsroom's second migration, because until now every draft
+  began as a lead. An editorial has none — an editor types a subject and the
+  paper states its position — so every finished piece hit a not-null violation
+  at the moment it was stored. The two visible failures on the desk were
+  timeouts; this one was waiting behind them.
+- The writer's ceiling is now 45 minutes, set from three measured runs (9m53s
+  at $2.66, 24m06s at $23.76, and one still going at 30). It is the most
+  expensive call the newsroom makes.
+- A piece that opens with a working note — a sentence ending "Here's the
+  piece", or a paragraph followed by a rule — no longer loses its headline to
+  it. Both were real deliveries; both put the real headline in the body.
 
 **Dark Desk**
 
