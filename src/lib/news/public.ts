@@ -124,9 +124,14 @@ export const listPublicCorrections = createServerFn({ method: "GET" }).handler(
     try {
       const sql = await getSql();
       return sql<CorrectionRow & { slug: string | null }>`
+      -- inner join, not left: a correction whose article is gone must not
+      -- print. Deleting a story used to leave its correction detached and
+      -- publicly visible under a null headline (ENG-005). The delete order is
+      -- fixed, and this refuses to serve any orphan that predates the fix.
       select c.id, c.body, c.created_at, a.headline, a.slug
       from corrections c
-      left join articles a on a.id = c.article_id
+      join articles a on a.id = c.article_id
+      where a.status = 'published'
       order by c.created_at desc
       limit 50
     `;

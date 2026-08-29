@@ -1228,22 +1228,46 @@ export const deleteArticle = createServerFn({ method: "POST" })
       snapshot,
     });
 
-    const gone = await sql<{ id: number; headline: string; lead_id: number | null }>`
-      delete from articles
-      where slug = ${slug} and newsroom_id = ${owned(context)}
-      returning id, headline, lead_id
-    `;
-    if (!gone[0]) {
+    /*
+      Corrections FIRST, then the article, and both inside one transaction.
+
+      `corrections.article_id` is ON DELETE SET NULL. This used to delete the
+      article and then run `delete from corrections where article_id = <id>` —
+      by which time Postgres had already nulled that column, so the cleanup
+      matched nothing. The correction survived, detached, and the public
+      corrections page prints it forever under no headline.
+
+      That is the worst possible thing to leave behind: correction text repeats
+      the error it is correcting, and an editor deleting a story is usually
+      deleting it precisely to take that sentence off the paper.
+
+      One transaction, so a failure halfway cannot leave the story gone and its
+      corrections standing. Audit finding ENG-005.
+    */
+    const { withTransaction } = await import("@/lib/db");
+    let gone: { id: number; headline: string; lead_id: number | null } | undefined;
+    try {
+      gone = await withTransaction(async (tx) => {
+        await tx`delete from corrections where article_id = ${found[0]!.id}`;
+        const rows = await tx<{ id: number; headline: string; lead_id: number | null }>`
+          delete from articles
+          where slug = ${slug} and newsroom_id = ${owned(context)}
+          returning id, headline, lead_id
+        `;
+        if (!rows[0]) throw new Error("gone");
+        if (rows[0].lead_id != null) {
+          await tx`
+            update leads set status = 'drafted'
+            where id = ${rows[0].lead_id} and newsroom_id = ${owned(context)}
+              and status = 'published'
+          `;
+        }
+        return rows[0];
+      });
+    } catch {
       await sql`delete from deleted_items where id = ${trashId}`.catch(() => undefined);
       return { ok: false as const, error: "That story is already gone." };
     }
-    await sql`delete from corrections where article_id = ${gone[0].id}`.catch(() => undefined);
-    if (gone[0].lead_id != null) {
-      await sql`
-        update leads set status = 'drafted'
-        where id = ${gone[0].lead_id} and newsroom_id = ${owned(context)} and status = 'published'
-      `.catch(() => undefined);
-    }
-    await audit(context.userId, "delete-article", `${slug} — ${gone[0].headline.slice(0, 100)}`);
+    await audit(context.userId, "delete-article", `${slug} — ${gone.headline.slice(0, 100)}`);
     return { ok: true as const, trashId };
   });

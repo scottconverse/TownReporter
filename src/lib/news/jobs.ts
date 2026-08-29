@@ -50,6 +50,22 @@ export async function ensureJobsSchema() {
     create index if not exists desk_jobs_open_idx
       on desk_jobs (newsroom_id, kind, subject_id, status, id desc)
   `);
+  /*
+    The same partial unique index as migrations/0017_one_open_job.sql.
+
+    It has to be in both places: the migration covers a real Postgres, this
+    covers the embedded PGLite path where migrations do not run. Declared twice
+    is a drift risk, so `jobs.test.ts` asserts the two definitions match — a
+    duplicated invariant that nobody checks is how the last one failed.
+
+    This is what makes enqueueJob race-safe; the findOpenJob check above is
+    only an optimisation. Audit finding ENG-004.
+  */
+  await sql.query(`
+    create unique index if not exists desk_jobs_one_open_per_subject
+      on desk_jobs (newsroom_id, kind, subject_id)
+      where status in ('queued', 'running')
+  `);
   // Identifies WHICH execution owns a running row. Without it a stale-reclaim
   // and the original executor both write results for the same job.
   await sql.query(`alter table desk_jobs add column if not exists claim_token text`);
@@ -138,13 +154,41 @@ export async function enqueueJob(opts: {
     if (opts.kick !== false) kickJobs();
     return open;
   }
+  /*
+    The check above is an optimisation, not the guarantee.
+
+    findOpenJob-then-insert is a check-then-act: under concurrency every caller
+    can look, see nothing, and insert. Twenty simultaneous enqueues for one
+    subject produced twenty jobs, each paying full model price. The claim token
+    stops two workers running the same ROW; nothing coalesced duplicate rows.
+
+    The partial unique index in 0017 is what actually holds. ON CONFLICT DO
+    NOTHING makes the loser silent, and the select that follows hands it the
+    row the winner created — so every caller gets the same job, which is what
+    they all wanted. Audit finding ENG-004.
+  */
   const created = await sql<DeskJob>`
     insert into desk_jobs (newsroom_id, user_id, kind, subject_id, status, stage)
     values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${"queued"}, ${"Queued"})
+    on conflict do nothing
     returning id, newsroom_id, user_id, kind, subject_id, status, stage, error,
               created_at, updated_at, started_at, finished_at
   `;
-  const job = created[0]!;
+  const job =
+    created[0] ??
+    (await findOpenJob({ newsroomId, kind: opts.kind, subjectId: opts.subjectId }));
+  if (!job) {
+    // Lost the race and the winner finished before we looked. Rare, and the
+    // honest answer is to try once more rather than invent a job row.
+    const retry = await sql<DeskJob>`
+      insert into desk_jobs (newsroom_id, user_id, kind, subject_id, status, stage)
+      values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${"queued"}, ${"Queued"})
+      returning id, newsroom_id, user_id, kind, subject_id, status, stage, error,
+                created_at, updated_at, started_at, finished_at
+    `;
+    if (opts.kick !== false) kickJobs();
+    return retry[0]!;
+  }
   if (opts.kick !== false) kickJobs();
   return job;
 }

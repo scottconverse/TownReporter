@@ -324,3 +324,85 @@ describe("restoring an editorial", () => {
     await sql`delete from drafts where id = ${draftId}`;
   });
 });
+
+/**
+ * Deleting a story must take its corrections off the paper with it.
+ *
+ * `corrections.article_id` is ON DELETE SET NULL. deleteArticle deleted the
+ * article first and only then ran `delete from corrections where article_id =
+ * <id>` — by which time Postgres had already nulled that column, so the
+ * cleanup matched nothing. The correction survived, detached, and
+ * listPublicCorrections left-joins with no `article_id is not null` filter, so
+ * it stayed on the public corrections page forever with a null headline.
+ *
+ * Correction text repeats the error it is correcting. An editor removing a
+ * story specifically to take something off the paper left the most sensitive
+ * sentence in it published, under no headline, with no way to find it.
+ *
+ * Audit finding ENG-005.
+ */
+describe("deleting a story takes its corrections", () => {
+  async function seedStoryWithCorrection(tag: string) {
+    const sql = await getSql();
+    const user = `corr-${tag}-${Math.random().toString(36).slice(2, 8)}`;
+    const lead = await sql<{ id: number }>`
+      insert into leads (user_id, headline, why, topic) values (${user}, ${"L"}, ${"W"}, ${"council"})
+      returning id
+    `;
+    const slug = `corr-order-${lead[0]!.id}`;
+    const art = await sql<{ id: number }>`
+      insert into articles (user_id, lead_id, slug, headline, dek, body, topic)
+      values (${user}, ${lead[0]!.id}, ${slug}, ${"Printed"}, ${""}, ${"Body"}, ${"council"})
+      returning id
+    `;
+    await sql`
+      insert into corrections (user_id, article_id, body)
+      values (${user}, ${art[0]!.id}, ${"We named the wrong person."})
+    `;
+    return { sql, user, leadId: lead[0]!.id, articleId: art[0]!.id, slug };
+  }
+
+  it("leaves no orphaned correction behind", async () => {
+    const { sql, articleId, slug } = await seedStoryWithCorrection("orphan");
+
+    // Production order, as deleteArticle performs it.
+    await sql`delete from corrections where article_id = ${articleId}`;
+    await sql`delete from articles where slug = ${slug}`;
+
+    const orphans = await sql<{ id: number }>`
+      select id from corrections where article_id is null
+    `;
+    assert.equal(orphans.length, 0, "a correction outlived the story it belonged to");
+  });
+
+  /**
+   * Defence in depth: even if an orphan exists from before this fix, the
+   * public feed must not print it.
+   */
+  it("the public corrections query refuses orphans", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./public.ts", import.meta.url), "utf8"),
+    );
+    const q = src.slice(src.indexOf("listPublicCorrections"));
+    assert.match(
+      q.slice(0, 800),
+      /article_id is not null|inner join/i,
+      "a correction with no article must not reach the public page",
+    );
+  });
+
+  it("deleteArticle deletes corrections before the article, not after", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./desk.ts", import.meta.url), "utf8"),
+    );
+    const fn = src.slice(src.indexOf("export const deleteArticle"));
+    const body = fn.slice(0, fn.indexOf("\n});"));
+    const corrFirst = body.indexOf("delete from corrections");
+    const artNext = body.indexOf("delete from articles");
+    assert.ok(corrFirst > -1 && artNext > -1, "both deletes must exist");
+    assert.ok(
+      corrFirst < artNext,
+      "corrections must go first — ON DELETE SET NULL makes the reverse order a no-op",
+    );
+  });
+});

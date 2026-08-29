@@ -153,3 +153,99 @@ describe("desk jobs", () => {
     assert.equal(final[0]?.status, settled, "the ghost must not have changed anything");
   });
 });
+
+/**
+ * One open job per subject, even when twenty callers ask at once.
+ *
+ * enqueueJob ran findOpenJob and then a separate insert, with no transaction
+ * and no conflict target. Under concurrency every caller can look, see
+ * nothing, and insert its own row. An auditor fired twenty simultaneous
+ * enqueues for one (newsroom, kind, subject) and got twenty distinct jobs.
+ *
+ * The worker's claim token and heartbeat correctly stop two workers running
+ * the SAME row — they cannot coalesce duplicate rows. So a double click, a
+ * retry, two tabs, or two monitor ticks landing together bought twenty scans,
+ * twenty drafts, or twenty investigations, each paying full model price.
+ *
+ * The invariant belongs in the database, not in a check-then-insert.
+ * Audit finding ENG-004.
+ */
+describe("enqueue is race-safe", () => {
+  it("twenty concurrent enqueues produce one open job", async () => {
+    const newsroomId = 94001 + Math.floor(Math.random() * 1000);
+    const subjectId = 4242;
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () =>
+        enqueueJob({
+          userId: "race-test",
+          newsroomId,
+          kind: "draft",
+          subjectId,
+          kick: false,
+        }),
+      ),
+    );
+
+    const sql = await getSql();
+    const rows = await sql<{ c: string }>`
+      select count(*) as c from desk_jobs
+      where newsroom_id = ${newsroomId} and kind = 'draft' and subject_id = ${subjectId}
+        and status in ('queued', 'running')
+    `;
+    assert.equal(Number(rows[0]!.c), 1, "expected exactly one open job for the tuple");
+
+    const ids = new Set(results.map((r) => r.id));
+    assert.equal(ids.size, 1, "every caller should have been handed the same job");
+
+    await sql`delete from desk_jobs where newsroom_id = ${newsroomId}`;
+  });
+
+  it("a new job can still be created once the previous one finishes", async () => {
+    const newsroomId = 95001 + Math.floor(Math.random() * 1000);
+    const sql = await getSql();
+    const first = await enqueueJob({
+      userId: "race-test",
+      newsroomId,
+      kind: "scan",
+      subjectId: 7,
+      kick: false,
+    });
+    await sql`update desk_jobs set status = 'completed' where id = ${first.id}`;
+    const second = await enqueueJob({
+      userId: "race-test",
+      newsroomId,
+      kind: "scan",
+      subjectId: 7,
+      kick: false,
+    });
+    assert.notEqual(second.id, first.id, "a finished job must not block the next one");
+    await sql`delete from desk_jobs where newsroom_id = ${newsroomId}`;
+  });
+});
+
+/**
+ * The open-job index is declared twice — in the migration for real Postgres,
+ * and in ensureJobsSchema for the embedded path. A duplicated invariant that
+ * nobody checks is exactly how the locator leak survived: fixed in one copy,
+ * still broken in the other. This fails if they drift.
+ */
+describe("the one-open-job index is declared the same in both places", () => {
+  it("migration and ensureJobsSchema agree", async () => {
+    const fs = await import("node:fs");
+    const migration = fs.readFileSync(
+      new URL("../../../migrations/0017_one_open_job.sql", import.meta.url),
+      "utf8",
+    );
+    const code = fs.readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
+    const norm = (t: string) =>
+      t.toLowerCase().replace(/--.*$/gm, "").replace(/\s+/g, " ");
+    for (const part of [
+      "desk_jobs_one_open_per_subject",
+      "on desk_jobs (newsroom_id, kind, subject_id)",
+      "where status in ('queued', 'running')",
+    ]) {
+      assert.ok(norm(migration).includes(part), `migration missing: ${part}`);
+      assert.ok(norm(code).includes(part), `ensureJobsSchema missing: ${part}`);
+    }
+  });
+});
