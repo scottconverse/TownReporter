@@ -1,0 +1,243 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { ListSkeleton } from "@/components/states";
+import { getOpsHealth, runOpsAction } from "@/lib/ops/dashboard";
+import { OPS_ACTIONS, type OpsActionId } from "@/lib/ops/actions";
+import { formatAgo, overallState, type HealthState } from "@/lib/ops/health";
+
+export const Route = createFileRoute("/desk/ops")({
+  head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
+  component: OpsPage,
+});
+
+/**
+ * Colour carries no information on its own here.
+ *
+ * Every row states its condition in words as well, because "is that dot amber
+ * or red" is not a thing to be squinting at when the paper is down, and a
+ * colour-blind operator gets nothing from the dot at all.
+ */
+const DOT: Record<HealthState, string> = {
+  ok: "bg-emerald-600",
+  warn: "bg-amber-500",
+  down: "bg-rust",
+  unknown: "bg-muted",
+};
+
+const WORD: Record<HealthState, string> = {
+  ok: "OK",
+  warn: "Check",
+  down: "Down",
+  unknown: "Unknown",
+};
+
+function StateDot({ state }: { state: HealthState }) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className={`inline-block h-2.5 w-2.5 rounded-full ${DOT[state]}`} aria-hidden />
+      <span className="text-[11px] tracking-[0.14em] text-muted uppercase">{WORD[state]}</span>
+    </span>
+  );
+}
+
+function OpsPage() {
+  const qc = useQueryClient();
+  const [confirming, setConfirming] = useState<OpsActionId | null>(null);
+  const [message, setMessage] = useState<string>("");
+  const [running, setRunning] = useState<OpsActionId | null>(null);
+
+  const health = useQuery({
+    queryKey: ["ops-health"],
+    queryFn: () => getOpsHealth(),
+    // The page is read, not watched. A poll every 30s keeps it honest without
+    // running PowerShell probes forever behind a forgotten open tab.
+    refetchInterval: 30_000,
+  });
+
+  const act = useMutation({
+    mutationFn: (id: OpsActionId) => runOpsAction({ data: id }),
+    onMutate: (id) => {
+      setRunning(id);
+      setMessage("");
+    },
+    onSuccess: (res) => {
+      setRunning(null);
+      setConfirming(null);
+      /*
+        A reply can be missing without anything having gone wrong.
+
+        Restarting the tunnel cuts the path this very answer travels on, so the
+        call resolves to nothing. Reading `res.output` then threw "Cannot read
+        properties of undefined" and the page reported an error for an action
+        that had just succeeded.
+      */
+      if (!res) {
+        setMessage(
+          "No answer came back. That is expected when the action interrupts the connection it would reply on — check the health rows above in a few seconds.",
+        );
+      } else {
+        setMessage(res.output || (res.ok ? "Done." : "Failed."));
+      }
+      void qc.invalidateQueries({ queryKey: ["ops-health"] });
+    },
+    onError: (err) => {
+      setRunning(null);
+      setConfirming(null);
+      setMessage(err instanceof Error ? err.message : "That did not run.");
+    },
+  });
+
+  const checks = health.data?.checks ?? [];
+  const state = checks.length ? overallState(checks) : "unknown";
+
+  return (
+    <DeskShell
+      title="Server"
+      kicker="Editor desk"
+      lede={
+        <>
+          Everything this machine is doing to keep the paper online, and the few
+          buttons worth having. Read from this machine, so it can tell you the
+          tunnel is routing but not that a reader in another town can reach you.
+        </>
+      }
+    >
+      <section className="mt-8">
+        <SecHead
+          title="Health"
+          aside={
+            <span className="flex items-center gap-4">
+              <StateDot state={state} />
+              <InkButton
+                tone="quiet"
+                small
+                onClick={() => void health.refetch()}
+                disabled={health.isFetching}
+              >
+                {health.isFetching ? "Checking…" : "Check now"}
+              </InkButton>
+            </span>
+          }
+          sub={
+            health.data
+              ? `${health.data.host} · read ${formatAgo(health.data.takenAt)}`
+              : undefined
+          }
+        />
+
+        {health.isPending ? (
+          <ListSkeleton />
+        ) : health.isError ? (
+          <p className="mt-4 text-rust">
+            Could not read the server. {String(health.error)}
+          </p>
+        ) : (
+          <ul className="mt-4 divide-y divide-rule border-y border-rule">
+            {checks.map((c) => (
+              <li key={c.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-3">
+                <span className="w-40 shrink-0 text-[11px] tracking-[0.14em] text-muted uppercase">
+                  {c.label}
+                </span>
+                <span className="min-w-0 flex-1 break-words">{c.value}</span>
+                <StateDot state={c.state} />
+                {c.note ? (
+                  <p className="w-full text-sm text-ink-2">{c.note}</p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="mt-12">
+        <SecHead
+          title="Actions"
+          sub="Each one says what it does before it does it. The two that interrupt the paper ask twice."
+        />
+        <ul className="mt-4 space-y-3">
+          {OPS_ACTIONS.map((a) => {
+            const isConfirming = confirming === a.id;
+            const isRunning = running === a.id;
+            return (
+              <li key={a.id} className="border border-rule p-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-3">
+                  <h3 className="font-display text-lg font-semibold">
+                    {a.label}
+                    {a.interrupts ? (
+                      <span className="ml-2 text-[11px] tracking-[0.14em] text-rust uppercase">
+                        interrupts
+                      </span>
+                    ) : null}
+                  </h3>
+                  {isConfirming ? (
+                    <span className="flex gap-2">
+                      <InkButton
+                        tone="danger"
+                        small
+                        disabled={isRunning}
+                        onClick={() => act.mutate(a.id)}
+                      >
+                        {isRunning ? "Running…" : "Yes, do it"}
+                      </InkButton>
+                      <InkButton tone="quiet" small onClick={() => setConfirming(null)}>
+                        Cancel
+                      </InkButton>
+                    </span>
+                  ) : (
+                    <InkButton
+                      tone={a.interrupts ? "ghost" : "solid"}
+                      small
+                      disabled={Boolean(running)}
+                      onClick={() =>
+                        a.interrupts ? setConfirming(a.id) : act.mutate(a.id)
+                      }
+                    >
+                      {isRunning ? "Running…" : "Run"}
+                    </InkButton>
+                  )}
+                </div>
+                <p className="mt-2 max-w-2xl text-ink-2">{a.detail}</p>
+                <p className="mt-1 text-sm text-muted">
+                  Takes about {a.expectSeconds} seconds.
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+        {message ? (
+          <pre className="mt-4 max-h-72 overflow-auto border border-rule bg-paper-2 p-3 text-sm whitespace-pre-wrap">
+            {message}
+          </pre>
+        ) : null}
+      </section>
+
+      <section className="mt-12">
+        <SecHead title="Logs" sub="The last few lines of each. Newest at the bottom." />
+        <div className="mt-4 space-y-6">
+          {(health.data?.logs ?? []).map((l) => (
+            <div key={l.path}>
+              <h3 className="text-[11px] tracking-[0.14em] text-muted uppercase">
+                {l.name}
+              </h3>
+              {l.error ? (
+                <p className="mt-1 text-sm text-muted">{l.error}</p>
+              ) : (
+                <pre className="mt-1 max-h-56 overflow-auto border border-rule bg-paper-2 p-3 text-xs whitespace-pre-wrap">
+                  {l.lines.join("\n")}
+                </pre>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <p className="mt-12 max-w-2xl text-sm text-muted">
+        This page runs inside the paper, so it cannot report on itself when the
+        paper is down. That is what the watchdog is for: it runs from Windows
+        every five minutes and restarts whatever has stopped. Its log is above.
+      </p>
+    </DeskShell>
+  );
+}
