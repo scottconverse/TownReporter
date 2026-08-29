@@ -1,8 +1,8 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.5.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.0).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.5.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.1).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
-Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). This page is the whole newsroom.
+Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). The whole system, including how it is built, is [manual.md](manual.md). This page is the newsroom, in the order you use it.
 
 ---
 
@@ -11,6 +11,10 @@ Dark Desk’s UI contract (for design and for anyone rewriting that page) is [da
 The **paper** (`/`) is what the public reads: published stories, About, How we report, Corrections, RSS. Nothing reaches it except through you.
 
 The **desk** (`/desk`) is the newsroom: sources, scan, queue, story workbench, published record, Dark Desk. Sign-in required.
+
+![The paper](images/01-front-page.png)
+
+![The desk](images/04-desk.png)
 
 A draft, a reporting note, a research memo, a Dark Desk file — none of that is the paper. If you can see notebook language on the masthead (“What is solid,” “Next checks are…”), something went wrong; it is supposed to be stripped. Tell the operator.
 
@@ -35,12 +39,15 @@ Notes:
 
 This is the loop. Skip steps that have nothing in them.
 
-1. **Sources** — is the watch list still the right list?
-2. **Scan** — one pass over accepted sources. Files leads. This is the expensive click.
-3. **Queue** — read what came in. Hold, kill, or open.
-4. **Workbench** — draft, notes, check the documents, publish or don’t.
-5. **Dark Desk** — only when something doesn’t add up, disappeared, or was never posted.
-6. **Published** — if you got it wrong, post a correction. It is public.
+1. **The desk** — the line under the heading says what needs you. If it is empty, you are done.
+2. **Sources** — is the watch list still the right list?
+3. **Scan** — one pass over accepted sources. Files leads. This is the expensive click.
+4. **Queue** — read what came in. Hold, kill, or open.
+5. **Workbench** — draft, notes, check the documents, publish or don’t.
+6. **Dark Desk** — only when something doesn’t add up, disappeared, or was never posted.
+7. **Opinion** — when the paper should say what it thinks about something it has reported.
+8. **Published** — if you got it wrong, post a correction. It is public.
+9. **Server** — a glance, when something feels slow or the site looks down.
 
 Scan does not publish. Draft does not publish. Dark Desk does not publish. **Publish** on the workbench is the only gate.
 
@@ -75,6 +82,8 @@ Newly discovered public records are fair game even if they were not on this list
 
 ## Scan (`/desk/scan`)
 
+![Scan](images/05-scan.png)
+
 One pass: fetch every **accepted** source, then one model read for leads and proposed sources.
 
 - It runs **only when you click.** It is not a loop and not a cron for writing. (Monitors in the background can still notice a missing packet. They do not draft.)
@@ -86,6 +95,8 @@ If AI is unavailable you will get a straight error. Usually that means the Claud
 ---
 
 ## The queue (`/desk/queue`)
+
+![The queue](images/06-queue.png)
 
 Everything that might be news, scored and sorted. The scanner files here. Dark Desk can file here. So can you (“File a lead yourself”).
 
@@ -107,7 +118,11 @@ A meeting on the calendar is not automatically a story. A five-hour council tape
 
 ## The workbench (`/desk/story/…`)
 
+![The workbench](images/07-story-editor.png)
+
 This is where a lead becomes a story, or doesn’t.
+
+The lead and the notes are on the left and never print. The draft is on the right. **PULL**, next to an unfinished to-do, goes and fetches that one document.
 
 ### Draft
 
@@ -180,6 +195,8 @@ Dark Desk is told: search the whole tape; names may be wrong; quotes need a chec
 
 The recursive investigative lane. **It never publishes.** Publication is a separate human action on the queue / workbench.
 
+![Dark Desk](images/08-dark-desk.png)
+
 An editor points it at a person, document, URL, rumor, or gap. It searches, fetches, captures copies, and follows names and attachments. Unknown, weak, speculative, and previously-dead trails stay investigable. That is on purpose. Curiosity is not a gate.
 
 ### Three piles
@@ -211,9 +228,99 @@ Worth a look ranks missing reports, disappeared records, monitor alerts, reopene
 
 Full UI contract: [dark-desk-editor.md](dark-desk-editor.md).
 
+### How hard to dig — the two dials
+
+![The dials](images/09-dark-dials.png)
+
+Under the piles there is a panel called **How hard to dig**. Press **Change** to
+open it.
+
+| Dial | What it moves |
+|---|---|
+| **Dig — how far it chases** | Hops, searches, whether it may leave the watch list, how far it follows a name into a company, a parcel, a contract |
+| **Nerve — how speculative** | How sure it has to be before it writes something down, and whether it may propose a theory or only ask a question |
+| **Map** | City · county · region · adjacent — how far out it is allowed to look |
+
+The paragraph above the sliders is not decoration. It is written from the same
+rules the run itself uses, in plain words: *"Up to 3 hops, following any public
+record it finds, including archived copies. One account is enough to open a
+file. No confidence floor at all — it writes the hunch down and labels it a
+hunch."* If the paragraph says it, the run does it.
+
+**Presets** are there for the two ends. A low, careful setting for a file you
+intend to publish from. **Black Sky** for the night you want it to go as far as
+it can.
+
+Three things never move, at any setting:
+
+1. It will not invent a claim that someone was paid.
+2. Everything it writes down is labelled with how mature the evidence is —
+   fact, observation, allegation, inference, hypothesis, unknown.
+3. Every theory carries what would kill it.
+
+Turning Nerve up does not make it more confident. It makes it willing to write
+down a weaker thought — **and say that it is weak**.
+
+---
+
+## Opinion (`/desk/opinion`)
+
+![Opinion](images/10-opinion.png)
+
+Where the paper says what it thinks.
+
+Type a subject, a sentence, or paste a URL, and press **Write an editorial**. A
+pasted link gets opened and read before anything is written.
+
+What comes back:
+
+- `OPINION:` at the front of the headline, so it cannot be mistaken for a
+  report.
+- **No byline.** An unsigned editorial is the paper's position, not one
+  writer's. That is the century-old convention and the honest one for a paper
+  run by one person.
+- **Claims and sources** at the end of the piece. People do not believe an
+  op-ed they dislike; the receipts are there for them.
+- An editor's fact sheet and an image prompt that **do not print** — they are
+  for you.
+
+It takes **ten to twenty minutes**, because it goes and reads the records before
+it writes a word. The row shows a clock counting up and a moving rule; at 3:40
+that is normal, not stuck. The page rechecks every twenty seconds.
+
+An editorial is a **draft**. Read it, edit it in the story workbench, and
+publish it like any other piece — or don't. It will happily conclude that your
+lead was wrong; one real run opened with the discovery that the record it was
+sent to attack had never been missing at all.
+
+---
+
+## Server (`/desk/ops`)
+
+![Server](images/11-server.png)
+
+Everything this machine is doing to keep the paper online, and the few buttons
+worth having.
+
+The **Health** list is read from this machine, so it can tell you the tunnel is
+routing — not that a reader in another town can reach you. Rows worth knowing:
+
+| Row | What a bad reading means |
+|---|---|
+| **Public site** | The paper is not answering. Try Restart the tunnel. |
+| **Cloudflare tunnel** | No tunnel process. The watchdog should fix this within five minutes. |
+| **Work queue** | Something failed, or one job has been running a long time. |
+| **Watchdog** | If it has not run recently, the scheduled task is off. |
+| **Reader privacy** | Anything other than "no outside requests" means a third-party asset got onto a reader's page. Tell the operator. |
+
+Every button says what it will do before it does it. The two that interrupt the
+paper ask twice.
+
 ---
 
 ## Published and corrections (`/desk/published`)
+
+![Published](images/12-published.png)
 
 What is live on the paper, with its corrections.
 
@@ -224,6 +331,7 @@ If you got it wrong: open the story here, write the correction in the open, post
 ## What never prints
 
 - Reporting notes and the research memo
+- The editorial's fact sheet and image prompt
 - Dark Desk files, hypotheses, open questions, dead ends
 - Scan summaries and proposed sources
 - “What is solid / not solid yet”
@@ -269,6 +377,9 @@ How we report, in public: `/how-we-report`.
 | Dates look a day ahead | Host clock in UTC | Masthead uses `PAPER.timezone`. Tell the operator if it is still UTC. |
 | Two nearly identical headlines on the paper | Same news, two drafts published | The paper collapses overlapping headlines and keeps the longer body. |
 | Second person gets 403 | They are not in `newsroom_members` | Operator adds them. First user is owner. |
+| Editorial says Failed with a timeout | The piece ran past the writer's limit | Ask again. If it repeats, the operator can raise `EDITORIAL_TIMEOUT_MS`. Nothing is lost but the run. |
+| Editorial never starts, says no voice | `TOWNREPORTER_VOICE_FILE` is unset or points nowhere | Operator: set it to an absolute path outside the repo |
+| The paper is down and the desk still works | The tunnel, not the app | Server page → Restart the tunnel. The watchdog also does this within five minutes. |
 | Desk wants sign-in again | Session expired | `/login` |
 | Notebook language on the paper | Strip failed or you pasted it | Edit the story. Kill if needed. Tell the operator. |
 

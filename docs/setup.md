@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.5.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.0).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.5.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.1).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -137,6 +137,58 @@ LLM_MODEL=claude-sonnet-4-5
 
 Resolution lives in `src/lib/news/ai.ts` (`resolveProvider()`); the Claude Code path is `ai-claude-code.server.ts`.
 
+### The Opinion voice
+
+The Opinion desk writes in a voice held in a **file on disk**, named by path:
+
+```
+TOWNREPORTER_VOICE_FILE=C:/Users/you/.townreporter/voice/your-voice.md
+```
+
+Rules the app enforces, not conventions:
+
+- The path must be absolute. A relative path is refused.
+- A path **inside this repository** is refused. The voice is meant to stay out
+  of version control.
+- Only the path ever reaches a command line. The file is read by the model CLI
+  itself, never loaded into the app's memory and never passed as an argument —
+  command lines are readable by every process on the machine.
+- A path long enough to look like an inlined prompt is refused outright.
+
+Without the variable, the Opinion desk says so and spends nothing. Everything
+else on the desk works.
+
+`TOWNREPORTER_EDITORIAL_MODEL` overrides the model for that one call. It
+defaults to Opus deliberately: it is the only call in the newsroom where the
+writing *is* the product.
+
+Note the length. A piece takes ten to twenty minutes, because the voice fetches
+its own records before it writes. Measured: 9m53s and 32 turns for a piece with
+one document pointer. The desk enqueues a job and returns at once; nothing waits
+on the model.
+
+---
+
+### Keeping it online
+
+The `ops/` directory holds the scripts the working edition runs on Windows:
+
+| Script | What it does |
+|---|---|
+| `ops/watchdog.ps1` | Every five minutes: check the app, the tunnel and the public URL; restart what is down; append to `logs/watchdog.log` |
+| `ops/run-tunnel.ps1` | Start `cloudflared` for this hostname |
+| `ops/restart-app.ps1` | Stop and start the paper |
+| `ops/restart-tunnel.ps1` | Stop and start the tunnel |
+| `ops/rotate-logs.ps1` | Keep `logs/` bounded |
+
+Register the watchdog and the two restarts as **scheduled tasks**, not as child
+processes of the app. Two reasons learned the hard way: a process cannot restart
+itself, and a tunnel restart cannot deliver its own result over the tunnel it
+just killed. The Server page at `/desk/ops` triggers the tasks and reads the
+log.
+
+---
+
 ### Database
 
 | `DATABASE_URL` | What you get |
@@ -163,7 +215,7 @@ BETTER_AUTH_SECRET=generate-a-long-random-string
 
 The first signed-in user is inserted into `newsroom_members` as `owner`. After that, Create editor account is gone and new accounts are rejected.
 
-There is no invite UI yet (0.5.0 has not named it). Do not turn auth off to “fix” this. Share the owner login, or wait for invite.
+There is no invite UI yet (0.5.1 has not named it). Do not turn auth off to “fix” this. Share the owner login, or wait for invite.
 
 ### Cron (source monitors)
 
@@ -253,7 +305,7 @@ Node’s built-in test runner. No network, no model calls. Coverage includes Pri
 
 ## Point it at another city
 
-There is no settings screen for this. That is deliberate in 0.5.0 — the Longmont edition is the working proof, and a half-built city picker would lie. Edit the seed, rebuild.
+There is no settings screen for this. That is deliberate in 0.5.1 — the Longmont edition is the working proof, and a half-built city picker would lie. Edit the seed, rebuild.
 
 ### 1. The masthead and the watch list
 

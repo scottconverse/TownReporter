@@ -1,6 +1,95 @@
 # Changelog
 
-Current release: **0.5.0**.
+Current release: **0.5.1**.
+
+## 0.5.1 — 2026-08-29
+
+The paper went dark for hours and nothing said so. That is the shape of this
+release: the newsroom now watches itself, the reader is nobody's product, and
+the investigative desk finally does the thing it was built to do.
+
+**Availability**
+
+- A watchdog runs every five minutes. It checks the app, the tunnel and the
+  public URL, restarts what is down, and writes what it did. Proved by killing
+  the tunnel and watching it come back.
+- A **Server** page (`/desk/ops`): version, uptime, memory, the public URL as
+  answered from this machine, tunnel processes, database size, queue depth,
+  last watchdog run, free disk, and whether the reader made any outside
+  request. Every button says what it will do before it does it, and the two
+  that interrupt the paper ask twice.
+- Restart and tunnel-restart are Windows scheduled tasks, not child processes.
+  The old inline restart reported "Started" and did nothing, and the tunnel
+  restart reported an error while succeeding — its own reply was travelling
+  over the tunnel it had just killed.
+
+**The reader**
+
+- Fonts are served from this machine. Reading the paper made no request to
+  Google or anyone else. Verified: zero outside requests on a cold load.
+- A third-party builder script was being injected into every reader's page.
+  Removed, along with the share-metadata stripping that came with it.
+- Every story carries its own title, description, canonical URL, published
+  time and social card. They all used to share one blurb, so every link
+  anyone posted looked identical.
+- `sitemap.xml`, and `robots.txt` points at it.
+- A real 404 is a 404. A missing slug used to render an empty article.
+
+**Opinion**
+
+- An Opinion desk (`/desk/opinion`). Give it a subject, a sentence or a URL and
+  it writes an unsigned editorial — OPINION in the headline, no byline, the
+  paper's own position — with a claims-and-sources appendix at the end. It
+  fetches its own records before it writes, so it takes ten to twenty minutes;
+  the page shows a running clock rather than a frozen word.
+- The editorial voice is a file on disk, named by path in the environment. Only
+  the path ever reaches a command line, and the file is never read into the
+  app's memory. It is not in this repository and cannot be.
+- The writer gets its own timeout. Measured: 9m53s and 32 turns for a piece
+  with one document pointer. Fifteen minutes had no headroom and the first real
+  request died at the cap with the work already paid for.
+- A piece that opens by handing itself over ("…Here's the piece.") no longer
+  loses its headline to that sentence.
+
+**Dark Desk**
+
+- Two dials: **Dig** — how far it chases — and **Nerve** — how speculative it
+  may be. The panel spells out in a sentence what the current setting will
+  actually do, computed from the same functions the run uses, so the promise
+  and the run cannot drift.
+- The planner had never once run. Its budget was 45 seconds against a call that
+  needs 150, and every failure fell back to keyword matching in silence. The
+  whole database held zero entities, zero claims and zero hypotheses.
+- Planning moved to Haiku, synthesis stays on Opus. Measured over five runs
+  each, not guessed: same output quality, about a quarter of the cost.
+- Confidence is capped by the label in code, not asked for in a prompt. A
+  HYPOTHESIS cannot be filed at 0.9 because the prompt said not to.
+- A claim labelled FACT with no citation is downgraded, and claims about the
+  desk's own digging are dropped instead of filed as findings. 76 existing
+  self-referential claims were archived, not deleted.
+- A brief that answers the question the editor actually has: what connects,
+  what the hypothesis is, how strong it is, what supports it, the boring
+  explanation, and what would kill it.
+- A NUL byte in a captured page killed an entire round after 21 documents.
+  Sanitised at the point of ingest.
+
+**Leads**
+
+- r/longmont is a tip line. Posts are scored for civic content, paced to stay
+  welcome, and filed as unverified tips that are never mistaken for reporting.
+- Search works. Exa runs first, and the redirect wrapper that made every Bing
+  result unusable is unwrapped.
+- A PULL used to answer a Longmont question with three California school
+  district PDFs. It now writes several queries, prefers the issuing body's own
+  document pages, and drops results that are not on the subject.
+- Reporting notes are packed to fit rather than cut at 16,000 characters — the
+  old cut landed mid-token and silently wiped every note on the story.
+
+**Layout**
+
+- Opinion and City Council Votes in the paper's navigation; archive search is a
+  magnifying glass in the top bar.
+- Nothing scrolls sideways any more. The rails wrap.
 
 ## 0.5.0 — 2026-08-28
 

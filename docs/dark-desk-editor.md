@@ -1,6 +1,6 @@
 # Dark Desk — editor UI brief (for design)
 
-As of **0.5.0** the hop engine is the same as 0.3.0, hops belong to the file, URL history / watches / names belong to the newsroom, and a claim is `resolved` only when the quoted evidence is in the captured document. Keep digging is a persisted job; Start digging no longer dumps the last 16 snapshots into the file. This is the signed-in investigative desk at `/desk/dark`. It is **not** the public paper and **not** the reporting queue.
+As of **0.5.1** the desk is reached through two dials — Dig and Nerve, see [editor.md](editor.md#how-hard-to-dig--the-two-dials) — the planner actually runs (it never had), and confidence is capped by evidence label in code rather than requested in a prompt. The hop engine is otherwise the same as 0.3.0: hops belong to the file, URL history / watches / names belong to the newsroom, and a claim is `resolved` only when the quoted evidence is in the captured document. Keep digging is a persisted job; Start digging no longer dumps the last 16 snapshots into the file. This is the signed-in investigative desk at `/desk/dark`. It is **not** the public paper and **not** the reporting queue.
 
 A designer is coming in because the current page is still not a usable newsroom surface. This note is the contract. Do not treat it as finished UI.
 

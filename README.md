@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.5.0](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.0)** — 28 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.5.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.1)** — 29 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
@@ -18,8 +18,8 @@ TownReporter is two rooms:
 
 | | What it is | Who sees it |
 |---|---|---|
-| **The paper** (`/`) | Stories a human published, with sources shown | Anyone |
-| **The desk** (`/desk`) | Watch list, scan, queue, drafts, notes, Dark Desk | Signed-in editors |
+| **The paper** (`/`) | Stories and editorials a human published, with sources shown | Anyone |
+| **The desk** (`/desk`) | Watch list, scan, queue, drafts, notes, Dark Desk, Opinion, Server | Signed-in editors |
 
 There is no fully automated path to the masthead.
 
@@ -31,8 +31,9 @@ It is not the Longmont Times-Call, not the city, and not a replacement for eithe
 
 | Audience | Document |
 |---|---|
+| **Everyone — the full manual**, with architecture drawings | [docs/manual.md](docs/manual.md) |
+| Editors, with screenshots and no code | [docs/editor.md](docs/editor.md) |
 | Operators (clone, env, Postgres, models, city swap) | [docs/setup.md](docs/setup.md) |
-| Editors (login, scan, draft, Dark Desk, publish) | [docs/editor.md](docs/editor.md) |
 | Dark Desk UI contract | [docs/dark-desk-editor.md](docs/dark-desk-editor.md) |
 | Marketing / GitHub Pages landing | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
 
@@ -74,7 +75,22 @@ Same six moves the paper itself describes at `/how-we-report`:
 
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
-### This release (0.5.0)
+### This release (0.5.1)
+
+- **The newsroom watches itself.** The paper was offline for hours and nothing said so. A watchdog now checks the app, the tunnel and the public URL every five minutes and restarts what is down. A [Server page](docs/manual.md#the-server-page) shows all of it.
+- **The reader is nobody's product.** Fonts are served from this machine, a third-party script was removed from every page, and a cold load of the paper makes zero outside requests.
+- **Stories are shareable.** Per-story titles, descriptions, canonical URLs and social cards — they all used to share one blurb. Plus a sitemap.
+- **An Opinion desk.** A subject, a sentence or a URL becomes an unsigned editorial: OPINION in the headline, no byline, receipts in an appendix at the end. The writer fetches its own records first, so it takes ten to twenty minutes.
+- **Dark Desk has two dials.** *Dig* — how far it chases. *Nerve* — how speculative it may be. The panel says in plain words what the current setting will do.
+- **Dark Desk's planner had never run.** Its budget was 45 seconds against a call that needs 150, and every failure fell back to keyword matching in silence. The database held zero entities, claims or hypotheses.
+- **Confidence is capped by the label in code**, not requested in a prompt, and a FACT with no citation is downgraded.
+- **r/longmont is a tip line** — scored, paced, and filed as unverified tips that can never be mistaken for reporting.
+- **Search works.** Exa runs first, and a PULL no longer answers a Longmont question with three California school-district PDFs.
+- **Nothing scrolls sideways.** The navigation rails wrap.
+
+Full detail is in [CHANGELOG.md](CHANGELOG.md).
+
+### Earlier (0.5.0)
 
 - **Self-hosted.** Builds to a plain Node server instead of Vercel. A long-lived process means the Chromium page reader works and background jobs are not chopped into pieces. `NITRO_PRESET=vercel` still builds for Vercel.
 - **Runs on your Claude Code login.** No API key. The desk shells out to the local CLI, with the coding harness stripped — including your own `CLAUDE.md` and skills, which have no business in a news prompt. An API key or a local OpenAI-compatible gateway still win if set.
@@ -87,7 +103,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 Full detail, including the newsletter and rate-limiter fixes, is in [CHANGELOG.md](CHANGELOG.md). Setup for your own machine: [SELF-HOSTING.md](SELF-HOSTING.md).
 
-### Earlier (0.4.x)
+### Earlier still (0.4.x)
 
 - **URL history, watches, and names belong to the newsroom.** A later editor reuses the captured page, the watch list, and the name graph. Who clicked is still stored.
 - **Quotes have to be in the document.** `resolved` means the captured text contains the evidence.
@@ -190,14 +206,18 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 | Path | What |
 |---|---|
 | `/` | Public paper |
+| `/opinion` | Editorials — unsigned, the paper's own position |
 | `/about` · `/how-we-report` · `/corrections` | Masthead pages |
+| `/sitemap.xml` · `/robots.txt` | For search engines |
 | `/desk` | Editor home (sign-in) |
 | `/desk/sources` | Watch list + bulk paste |
 | `/desk/scan` | Fetch + leads. The expensive button. Not a loop. |
 | `/desk/queue` | Draft / hold / publish |
 | `/desk/story/:id` | Workbench: draft, reporting notes, research memo, publish |
 | `/desk/published` | Live stories + public corrections |
-| `/desk/dark` | Dark Desk. Investigates. Never prints. |
+| `/desk/dark` | Dark Desk. Investigates. Never prints. Two dials. |
+| `/desk/opinion` | Opinion. Writes an unsigned editorial. |
+| `/desk/ops` | Server. Health, and the few buttons worth having. |
 | `/feed` | RSS |
 | `/login` | Create account / sign in |
 
@@ -222,6 +242,15 @@ No. Captions are a map of the tape. Minutes and the packet are the official reco
 
 **What’s Dark Desk?**
 The investigative lane. An editor points it at a person, document, URL, rumor, or gap. It searches, fetches, captures copies, and follows names and attachments. Remaining pages stay on the file. It has no publish button. Editor UI: [docs/dark-desk-editor.md](docs/dark-desk-editor.md) and [docs/editor.md](docs/editor.md#dark-desk).
+
+**What's the Opinion desk?**
+Give it a subject, a sentence, or a URL and it writes an unsigned editorial — OPINION in the headline, no byline, because an unsigned editorial is the paper's own position. Claims and sources run in an appendix at the end. It is a draft until you publish it. The writing voice is a file on disk that you point at with `TOWNREPORTER_VOICE_FILE`; it is not in this repository, and only its path ever reaches a command line.
+
+**Does the paper track readers?**
+No. Fonts are served from this machine, there is no analytics script, and a cold load makes zero requests to any outside host. The Server page checks that and will tell you if it stops being true.
+
+**What are the Dark Desk dials?**
+*Dig* is how far it chases — hops, searches, whether it leaves the watch list. *Nerve* is how speculative it may be — how sure it has to be before it writes a signal down, and whether it may propose a theory or only ask a question. Three floors never move at any setting: no invented claims of paid influence, everything is labelled, and every theory carries what would kill it.
 
 **Can two people edit?**
 The first signed-in user is owner. Later accounts get 403 unless you add them to `newsroom_members`. There is no “invite editor” screen yet. See [docs/setup.md](docs/setup.md#a-second-editor).
