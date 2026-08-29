@@ -152,6 +152,8 @@ First match wins:
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
+**One exception, on purpose.** The Opinion desk always uses the Claude Code CLI, whatever else you set. Its voice file is passed as a path so it never reaches a command line, and it writes with web search — neither of which an OpenAI-compatible endpoint offers. With `TOWNREPORTER_CLAUDE_CODE=0` it refuses rather than using the CLI behind your back. Everything else follows your choice; the per-feature table is in [docs/manual.md](docs/manual.md#which-feature-uses-which-provider).
+
 ### Other models — one OpenAI-compatible URL
 
 TownReporter talks `/v1/chat/completions`. Any of these work by changing three env vars. **No extra npm package.**

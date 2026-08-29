@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  plannerModel,
   GROK_UNAVAILABLE,
   grokChat,
   isGrokAvailable,
@@ -189,5 +190,85 @@ describe("parseJsonBlock", () => {
   it("parses a fenced object", () => {
     const raw = '```json\n{"headline":"Hi"}\n```';
     assert.deepEqual(parseJsonBlock<{ headline: string }>(raw), { headline: "Hi" });
+  });
+});
+
+/**
+ * A Claude model id must not be handed to a provider that has never heard of it.
+ *
+ * `plannerModel()` returned "claude-haiku-4-5-20251001" unconditionally. That
+ * is right on the Claude paths, where the Haiku/Opus split saves about
+ * three-quarters of the planning cost. It is wrong everywhere else: point
+ * LLM_BASE_URL at LM Studio, Ollama or any gateway and every Dark Desk hop
+ * asks for a model that endpoint does not serve. The call fails, and the
+ * planner falls back to keyword matching without a word — the exact silent
+ * failure that once left the whole database with zero entities, claims and
+ * hypotheses.
+ *
+ * An outside audit filed this as part of TW-001: the docs promise the selected
+ * provider controls everything, and Dark planning substituted a Claude
+ * identifier regardless.
+ */
+describe("the planner model respects the provider", () => {
+  const KEYS = [
+    "TOWNREPORTER_PLANNER_MODEL",
+    "TOWNREPORTER_CLAUDE_CODE",
+    "ANTHROPIC_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_API_KEY",
+    "LLM_MODEL",
+    "XAI_API_KEY",
+  ];
+  function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
+    const prev: Record<string, string | undefined> = {};
+    for (const k of KEYS) {
+      prev[k] = process.env[k];
+      delete process.env[k];
+    }
+    try {
+      for (const [k, v] of Object.entries(vars)) if (v !== undefined) process.env[k] = v;
+      fn();
+    } finally {
+      for (const k of KEYS) {
+        if (prev[k] === undefined) delete process.env[k];
+        else process.env[k] = prev[k];
+      }
+    }
+  }
+
+  it("splits to Haiku on an Anthropic key", () => {
+    withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () => {
+      assert.match(plannerModel(), /haiku/i);
+    });
+  });
+
+  it("names no model at all on an OpenAI-compatible endpoint", () => {
+    withEnv({ LLM_BASE_URL: "http://127.0.0.1:1234/v1", LLM_MODEL: "local-thing" }, () => {
+      assert.equal(
+        plannerModel(),
+        "",
+        "an empty string means grokChat keeps the provider's own model",
+      );
+    });
+  });
+
+  /*
+    Grok only wins once the CLI is out of the chain. The precedence is
+    LLM_BASE_URL > ANTHROPIC_API_KEY > Claude Code CLI > XAI_API_KEY, and this
+    machine has the CLI installed — my first version of this test set
+    XAI_API_KEY alone and failed, because the CLI legitimately outranked it.
+    The test was wrong, not the code.
+  */
+  it("names no model on Grok either", () => {
+    withEnv({ XAI_API_KEY: "xai-test", TOWNREPORTER_CLAUDE_CODE: "0" }, () => {
+      assert.equal(plannerModel(), "");
+    });
+  });
+
+  /** An explicit override is the operator's business, whatever the provider. */
+  it("always honours an explicit override", () => {
+    withEnv({ LLM_BASE_URL: "http://127.0.0.1:1234/v1", TOWNREPORTER_PLANNER_MODEL: "qwen3.6-35b" }, () => {
+      assert.equal(plannerModel(), "qwen3.6-35b");
+    });
   });
 });

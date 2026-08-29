@@ -235,3 +235,44 @@ describe("the pack hands over leads, not conclusions", () => {
     assert.match(NEWSROOM_NOTE, /stands unchanged/, "must say the rest of the file is untouched");
   });
 });
+
+/**
+ * Opinion is the one feature that genuinely needs the Claude Code CLI, and it
+ * must say so rather than quietly overriding the operator.
+ *
+ * It cannot go through the provider chain: the voice is passed as
+ * --system-prompt-file so the file never becomes a command-line argument, and
+ * the piece is written with WebSearch and WebFetch. No OpenAI-compatible
+ * endpoint offers either. That exception is legitimate — but the audit
+ * (TW-001) was right that it was undocumented and unchecked: editorial.server
+ * called claudeCodeChat directly, so an operator who had explicitly set
+ * TOWNREPORTER_CLAUDE_CODE=0 still got the CLI used behind their back.
+ *
+ * Refusing clearly is the honest behaviour. Silently ignoring the setting is
+ * not.
+ */
+describe("the editorial writer respects a disabled CLI", () => {
+  it("checks the CLI is allowed before it spends anything", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8"),
+    );
+    assert.match(
+      src,
+      /TOWNREPORTER_CLAUDE_CODE|claudeCodeDisabled|resolveClaudeCode/,
+      "it must consult the operator's CLI setting, not just call the CLI",
+    );
+  });
+
+  it("refuses before the voice file is even looked up", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8"),
+    );
+    const cliCheck = src.search(/TOWNREPORTER_CLAUDE_CODE|claudeCodeDisabled|resolveClaudeCode/);
+    const voiceLookup = src.indexOf("findVoiceFile()");
+    assert.ok(cliCheck > -1 && voiceLookup > -1, "both steps must exist");
+    assert.ok(
+      cliCheck < voiceLookup,
+      "the cheap refusal comes first — no point reading a voice file we cannot use",
+    );
+  });
+});

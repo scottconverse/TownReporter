@@ -80,6 +80,29 @@ export type WriteEditorialResult =
   | { ok: false; error: string };
 
 export async function writeEditorial(input: WriteEditorialInput): Promise<WriteEditorialResult> {
+  /*
+    Opinion is the one feature that genuinely needs the Claude Code CLI. The
+    voice is passed as --system-prompt-file so the file never becomes a
+    command-line argument, and the piece is written with WebSearch and
+    WebFetch; no OpenAI-compatible endpoint offers either.
+
+    That exception is legitimate. Ignoring the operator is not. This module
+    called claudeCodeChat directly, so somebody who had explicitly set
+    TOWNREPORTER_CLAUDE_CODE=0 still got the CLI used behind their back —
+    audit finding TW-001. Refuse, and say why.
+
+    Checked before the voice file is read: no point looking up a file we
+    cannot use.
+  */
+  const { resolveClaudeCode } = await import("./ai");
+  if (!resolveClaudeCode()) {
+    return {
+      ok: false,
+      error:
+        "The Opinion desk needs the Claude Code CLI, and it is switched off or missing here. It cannot use ANTHROPIC_API_KEY or LLM_BASE_URL: the voice is handed over as a file path so it never reaches a command line, and the piece is written with web search. Unset TOWNREPORTER_CLAUDE_CODE=0, or install and sign in to Claude Code. See docs/setup.md.",
+    };
+  }
+
   const found = await findVoiceFile();
   if (!found.ok) return { ok: false, error: found.error };
 

@@ -277,8 +277,32 @@ First match wins:
 | *nothing* | **Claude, through your Claude Code login** |
 | `XAI_API_KEY` | Grok |
 
-Pointing `LLM_BASE_URL` at a local model sends **everything** local, including
-the story writing and the editorials — there is no per-call provider routing.
+### Which feature uses which provider
+
+The provider you select drives every model call **except one**, and the
+exception is deliberate.
+
+| Feature | Provider | Model |
+|---|---|---|
+| Scan, Draft (research/write/edit) | the one you selected | the one you configured |
+| Dark Desk synthesis and brief | the one you selected | the one you configured |
+| Dark Desk **planner** | the one you selected | Haiku **only when the provider is Claude**; otherwise your configured model |
+| **Opinion (editorials)** | **always the Claude Code CLI** | Opus, or `TOWNREPORTER_EDITORIAL_MODEL` |
+
+**Why Opinion is different.** The editorial voice is handed to the CLI as
+`--system-prompt-file`, so the file never becomes a command-line argument that
+any process on the machine could read. The piece is also written with WebSearch
+and WebFetch. No OpenAI-compatible endpoint offers either, so Opinion cannot go
+through the provider chain. If you set `TOWNREPORTER_CLAUDE_CODE=0`, Opinion
+refuses and says so — it does not quietly use the CLI anyway.
+
+**The planner split.** Planning on Haiku costs about a quarter of planning on
+Opus for the same output, so the desk substitutes it — but only on a Claude
+provider. Pointing `LLM_BASE_URL` at LM Studio does not make the desk ask a
+local endpoint for a Claude model; it uses yours.
+
+Pointing `LLM_BASE_URL` at a local model sends everything except Opinion local,
+including the story writing.
 What that actually costs in quality was measured on this machine:
 [docs/local-models.md](local-models.md).
 

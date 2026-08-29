@@ -346,7 +346,26 @@ export type ProviderBudget = {
  * ANTHROPIC_MODEL to turn the split off.
  */
 export function plannerModel(): string {
-  return (env("TOWNREPORTER_PLANNER_MODEL") || "claude-haiku-4-5-20251001").trim();
+  const explicit = env("TOWNREPORTER_PLANNER_MODEL")?.trim();
+  if (explicit) return explicit;
+
+  /*
+    Only substitute a Claude model when the provider is actually Claude.
+
+    This used to return the Haiku identifier unconditionally. Point
+    LLM_BASE_URL at LM Studio, Ollama or any gateway and every Dark Desk hop
+    then asked that endpoint for "claude-haiku-4-5-20251001", which it has
+    never heard of. The call failed and the planner fell back to keyword
+    matching without a word — the same silent failure that once left the whole
+    database with zero entities, claims and hypotheses, reached by a different
+    door.
+
+    An empty string means "no opinion": grokChat keeps the provider's own
+    configured model. Audit finding TW-001.
+  */
+  const provider = resolveProvider();
+  const isClaude = provider?.kind === "anthropic" || provider?.kind === "claude-code";
+  return isClaude ? "claude-haiku-4-5-20251001" : "";
 }
 
 export function providerBudget(): ProviderBudget {
