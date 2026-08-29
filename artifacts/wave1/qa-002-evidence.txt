@@ -1,0 +1,5 @@
+QA-002 — dependency-absent Scan, dev instance, 2026-08-29T21:26:47Z
+provider: TOWNREPORTER_CLAUDE_CODE=0, no ANTHROPIC_API_KEY / LLM_BASE_URL / XAI_API_KEY
+probe:    runScan -> scanPreflight -> refusal (kind=unconfigured, retryable=false)
+observed: guidance rendered, no 'try again', scan_runs=0, desk_jobs(scan)=0
+before:   enqueued, fetched every source, failed at the model call, invited a retry

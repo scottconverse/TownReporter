@@ -8,15 +8,13 @@ import {
   ensureNewsroomSchema,
   ForbiddenError,
   leaveAsEditor,
-  newsroomSetupToken,
-  SetupRequiredError,
 } from "./membership";
 
 export const deskClaimState = createServerFn({ method: "GET" }).handler(async () => {
-  return {
-    claimed: await deskIsClaimed(),
-    tokenRequired: Boolean(newsroomSetupToken()),
-  };
+  // tokenRequired stays in the shape, always false: the setup token is gone
+  // (see membership.ts). Kept so an older client bundle cannot crash on a
+  // missing field mid-deploy.
+  return { claimed: await deskIsClaimed(), tokenRequired: false };
 });
 
 /** Signed-in visitor's desk role. Does not auto-claim. */
@@ -43,12 +41,12 @@ export const myDesk = createServerFn({ method: "GET" })
 export const claimDesk = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((token: string) => String(token ?? ""))
-  .handler(async ({ context, data: token }) => {
+  .handler(async ({ context }) => {
     try {
-      const editor = await claimOwner(context.userId, token);
+      const editor = await claimOwner(context.userId);
       return { ok: true as const, role: editor.role, newsroomId: editor.newsroomId };
     } catch (err) {
-      if (err instanceof SetupRequiredError || err instanceof ForbiddenError) {
+      if (err instanceof ForbiddenError) {
         return { ok: false as const, error: err.message };
       }
       throw err;

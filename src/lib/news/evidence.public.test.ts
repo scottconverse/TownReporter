@@ -266,3 +266,52 @@ describe("public capture history publication", { timeout: 60000 }, () => {
     assert.equal(hiddenHistory.length, 0);
   });
 });
+
+/**
+ * A locator is a note to ourselves, not to a reader.
+ *
+ * The LURA story printed this on the public page:
+ *
+ *   char:14000-16000 — plan amendment adds two parcels plus part of Boston Ave
+ *
+ * That is a character offset into a captured transcript. It is how the desk
+ * points at the passage it read; it means nothing to somebody reading a
+ * newspaper, and it is exactly the notebook language the editor's manual says
+ * must never reach the masthead.
+ *
+ * `resolvePublicFindings` decides WHICH findings print. It never looked at
+ * what was inside one, so locators went straight through to the page.
+ * Readers get the "Captured record" link instead — the real way in.
+ */
+describe("locators never reach a reader", () => {
+  const provenance = provenanceFromUrls(["https://www.youtube.com/watch?v=_cTgf1W7188"]).map(
+    (p) => ({ ...p, version_id: 87 }),
+  );
+
+  const withLocator = JSON.stringify([
+    {
+      text: "TownReporter listened to the Aug. 18 LURA recording.",
+      source_urls: ["https://www.youtube.com/watch?v=_cTgf1W7188"],
+      artifact_version_ids: [87],
+      capture_event_ids: [],
+      locators: ["char:14000-16000 — plan amendment adds two parcels"],
+    },
+  ]);
+
+  it("keeps the finding but drops its locators", () => {
+    const out = resolvePublicFindings(parseFindings(withLocator), provenance);
+    assert.equal(out.length, 1, "the finding itself still prints");
+    assert.deepEqual(out[0]!.locators, [], "locators must not survive into the public payload");
+  });
+
+  it("leaves no char offset anywhere in what the page receives", () => {
+    const out = resolvePublicFindings(parseFindings(withLocator), provenance);
+    assert.doesNotMatch(JSON.stringify(out), /char:\d+-\d+/, "a raw offset reached the reader");
+  });
+
+  it("does not quietly drop the finding to achieve that", () => {
+    const out = resolvePublicFindings(parseFindings(withLocator), provenance);
+    assert.match(out[0]!.text, /listened to the Aug\. 18 LURA recording/);
+    assert.deepEqual(out[0]!.artifact_version_ids, [87], "the Captured record link must survive");
+  });
+});

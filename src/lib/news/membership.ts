@@ -1,3 +1,23 @@
+/*
+  There is no setup token.
+
+  It guarded exactly one window — an unclaimed desk on a public host, before
+  the operator signs in for the first time. For a one-person newsroom that is
+  about ninety seconds, once, ever, and the price was a shared secret carried
+  for the life of the product plus a form field that locked the operator out of
+  his own instance when he did not have the string to hand.
+
+  An audit raised it as a Critical: guessable, no throttling, no entropy floor.
+  Removing the mechanism closes that more completely than hardening it — there
+  is no secret to guess, no comparison to time, no lockout to tune.
+
+  What still holds: two people cannot both own the desk. That is a unique
+  partial index in migrations/0012_newsroom_appliance.sql, not a secret.
+
+  The trade, stated in the README: on a fresh public deployment the first
+  person to reach /login owns the desk. Sign in first.
+*/
+
 import { getSql } from "../db.ts";
 import { deskTakenLoginCopy } from "./desk-copy.ts";
 
@@ -11,15 +31,6 @@ export class ForbiddenError extends Error {
   }
 }
 
-export class SetupRequiredError extends Error {
-  readonly status = 403;
-  constructor() {
-    super(
-      "This desk is not claimed. Set NEWSROOM_SETUP_TOKEN and pass it when creating the first editor.",
-    );
-    this.name = "SetupRequiredError";
-  }
-}
 
 export type EditorRole = "owner" | "editor";
 
@@ -28,9 +39,6 @@ export type EditorContext = {
   newsroomId: number;
 };
 
-export function newsroomSetupToken(): string {
-  return (process.env.NEWSROOM_SETUP_TOKEN ?? process.env.SETUP_TOKEN ?? "").trim();
-}
 
 export function isGrokPreviewHost(host: string | undefined | null): boolean {
   const h = (host ?? "").toLowerCase();
@@ -89,9 +97,6 @@ export async function requireEditor(userId: string): Promise<EditorContext> {
     select count(*)::int as c from newsroom_members where newsroom_id = ${DEFAULT_NEWSROOM_ID}
   `;
   if ((n[0]?.c ?? 0) === 0) {
-    if (newsroomSetupToken()) {
-      throw new SetupRequiredError();
-    }
     try {
       await sql`
         insert into newsroom_members (user_id, role, newsroom_id)
@@ -141,11 +146,12 @@ export async function leaveAsEditor(userId: string): Promise<void> {
 }
 
 /**
- * Claim an unclaimed desk with the operator's setup token.
- * Preview (no token in env) still uses requireEditor's first-user-owns path.
- * When NEWSROOM_SETUP_TOKEN is set, the token must match.
+ * Claim an unclaimed desk. First account in owns it.
+ *
+ * The uniqueness guarantee lives in the database, not here: a unique partial
+ * index on the owner row means a concurrent second claim loses.
  */
-export async function claimOwner(userId: string, providedToken: string): Promise<EditorContext> {
+export async function claimOwner(userId: string): Promise<EditorContext> {
   await ensureNewsroomSchema();
   const sql = await getSql();
   const mine = await sql<{ role: string; newsroom_id: number }>`
@@ -158,13 +164,6 @@ export async function claimOwner(userId: string, providedToken: string): Promise
     select count(*)::int as c from newsroom_members where newsroom_id = ${DEFAULT_NEWSROOM_ID}
   `;
   if ((n[0]?.c ?? 0) > 0) throw new ForbiddenError();
-  const expected = newsroomSetupToken();
-  if (expected) {
-    if (providedToken.trim() !== expected) throw new ForbiddenError("Setup token does not match.");
-  } else {
-    // Preview / local without a token: first-user-owns is requireEditor's job.
-    if (!providedToken.trim()) throw new SetupRequiredError();
-  }
   try {
     await sql`
       insert into newsroom_members (user_id, role, newsroom_id)

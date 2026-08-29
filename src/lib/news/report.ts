@@ -683,28 +683,16 @@ export function formatClaimsDump(claims: StoryClaim[]): string {
   return `Claims and sources\n\n${lines.join("\n\n")}\n`;
 }
 
-export function resolvePublicFindings(
-  findings: StoryFinding[],
-  provenance: ProvenanceItem[],
-): StoryFinding[] {
-  const urls = new Set(provenance.map((p) => p.url));
-  const versions = new Set(
-    provenance.map((p) => p.version_id).filter((id): id is number => id != null),
-  );
-  const captures = new Set(
-    provenance
-      .map((p) => p.capture_event_id)
-      .filter((id): id is number => id != null),
-  );
-  return findings.filter((f) => {
-    if (!f.text.trim()) return false;
-    const urlOk = f.source_urls.some((u) => urls.has(u));
-    if (!urlOk) return false;
-    const versionOk = f.artifact_version_ids.some((id) => versions.has(id));
-    const captureOk = f.capture_event_ids.some((id) => captures.has(id));
-    return versionOk || captureOk;
-  });
-}
+/*
+  One implementation, not two.
+
+  This file carried a byte-identical copy of `resolvePublicFindings` while
+  `public.ts` — the code that actually renders the paper — imported the copy in
+  `findings.ts`. Fixing the locator leak in one left the other leaking, which
+  is how a duplicated invariant fails: quietly, in whichever copy nobody
+  remembered. Re-exported so there is one place to be right.
+*/
+export { resolvePublicFindings } from "./findings.ts";
 
 function parseTrail(raw: unknown): Partial<ProvenanceItem>[] {
   if (!Array.isArray(raw)) return [];

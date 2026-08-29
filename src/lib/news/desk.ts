@@ -334,6 +334,29 @@ export const listScans = createServerFn({ method: "GET" })
 export const runScan = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
+    /*
+      Check the model BEFORE spending the scan.
+
+      This used to enqueue unconditionally: the job fetched every watched
+      source and only then failed at the model call, leaving the editor with a
+      failed run, no setup guidance, and an invitation to try again that no
+      retry could satisfy. An outside audit walked a first-run paper with no
+      provider and called it a Blocker, correctly — the core action dead-ends.
+
+      Refusing here costs nothing and says what to do. See `scanPreflight`.
+    */
+    const { scanPreflight } = await import("./preflight");
+    const ready = scanPreflight(await probeProvider());
+    if (!ready.ok) {
+      return {
+        ok: false as const,
+        kind: ready.kind,
+        error: ready.guidance,
+        detail: ready.detail,
+        retryable: ready.retryable,
+      };
+    }
+
     await ensureSeeds(context.userId);
     await assertRate(context.userId, "scan");
     const newsroomId = owned(context);

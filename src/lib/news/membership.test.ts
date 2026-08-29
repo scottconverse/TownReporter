@@ -4,8 +4,6 @@ import { getSql } from "../db.ts";
 import {
   ensureNewsroomSchema,
   isGrokPreviewHost,
-  newsroomSetupToken,
-  SetupRequiredError,
   ForbiddenError,
   deskIsClaimed,
   leaveAsEditor,
@@ -21,24 +19,16 @@ describe("newsroom hosts", () => {
   });
 });
 
-describe("setup token env", () => {
-  it("reads NEWSROOM_SETUP_TOKEN", () => {
-    const prev = process.env.NEWSROOM_SETUP_TOKEN;
-    process.env.NEWSROOM_SETUP_TOKEN = "desk-secret";
-    try {
-      assert.equal(newsroomSetupToken(), "desk-secret");
-    } finally {
-      if (prev === undefined) delete process.env.NEWSROOM_SETUP_TOKEN;
-      else process.env.NEWSROOM_SETUP_TOKEN = prev;
-    }
-  });
-
-  it("SetupRequiredError is a 403", () => {
-    const err = new SetupRequiredError();
-    assert.equal(err.status, 403);
-    assert.match(err.message, /NEWSROOM_SETUP_TOKEN/);
-  });
-
+/*
+  Two tests lived here that read NEWSROOM_SETUP_TOKEN and asserted
+  SetupRequiredError was a 403. They are deleted rather than weakened: the
+  behaviour they covered was removed on purpose by the operator, so a test
+  demanding it would be asserting a feature that no longer exists. What
+  replaced them is the "first account owns the desk" block at the end of this
+  file, which asserts the token is gone and that the database still prevents
+  two owners.
+*/
+describe("newsroom membership", () => {
   it("leave as editor refuses a stranger", async () => {
     await assert.rejects(() => leaveAsEditor("nobody-here"), (err: unknown) => {
       assert.ok(err instanceof ForbiddenError);
@@ -68,5 +58,59 @@ describe("setup token env", () => {
     assert.equal(left.some((r) => r.user_id === decoy && r.newsroom_id === 99), true);
     assert.equal(await deskIsClaimed(), false);
     await sql`delete from newsroom_members where user_id = ${decoy}`;
+  });
+});
+
+/**
+ * The setup token is gone.
+ *
+ * It guarded exactly one window: an unclaimed desk on a public host, before
+ * the operator signs in for the first time. For a one-person newsroom that
+ * window is about ninety seconds, once, ever — and the price was carrying a
+ * shared secret for the life of the product, plus a form field that locked the
+ * operator out of his own dev instance when he did not have the string to hand.
+ *
+ * An audit raised the token as a Critical (guessable, unthrottled). Removing
+ * the mechanism closes it more completely than hardening it would: there is no
+ * secret to guess, no comparison to time, no lockout to tune.
+ *
+ * The trade is stated plainly in the README: on a fresh public deployment, the
+ * first person to reach /login owns the desk. Sign in first.
+ */
+describe("first account owns the desk", () => {
+  it("no longer exposes a setup-token requirement", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./membership.ts", import.meta.url), "utf8"),
+    );
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    assert.doesNotMatch(code, /NEWSROOM_SETUP_TOKEN/, "the token must be gone from the code path");
+    assert.doesNotMatch(code, /SetupRequiredError/, "nothing may demand a token any more");
+  });
+
+  it("claiming takes no token argument at all", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./membership.ts", import.meta.url), "utf8"),
+    );
+    assert.match(
+      src,
+      /export async function claimOwner\(\s*userId: string\s*\)/,
+      "claimOwner should accept only a user id",
+    );
+  });
+
+  /**
+   * The one guarantee that must survive: two people cannot both own it. That
+   * is enforced in the database, not by the token — a unique partial index on
+   * the owner row (migrations/0012_newsroom_appliance.sql).
+   */
+  it("still cannot produce two owners", async () => {
+    const migration = await import("node:fs").then((fs) =>
+      fs.readFileSync(
+        new URL("../../../migrations/0012_newsroom_appliance.sql", import.meta.url),
+        "utf8",
+      ),
+    );
+    assert.match(migration, /unique index/i);
+    assert.match(migration, /owner/i);
   });
 });

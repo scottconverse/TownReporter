@@ -236,12 +236,28 @@ export function resolvePublicFindings(
       .map((p) => p.capture_event_id)
       .filter((id): id is number => id != null),
   );
-  return findings.filter((f) => {
-    if (!f.text.trim()) return false;
-    const urlOk = f.source_urls.some((u) => urls.has(u));
-    if (!urlOk) return false;
-    const versionOk = f.artifact_version_ids.some((id) => versions.has(id));
-    const captureOk = f.capture_event_ids.some((id) => captures.has(id));
-    return versionOk || captureOk;
-  });
+  return findings
+    .filter((f) => {
+      if (!f.text.trim()) return false;
+      const urlOk = f.source_urls.some((u) => urls.has(u));
+      if (!urlOk) return false;
+      const versionOk = f.artifact_version_ids.some((id) => versions.has(id));
+      const captureOk = f.capture_event_ids.some((id) => captures.has(id));
+      return versionOk || captureOk;
+    })
+    /*
+      A locator is a note to ourselves, not to a reader.
+
+      The LURA story printed `char:14000-16000 — plan amendment adds two
+      parcels...` on the public page. That is a character offset into a
+      captured transcript: it is how the desk points at the passage it read,
+      and it means nothing to somebody reading a newspaper. This function
+      decided WHICH findings print and never looked inside one, so locators
+      went straight through.
+
+      Dropped here rather than in the component, so they never reach the
+      browser at all. The reader gets the "Captured record" link, which is the
+      real way into the same passage.
+    */
+    .map((f) => ({ ...f, locators: [] }));
 }

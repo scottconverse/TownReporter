@@ -5,6 +5,7 @@ import { storableText } from "./storable-text.ts";
 import { needsRenderedFetch } from "./render-detect.ts";
 import { ingestYoutube, isYoutubeUrl, type YoutubeIngest } from "./youtube.ts";
 import { ingestPrimeGov } from "./primegov.ts";
+import { limitFor, readBodyCapped } from "./body-limit.ts";
 
 /** Archive cap. Planner context is sliced at retrieval, never here. */
 export const ARCHIVE_TEXT_CAP = 2_000_000;
@@ -430,7 +431,32 @@ async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
     const res = tracked.response;
     const status = res.status;
     const ctype = (res.headers.get("content-type") ?? "").toLowerCase();
-    const buf = new Uint8Array(await res.arrayBuffer());
+    /*
+      Capped, and capped before the status check.
+
+      This used to be `await res.arrayBuffer()` with no ceiling, sitting above
+      the `!res.ok` branch — so a hostile 500 with a gigabyte of body was fully
+      allocated before anyone looked at the status. The SSRF guard says where
+      we may connect; it says nothing about how much we may accept.
+    */
+    const capped = await readBodyCapped(res, limitFor(url.toString(), ctype));
+    if (!capped.ok) {
+      return {
+        ok: false,
+        status,
+        outcome: "fetch-failed" as FetchOutcome,
+        // The reason belongs where an editor can read it, not in a thrown error.
+        text: `The response was larger than this desk will read (${capped.declared ?? capped.read} bytes).`,
+        title: url.toString(),
+        extras: [],
+        contentType: ctype,
+        needsOcr: false,
+        redirectChain: tracked.chain,
+        extractionMethod: "refused-too-large",
+        pages: [],
+      };
+    }
+    const buf = capped.bytes;
     const path = url.pathname.toLowerCase();
 
     if (!res.ok) {
@@ -553,7 +579,13 @@ export async function ingestUrl(raw: string): Promise<IngestResult> {
   const res = await fetchPublicHttp(url);
   if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
   const ctype = (res.headers.get("content-type") ?? "").toLowerCase();
-  const buf = new Uint8Array(await res.arrayBuffer());
+  const capped = await readBodyCapped(res, limitFor(url.toString(), ctype));
+  if (!capped.ok) {
+    throw new Error(
+      `Response too large to read (${capped.declared ?? capped.read} bytes)`,
+    );
+  }
+  const buf = capped.bytes;
 
   if (ctype.includes("pdf") || path.endsWith(".pdf")) {
     const pdf = await extractPdfBetter(buf);

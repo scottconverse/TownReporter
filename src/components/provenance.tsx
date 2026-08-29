@@ -111,9 +111,6 @@ export function ProvenanceBlock({
                 {f.source_urls[0] ? (
                   <p className="mt-1 break-all text-sm text-muted">{f.source_urls[0]}</p>
                 ) : null}
-                {f.locators[0] ? (
-                  <p className="mt-1 text-sm text-muted">{f.locators[0]}</p>
-                ) : null}
                 {f.artifact_version_ids[0] != null ? (
                   <p className="mt-1 text-sm">
                     <Link

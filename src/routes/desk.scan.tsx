@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice } from "@/components/states";
 import { listScans, listSources, runScan } from "@/lib/news/desk";
@@ -20,9 +21,33 @@ function ScanPage() {
     },
   });
   const sources = useQuery({ queryKey: ["sources"], queryFn: () => listSources() });
+  /*
+    A refusal is not a failure, and it needs different words.
+
+    Scan used to enqueue whatever the model situation was: it fetched every
+    source and died at the model call, showing a failed run and inviting a
+    retry that could not help. runScan now checks first and returns setup
+    guidance instead, which this renders as its own state — with the Run
+    button hidden when pressing it again cannot work.
+  */
+  const [blocked, setBlocked] = useState<{
+    guidance: string;
+    detail: string;
+    retryable: boolean;
+  } | null>(null);
+
   const scan = useMutation({
     mutationFn: () => runScan(),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      if (res && "ok" in res && res.ok === false) {
+        setBlocked({
+          guidance: res.error,
+          detail: res.detail ?? "",
+          retryable: Boolean(res.retryable),
+        });
+        return;
+      }
+      setBlocked(null);
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
       void qc.invalidateQueries({ queryKey: ["sources"] });
@@ -79,6 +104,19 @@ function ScanPage() {
         </div>
       ) : null}
       {!scanning && last?.error ? <Notice kind="err">{editorScanError(last.error)}</Notice> : null}
+      {blocked ? (
+        <Notice kind="err">
+          <b>The desk cannot scan yet.</b>
+          <br />
+          {blocked.guidance}
+          {blocked.detail ? (
+            <>
+              <br />
+              <span className="meta">{blocked.detail}</span>
+            </>
+          ) : null}
+        </Notice>
+      ) : null}
       {scan.error ? (
         <Notice kind="err">{scan.error instanceof Error ? scan.error.message : "Scan failed"}</Notice>
       ) : null}

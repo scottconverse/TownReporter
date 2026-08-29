@@ -1,0 +1,5 @@
+
+=== attestation facts captured so far ===
+provider: TOWNREPORTER_CLAUDE_CODE=0 (CLI out of the chain), no ANTHROPIC_API_KEY / LLM_BASE_URL / XAI_API_KEY in dev .env
+database: townreporter_dev (separate from production 'townreporter')
+port:     3100 (production 3000 untouched)

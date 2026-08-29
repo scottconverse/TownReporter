@@ -69,25 +69,21 @@ function Login() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [name, setName] = useState("");
-  const [setupToken, setSetupToken] = useState("");
   const claim = useQuery({ queryKey: ["desk-claim"], queryFn: () => deskClaimState() });
   const claimed = claim.isError || Boolean(claim.data?.claimed);
-  const tokenRequired = Boolean(claim.data?.tokenRequired && !claimed);
   const mode: "create" | "signin" = claimed ? "signin" : wantCreate ? "create" : "signin";
   const taken = deskTakenLoginCopy();
-  if (user && !claim.isPending && !tokenRequired) return <Navigate to="/desk" />;
+  if (user && !claim.isPending) return <Navigate to="/desk" />;
 
   async function finishEmail(data?: unknown, headers?: Headers | null) {
     storePreviewBearer(tokenFromResult(data, headers));
     await authClient.getSession();
-    if (tokenRequired || setupToken.trim()) {
-      const claimedDesk = await claimDesk({ data: setupToken });
-      if (!claimedDesk.ok) {
-        setBusy(null);
-        setError(claimedDesk.error);
-        return;
-      }
-    }
+    /*
+      No claim call here any more. The setup token is gone (see
+      membership.ts), and first-account-owns is `requireEditor`'s job on the
+      first desk request. Calling claimDesk from the form was only ever the
+      token path.
+    */
     await qc.invalidateQueries({ queryKey: ["desk-claim"] });
     await qc.invalidateQueries({ queryKey: ["my-desk"] });
     await navigate({ to: "/desk" });
@@ -170,9 +166,7 @@ function Login() {
   const blurb = claim.isPending
     ? "One moment."
     : mode === "create"
-      ? tokenRequired
-        ? "This desk needs the operator setup token before the first editor can own it. If you already have an account, sign in."
-        : "First person in owns the newsroom. If you already created an account, submit again with the same email and password — we will sign you in."
+      ? "First person in owns the newsroom. If you already created an account, submit again with the same email and password — we will sign you in."
       : claimed
         ? taken.body
         : "Sign in with the password you set for this desk.";
@@ -203,10 +197,6 @@ function Login() {
           className="space-y-3"
           onSubmit={(event) => {
             event.preventDefault();
-            if (user && tokenRequired) {
-              void finishEmail();
-              return;
-            }
             if (mode === "create") void onEmailSignUp();
             else void onEmailSignIn();
           }}
@@ -257,20 +247,6 @@ function Login() {
                 autoComplete="new-password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
-              />
-            </label>
-          ) : null}
-          {tokenRequired ? (
-            <label className="block text-sm">
-              Setup token
-              <input
-                className={inputClass + " mt-1"}
-                type="password"
-                autoComplete="off"
-                required
-                value={setupToken}
-                onChange={(e) => setSetupToken(e.target.value)}
-                placeholder="NEWSROOM_SETUP_TOKEN"
               />
             </label>
           ) : null}
