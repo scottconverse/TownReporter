@@ -277,6 +277,11 @@ First match wins:
 | *nothing* | **Claude, through your Claude Code login** |
 | `XAI_API_KEY` | Grok |
 
+Pointing `LLM_BASE_URL` at a local model sends **everything** local, including
+the story writing and the editorials — there is no per-call provider routing.
+What that actually costs in quality was measured on this machine:
+[docs/local-models.md](local-models.md).
+
 The CLI path spends no API money at all. It is slower than an HTTP API because
 it reloads a fixed preamble on every call, so a draft takes minutes rather than
 seconds; the time budgets adjust on their own.
@@ -710,6 +715,7 @@ npx playwright install chromium
 | Editors, with screenshots and no code | [docs/editor.md](editor.md) |
 | Operators — clone, env, Postgres, models, city swap | [docs/setup.md](setup.md) |
 | Dark Desk UI contract | [docs/dark-desk-editor.md](dark-desk-editor.md) |
+| Local models — what was measured, and why mostly no | [docs/local-models.md](local-models.md) |
 | Self-hosting this exact deployment | [SELF-HOSTING.md](../SELF-HOSTING.md) |
 | What changed, release by release | [CHANGELOG.md](../CHANGELOG.md) |
 

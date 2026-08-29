@@ -35,6 +35,7 @@ It is not the Longmont Times-Call, not the city, and not a replacement for eithe
 | Editors, with screenshots and no code | [docs/editor.md](docs/editor.md) |
 | Operators (clone, env, Postgres, models, city swap) | [docs/setup.md](docs/setup.md) |
 | Dark Desk UI contract | [docs/dark-desk-editor.md](docs/dark-desk-editor.md) |
+| Local models, measured on real prompts | [docs/local-models.md](docs/local-models.md) |
 | Marketing / GitHub Pages landing | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
 
 GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings → Pages → Deploy from a branch → `main` / `/docs`**. The token that pushes this repo cannot flip that switch.

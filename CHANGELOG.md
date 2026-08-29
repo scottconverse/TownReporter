@@ -23,6 +23,38 @@ the investigative desk finally does the thing it was built to do.
   restart reported an error while succeeding — its own reply was travelling
   over the tunnel it had just killed.
 
+**The machine it runs on**
+
+- The server binds `127.0.0.1` when `HOST` says so, and it does. Without it the
+  app answered on every interface, so anything fronting it — a tunnel, a proxy
+  — was not the only way in. Measured after the change: `netstat` shows
+  loopback and nothing else, the LAN address refuses, and the public site still
+  answers 200.
+- **Two console windows stopped stealing focus every five minutes.** Both
+  five-minute tasks put a window on the operator's screen, which took focus and
+  interrupted whatever was being typed — twelve times an hour. `-WindowStyle
+  Hidden` does not fix it: Task Scheduler creates the console host and shows it
+  before the script's own window style applies. They now run through
+  `ops/run-hidden.vbs`, which has no console of its own.
+- `ops/status.ps1` answers "is it up" in plain words, and works when the paper
+  is down — which is exactly when `/desk/ops` cannot, because it lives inside
+  the paper. `ops/TownReporter Control.cmd` is the same for someone who does
+  not want a terminal: double-click, pick a number. It cannot publish or delete
+  anything.
+- Documented plainly: both start triggers are *at logon*, so a machine sitting
+  at a lock screen after a reboot runs nothing until someone signs in. Verified
+  by stopping the database, the app and the tunnel, then firing only the logon
+  tasks: fully up in 45 seconds.
+
+**Local models**
+
+- Measured rather than assumed, and written down in
+  [docs/local-models.md](docs/local-models.md): a local 35B finds about half as
+  many leads per Dark Desk hop as Haiku (26 against 50, median of four runs and
+  three), so the planner stays where it is. The same test found that a
+  reasoning model behind `LLM_BASE_URL` spends its whole output budget thinking
+  and returns nothing, which the app cannot tell from a refusal.
+
 **The reader**
 
 - Fonts are served from this machine. Reading the paper made no request to
