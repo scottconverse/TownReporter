@@ -95,10 +95,11 @@ export const CLAUDE_CLI_MISSING =
 /**
  * End a spawned CLI and everything it started.
  *
- * `child.kill()` signals only the process we spawned. On Windows the `claude`
- * launcher owns the session in a child of its own, which survives — an Opus
- * session with nobody left to read its answer, still billing. `taskkill /T`
- * takes the tree. Elsewhere, killing the process group does the same job.
+ * The spawned `claude.exe` runs a child of its own. Measured on this machine, a
+ * bare `child.kill()` did leave zero surviving `claude.exe` — so this is not a
+ * fix for an observed orphan, and should not be described as one. It is the
+ * stronger guarantee for the case the measurement did not cover: a helper the
+ * CLI started that does not exit with it. `taskkill /T` takes the tree.
  */
 function killTree(child: { pid?: number; kill: (sig?: NodeJS.Signals) => boolean }) {
   const pid = child.pid;
