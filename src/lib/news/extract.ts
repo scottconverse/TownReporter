@@ -407,3 +407,128 @@ export function classifyClaimKind(raw: string): string {
   }
   return "UNKNOWN";
 }
+
+/**
+ * Normalized key for comparing two URLs that point at the same page.
+ * Host case and a `www.` prefix and a trailing slash are not differences.
+ * The query IS kept: `?meetingId=1` and `?meetingId=2` are different records.
+ */
+function urlKey(raw: string): string {
+  try {
+    const u = new URL(raw);
+    const host = u.hostname.replace(/^www\./i, "").toLowerCase();
+    const path = u.pathname.replace(/\/+$/, "").toLowerCase() || "/";
+    return `${host}${path}${u.search}`;
+  } catch {
+    return raw.trim().toLowerCase();
+  }
+}
+
+/**
+ * A page that only lists other pages: the bare homepage of a site, and tag,
+ * author or category archives.
+ *
+ * Deliberately narrow. Anything that might be a record — a PDF, an agenda, a
+ * meeting portal page, a press release — must survive, so this matches only
+ * shapes that are navigation by construction.
+ */
+function isListingPath(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    const path = u.pathname.replace(/\/+$/, "").toLowerCase();
+    if (!path || path === "/") return !u.search;
+    return /^\/(tag|tags|category|categories|author|topics|section)\//.test(`${path}/`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A section front on a publisher we already watch — `/sports/high-school-sports/`
+ * on the Times-Call, `/local-news` on the Leader.
+ *
+ * Three conditions together, because any one alone throws away records:
+ *
+ *  - The host must be one we watch. `frprdistrict.com/about-the-district` has
+ *    the same shape and is a real page about a real district.
+ *  - The host must not be a `.gov`. Government section pages ARE the record
+ *    index — `longmontcolorado.gov/city-clerk/election-information/` is exactly
+ *    the kind of page a story should cite.
+ *  - Every path segment must be a short, digit-free word. Article URLs on these
+ *    same publishers carry a date (`/2026/08/12/…`) or a long headline slug;
+ *    section names do not.
+ */
+function isWatchedSectionFront(raw: string, watchedHosts: Set<string>): boolean {
+  try {
+    const host = new URL(raw).hostname.replace(/^www\./i, "").toLowerCase();
+    if (host.endsWith(".gov")) return false;
+    if (!watchedHosts.has(host)) return false;
+    return looksLikeSectionFront(raw);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The URL shape of a section front: `/sports/high-school-sports/`, `/local-news`.
+ *
+ * Article URLs on the same publishers carry a date or a long headline slug;
+ * section names are short, wordy and dateless. Used both to keep section fronts
+ * out of a story's source list and to stop the body linking a paper's name to
+ * one — "the Longmont Times-Call reported" pointed at the paper's high-school
+ * sports section for a story about a rail tax.
+ */
+export function looksLikeSectionFront(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    if (u.search) return false;
+    const segs = u.pathname.split("/").filter(Boolean);
+    if (!segs.length || segs.length > 2) return false;
+    return segs.every((seg) => seg.length < 25 && /^[a-z-]+$/i.test(seg));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Strip the pages a story was found *through* from the list of pages it was
+ * sourced *from*.
+ *
+ * The scan feeds the watch list's own pages to the writing pass as evidence, so
+ * the writer cites them back: a rail-district story came out sourced to the
+ * Times-Call high-school-sports section and the paper's homepage. Those are
+ * where the lead was spotted, not where any fact in the story came from.
+ *
+ * Falls back to the input when everything would be dropped. An empty list hides
+ * the provenance panel entirely, which is the opposite of what this is for.
+ */
+export function dropListingUrls(
+  urls: string[],
+  watched: string[] = [],
+  /**
+   * Return an empty list rather than falling back to the input.
+   *
+   * The fallback exists so a published story never shows an empty provenance
+   * panel. When the caller is deciding which sites to go looking on, an empty
+   * answer is the correct one — falling back handed a rail district's board
+   * packet hunt to the local paper's homepage.
+   */
+  allowEmpty = false,
+): string[] {
+  const watchedKeys = new Set(watched.map(urlKey));
+  const watchedHosts = new Set<string>();
+  for (const w of watched) {
+    try {
+      watchedHosts.add(new URL(w).hostname.replace(/^www\./i, "").toLowerCase());
+    } catch {
+      /* not a URL — cannot contribute a host */
+    }
+  }
+  const kept = urls.filter(
+    (u) =>
+      !isListingPath(u) &&
+      !watchedKeys.has(urlKey(u)) &&
+      !isWatchedSectionFront(u, watchedHosts),
+  );
+  return kept.length || allowEmpty ? kept : urls;
+}

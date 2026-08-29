@@ -4,6 +4,7 @@ import {
   classifyClaimKind,
   detectMissingCadence,
   detectPatternAnomalies,
+  dropListingUrls,
   diffExcerpt,
   extractMeetingInstant,
   extractReferences,
@@ -132,5 +133,105 @@ describe("extractMeetingInstant", () => {
     assert.ok(meeting);
     const lead = leadHoursBefore(new Date("2026-08-22T00:00:00Z"), meeting!);
     assert.ok(lead != null && lead >= 70 && lead <= 80);
+  });
+});
+
+describe("dropListingUrls", () => {
+  const watched = [
+    "https://www.timescall.com/news/crime-public-safety/",
+    "https://longmont.primegov.com/Portal/Meeting?meetingTemplateId=1",
+  ];
+
+  it("drops the watch-list pages a lead was spotted through", () => {
+    const kept = dropListingUrls(
+      [
+        "https://www.timescall.com/news/crime-public-safety/",
+        "https://leg.colorado.gov/bills/SB21-238",
+      ],
+      watched,
+    );
+    assert.deepEqual(kept, ["https://leg.colorado.gov/bills/SB21-238"]);
+  });
+
+  it("matches a watched page across www and a trailing slash", () => {
+    const kept = dropListingUrls(
+      ["https://timescall.com/news/crime-public-safety", "https://example.gov/a.pdf"],
+      watched,
+    );
+    assert.deepEqual(kept, ["https://example.gov/a.pdf"]);
+  });
+
+  it("keeps a different meeting on the same portal", () => {
+    const url = "https://longmont.primegov.com/Portal/Meeting?meetingTemplateId=2";
+    assert.deepEqual(dropListingUrls([url, "https://example.gov/a"], watched), [
+      url,
+      "https://example.gov/a",
+    ]);
+  });
+
+  it("drops homepages, tag and author archives", () => {
+    const kept = dropListingUrls([
+      "https://www.timescall.com/",
+      "https://www.timescall.com/tag/carbon-valley/",
+      "https://www.timescall.com/author/jane-doe",
+      "https://www.timescall.com/2026/08/12/longmont-council-ranked-choice-voting/",
+    ]);
+    assert.deepEqual(kept, [
+      "https://www.timescall.com/2026/08/12/longmont-council-ranked-choice-voting/",
+    ]);
+  });
+
+  it("keeps records that merely look like index pages", () => {
+    const urls = [
+      "https://ratpd.gov/meetings/",
+      "https://longmontcolorado.gov/city-clerk/election-information/",
+      "https://example.gov/packet.pdf",
+    ];
+    assert.deepEqual(dropListingUrls(urls), urls);
+  });
+
+  it("returns the input rather than an empty source list", () => {
+    const urls = ["https://www.timescall.com/"];
+    assert.deepEqual(dropListingUrls(urls, watched), urls);
+  });
+});
+
+describe("dropListingUrls section fronts", () => {
+  // The real watch list shape: publishers are watched at their homepage.
+  const watched = ["https://www.timescall.com/", "https://www.longmontcolorado.gov/"];
+
+  it("drops a section front on a watched publisher", () => {
+    const kept = dropListingUrls(
+      [
+        "https://www.timescall.com/sports/high-school-sports/",
+        "https://www.timescall.com/news/crime-public-safety/",
+        "https://leg.colorado.gov/bills/SB21-238",
+      ],
+      watched,
+    );
+    assert.deepEqual(kept, ["https://leg.colorado.gov/bills/SB21-238"]);
+  });
+
+  it("keeps a dated article on that same publisher", () => {
+    const url = "https://www.timescall.com/2026/08/12/longmont-council-ranked-choice-voting/";
+    assert.deepEqual(dropListingUrls([url], watched), [url]);
+  });
+
+  it("keeps a long headline slug with no date in it", () => {
+    const url = "https://www.timescall.com/longmont-council-takes-next-step-toward-rail-tax";
+    assert.deepEqual(dropListingUrls([url], watched), [url]);
+  });
+
+  it("keeps a .gov section page — that is the record index", () => {
+    const urls = [
+      "https://www.longmontcolorado.gov/city-clerk/election-information/",
+      "https://www.longmontcolorado.gov/government/city-council",
+    ];
+    assert.deepEqual(dropListingUrls(urls, watched), urls);
+  });
+
+  it("keeps the same shape on a host we do not watch", () => {
+    const url = "https://www.frprdistrict.com/about-the-district";
+    assert.deepEqual(dropListingUrls([url], watched), [url]);
   });
 });

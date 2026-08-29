@@ -1,6 +1,6 @@
 import { grokChat, parseJsonBlock, providerBudget } from "./ai.ts";
 import { coerceDraft } from "./coerce-draft.ts";
-import { extractReferences, queriesForRef, namedSubjects, primarySourceQueries, preferPrimaryUrls, primarySourceScore } from "./extract.ts";
+import { extractReferences, queriesForRef, looksLikeSectionFront, namedSubjects, primarySourceQueries, preferPrimaryUrls, primarySourceScore } from "./extract.ts";
 import { sha256 } from "./fetch-url.ts";
 import { ingestDocument, mapLimit, type PdfPage } from "./ingest.ts";
 import { rememberCapture } from "./investigate.ts";
@@ -251,6 +251,10 @@ export function isIndexUrl(url: string): boolean {
 export function looksLikeArticleUrl(url: string): boolean {
   try {
     if (isIndexUrl(url)) return false;
+    // `/sports/high-school-sports/` passes every test below: two segments, a
+    // long hyphenated last one. It is still a section front, and linking a
+    // paper's name to it misattributes the story.
+    if (looksLikeSectionFront(url)) return false;
     const path = new URL(url).pathname;
     const parts = path.split("/").filter(Boolean);
     if (parts.length < 2) return false;
@@ -312,20 +316,29 @@ export function linkOutletInBody(body: string, urls: string[]): string {
   for (const url of urls.filter(looksLikeArticleUrl)) {
     if (out.includes(url)) continue;
     const names = outletNamesForHost(url);
-    let linked = false;
     for (const name of names) {
       const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const re = new RegExp(`(?<!\\[)${escaped}(?!]\\()`);
       if (re.test(out) && !out.includes(`](${url})`)) {
         out = out.replace(re, `[${name}](${url})`);
-        linked = true;
         break;
       }
     }
-    if (!linked) {
-      const label = names[0] || describeSourceUrl(url).organization || "original report";
-      out = `${out.trim()}\n\nRead the original: [${label}](${url})`;
-    }
+    /*
+      No "read the original" footer.
+
+      It used to append one for any source URL whose host it could name, on the
+      theory that an uncredited newsroom deserves the link. But "the original"
+      is a claim about where the story came from, and nothing here checks that.
+      A 2026 story about a house explosion ended with "Read the original:
+      Longmont Times-Call" pointing at a 2022 item about a gas main closure that
+      search had swept in — a false attribution printed under the story, in the
+      paper's own voice.
+
+      An outlet is credited when the prose names it, which is the only case
+      where the link is demonstrably about this story. Every other source still
+      appears in the provenance panel, with its title, date and role.
+    */
   }
   return out;
 }
@@ -536,11 +549,32 @@ function blankProvenance(url: string): ProvenanceItem {
   };
 }
 
+/**
+ * A title that is only the page's own hostname carries nothing the URL beneath
+ * it does not already say. The provenance panel then shows a row reading
+ * "www.longmontleader.com · followed" above the words "longmontleader.com",
+ * sitting between two rows that name a real headline and a real newsroom — it
+ * reads as a rendering fault rather than a source.
+ *
+ * When a fetch returns that, fall back to the title derived from the path,
+ * which is usually the article slug and usually the headline.
+ */
+function titleIsJustTheHost(title: string, url: string): boolean {
+  const t = title.trim().toLowerCase().replace(/^www\./, "");
+  if (!t) return true;
+  try {
+    return t === new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return false;
+  }
+}
+
 function finalizeProvenance(item: ProvenanceItem): ProvenanceItem {
   const desc = describeSourceUrl(item.url);
+  const title = titleIsJustTheHost(item.title, item.url) ? desc.title : item.title;
   return {
     ...item,
-    title: item.title || desc.title,
+    title: title || desc.title,
     organization: item.organization || desc.organization,
     role: item.role || "source",
   };

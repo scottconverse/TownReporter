@@ -582,3 +582,76 @@ describe("rankWorthItems", () => {
     assert.equal(ranked[0]!.kind, "disappeared");
   });
 });
+
+describe("linkOutletInBody misattribution", () => {
+  /**
+   * The rail-tax story linked "the Longmont Times-Call reported Thursday" to
+   * the paper's high-school sports section, and ended with "Read the original:
+   * uchealth.org" — a hospital press release with nothing to do with it.
+   */
+  it("does not link a paper's name to one of its section fronts", () => {
+    const body = "The Longmont Times-Call reported Thursday that the board acted.";
+    const out = linkOutletInBody(body, ["https://www.timescall.com/sports/high-school-sports/"]);
+    assert.equal(out, body);
+  });
+
+  it("still links the paper's name to a real article", () => {
+    const url = "https://www.timescall.com/2026/08/28/front-range-rail-sales-tax-ballot/";
+    const out = linkOutletInBody("The Longmont Times-Call reported Thursday.", [url]);
+    assert.ok(out.includes(`](${url})`));
+  });
+
+  it("does not append a read-the-original line for an unrecognised host", () => {
+    const body = "The board referred a sales tax.";
+    const out = linkOutletInBody(body, [
+      "https://www.uchealth.org/newsroom/longs-peak-hospital-expansion-halfway/",
+    ]);
+    assert.doesNotMatch(out, /Read the original/);
+  });
+
+  /**
+   * "The original" is a claim about where the story came from, and nothing
+   * checked it. A 2026 story about a house explosion ended with "Read the
+   * original: Longmont Times-Call" pointing at a 2022 gas-main closure item
+   * that a search had swept into the source list.
+   */
+  it("does not credit a source the story never mentions", () => {
+    const body = "A home exploded on 15th Avenue on Aug. 8.";
+    const stale = "https://www.timescall.com/2022/06/10/closure-of-hover-and-17th-for-gas-main-repair/";
+    const out = linkOutletInBody(body, [stale]);
+    assert.equal(out, body);
+    assert.doesNotMatch(out, /Read the original/);
+  });
+
+  it("still links an outlet the prose does name", () => {
+    const url = "https://www.dailycamera.com/2026/08/28/boulder-county-rail-tax-vote/";
+    const out = linkOutletInBody("The Daily Camera reported the vote.", [url]);
+    assert.match(out, /\[Daily Camera\]\(/);
+  });
+});
+
+describe("provenance titles", () => {
+  const URL_ = "https://www.longmontleader.com/local-news/church-commits-40k-for-san-lazaro";
+
+  /**
+   * A fetch that returns the site's own hostname as the page title produced a
+   * provenance row reading "www.longmontleader.com" above "longmontleader.com",
+   * between two rows naming real headlines. It looked like a rendering fault.
+   */
+  it("replaces a title that is only the hostname", () => {
+    const [item] = provenanceFromUrls([URL_], [{ url: URL_, title: "www.longmontleader.com" }]);
+    assert.notEqual(item!.title.toLowerCase(), "www.longmontleader.com");
+    assert.match(item!.title, /Church Commits/i);
+  });
+
+  it("keeps a real headline exactly as fetched", () => {
+    const title = "Church commits $40,000 toward resident purchase";
+    const [item] = provenanceFromUrls([URL_], [{ url: URL_, title }]);
+    assert.equal(item!.title, title);
+  });
+
+  it("still fills a missing title from the path", () => {
+    const [item] = provenanceFromUrls([URL_]);
+    assert.match(item!.title, /Church Commits/i);
+  });
+});

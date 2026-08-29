@@ -112,11 +112,32 @@ function blankProvenance(url: string): ProvenanceItem {
   };
 }
 
+/**
+ * A title that is only the page's own hostname carries nothing the URL beneath
+ * it does not already say. The provenance panel then shows a row reading
+ * "www.longmontleader.com · followed" above the words "longmontleader.com",
+ * sitting between two rows that name a real headline and a real newsroom — it
+ * reads as a rendering fault rather than a source.
+ *
+ * When a fetch returns that, fall back to the title derived from the path,
+ * which is usually the article slug and usually the headline.
+ */
+function titleIsJustTheHost(title: string, url: string): boolean {
+  const t = title.trim().toLowerCase().replace(/^www\./, "");
+  if (!t) return true;
+  try {
+    return t === new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return false;
+  }
+}
+
 function finalizeProvenance(item: ProvenanceItem): ProvenanceItem {
   const desc = describeSourceUrl(item.url);
+  const title = titleIsJustTheHost(item.title, item.url) ? desc.title : item.title;
   return {
     ...item,
-    title: item.title || desc.title,
+    title: title || desc.title,
     organization: item.organization || desc.organization,
     role: item.role || "source",
   };

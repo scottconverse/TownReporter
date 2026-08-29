@@ -17,13 +17,21 @@ import {
 } from "./schema";
 import { reportAndDraft } from "./report";
 import { webSearch } from "./search-web";
-import { namedSubjects, preferPrimaryUrls } from "./extract";
+import { dropListingUrls, namedSubjects, preferPrimaryUrls } from "./extract";
+import {
+  docCandidateHosts,
+  docIndexPages,
+  isOnSubject,
+  pullQueries,
+  siteOwnDocLinks,
+} from "./pull-plan";
 import {
   applyTodoPatch,
   appendScratch,
   formatPullDump,
   keepHumanTodos,
   machineTodosFrom,
+  packNotes,
   parseNotes,
   toggleTodo,
 } from "./notes";
@@ -622,7 +630,15 @@ export async function performDraftWork(job: DeskJob) {
   });
   if ("error" in reported) throw new Error(reported.error);
 
-  const sourceUrls = JSON.stringify(reported.source_urls.length ? reported.source_urls : urls);
+  // The watch list's own pages are how a lead was spotted, not what it is
+  // sourced to. Drop them and the section/tag fronts before they are recorded.
+  const watched = await sql<{ url: string }>`
+    select url from sources where newsroom_id = ${owned(context)}
+  `;
+  const cited = reported.source_urls.length ? reported.source_urls : urls;
+  const sourceUrls = JSON.stringify(
+    dropListingUrls(cited, watched.map((w) => w.url)),
+  );
   const notes = reported.integrity_notes;
   const provenanceJson = JSON.stringify(reported.provenance).slice(0, 8000);
   const unansweredJson = JSON.stringify(reported.unanswered).slice(0, 2000);
@@ -652,7 +668,7 @@ export async function performDraftWork(job: DeskJob) {
     opened: reported.research_memo?.captured ?? [],
     scratch: prevNotes.scratch,
   };
-  const notesJson = JSON.stringify(nextNotes).slice(0, 16000);
+  const notesJson = packNotes(nextNotes);
 
   await sql`
     insert into drafts (
@@ -711,7 +727,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       add: data.add,
       scratch: data.scratch,
     });
-    const json = JSON.stringify(notes).slice(0, 16000);
+    const json = packNotes(notes);
     await sql`
       update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
     `;
@@ -726,29 +742,115 @@ export const pullTodo = createServerFn({ method: "POST" })
       await assertRate(context.userId, "pull");
       await ensureDraftMemoColumn();
       const sql = await getSql();
-      const rows = await sql<{ notes_json: string | null; headline: string }>`
-        select notes_json, headline from leads
+      const rows = await sql<{ notes_json: string | null; headline: string; source_urls: string }>`
+        select notes_json, headline, source_urls from leads
         where id = ${data.leadId} and newsroom_id = ${owned(context)} limit 1
       `;
       if (!rows[0]) return { ok: false as const, error: "Lead not found" };
       const query = data.query.trim().slice(0, 240);
       if (query.length < 4) return { ok: false as const, error: "That line is too thin to search." };
-      const subjects = namedSubjects(`${rows[0].headline}\n${query}`);
-      let hits: { title: string; url: string; snippet?: string }[] = [];
-      try {
-        hits = await webSearch(query);
-      } catch {
-        hits = [];
+      /*
+        Subjects come from the whole memo, not the headline alone. A headline
+        written for readers — "Longmont is inside the rail district that just
+        sent a sales tax to the ballot" — names no proper noun at all, so the
+        only anchor left was the city, and the pull came back with the city's
+        own unrelated resolutions. The memo names the body: Front Range
+        Passenger Rail District.
+      */
+      const memo = parseNotes(rows[0].notes_json);
+      const subjects = namedSubjects(
+        [rows[0].headline, memo.news, memo.angle, memo.why, query].filter(Boolean).join("\n"),
+      );
+
+      // One line, several short anchored searches — not one 240-character
+      // run-on that matches only its own generic nouns.
+      const queries = pullQueries(query, subjects, PAPER.city);
+      const hits: { title: string; url: string; snippet?: string }[] = [];
+      for (const q of queries) {
+        try {
+          hits.push(...(await webSearch(q)));
+        } catch {
+          /* one dead query must not sink the pull */
+        }
       }
-      const ranked = preferPrimaryUrls(
+
+      /*
+        The lead's URLs still carry the watch-list pages the scan spotted it
+        through. Left in, they made the paper's own homepage the top-ranked
+        place to go looking for a rail district's board packet.
+      */
+      const watchedForPull = await sql<{ url: string }>`
+        select url from sources where newsroom_id = ${owned(context)}
+      `;
+      /*
+        The draft's source list first: it is what the reporting pass actually
+        cited, so it names the issuing body. The lead's own list is the scan's
+        view and is mostly the watch-list page the lead was spotted on.
+      */
+      const draftSrc = await sql<{ source_urls: string }>`
+        select source_urls from drafts
+        where lead_id = ${data.leadId} and user_id = ${context.userId}
+        order by updated_at desc limit 1
+      `;
+      const storyUrls: string[] = [];
+      for (const raw of [draftSrc[0]?.source_urls, rows[0].source_urls]) {
+        if (!raw) continue;
+        try {
+          storyUrls.push(
+            ...dropListingUrls(
+              sanitizePublicUrls(JSON.parse(raw)),
+              watchedForPull.map((w) => w.url),
+              true,
+            ),
+          );
+        } catch {
+          /* a lead with unparseable URLs contributes none */
+        }
+      }
+
+      /*
+        Board packets, agendas and adopted resolutions are usually absent from
+        every search index — they hang off the issuing body's own meetings page.
+        So read that page and take the document links from it.
+      */
+      const indexed: string[] = [];
+      const hosts = docCandidateHosts(
         hits.map((h) => h.url),
+        storyUrls,
+      );
+      for (const page of docIndexPages(hosts)) {
+        try {
+          // `extras` is exactly this: the document and article links the
+          // ingester already found on the page it fetched.
+          const got = await ingestDocument(page);
+          indexed.push(...siteOwnDocLinks(got.extras, page));
+        } catch {
+          /* a body without that page is the normal case */
+        }
+        if (indexed.length >= 12) break;
+      }
+
+      const ranked = preferPrimaryUrls(
+        [...new Set([...indexed, ...hits.map((h) => h.url)])],
         subjects,
-      ).slice(0, 3);
+      ).slice(0, 8);
       const docs: { title: string; url: string; excerpt: string }[] = [];
+      let offSubject = 0;
       for (const url of ranked) {
+        if (docs.length >= 4) break;
         try {
           const got = await ingestDocument(url);
           if (!got.text || got.text.trim().length < 40) continue;
+          /*
+            A document that names neither the city, the state, nor any subject
+            of the story is not the record. Three California parcel-tax PDFs
+            were written into a Longmont rail story's notes before this gate
+            existed, and nothing downstream could tell they did not belong.
+          */
+          if (!isOnSubject(got.text, subjects, PAPER.city, PAPER.state)) {
+            offSubject += 1;
+            continue;
+          }
           docs.push({
             title: (got.title || url).slice(0, 160),
             url,
@@ -758,25 +860,30 @@ export const pullTodo = createServerFn({ method: "POST" })
           /* skip a dead URL */
         }
       }
+
       const dump = formatPullDump(query, docs);
-      let notes = parseNotes(rows[0].notes_json);
+      let notes = memo;
       notes = appendScratch(notes, dump);
       if (typeof data.index === "number" && notes.todo[data.index] && !notes.todo[data.index].done) {
         notes = toggleTodo(notes, data.index);
       }
+      /*
+        Newest first. The cap used to drop from the end, so once a lead had
+        collected 16 pages every later pull added nothing and said so nowhere.
+      */
       const opened = [
-        ...notes.opened,
         ...docs.map((d) => ({ url: d.url, title: d.title })),
+        ...notes.opened,
       ]
         .filter((o, i, arr) => arr.findIndex((x) => x.url === o.url) === i)
-        .slice(0, 16);
+        .slice(0, 24);
       notes = { ...notes, opened };
-      const json = JSON.stringify(notes).slice(0, 16000);
+      const json = packNotes(notes);
       await sql`
         update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
       `;
       await audit(context.userId, "pull", query.slice(0, 200));
-      return { ok: true as const, notes, dump, found: docs.length };
+      return { ok: true as const, notes, dump, found: docs.length, offSubject };
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Pull failed";
       return { ok: false as const, error: raw };
@@ -829,95 +936,108 @@ export const setLeadStatus = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+/**
+ * Publishing, separated from the server function that wraps it.
+ *
+ * Same shape as `performScanWork` and `performDraftWork`: the transport layer
+ * owns authentication, this owns the work. It is also the only way to exercise
+ * a publish end to end without a browser session, which is how the desk's own
+ * walkthrough is run.
+ */
+export async function performPublish(
+  context: { userId: string; newsroomId?: number },
+  leadId: number,
+): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
+  const already = await getSql().then((sql) =>
+    sql<{ slug: string }>`
+      select slug from articles
+      where lead_id = ${leadId} and newsroom_id = ${owned(context)} and status = 'published'
+      limit 1
+    `,
+  );
+  if (already[0]) return { ok: true as const, slug: already[0].slug };
+
+  const leads = await getSql().then((sql) =>
+    sql<LeadRow>`
+      select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at
+      from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
+    `,
+  );
+  const lead = leads[0];
+  if (!lead) return { ok: false as const, error: "Lead not found" };
+  if (lead.status === "killed") {
+    return { ok: false as const, error: "Killed leads cannot print." };
+  }
+  if (lead.status === "held") {
+    return { ok: false as const, error: "Un-hold this lead before publishing. Working notes stay private until then." };
+  }
+
+  const drafts = await getSql().then((sql) =>
+    sql<DraftRow>`
+      select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
+             provenance_json, form, found_note, unanswered
+      from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
+      order by updated_at desc limit 1
+    `,
+  );
+  const row = drafts[0];
+  if (!row) return { ok: false as const, error: "Draft this lead before publishing." };
+  const draft = unpackStoredDraft(row);
+  draft.body = stripReporterNotebook(draft.body);
+  let provenanceJson = row.provenance_json && row.provenance_json !== "[]" ? row.provenance_json : "";
+  if (!provenanceJson) {
+    provenanceJson = JSON.stringify(provenanceFromUrls(parseUrlList(draft.source_urls)));
+  }
+
+  const baseSlug = slugify(draft.headline);
+  let slug = baseSlug;
+
+  const published = await withTransaction(async (sql) => {
+    // `articles.slug` is UNIQUE. The old code checked once and, on a clash,
+    // appended the lead id without re-checking — so a second collision (a
+    // headline that slugifies to an existing "<base>-<leadId>", or a
+    // re-publish after the first article was deleted) hit the constraint and
+    // threw a raw 500 out of the server function. Keep looking until free.
+    slug = baseSlug;
+    for (let n = 0; n < 50; n += 1) {
+      const clash = await sql<{ slug: string }>`
+        select slug from articles where slug = ${slug} limit 1
+      `;
+      if (!clash[0]) break;
+      slug = n === 0 ? `${baseSlug}-${leadId}` : `${baseSlug}-${leadId}-${n + 1}`;
+    }
+    await sql`
+      insert into articles (
+        user_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
+        provenance_json, form, found_note, unanswered
+      )
+      values (
+        ${context.userId}, ${leadId}, ${slug}, ${draft.headline}, ${draft.dek},
+        ${draft.body}, ${draft.topic}, ${draft.source_urls}, 'published', now(),
+        ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}
+      )
+    `;
+    await sql`
+      update leads set status = 'published' where id = ${leadId} and newsroom_id = ${owned(context)}
+    `;
+    const entities = [draft.topic, ...draft.headline.split(/[:,—-]/).slice(0, 2)];
+    for (const entity of entities.map((e) => e.trim()).filter((e) => e.length > 2)) {
+      await sql`
+        insert into beat_memory (user_id, entity, last_angle)
+        values (${context.userId}, ${entity.slice(0, 80)}, ${draft.dek.slice(0, 200)})
+      `;
+    }
+    return slug;
+  });
+
+  await audit(context.userId, "publish", published);
+  return { ok: true as const, slug: published };
+}
+
 export const publishLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((leadId: number) => leadId)
-  .handler(async ({ context, data: leadId }) => {
-    const already = await getSql().then((sql) =>
-      sql<{ slug: string }>`
-        select slug from articles
-        where lead_id = ${leadId} and newsroom_id = ${owned(context)} and status = 'published'
-        limit 1
-      `,
-    );
-    if (already[0]) return { ok: true as const, slug: already[0].slug };
-
-    const leads = await getSql().then((sql) =>
-      sql<LeadRow>`
-        select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at
-        from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
-      `,
-    );
-    const lead = leads[0];
-    if (!lead) return { ok: false as const, error: "Lead not found" };
-    if (lead.status === "killed") {
-      return { ok: false as const, error: "Killed leads cannot print." };
-    }
-    if (lead.status === "held") {
-      return { ok: false as const, error: "Un-hold this lead before publishing. Working notes stay private until then." };
-    }
-
-    const drafts = await getSql().then((sql) =>
-      sql<DraftRow>`
-        select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
-               provenance_json, form, found_note, unanswered
-        from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
-        order by updated_at desc limit 1
-      `,
-    );
-    const row = drafts[0];
-    if (!row) return { ok: false as const, error: "Draft this lead before publishing." };
-    const draft = unpackStoredDraft(row);
-    draft.body = stripReporterNotebook(draft.body);
-    let provenanceJson = row.provenance_json && row.provenance_json !== "[]" ? row.provenance_json : "";
-    if (!provenanceJson) {
-      provenanceJson = JSON.stringify(provenanceFromUrls(parseUrlList(draft.source_urls)));
-    }
-
-    const baseSlug = slugify(draft.headline);
-    let slug = baseSlug;
-
-    const published = await withTransaction(async (sql) => {
-      // `articles.slug` is UNIQUE. The old code checked once and, on a clash,
-      // appended the lead id without re-checking — so a second collision (a
-      // headline that slugifies to an existing "<base>-<leadId>", or a
-      // re-publish after the first article was deleted) hit the constraint and
-      // threw a raw 500 out of the server function. Keep looking until free.
-      slug = baseSlug;
-      for (let n = 0; n < 50; n += 1) {
-        const clash = await sql<{ slug: string }>`
-          select slug from articles where slug = ${slug} limit 1
-        `;
-        if (!clash[0]) break;
-        slug = n === 0 ? `${baseSlug}-${leadId}` : `${baseSlug}-${leadId}-${n + 1}`;
-      }
-      await sql`
-        insert into articles (
-          user_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
-          provenance_json, form, found_note, unanswered
-        )
-        values (
-          ${context.userId}, ${leadId}, ${slug}, ${draft.headline}, ${draft.dek},
-          ${draft.body}, ${draft.topic}, ${draft.source_urls}, 'published', now(),
-          ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}
-        )
-      `;
-      await sql`
-        update leads set status = 'published' where id = ${leadId} and newsroom_id = ${owned(context)}
-      `;
-      const entities = [draft.topic, ...draft.headline.split(/[:,—-]/).slice(0, 2)];
-      for (const entity of entities.map((e) => e.trim()).filter((e) => e.length > 2)) {
-        await sql`
-          insert into beat_memory (user_id, entity, last_angle)
-          values (${context.userId}, ${entity.slice(0, 80)}, ${draft.dek.slice(0, 200)})
-        `;
-      }
-      return slug;
-    });
-
-    await audit(context.userId, "publish", published);
-    return { ok: true as const, slug: published };
-  });
+  .handler(async ({ context, data: leadId }) => performPublish(context, leadId));
 
 export const addCorrection = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])

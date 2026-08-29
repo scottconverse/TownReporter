@@ -1,4 +1,4 @@
-import { fetchPublicHttp } from "./fetch-url.ts";
+import { assertPublicHttpUrl, fetchPublicHttp, resolveFetch } from "./fetch-url.ts";
 import { assertHttpUrl } from "./url-guard.ts";
 import { classifySearchHtml, type SearchState } from "./fetch-outcome.ts";
 
@@ -109,6 +109,120 @@ export function parseWikipediaOpenSearch(raw: string): WebHit[] {
   }
 }
 
+/**
+ * Exa's hosted MCP endpoint. No API key.
+ *
+ * First in the chain because it is the only provider measured to return the
+ * primary document rather than something merely topical. On "CDOT CO 119 Hover
+ * Street left turn closure" it returned CDOT's own project page; Bing returned
+ * front.com and a dictionary entry for "front". On the council-minutes query it
+ * returned the city clerk's agenda portal and the PrimeGov meeting pages —
+ * exactly the records that story was about.
+ *
+ * It is built for semantic queries ("describe the ideal page, not keywords"),
+ * which is how the research pass already writes its lanes.
+ *
+ * Scraped engines stay behind it: this is a third party seeing every query, and
+ * its free tier has no documented ceiling, so the desk must still work when it
+ * refuses.
+ */
+export const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
+
+/** Exa returns `Title:` / `URL:` / `Highlights:` blocks separated by `---`. */
+export function parseExaBlocks(text: string): WebHit[] {
+  const hits: WebHit[] = [];
+  const seen = new Set<string>();
+  for (const block of text.split(/^---$/m)) {
+    const url = block.match(/^URL:\s*(\S+)\s*$/m)?.[1];
+    if (!url) continue;
+    try {
+      assertHttpUrl(url);
+    } catch {
+      continue;
+    }
+    if (seen.has(url)) continue;
+    seen.add(url);
+    const title = block.match(/^Title:\s*(.+?)\s*$/m)?.[1] ?? "";
+    const highlights = block.split(/^Highlights:\s*$/m)[1] ?? "";
+    hits.push({
+      title: title || new URL(url).hostname,
+      url,
+      snippet: highlights.replace(/\.\.\./g, " ").replace(/\s+/g, " ").trim().slice(0, 400),
+    });
+    if (hits.length >= 8) break;
+  }
+  return hits;
+}
+
+/** Pull the tool payload out of an MCP server-sent-events response. */
+export function readMcpSseText(raw: string): string | null {
+  for (const line of raw.split("\n")) {
+    if (!line.startsWith("data: ")) continue;
+    try {
+      const env = JSON.parse(line.slice(6)) as {
+        result?: { isError?: boolean; content?: { type: string; text?: string }[] };
+        error?: { message?: string };
+      };
+      if (env.error) return null;
+      if (env.result?.isError) return null;
+      const text = env.result?.content?.find((c) => c.type === "text")?.text;
+      if (typeof text === "string") return text;
+    } catch {
+      /* not the data frame we want */
+    }
+  }
+  return null;
+}
+
+async function searchExa(query: string): Promise<SearchAttempt> {
+  const provider = "exa-mcp";
+  try {
+    const url = await assertPublicHttpUrl(EXA_MCP_URL);
+    const doFetch = await resolveFetch();
+    const res = await doFetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // The endpoint answers as SSE; without this it may refuse.
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "web_search_exa", arguments: { query, numResults: 8 } },
+      }),
+      signal: AbortSignal.timeout(20_000),
+    } as RequestInit);
+    if (!res.ok) {
+      return {
+        state: res.status === 429 ? "SEARCH_BLOCKED" : "SEARCH_FAILED_PROVIDER",
+        hits: [],
+        provider,
+        error: `HTTP ${res.status}`,
+      };
+    }
+    const text = readMcpSseText(await res.text());
+    if (text === null) {
+      return { state: "SEARCH_FAILED_PARSE", hits: [], provider };
+    }
+    const hits = parseExaBlocks(text);
+    return {
+      state: hits.length ? "SEARCH_SUCCESS_RESULTS" : "SEARCH_SUCCESS_ZERO_RESULTS",
+      hits,
+      provider,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "network";
+    return {
+      state: /timeout|aborted/i.test(msg) ? "SEARCH_TIMEOUT" : "SEARCH_FAILED_NETWORK",
+      hits: [],
+      provider,
+      error: msg,
+    };
+  }
+}
+
 async function searchDdg(query: string): Promise<SearchAttempt> {
   const url = new URL("https://html.duckduckgo.com/html/");
   url.searchParams.set("q", query);
@@ -189,13 +303,40 @@ export function pickSearchResult(attempts: SearchAttempt[]): SearchAttempt {
   return { ...attempts[attempts.length - 1]!, lineage: attempts };
 }
 
+/**
+ * Bing no longer links results directly. Every one is wrapped in a click
+ * tracker — `https://www.bing.com/ck/a?…&u=a1<base64url>&…` — with the real
+ * destination base64url-encoded in `u`, after a literal `a1` prefix.
+ *
+ * The parser discarded anything on `bing.com`, which after this change meant
+ * every result on the page. Search returned zero for everything, silently, and
+ * the desk lost the ability to find any document it was not handed. A draft
+ * would ask for a board's referral resolution by name and then have no way to
+ * look for it.
+ */
+export function unwrapBingRedirect(raw: string): string {
+  if (!/bing\.com\/ck\/a/i.test(raw)) return raw;
+  // The href arrives HTML-escaped, so `&amp;u=` has to become `&u=` first.
+  const href = raw.replace(/&amp;/gi, "&");
+  const enc = href.match(/[?&]u=a1([A-Za-z0-9_-]+)/)?.[1];
+  if (!enc) return raw;
+  try {
+    const b64 = enc.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const decoded = atob(padded);
+    return /^https?:\/\//i.test(decoded) ? decoded : raw;
+  } catch {
+    return raw;
+  }
+}
+
 export function parseBingHtml(html: string): WebHit[] {
   const hits: WebHit[] = [];
   const seen = new Set<string>();
   const re = /<h2[^>]*>\s*<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
-    const url = m[1]!;
+    const url = unwrapBingRedirect(m[1]!);
     if (/bing\.com|microsoft\.com|msn\.com/i.test(url)) continue;
     if (seen.has(url)) continue;
     try {
@@ -296,7 +437,7 @@ export async function searchWithFallback(query: string): Promise<SearchAttempt> 
   const q = query.trim().slice(0, 180);
   if (!q) return { state: "SEARCH_SUCCESS_ZERO_RESULTS", hits: [], provider: "none", lineage: [] };
   const lineage: SearchAttempt[] = [];
-  for (const fn of [searchDdg, searchDdgLite, searchBing, searchBrave, searchWikipedia]) {
+  for (const fn of [searchExa, searchDdg, searchDdgLite, searchBing, searchBrave, searchWikipedia]) {
     const attempt = await fn(q);
     lineage.push(attempt);
     if (attempt.state === "SEARCH_SUCCESS_RESULTS") return { ...attempt, lineage };

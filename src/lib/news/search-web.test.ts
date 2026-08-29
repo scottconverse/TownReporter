@@ -5,9 +5,78 @@ import {
   parseBingHtml,
   parseBraveHtml,
   parseDdgHtml,
+  parseExaBlocks,
   parseWaybackCdx,
   parseWikipediaOpenSearch,
+  readMcpSseText,
+  unwrapBingRedirect,
 } from "./search-web.ts";
+
+describe("parseExaBlocks", () => {
+  it("reads the block shape Exa's MCP returns", () => {
+    const text = [
+      "Title: CO 119 Mobility Improvements",
+      "URL: https://www.codot.gov/projects/co119mobility",
+      "Published: 2026-02-11",
+      "Highlights:",
+      "The Hover Street ... intersection closes to left turns ...",
+      "---",
+      "Title: Longmont Meeting Portal",
+      "URL: https://longmont.primegov.com/Portal/Meeting?meetingTemplateId=1",
+      "Highlights:",
+      "City Council regular session",
+    ].join("\n");
+    const hits = parseExaBlocks(text);
+    assert.equal(hits.length, 2);
+    assert.equal(hits[0]!.url, "https://www.codot.gov/projects/co119mobility");
+    assert.match(hits[0]!.title, /CO 119/);
+    assert.match(hits[0]!.snippet, /Hover Street/);
+    assert.ok(hits[1]!.url.includes("primegov.com"));
+  });
+
+  it("drops blocks with no URL and de-duplicates", () => {
+    const text = [
+      "Title: no url here",
+      "---",
+      "URL: https://example.gov/a",
+      "---",
+      "URL: https://example.gov/a",
+    ].join("\n");
+    assert.equal(parseExaBlocks(text).length, 1);
+  });
+
+  it("rejects a non-http destination rather than passing it on", () => {
+    assert.deepEqual(parseExaBlocks("URL: file:///c:/windows/win.ini"), []);
+  });
+});
+
+describe("readMcpSseText", () => {
+  it("pulls the tool text out of the SSE data frame", () => {
+    const raw = [
+      "event: message",
+      `data: ${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        result: { content: [{ type: "text", text: "URL: https://example.gov/a" }] },
+      })}`,
+      "",
+    ].join("\n");
+    assert.equal(readMcpSseText(raw), "URL: https://example.gov/a");
+  });
+
+  it("returns null on a JSON-RPC error or a tool error", () => {
+    const err = `data: ${JSON.stringify({ error: { message: "rate limited" } })}`;
+    assert.equal(readMcpSseText(err), null);
+    const toolErr = `data: ${JSON.stringify({
+      result: { isError: true, content: [{ type: "text", text: "boom" }] },
+    })}`;
+    assert.equal(readMcpSseText(toolErr), null);
+  });
+
+  it("returns null when nothing parses, rather than throwing", () => {
+    assert.equal(readMcpSseText("data: not-json\n\nhello"), null);
+  });
+});
 
 describe("parseDdgHtml", () => {
   it("unwraps uddg result URLs and drops duckduckgo chrome", () => {
@@ -34,6 +103,49 @@ describe("parseBingHtml", () => {
     assert.ok(hits.some((h) => h.url.includes("sos.state.co.us")));
     assert.ok(hits.some((h) => h.url.includes("2024-19")));
     assert.equal(hits.some((h) => /bing\.com/.test(h.url)), false);
+  });
+
+  /**
+   * The shape Bing actually serves. Every result is a click tracker with the
+   * destination base64url-encoded after a literal `a1`, and the href arrives
+   * HTML-escaped. Treating those as Bing chrome discarded the entire page, so
+   * search returned zero for every query, silently.
+   */
+  it("unwraps the click tracker Bing really uses", () => {
+    // u=a1 + base64url("https://longmontcolorado.gov/")
+    const html = `
+      <h2 class=""><a target="_blank" href="https://www.bing.com/ck/a?!&amp;&amp;p=6a8a&amp;ptn=3&amp;u=a1aHR0cHM6Ly9sb25nbW9udGNvbG9yYWRvLmdvdi8&amp;ntb=1">City of Longmont</a></h2>
+    `;
+    const hits = parseBingHtml(html);
+    assert.equal(hits.length, 1, "a wrapped result must not be discarded");
+    assert.equal(hits[0]?.url, "https://longmontcolorado.gov/");
+    assert.equal(hits[0]?.title, "City of Longmont");
+  });
+
+  it("still drops a tracker whose destination cannot be decoded", () => {
+    const html = `<h2><a href="https://www.bing.com/ck/a?ptn=3&amp;ntb=1">no destination</a></h2>`;
+    assert.equal(parseBingHtml(html).length, 0);
+  });
+});
+
+describe("unwrapBingRedirect", () => {
+  it("decodes a base64url destination", () => {
+    const wrapped =
+      "https://www.bing.com/ck/a?!&amp;p=x&amp;u=a1aHR0cHM6Ly9leGFtcGxlLmdvdi9hZ2VuZGE&amp;ntb=1";
+    assert.equal(unwrapBingRedirect(wrapped), "https://example.gov/agenda");
+  });
+
+  it("leaves an ordinary URL alone", () => {
+    assert.equal(
+      unwrapBingRedirect("https://longmontcolorado.gov/city-clerk/"),
+      "https://longmontcolorado.gov/city-clerk/",
+    );
+  });
+
+  it("returns the input when the payload is not a URL", () => {
+    // base64url("not a url")
+    const wrapped = "https://www.bing.com/ck/a?u=a1bm90IGEgdXJs";
+    assert.match(unwrapBingRedirect(wrapped), /bing\.com/);
   });
 });
 
