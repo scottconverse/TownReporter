@@ -21,12 +21,16 @@ Nothing listens on a port the internet can reach. The machine dials **out** to
 Cloudflare and holds that connection open, so the home IP never appears in DNS
 and the router has no port forwarded.
 
-**On the local network it is a different story.** The server binds `0.0.0.0:3000`,
-not loopback, so any device on this Wi-Fi can reach the paper and the desk
-directly at `http://<this-machine>:3000` — sign-in still applies, but Cloudflare
-is not in front of it. Measured, not assumed: `netstat` shows `0.0.0.0:3000`
-LISTENING, and a request to the LAN address answers 200. If you want the tunnel
-to be the only route, bind the server to `127.0.0.1` and restart it.
+The local network used to be a different story: the server bound `0.0.0.0:3000`
+and answered on the LAN, so any device on this Wi-Fi reached the paper and the
+desk without passing Cloudflare. `HOST=127.0.0.1` in `.env` closes that, and it
+is set. Measured after the change: `netstat` shows `127.0.0.1:3000` and nothing
+else, the LAN address refuses the connection, and the public site still answers
+200 — which is the point, because the tunnel dials out from this machine and
+reaches the server over loopback like anything else here.
+
+If you ever need the LAN back (testing on a phone, say), remove that line and
+restart.
 
 ---
 

@@ -658,6 +658,7 @@ flowchart TB
 | `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL` | Any OpenAI-compatible endpoint |
 | `XAI_API_KEY` | Grok |
 | `CRON_SECRET` | Lets an external monitor ping the job runner |
+| `HOST` | What the server binds to. Unset means every interface, LAN included. Set `127.0.0.1` when a tunnel or proxy fronts it. |
 | `VITE_AUTH_ENABLED=false` | No login at all. Local only. Never on a public host. |
 
 ## Job kinds
