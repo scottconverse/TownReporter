@@ -93,6 +93,31 @@ export const CLAUDE_CLI_MISSING =
   "Claude Code CLI not found. Install it (npm i -g @anthropic-ai/claude-code) and sign in with `claude`, set CLAUDE_CLI_PATH to its binary, or set ANTHROPIC_API_KEY instead.";
 
 /**
+ * End a spawned CLI and everything it started.
+ *
+ * `child.kill()` signals only the process we spawned. On Windows the `claude`
+ * launcher owns the session in a child of its own, which survives — an Opus
+ * session with nobody left to read its answer, still billing. `taskkill /T`
+ * takes the tree. Elsewhere, killing the process group does the same job.
+ */
+function killTree(child: { pid?: number; kill: (sig?: NodeJS.Signals) => boolean }) {
+  const pid = child.pid;
+  if (pid && process.platform === "win32") {
+    try {
+      spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { windowsHide: true });
+      return;
+    } catch {
+      /* fall through to the plain kill */
+    }
+  }
+  try {
+    child.kill();
+  } catch {
+    /* already gone */
+  }
+}
+
+/**
  * One prompt, one answer. The user text goes over stdin, never argv: the desk
  * sends packs up to ~28k characters and Windows caps a command line at ~32k.
  */
@@ -176,8 +201,28 @@ export async function claudeCodeChat(opts: {
     };
 
     const timer = setTimeout(() => {
-      child.kill();
-      finish({ ok: false, error: "Claude Code request timed out" });
+      /*
+        Kill the tree, not the shim.
+
+        `claude` on Windows is a Node process that owns the real session. A bare
+        kill() takes the parent and leaves the session running, still spending,
+        with nothing left to read its answer.
+      */
+      killTree(child);
+      /*
+        Say what was happening when the clock ran out.
+
+        The first timeout on the Opinion desk reported four words and threw away
+        both streams, so a thirty-minute failure produced no evidence at all.
+        A run that has written nothing to either stream is a different fault
+        from one that was mid-answer.
+      */
+      const tail = stderr.trim().split("\n").pop()?.slice(0, 200) ?? "";
+      const seen = `${Math.round(opts.timeoutMs / 1000)}s, ${stdout.length} bytes out`;
+      finish({
+        ok: false,
+        error: `Claude Code request timed out after ${seen}${tail ? ` — ${tail}` : ""}`,
+      });
     }, opts.timeoutMs);
 
     child.stdout?.on("data", (d) => {
