@@ -197,3 +197,35 @@ test("every test file on disk is discovered by npm test", () => {
   assert.match(cmd, /src\/\*\*\/\*\.test\.ts/, "the src glob must be present");
   assert.match(cmd, /scripts\/\*\*\/\*\.test\.mjs/, "the scripts glob must be present");
 });
+
+/*
+  CI must build, boot and open a browser.
+
+  Two release-blocking defects shipped past a green pipeline because it ran
+  typecheck, unit tests and a lifecycle script against `npm run dev` — and
+  never ran `npm run build`, never booted `.output`, and never loaded a page in
+  a browser. Every server response was 200 while the client bundle threw and
+  the sign-in form never rendered.
+
+  Both modes are required. I proved the difference deliberately: with
+  node:crypto reintroduced into the client graph, the built-server smoke passed
+  and the dev-mode smoke failed with the exact externalization error. A
+  built-only check would have shipped the Blocker again.
+
+  Audit finding TE-05.
+*/
+test("CI builds, boots and smoke-tests in a browser", () => {
+  const ci = readFileSync(join(ROOT, ".github", "workflows", "ci.yml"), "utf8");
+  assert.match(ci, /npm run build/, "CI must build");
+  assert.match(ci, /npm start/, "CI must boot the built server");
+  assert.match(ci, /smoke-built-server\.mjs/, "CI must run the browser smoke");
+  assert.match(ci, /smoke-dev:/, "CI must smoke the documented dev path too");
+  assert.match(ci, /smoke-built:/, "CI must smoke the built server too");
+});
+
+test("the smoke script actually opens a browser", () => {
+  const smoke = readFileSync(join(ROOT, "scripts", "smoke-built-server.mjs"), "utf8");
+  assert.match(smoke, /from "playwright"/, "a fetch-only smoke cannot see a dead client");
+  assert.match(smoke, /pageerror|console/, "it must read the console");
+  assert.match(smoke, /Opening/, "it must catch the hydration dead-end specifically");
+});

@@ -48,3 +48,77 @@ jobs:
             exit 1
           }
           node scripts/lifecycle-e2e.mjs
+
+  # The gap that let two Blockers past a green pipeline.
+  #
+  # CI ran typecheck, the unit suite, and a lifecycle test against `npm run
+  # dev`. It never ran `npm run build`, never booted `.output`, and never
+  # opened a page in a browser. A 200 is not proof a page works: the server can
+  # answer perfectly while the client bundle throws and the reader sees a
+  # spinner forever. That is exactly how `node:crypto` reached the client and
+  # left the documented onboarding path dead.
+  #
+  # Both modes run, because they fail differently. The dev-mode job is the one
+  # that catches externalization; a production build silently tolerated the
+  # same defect when I tested it deliberately.
+
+  smoke-built:
+    name: Built server boots and serves
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Boot the built server and smoke it
+        env:
+          BETTER_AUTH_SECRET: ci-smoke-secret-not-for-production
+          PORT: "3000"
+          HOST: 127.0.0.1
+          SMOKE_BASE_URL: http://127.0.0.1:3000
+          # No provider, on purpose: the first-run state a new operator meets.
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: |
+          npm start > /tmp/built.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3000/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3000/ || {
+            echo "built server did not come up"; tail -n 80 /tmp/built.log; exit 1;
+          }
+          node scripts/smoke-built-server.mjs
+
+  smoke-dev:
+    name: Documented dev path works in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run the README's own quick start, then open it
+        env:
+          BETTER_AUTH_SECRET: ci-smoke-secret-not-for-production
+          SMOKE_BASE_URL: http://127.0.0.1:8080
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: |
+          cp .env.example .env
+          npm run dev > /tmp/dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ || {
+            echo "dev server did not come up"; tail -n 80 /tmp/dev.log; exit 1;
+          }
+          node scripts/smoke-built-server.mjs
