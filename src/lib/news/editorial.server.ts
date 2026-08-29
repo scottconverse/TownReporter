@@ -38,7 +38,24 @@ import {
  * This is a ceiling, not a target. Nothing waits on it: the desk enqueues a job
  * and returns at once, and the page counts up while it works.
  */
-const EDITORIAL_TIMEOUT_MS = 2_700_000;
+const EDITORIAL_TIMEOUT_DEFAULT_MS = 2_700_000;
+
+/**
+ * Overridable, because the manual told operators they could.
+ *
+ * docs/editor.md said "the operator can raise EDITORIAL_TIMEOUT_MS" and no
+ * such variable existed — I invented it while writing the troubleshooting
+ * table, and an audit caught it (TW-003). Implementing it is the better fix
+ * than deleting the sentence: the spread between measured runs was 9m53s to
+ * over 30 minutes, so a slower box genuinely may need more.
+ *
+ * Floored at a minute so a typo cannot make every editorial fail instantly.
+ */
+function editorialTimeoutMs(): number {
+  const raw = process.env.EDITORIAL_TIMEOUT_MS?.trim();
+  const parsed = raw && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed >= 60_000 ? parsed : EDITORIAL_TIMEOUT_DEFAULT_MS;
+}
 
 export async function ensureEditorialSchema() {
   const sql = await getSql();
@@ -121,7 +138,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
     // writing IS the product; it is not the place to save four dollars.
     model: process.env.TOWNREPORTER_EDITORIAL_MODEL?.trim() || "claude-opus-5",
     allowedTools: EDITORIAL_TOOLS,
-    timeoutMs: EDITORIAL_TIMEOUT_MS,
+    timeoutMs: editorialTimeoutMs(),
   });
   if (!out.ok) return { ok: false, error: out.error };
 

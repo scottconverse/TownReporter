@@ -9,6 +9,8 @@
   ASCII only: Windows PowerShell 5.1 reads a BOM-less UTF-8 script as ANSI, so
   anything fancier comes out as mojibake in a console window.
 #>
+
+. (Join-Path $PSScriptRoot "lib-port.ps1")
 $ErrorActionPreference = "SilentlyContinue"
 $app = Split-Path -Parent $PSScriptRoot
 

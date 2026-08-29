@@ -25,6 +25,8 @@
   wrote "app DOWN" and nothing else, which was indistinguishable from a broken
   probe -- and that is exactly what it turned out to be.
 #>
+
+. (Join-Path $PSScriptRoot "lib-port.ps1")
 $ErrorActionPreference = "Stop"
 $app = Split-Path -Parent $PSScriptRoot
 $logDir = Join-Path $app "logs"
@@ -68,7 +70,7 @@ if (-not $pgUp) {
 # --- App ------------------------------------------------------------------
 # A port being open is not enough: a node process can hold 3000 while serving
 # errors. Ask for a real page.
-$appPort = Test-Port 3000
+$appPort = Test-Port $port
 $appCode = 0
 $appError = ""
 if ($appPort) {
@@ -112,8 +114,8 @@ if (-not $appHealthy) {
         -ArgumentList "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", `
                       "-File", (Join-Path $PSScriptRoot "start-townreporter.ps1") `
         -WindowStyle Hidden
-      for ($i = 0; $i -lt 45 -and -not (Test-Port 3000); $i++) { Start-Sleep -Seconds 1 }
-      if (Test-Port 3000) { $repaired += "app" } else { Write-Log "app: still no listener after start" }
+      for ($i = 0; $i -lt 45 -and -not (Test-Port $port); $i++) { Start-Sleep -Seconds 1 }
+      if (Test-Port $port) { $repaired += "app" } else { Write-Log "app: still no listener after start" }
     } catch {
       Write-Log "app: start failed: $($_.Exception.Message)"
     }

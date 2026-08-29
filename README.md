@@ -272,7 +272,7 @@ No. [docs/index.html](docs/index.html) is a static landing page. The app is Node
 npm test
 ```
 
-No network, no token spend. Meeting ingest, retrieval, draft stripping, Mountain Time dates, printed-headline collapse, version lock, auth, and Dark Desk loop coverage live in `src/lib/news/*.test.ts`.
+Deterministic, offline and free by default — no provider is contacted and nothing is billed. The live model evaluation is separate and opt-in (`RUN_LIVE_MODEL_TESTS=1 npm run test:live-model`), because a default suite that calls a paid API is neither reproducible nor free. Meeting ingest, retrieval, draft stripping, Mountain Time dates, printed-headline collapse, version lock, auth, and Dark Desk loop coverage live in `src/lib/news/*.test.ts`.
 
 ---
 

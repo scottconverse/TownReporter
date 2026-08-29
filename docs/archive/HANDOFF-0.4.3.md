@@ -1,3 +1,20 @@
+> **ARCHIVED — historical, describes 0.4.3, superseded by 0.5.1.**
+>
+> This was the product-memory handoff written for an agent taking the project
+> over at 0.4.3. It is kept because its reasoning is still worth reading, not
+> because it is accurate: the release, the provider architecture, the desk and
+> the operations layer have all moved since.
+>
+> An audit found it contradicting the current release and provider design
+> (TW-007). It is archived rather than rewritten because a second
+> product-memory file alongside the manual is what let it drift in the first
+> place — two documents describing one system, and only one of them maintained.
+>
+> **For the current system, read [docs/manual.md](../manual.md).**
+> For what changed, read [CHANGELOG.md](../../CHANGELOG.md).
+
+---
+
 # TownReporter — handoff for the Grok taking this over
 
 Paste this as your first working context. The repo is the truth; this is the product memory so you do not spend a day re-deriving it.

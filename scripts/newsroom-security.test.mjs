@@ -253,3 +253,39 @@ test("CI walks the 0.5.1 desk flows in a browser", () => {
     assert.ok(walk.includes(flow), `the walk must cover: ${flow}`);
   }
 });
+
+/*
+  .env.example is the inventory docs/setup.md says it is.
+
+  An audit found several variables the code reads that the example file never
+  mentioned — including EDITORIAL_TIMEOUT_MS, which the manual told operators
+  to raise while the code ignored it entirely. A config file that lists some of
+  the settings is worse than none: it reads as complete. Audit finding TW-006.
+
+  OS-provided variables are excluded; nobody sets HOME in a .env.
+*/
+test(".env.example lists every setting the code reads", () => {
+  const OS_PROVIDED = new Set(["APPDATA", "HOME", "USERPROFILE", "TEMP", "TMPDIR", "NODE_ENV"]);
+  const example = readFileSync(join(ROOT, ".env.example"), "utf8");
+  const declared = new Set(
+    [...example.matchAll(/^#?\s*([A-Z][A-Z0-9_]{3,})\s*=/gm)].map((m) => m[1]),
+  );
+
+  const srcDir = join(ROOT, "src");
+  const read = new Set();
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.tsx?$/.test(entry.name) && !/\.test\./.test(entry.name)) {
+        const text = readFileSync(full, "utf8");
+        for (const m of text.matchAll(/process\.env\.([A-Z][A-Z0-9_]{3,})/g)) read.add(m[1]);
+        for (const m of text.matchAll(/\benv\("([A-Z][A-Z0-9_]{3,})"\)/g)) read.add(m[1]);
+      }
+    }
+  };
+  walk(srcDir);
+
+  const missing = [...read].filter((k) => !OS_PROVIDED.has(k) && !declared.has(k)).sort();
+  assert.deepEqual(missing, [], `these are read by the code but absent from .env.example: ${missing.join(", ")}`);
+});

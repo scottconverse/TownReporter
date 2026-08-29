@@ -8,6 +8,8 @@
   belong to this project already owns 5432 on this machine. Do not "fix" that by
   moving back; the split is what stops the desk writing to the wrong cluster.
 #>
+
+. (Join-Path $PSScriptRoot "lib-port.ps1")
 $ErrorActionPreference = "Stop"
 $app  = Split-Path -Parent $PSScriptRoot
 $bin  = "$env:USERPROFILE\scoop\apps\postgresql\current\bin"
@@ -51,7 +53,7 @@ if ((Test-Path $appLog) -and ((Get-Item $appLog).Length -gt 5MB)) {
 
 & node scripts/with-app-env.mjs node scripts/migrate.mjs 2>&1 | Add-Content $appLog
 
-if (-not (Test-Port 3000)) {
+if (-not (Test-Port $port)) {
   # Start-Process, not `| Add-Content`: a PowerShell pipeline holds an exclusive
   # write handle for as long as the app runs, so the log could not be read while
   # the thing you wanted to debug was happening. Redirected process handles allow

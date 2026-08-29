@@ -441,7 +441,8 @@ The editorial writer is Opus deliberately: it is the one call where the writing
 npm test
 ```
 
-495 tests, no network and no token spend. They cover meeting ingest, retrieval,
+528 tests, and the default run is deterministic, offline and free. They cover
+meeting ingest, retrieval,
 draft stripping, timezone handling, the SSRF guard, the job lifecycle, the Dark
 Desk loop, the dials, claim hygiene, the editorial parser, and the ops action
 allowlist.
@@ -612,7 +613,7 @@ inside the repository, is rejected.
 ```mermaid
 flowchart TB
     T["Scheduled task<br/>every 5 minutes"] --> WD["watchdog.ps1"]
-    WD --> C1{"App answering<br/>on :8080?"}
+    WD --> C1{"App answering<br/>on PORT (3000)?"}
     C1 -->|no| R1["Start the app"]
     C1 -->|yes| C2{"cloudflared<br/>running?"}
     R1 --> C2
@@ -685,6 +686,9 @@ flowchart TB
 | `/articles/:slug` | A story |
 | `/about` · `/how-we-report` · `/corrections` | Masthead pages |
 | `/feed` · `/sitemap.xml` · `/robots.txt` | Machines |
+| `/evidence/:versionId` | The captured copy of a source a printed story cited |
+| `/evidence/compare` | Two captures of the same URL, side by side |
+| `/get-the-code` · `/TownReporter.zip` | Download this newsroom's own source |
 | `/login` | Create an editor account, or sign in |
 | `/desk` | The desk — what needs you |
 | `/desk/sources` | Watch list, and bulk paste |
@@ -727,7 +731,8 @@ flowchart TB
 npm run dev          # http://localhost:8080
 npm run build        # build, then migrate
 npm start            # run the built server
-npm test             # 495 tests, no network
+npm test             # deterministic, offline, free
+npm run test:live-model  # opt-in live evaluation (RUN_LIVE_MODEL_TESTS=1)
 npm run typecheck
 npm run db:migrate
 npx playwright install chromium

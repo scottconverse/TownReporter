@@ -11,6 +11,8 @@
   both run on this machine for other software, and a blanket stop-by-name has
   taken down unrelated things here before.
 #>
+
+. (Join-Path $PSScriptRoot "lib-port.ps1")
 $ErrorActionPreference = "Stop"
 $app = Split-Path -Parent $PSScriptRoot
 $logDir = Join-Path $app "logs"
@@ -50,10 +52,10 @@ Start-Process -FilePath $exe `
   -WindowStyle Hidden
 
 for ($i = 0; $i -lt 45; $i++) {
-  if (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue) { break }
+  if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { break }
   Start-Sleep -Seconds 1
 }
-if (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue) {
+if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
   Write-Log "back up"
 } else {
   Write-Log "FAILED to come back up"
