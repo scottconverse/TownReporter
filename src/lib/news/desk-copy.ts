@@ -93,6 +93,9 @@ export function editorKindLabel(kind: string): string {
       return "From the scanner";
     case "signal":
       return "Earlier note";
+    // Says on the card, before anything is clicked, that nobody has checked it.
+    case "reddit-tip":
+      return "Unverified tip";
     default:
       return "Worth a look";
   }

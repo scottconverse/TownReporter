@@ -46,6 +46,14 @@ const PRIORITY_BONUS: Record<string, number> = {
   url: 7,
   "unresolved-reference": 7,
   "unresolved-provenance": 7,
+  /*
+    A resident's tip, not a record.
+
+    Ranked below every anomaly the desk found in a document, and deliberately
+    so: it is the only kind here that nobody has verified. High enough to be
+    seen on a quiet day, low enough that it never outranks a missing minute.
+  */
+  "reddit-tip": 6,
 };
 
 function frontierPriority(status: string, kind: string): number {
@@ -73,6 +81,8 @@ function questionFor(kind: string, title: string): string {
       return `What independent record would confirm or kill this?`;
     case "promise":
       return `Did this promise return on a later agenda, or was it quietly dropped?`;
+    case "reddit-tip":
+      return `Which agency would hold the record for this, and does that record say the same thing?`;
     default:
       return `What public record would confirm or contradict this?`;
   }
@@ -97,7 +107,17 @@ export function rankWorthItems(input: {
       kind,
       title,
       happened: a.details?.trim() || a.summary,
-      why: `Dark Desk / monitors flagged a ${kind.replace(/-/g, " ")}.`,
+      /*
+        A tip needs its own words.
+
+        The generic line — "a monitored public record did not look the way it
+        usually does" — is not merely vague on a Reddit card, it is false: no
+        record was monitored and nothing changed. Somebody posted something.
+      */
+      why:
+        kind === "reddit-tip"
+          ? "A resident posted this on the town's subreddit. Nobody has checked it."
+          : `Dark Desk / monitors flagged a ${kind.replace(/-/g, " ")}.`,
       evidence: url || a.summary,
       source_url: url,
       question: questionFor(kind, title),
@@ -204,15 +224,48 @@ export function rankWorthItems(input: {
   }
 
   const seen = new Set<string>();
-  return out
+  const ranked = out
     .sort((a, b) => b.priority - a.priority)
     .filter((item) => {
       const key = item.source_url || item.title.toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
-    })
-    .slice(0, 12);
+    });
+
+  return withReservedTipSlots(ranked, 12, TIP_SLOTS);
+}
+
+/** How many of the twelve are held open for unverified tips. */
+const TIP_SLOTS = 2;
+
+/**
+ * Keep a couple of places for tips that would otherwise never be seen.
+ *
+ * A resident's tip is ranked below every anomaly found in a document, which is
+ * correct — nobody has verified it. But the list is capped at twelve, and on a
+ * busy desk twelve records outrank every tip, so the first run of the subreddit
+ * reader filed seven tips and displayed none of them. The button said "Filed 7
+ * tips" and the page showed nothing: the same silent nothing as not running at
+ * all.
+ *
+ * Reserved, not promoted. A tip still never outranks a missing minute; it just
+ * cannot be crowded into invisibility. When there are no tips the reserve costs
+ * nothing and the full twelve are records.
+ */
+export function withReservedTipSlots(
+  ranked: WorthSeed[],
+  limit: number,
+  reserved: number,
+): WorthSeed[] {
+  const tips = ranked.filter((i) => i.kind === "reddit-tip");
+  if (!tips.length) return ranked.slice(0, limit);
+
+  const rest = ranked.filter((i) => i.kind !== "reddit-tip");
+  const keptTips = tips.slice(0, Math.min(reserved, limit));
+  const kept = rest.slice(0, Math.max(0, limit - keptTips.length));
+  // Back into priority order, so the page still reads worst-first.
+  return [...kept, ...keptTips].sort((a, b) => b.priority - a.priority);
 }
 
 function stripInternalJargon(text: string): string {
@@ -251,6 +304,9 @@ export function presentWorthItem(item: WorthSeed): WorthSeed {
       org
         ? `A ${org} record Dark Desk previously considered finished has appeared again in new material. That may mean it is newly relevant to another record or investigation.`
         : "A record Dark Desk previously considered finished has appeared again in new material. That may mean it is newly relevant to another record or investigation.";
+  } else if (item.kind === "reddit-tip") {
+    // Already written for this card; the generic rewrite below would undo it.
+    happened = happened || "Posted on the town's subreddit.";
   } else if (!why || /flagged a |strength |handoff/i.test(item.why)) {
     why = why
       .replace(/Dark Desk \/ monitors flagged a [\w\s]+\./i, "A monitored public record did not look the way it usually does.")

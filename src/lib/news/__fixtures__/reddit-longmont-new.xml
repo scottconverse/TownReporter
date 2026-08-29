@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A trimmed copy of https://www.reddit.com/r/longmont/new/.rss as it read on
+  2026-08-28. Titles are the real ones; bodies are shortened.
+
+  Kept as a fixture because the scoring has to be calibrated against what the
+  subreddit actually posts, not against invented examples. The mix here is the
+  real mix: one genuine civic story, one incident, and a lot of small talk. The
+  first version of the scorer gave the CO 119 closure — a story this paper had
+  already published — a 3 out of 20, below its own threshold.
+-->
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Longmont</title>
+  <entry>
+    <author><name>/u/example1</name></author>
+    <title>Lunar Eclipse 8/27 from Longmont</title>
+    <link href="https://www.reddit.com/r/longmont/comments/aaa001/lunar_eclipse_827_from_longmont/" />
+    <updated>2026-08-29T02:10:00+00:00</updated>
+    <content type="html">&lt;div&gt;Got a decent shot from my backyard last night.&lt;/div&gt;</content>
+  </entry>
+  <entry>
+    <author><name>/u/example2</name></author>
+    <title>To the parachutists who landed at Eagle Crest Elementary field today, you made my kid's week</title>
+    <link href="https://www.reddit.com/r/longmont/comments/aaa002/to_the_parachutists/" />
+    <updated>2026-08-28T23:00:00+00:00</updated>
+    <content type="html">&lt;div&gt;They let the kids look at the gear afterwards.&lt;/div&gt;</content>
+  </entry>
+  <entry>
+    <author><name>/u/example3</name></author>
+    <title>Best place to donate unopened bars of soap?</title>
+    <link href="https://www.reddit.com/r/longmont/comments/aaa003/best_place_to_donate_soap/" />
+    <updated>2026-08-28T21:00:00+00:00</updated>
+    <content type="html">&lt;div&gt;I have about forty bars. Any recommendations?&lt;/div&gt;</content>
+  </entry>
+  <entry>
+    <author><name>/u/example4</name></author>
+    <title>All left turns at CO 119 and Hover Street in Longmont will close for construction</title>
+    <link href="https://www.reddit.com/r/longmont/comments/aaa004/all_left_turns_at_co_119_and_hover/" />
+    <updated>2026-08-28T18:30:00+00:00</updated>
+    <content type="html">&lt;div&gt;CDOT says it starts in early September and lasts about a year while they build the bridge.&lt;/div&gt;</content>
+  </entry>
+  <entry>
+    <author><name>/u/example5</name></author>
+    <title>Fire near Pinewood</title>
+    <link href="https://www.reddit.com/r/longmont/comments/aaa005/fire_near_pinewood/" />
+    <updated>2026-08-28T17:45:00+00:00</updated>
+    <content type="html">&lt;div&gt;Lots of smoke and three engines went by. Anyone know what happened?&lt;/div&gt;</content>
+  </entry>
+  <entry>
+    <author><name>/u/example6</name></author>
+    <title>Need help with finding the best appetizer offerings in Longmont</title>
+    <link href="https://www.reddit.com/r/longmont/comments/aaa006/best_appetizers/" />
+    <updated>2026-08-28T16:00:00+00:00</updated>
+    <content type="html">&lt;div&gt;Having people over. Where should I order from?&lt;/div&gt;</content>
+  </entry>
+  <entry>
+    <author><name>/u/example7</name></author>
+    <title>Weekly open discussion, complaint, rant, and rave thread</title>
+    <link href="https://www.reddit.com/r/longmont/comments/aaa007/weekly_open_discussion/" />
+    <updated>2026-08-28T13:00:00+00:00</updated>
+    <content type="html">&lt;div&gt;Post whatever is on your mind.&lt;/div&gt;</content>
+  </entry>
+  <entry>
+    <author><name>/u/example8</name></author>
+    <title>Verizon coverage getting worse?</title>
+    <link href="https://www.reddit.com/r/longmont/comments/aaa008/verizon_coverage/" />
+    <updated>2026-08-28T12:00:00+00:00</updated>
+    <content type="html">&lt;div&gt;Dropped calls all week on the south side of town.&lt;/div&gt;</content>
+  </entry>
+  <entry>
+    <author><name>/u/example9</name></author>
+    <title>Apartment advice</title>
+    <link href="https://www.reddit.com/r/longmont/comments/aaa009/apartment_advice/" />
+    <updated>2026-08-27T22:00:00+00:00</updated>
+    <content type="html">&lt;div&gt;Moving to town in October, which complexes are decent?&lt;/div&gt;</content>
+  </entry>
+  <entry>
+    <author><name>/u/example10</name></author>
+    <title>City council votes 5-2 to send the rec center bond to the November ballot</title>
+    <link href="https://www.reddit.com/r/longmont/comments/aaa010/council_votes_rec_center_bond/" />
+    <updated>2026-08-27T04:00:00+00:00</updated>
+    <content type="html">&lt;div&gt;Ordinance 2026-41. The packet says $38,000,000 over 20 years.&lt;/div&gt;</content>
+  </entry>
+  <entry>
+    <author><name>/u/example11</name></author>
+    <title>My rent went up $300 and the notice says it's a "utility recovery fee"</title>
+    <link href="https://www.reddit.com/r/longmont/comments/aaa011/rent_utility_recovery_fee/" />
+    <updated>2026-08-26T19:00:00+00:00</updated>
+    <content type="html">&lt;div&gt;Landlord sent a letter. Is that even legal here?&lt;/div&gt;</content>
+  </entry>
+</feed>
