@@ -310,6 +310,9 @@ The working edition runs on one Windows machine behind a Cloudflare Tunnel. The
 | `ops/restart-app.ps1` | Stop and start the paper |
 | `ops/restart-tunnel.ps1` | Stop and start the tunnel |
 | `ops/rotate-logs.ps1` | Keep `logs/` from growing without bound |
+| `ops/status.ps1` | Is it up? Read-only, and it answers when the paper is down and `/desk/ops` cannot |
+| `ops/TownReporter Control.cmd` | The same, for someone who does not want a terminal. Double-click, pick a number. |
+| `ops/run-hidden.vbs` | Runs the five-minute tasks with no console window |
 
 Restart and tunnel-restart run as Windows scheduled tasks rather than as child
 processes of the app — a restart cannot be performed by the process being

@@ -41,18 +41,43 @@ restart.
 | `TownReporter` | at logon | starts Postgres, applies migrations, serves the app |
 | `TownReporter Tunnel` | at logon | connects the Cloudflare Tunnel |
 | `TownReporter Monitors` | every 5 min | rechecks watched sources, drains desk jobs |
-| `TownReporter Watchdog` | every 5 min | checks the app, the tunnel and the public URL; restarts what is down; appends to `logs/watchdog.log` |
+| `TownReporter Watchdog` | every 5 min | checks the app, the tunnel and the public URL; restarts what is down; appends to `logs/watchdog.log` when there is something to say |
 | `TownReporter Restart` | on demand | stops and starts the paper |
 | `TownReporter Tunnel Restart` | on demand | stops and starts the tunnel |
 | (Postgres) | — | started by the first task, not separately registered |
+
+The two five-minute tasks are launched through `ops/run-hidden.vbs` rather than
+`powershell.exe` directly. `-WindowStyle Hidden` does not stop the flash:
+Task Scheduler creates the console host in the interactive session and shows it
+before the script's own window style applies, so twice every five minutes a
+window appeared, took focus, and interrupted whatever was being typed.
+`wscript.exe` has no console of its own and starts the child hidden from the
+first instant. The security context is unchanged, which matters because the
+desk reads the operator's Claude Code login out of their own profile.
 
 The last two are tasks rather than child processes of the app for two reasons
 learned the hard way: a process cannot restart itself, and a tunnel restart
 cannot deliver its own result over the tunnel it has just killed. The Server
 page at `/desk/ops` triggers them and reads the watchdog log.
 
-Everything comes back by itself after a reboot. Tested by stopping the lot and
-letting the task restart it.
+**After a reboot it comes back when you log in, not before.** Both start
+triggers are *at logon* for HALO\scott, and the two five-minute tasks are
+interactive as well, so a machine sitting at the lock screen runs nothing. Log
+in and everything starts on its own. Tested by stopping the lot and letting the
+tasks restart it.
+
+If the paper ever needs to survive a reboot with nobody logging in, the tasks
+have to run as S4U ("whether user is logged on or not") — which is a real
+change, not a checkbox, because the desk shells out to the Claude Code CLI and
+that reads the operator's login out of their profile.
+
+### Without a terminal
+
+`ops/TownReporter Control.cmd`, and a **TownReporter Control** shortcut on the
+Desktop. Double-click, pick a number: check, restart the paper, restart the
+tunnel, start everything, stop everything. It cannot publish or delete
+anything. `ops/status.ps1` is the read-only check on its own, and it works when
+the paper is down — which is exactly when `/desk/ops` cannot answer.
 
 Manual control:
 
