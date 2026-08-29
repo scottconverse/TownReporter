@@ -206,7 +206,7 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 | Path | What |
 |---|---|
 | `/` | Public paper |
-| `/opinion` | Editorials — unsigned, the paper's own position |
+| `/?topic=opinion` | Editorials — unsigned, the paper's own position. The Opinion link in the masthead; the same route as the paper, filtered. |
 | `/about` · `/how-we-report` · `/corrections` | Masthead pages |
 | `/sitemap.xml` · `/robots.txt` | For search engines |
 | `/desk` | Editor home (sign-in) |

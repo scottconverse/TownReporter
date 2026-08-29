@@ -626,7 +626,7 @@ flowchart TB
 | Path | What |
 |---|---|
 | `/` | The paper |
-| `/opinion` | Editorials |
+| `/?topic=opinion` | Editorials — the Opinion link in the masthead. Same route as the paper, filtered by topic. |
 | `/articles/:slug` | A story |
 | `/about` · `/how-we-report` · `/corrections` | Masthead pages |
 | `/feed` · `/sitemap.xml` · `/robots.txt` | Machines |
