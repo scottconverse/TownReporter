@@ -317,10 +317,26 @@ export function Notice({
         : night
           ? "border-paper/20 text-paper"
           : "border-ink/20 bg-paper-2 text-ink";
+  /*
+    A live region has to exist BEFORE its content changes.
+
+    Notice already carried role="status" / role="alert", which implies a live
+    region — but the element is mounted at the same moment its text appears, and
+    a region that arrives with its content is frequently not announced at all.
+    An audit found async success and error feedback inconsistently spoken
+    (UIUX-03).
+
+    aria-live is explicit here, and `aria-atomic` makes the whole notice read as
+    one message rather than a fragment. The always-mounted companion region
+    lives in DeskShell, which covers notices rendered by mutations that unmount
+    and remount.
+  */
   return (
     <p
       className={"enter-fade-fast mt-3 border px-3 py-2.5 text-sm " + color}
       role={kind === "err" ? "alert" : "status"}
+      aria-live={kind === "err" ? "assertive" : "polite"}
+      aria-atomic="true"
     >
       {children}
     </p>

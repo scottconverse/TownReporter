@@ -1,5 +1,5 @@
 import { createFileRoute, Link, Navigate, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GROK_PROVIDERS, authClient, signIn } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
@@ -73,6 +73,38 @@ function Login() {
   const claimed = claim.isError || Boolean(claim.data?.claimed);
   const mode: "create" | "signin" = claimed ? "signin" : wantCreate ? "create" : "signin";
   const taken = deskTakenLoginCopy();
+  /*
+    Waiting has to end in an answer, not in "Opening..." forever.
+
+    When the client bundle failed to hydrate, this page sat on generic progress
+    copy indefinitely: no timeout, no error, no retry, no way to tell a slow
+    newsroom from a broken one. An audit called it a dead end (UIUX-02), and it
+    is the screen where the dev-path Blocker actually showed itself — a
+    permanent spinner reads as patience required rather than as a defect.
+
+    Ten seconds is generous for a local query and short enough that nobody
+    waits wondering.
+  */
+  const [waitedTooLong, setWaitedTooLong] = useState(false);
+  useEffect(() => {
+    if (!claim.isPending) {
+      setWaitedTooLong(false);
+      return;
+    }
+    const t = window.setTimeout(() => setWaitedTooLong(true), 10_000);
+    return () => window.clearTimeout(t);
+  }, [claim.isPending]);
+
+  /*
+    These hooks sit ABOVE the early return on purpose.
+
+    I first wrote them below it, where the Navigate short-circuits the render —
+    so on the branch that returns early React saw fewer hooks than the previous
+    render and threw error #300. Nothing in the desk noticed; the e2e walk
+    written for TE-04 caught it on the very first run, tagged to /login.
+
+    That is the whole argument for the walk existing.
+  */
   if (user && !claim.isPending) return <Navigate to="/desk" />;
 
   async function finishEmail(data?: unknown, headers?: Headers | null) {
@@ -161,9 +193,18 @@ function Login() {
     }
   }
 
-  const heading =
-    claim.isPending ? "Editor desk" : mode === "create" ? "Create the desk" : taken.title;
-  const blurb = claim.isPending
+  const stalled = claim.isError || waitedTooLong;
+
+  const heading = stalled
+    ? "The desk did not answer"
+    : claim.isPending
+      ? "Editor desk"
+      : mode === "create"
+        ? "Create the desk"
+        : taken.title;
+  const blurb = stalled
+    ? "This page could not reach the newsroom. That is usually the server being down or still starting; it can also mean the page failed to load properly. Try again, and if it keeps happening check the server is running."
+    : claim.isPending
     ? "One moment."
     : mode === "create"
       ? "First person in owns the newsroom. If you already created an account, submit again with the same email and password — we will sign you in."
@@ -177,6 +218,21 @@ function Login() {
       style={{ background: "#F6F1E7", color: "#1C1410", minHeight: "100dvh" }}
     >
       <div className="stagger-in w-full max-w-sm space-y-5">
+        {stalled ? (
+          <p role="alert" className="border border-danger/35 bg-paper-2 px-3 py-2.5 text-sm text-danger">
+            {claim.isError ? "The newsroom refused the request." : "No answer after ten seconds."}{" "}
+            <button
+              type="button"
+              className="underline"
+              onClick={() => {
+                setWaitedTooLong(false);
+                void claim.refetch();
+              }}
+            >
+              Try again
+            </button>
+          </p>
+        ) : null}
         <div>
           <p className="text-[11px] tracking-[0.18em] text-rust uppercase">
             {PAPER.name}

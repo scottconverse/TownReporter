@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead, areaClass, inputClass } from "@/components/desk-chrome";
 import { ListSkeleton } from "@/components/states";
-import { deleteEditorial, getEditorial, listEditorials, startEditorial } from "@/lib/news/opinion";
+import { deleteEditorial, getEditorial, listEditorials, opinionReadiness, startEditorial } from "@/lib/news/opinion";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { formatDateTime } from "@/lib/paper";
 
@@ -33,6 +33,10 @@ function OpinionPage() {
   const [confirmId, setConfirmId] = useState<number | null>(null);
   // The trash id of the last delete, so Undo is here rather than on Server.
   const [undo, setUndo] = useState<number | null>(null);
+
+  // Asked before anything is typed: a dependency you cannot satisfy should be
+  // visible while you are deciding whether to start. Audit finding UIUX-05.
+  const ready = useQuery({ queryKey: ["opinion-ready"], queryFn: () => opinionReadiness() });
 
   const list = useQuery({
     queryKey: ["editorials"],
@@ -110,6 +114,14 @@ function OpinionPage() {
           title="Write one"
           sub="A subject, a URL, or a sentence. A pasted link gets opened and read before anything is written."
         />
+        {ready.data && !ready.data.ready ? (
+          <p
+            role="status"
+            className="mt-4 max-w-2xl border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust"
+          >
+            <b>This desk cannot write yet.</b> {ready.data.why}
+          </p>
+        ) : null}
         <div className="mt-4 max-w-2xl space-y-3">
           <label className="block">
             <span className="text-[11px] tracking-[0.14em] text-muted uppercase">
@@ -138,7 +150,11 @@ function OpinionPage() {
             <InkButton
               tone="solid"
               onClick={() => start.mutate()}
-              disabled={start.isPending || subject.trim().length < 6}
+              disabled={
+                start.isPending ||
+                subject.trim().length < 6 ||
+                (ready.data ? !ready.data.ready : false)
+              }
             >
               {start.isPending ? "Starting…" : "Write an editorial"}
             </InkButton>

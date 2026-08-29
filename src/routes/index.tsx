@@ -31,7 +31,7 @@ export const Route = createFileRoute("/")({
 function Home() {
   const { topic, q } = Route.useSearch();
   const initial = Route.useLoaderData();
-  const { data, isPending, isFetching, isPlaceholderData } = useQuery({
+  const { data, isPending, isFetching, isPlaceholderData, isError, refetch } = useQuery({
     queryKey: ["paper", topic, q],
     queryFn: () => {
       if (q) return searchPublished({ data: q });
@@ -47,7 +47,16 @@ function Home() {
   const rest = articles.slice(1);
   const showSkeleton = isPending && !featured && !isPlaceholderData;
   const empty = !isPending && !isPlaceholderData && !featured;
-  const dimming = isFetching && !showSkeleton;
+  /*
+    A failed refresh must not leave the paper dimmed forever.
+
+    `dimming` was driven by isFetching alone and the error branch was never
+    consumed, so a rejected query left already-printed stories visually
+    disabled with no explanation and no way back. An audit called it a
+    permanent dead end (UIUX-02). Stale stories are still worth reading; the
+    honest thing is to show them at full strength and say the refresh failed.
+  */
+  const dimming = isFetching && !isError && !showSkeleton;
 
   let emptyTitle = "The edition is still being set";
   let emptyBody =
@@ -99,6 +108,15 @@ function Home() {
         </p>
       ) : null}
       <FetchingRule active={dimming} />
+      {isError ? (
+        <p role="alert" className="mb-6 border border-danger/35 bg-paper-2 px-3 py-2.5 text-sm text-danger">
+          The paper could not refresh. What is below is the last version that
+          loaded.{" "}
+          <button type="button" className="underline" onClick={() => void refetch()}>
+            Try again
+          </button>
+        </p>
+      ) : null}
 
       {!topic && !q ? (
         <p className="enter-fade mb-6 max-w-2xl text-ink-2">{PAPER.deck}</p>

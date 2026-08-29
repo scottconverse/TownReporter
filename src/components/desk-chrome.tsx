@@ -117,6 +117,17 @@ export function DeskShell({
         <DeskNav />
         <div className="rule1" />
       </header>
+      {/*
+        An always-mounted live region.
+
+        A screen reader announces a polite region reliably when the region was
+        already in the document and only its text changed. Notices that mount
+        together with their message often go unspoken, which is how async
+        success and error feedback ended up inconsistently announced (UIUX-03).
+        This region exists from first paint on every desk page; anything that
+        wants to be heard can write into it.
+      */}
+      <div id="desk-announcer" className="sr-only" role="status" aria-live="polite" aria-atomic="true" />
       <main id="desk" className="deskmain">
         {!hideTitle ? (
           <div className="ov-head">
@@ -295,7 +306,12 @@ export function SecHead({
   return (
     <div className="sechead">
       <div className="sechead-l">
-        <h3 className="sec-title">{title}</h3>
+        {/*
+          h2, not h3. The page heading is an h1 and these are its sections, so
+          jumping to h3 left a gap that a screen-reader user navigating by
+          heading level reads as a missing level. Audit finding UIUX-04.
+        */}
+        <h2 className="sec-title">{title}</h2>
         {count != null ? <span className="sec-count">{count}</span> : null}
       </div>
       {aside || null}

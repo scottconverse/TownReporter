@@ -60,10 +60,20 @@ async function main() {
   page = await context.newPage();
   page.setDefaultTimeout(45_000);
 
+  /*
+    Record WHERE each error happened, not just that one did.
+
+    The first run of this walk reported a React error at the end and named the
+    last page visited, which sent me bisecting the wrong change for half an
+    hour. An error collector that does not say which step it fired on is a
+    puzzle rather than a diagnosis.
+  */
   const consoleErrors = [];
-  page.on("pageerror", (e) => consoleErrors.push(String(e.message ?? e)));
+  const note = (text) =>
+    consoleErrors.push(`[after: ${done[done.length - 1] ?? "start"} | ${page.url()}] ${text}`);
+  page.on("pageerror", (e) => note(String(e.message ?? e).slice(0, 200)));
   page.on("console", (m) => {
-    if (m.type() === "error") consoleErrors.push(m.text());
+    if (m.type() === "error") note(m.text().slice(0, 200));
   });
 
   console.log(`desk flows: ${base}`);
@@ -84,14 +94,41 @@ async function main() {
   await page.getByRole("heading", { name: "Opinion", exact: true }).waitFor();
   step("Opinion desk renders");
 
+  // UIUX-03: a live region has to exist before its content changes, or the
+  // announcement is frequently never made.
+  if ((await page.locator("#desk-announcer").count()) !== 1) {
+    throw new Error("the persistent live region is missing from the desk shell");
+  }
+  step("the desk carries a persistent live region");
+
+  // UIUX-04: page heading is h1, section headings are h2. A jump to h3 reads
+  // as a missing level to anyone navigating by heading.
+  const h3s = await page.locator("main h3").count();
+  if (h3s > 0) throw new Error(`${h3s} section heading(s) still skip to h3`);
+  step("section headings are h2, with no skipped level");
+
+  // UIUX-05: the dependency is visible before anything is typed.
+  const notReady = await page.getByText(/This desk cannot write yet/i).count();
+  const writeBtn = page.getByRole("button", { name: /Write an editorial/ });
+  if (notReady > 0) {
+    if (!(await writeBtn.isDisabled())) {
+      throw new Error("Opinion says it cannot write but the button is still enabled");
+    }
+    step("Opinion states the missing dependency before anything is typed");
+  } else {
+    step("Opinion is ready to write (dependency present)");
+  }
+
   await page
     .getByPlaceholder(/rail district wants a second tax/i)
     .fill("The city has not posted council minutes for any 2026 session.");
-  const write = page.getByRole("button", { name: /Write an editorial/ });
-  await write.click();
-  // No voice file and no CLI in CI: it must say so, not start a job.
-  await page.getByText(/voice|Claude Code|not|cannot/i).first().waitFor({ timeout: 20_000 });
-  step("Opinion refuses clearly when it cannot write");
+  if (await writeBtn.isEnabled()) {
+    await writeBtn.click();
+    await page.getByText(/voice|Claude Code|not|cannot/i).first().waitFor({ timeout: 20_000 });
+    step("Opinion refuses clearly when asked to write and it cannot");
+  } else {
+    step("Opinion refused up front, so nothing was submitted");
+  }
 
   // ── Queue: file a lead, then delete it, then undo ─────────────────────────
   await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });

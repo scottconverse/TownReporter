@@ -36,6 +36,32 @@ export type EditorialRow = {
   published_slug: string | null;
 };
 
+/**
+ * Can the Opinion desk write at all, asked before anything is typed.
+ *
+ * The desk only revealed a missing voice file or a disabled CLI AFTER the
+ * editor had written a subject and pressed the button — an audit called that
+ * out (UIUX-05). A dependency you cannot satisfy should be visible while you
+ * are deciding whether to start, not after you have.
+ *
+ * Cheap: a stat and an env read. No model call, nothing spent.
+ */
+export const opinionReadiness = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async () => {
+    const { resolveClaudeCode } = await import("./ai");
+    if (!resolveClaudeCode()) {
+      return {
+        ready: false as const,
+        why: "The Opinion desk needs the Claude Code CLI, and it is switched off or missing here. It cannot use an API key or a gateway instead: the voice is handed over as a file path so it never reaches a command line, and the piece is written with web search.",
+      };
+    }
+    const { findVoiceFile } = await import("./voice.server");
+    const voice = await findVoiceFile();
+    if (!voice.ok) return { ready: false as const, why: voice.error };
+    return { ready: true as const, why: "" };
+  });
+
 export const listEditorials = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }): Promise<EditorialRow[]> => {
