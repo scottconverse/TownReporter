@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Chip, InkButton, Score, leadOrigin } from "@/components/desk-chrome";
 import { formatAge, formatShortDate } from "@/lib/paper";
@@ -10,6 +11,7 @@ export function LeadRowView({
   onHold,
   onBack,
   onKill,
+  onDelete,
   roomy = false,
 }: {
   lead: LeadRow;
@@ -17,8 +19,18 @@ export function LeadRowView({
   onHold?: () => void;
   onBack?: () => void;
   onKill?: () => void;
+  /**
+   * Remove the lead entirely.
+   *
+   * Kill is not delete. A killed lead stays under Killed, which is right for
+   * "not this one" and wrong for a lead filed against the wrong person or a
+   * scan that swept up something private. Confirmed in place, because a
+   * two-click delete on a row this small is the whole safety net it needs.
+   */
+  onDelete?: () => void;
   roomy?: boolean;
 }) {
+  const [confirming, setConfirming] = useState(false);
   const score = lead.newsworthiness ?? 0;
   return (
     <div className={"lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")}>
@@ -63,7 +75,38 @@ export function LeadRowView({
                 Kill
               </InkButton>
             ) : null}
+            {onDelete ? (
+              confirming ? (
+                <>
+                  <InkButton
+                    tone="ghost"
+                    small
+                    onClick={() => {
+                      setConfirming(false);
+                      onDelete();
+                    }}
+                  >
+                    Yes, delete
+                  </InkButton>
+                  <InkButton tone="quiet" small onClick={() => setConfirming(false)}>
+                    Keep
+                  </InkButton>
+                </>
+              ) : (
+                <InkButton tone="quiet" small onClick={() => setConfirming(true)}>
+                  Delete
+                </InkButton>
+              )
+            ) : null}
           </span>
+          {confirming ? (
+            <span className="del-warn">
+              Deletes this lead and any draft on it.
+              {lead.status === "published"
+                ? " The printed story stays on the paper — remove that under Published."
+                : ""}
+            </span>
+          ) : null}
         </p>
         {dup ? (
           <p className="meta">

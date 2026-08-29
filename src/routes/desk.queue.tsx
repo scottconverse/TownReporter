@@ -4,7 +4,7 @@ import { useState } from "react";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { LeadRowView } from "@/components/desk-leads";
 import { ListSkeleton, Notice } from "@/components/states";
-import { fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
+import { deleteLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
 import { nearDuplicate, openLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
 import { TOPICS } from "@/lib/paper";
 
@@ -25,6 +25,15 @@ function QueuePage() {
       setLeadStatus({ data: input }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
   });
+  const remove = useMutation({
+    mutationFn: (id: number) => deleteLead({ data: id }),
+    onSuccess: (res) => {
+      if (!res?.ok) setDeleteError(res?.error ?? "That did not delete.");
+      void qc.invalidateQueries({ queryKey: ["leads"] });
+    },
+    onError: (e) => setDeleteError(e instanceof Error ? e.message : "That did not delete."),
+  });
+  const [deleteError, setDeleteError] = useState("");
   const [filter, setFilter] = useState<"all" | "new" | "drafted" | "held" | "killed">("all");
   const [headline, setHeadline] = useState("");
   const [why, setWhy] = useState("");
@@ -135,6 +144,8 @@ function QueuePage() {
         ))}
       </div>
 
+      {deleteError ? <Notice kind="err">{deleteError}</Notice> : null}
+
       {isPending && leads.length === 0 ? (
         <ListSkeleton rows={4} />
       ) : shown.length === 0 ? (
@@ -172,6 +183,7 @@ function QueuePage() {
               onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
               onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
               onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}
+              onDelete={() => remove.mutate(l.id)}
             />
           ))}
         </div>

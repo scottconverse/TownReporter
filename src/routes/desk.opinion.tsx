@@ -1,9 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead, areaClass, inputClass } from "@/components/desk-chrome";
 import { ListSkeleton } from "@/components/states";
-import { getEditorial, listEditorials, startEditorial } from "@/lib/news/opinion";
+import { deleteEditorial, getEditorial, listEditorials, startEditorial } from "@/lib/news/opinion";
 import { formatDateTime } from "@/lib/paper";
 
 export const Route = createFileRoute("/desk/opinion")({
@@ -28,6 +28,8 @@ function OpinionPage() {
   const [askedFor, setAskedFor] = useState("");
   const [openId, setOpenId] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
+  // Which row is asking "are you sure". Null when nothing is.
+  const [confirmId, setConfirmId] = useState<number | null>(null);
 
   const list = useQuery({
     queryKey: ["editorials"],
@@ -55,6 +57,21 @@ function OpinionPage() {
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
     onError: (err) => setNotice(err instanceof Error ? err.message : "That did not start."),
+  });
+
+  const remove = useMutation({
+    mutationFn: (draftId: number) => deleteEditorial({ data: draftId }),
+    onSuccess: (res, draftId) => {
+      setConfirmId(null);
+      if (!res?.ok) {
+        setNotice(res?.error ?? "That did not delete.");
+        return;
+      }
+      if (openId === draftId) setOpenId(null);
+      setNotice("Deleted.");
+      void qc.invalidateQueries({ queryKey: ["editorials"] });
+    },
+    onError: (err) => setNotice(err instanceof Error ? err.message : "That did not delete."),
   });
 
   const rows = list.data ?? [];
@@ -155,16 +172,53 @@ function OpinionPage() {
                     <span className="text-[11px] tracking-[0.14em] text-muted uppercase">
                       Published
                     </span>
-                  ) : (
-                    <InkButton
-                      tone="quiet"
-                      small
-                      onClick={() => setOpenId(r.draft_id)}
-                      disabled={!r.draft_id}
-                    >
-                      {openId === r.draft_id ? "Open" : "Read it"}
-                    </InkButton>
-                  )}
+                  ) : null}
+                  {/*
+                    Read, Edit, Delete — always shown, never behind a hover.
+                    Edit is the one that was missing entirely: the story
+                    workbench opens by lead, and an editorial has no lead, so a
+                    finished piece could be read here and nowhere else.
+                  */}
+                  <span className="row-acts static">
+                    {r.draft_id ? (
+                      <>
+                        <InkButton tone="quiet" small onClick={() => setOpenId(r.draft_id)}>
+                          {openId === r.draft_id ? "Close" : "Read it"}
+                        </InkButton>
+                        <Link
+                          to="/desk/story/draft/$draftId"
+                          params={{ draftId: String(r.draft_id) }}
+                          className="btn quiet small"
+                        >
+                          Edit
+                        </Link>
+                      </>
+                    ) : null}
+                    {confirmId === r.id ? (
+                      <>
+                        <InkButton
+                          tone="ghost"
+                          small
+                          disabled={remove.isPending || !r.draft_id}
+                          onClick={() => r.draft_id && remove.mutate(r.draft_id)}
+                        >
+                          {remove.isPending ? "Deleting…" : "Yes, delete"}
+                        </InkButton>
+                        <InkButton tone="quiet" small onClick={() => setConfirmId(null)}>
+                          Keep
+                        </InkButton>
+                      </>
+                    ) : (
+                      <InkButton
+                        tone="quiet"
+                        small
+                        disabled={!r.draft_id && !r.error}
+                        onClick={() => setConfirmId(r.id)}
+                      >
+                        Delete
+                      </InkButton>
+                    )}
+                  </span>
                 </div>
                 <p className="mt-1 text-sm text-muted">
                   Asked {formatDateTime(r.created_at)}
@@ -176,6 +230,14 @@ function OpinionPage() {
                   </div>
                 ) : null}
                 {r.error ? <p className="mt-1 text-sm text-rust">{r.error}</p> : null}
+                {confirmId === r.id ? (
+                  <p className="mt-1 text-sm text-rust">
+                    This deletes the draft for good.
+                    {r.published_slug
+                      ? " The published piece stays on the paper — remove that under Published."
+                      : " Nothing else has a copy."}
+                  </p>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -191,7 +253,7 @@ function OpinionPage() {
                 Close
               </InkButton>
             }
-            sub="Edit it in the story editor when you are ready to run it."
+            sub="Read it here. Edit opens the full editor, where you can print it or throw it away."
           />
           {piece.isPending ? (
             <ListSkeleton />

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice } from "@/components/states";
-import { addCorrection, listMemory, listPublishedDesk } from "@/lib/news/desk";
+import { addCorrection, deleteArticle, listMemory, listPublishedDesk } from "@/lib/news/desk";
 import { formatShortDate } from "@/lib/paper";
 
 export const Route = createFileRoute("/desk/published")({ component: PublishedPage });
@@ -15,6 +15,8 @@ function PublishedPage() {
   const [corrFor, setCorrFor] = useState<string | null>(null);
   const [corrBySlug, setCorrBySlug] = useState<Record<string, string>>({});
   const [note, setNote] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  // Which story is asking to be taken off the paper. Null when none is.
+  const [killFor, setKillFor] = useState<string | null>(null);
   const corr = useMutation({
     mutationFn: (slug: string) =>
       addCorrection({ data: { articleSlug: slug, body: (corrBySlug[slug] ?? "").trim() } }),
@@ -39,6 +41,34 @@ function PublishedPage() {
         text: err instanceof Error ? err.message : "Could not post that correction.",
       });
     },
+  });
+
+  /**
+   * Take a story off the paper.
+   *
+   * The paper's convention is that a printed piece is corrected, never quietly
+   * changed — so this is the exception, and it says what it costs before it
+   * does it. The operator's rule is that an editor can always remove
+   * something, before or after it prints.
+   */
+  const remove = useMutation({
+    mutationFn: (slug: string) => deleteArticle({ data: slug }),
+    onSuccess: (res) => {
+      setKillFor(null);
+      if (res?.ok) {
+        setNote({ kind: "ok", text: "Taken off the paper." });
+        void qc.invalidateQueries({ queryKey: ["published-desk"] });
+        void qc.invalidateQueries({ queryKey: ["leads"] });
+        void qc.invalidateQueries({ queryKey: ["articles"] });
+      } else {
+        setNote({ kind: "err", text: res?.error ?? "Could not remove that." });
+      }
+    },
+    onError: (err) =>
+      setNote({
+        kind: "err",
+        text: err instanceof Error ? err.message : "Could not remove that.",
+      }),
   });
 
   const rows = published.data ?? [];
@@ -69,6 +99,14 @@ function PublishedPage() {
                     <b>Correction, {formatShortDate(c.date)}:</b> {c.body}
                   </p>
                 ))}
+                {killFor === p.slug ? (
+                  <p className="pub-corr del-warn">
+                    <b>This takes it off the paper.</b> Its URL becomes a 404, the
+                    feed and the sitemap drop it, and anyone holding a link has a
+                    dead link. Its corrections go too. Consider a correction
+                    instead — that is what the paper normally does.
+                  </p>
+                ) : null}
                 {corrFor === p.slug ? (
                   <div className="corr-form">
                     <textarea
@@ -101,6 +139,25 @@ function PublishedPage() {
                 <InkButton tone="quiet" small onClick={() => setCorrFor(p.slug)}>
                   Post correction
                 </InkButton>
+                {killFor === p.slug ? (
+                  <>
+                    <InkButton
+                      tone="ghost"
+                      small
+                      disabled={remove.isPending}
+                      onClick={() => remove.mutate(p.slug)}
+                    >
+                      {remove.isPending ? "Removing…" : "Yes, take it off"}
+                    </InkButton>
+                    <InkButton tone="quiet" small onClick={() => setKillFor(null)}>
+                      Keep it
+                    </InkButton>
+                  </>
+                ) : (
+                  <InkButton tone="quiet" small onClick={() => setKillFor(p.slug)}>
+                    Delete
+                  </InkButton>
+                )}
               </div>
             </div>
           ))}

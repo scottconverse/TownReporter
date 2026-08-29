@@ -174,3 +174,168 @@ export const startEditorial = createServerFn({ method: "POST" })
     await audit(context.userId, "editorial", `request ${requestId} from ${sourceKind}`);
     return { ok: true as const, requestId, jobId: job.id };
   });
+
+/**
+ * Editing, printing and deleting an editorial.
+ *
+ * The story workbench opens by LEAD id, and an editorial has no lead — an
+ * editor typed a subject and the paper stated its position. So until now a
+ * finished editorial could be read on this desk and nothing else: not edited,
+ * not published, not thrown away. The panel even told the editor to "edit it in
+ * the story editor", which was a promise the software could not keep.
+ *
+ * These are the same three verbs the reported-story desk has, keyed by draft.
+ */
+export type EditorialDraft = {
+  id: number;
+  headline: string;
+  dek: string;
+  body: string;
+  topic: string;
+  form: string;
+  fact_sheet: string;
+  image_prompt: string;
+  published_slug: string | null;
+};
+
+export const getEditorialDraft = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((draftId: number) => draftId)
+  .handler(async ({ context, data: draftId }): Promise<EditorialDraft | null> => {
+    const { ensureEditorialSchema } = await import("./editorial.server");
+    await ensureEditorialSchema();
+    const sql = await getSql();
+    const rows = await sql<EditorialDraft>`
+      select d.id, d.headline, d.dek, d.body, d.topic, d.form,
+             coalesce(e.fact_sheet, '') as fact_sheet,
+             coalesce(e.image_prompt, '') as image_prompt,
+             (select a.slug from articles a
+               where a.headline = d.headline and a.status = 'published'
+                 and a.newsroom_id = d.newsroom_id
+               limit 1) as published_slug
+      from drafts d
+      left join editorial_extras e on e.draft_id = d.id
+      where d.id = ${draftId} and d.newsroom_id = ${owned(context)}
+      limit 1
+    `;
+    return rows[0] ?? null;
+  });
+
+export const saveEditorialDraft = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { draftId: number; headline: string; dek: string; body: string; topic: string }) => input)
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const done = await sql<{ id: number }>`
+      update drafts
+      set headline = ${data.headline.slice(0, 300)},
+          dek = ${data.dek.slice(0, 600)},
+          body = ${data.body},
+          topic = ${data.topic.slice(0, 40)},
+          updated_at = now()
+      where id = ${data.draftId} and newsroom_id = ${owned(context)}
+      returning id
+    `;
+    if (!done[0]) return { ok: false as const, error: "That draft is gone." };
+    return { ok: true as const };
+  });
+
+/**
+ * Put an editorial on the paper.
+ *
+ * Deliberately not `performPublish`: that one reads a lead, refuses to print a
+ * held or killed one, and marks the lead published afterwards. None of it
+ * applies here. `articles.lead_id` has been nullable since the newsroom's
+ * second migration, so the row is simply written without one.
+ *
+ * The slug loop is the same as the reported path, and for the same reason: the
+ * column is unique, and a single retry could still collide.
+ */
+export const publishEditorial = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((draftId: number) => draftId)
+  .handler(async ({ context, data: draftId }) => {
+    const { slugify } = await import("@/lib/paper");
+    const { withTransaction } = await import("@/lib/db");
+    const sql = await getSql();
+
+    const rows = await sql<{
+      headline: string;
+      dek: string;
+      body: string;
+      topic: string;
+      source_urls: string;
+      form: string;
+    }>`
+      select headline, dek, body, topic, source_urls, form
+      from drafts where id = ${draftId} and newsroom_id = ${owned(context)} limit 1
+    `;
+    const d = rows[0];
+    if (!d) return { ok: false as const, error: "That draft is gone." };
+    if (!d.headline.trim() || !d.body.trim()) {
+      return { ok: false as const, error: "An editorial needs a headline and a body." };
+    }
+
+    const already = await sql<{ slug: string }>`
+      select slug from articles
+      where headline = ${d.headline} and status = 'published' and newsroom_id = ${owned(context)}
+      limit 1
+    `;
+    if (already[0]) return { ok: true as const, slug: already[0].slug };
+
+    const baseSlug = slugify(d.headline);
+    const slug = await withTransaction(async (tx) => {
+      let candidate = baseSlug;
+      for (let n = 0; n < 50; n += 1) {
+        const clash = await tx<{ slug: string }>`select slug from articles where slug = ${candidate} limit 1`;
+        if (!clash[0]) break;
+        candidate = n === 0 ? `${baseSlug}-${draftId}` : `${baseSlug}-${draftId}-${n + 1}`;
+      }
+      await tx`
+        insert into articles (
+          user_id, lead_id, slug, headline, dek, body, topic, source_urls, status,
+          published_at, form
+        )
+        values (
+          ${context.userId}, ${null}, ${candidate}, ${d.headline}, ${d.dek}, ${d.body},
+          ${d.topic || "opinion"}, ${d.source_urls || "[]"}, 'published', now(),
+          ${d.form || "editorial"}
+        )
+      `;
+      return candidate;
+    });
+
+    await audit(context.userId, "publish-editorial", slug);
+    return { ok: true as const, slug };
+  });
+
+/**
+ * Throw an editorial away.
+ *
+ * A real delete, because the operator asked for one: an editor must be able to
+ * remove anything, before or after it prints. `editorial_extras` and the
+ * request row that points here are plain integer columns with no foreign key,
+ * so they are cleaned up by hand rather than by a cascade.
+ *
+ * A published editorial is a separate object; deleting the draft leaves the
+ * printed piece alone. Removing that is `deleteArticle`.
+ */
+export const deleteEditorial = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((draftId: number) => draftId)
+  .handler(async ({ context, data: draftId }) => {
+    const sql = await getSql();
+    const gone = await sql<{ id: number; headline: string }>`
+      delete from drafts
+      where id = ${draftId} and newsroom_id = ${owned(context)}
+      returning id, headline
+    `;
+    if (!gone[0]) return { ok: false as const, error: "That draft is already gone." };
+    await sql`delete from editorial_extras where draft_id = ${draftId}`.catch(() => undefined);
+    await sql`
+      update editorial_requests set draft_id = null
+      where draft_id = ${draftId} and newsroom_id = ${owned(context)}
+    `.catch(() => undefined);
+    await audit(context.userId, "delete-editorial", gone[0].headline.slice(0, 120));
+    return { ok: true as const };
+  });

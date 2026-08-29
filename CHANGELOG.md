@@ -61,6 +61,27 @@ the investigative desk finally does the thing it was built to do.
   piece", or a paragraph followed by a rule — no longer loses its headline to
   it. Both were real deliveries; both put the real headline in the body.
 
+**The desk**
+
+- **An editorial could be read and nothing else.** The story workbench opens by
+  lead, and an editorial has no lead, so a finished piece could not be edited,
+  printed or thrown away. The panel even told the editor to "edit it in the
+  story editor" — a promise the software could not keep. There is now an
+  editorial workbench at `/desk/story/draft/:id` with save, publish and delete.
+- **Delete, everywhere.** Leads, editorials and published stories. Kill was
+  never delete: a killed lead stays under Killed, which is right for "not this
+  one" and wrong for a lead filed against the wrong person. Each delete
+  confirms in place and says what it costs — taking a story off the paper says
+  plainly that its URL becomes a 404 and that a correction is what the paper
+  normally does instead.
+- **Row actions are visible.** Open, Hold, Kill and Delete used to fade in on
+  hover, so an editor scanning twenty leads had to sweep the mouse along the
+  list to discover they existed. Touch screens already showed them; now
+  everyone gets the same desk.
+- The server binds `127.0.0.1` when `HOST` says so. Without it the app answers
+  on every interface, so anything fronting it — a tunnel, a proxy — was not the
+  only way in.
+
 **Dark Desk**
 
 - Two dials: **Dig** — how far it chases — and **Nerve** — how speculative it

@@ -67,6 +67,13 @@ the same order the software performs it.
 Corrections are public. A published story is never quietly edited; a correction
 runs as a dated note above it.
 
+**Delete is always available**, before or after printing — a lead filed against
+the wrong person, a scan that swept up something private, a story that should
+never have run. Kill is not delete: a killed lead stays on the desk under
+Killed. Delete removes the thing. Each one confirms in place and says what it
+costs; taking a story off the paper says plainly that its URL becomes a 404 and
+that a correction is what the paper normally does instead.
+
 ![A published story](images/02-article.png)
 
 ## What it will not do
@@ -184,6 +191,10 @@ A subject, a sentence or a URL becomes an unsigned editorial. `OPINION` goes in
 the headline and there is no byline, because an unsigned editorial is the
 paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
+
+**Edit**, on the row, opens the piece in its own workbench at
+`/desk/story/draft/:id`: headline, dek, topic and the piece itself, plus the two
+boxes that never print. Save, publish, or delete it from there.
 
 It fetches its own records before it writes a word, so it takes **ten to forty
 minutes** — three measured runs came in at 9m53s, 24m06s, and one still going at
@@ -392,7 +403,7 @@ The editorial writer is Opus deliberately: it is the one call where the writing
 npm test
 ```
 
-487 tests, no network and no token spend. They cover meeting ingest, retrieval,
+490 tests, no network and no token spend. They cover meeting ingest, retrieval,
 draft stripping, timezone handling, the SSRF guard, the job lifecycle, the Dark
 Desk loop, the dials, claim hygiene, the editorial parser, and the ops action
 allowlist.
@@ -640,7 +651,8 @@ flowchart TB
 | `/desk/sources` | Watch list, and bulk paste |
 | `/desk/scan` | Fetch and file leads. The expensive button. |
 | `/desk/queue` | Leads: draft, hold, kill |
-| `/desk/story/:id` | The workbench |
+| `/desk/story/:id` | The workbench, opened by lead |
+| `/desk/story/draft/:id` | The editorial workbench, opened by draft — an editorial has no lead |
 | `/desk/published` | Live stories and corrections |
 | `/desk/dark` | Dark Desk. Investigates, never prints. |
 | `/desk/opinion` | Opinion. Unsigned editorials. |
@@ -676,7 +688,7 @@ flowchart TB
 npm run dev          # http://localhost:8080
 npm run build        # build, then migrate
 npm start            # run the built server
-npm test             # 487 tests, no network
+npm test             # 490 tests, no network
 npm run typecheck
 npm run db:migrate
 npx playwright install chromium

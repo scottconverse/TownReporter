@@ -1117,3 +1117,70 @@ export const listPublishedDesk = createServerFn({ method: "GET" })
       corrections: byArt.get(a.id) ?? [],
     }));
   });
+
+/**
+ * Deleting, which the desk could not do at all.
+ *
+ * Kill is not delete. A killed lead stays on the desk under Killed, which is
+ * right for "not this one" and wrong for "this should not exist" — a lead filed
+ * against the wrong person, a scan that swept up something private, a story
+ * that should never have printed. The operator's rule is that an editor can
+ * always remove something, before or after it prints.
+ *
+ * These are real deletes, not a status. Each one is audited, and each one is
+ * behind a confirm in the UI that says what will happen.
+ */
+export const deleteLead = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((leadId: number) => leadId)
+  .handler(async ({ context, data: leadId }) => {
+    const sql = await getSql();
+    /*
+      `drafts.lead_id` cascades, so the drafts go with it. `articles.lead_id`
+      is ON DELETE SET NULL, so a printed story SURVIVES its lead being
+      deleted — deliberately. Removing something from the paper is a separate,
+      louder action.
+    */
+    const gone = await sql<{ id: number; headline: string }>`
+      delete from leads
+      where id = ${leadId} and newsroom_id = ${owned(context)}
+      returning id, headline
+    `;
+    if (!gone[0]) return { ok: false as const, error: "That lead is already gone." };
+    await audit(context.userId, "delete-lead", gone[0].headline.slice(0, 120));
+    return { ok: true as const };
+  });
+
+/**
+ * Take a story off the paper.
+ *
+ * This is the loud one. The URL becomes a 404, the feed and the sitemap drop
+ * it, and anyone holding a link to it has a dead link. That is the operator's
+ * call to make, not the software's — but the confirm says it plainly, because
+ * the paper's own convention is that a printed piece is corrected rather than
+ * quietly changed, and this is the exception to it.
+ *
+ * The lead, if there was one, goes back to `drafted` so the story can be
+ * reworked and printed again rather than being stranded as published.
+ */
+export const deleteArticle = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((slug: string) => slug)
+  .handler(async ({ context, data: slug }) => {
+    const sql = await getSql();
+    const gone = await sql<{ id: number; headline: string; lead_id: number | null }>`
+      delete from articles
+      where slug = ${slug} and newsroom_id = ${owned(context)}
+      returning id, headline, lead_id
+    `;
+    if (!gone[0]) return { ok: false as const, error: "That story is already gone." };
+    await sql`delete from corrections where article_id = ${gone[0].id}`.catch(() => undefined);
+    if (gone[0].lead_id != null) {
+      await sql`
+        update leads set status = 'drafted'
+        where id = ${gone[0].lead_id} and newsroom_id = ${owned(context)} and status = 'published'
+      `.catch(() => undefined);
+    }
+    await audit(context.userId, "delete-article", `${slug} — ${gone[0].headline.slice(0, 100)}`);
+    return { ok: true as const };
+  });

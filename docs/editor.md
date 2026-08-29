@@ -284,6 +284,10 @@ What comes back:
 - An editor's fact sheet and an image prompt that **do not print** — they are
   for you.
 
+**Edit** opens the piece in its own editor. That is where you change the
+headline, fix a line, print it, or throw it away. The fact sheet and the image
+prompt sit under the piece there, marked *does not print*.
+
 It takes **ten to forty minutes**, because it goes and reads the records before
 it writes a word. The row shows a clock counting up and a moving rule; at 3:40
 that is normal, not stuck. The page rechecks every twenty seconds.
@@ -315,6 +319,27 @@ routing — not that a reader in another town can reach you. Rows worth knowing:
 
 Every button says what it will do before it does it. The two that interrupt the
 paper ask twice.
+
+---
+
+## Delete
+
+Every list has a **Delete** button: leads in the queue, editorials on Opinion,
+and stories under Published. It asks once, in the row, and says what it costs.
+
+**Kill is not delete.** Kill parks a lead under Killed and you can bring it
+back. Delete removes it.
+
+| Delete this | And this happens |
+|---|---|
+| A lead | It goes, and any draft on it goes. A story already printed from it **stays on the paper** — that is a separate button. |
+| An editorial | The draft goes. If it was printed, the printed piece stays; remove that under Published. |
+| A published story | It comes off the paper. Its URL becomes a 404, the feed and sitemap drop it, its corrections go, and anyone holding a link has a dead link. |
+
+That last one is the loud one. The paper's normal answer to being wrong is a
+**correction**, in public, above the story. Delete is for the thing that should
+never have existed — the wrong name, the private detail, the piece filed against
+someone it should not have been.
 
 ---
 
@@ -380,6 +405,7 @@ How we report, in public: `/how-we-report`.
 | Editorial says Failed with a timeout | The piece ran past the writer's limit | Ask again. If it repeats, the operator can raise `EDITORIAL_TIMEOUT_MS`. Nothing is lost but the run. |
 | Editorial never starts, says no voice | `TOWNREPORTER_VOICE_FILE` is unset or points nowhere | Operator: set it to an absolute path outside the repo |
 | The paper is down and the desk still works | The tunnel, not the app | Server page → Restart the tunnel. The watchdog also does this within five minutes. |
+| An editorial has no Edit button | It has not finished, or it failed | Only a finished piece can be edited. A failed row can still be deleted. |
 | Desk wants sign-in again | Session expired | `/login` |
 | Notebook language on the paper | Strip failed or you pasted it | Edit the story. Kill if needed. Tell the operator. |
 
