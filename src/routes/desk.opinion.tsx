@@ -1,9 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead, areaClass, inputClass } from "@/components/desk-chrome";
 import { ListSkeleton } from "@/components/states";
-import { deleteEditorial, fileWrittenEditorial, getEditorial, listEditorials, opinionReadiness, startEditorial } from "@/lib/news/opinion";
+import { deleteEditorial, discardEditorialRequest, fileWrittenEditorial, getEditorial, listEditorials, opinionReadiness, startEditorial } from "@/lib/news/opinion";
 import { stalledRunCopy } from "@/lib/news/desk-copy";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { formatDateTime } from "@/lib/paper";
@@ -29,6 +29,16 @@ function OpinionPage() {
   const [subject, setSubject] = useState("");
   const [askedFor, setAskedFor] = useState("");
   const [openId, setOpenId] = useState<number | null>(null);
+  /*
+    Where the opened piece is drawn, so it can be scrolled to.
+
+    The panel renders after the whole list, and the operator reported Read it
+    doing nothing: the button flipped to Close and no text appeared. Measured
+    in a browser -- the panel's heading landed at 722px in a 720px viewport,
+    two pixels below the fold. It was working perfectly and was invisible,
+    which is indistinguishable from broken and considerably more annoying.
+  */
+  const pieceRef = useRef<HTMLElement | null>(null);
   const [notice, setNotice] = useState("");
   /*
     A piece the editor wrote somewhere else.
@@ -57,10 +67,43 @@ function OpinionPage() {
     refetchInterval: 20_000,
   });
 
+  useEffect(() => {
+    if (openId == null) return;
+    // After paint, or the element is not there to scroll to yet.
+    const id = requestAnimationFrame(() => {
+      pieceRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [openId]);
+
   const piece = useQuery({
     queryKey: ["editorial", openId],
     queryFn: () => getEditorial({ data: openId! }),
     enabled: openId != null,
+  });
+
+  /*
+    Two different deletes, because they are two different things.
+
+    A request with a piece written is deleted through its DRAFT, which keeps a
+    copy for thirty days. A request that finished without producing anything
+    has no copy to keep, so it is simply removed -- and until now it could not
+    be removed at all, because the button was keyed on the draft. The operator
+    found two stuck on the live desk, one of which reported neither a piece nor
+    an error.
+  */
+  const discard = useMutation({
+    mutationFn: (requestId: number) => discardEditorialRequest({ data: requestId }),
+    onSuccess: (r) => {
+      setConfirmId(null);
+      if (!r.ok) {
+        setNotice(r.error);
+        return;
+      }
+      setNotice("Cleared off the desk. Nothing was written, so there was nothing to keep.");
+      void qc.invalidateQueries({ queryKey: ["editorials"] });
+    },
+    onError: () => setNotice("That would not clear. Nothing was changed."),
   });
 
   const fileWritten = useMutation({
@@ -316,23 +359,24 @@ function OpinionPage() {
                         <InkButton
                           tone="ghost"
                           small
-                          disabled={remove.isPending || !r.draft_id}
-                          onClick={() => r.draft_id && remove.mutate(r.draft_id)}
+                          disabled={remove.isPending || discard.isPending}
+                          onClick={() =>
+                            r.draft_id ? remove.mutate(r.draft_id) : discard.mutate(r.id)
+                          }
                         >
-                          {remove.isPending ? "Deleting…" : "Yes, delete"}
+                          {remove.isPending || discard.isPending
+                            ? "Deleting…"
+                            : r.draft_id
+                              ? "Yes, delete"
+                              : "Yes, clear it"}
                         </InkButton>
                         <InkButton tone="quiet" small onClick={() => setConfirmId(null)}>
                           Keep
                         </InkButton>
                       </>
                     ) : (
-                      <InkButton
-                        tone="quiet"
-                        small
-                        disabled={!r.draft_id && !r.error}
-                        onClick={() => setConfirmId(r.id)}
-                      >
-                        Delete
+                      <InkButton tone="quiet" small onClick={() => setConfirmId(r.id)}>
+                        {r.draft_id ? "Delete" : "Clear"}
                       </InkButton>
                     )}
                   </span>
@@ -364,7 +408,7 @@ function OpinionPage() {
       </section>
 
       {openId != null ? (
-        <section className="mt-12 border-2 border-ink p-4">
+        <section ref={pieceRef} className="mt-12 border-2 border-ink p-4">
           <SecHead
             title="The piece"
             aside={

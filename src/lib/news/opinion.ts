@@ -485,3 +485,48 @@ export const fileWrittenEditorial = createServerFn({ method: "POST" })
     await audit(context.userId, "file-written-editorial", (ed.headline || "").slice(0, 120));
     return { ok: true as const, draftId: result.draftId, headline: ed.headline };
   });
+
+/**
+ * Throw away a request that never produced anything.
+ *
+ * Deleting an editorial has always meant deleting its DRAFT -- which snapshots
+ * it to the trash first, so it can come back. That is right when there is a
+ * draft. A request that finished without one has nothing to snapshot and
+ * nothing to restore, and the desk keyed its Delete button on the draft, so
+ * those rows could not be removed at all.
+ *
+ * The operator found two on the live desk: one that timed out, and a worse one
+ * that finished with no draft AND no error, so it sat there looking like work
+ * in progress that had actually stopped. Neither could be cleared. A desk you
+ * cannot tidy accumulates things you have to mentally skip past forever.
+ *
+ * Refuses when a draft exists, rather than quietly doing something different
+ * from what the caller asked: that path must go through deleteEditorial so the
+ * writing is kept for thirty days.
+ */
+export const discardEditorialRequest = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((requestId: number) => requestId)
+  .handler(async ({ context, data: requestId }) => {
+    const { ensureEditorialRequestSchema } = await import("./editorial.server");
+    await ensureEditorialRequestSchema();
+    const sql = await getSql();
+    const rows = await sql<{ draft_id: number | null; subject: string }>`
+      select draft_id, subject from editorial_requests
+      where id = ${requestId} and newsroom_id = ${owned(context)} limit 1
+    `;
+    const row = rows[0];
+    if (!row) return { ok: false as const, error: "That is not on the desk any more." };
+    if (row.draft_id) {
+      return {
+        ok: false as const,
+        error: "That one has a piece written. Delete it from the piece, so a copy is kept.",
+      };
+    }
+    await sql`
+      delete from editorial_requests
+      where id = ${requestId} and newsroom_id = ${owned(context)} and draft_id is null
+    `;
+    await audit(context.userId, "discard-editorial-request", (row.subject ?? "").slice(0, 120));
+    return { ok: true as const };
+  });

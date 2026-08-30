@@ -30,7 +30,8 @@
     "test:sources": "node scripts/sources-reach-the-reader.mjs",
     "lint": "eslint . --max-warnings 40",
     "test:paste": "node scripts/paste-editorial-e2e.mjs",
-    "test:headers": "node scripts/security-headers-e2e.mjs"
+    "test:headers": "node scripts/security-headers-e2e.mjs",
+    "test:opinion": "node scripts/opinion-desk-e2e.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

@@ -284,6 +284,25 @@ jobs:
           }
           node scripts/delete-corrections-e2e.mjs
 
+      # Two the operator hit on the live desk. Read it opened the piece two
+      # pixels below the fold, so it looked dead while working perfectly. And
+      # a run that finished without producing anything could never be removed,
+      # because Delete was keyed on a draft that did not exist -- one of those
+      # rows reported neither a piece nor an error, so it looked like work in
+      # progress that had actually stopped.
+      #
+      # It lives in THIS job because it seeds those rows straight into
+      # Postgres, so the server has to be reading the same database. The
+      # jobs that run against PGLite would have it writing somewhere the app
+      # never looks, and passing while proving nothing.
+      - name: The Opinion desk can be read and tidied
+        env:
+          BETTER_AUTH_SECRET: ci-delete-corr-secret-not-for-production
+          OPINION_BASE_URL: http://127.0.0.1:8080
+          OPINION_DB_URL: postgres://postgres:ci@127.0.0.1:5432/townreporter_delete_corr
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/opinion-desk-e2e.mjs
+
   # The front page promises "Sources shown." A lead carrying a source URL
   # published a story with no sources section at all: the lead stored the URL,
   # the draft it created did not, and publishing reads the draft. The data was
@@ -326,3 +345,4 @@ jobs:
           PASTE_BASE_URL: http://127.0.0.1:8080
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/paste-editorial-e2e.mjs
+
