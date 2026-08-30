@@ -273,6 +273,31 @@ describe("the search actually finds what the contract promises, end to end", () 
         originSays = `origin-db probe failed: ${err instanceof Error ? err.message : String(err)}`;
       }
     }
+    /*
+      Fourth discriminator, the conclusive one: write THROUGH the server,
+      read via the probe. A signup that lands in the scratch database proves
+      the server is on it; a signup the probe cannot see means the server
+      silently fell back to its in-memory PGLite -- DATABASE_URL invisible
+      inside the Linux build artifact.
+    */
+    let writeSays = "write probe skipped";
+    try {
+      const su = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: `searchdiag-${process.pid}@townreporter.test`,
+          password: "search-diag-pass-8",
+          name: "Search Diag",
+        }),
+      });
+      const seen = probeClient
+        ? await probeClient.query(`select count(*)::int as n from "user" where email like 'searchdiag-%'`)
+        : null;
+      writeSays = `signup HTTP ${su.status}; probe sees ${seen?.rows[0]?.n ?? "?"} such user(s) in scratch`;
+    } catch (err) {
+      writeSays = `write probe failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
     let probeSays = "probe unavailable";
     if (probeClient) {
       try {
@@ -291,7 +316,7 @@ describe("the search actually finds what the contract promises, end to end", () 
       /Marker headline published/,
       "a lowercase query did not find a story whose body contains the marker in mixed case -- " +
         "the search is not doing case-insensitive substring matching against body. " +
-        `${probeSays}; ${feedSays}; ${originSays}. What the page shows after the chip rail:\n${afterChips}`,
+        `${probeSays}; ${feedSays}; ${originSays}; ${writeSays}. What the page shows after the chip rail:\n${afterChips}`,
     );
   });
 
