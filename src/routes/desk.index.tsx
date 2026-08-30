@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Busy, InkButton, SecHead } from "@/components/desk-chrome";
 import { LeadRowView } from "@/components/desk-leads";
 import { DeskShell } from "@/components/desk-chrome";
-import { ListSkeleton } from "@/components/states";
+import { ListSkeleton, ScreenError } from "@/components/states";
 import {
   listLeads,
   listMemory,
@@ -163,6 +163,12 @@ function DeskHome() {
   }
 
   const booting = (leads.isPending && !leads.data) || (sources.isPending && !sources.data);
+  // The two queries the front page cannot render anything useful without.
+  // Everything else on this page degrades gracefully to "empty"; these two
+  // don't, so a failed fetch needs its own terminal state rather than an
+  // infinite `booting` skeleton or a silently empty desk. Audit UIUX-02.
+  const bootFailed =
+    (leads.isError && !leads.data) || (sources.isError && !sources.data);
 
   return (
     <DeskShell title="The desk" kicker="Command center">
@@ -189,7 +195,20 @@ function DeskHome() {
         </div>
       ) : null}
 
-      {booting ? (
+      {bootFailed ? (
+        <ScreenError
+          message={
+            (leads.error instanceof Error && leads.error.message) ||
+            (sources.error instanceof Error && sources.error.message) ||
+            "Could not load the desk."
+          }
+          onRetry={() => {
+            void leads.refetch();
+            void sources.refetch();
+          }}
+          retrying={leads.isRefetching || sources.isRefetching}
+        />
+      ) : booting ? (
         <ListSkeleton rows={6} />
       ) : (
         <div className="front">

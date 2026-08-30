@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, Field, InkButton, leadOrigin } from "@/components/desk-chrome";
-import { EmptyState, WorkbenchSkeleton, Notice } from "@/components/states";
+import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import { draftLead, getLead, publishLead, pullTodo, saveDraft, saveReportingNotes } from "@/lib/news/desk";
 import { formatShortDate, parseUrlList, TOPICS } from "@/lib/paper";
 import {
@@ -70,7 +70,7 @@ function StoryPage() {
 
   const waiting = waitingSince !== null;
 
-  const { data, isPending } = useQuery({
+  const { data, isPending, isError, error, refetch, isRefetching } = useQuery({
     queryKey: ["lead", id],
     queryFn: () => getLead({ data: id }),
     refetchInterval: waiting ? 2000 : false,
@@ -263,6 +263,17 @@ function StoryPage() {
     );
   }
   if (!data) {
+    if (isError) {
+      return (
+        <DeskShell title="Missing" kicker="Workbench">
+          <ScreenError
+            message={error instanceof Error ? error.message : "Could not load that lead."}
+            onRetry={() => void refetch()}
+            retrying={isRefetching}
+          />
+        </DeskShell>
+      );
+    }
     return (
       <DeskShell title="Missing" kicker="Workbench">
         <EmptyState

@@ -3,7 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useState } from "react";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { LeadRowView } from "@/components/desk-leads";
-import { ListSkeleton, Notice } from "@/components/states";
+import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { nearDuplicate, openLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
@@ -14,7 +14,7 @@ export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
 function QueuePage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { data: leads = [], isPending } = useQuery({
+  const { data: leads = [], isPending, isError, error, refetch, isRefetching } = useQuery({
     queryKey: ["leads"],
     queryFn: () => listLeads(),
     placeholderData: keepPreviousData,
@@ -179,7 +179,13 @@ function QueuePage() {
         </Notice>
       ) : null}
 
-      {isPending && leads.length === 0 ? (
+      {isError && leads.length === 0 ? (
+        <ScreenError
+          message={error instanceof Error ? error.message : "Could not load the queue."}
+          onRetry={() => void refetch()}
+          retrying={isRefetching}
+        />
+      ) : isPending && leads.length === 0 ? (
         <ListSkeleton rows={4} />
       ) : shown.length === 0 ? (
         <p className="wire-sum">

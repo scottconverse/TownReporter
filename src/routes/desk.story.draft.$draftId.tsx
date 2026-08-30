@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
-import { Notice, WorkbenchSkeleton, EmptyState } from "@/components/states";
+import { Notice, WorkbenchSkeleton, EmptyState, ScreenError } from "@/components/states";
 import {
   deleteEditorial,
   getEditorialDraft,
@@ -106,6 +106,17 @@ function EditorialPage() {
   }
 
   if (!q.data) {
+    if (q.isError) {
+      return (
+        <DeskShell title="Editorial" kicker="Editor desk">
+          <ScreenError
+            message={q.error instanceof Error ? q.error.message : "Could not load that editorial."}
+            onRetry={() => void q.refetch()}
+            retrying={q.isRefetching}
+          />
+        </DeskShell>
+      );
+    }
     return (
       <DeskShell title="Editorial" kicker="Editor desk">
         <EmptyState

@@ -351,6 +351,56 @@ export function Notice({
   );
 }
 
+/**
+ * A terminal error state for a query that has no data to fall back on.
+ *
+ * Audit finding UIUX-02: several desk routes destructured `{ data = [],
+ * isPending }` from useQuery and never looked at `isError`. A failed fetch
+ * then either spun forever (isPending never resolves on some paths) or
+ * rendered as a silent empty list -- no message, no way to recover short of
+ * reloading the whole page. This gives every such query the same terminal
+ * branch: state what failed, in words, with a button that calls `refetch`.
+ */
+export function ScreenError({
+  message,
+  onRetry,
+  retrying = false,
+  night = false,
+}: {
+  message: string;
+  onRetry: () => void;
+  retrying?: boolean;
+  night?: boolean;
+}) {
+  return (
+    <div
+      className={
+        night
+          ? "enter-fade-fast border border-blush/40 bg-ink px-5 py-8 text-center"
+          : "enter-fade-fast border border-danger/35 bg-paper-2 px-5 py-8 text-center"
+      }
+      role="alert"
+      aria-live="assertive"
+      aria-atomic="true"
+    >
+      <p className={"text-sm " + (night ? "text-blush" : "text-danger")}>{message}</p>
+      <button
+        type="button"
+        className={
+          "pressable mt-4 inline-flex min-h-11 items-center justify-center border px-4 text-sm font-medium " +
+          (night
+            ? "border-paper/40 text-paper hover:bg-paper/10"
+            : "border-ink hover:bg-paper")
+        }
+        disabled={retrying}
+        onClick={onRetry}
+      >
+        {retrying ? "Trying again…" : "Try again"}
+      </button>
+    </div>
+  );
+}
+
 export function GrokStatusNotice({
   available,
   message,

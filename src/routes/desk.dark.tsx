@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
-import { ListSkeleton } from "@/components/states";
+import { ListSkeleton, ScreenError } from "@/components/states";
 import {
   continueInvestigation,
   findSomethingToDigInto,
@@ -493,7 +493,14 @@ function DarkPage() {
             count={inbox.length}
             sub="New material. Nobody has opened it yet."
           />
-          {worth.isPending && !inbox.length ? (
+          {worth.isError && !worth.data ? (
+            <ScreenError
+              night
+              message={worth.error instanceof Error ? worth.error.message : "Could not load new material."}
+              onRetry={() => void worth.refetch()}
+              retrying={worth.isRefetching}
+            />
+          ) : worth.isPending && !inbox.length ? (
             <ListSkeleton rows={3} night />
           ) : inbox.length === 0 ? (
             <p className="meta">Nothing new tonight — everything interesting is already on the desk.</p>
@@ -535,7 +542,18 @@ function DarkPage() {
             count={active.length}
             sub="Started. A stop mid-file is normal — it means more to read, not a failure."
           />
-          {investigations.isPending && !active.length ? (
+          {investigations.isError && !investigations.data ? (
+            <ScreenError
+              night
+              message={
+                investigations.error instanceof Error
+                  ? investigations.error.message
+                  : "Could not load the desk."
+              }
+              onRetry={() => void investigations.refetch()}
+              retrying={investigations.isRefetching}
+            />
+          ) : investigations.isPending && !active.length ? (
             <ListSkeleton rows={3} night />
           ) : active.length === 0 ? (
             <p className="meta">Empty. Paste a tip above, or start digging on a card.</p>

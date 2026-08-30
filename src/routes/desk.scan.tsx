@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
-import { ListSkeleton, Notice } from "@/components/states";
+import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { listScans, listSources, runScan } from "@/lib/news/desk";
 import { editorScanError, scanCountsLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
 import { formatDateTime } from "@/lib/paper";
@@ -130,7 +130,13 @@ function ScanPage() {
       ) : null}
 
       <SecHead title="Previous scans" count={history.length} />
-      {scans.isPending && history.length === 0 ? (
+      {scans.isError && history.length === 0 ? (
+        <ScreenError
+          message={scans.error instanceof Error ? scans.error.message : "Could not load previous scans."}
+          onRetry={() => void scans.refetch()}
+          retrying={scans.isRefetching}
+        />
+      ) : scans.isPending && history.length === 0 ? (
         <ListSkeleton rows={3} />
       ) : history.length === 0 ? (
         <p className="wire-sum">No scans yet. Click Run scan when you want a new pass — not on a loop.</p>

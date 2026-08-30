@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
-import { ListSkeleton } from "@/components/states";
+import { ListSkeleton, ScreenError } from "@/components/states";
 import { addSource, addSourcesBulk, listSources, setSourceStatus } from "@/lib/news/desk";
 import { editorFetchError, kindFromSourceUrl, tierFromKind } from "@/lib/news/desk-copy";
 import { formatShortDate } from "@/lib/paper";
@@ -13,7 +13,14 @@ export const Route = createFileRoute("/desk/sources")({ component: SourcesPage }
 function SourcesPage() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
-  const { data: sources = [], isPending, error: listError } = useQuery({
+  const {
+    data: sources = [],
+    isPending,
+    isError: listIsError,
+    error: listError,
+    refetch: refetchSources,
+    isRefetching: refetchingSources,
+  } = useQuery({
     queryKey: ["sources"],
     queryFn: () => listSources(),
   });
@@ -187,9 +194,14 @@ function SourcesPage() {
         </div>
       </details>
       {notice ? <p className={"note" + (notice.kind === "err" ? " err" : "")}>{notice.text}</p> : null}
-      {listError ? <p className="note err">Could not load sources.</p> : null}
 
-      {isPending && sources.length === 0 ? (
+      {listIsError && sources.length === 0 ? (
+        <ScreenError
+          message={listError instanceof Error ? listError.message : "Could not load sources."}
+          onRetry={() => void refetchSources()}
+          retrying={refetchingSources}
+        />
+      ) : isPending && sources.length === 0 ? (
         <ListSkeleton rows={5} />
       ) : (
         groups.map((g) => {

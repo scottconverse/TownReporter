@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead, areaClass, inputClass } from "@/components/desk-chrome";
-import { ListSkeleton } from "@/components/states";
+import { ListSkeleton, ScreenError } from "@/components/states";
 import { deleteEditorial, discardEditorialRequest, fileWrittenEditorial, getEditorial, listEditorials, opinionReadiness, startEditorial } from "@/lib/news/opinion";
 import { stalledRunCopy } from "@/lib/news/desk-copy";
 import { restoreTrashItem } from "@/lib/news/trash";
@@ -298,7 +298,13 @@ function OpinionPage() {
               : undefined
           }
         />
-        {list.isPending ? (
+        {list.isError && rows.length === 0 ? (
+          <ScreenError
+            message={list.error instanceof Error ? list.error.message : "Could not load editorials."}
+            onRetry={() => void list.refetch()}
+            retrying={list.isRefetching}
+          />
+        ) : list.isPending ? (
           <ListSkeleton />
         ) : rows.length === 0 ? (
           <p className="mt-4 text-ink-2">Nothing yet. Write the first one above.</p>

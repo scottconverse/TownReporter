@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
-import { ListSkeleton, Notice } from "@/components/states";
+import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { addCorrection, deleteArticle, listMemory, listPublishedDesk } from "@/lib/news/desk";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { formatShortDate } from "@/lib/paper";
@@ -12,6 +12,7 @@ export const Route = createFileRoute("/desk/published")({ component: PublishedPa
 function PublishedPage() {
   const qc = useQueryClient();
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
+  const { isError: pubIsError, error: pubError, refetch: pubRefetch, isRefetching: pubRefetching } = published;
   const memory = useQuery({ queryKey: ["memory"], queryFn: () => listMemory() });
   const [corrFor, setCorrFor] = useState<string | null>(null);
   const [corrBySlug, setCorrBySlug] = useState<Record<string, string>>({});
@@ -119,7 +120,13 @@ function PublishedPage() {
           ) : null}
         </Notice>
       ) : null}
-      {published.isPending && !rows.length ? (
+      {pubIsError && !rows.length ? (
+        <ScreenError
+          message={pubError instanceof Error ? pubError.message : "Could not load what's published."}
+          onRetry={() => void pubRefetch()}
+          retrying={pubRefetching}
+        />
+      ) : published.isPending && !rows.length ? (
         <ListSkeleton rows={4} />
       ) : rows.length === 0 ? (
         <p className="wire-sum">Empty until you publish.</p>
@@ -132,7 +139,13 @@ function PublishedPage() {
                   {p.topic} · {formatShortDate(p.published_at)}
                   {p.lead_score != null ? ` · scored ${p.lead_score}/20 at filing` : ""}
                 </p>
-                <h3 className="pub-h">{p.headline}</h3>
+                {/*
+                  h2, not h3. This list has no section heading of its own
+                  above it (the page's only heading before it is the h1 in
+                  DeskShell), so h3 here skipped a level. Audit finding
+                  UIUX-04.
+                */}
+                <h2 className="pub-h">{p.headline}</h2>
                 {p.dek ? <p className="pub-dek">{p.dek}</p> : null}
                 {p.corrections.map((c, i) => (
                   <p key={i} className="pub-corr">
