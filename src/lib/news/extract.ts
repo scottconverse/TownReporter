@@ -5,9 +5,9 @@ import { PAPER } from "../paper.ts";
 const LLC_RE =
   /\b([A-Z][A-Za-z0-9&.'-]+(?:\s+[A-Z][A-Za-z0-9&.'-]+){0,5}\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?))\b/g;
 const CONTRACT_RE =
-  /\b(?:contract|agreement|po|purchase order)\s*#?\s*([A-Z0-9][A-Z0-9\/-]{3,})\b/gi;
-const RFP_RE = /\b(?:RFP|RFQ|IFB)[\s#:.-]*([A-Z0-9][A-Z0-9\/-]{2,})\b/gi;
-const ORD_RE = /\b(?:ordinance|resolution)\s*(?:no\.?|number|#)?\s*([A-Z0-9][A-Z0-9\/-]{2,})\b/gi;
+  /\b(?:contract|agreement|po|purchase order)\s*#?\s*([A-Z0-9][A-Z0-9/-]{3,})\b/gi;
+const RFP_RE = /\b(?:RFP|RFQ|IFB)[\s#:.-]*([A-Z0-9][A-Z0-9/-]{2,})\b/gi;
+const ORD_RE = /\b(?:ordinance|resolution)\s*(?:no\.?|number|#)?\s*([A-Z0-9][A-Z0-9/-]{2,})\b/gi;
 const PARCEL_RE = /\b(?:parcel|AIN|assessor(?:'s)? (?:id|number)|PIN)\s*[:#]?\s*([A-Z0-9-]{5,})\b/gi;
 const DATED_RE =
   /\b(?:pursuant to|according to|as previously approved|amended by|under|see attachment|as discussed(?: at)?|prepared by|submitted by)\b[^.\n]{5,120}/gi;

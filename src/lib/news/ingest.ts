@@ -272,7 +272,7 @@ export function discoverDocLinks(html: string, base: URL): string[] {
   const re = /href\s*=\s*["']([^"']+)["']/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
-    let href = m[1]!;
+    const href = m[1]!;
     if (href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:")) continue;
     try {
       const abs = new URL(href, base);

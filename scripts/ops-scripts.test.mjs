@@ -58,7 +58,7 @@ test("no doc references an ops script that is not there", () => {
     for (const m of text.matchAll(/ops\/([A-Za-z0-9._ -]+\.(?:ps1|vbs|cmd|mjs))/g)) {
       assert.ok(
         present.has(m[1]),
-        `${doc.split(/[\/]/).pop()} references ops/${m[1]}, which does not exist`,
+        `${doc.split(/[/]/).pop()} references ops/${m[1]}, which does not exist`,
       );
     }
   }

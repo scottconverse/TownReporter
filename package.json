@@ -27,7 +27,8 @@
     "proof:search": "node scripts/with-app-env.mjs node scripts/search-index-proof.mjs",
     "smoke": "node scripts/smoke-built-server.mjs",
     "test:flows": "node scripts/desk-flows-e2e.mjs",
-    "test:sources": "node scripts/sources-reach-the-reader.mjs"
+    "test:sources": "node scripts/sources-reach-the-reader.mjs",
+    "lint": "eslint . --max-warnings 40"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

@@ -15,6 +15,10 @@ export default tseslint.config(
       ".nitro/**",
       "node_modules/**",
       "src/routeTree.gen.ts",
+      // Audit evidence: capture scripts written by the auditors, kept out of
+      // git and out of the lint budget. The reports beside them are the
+      // deliverable; these are the throwaway that produced them.
+      "artifacts/**",
     ],
   },
   js.configs.recommended,

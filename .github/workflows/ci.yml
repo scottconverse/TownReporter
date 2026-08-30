@@ -17,6 +17,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # ESLint was red with nine errors and had never run in CI. One of them
+      # was `no-control-regex` -- the rule that flags a literal backspace in a
+      # regular expression, which is exactly how the reader-privacy check on
+      # the Server page came to match nothing and report a clean result
+      # unconditionally. The linter would have caught it in thirty seconds.
+      - run: npm run lint
       - run: npm test
 
   lifecycle:

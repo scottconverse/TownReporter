@@ -207,7 +207,7 @@ export async function fetchSourceText(
   const html = await res.text();
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const titleHint = titleMatch ? stripHtml(titleMatch[1]).slice(0, 140) : url.hostname;
-  let text = stripHtml(html).slice(0, 14000);
+  const text = stripHtml(html).slice(0, 14000);
   if (typeof window === "undefined") {
     const { needsRenderedFetch, fetchRenderedPage } = await import("./render-fetch.ts");
     if (needsRenderedFetch(url, text, html)) {

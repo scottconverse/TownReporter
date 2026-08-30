@@ -15,8 +15,18 @@
  * dozen places this text eventually gets written, and the next one added would
  * not know to call a sanitizer.
  */
+/*
+  On the no-control-regex rule: this is the sanitiser, so matching control
+  characters is the entire job. The rule stays on everywhere else on
+  purpose: it is what catches a `\b` that lost a backslash on its way to
+  disk and became a literal backspace, which is exactly how the reader-
+  privacy check on the Server page came to match nothing at all and report
+  a clean result unconditionally.
+*/
+// eslint-disable-next-line no-control-regex
 const CONTROL = new RegExp(
   // NUL through backspace, vertical tab and form feed, then SO through US, and DEL.
+  // eslint-disable-next-line no-control-regex
   "[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]",
   "g",
 );

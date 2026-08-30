@@ -211,7 +211,10 @@ function tokenIdentityKey(token: string): string {
             .digest("base64url");
         }
       }
-    } catch {}
+    } catch {
+      /* A malformed or unreadable token is simply not a session we can
+         identify; the caller's own hash below is the correct answer. */
+    }
   }
   return createHash("sha256").update(token).digest("base64url");
 }
