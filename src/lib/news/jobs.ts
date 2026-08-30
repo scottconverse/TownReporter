@@ -307,3 +307,64 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
 export function jobIsOpen(job: DeskJob | null | undefined) {
   return job?.status === "queued" || job?.status === "running";
 }
+
+/**
+ * The heartbeat is the one signal that actually distinguishes "still
+ * working" from "the process that owned this is gone": `executeJob` touches
+ * `updated_at` every 30s for as long as it is alive, on every job kind,
+ * including the 10-40 minute editorial pieces. A queued-or-running job whose
+ * heartbeat is older than the reclaim window (`STALE_RUNNING_SECONDS`) was
+ * not written to by anything in the last four heartbeats -- the executor
+ * died. `drainQueuedJobs` will eventually reclaim and rerun it, but that can
+ * take a while, and nothing about the row itself changes in the meantime, so
+ * a screen polling naively would show the same "still going" state whether
+ * the job is seconds old or has been dead for an hour.
+ */
+export function jobHeartbeatStale(
+  job: Pick<DeskJob, "status" | "updated_at"> | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (!job) return false;
+  if (job.status !== "running" && job.status !== "queued") return false;
+  const updated = Date.parse(job.updated_at);
+  if (Number.isNaN(updated)) return false;
+  return nowMs - updated > STALE_RUNNING_SECONDS * 1000;
+}
+
+/**
+ * Scan, Dark Desk and Opinion each keep their own "run" record (scan_runs,
+ * dark_runs, editorial_requests) alongside the generic desk_jobs row that
+ * actually does the work. The run record only learns it is done when the
+ * job's own code writes `finished_at` -- and a process killed mid-run (the
+ * machine rebooting, the app being restarted, an OOM kill) can die between
+ * those writes, leaving `finished_at` and `error` both null forever. That
+ * looked, from the run record alone, indistinguishable from real progress:
+ * Scan's `desk.scan.tsx` computed `scanning` from exactly that shape before
+ * this fix, so a dead run left the page spinning with the Run button
+ * disabled and no way out.
+ *
+ * A run "looks stalled" when it claims to be open but nothing is actually
+ * going to finish it on its own within a useful time:
+ *  - no desk_jobs row exists for it at all (orphaned -- nothing will ever
+ *    reclaim a job that was never enqueued, e.g. a crash between inserting
+ *    the run row and enqueuing the job), or
+ *  - the job already settled (completed/failed) without the run record ever
+ *    being told, or
+ *  - the job's heartbeat has gone cold (`jobHeartbeatStale`).
+ *
+ * Deliberately NOT "has this been open a long time": that would misjudge a
+ * legitimately slow run (Scan fetching many sources, a 40-minute editorial)
+ * as dead. The heartbeat is what the system itself already uses to decide
+ * whether a job is safe to reclaim, so this reuses that judgment instead of
+ * inventing a second, less-informed one.
+ */
+export function runLooksStalled(opts: {
+  runOpen: boolean;
+  job: DeskJob | null | undefined;
+  now?: number;
+}): boolean {
+  if (!opts.runOpen) return false;
+  if (!opts.job) return true;
+  if (opts.job.status === "completed" || opts.job.status === "failed") return true;
+  return jobHeartbeatStale(opts.job, opts.now);
+}

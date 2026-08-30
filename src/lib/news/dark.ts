@@ -36,7 +36,7 @@ import {
   stanceFor,
   type DarkDials,
 } from "./dark-dials.ts";
-import { enqueueJob, type DeskJob } from "./jobs.ts";
+import { enqueueJob, latestJob, runLooksStalled, type DeskJob } from "./jobs.ts";
 
 function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
@@ -541,8 +541,20 @@ export const getInvestigation = createServerFn({ method: "GET" })
       brief = null;
     }
 
+    /*
+      "investigating" is the only status the page polls on -- see
+      `desk.dark.tsx`'s `detail` query. `performDarkRound` inserts a FRESH
+      dark_runs row every round rather than reusing one, so a process killed
+      mid-round leaves the investigation stuck at "investigating" with no run
+      record to even check: the status itself is the only open state there
+      is, and nothing ever flips it back without a live job behind it.
+    */
+    const job = await latestJob({ newsroomId: owned(context), kind: "dark", subjectId: id });
+    const stalled = runLooksStalled({ runOpen: inv[0].status === "investigating", job });
+
     return {
       investigation: inv[0],
+      stalled,
       brief,
       frontier,
       artifacts,

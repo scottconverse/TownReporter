@@ -177,8 +177,8 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: node scripts/migrate.mjs
-      - name: Sign-in throttling, giving up the desk, and the search index -- each against its own scratch database
-        run: node --experimental-strip-types --test src/lib/auth/sign-in-throttle.test.ts src/lib/news/leave-desk.test.ts src/lib/news/search-index.test.ts
+      - name: Sign-in throttling, giving up the desk, the search index, the reader-facing leak guard, and a dead run recovering -- each against its own scratch database
+        run: node --experimental-strip-types --test src/lib/auth/sign-in-throttle.test.ts src/lib/news/leave-desk.test.ts src/lib/news/search-index.test.ts src/lib/news/public-surfaces.no-leak.test.ts src/lib/news/stalled-run.e2e.test.ts
       - name: The index actually makes the search cheaper
         run: node scripts/search-index-proof.mjs
 
@@ -222,6 +222,57 @@ jobs:
             echo "dev server did not come up"; tail -n 80 /tmp/flows.log; exit 1;
           }
           node scripts/desk-flows-e2e.mjs
+
+  # Delete, trash, and the public corrections feed each had a fix proven only
+  # by a unit test: a deleted story's correction could outlive it and print
+  # under a null headline, restoring a story from the trash could leave its
+  # correction behind, the public corrections feed could print a correction
+  # for a story that was never published, and a transcript locator meant for
+  # the desk, not a reader, could reach the article page through either of two
+  # copies of the function that was supposed to strip it. None of that had
+  # ever been driven through a browser.
+  delete-corrections:
+    name: Delete, trash, and the public corrections feed, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: townreporter_delete_corr
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:ci@127.0.0.1:5432/townreporter_delete_corr
+      BETTER_AUTH_SECRET: ci-delete-corr-secret-not-for-production
+      PORT: "8080"
+      HOST: 127.0.0.1
+      DELETE_CORR_BASE_URL: http://127.0.0.1:8080
+      TOWNREPORTER_CLAUDE_CODE: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node scripts/migrate.mjs
+      - name: File, publish, correct, delete, restore, and check the locator never prints
+        run: |
+          npm run build
+          npm start > /tmp/delete-corr.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ || {
+            echo "built server did not come up"; tail -n 80 /tmp/delete-corr.log; exit 1;
+          }
+          node scripts/delete-corrections-e2e.mjs
 
   # The front page promises "Sources shown." A lead carrying a source URL
   # published a story with no sources section at all: the lead stored the URL,

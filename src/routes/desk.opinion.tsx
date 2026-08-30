@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead, areaClass, inputClass } from "@/components/desk-chrome";
 import { ListSkeleton } from "@/components/states";
 import { deleteEditorial, fileWrittenEditorial, getEditorial, listEditorials, opinionReadiness, startEditorial } from "@/lib/news/opinion";
+import { stalledRunCopy } from "@/lib/news/desk-copy";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { formatDateTime } from "@/lib/paper";
 
@@ -120,7 +121,7 @@ function OpinionPage() {
   });
 
   const rows = list.data ?? [];
-  const working = rows.filter((r) => !r.finished_at);
+  const working = rows.filter((r) => !r.finished_at && !r.stalled);
 
   return (
     <DeskShell
@@ -272,7 +273,11 @@ function OpinionPage() {
                       {r.words ? ` · ${r.words} words` : ""}
                     </span>
                   </span>
-                  {!r.finished_at ? (
+                  {!r.finished_at && r.stalled ? (
+                    <span className="text-[11px] tracking-[0.14em] text-rust uppercase">
+                      Stalled
+                    </span>
+                  ) : !r.finished_at ? (
                     // Fifteen minutes of a static word reads as hung. The rule
                     // animates, and the clock counts up, so it is visibly alive.
                     <Elapsed since={r.created_at} />
@@ -336,7 +341,9 @@ function OpinionPage() {
                   Asked {formatDateTime(r.created_at)}
                   {r.finished_at ? ` · finished ${formatDateTime(r.finished_at)}` : ""}
                 </p>
-                {!r.finished_at ? (
+                {!r.finished_at && r.stalled ? (
+                  <p className="mt-2 max-w-md text-sm text-rust">{stalledRunCopy("editorial")}</p>
+                ) : !r.finished_at ? (
                   <div className="mt-2 max-w-md">
                     <Busy label="Reading the records before it writes a word" />
                   </div>

@@ -20,7 +20,7 @@
     "playwright:install": "playwright install chromium",
     "check:auth": "node scripts/check-auth-invariant.mjs",
     "test:lifecycle": "node scripts/lifecycle-e2e.mjs",
-    "test": "node --test \"scripts/**/*.test.mjs\" && node --experimental-strip-types --test \"src/**/*.test.ts\"",
+    "test": "node --test \"scripts/**/*.test.mjs\" && node --experimental-strip-types --test --test-concurrency=1 \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "test:live-model": "node scripts/with-app-env.mjs node --experimental-strip-types --test src/lib/news/scan-pass.test.ts",

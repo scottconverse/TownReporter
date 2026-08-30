@@ -34,6 +34,7 @@ import {
   plainFinding,
   progressLine,
   recordKindFromUrl,
+  stalledRunCopy,
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
 import { formatDateTime, formatShortDate } from "@/lib/paper";
@@ -373,6 +374,11 @@ function DarkPage() {
     }
   }, [openId]);
   const inv = detail.data?.investigation;
+  // See `runLooksStalled` in `src/lib/news/jobs.ts`: true only when the
+  // investigation claims to still be running but no live job is behind it,
+  // most likely because the app restarted mid-round. Gates the busy UI so a
+  // dead round does not poll and spin forever with "Keep digging" disabled.
+  const stalled = Boolean(detail.data?.stalled);
   useEffect(() => {
     const now = inv?.status === "investigating" || digging;
     if (wasInvestigating.current && !now) clearPhase();
@@ -458,8 +464,9 @@ function DarkPage() {
           openId={openId}
           detail={detail.data ?? undefined}
           pending={detail.isPending && !detail.data}
-          digging={digging || inv?.status === "investigating"}
-          keepDisabled={digging || inv?.status === "investigating"}
+          digging={(digging || inv?.status === "investigating") && !stalled}
+          keepDisabled={(digging || inv?.status === "investigating") && !stalled}
+          stalled={stalled}
           phase={cardPhase || liveLine}
           notice={noticeAt === "work" ? notice : null}
           noticeOk={noticeOk}
@@ -698,6 +705,7 @@ function InvestigationWorkspace({
   pending,
   digging,
   keepDisabled,
+  stalled,
   phase,
   notice,
   noticeOk,
@@ -716,6 +724,7 @@ function InvestigationWorkspace({
   pending: boolean;
   digging: boolean;
   keepDisabled: boolean;
+  stalled: boolean;
   phase: string;
   notice: string | null;
   noticeOk: boolean;
@@ -804,6 +813,7 @@ function InvestigationWorkspace({
           </InkButton>
         </div>
       </div>
+      {stalled ? <p className="note err">{stalledRunCopy("dark")}</p> : null}
       {digging ? <Busy label={phase || "Searching records…"} /> : null}
       {notice && !digging ? <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p> : null}
       {queuedLead != null ? (

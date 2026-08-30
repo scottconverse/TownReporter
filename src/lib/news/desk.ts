@@ -37,7 +37,7 @@ import {
 } from "./notes";
 import { provenanceFromUrls } from "./findings";
 import { composeZeroLeadSummary, kindFromSourceUrl } from "./desk-copy";
-import { enqueueJob, findOpenJob, kickJobs, latestJob, type DeskJob } from "./jobs";
+import { enqueueJob, findOpenJob, kickJobs, latestJob, runLooksStalled, type DeskJob } from "./jobs";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import type {
   DraftRow,
@@ -298,11 +298,18 @@ export const getLead = createServerFn({ method: "GET" })
         lead.notes_json = json;
       }
     }
+    const job = await latestJob({ newsroomId: owned(context), kind: "draft", subjectId: id });
     return {
       lead,
       draft,
       articleSlug: live[0]?.slug ?? null,
-      job: await latestJob({ newsroomId: owned(context), kind: "draft", subjectId: id }),
+      job,
+      // Draft has no separate run table -- desk_jobs IS the record, so
+      // "orphaned" cannot happen here; only a cold heartbeat means dead.
+      stalled: runLooksStalled({
+        runOpen: job?.status === "running" || job?.status === "queued",
+        job,
+      }),
     };
   });
 
@@ -335,13 +342,24 @@ export const listScans = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     kickJobs();
     const sql = await getSql();
-    return sql<ScanRow>`
+    const rows = await sql<ScanRow>`
       select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed, summary, error
       from scan_runs
       where newsroom_id = ${owned(context)}
       order by started_at desc
       limit 12
     `;
+    /*
+      Only the most recent row can be the one a screen is watching, and it is
+      the only one worth a job lookup -- older rows are either finished or,
+      if a still-open older row exists too, will resolve on their own turn.
+    */
+    const newest = rows[0];
+    if (newest && !newest.finished_at && !newest.error) {
+      const job = await latestJob({ newsroomId: owned(context), kind: "scan", subjectId: newest.id });
+      newest.stalled = runLooksStalled({ runOpen: true, job });
+    }
+    return rows;
   });
 
 export const runScan = createServerFn({ method: "POST" })

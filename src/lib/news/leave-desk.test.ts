@@ -6,6 +6,7 @@ import { Client } from "pg";
 import { chromium, type Browser, type Page } from "playwright";
 import {
   ensureBuilt,
+  integrationRequested,
   probePostgres,
   resolveAdminUrl,
   run,
@@ -75,7 +76,23 @@ let page: Page | undefined;
 const OWNER_EMAIL = "leave-desk-probe@townreporter.test";
 const OWNER_PASSWORD = "leave-desk-probe-pass-1";
 
-const dbProbe = await probePostgres(PSQL_ADMIN_URL);
+/*
+  Opt-in, because this file builds the app and boots a server.
+
+  Five files do that. Node's test runner starts files concurrently, so on any
+  machine with Postgres on the default port they all did it at once during an
+  ordinary `npm test` -- and seven unrelated database tests then timed out,
+  starved rather than broken. TEST_POSTGRES_ADMIN_URL is the switch; the
+  postgres-integration CI job sets it and names this file, and a gate fails if
+  it ever stops doing so.
+*/
+const dbProbe = integrationRequested()
+  ? await probePostgres(PSQL_ADMIN_URL)
+  : ({
+      ok: false as const,
+      reason:
+        "set TEST_POSTGRES_ADMIN_URL to run the integration tests (they build the app and boot a server; the postgres-integration CI job runs them on every push)",
+    });
 const skip = dbProbe.ok ? false : dbProbe.reason;
 
 /**

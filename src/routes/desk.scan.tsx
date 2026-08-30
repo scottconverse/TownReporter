@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice } from "@/components/states";
 import { listScans, listSources, runScan } from "@/lib/news/desk";
-import { editorScanError, scanCountsLine, scanZeroWhy } from "@/lib/news/desk-copy";
+import { editorScanError, scanCountsLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
 import { formatDateTime } from "@/lib/paper";
 
 export const Route = createFileRoute("/desk/scan")({ component: ScanPage });
@@ -57,7 +57,14 @@ function ScanPage() {
   const history = scans.data ?? [];
   const watch = (sources.data ?? []).filter((s) => s.status === "accepted").length;
   const last = history[0];
-  const scanning = scan.isPending || Boolean(last && !last.finished_at && !last.error);
+  // A row can look open (no finished_at, no error) forever if the process
+  // that was running it died mid-scan -- the machine rebooting, the app
+  // restarting. `listScans` marks that row `stalled` by checking whether a
+  // live job is actually behind it. Audit: this used to be purely
+  // `!last.finished_at && !last.error`, which left the Run button disabled
+  // and the page spinning with no way to start over.
+  const stalled = Boolean(last?.stalled);
+  const scanning = scan.isPending || Boolean(last && !last.finished_at && !last.error && !stalled);
 
   return (
     <DeskShell title="Scan" kicker="Reporter pass">
@@ -77,7 +84,8 @@ function ScanPage() {
       {scanning ? (
         <Busy label="Fetching accepted sources, then one pass for leads. Stay on this page." />
       ) : null}
-      {!scanning && last && !last.error && last.leads_created > 0 ? (
+      {!scanning && stalled ? <Notice kind="err">{stalledRunCopy("scan")}</Notice> : null}
+      {!scanning && !stalled && last && !last.error && last.leads_created > 0 ? (
         <div className="scan-result">
           <p className="wire-line">
             <b>Done.</b> {scanCountsLine({
@@ -92,7 +100,7 @@ function ScanPage() {
           </Link>
         </div>
       ) : null}
-      {!scanning && last && !last.error && last.leads_created === 0 ? (
+      {!scanning && !stalled && last && !last.error && last.leads_created === 0 ? (
         <div className="scan-result zero">
           <p className="wire-line">
             <b>Fetched {last.sources_fetched}. Filed nothing.</b>
@@ -139,7 +147,9 @@ function ScanPage() {
                 })}
               </p>
               {s.leads_created > 0 && s.summary ? <p className="wire-sum">{s.summary}</p> : null}
-              {s.leads_created === 0 ? (
+              {s.stalled ? (
+                <p className="wire-warn">{stalledRunCopy("scan")}</p>
+              ) : s.leads_created === 0 ? (
                 <p className="wire-sum">{scanZeroWhy(s)}</p>
               ) : s.error ? (
                 <p className="wire-warn">{editorScanError(s.error)}</p>

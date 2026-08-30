@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { Client } from "pg";
 import {
   ensureBuilt,
+  integrationRequested,
   probePostgres,
   resolveAdminUrl,
   run,
@@ -67,7 +68,23 @@ const dbName = `townreporter_test_throttle_${process.pid}_${Date.now()}`;
 
 let server: ChildProcess | undefined;
 
-const dbProbe = await probePostgres(PSQL_ADMIN_URL);
+/*
+  Opt-in, because this file builds the app and boots a server.
+
+  Five files do that. Node's test runner starts files concurrently, so on any
+  machine with Postgres on the default port they all did it at once during an
+  ordinary `npm test` -- and seven unrelated database tests then timed out,
+  starved rather than broken. TEST_POSTGRES_ADMIN_URL is the switch; the
+  postgres-integration CI job sets it and names this file, and a gate fails if
+  it ever stops doing so.
+*/
+const dbProbe = integrationRequested()
+  ? await probePostgres(PSQL_ADMIN_URL)
+  : ({
+      ok: false as const,
+      reason:
+        "set TEST_POSTGRES_ADMIN_URL to run the integration tests (they build the app and boot a server; the postgres-integration CI job runs them on every push)",
+    });
 const skip = dbProbe.ok ? false : dbProbe.reason;
 
 async function signIn(email: string, password: string, ip: string): Promise<Response> {

@@ -29,6 +29,51 @@ export function resolveAdminUrl(): string {
   return process.env.TEST_POSTGRES_ADMIN_URL ?? "postgres://postgres@127.0.0.1:5433/postgres";
 }
 
+/**
+ * Should the heavyweight tests run in THIS process?
+ *
+ * Five test files build the app and boot a server. Node's test runner starts
+ * files concurrently, so on a developer machine that happens to have Postgres
+ * on the default port -- which is every machine this is developed on -- all
+ * five did that at once during an ordinary `npm test`. The box could not carry
+ * it: seven unrelated database tests timed out at eleven seconds each, none of
+ * them broken, all of them starved. Diagnosing that costs an hour and teaches
+ * nothing, and a suite that fails for reasons unrelated to the code is worse
+ * than a slower one.
+ *
+ * So they are opt-in, and TEST_POSTGRES_ADMIN_URL is the switch: set it and
+ * they run, leave it and they skip with a reason. The default above stays for
+ * anyone who sets the variable to something other than this machine's server.
+ *
+ * A skip is only honest if something guarantees they run somewhere. The
+ * `postgres-integration` CI job sets the variable and names every one of these
+ * files, and `scripts/postgres-tests-are-covered.test.mjs` fails if a file
+ * that can skip this way is missing from it.
+ */
+/*
+  A note on why `npm test` runs the src group with --test-concurrency=1.
+
+  Measured, not guessed. Run in parallel, eight files fail: dark.open,
+  dark.preflight, delete, evidence.public, investigate.nongate, jobs,
+  membership and their neighbours. Every one of them passes alone, and the
+  whole group passes with concurrency 1 -- 579 tests, 0 failures. The failures
+  carry no assertion message, only 'test failed' at file level, and they land
+  at a uniform ~7.8s, which is the shape of a timeout rather than a defect.
+
+  These tests share one embedded PGLite database and several of them probe for
+  a model provider with its own timeout. Under parallel load the probes and
+  the WASM database contend and something exceeds its budget. That is worth
+  fixing properly one day; what is NOT acceptable is a suite that fails for
+  reasons unrelated to the code, because the next real failure gets read as
+  noise and waved through.
+
+  Serial is slower and honest. The five heavyweight files below are excluded
+  from the default run entirely, for the same reason at a larger scale.
+*/
+export function integrationRequested(): boolean {
+  return Boolean(process.env.TEST_POSTGRES_ADMIN_URL?.trim());
+}
+
 /** Never log a connection string with a password in it. */
 function redact(url: string): string {
   return url.replace(/:[^:@/]*@/, ":***@");

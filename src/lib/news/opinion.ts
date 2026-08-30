@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { assertRate, audit } from "./ops";
-import { enqueueJob } from "./jobs";
+import { enqueueJob, latestJob, runLooksStalled } from "./jobs";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { assertHttpUrl } from "./url-guard";
 import { siteUrl } from "@/lib/paper";
@@ -34,6 +34,14 @@ export type EditorialRow = {
   headline: string | null;
   words: number | null;
   published_slug: string | null;
+  /**
+   * True when the row looks like it is still being written (no finished_at,
+   * no error) but the desk_jobs heartbeat behind it is cold or missing --
+   * most likely the app restarted mid-piece. See `runLooksStalled`. Left
+   * undefined on finished rows so the client's `!r.finished_at` checks stay
+   * the source of truth for "is this open at all".
+   */
+  stalled?: boolean;
 };
 
 /**
@@ -71,7 +79,7 @@ export const listEditorials = createServerFn({ method: "GET" })
     await ensureEditorialRequestSchema();
     await ensureEditorialSchema();
     const sql = await getSql();
-    return sql<EditorialRow>`
+    const rows = await sql<EditorialRow>`
       select r.id, r.subject, r.source_kind, r.source_ref, r.draft_id, r.error,
              r.created_at, r.finished_at,
              d.headline,
@@ -86,6 +94,20 @@ export const listEditorials = createServerFn({ method: "GET" })
       order by r.id desc
       limit 30
     `.catch(() => []);
+    /*
+      Only rows that still look open are worth a job lookup. A piece writes
+      for 10-40 minutes and this desk deliberately never polls faster than
+      20s, so the `Elapsed` clock on `desk.opinion.tsx` was the only signal
+      an editor had -- and it ticks forever whether the job is alive or the
+      process that owned it died. `runLooksStalled` tells the two apart using
+      the same heartbeat `executeJob` already keeps fresh for a live run.
+    */
+    for (const row of rows) {
+      if (row.finished_at) continue;
+      const job = await latestJob({ newsroomId: owned(context), kind: "editorial", subjectId: row.id });
+      row.stalled = runLooksStalled({ runOpen: true, job });
+    }
+    return rows;
   });
 
 export const getEditorial = createServerFn({ method: "GET" })

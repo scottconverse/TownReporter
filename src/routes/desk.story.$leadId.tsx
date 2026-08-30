@@ -11,7 +11,7 @@ import {
   parseNotes,
   type ReportingNotes,
 } from "@/lib/news/notes";
-import { editorDraftError, draftHasLanded } from "@/lib/news/desk-copy";
+import { editorDraftError, draftHasLanded, stalledRunCopy } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
@@ -130,6 +130,23 @@ function StoryPage() {
     setSlowWait(false);
     setMsg(editorDraftError(data.job.error) ?? data.job.error ?? "The draft did not finish.");
   }, [data?.job, waitingSince]);
+
+  /*
+    A job that looks open (no failure, no landed draft) but whose desk_jobs
+    heartbeat has gone cold -- most likely the app restarted mid-draft. The
+    "failed" effect above cannot catch this: the row was never marked
+    failed, it just stopped being touched. Without this, the button stays
+    disabled and the page waits on a click that already happened and a
+    process that is gone. `data.stalled` is computed server-side in
+    `getLead` using the same heartbeat `executeJob` keeps fresh for a live
+    run, so a genuinely slow draft never trips this.
+  */
+  useEffect(() => {
+    if (!data?.stalled) return;
+    setWaitingSince(null);
+    setSlowWait(false);
+    setMsg(stalledRunCopy("draft"));
+  }, [data?.stalled]);
 
   useEffect(() => {
     const s = parseNotes(data?.lead.notes_json).scratch ?? "";

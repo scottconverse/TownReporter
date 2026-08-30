@@ -414,6 +414,28 @@ export function editorScanError(raw: string | null | undefined): string | null {
   return plainEditorText(t);
 }
 
+/**
+ * Copy for a run `runLooksStalled()` (in `./jobs`) has judged dead: no
+ * finished_at, no error, and no live heartbeat behind it. Written to say
+ * plainly what happened (it stopped, most likely because the app restarted)
+ * and what to do about it (start over -- the old run is not blocking
+ * anything). Never "try again" phrased as if the same click might behave
+ * differently; the desk already knows this one is not coming back.
+ */
+export function stalledRunCopy(kind: "scan" | "dark" | "draft" | "editorial"): string {
+  const startedOver = "most likely because the app restarted partway through";
+  switch (kind) {
+    case "scan":
+      return `This scan stopped without finishing -- ${startedOver}. It did not fail, and nothing was lost. Run a new scan when you're ready.`;
+    case "dark":
+      return `This round stopped without finishing -- ${startedOver}. It did not fail, and nothing was lost. Keep digging to start a fresh round.`;
+    case "draft":
+      return `This draft stopped without finishing -- ${startedOver}. Nothing was lost. Click Draft with AI again to start over.`;
+    case "editorial":
+      return `This piece stopped without finishing -- ${startedOver}. It did not fail, and nothing was lost.`;
+  }
+}
+
 export function editorFetchError(raw: string | null | undefined, url?: string | null): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();

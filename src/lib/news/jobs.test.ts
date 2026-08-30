@@ -7,9 +7,30 @@ import {
   drainQueuedJobs,
   executeJob,
   ensureJobsSchema,
+  jobHeartbeatStale,
+  runLooksStalled,
   STALE_RUNNING_SECONDS,
+  type DeskJob,
 } from "./jobs.ts";
 import { getSql } from "../db.ts";
+
+function fakeJob(over: Partial<DeskJob>): DeskJob {
+  return {
+    id: 1,
+    newsroom_id: 1,
+    user_id: "u",
+    kind: "scan",
+    subject_id: 1,
+    status: "running",
+    stage: "",
+    error: null,
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+    started_at: new Date(0).toISOString(),
+    finished_at: null,
+    ...over,
+  };
+}
 
 describe("desk jobs", () => {
   it("reuses a queued/running job for the same subject", async () => {
@@ -220,6 +241,101 @@ describe("enqueue is race-safe", () => {
     });
     assert.notEqual(second.id, first.id, "a finished job must not block the next one");
     await sql`delete from desk_jobs where newsroom_id = ${newsroomId}`;
+  });
+});
+
+/**
+ * The dead-run defect: a scan/dark/draft/editorial screen that polls a "run"
+ * record (or, for draft, desk_jobs directly) can be left showing a
+ * loading state that will never end if the process working it dies mid-run
+ * without writing finished_at or error. `runLooksStalled` is the one signal
+ * every affected screen relies on to tell "still genuinely working" apart
+ * from "the desk has nobody actually working on this any more" -- it must
+ * never mistake a live-but-slow run (an editorial piece can run 10-40
+ * minutes) for a dead one, and it must never leave a truly dead run looking
+ * alive forever.
+ */
+describe("jobHeartbeatStale", () => {
+  const now = Date.parse("2026-01-01T00:00:10.000Z");
+
+  it("is false for a job whose heartbeat is fresh", () => {
+    const job = fakeJob({ status: "running", updated_at: "2026-01-01T00:00:00.000Z" });
+    assert.equal(jobHeartbeatStale(job, now), false);
+  });
+
+  it("is false right up to the reclaim window, even for a legitimately slow job", () => {
+    const justUnderWindow = now - (STALE_RUNNING_SECONDS - 1) * 1000;
+    const job = fakeJob({ status: "running", updated_at: new Date(justUnderWindow).toISOString() });
+    assert.equal(jobHeartbeatStale(job, now), false);
+  });
+
+  it("is true once the heartbeat is older than the reclaim window", () => {
+    const pastWindow = now - (STALE_RUNNING_SECONDS + 1) * 1000;
+    const job = fakeJob({ status: "running", updated_at: new Date(pastWindow).toISOString() });
+    assert.equal(jobHeartbeatStale(job, now), true);
+  });
+
+  it("ignores a cold heartbeat on a job that already finished or failed", () => {
+    const pastWindow = now - (STALE_RUNNING_SECONDS + 1) * 1000;
+    for (const status of ["completed", "failed"] as const) {
+      const job = fakeJob({ status, updated_at: new Date(pastWindow).toISOString() });
+      assert.equal(jobHeartbeatStale(job, now), false, status);
+    }
+  });
+
+  it("is false with no job at all -- absence is a different signal, handled by runLooksStalled", () => {
+    assert.equal(jobHeartbeatStale(null, now), false);
+    assert.equal(jobHeartbeatStale(undefined, now), false);
+  });
+});
+
+describe("runLooksStalled", () => {
+  const now = Date.parse("2026-01-01T00:00:10.000Z");
+  const pastWindow = now - (STALE_RUNNING_SECONDS + 1) * 1000;
+  const freshTime = now - 5_000;
+
+  it("is false whenever the run itself is not open", () => {
+    assert.equal(runLooksStalled({ runOpen: false, job: null, now }), false);
+    assert.equal(
+      runLooksStalled({
+        runOpen: false,
+        job: fakeJob({ status: "running", updated_at: new Date(pastWindow).toISOString() }),
+        now,
+      }),
+      false,
+    );
+  });
+
+  it("is true for an open run with no desk_jobs row behind it (orphaned)", () => {
+    // A crash between inserting the run row (scan_runs/dark_runs/
+    // editorial_requests) and enqueueing the desk_jobs row leaves exactly
+    // this shape: nothing will ever reclaim a job that was never enqueued.
+    assert.equal(runLooksStalled({ runOpen: true, job: null, now }), true);
+  });
+
+  it("is true when the job already settled without the run record hearing about it", () => {
+    for (const status of ["completed", "failed"] as const) {
+      const job = fakeJob({ status, updated_at: new Date(freshTime).toISOString() });
+      assert.equal(runLooksStalled({ runOpen: true, job, now }), true, status);
+    }
+  });
+
+  it("is true once the backing job's heartbeat has gone cold", () => {
+    const job = fakeJob({ status: "running", updated_at: new Date(pastWindow).toISOString() });
+    assert.equal(runLooksStalled({ runOpen: true, job, now }), true);
+  });
+
+  it("is false for a genuinely live run, no matter how long it has been open", () => {
+    // The heartbeat is what makes this safe: `executeJob` re-touches
+    // updated_at every 30s for as long as the process is alive, so a
+    // 40-minute editorial piece stays "not stalled" throughout.
+    const job = fakeJob({ status: "running", updated_at: new Date(freshTime).toISOString() });
+    assert.equal(runLooksStalled({ runOpen: true, job, now }), false);
+  });
+
+  it("is false for a job still queued and fresh", () => {
+    const job = fakeJob({ status: "queued", updated_at: new Date(freshTime).toISOString() });
+    assert.equal(runLooksStalled({ runOpen: true, job, now }), false);
   });
 });
 
