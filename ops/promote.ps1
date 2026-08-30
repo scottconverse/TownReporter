@@ -92,9 +92,23 @@ $target = (& git rev-parse origin/main).Trim()
 if ($head -ne $target) {
   $ahead = (& git rev-list --count origin/main..HEAD).Trim()
   if ($ahead -ne '0') { Die "This checkout has $ahead commit(s) origin/main does not. Push or reset them first." }
-  # A dry-run merge: reports what would block it while the paper is still up.
-  $blocked = (& git merge --ff-only --no-commit --no-ff origin/main 2>&1)
-  & git merge --abort 2>$null
+  <#
+    Ask git whether a fast-forward is POSSIBLE, without performing one.
+
+    The first version of this check ran `git merge --ff-only --no-commit
+    --no-ff`, which is self-contradictory -- and git resolved it by doing a
+    real merge and stopping before the commit. A check that changes the thing
+    it is checking is not a check. It left the live checkout mid-merge with
+    everything staged, on a run whose whole purpose was to find problems
+    BEFORE touching anything.
+
+    `merge-base --is-ancestor` answers the same question and reads nothing but
+    the commit graph.
+  #>
+  & git merge-base --is-ancestor HEAD origin/main
+  if ($LASTEXITCODE -ne 0) {
+    Die "origin/main is not ahead of this checkout in a straight line. A fast-forward is not possible."
+  }
   # A file is a collision when it is arriving from origin/main, already exists
   # on disk, and git is not tracking it -- git refuses to overwrite those.
   $incoming = @(& git diff --name-only HEAD origin/main)
