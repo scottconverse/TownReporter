@@ -77,7 +77,18 @@ const dbName = `townreporter_test_throttle_${process.pid}_${Date.now()}`;
   instead, purely so "the lock lifts on its own" is something this file can
   actually observe rather than assert about the source text.
 */
-const PORT_LOCKOUT = 3863;
+/*
+  3865, and the number is load-bearing: this was 3863 -- the SAME port as
+  search-index.test.ts -- and in CI the five integration files run in
+  parallel. Whichever server bound 3863 first answered BOTH files' requests,
+  wired to its own scratch database, so the search test asked a lockout
+  server about a row that lived somewhere else. No error anywhere: the page
+  rendered, empty. It cost four diagnostic CI cycles to corner, because each
+  file run alone (locally) binds its own port and passes.
+  scripts/integration-ports-are-unique.test.mjs now fails the suite if any
+  two of these files ever share a port again.
+*/
+const PORT_LOCKOUT = 3865;
 const BASE_URL_LOCKOUT = `http://127.0.0.1:${PORT_LOCKOUT}`;
 const dbNameLockout = `townreporter_test_throttle_lockout_${process.pid}_${Date.now()}`;
 const LOCKOUT_MAX_ATTEMPTS = 5;
