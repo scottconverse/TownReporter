@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead, areaClass, inputClass } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
-import { deleteEditorial, discardEditorialRequest, fileWrittenEditorial, getEditorial, listEditorials, opinionReadiness, startEditorial } from "@/lib/news/opinion";
+import { deleteEditorial, discardEditorialRequest, fileWrittenEditorial, getEditorial, listEditorials, opinionReadiness, publishEditorial, startEditorial } from "@/lib/news/opinion";
 import { stalledRunCopy } from "@/lib/news/desk-copy";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { formatDateTime } from "@/lib/paper";
@@ -134,6 +134,26 @@ function OpinionPage() {
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
     onError: (err) => setNotice(err instanceof Error ? err.message : "That did not start."),
+  });
+
+  /*
+    Publish, from the reading view. The button also lives in the full editor,
+    but the operator pasted a finished piece, opened it here to check it, and
+    found only Close / Edit / Delete -- the one action a done draft actually
+    wants was hidden behind "Edit", and the hint spelled it "print". Same
+    server fn, same guard: nothing publishes without this click.
+  */
+  const publish = useMutation({
+    mutationFn: (draftId: number) => publishEditorial({ data: draftId }),
+    onSuccess: (r) => {
+      if (!r?.ok) {
+        setNotice(r?.error ?? "That did not print.");
+        return;
+      }
+      setNotice("On the paper. See it under Published, or read it on the paper.");
+      void qc.invalidateQueries({ queryKey: ["editorials"] });
+    },
+    onError: (err) => setNotice(err instanceof Error ? err.message : "That did not print."),
   });
 
   const remove = useMutation({
@@ -418,11 +438,39 @@ function OpinionPage() {
           <SecHead
             title="The piece"
             aside={
-              <InkButton tone="quiet" small onClick={() => setOpenId(null)}>
-                Close
-              </InkButton>
+              <span className="flex items-center gap-2">
+                {(() => {
+                  const row = rows.find((r) => r.id === openId);
+                  if (row?.published_slug) {
+                    return (
+                      <Link
+                        to="/articles/$slug"
+                        params={{ slug: row.published_slug }}
+                        className="btn quiet small"
+                      >
+                        On the paper
+                      </Link>
+                    );
+                  }
+                  if (piece.data) {
+                    return (
+                      <InkButton
+                        small
+                        disabled={publish.isPending}
+                        onClick={() => publish.mutate(openId)}
+                      >
+                        {publish.isPending ? "Publishing…" : "Publish to the paper"}
+                      </InkButton>
+                    );
+                  }
+                  return null;
+                })()}
+                <InkButton tone="quiet" small onClick={() => setOpenId(null)}>
+                  Close
+                </InkButton>
+              </span>
             }
-            sub="Read it here. Edit opens the full editor, where you can print it or throw it away."
+            sub="Read it here, and publish it from here when it is ready. Edit opens the full editor for changes."
           />
           {piece.isPending ? (
             <ListSkeleton />
