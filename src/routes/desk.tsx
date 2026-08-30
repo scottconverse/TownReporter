@@ -96,6 +96,7 @@ function DeskGate() {
         kicker="Editor desk"
         hint="If this sits here, use Sign in."
         action={<SignInLink />}
+        awaitingSession
       />
     );
   }

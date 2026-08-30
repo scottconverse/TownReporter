@@ -30,12 +30,19 @@ export function ScreenPending({
   hint = "Setting type…",
   night = false,
   action,
+  awaitingSession = false,
 }: {
   title: string;
   kicker?: string;
   hint?: string;
   night?: boolean;
   action?: ReactNode;
+  /**
+   * Marks the one pending screen shown to a visitor whose session is still
+   * unknown. The no-JavaScript fallback in __root.tsx keys on this attribute
+   * rather than on the heading text -- see the comment there for why.
+   */
+  awaitingSession?: boolean;
 }) {
   return (
     <div
@@ -45,6 +52,7 @@ export function ScreenPending({
           : "grid min-h-dvh place-items-center bg-paper px-6 text-ink"
       }
       role="status"
+      {...(awaitingSession ? { "data-awaiting-session": "" } : {})}
       aria-live="polite"
       aria-busy="true"
     >

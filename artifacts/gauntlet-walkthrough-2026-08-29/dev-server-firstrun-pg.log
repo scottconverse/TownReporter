@@ -1,0 +1,89 @@
+
+  [32m[1mVITE[22m v8.2.2[39m  [2mready in [0m[1m2005[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m3900[22m/[39m
+[2m9:16:34 PM[22m [36m[1m[vite][22m[39m [34m[2m(ssr)[22m[39m connected.
+Error: aborted
+    at abortIncoming (node:_http_server:851:17)
+    ... 2 lines matching cause stack trace ...
+    at TCP.<anonymous> (node:net:350:12) {
+  cause: Error: aborted
+      at abortIncoming (node:_http_server:851:17)
+      at socketOnClose (node:_http_server:845:3)
+      at Socket.emit (node:events:521:24)
+      at TCP.<anonymous> (node:net:350:12) {
+    code: 'ECONNRESET'
+  },
+  status: 500,
+  statusText: undefined,
+  headers: undefined,
+  data: undefined,
+  body: undefined,
+  unhandled: true
+}
+[townreporter] monitor tick failed: error: relation "source_monitors" does not exist
+    at C:\Users\scott\Desktop\Code\townreporter-web\node_modules\pg-pool\index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async eval (C:\Users\scott\Desktop\Code\townreporter-dev\src\lib\db.ts:118:19)
+    at async Module.tickAllDueMonitors (C:\Users\scott\Desktop\Code\townreporter-dev\src\lib\news\monitors-cron.ts:13:17)
+    at async tick (file:///C:/Users/scott/Desktop/Code/townreporter-web/node_modules/.vite-temp/vite.config.ts.timestamp-1788059783291-11f25cc6648408.mjs:655:56) {
+  length: 114,
+  severity: 'ERROR',
+  code: '42P01',
+  detail: undefined,
+  hint: undefined,
+  position: '35',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '1501',
+  routine: 'parserOpenTable'
+}
+[2m9:17:13 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2martifacts/gauntlet-walkthrough-2026-08-29/resp1.html[22m
+[2m9:17:29 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2martifacts/gauntlet-walkthrough-2026-08-29/resp2-home.html[22m
+[2m9:17:29 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2martifacts/gauntlet-walkthrough-2026-08-29/resp3-login.html[22m
+[2m9:17:29 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2martifacts/gauntlet-walkthrough-2026-08-29/resp4-how.html[22m
+[2m9:17:37 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css?direct[22m
+[2m9:17:45 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css?direct[22m
+[2m9:17:55 PM[22m [33m[1m[vite][22m[39m [33m[2m(client)[22m[39m [33mwarning: 
+[import-protection] Import denied in client environment
+
+  Denied by file pattern: **/*.server.*
+  Importer: c:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/ai.ts:148:62
+  Import: "./ai-claude-code.server.ts"
+  Resolved: src/lib/news/ai-claude-code.server.ts
+
+  Trace:
+    1. src/router.tsx:3:28 (entry) (import "./routeTree.gen")
+    2. src/routeTree.gen.ts:14:48 (import "./routes/desk.index")
+    3. src/routes/desk.index.tsx (import "src/routes/desk.index.tsx?tsr-split=component")
+    4. src/routes/desk.index.tsx:9:76 (import "@/lib/news/dark")
+    5. src/lib/news/dark.ts:5:59 (import "./ai")
+    6. src/lib/news/ai.ts:148:62 (import "./ai-claude-code.server.ts")
+
+  Code:
+    146 |   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
+    147 |   if (provider.kind !== "claude-code") return { ok: true, label: provider.label };
+  > 148 |   const { findClaudeCli, CLAUDE_CLI_MISSING } = await import("./ai-claude-code.server.ts");
+        |                                                              ^
+    149 |   const bin = await findClaudeCli();
+    150 |   return bin ? { ok: true, label: provider.label } : { ok: false, error: CLAUDE_CLI_MISSING };
+
+  c:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/ai.ts:148:62
+
+  Suggestions:
+    - Use createServerFn().handler(() => ...) to keep the logic on the server and call it from the client via an RPC bridge
+    - Use createServerOnlyFn(() => ...) to mark it as server-only (it will throw if accidentally called from the client)
+    - Use createIsomorphicFn().client(() => ...).server(() => ...) to provide separate client and server implementations
+    - Move the server-only import out of this file into a separate .server.ts module that is not imported by any client code
+[39m
+  Plugin: [35mtanstack-start-core:import-protection[39m
+[2m9:19:27 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css?direct, /src/routes/__root.tsx[22m
+[2m9:19:27 PM[22m [36m[1m[vite][22m[39m [34m[2m(ssr)[22m[39m [32mpage reload [39m[2msrc/routes/__root.tsx[22m
+[2m9:19:27 PM[22m [36m[1m[vite][22m[39m [34m[2m(ssr)[22m[39m program reload

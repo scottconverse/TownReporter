@@ -17,8 +17,25 @@
 DO $$
 BEGIN
   CREATE EXTENSION IF NOT EXISTS pg_trgm;
-EXCEPTION WHEN insufficient_privilege THEN
-  RAISE NOTICE 'pg_trgm needs a superuser. Archive search stays unindexed.';
+EXCEPTION WHEN OTHERS THEN
+  /*
+    Every failure, not just a privilege one.
+
+    This caught `insufficient_privilege` alone, on the assumption that the
+    only way to fail is to lack superuser. PGLite -- the embedded database
+    the README's zero-config quickstart uses when DATABASE_URL is unset --
+    does not ship pg_trgm at all, and raises a different class entirely:
+      extension "pg_trgm" is not available
+    So the unhandled error aborted the migration, the bootstrap failed, and
+    the documented five-minute quickstart died at boot. A gate lane found it
+    on the first-run path, which is the only place it shows.
+
+    Degrading is the right answer for all of them. The indexes below are
+    skipped when the extension is absent, and the paper still works with the
+    search it had before -- slower, but present. Refusing to start is never
+    the better outcome for an optional index.
+  */
+  RAISE NOTICE 'pg_trgm unavailable (%). Archive search stays unindexed.', SQLERRM;
 END
 $$;
 

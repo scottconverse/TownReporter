@@ -205,7 +205,12 @@ log.
 | unset | Embedded PGLite. Fast to demo. **Wiped when the process stops.** |
 | `postgres://…` | Real Postgres. Survives restarts. Use this if you care about the archive. |
 
-Schema is applied on `npm run build` (`npm run db:migrate`) and on boot. SQL lives in `migrations/`.
+Schema is applied by `npm run db:migrate`, which both `npm run dev` and `npm run build` run for you. SQL lives in `migrations/`.
+
+This page used to say the schema was applied "on boot", which was true of the
+build and false of `npm run dev` -- the command the README gives you. A first
+run against an empty Postgres met `relation "articles" does not exist` on the
+front page. `dev` migrates first now, so the sentence above is true of both.
 
 ### Sign-in
 
