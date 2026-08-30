@@ -77,15 +77,74 @@ if ($PSCmdlet.ShouldProcess($dbName, "back up to $backup")) {
   Say "backup: $backup ($([math]::Round($bytes/1MB,1)) MB)"
 }
 
+# --- 2b. can we even fast-forward? -----------------------------------------
+<#
+  Ask BEFORE stopping anything.
+
+  The first real run took the paper down, then discovered the merge could not
+  proceed because an untracked file sat where an incoming one belonged. The
+  paper stayed down while that was sorted out. Everything that can fail without
+  consequence must fail before the first destructive step, not after it.
+#>
+& git fetch origin --quiet
+$head = (& git rev-parse HEAD).Trim()
+$target = (& git rev-parse origin/main).Trim()
+if ($head -ne $target) {
+  $ahead = (& git rev-list --count origin/main..HEAD).Trim()
+  if ($ahead -ne '0') { Die "This checkout has $ahead commit(s) origin/main does not. Push or reset them first." }
+  # A dry-run merge: reports what would block it while the paper is still up.
+  $blocked = (& git merge --ff-only --no-commit --no-ff origin/main 2>&1)
+  & git merge --abort 2>$null
+  # A file is a collision when it is arriving from origin/main, already exists
+  # on disk, and git is not tracking it -- git refuses to overwrite those.
+  $incoming = @(& git diff --name-only HEAD origin/main)
+  $tracked = @(& git ls-files)
+  $collisions = @()
+  foreach ($f in $incoming) {
+    if (-not (Test-Path $f)) { continue }
+    if ($tracked -contains $f) { continue }
+    $collisions += $f
+  }
+  if ($collisions.Count -gt 0) {
+    Say 'these untracked files sit where incoming ones belong:'
+    $collisions | ForEach-Object { Say "    $_" }
+    Die 'Move or delete them first. Stopping now would take the paper down for a merge that cannot run.'
+  }
+}
+
 # --- 3. what is on the paper now -------------------------------------------
 $before = & "$env:USERPROFILE\scoop\apps\postgresql\current\bin\psql.exe" -p 5433 -U postgres -d $dbName -tAc "select count(*) from articles where status='published'"
 $before = "$before".Trim()
 Say "published stories now: $before"
 
 # --- 4. stop this install ---------------------------------------------------
+<#
+  Stop the app here, not through stop-townreporter.ps1.
+
+  That script is part of what is being upgraded, so on the run that matters it
+  is whatever version the OLD checkout had. On the first real promotion the old
+  one stopped the shared Postgres cluster as well -- serving the live paper, the
+  development copy and every test database -- and recovery from an unclean stop
+  took 226 seconds of fsync while the site returned 500.
+
+  A promotion must not depend on a fix arriving in the same promotion. This
+  stops exactly one process: whatever holds this install's port.
+#>
 if ($PSCmdlet.ShouldProcess("the app on port $port", "stop")) {
-  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ops "stop-townreporter.ps1")
+  $owners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty OwningProcess -Unique)
+  foreach ($owner in $owners) {
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue
+    if (-not $proc) { continue }
+    if ($proc.Name -ne 'node.exe' -or $proc.CommandLine -notlike '*.output/server/index.mjs*') {
+      Die "Port $port is held by PID $owner ($($proc.Name)), which is not this app. Not touching it."
+    }
+    Say "stopping the app, PID $owner"
+    Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
+  }
   Start-Sleep -Seconds 2
+  # Postgres is deliberately left running: one cluster serves the live paper,
+  # the development copy and every scratch database on this machine.
 }
 
 # --- 5. fetch and fast-forward ---------------------------------------------
