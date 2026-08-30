@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 |---|---|
 | **Node** | 22 or newer (`node -v`). Types in this repo are Node 22. |
 | **npm** | Comes with Node. `npm install` is enough. |
-| **A model** | An [xAI key](https://console.x.ai) **or** any OpenAI-compatible `/v1/chat/completions` gateway. Scan, Draft, and Dark Desk will refuse to run without one. |
+| **A model** | The [Claude Code CLI](https://claude.com/claude-code), signed in. Scan, Draft, Dig and Opinion refuse to run without it, and say so before you type anything. No API key goes in a file. |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it. |
 | **A database** | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres). |
 

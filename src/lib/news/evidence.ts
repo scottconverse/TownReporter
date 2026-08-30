@@ -328,7 +328,21 @@ async function loadVersion(id: number): Promise<PublicEvidence | null> {
   return asPublicEvidence(captureRow, idx >= 0 ? classified[idx] : undefined, timeline);
 }
 
+/**
+ * A capture, by id, for a reader.
+ *
+ * The id arrives from the URL, so it can be anything. `/evidence/NaN` used to
+ * reach Postgres and the page printed what came back:
+ *   invalid input syntax for type integer: "NaN"
+ * -- a database error, as the body of a public page, on a paper whose whole
+ * pitch is that readers can check the evidence. An audit filed it as UX-001.
+ *
+ * Anything that is not a positive whole number is simply not a capture that
+ * exists, so it takes the same path as a capture that has been deleted: the
+ * route's own not-in-this-edition page, which is what a reader should see.
+ */
 export async function loadPublicEvidence(id: number): Promise<PublicEvidence | null> {
+  if (!Number.isInteger(id) || id <= 0) return null;
   return loadVersion(id);
 }
 

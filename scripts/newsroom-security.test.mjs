@@ -331,3 +331,45 @@ test("no live doc tells the operator to set the removed setup token", () => {
     `these lines still instruct the operator to set a variable the code ignores:\n  ${offenders.join("\n  ")}`,
   );
 });
+
+/**
+ * The docs must not price the test suite wrongly, in either direction.
+ *
+ * SELF-HOSTING.md told operators `npm test` makes one real Claude call and
+ * offered a variable to "skip it". That was true of an earlier release. The
+ * suite has been hermetic since the live model path moved behind
+ * `npm run test:live-model`, and an audit measured it: 540 tests, ~14 seconds,
+ * no provider contacted. The cost claim survived because prose is not
+ * executable, so nothing failed when it stopped being true.
+ *
+ * A wrong cost claim is not cosmetic. It teaches a contributor that running the
+ * tests is something to avoid, which is the opposite of what the project wants,
+ * and it is exactly the kind of sentence people trust without checking.
+ */
+test("no live doc claims the ordinary test suite spends money", () => {
+  const files = ["README.md", "SELF-HOSTING.md", ...readdirSync(join(ROOT, "docs"))
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => join("docs", f))];
+  const offenders = [];
+  for (const rel of files) {
+    let text;
+    try {
+      text = readFileSync(join(ROOT, rel), "utf8");
+    } catch {
+      continue;
+    }
+    text.split(/\r?\n/).forEach((line, i) => {
+      if (!/`?npm test`?/.test(line)) return;
+      // "makes no model call" and "used to" are the correction, not the defect.
+      if (/\bno model call|costs nothing|used to make/i.test(line)) return;
+      if (/real (Claude|model) call|billed|spends? (quota|money)|costs (money|real)/i.test(line)) {
+        offenders.push(`${rel}:${i + 1}  ${line.trim().slice(0, 100)}`);
+      }
+    });
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `the suite is hermetic; these lines still say running it costs something:\n  ${offenders.join("\n  ")}`,
+  );
+});

@@ -232,9 +232,22 @@ export const fileLead = createServerFn({ method: "POST" })
     `;
     const id = rows[0]?.id;
     if (!id) return { ok: false as const, error: "Could not file that lead." };
+    /*
+      Carry the source through to the draft.
+
+      The lead stored the URL and the draft did not, and `publishLead` reads
+      the DRAFT's source_urls. So a lead filed by hand with a source published
+      an article with no sources section at all, on a paper whose front page
+      promises "Sources shown." An audit filed it as UX-005, and it is the
+      worst kind of defect this project can have: the reader is told the
+      evidence is there, and it is not.
+    */
     await sql`
-      insert into drafts (user_id, lead_id, headline, dek, body, topic)
-      values (${context.userId}, ${id}, ${headline}, ${why.slice(0, 220)}, '', ${topic})
+      insert into drafts (user_id, lead_id, headline, dek, body, topic, source_urls)
+      values (
+        ${context.userId}, ${id}, ${headline}, ${why.slice(0, 220)}, '', ${topic},
+        ${JSON.stringify(urls)}
+      )
     `;
     await audit(context.userId, "lead", `filed ${id}`);
     return { ok: true as const, id };
@@ -1007,6 +1020,25 @@ export async function performPublish(
   if (!row) return { ok: false as const, error: "Draft this lead before publishing." };
   const draft = unpackStoredDraft(row);
   draft.body = stripReporterNotebook(draft.body);
+
+  /*
+    A draft with no sources falls back to its lead's.
+
+    Belt and braces for UX-005. The insert above now copies the URL into the
+    draft, but every draft created before that fix is still empty, and those
+    are exactly the stories an operator has in flight right now. Publishing
+    one of them would print an article with no sources and no warning.
+  */
+  if (parseUrlList(draft.source_urls).length === 0) {
+    const fromLead = await getSql().then((sql) =>
+      sql<{ source_urls: string }>`
+        select source_urls from leads
+        where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
+      `,
+    );
+    const inherited = sanitizePublicUrls(parseUrlList(fromLead[0]?.source_urls ?? "[]"));
+    if (inherited.length > 0) draft.source_urls = JSON.stringify(inherited);
+  }
   let provenanceJson = row.provenance_json && row.provenance_json !== "[]" ? row.provenance_json : "";
   if (!provenanceJson) {
     provenanceJson = JSON.stringify(provenanceFromUrls(parseUrlList(draft.source_urls)));

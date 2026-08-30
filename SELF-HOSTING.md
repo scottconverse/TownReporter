@@ -174,10 +174,15 @@ prompts. Without it your developer instructions get prepended to every story.
 
 If quota ever bites, point `LLM_BASE_URL` at a local model on this box instead.
 
-`npm test` makes one real Claude call (~28s). To skip it:
+`npm test` makes no model call and costs nothing — 540 tests in about fourteen
+seconds, with no provider contacted. It used to make one real Claude call, and
+this page went on saying so long after that stopped being true.
+
+The live model path has its own opt-in script, so nobody spends quota by
+running the ordinary suite:
 
 ```bash
-TOWNREPORTER_CLAUDE_CODE=0 npm test
+npm run test:live-model
 ```
 
 ---

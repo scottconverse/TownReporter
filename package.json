@@ -26,7 +26,8 @@
     "test:live-model": "node scripts/with-app-env.mjs node --experimental-strip-types --test src/lib/news/scan-pass.test.ts",
     "proof:search": "node scripts/with-app-env.mjs node scripts/search-index-proof.mjs",
     "smoke": "node scripts/smoke-built-server.mjs",
-    "test:flows": "node scripts/desk-flows-e2e.mjs"
+    "test:flows": "node scripts/desk-flows-e2e.mjs",
+    "test:sources": "node scripts/sources-reach-the-reader.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

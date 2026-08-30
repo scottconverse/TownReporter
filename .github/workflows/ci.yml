@@ -49,17 +49,6 @@ jobs:
           }
           node scripts/lifecycle-e2e.mjs
 
-      # Everything 0.5.1 shipped had no browser coverage: Opinion, delete,
-      # Undo, the trash and its restore, the Server page, the Dark Desk dials.
-      # A locator leak and an unreachable editorial both reached the paper
-      # because those screens were looked at once by an agent rather than
-      # exercised by anything that runs again. Audit finding TE-04.
-      - name: The 0.5.1 desk flows
-        env:
-          BETTER_AUTH_SECRET: ci-lifecycle-secret-not-for-production
-          DESK_FLOWS_BASE_URL: http://127.0.0.1:8080
-          TOWNREPORTER_CLAUDE_CODE: "0"
-        run: node scripts/desk-flows-e2e.mjs
 
   # The gap that let two Blockers past a green pipeline.
   #
@@ -171,3 +160,76 @@ jobs:
         run: node --experimental-strip-types --test src/lib/news/search-index.test.ts
       - name: The index actually makes the search cheaper
         run: node scripts/search-index-proof.mjs
+
+  # These two walks each need an UNCLAIMED desk: they create their own owner
+  # at /login, and the first account in owns the newsroom.
+  #
+  # The desk-flows walk used to be a STEP inside the lifecycle job, running
+  # after lifecycle-e2e had already claimed that server's desk. It could never
+  # pass -- it failed at step zero with an empty completed list, on a server
+  # where the sign-up form no longer exists. An audit filed it as a blocker,
+  # and it was right: a job that cannot go green is not coverage, it is a
+  # red light nobody reads.
+  #
+  # Separate jobs, each with its own server. With no DATABASE_URL the app
+  # falls back to in-memory PGLite, so every job starts on an empty database
+  # and owns its own desk.
+  desk-flows:
+    name: The 0.5.1 desk flows, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Opinion, delete, Undo, trash, Server, dials
+        env:
+          BETTER_AUTH_SECRET: ci-flows-secret-not-for-production
+          DESK_FLOWS_BASE_URL: http://127.0.0.1:8080
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: |
+          npm run dev > /tmp/flows.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ || {
+            echo "dev server did not come up"; tail -n 80 /tmp/flows.log; exit 1;
+          }
+          node scripts/desk-flows-e2e.mjs
+
+  # The front page promises "Sources shown." A lead carrying a source URL
+  # published a story with no sources section at all: the lead stored the URL,
+  # the draft it created did not, and publishing reads the draft. The data was
+  # dropped between two tables, which no unit test on either table would see.
+  sources-reach-the-reader:
+    name: A source on a lead reaches the reader
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: File a lead with a source, publish, read it as a reader
+        env:
+          BETTER_AUTH_SECRET: ci-sources-secret-not-for-production
+          SOURCES_BASE_URL: http://127.0.0.1:8080
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: |
+          npm run dev > /tmp/sources.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ || {
+            echo "dev server did not come up"; tail -n 80 /tmp/sources.log; exit 1;
+          }
+          node scripts/sources-reach-the-reader.mjs
