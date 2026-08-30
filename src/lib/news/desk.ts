@@ -29,6 +29,7 @@ import {
   applyTodoPatch,
   appendScratch,
   formatPullDump,
+  selectExcerpt,
   keepHumanTodos,
   machineTodosFrom,
   packNotes,
@@ -938,7 +939,9 @@ export const pullTodo = createServerFn({ method: "POST" })
           docs.push({
             title: (got.title || url).slice(0, 160),
             url,
-            excerpt: got.text.replace(/\s+/g, " ").trim().slice(0, 1600),
+            // The best-matching passage, paragraph breaks intact -- not the first
+            // 1,600 flattened characters of navigation (see selectExcerpt).
+            excerpt: selectExcerpt(got.text, query),
           });
         } catch {
           /* skip a dead URL */

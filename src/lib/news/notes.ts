@@ -191,6 +191,81 @@ export function applyTodoPatch(
   return next;
 }
 
+/**
+ * The passage of a document that actually answers the pulled line.
+ *
+ * Pull used to take the FIRST 1,600 characters of the page with every line
+ * break flattened to a space. Two failures in one: the top of a civic page is
+ * navigation and boilerplate, not the record, and prose without paragraph
+ * breaks is a wall (operator finding, 2026-08-30). This scores each paragraph
+ * against the meaningful words of the pulled line and returns the
+ * best-scoring run of consecutive paragraphs, breaks intact.
+ *
+ * When nothing matches (a scanned PDF whose text mangles, a page about
+ * something else), it falls back to the first SUBSTANTIAL paragraphs --
+ * short nav-ish lines are skipped even then, so the old menu-dump cannot
+ * come back through the fallback.
+ */
+export function selectExcerpt(text: string, query: string, cap = 1600): string {
+  const paragraphs = text
+    .split(/\n{2,}|\r\n{2,}|(?:\r?\n)(?=\S)/)
+    .map((p) => p.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean);
+  if (!paragraphs.length) return "";
+
+  const words = query
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 3);
+  const score = (p: string) => {
+    const low = p.toLowerCase();
+    let n = 0;
+    for (const w of words) if (low.includes(w)) n += 1;
+    return n;
+  };
+
+  /*
+    Only PROSE can anchor the excerpt. The first live walk of this function
+    anchored on a page's own <title> line -- "…NextLight discount - City of
+    Longmont" scores on the pulled words too -- and the next two "paragraphs"
+    were "Skip to main content" and a survey banner. A line too short to be a
+    sentence about anything is scenery, whatever words it contains: it cannot
+    start the excerpt, and while collecting it is skipped unless it genuinely
+    matches the pulled line.
+
+    A loop, not Math.max(...spread): a long PDF splits into thousands of
+    paragraphs and a spread that size can blow the argument limit.
+  */
+  const PROSE_MIN = 60;
+  const scores = paragraphs.map(score);
+  let best = 0;
+  let start = -1;
+  for (let i = 0; i < paragraphs.length; i++) {
+    if (paragraphs[i]!.length < PROSE_MIN) continue;
+    if (scores[i]! > best) {
+      best = scores[i]!;
+      start = i;
+    }
+  }
+  if (start < 0 || best === 0) {
+    // Fallback: first paragraph long enough to be prose, not a menu row.
+    start = paragraphs.findIndex((p) => p.length >= 80);
+    if (start < 0) start = 0;
+  }
+
+  const out: string[] = [];
+  let used = 0;
+  for (let i = start; i < paragraphs.length && out.length < 3; i++) {
+    const p = paragraphs[i]!;
+    if (p.length < PROSE_MIN && scores[i] === 0) continue; // scenery between prose
+    if (used + p.length > cap && out.length > 0) break;
+    out.push(p.length > cap ? p.slice(0, cap) : p);
+    used += p.length + 2;
+  }
+  return out.join("\n\n").slice(0, cap);
+}
+
 export function formatPullDump(
   query: string,
   rows: { title: string; url: string; excerpt: string }[],

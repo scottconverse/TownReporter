@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  selectExcerpt,
   addHumanLine,
   applyTodoPatch,
   keepHumanTodos,
@@ -171,5 +172,61 @@ describe("splitTodoLine", () => {
   it("machineTodosFrom still caps the list", () => {
     const many = Array.from({ length: 40 }, (_, i) => `Get document number ${i} from the clerk`);
     assert.equal(machineTodosFrom(many).length, 16);
+  });
+});
+
+describe("selectExcerpt", () => {
+  const noisyPage = [
+    "Home",
+    "Agendas & Minutes",
+    "Departments | Services | Pay My Bill",
+    "Skip to content",
+    "",
+    "City of Longmont",
+    "",
+    "The council voted 6-1 to delay the NextLight rate change after the packet was revised the night before the meeting. The revised fiscal note moved the effective date to January.",
+    "",
+    "Council member Ruiz said the change deserved a full public reading before any vote.",
+    "",
+    "Subscribe to our newsletter",
+    "Privacy Policy | Terms",
+  ].join("\n");
+
+  it("returns the passage that matches the pulled line, not the page top", () => {
+    const out = selectExcerpt(noisyPage, "NextLight rate change delayed by council vote");
+    assert.match(out, /voted 6-1 to delay the NextLight rate change/);
+    assert.doesNotMatch(out, /Pay My Bill|Skip to content|Privacy Policy/);
+  });
+
+  it("keeps paragraph breaks instead of flattening to one line", () => {
+    const out = selectExcerpt(noisyPage, "NextLight rate change council");
+    assert.ok(out.includes("\n\n"), "consecutive kept paragraphs must stay separated");
+    assert.match(out, /Ruiz said/);
+  });
+
+  it("falls back past short nav rows when nothing matches the line", () => {
+    const out = selectExcerpt(noisyPage, "zzz qqqq xxxxx");
+    assert.match(out, /voted 6-1/, "the fallback must start at real prose, not the menu");
+    assert.doesNotMatch(out, /Agendas & Minutes/);
+  });
+
+  it("never anchors on a title line, even when the title matches the query", () => {
+    // The exact shape a live city page fooled the first version with: the
+    // page <title> repeats the query words, then a skip-link, then a banner.
+    const cityPage = [
+      "Non-profits eligible for new NextLight discount - City of Longmont",
+      "Skip to main content",
+      "Take the 2026 Community Satisfaction Survey to help make a Longmont you love.",
+      "The NextLight municipal broadband service will offer qualifying non-profit organizations a discounted rate beginning in October, the city announced, citing the rate ordinance packet approved last month.",
+      "Subscribe | Privacy",
+    ].join("\n");
+    const out = selectExcerpt(cityPage, "NextLight rate ordinance packet");
+    assert.match(out, /discounted rate beginning in October/, "must anchor on prose, not the title");
+    assert.doesNotMatch(out, /Skip to main content/);
+  });
+
+  it("respects the cap", () => {
+    const long = "word ".repeat(2000) + "\n\nneedle paragraph about the packet";
+    assert.ok(selectExcerpt(long, "packet needle").length <= 1600);
   });
 });
