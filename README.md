@@ -212,6 +212,9 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 | `/?topic=opinion` | Editorials — unsigned, the paper's own position. The Opinion link in the masthead; the same route as the paper, filtered. |
 | `/about` · `/how-we-report` · `/corrections` | Masthead pages |
 | `/sitemap.xml` · `/robots.txt` | For search engines |
+| `/evidence/:versionId` | The captured copy of a source a printed story cited |
+| `/evidence/compare` | Two captures of the same URL, side by side |
+| `/get-the-code` · `/TownReporter.zip` | Download this newsroom's own source |
 | `/desk` | Editor home (sign-in) |
 | `/desk/sources` | Watch list + bulk paste |
 | `/desk/scan` | Fetch + leads. The expensive button. Not a loop. |
