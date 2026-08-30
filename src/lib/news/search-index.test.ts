@@ -220,12 +220,32 @@ describe("the search actually finds what the contract promises, end to end", () 
     // and cut off exactly where the answer was. The chip rail ends where the
     // stories (or the empty-state) begin.
     const afterChips = html.slice(html.lastIndexOf("chip-rail")).slice(0, 2600);
+    /*
+      Discriminate "the row is not there" from "the server cannot see it".
+      CI renders the empty state with no server-side error logged, while the
+      identical run passes locally -- so at failure time, ask the SAME
+      database the server was spawned against, over the probe connection,
+      the SAME question the server-fn asks.
+    */
+    let probeSays = "probe unavailable";
+    if (probeClient) {
+      try {
+        const direct = await probeClient.query(
+          `select count(*)::int as n from articles
+           where status = 'published' and body ilike $1`,
+          [`%${marker.toLowerCase()}%`],
+        );
+        probeSays = `direct ilike over the same database finds ${direct.rows[0]?.n} row(s)`;
+      } catch (err) {
+        probeSays = `probe query failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
     assert.match(
       html,
       /Marker headline published/,
       "a lowercase query did not find a story whose body contains the marker in mixed case -- " +
         "the search is not doing case-insensitive substring matching against body. " +
-        `What the page shows after the chip rail:\n${afterChips}`,
+        `${probeSays}. What the page shows after the chip rail:\n${afterChips}`,
     );
   });
 
