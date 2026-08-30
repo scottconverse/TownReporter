@@ -227,6 +227,22 @@ describe("the search actually finds what the contract promises, end to end", () 
       database the server was spawned against, over the probe connection,
       the SAME question the server-fn asks.
     */
+    /*
+      Second discriminator: the RSS feed reads the same articles table through
+      a plain server route -- no server-fn, no router loader. If /feed carries
+      the marker story while the page does not, the database connection is
+      fine and the break is in the SSR loader/server-fn path of the Linux
+      build specifically.
+    */
+    let feedSays = "feed unavailable";
+    try {
+      const feed = await (await fetch(`${BASE_URL}/feed`)).text();
+      feedSays = /Marker headline published/.test(feed)
+        ? "the RSS feed DOES carry the story"
+        : "the RSS feed does NOT carry the story either";
+    } catch (err) {
+      feedSays = `feed fetch failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
     let probeSays = "probe unavailable";
     if (probeClient) {
       try {
@@ -245,7 +261,7 @@ describe("the search actually finds what the contract promises, end to end", () 
       /Marker headline published/,
       "a lowercase query did not find a story whose body contains the marker in mixed case -- " +
         "the search is not doing case-insensitive substring matching against body. " +
-        `${probeSays}. What the page shows after the chip rail:\n${afterChips}`,
+        `${probeSays}; ${feedSays}. What the page shows after the chip rail:\n${afterChips}`,
     );
   });
 
