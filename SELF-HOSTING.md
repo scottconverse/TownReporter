@@ -174,9 +174,12 @@ prompts. Without it your developer instructions get prepended to every story.
 
 If quota ever bites, point `LLM_BASE_URL` at a local model on this box instead.
 
-`npm test` makes no model call and costs nothing — 540 tests in about fourteen
-seconds, with no provider contacted. It used to make one real Claude call, and
-this page went on saying so long after that stopped being true.
+`npm test` makes no model call and costs nothing: it runs the whole suite with
+no provider contacted. It used to make one real Claude call, and this page went
+on saying so long after that stopped being true. The src group runs one file at
+a time on purpose — several tests each stand up an embedded database, and
+running them at once exhausts memory on a smaller machine — so it is thorough
+rather than fast.
 
 The live model path has its own opt-in script, so nobody spends quota by
 running the ordinary suite:

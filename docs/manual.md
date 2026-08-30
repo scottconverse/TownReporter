@@ -461,8 +461,9 @@ deleted rather than repaired.
 npm test
 ```
 
-528 tests, and the default run is deterministic, offline and free. They cover
-meeting ingest, retrieval,
+The default run is offline and free — no provider is contacted and nothing is
+billed. It runs one test file at a time, which is slower but steady on a small
+machine. The tests cover meeting ingest, retrieval,
 draft stripping, timezone handling, the SSRF guard, the job lifecycle, the Dark
 Desk loop, the dials, claim hygiene, the editorial parser, and the ops action
 allowlist.
