@@ -576,15 +576,27 @@ export function deskTakenLoginCopy() {
   };
 }
 
-/** Paper CTA while the newsroom has no owner, and the desk escape hatch. */
+/**
+ * Paper CTA while the newsroom has no owner, and the desk escape hatch.
+ *
+ * The old wording was "Really leave? The paper stays. Anyone can Create editor
+ * and own the desk." An audit read that as an accurate sentence that still
+ * failed: it describes the mechanism, not the consequence, and it sat one
+ * confirm away from a button placed two positions from Sign out. What actually
+ * happens is that the newsroom belongs to the next stranger who loads /login,
+ * and the departing owner cannot get it back. Say that.
+ */
 export function createEditorCopy() {
   return {
     paper: "Create editor",
-    leave: "Leave as editor",
+    leave: "Give up the desk",
     confirm:
-      "Really leave? The paper stays. Anyone can Create editor and own the desk.",
-    confirmYes: "Leave",
-    confirmNo: "Stay",
+      "This hands the newsroom to whoever opens the sign-in page next. They get " +
+      "the archive, the Dark Desk files, the notes, and the Server controls. " +
+      "You cannot take it back. Type your email address to confirm.",
+    confirmYes: "Give up the desk",
+    confirmNo: "Keep it",
+    mismatch: "That is not the address you signed in with.",
   };
 }
 

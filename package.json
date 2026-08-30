@@ -24,7 +24,9 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "test:live-model": "node scripts/with-app-env.mjs node --experimental-strip-types --test src/lib/news/scan-pass.test.ts",
-    "proof:search": "node scripts/with-app-env.mjs node scripts/search-index-proof.mjs"
+    "proof:search": "node scripts/with-app-env.mjs node scripts/search-index-proof.mjs",
+    "smoke": "node scripts/smoke-built-server.mjs",
+    "test:flows": "node scripts/desk-flows-e2e.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

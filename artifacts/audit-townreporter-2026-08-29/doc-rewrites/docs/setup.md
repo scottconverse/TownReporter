@@ -1,3 +1,15 @@
+<!--
+AUDIT DRAFT — 2026-08-29, Technical Writer. Replacement for docs/setup.md.
+Changes from the shipped file, and nothing else:
+  * "What you need" → the model row no longer requires an xAI key (DOC-001)
+  * "What you need" → the bind line separates dev from the built server (DOC-010)
+  * New section "What leaves this machine" (DOC-003)
+  * Tests section → the measured count and the enforced invariant
+Everything else is preserved verbatim, because it was accurate.
+Confirm before shipping: nothing here needs maintainer input; this is a
+straight correction of statements checked against the code and a live run.
+-->
+
 # TownReporter — operator setup
 
 **Current release: [0.5.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.1).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
@@ -14,11 +26,16 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 |---|---|
 | **Node** | 22 or newer (`node -v`). Types in this repo are Node 22. |
 | **npm** | Comes with Node. `npm install` is enough. |
-| **A model** | An [xAI key](https://console.x.ai) **or** any OpenAI-compatible `/v1/chat/completions` gateway. Scan, Draft, and Dark Desk will refuse to run without one. |
+| **A model** | **Nothing**, if the [Claude Code](https://code.claude.com) CLI is installed and signed in on this machine — the desk uses that login and there is no key to buy. Otherwise, one of: `ANTHROPIC_API_KEY`, `LLM_BASE_URL` (any OpenAI-compatible gateway, including a local model), or `XAI_API_KEY`. With none of the four, Scan, Draft and Dark Desk say so plainly and spend nothing. |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it. |
 | **A database** | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres). |
 
-Windows, macOS, and Linux all work. The app binds `0.0.0.0:8080`.
+Windows, macOS, and Linux all work.
+
+`npm run dev` serves on `0.0.0.0:8080`. The **built** server (`npm start`) listens
+on `PORT` — default **3000** — and binds `HOST`, which defaults to every
+interface. Set `HOST=127.0.0.1` when a tunnel or a reverse proxy fronts it, so
+that is the only way in.
 
 ---
 
@@ -46,7 +63,7 @@ Then:
 npm run dev
 ```
 
-Open the paper. Top right: **Create editor**. Email + password. That account is stored in **your** database, becomes the newsroom **owner**, and the button disappears. First person in owns the desk. There is no setup token — it was removed in 0.5.1, because a one-person newsroom that could not re-issue the token had a lock with no locksmith. Sign-in allows ten attempts every five minutes from any one address, so a desk on the open internet is not a desk open to guessing. To hand the newsroom to someone else, use **Give up the desk** at the bottom of the Server page; it asks you to type your email address, because it cannot be undone.
+Open the paper. Top right: **Create editor**. Email + password. That account is stored in **your** database. With no `NEWSROOM_SETUP_TOKEN`, that account becomes the newsroom **owner** and the button disappears. **Leave as editor** on the desk gives the hatch back. On a public host, set `NEWSROOM_SETUP_TOKEN` and paste it on Create the desk — signup alone does not own the desk.
 
 - Paper: `http://localhost:8080/`
 - Desk: `http://localhost:8080/desk`
@@ -136,6 +153,34 @@ LLM_MODEL=claude-sonnet-4-5
 `OPENAI_API_KEY` is accepted as an alias for `LLM_API_KEY`. You do **not** install LiteLLM, Bifrost, Helicone, MLflow, or Kong as npm dependencies of this repo. Run the gateway next to TownReporter and point the three vars at it.
 
 Resolution lives in `src/lib/news/ai.ts` (`resolveProvider()`); the Claude Code path is `ai-claude-code.server.ts`.
+
+### What leaves this machine
+
+Reading the paper sends nothing anywhere: fonts are served from `public/fonts/`,
+there is no analytics script, and a cold load makes zero requests to any outside
+host. The Server page re-checks that and reports it.
+
+**Working the desk is different, and it is worth knowing exactly how.** Four
+kinds of traffic leave this machine:
+
+| What | Where it goes | Can you turn it off? |
+|---|---|---|
+| **Model calls** — scan, draft, Dark Desk, Opinion | Whichever provider you selected above. The Claude Code CLI path goes to Anthropic under your own login; `LLM_BASE_URL` pointed at a local gateway keeps it on this box. | Yes — choose the provider, or set none and the desk refuses rather than guessing. |
+| **Source fetches** — watched pages, packets, PDFs, YouTube | The sites that host them. Normal web requests, guarded at connect time against private addresses. | No. This is the product. |
+| **Searches** — the research pass, PULL, and every Dark Desk hop | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia. None needs an API key. | Not today. There is no env var for it; the chain is unconditional in `src/lib/news/search-web.ts`. |
+| **Cron pings**, if you point an external monitor at `/api/cron/monitors` | Wherever you pointed it | Yes — leave `CRON_SECRET` unset and the endpoint is disabled. |
+
+The third row is the one that deserves a moment before you start. **A name, an
+LLC, a contract number or an unpublished rumour typed into Dark Desk becomes a
+search query, and whichever provider answers it sees that query.** Exa is first
+because it was measured to return the primary document rather than something
+merely topical, and the scraped engines sit behind it — but all of them are
+third parties. If a line of reporting is sensitive enough that the query itself
+is sensitive, do that search yourself, and paste the URL into the desk instead
+of the name.
+
+None of this touches the reader side of the paper. A visitor to a published
+story still makes zero outside requests.
 
 ### The Opinion voice
 
@@ -308,7 +353,12 @@ npm test
 npm run test:lifecycle   # needs the app on :8080 and Playwright Chromium
 ```
 
-Node’s built-in test runner. No network, no model calls. Coverage includes PrimeGov catalog matching, YouTube meeting join (including the June-vs-August museum false join), retrieval skipping hold-music transcript heads, draft notebook stripping, Mountain Time masthead dates, printed-headline collapse, workbench draft-landing, auth gates, the Dark Desk loop, and durable jobs. CI also runs one Playwright lifecycle: create the desk, file a lead, publish, post a correction.
+Node’s built-in test runner. The default run is deterministic, offline and
+free — no network, no model calls, about seventeen seconds. That is not a
+convention, it is enforced: `scripts/newsroom-security.test.mjs` fails the build
+if any test in the default suite can reach a live model unasked, and the live
+model evaluation is opt-in behind `RUN_LIVE_MODEL_TESTS=1 npm run
+test:live-model`. Coverage includes PrimeGov catalog matching, YouTube meeting join (including the June-vs-August museum false join), retrieval skipping hold-music transcript heads, draft notebook stripping, Mountain Time masthead dates, printed-headline collapse, workbench draft-landing, auth gates, the Dark Desk loop, and durable jobs. CI also runs one Playwright lifecycle: create the desk, file a lead, publish, post a correction.
 
 ---
 

@@ -289,3 +289,45 @@ test(".env.example lists every setting the code reads", () => {
   const missing = [...read].filter((k) => !OS_PROVIDED.has(k) && !declared.has(k)).sort();
   assert.deepEqual(missing, [], `these are read by the code but absent from .env.example: ${missing.join(", ")}`);
 });
+
+/**
+ * The docs must not tell an operator to set a variable the code ignores.
+ *
+ * `NEWSROOM_SETUP_TOKEN` was removed from the code in 0.5.1 -- a single-editor
+ * newsroom cannot re-issue a token it has lost, so the token was a lock with no
+ * locksmith, and the operator asked for it to go. A test already forbids the
+ * code path. Nothing forbade the prose, and an audit found the README,
+ * .env.example, docs/setup.md, docs/editor.md and docs/manual.md all still
+ * instructing operators to set it "on a public host" -- advice that reads like a
+ * security step and does nothing at all.
+ *
+ * The archive and the changelog are exempt on purpose: they record what past
+ * releases did, and rewriting history to match the present is how a changelog
+ * stops being useful.
+ */
+test("no live doc tells the operator to set the removed setup token", () => {
+  const roots = ["README.md", "SELF-HOSTING.md", ".env.example"];
+  const docs = readdirSync(join(ROOT, "docs"))
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => join("docs", f));
+  const offenders = [];
+  for (const rel of [...roots, ...docs]) {
+    let text;
+    try {
+      text = readFileSync(join(ROOT, rel), "utf8");
+    } catch {
+      continue;
+    }
+    text.split(/\r?\n/).forEach((line, i) => {
+      // A line explaining that it was removed is the fix, not the defect.
+      if (!line.includes("NEWSROOM_SETUP_TOKEN")) return;
+      if (/removed|no setup token|gone|used to/i.test(line)) return;
+      offenders.push(`${rel}:${i + 1}  ${line.trim().slice(0, 100)}`);
+    });
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `these lines still instruct the operator to set a variable the code ignores:\n  ${offenders.join("\n  ")}`,
+  );
+});

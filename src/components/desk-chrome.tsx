@@ -83,7 +83,6 @@ export function DeskShell({
             <span className="brand-sub">
               {night ? "Dark Desk — investigates, never prints" : `Editor's desk — ${PAPER.city}`}
             </span>
-            <LeaveEditorControl />
           </div>
           <div className="mast-date">{formatDate(new Date())}</div>
           <div className="mast-tools">
@@ -144,14 +143,32 @@ export function DeskShell({
   );
 }
 
-function LeaveEditorControl() {
+/**
+ * Give up the desk. Lives on the Server page, and asks you to type your address.
+ *
+ * This was a button in the header of every desk page, two positions from
+ * "Sign out", behind one inline confirm. An audit walked it: click, confirm,
+ * and the newsroom belongs to the next anonymous visitor to /login -- archive,
+ * Dark Desk files, reporting notes, and the Server controls that restart
+ * services on the journalist's machine. No password reset exists, so there was
+ * no way back from inside the product, and the desk is reachable from the
+ * internet through the tunnel.
+ *
+ * Three things changed. It moved off the chrome, so it is not adjacent to an
+ * action people click without reading. The confirmation describes the
+ * consequence rather than the mechanism. And it asks for the email address of
+ * the account you are signed in as -- which is also enforced by the server, so
+ * removing this input would not reopen the door.
+ */
+export function LeaveEditorControl({ email }: { email: string }) {
   const [ask, setAsk] = useState(false);
+  const [typed, setTyped] = useState("");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const copy = createEditorCopy();
   const leave = useMutation({
     mutationFn: async () => {
-      const res = await leaveEditor();
+      const res = await leaveEditor({ data: typed });
       if (!res.ok) throw new Error(res.error);
     },
     onSuccess: async () => {
@@ -165,33 +182,53 @@ function LeaveEditorControl() {
       await navigate({ to: "/" });
     },
   });
-  if (ask) {
+
+  if (!ask) {
     return (
-      <span className="leave-ask">
-        <span>{copy.confirm}</span>
-        <button
-          type="button"
-          className="leave-yes"
-          disabled={leave.isPending}
-          onClick={() => leave.mutate()}
-        >
-          {leave.isPending ? "Leaving…" : copy.confirmYes}
-        </button>
-        <button
-          type="button"
-          className="leave-no"
-          disabled={leave.isPending}
-          onClick={() => setAsk(false)}
-        >
-          {copy.confirmNo}
-        </button>
-      </span>
+      <button type="button" className="leave-editor" onClick={() => setAsk(true)}>
+        {copy.leave}
+      </button>
     );
   }
+
+  // Compared here only to disable the button early. The server checks it too,
+  // and the server's check is the one that matters.
+  const matches = typed.trim().toLowerCase() === email.trim().toLowerCase();
+
   return (
-    <button type="button" className="leave-editor" onClick={() => setAsk(true)}>
-      {copy.leave}
-    </button>
+    <div className="leave-ask">
+      <p>{copy.confirm}</p>
+      <label htmlFor="leave-confirm-email">Your email address</label>
+      <input
+        id="leave-confirm-email"
+        type="email"
+        autoComplete="off"
+        value={typed}
+        placeholder={email}
+        onChange={(e) => setTyped(e.target.value)}
+      />
+      {typed && !matches ? <p role="alert">{copy.mismatch}</p> : null}
+      {leave.isError ? <p role="alert">{(leave.error as Error).message}</p> : null}
+      <button
+        type="button"
+        className="leave-yes"
+        disabled={!matches || leave.isPending}
+        onClick={() => leave.mutate()}
+      >
+        {leave.isPending ? "Leaving…" : copy.confirmYes}
+      </button>
+      <button
+        type="button"
+        className="leave-no"
+        disabled={leave.isPending}
+        onClick={() => {
+          setAsk(false);
+          setTyped("");
+        }}
+      >
+        {copy.confirmNo}
+      </button>
+    </div>
   );
 }
 

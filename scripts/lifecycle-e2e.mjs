@@ -75,7 +75,10 @@ async function main() {
   await page.getByText(/Longmont City Council set a special session on the water plant/i).waitFor();
 
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "Leave as editor" }).waitFor();
+  // Was "Leave as editor", which sat in the header of every desk page. It moved
+  // to the Server page and asks you to type your address; see claim.ts. The desk
+  // is still proven to be rendering by the nav link on the next line.
+  await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
   await page.getByRole("link", { name: "Published", exact: true }).first().click();
   await page.waitForURL(/\/desk\/published/);
   await page.getByRole("button", { name: "Post correction" }).first().click({ force: true });

@@ -392,7 +392,7 @@
       <div class="panel">
         <h3>The reader is nobody&rsquo;s product</h3>
         <p class="cap" style="margin:0 0 10px">Verified, not asserted</p>
-        <p style="font-size:15px;color:var(--ink-2);margin:0">Self-hosted fonts, a third-party script removed from every page, and a cold load that makes zero requests to any outside host. The Server page re-checks it and will tell you when it stops being true.</p>
+        <p style="font-size:15px;color:var(--ink-2);margin:0">Self-hosted fonts, a third-party script removed from every page, and a cold load that makes zero requests to any outside host. A test in CI opens the page in a real browser and counts every request it makes, so this fails the build the day it stops being true.</p>
       </div>
       <div class="panel">
         <h3>The planner had never run</h3>

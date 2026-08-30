@@ -55,7 +55,7 @@ cp .env.example .env              # no AI key needed if Claude Code is signed in
 npm run dev                       # http://localhost:8080
 ```
 
-Open [http://localhost:8080/login](http://localhost:8080/login) and **create an editor account** (email + password). With no `NEWSROOM_SETUP_TOKEN`, the first account becomes the newsroom owner. On a public host, set that token — signup alone does not own the desk. The account lives in your database.
+Open [http://localhost:8080/login](http://localhost:8080/login) and **create an editor account** (email + password). The first account becomes the newsroom owner — there is no setup token. The account lives in your database, and sign-in is limited to ten attempts every five minutes per address.
 
 The public paper is `/`. The desk is `/desk`.
 
@@ -192,7 +192,7 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 
 ## Sign-in
 
-- **Self-host:** first visit, **Create editor** on the paper (top right). After that the button is gone. **Leave as editor** on the desk hands the newsroom back. Set `NEWSROOM_SETUP_TOKEN` on a public host.
+- **Self-host:** first visit, **Create editor** on the paper (top right). After that the button is gone and the first account owns the desk — there is no setup token, removed in 0.5.1. **Give up the desk**, at the bottom of the Server page, hands the newsroom to the next person who signs in; it asks you to type your email address, because there is no way back.
 - **This grok.me preview:** Google / X via Grok’s broker (those buttons only show on `*.grok.me`).
 - Local with no login at all: `VITE_AUTH_ENABLED=false`. Do not do that on a public host.
 

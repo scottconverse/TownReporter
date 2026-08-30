@@ -53,10 +53,48 @@ export const claimDesk = createServerFn({ method: "POST" })
     }
   });
 
+/**
+ * Give up the desk. Requires typing your own email address.
+ *
+ * This used to be a button in the header of every desk page, two positions from
+ * "Sign out", behind one inline confirm. An audit walked it end to end: click,
+ * confirm, and the newsroom is unclaimed -- at which point the next anonymous
+ * visitor to /login owns the published archive, the Dark Desk investigation
+ * files, the reporting notes, and the Server page that restarts services on the
+ * journalist's own machine. There is no password reset, so the previous owner
+ * had no route back from inside the product. The desk is reachable from the
+ * internet through the tunnel. One misread word, and the paper is gone.
+ *
+ * Two changes, and this one is the load-bearing half: the RPC now refuses
+ * unless the caller sends back the email address of the account it is signed in
+ * as. A stray click cannot produce that string, and neither can a request the
+ * operator did not deliberately compose. The other half -- moving the control
+ * off the persistent header -- is in the interface, and an interface guard
+ * alone would be a fence in front of an open door.
+ *
+ * Deliberately NOT a password prompt. This is a one-person newsroom and the
+ * operator asked for less ceremony, not more. Typing your own address is the
+ * same weight as the Delete confirmation, on an action that is far less
+ * reversible.
+ */
 export const leaveEditor = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .handler(async ({ context }) => {
+  .validator((confirmEmail: unknown) => String(confirmEmail ?? ""))
+  .handler(async ({ context, data: confirmEmail }) => {
     try {
+      const sql = await getSql();
+      const rows = await sql<{ email: string }>`
+        select email from "user" where id = ${context.userId} limit 1
+      `;
+      const mine = rows[0]?.email?.trim().toLowerCase();
+      const typed = confirmEmail.trim().toLowerCase();
+      if (!mine || !typed || typed !== mine) {
+        return {
+          ok: false as const,
+          error:
+            "Type the email address you signed in with, exactly, to give up the desk.",
+        };
+      }
       await leaveAsEditor(context.userId);
       return { ok: true as const };
     } catch (err) {

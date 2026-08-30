@@ -278,90 +278,30 @@ async function checkPublic(): Promise<HealthCheck[]> {
   }
 }
 
-/**
- * Does a reader's browser touch anyone but this server?
- *
- * A standing check rather than a one-off audit: the beacon and the Google font
- * links were both invisible until someone looked at the served HTML, and both
- * could come back through a setting nobody remembers changing.
- */
-async function checkThirdParty(): Promise<HealthCheck[]> {
-  /*
-    Same fallback as every other place that needs the public origin.
+/*
+  The Reader privacy row is gone, deliberately.
 
-    Reading only `PUBLIC_SITE_URL` meant this check silently returned nothing on
-    a deployment configured with `BETTER_AUTH_URL` instead — the row simply was
-    not on the page, which reads as "no problems" rather than "not checked".
-  */
-  const site = (process.env.PUBLIC_SITE_URL || process.env.BETTER_AUTH_URL || "").trim();
-  if (!site) {
-    return [
-      {
-        id: "third-party",
-        label: "Reader privacy",
-        state: "unknown",
-        value: "no public address configured",
-        note: "Set PUBLIC_SITE_URL or BETTER_AUTH_URL and this checks itself.",
-      },
-    ];
-  }
-  try {
-    const res = await fetch(site, {
-      headers: {
-        // The injections only happen for browser-shaped requests. A plain fetch
-        // comes back clean and would report a false all-clear.
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-      },
-      signal: AbortSignal.timeout(20_000),
-    });
-    const html = await res.text();
-    const origin = new URL(site).origin;
-    /*
-      Only what the browser fetches on its own.
+  It fetched the front page and grepped the HTML for outside hosts in
+  script/link/img/iframe/video/source tags. Two problems, and the second is
+  the one that matters.
 
-      The first version matched every `src` and `href`, so it counted the law
-      firm page cited inside a story as a privacy problem. A link a reader
-      chooses to click is journalism; a script, stylesheet, font or image the
-      page pulls in without asking is the thing being watched for. `<a href>`
-      is deliberately not in this list.
-    */
-    const hosts = new Set<string>();
-    const autoLoaded = [
-      /<script[^>]*src="(https?:\/\/[^"]+)"/gi,
-      /<link[^>]*href="(https?:\/\/[^"]+)"/gi,
-      /<img[^>]*src="(https?:\/\/[^"]+)"/gi,
-      /<iframe[^>]*src="(https?:\/\/[^"]+)"/gi,
-      /<video[^>]*src="(https?:\/\/[^"]+)"/gi,
-      /<source[^>]*src="(https?:\/\/[^"]+)"/gi,
-    ];
-    for (const re of autoLoaded) {
-      for (const m of html.matchAll(re)) {
-        try {
-          const u = new URL(m[1]!);
-          if (u.origin !== origin) hosts.add(u.hostname);
-        } catch {
-          /* not a URL */
-        }
-      }
-    }
-    const list = [...hosts];
-    return [
-      {
-        id: "third-party",
-        label: "Reader privacy",
-        state: list.length ? "warn" : "ok",
-        value: list.length
-          ? `${list.length} outside host${list.length === 1 ? "" : "s"} loaded by the front page`
-          : "no outside requests",
-        note: list.join(", "),
-      },
-    ];
-  } catch {
-    return [{ id: "third-party", label: "Reader privacy", state: "unknown", value: "could not check" }];
-  }
-}
+  First, it was broken. Six of its patterns carried a literal backspace byte
+  (0x08) where a word boundary was meant, so nothing could ever match and the
+  row reported "no outside requests" unconditionally, whatever was on the page.
+  An audit found it. No test would have, because the row had none.
+
+  Second, and the reason it was removed rather than repaired: even working, it
+  only ever saw hard-coded tags in static HTML. A tracker injected by
+  JavaScript at runtime -- which is how trackers usually arrive -- was
+  invisible to it. The row read as a guarantee and was a spot-check of the
+  weakest kind. A gauge that can only say "fine" is worse than no gauge.
+
+  The claim itself is true and still enforced elsewhere: checkReaderPrivacy()
+  in scripts/smoke-built-server.mjs loads the front page in a real browser,
+  counts every request it makes, and fails if any of them leaves this origin.
+  That runs in CI against both the built server and the dev server. One honest
+  check beats an honest one plus a flattering one.
+*/
 
 export type LogTail = { name: string; path: string; lines: string[]; error?: string };
 
@@ -407,7 +347,6 @@ export async function collectHealth(): Promise<OpsHealth> {
     checkJobs(),
     checkWatchdog(),
     checkDisk(),
-    checkThirdParty(),
   ]);
   return {
     checks: groups.flat(),

@@ -461,12 +461,26 @@ describe("Worth a Look presentation", () => {
     assert.doesNotMatch(copy.unknownEmail, /Create editor/i);
   });
 
-  it("names the paper Create editor CTA and the desk leave hatch", () => {
+  /*
+    The confirmation used to say "Really leave? The paper stays. Anyone can
+    Create editor and own the desk." -- an accurate sentence about the
+    mechanism that did not say what is lost. An audit walked it: the newsroom
+    goes to the next stranger who opens the sign-in page, and the previous
+    owner cannot get it back. So the assertions moved from naming the mechanism
+    to naming the consequence.
+  */
+  it("names the paper Create editor CTA, and says what giving up the desk costs", () => {
     const copy = createEditorCopy();
     assert.equal(copy.paper, "Create editor");
-    assert.equal(copy.leave, "Leave as editor");
-    assert.match(copy.confirm, /paper stays/i);
-    assert.match(copy.confirm, /Create editor/i);
+    assert.equal(copy.leave, "Give up the desk");
+    assert.match(copy.confirm, /archive/i);
+    assert.match(copy.confirm, /cannot take it back/i);
+    assert.match(copy.confirm, /type your email/i);
+    assert.doesNotMatch(
+      copy.confirm,
+      /paper stays/i,
+      "reassurance about the paper buried the part that matters",
+    );
   });
 });
 

@@ -247,9 +247,12 @@ npx playwright install chromium
 cp .env.example .env
 npm run dev
 ```
-
-Open `http://localhost:8080/login` and create an editor account. With no
-`NEWSROOM_SETUP_TOKEN` set, the first account becomes the newsroom owner. On a
+Open `http://localhost:8080/login` and create an editor account. The first
+account becomes the newsroom owner. There is no setup token: it was removed in
+0.5.1, because a one-person newsroom that could not re-issue the token had a
+lock with no locksmith. Sign-in is limited to ten attempts every five minutes
+from any one address, which is what keeps an open desk from being a guessable
+one.
 public host, set that token — signing up alone must not own the desk.
 
 The public paper is `/`. The desk is `/desk`.
@@ -432,8 +435,17 @@ The editorial writer is Opus deliberately: it is the one call where the writing
 - Fonts are self-hosted in `public/fonts/`; `scripts/fetch-fonts.mjs` refreshes
   them.
 - There is no analytics script and no third-party embed on a reader page.
-- The Server page's **Reader privacy** row re-checks this and reports what it
-  found.
+- `npm run smoke` proves it rather than asserting it: it loads the front page in
+  a real browser, counts every request the page makes, and fails if any of them
+  leaves this machine. CI runs it against both the built server and the dev
+  server on every push.
+
+The Server page used to carry a **Reader privacy** row. It was removed in
+0.5.1. It fetched the front page and searched the HTML for outside hosts, which
+could not see a tracker added by JavaScript after the page loaded -- and an
+audit then found the search itself was broken and had been reporting a clean
+result unconditionally. The browser check above is the real one, so the row was
+deleted rather than repaired.
 
 ## Tests
 
@@ -706,7 +718,7 @@ flowchart TB
 | Variable | Effect |
 |---|---|
 | `DATABASE_URL` | Postgres. Unset means throwaway PGLite. |
-| `NEWSROOM_SETUP_TOKEN` | Required on a public host, so signing up does not own the desk |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | Extra origins allowed to sign in, comma-separated |
 | `TOWNREPORTER_VOICE_FILE` | Absolute path to the Opinion voice, outside the repo |
 | `TOWNREPORTER_EDITORIAL_MODEL` | Override the editorial model (default Opus) |
 | `ANTHROPIC_API_KEY` | Bill Claude to a key instead of using the CLI login |

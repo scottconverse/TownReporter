@@ -1,7 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import {
+  DeskShell,
+  InkButton,
+  LeaveEditorControl,
+  SecHead,
+} from "@/components/desk-chrome";
+import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { ListSkeleton } from "@/components/states";
 import { getOpsHealth, runOpsAction } from "@/lib/ops/dashboard";
 import { OPS_ACTIONS, type OpsActionId } from "@/lib/ops/actions";
@@ -242,6 +248,8 @@ function OpsPage() {
         paper is down. That is what the watchdog is for: it runs from Windows
         every five minutes and restarts whatever has stopped. Its log is above.
       </p>
+
+      <GiveUpTheDesk />
     </DeskShell>
   );
 }
@@ -354,6 +362,40 @@ function RecentlyDeleted() {
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+
+/**
+ * The one irreversible thing on this page, kept furthest from everything else.
+ *
+ * It used to be a button in the header of every desk page. See
+ * LeaveEditorControl in desk-chrome.tsx for what an audit found when it walked
+ * that path. It belongs here, at the bottom of the page an operator visits on
+ * purpose, and nowhere else.
+ */
+function GiveUpTheDesk() {
+  const { user, isPending } = useCurrentUserState();
+  const email = user?.primaryEmail ?? "";
+  return (
+    <section className="mt-16 border-t border-rule pt-8">
+      <SecHead
+        title="Give up the desk"
+        sub="Hands the newsroom to the next person who signs in. There is no way back."
+      />
+      <div className="mt-4 max-w-2xl">
+        {isPending ? (
+          <p className="text-sm text-muted">Checking who you are…</p>
+        ) : email ? (
+          <LeaveEditorControl email={email} />
+        ) : (
+          <p className="text-sm text-muted">
+            This needs the email address you signed in with, and it could not be
+            read. Reload the page.
+          </p>
+        )}
+      </div>
     </section>
   );
 }

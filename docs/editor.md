@@ -24,12 +24,12 @@ A draft, a reporting note, a research memo, a Dark Desk file — none of that is
 
 1. On a new paper, top right: **Create editor**. That opens `/login`. Email + password. You own the desk. The button is gone after that.
 2. Later visits: **Editor desk** or **Sign in**. Anyone can still read the paper without an account.
-3. **Leave as editor** (desk, top left) drops the owner. The paper stays. Create editor comes back. The next person in owns the desk.
+3. **Give up the desk** (Server page, at the bottom) drops the owner. The paper stays, Create editor comes back, and the next person to open the sign-in page owns the desk -- including the archive, the Dark Desk files and the Server controls. You cannot take it back, so it asks you to type your email address first. It used to be a button in the header of every desk page; an audit showed how easily that is mistaken for Sign out.
 
 Notes:
 
 - Self-host uses email + password. Google / X buttons only appear on the grok.me preview.
-- With no `NEWSROOM_SETUP_TOKEN`, the first account is owner. If the operator set that token, Create the desk asks for it — an account without it does not own the newsroom.
+- The first account is the owner. There is no setup token; it was removed in 0.5.1.
 - A second person cannot create an account unless the editor has left. There is no invite button yet. See [setup.md](setup.md#a-second-editor).
 - If the desk sits on “Opening the desk,” use Sign in again. Session expired.
 
@@ -315,7 +315,6 @@ routing — not that a reader in another town can reach you. Rows worth knowing:
 | **Cloudflare tunnel** | No tunnel process. The watchdog should fix this within five minutes. |
 | **Work queue** | Something failed, or one job has been running a long time. |
 | **Watchdog** | If it has not run recently, the scheduled task is off. |
-| **Reader privacy** | Anything other than "no outside requests" means a third-party asset got onto a reader's page. Tell the operator. |
 
 Every button says what it will do before it does it. The two that interrupt the
 paper ask twice.

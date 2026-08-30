@@ -232,6 +232,40 @@ export const auth = betterAuth({
   // flicker-prevention guidance (gate on `isPending`; SSR the session).
   session: { cookieCache: { enabled: true, maxAge: 300 } },
 
+  /*
+    Sign-in throttling, on by default rather than by environment.
+
+    An audit sent eighty wrong passwords in 6.3 seconds against a built server
+    and got eighty 401s with no delay and no lockout. Better Auth does ship a
+    rule for this -- three attempts per ten seconds on /sign-in and /sign-up --
+    but `enabled` defaults to `isProduction`, and this app is started by a
+    Windows scheduled task running `node .output/server/index.mjs`, which sets
+    no NODE_ENV. So the protection existed and was switched off on the one
+    deployment that is actually exposed to the internet.
+
+    Not left to an environment variable. The desk is a single account with no
+    password reset, reachable through a Cloudflare Tunnel, and it carries
+    controls that restart services on the operator's own machine. A guess-rate
+    limit there should not depend on a variable someone has to remember to set.
+
+    The custom rule is the slow half. The built-in ten-second window stops a
+    burst; ten attempts per five minutes stops the patient version, which is
+    the one that works against a single known account.
+
+    Storage is in memory, so a restart clears the counters. That is a real
+    limit, written down rather than papered over: it is bounded by how often
+    the process restarts, not by anything an attacker controls.
+  */
+  rateLimit: {
+    enabled: true,
+    window: 60,
+    max: 200,
+    customRules: {
+      "/sign-in/email": { window: 300, max: 10 },
+      "/sign-up/email": { window: 3600, max: 5 },
+    },
+  },
+
   // Local email/password — toggled only via `./email-password` (not a plugin).
   ...(emailAndPasswordEnabled ? { emailAndPassword: { enabled: true } } : {}),
 
@@ -261,6 +295,27 @@ export const auth = betterAuth({
   // Secure + the names ourselves. (Browsers allow Secure cookies on
   // `http://localhost`, so local dev still works.)
   advanced: {
+    /*
+      Who the throttle counts, when the paper is behind a tunnel.
+
+      The rate limiter buckets by client IP, which is the property that keeps it
+      a defence rather than a weapon: an attacker exhausts their own bucket, not
+      the operator's. That only holds if the real visitor address can be read.
+
+      This deployment serves the public through a Cloudflare Tunnel, so every
+      request arrives at 127.0.0.1 from cloudflared. Left at the default the
+      limiter would file the whole internet under one key, and ten wrong
+      passwords from a stranger would lock the journalist out of their own desk
+      -- turning the fix into the outage.
+
+      `cf-connecting-ip` is set by Cloudflare's edge and cannot be forged by a
+      visitor coming through the tunnel; `x-forwarded-for` is the fallback for
+      any other front end. Something on the same LAN hitting the port directly
+      could spoof either, and would be no worse off than before this existed.
+    */
+    ipAddress: {
+      ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"],
+    },
     useSecureCookies: false,
     defaultCookieAttributes: { secure: true, sameSite: "lax", path: "/" },
     cookies: {
