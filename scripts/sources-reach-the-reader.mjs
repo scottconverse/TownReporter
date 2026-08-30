@@ -61,7 +61,9 @@ try {
   await page.getByText(/Saved/i).first().waitFor({ timeout: 20_000 });
   step("wrote and saved the story by hand");
 
-  await page.getByRole("button", { name: /^Publish/ }).first().click();
+  await page.getByRole("button", { name: "Publish to the paper" }).first().click();
+  // Publishing confirms before it prints; see lifecycle-e2e.mjs for why.
+  await page.getByRole("button", { name: "Yes, print it" }).click();
   const readIt = page.getByRole("link", { name: /Read it on the paper/i });
   await readIt.waitFor({ timeout: 30_000 });
   step("published it");

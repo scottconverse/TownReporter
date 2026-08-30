@@ -4,7 +4,7 @@ import { PaperShell } from "@/components/paper-chrome";
 import { EmptyState, ListSkeleton } from "@/components/states";
 import { inkGhost } from "@/components/desk-chrome";
 import { listPublicCorrections } from "@/lib/news/public";
-import { PAPER, formatShortDate } from "@/lib/paper";
+import { EDITOR_EMAIL, PAPER, formatShortDate } from "@/lib/paper";
 
 export const Route = createFileRoute("/corrections")({
   /*
@@ -28,9 +28,16 @@ function Corrections() {
       </h1>
       <p className="enter-rise mt-4 max-w-2xl text-lg text-ink-2">
         If we got it wrong, it lives here in the open — not buried in a rewrite
-        nobody sees. Corrections also appear on the story itself. To flag an
-        error, write the editor from the About page or post a correction from
-        Published on the desk.
+        nobody sees. Corrections also appear on the story itself.
+        {EDITOR_EMAIL ? (
+          <>
+            {" "}To flag an error, write the editor at{" "}
+            <a className="text-rust underline" href={`mailto:${EDITOR_EMAIL}`}>
+              {EDITOR_EMAIL}
+            </a>
+            .
+          </>
+        ) : null}
       </p>
       {isPending ? (
         <div className="mt-8 max-w-2xl">

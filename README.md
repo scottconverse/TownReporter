@@ -224,6 +224,14 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 | `/feed` | RSS |
 | `/login` | Create account / sign in |
 
+`AGENTS.md`, `AGENTS.project.md`, and `.grok/` at the repo root are not
+TownReporter documentation — they are the build-tool contract and personal
+handoff notes from the App Builder sandbox this repo was originally
+scaffolded with. Some of it (`.grok/app-env.json`, read by
+`scripts/with-app-env.mjs`) is still load-bearing for `npm run dev`/`build`;
+the rest is inert. If you are here to understand the newspaper, start at the
+top of this file, not there.
+
 ---
 
 ## Frequently asked questions
@@ -251,6 +259,9 @@ Give it a subject, a sentence, or a URL and it writes an unsigned editorial — 
 
 **Does the paper track readers?**
 No. Fonts are served from this machine, there is no analytics script, and a cold load makes zero requests to any outside host. The Server page checks that and will tell you if it stops being true.
+
+**Does anything leave my machine when I use the desk?**
+Yes, and it is worth knowing which things. Reading the paper sends nothing anywhere — that is the claim above, and it only covers the reader. Working the desk is different: pages you watch and documents you pull are fetched from the sites that host them; model calls go to whichever provider you configured; and searches — the research pass, PULL, and every Dark Desk hop — go to a third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia. None of them needs an API key, and there is no setting to keep a search on this machine — the chain runs unconditionally (`src/lib/news/search-web.ts`). That means a name, an LLC, or a contract number you type into Dark Desk is seen by whichever of those providers answers it.
 
 **What are the Dark Desk dials?**
 *Dig* is how far it chases — hops, searches, whether it leaves the watch list. *Nerve* is how speculative it may be — how sure it has to be before it writes a signal down, and whether it may propose a theory or only ask a question. Three floors never move at any setting: no invented claims of paid influence, everything is labelled, and every theory carries what would kill it.

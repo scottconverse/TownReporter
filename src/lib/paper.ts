@@ -10,6 +10,32 @@ export const PAPER = {
   trust: "Civic news, human-edited.",
 } as const;
 
+/**
+ * How a reader reaches the editor, if the operator has said.
+ *
+ * The Corrections page told readers to "write the editor from the About page".
+ * The About page carried no address, no form, and no contact of any kind, so
+ * the paper's own accountability promise ended at a wall. An audit found it
+ * beside a second one: the paper promises "Sources shown" and a story had
+ * none. Both are the same failure -- a claim printed with nothing behind it.
+ *
+ * Deliberately not hard-coded. This is self-hosted software; the address
+ * belongs to whoever runs the paper, and shipping one in the source would put
+ * a stranger's inbox on every fork. While it is unset, nothing anywhere
+ * claims a way to write in -- an honest silence beats a dead pointer.
+ */
+/*
+  Read at BUILD time, not at run time.
+
+  This page renders in the browser, where process.env does not exist, so a
+  server variable would have been silently null on every screen that shows it.
+  A self-hoster builds their own copy of the paper, so Vite inlining the value
+  is both simplest and correct: set VITE_TOWNREPORTER_EDITOR_EMAIL in .env
+  before npm run build.
+*/
+export const EDITOR_EMAIL: string | null =
+  (import.meta.env?.VITE_TOWNREPORTER_EDITOR_EMAIL ?? "").trim() || null;
+
 export const TOPICS = [
   "council",
   "budget",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 
@@ -122,6 +122,89 @@ function everyServerFnHasMiddleware(src, middleware) {
   return missing;
 }
 
+/** Strip comments so a stray mention in prose cannot satisfy a source-shape check below. */
+function stripComments(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
+
+/**
+ * Pull the identifiers out of a `.middleware([ ... ])` call by counting
+ * brackets, not by matching a literal `.middleware([name])` string. A
+ * formatter that reflows the array onto several lines, or a second
+ * middleware added to the array, must not change whether this finds it.
+ */
+function extractMiddlewareNames(block) {
+  const idx = block.indexOf(".middleware([");
+  if (idx === -1) return [];
+  const start = idx + ".middleware([".length;
+  let depth = 1;
+  let i = start;
+  for (; i < block.length; i++) {
+    if (block[i] === "[") depth++;
+    else if (block[i] === "]") {
+      depth--;
+      if (depth === 0) break;
+    }
+  }
+  return block
+    .slice(start, i)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Every `export const X = createServerFn` in one file, with the middleware
+ * identifiers attached to it (comment-stripped source, so a comment cannot
+ * forge a gate that isn't really there).
+ *
+ * The end of one function's block is the next top-level `export` of any
+ * kind, not just the next `createServerFn` -- a plain `export const` or
+ * `export type` sitting between two server functions (both happen in this
+ * codebase, e.g. `public.ts`'s `SEARCH_MIN_INDEXED`) must not get folded into
+ * the function above it, where its absence of a `.middleware([...])` would
+ * be silently forgiven by the next real server function's gate.
+ */
+function discoverServerFnsInFile(relPath, rawSrc) {
+  const src = stripComments(rawSrc);
+  const results = [];
+  for (const match of src.matchAll(/^export const (\w+) = createServerFn/gm)) {
+    const name = match[1];
+    const afterStart = match.index + match[0].length;
+    const rest = src.slice(afterStart);
+    const nextExportOffset = rest.search(/^export /m);
+    const end = nextExportOffset === -1 ? src.length : afterStart + nextExportOffset;
+    results.push({ file: relPath, name, middleware: extractMiddlewareNames(src.slice(match.index, end)) });
+  }
+  return results;
+}
+
+/**
+ * Every server function in `src/`, discovered by walking the tree rather
+ * than by naming files. This is the fix for the census this replaces: that
+ * one read exactly `desk.ts` and `dark.ts` by name, so `opinion.ts`,
+ * `trash.ts`, `dashboard.ts` and `claim.ts` -- 16 more gated functions,
+ * including a permanent-delete and the ops health/actions endpoints -- were
+ * never looked at. A seventh module added next month is covered by this
+ * walk without anyone remembering to add it to a list.
+ */
+function discoverAllServerFns(srcRoot) {
+  const out = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+        const rel = relative(ROOT, full).replace(/\\/g, "/");
+        out.push(...discoverServerFnsInFile(rel, readFileSync(full, "utf8")));
+      }
+    }
+  };
+  walk(srcRoot);
+  return out;
+}
+
 /*
   This used to be a source-text match: `assert.match(src, /assertHttpUrl/)`.
   That is satisfied by the import line alone, so the actual defect an audit
@@ -169,6 +252,63 @@ test("every desk and dark mutation is gated by deskMiddleware", () => {
   assert.match(desk, /withTransaction/);
   assert.match(dark, /assertRate\(context\.userId, "dark"\)/);
   assert.match(dark, /audit\(\s*(?:context\.)?userId,\s*"dark"/);
+});
+
+/*
+  Every server function in `src/` is either gated or on a named,
+  disk-checked allowlist of intentionally public reader endpoints.
+
+  This is the direct fix for the finding that follows from the
+  `desk.ts`/`dark.ts`-only census above: an audit removed `.middleware([
+  deskMiddleware])` from `getOpsHealth` (`src/lib/ops/dashboard.ts`, no
+  `context` argument, so nothing types it) and both `npm run typecheck` and
+  the full suite stayed green, because nothing was looking at that file.
+  `opinion.ts` (incl. `publishEditorial`/`deleteEditorial`), `trash.ts`
+  (incl. the permanent-delete `purgeTrashItem`), `dashboard.ts` and
+  `claim.ts` were equally unwatched.
+
+  The allowlist exists so a genuinely public reader endpoint doesn't have to
+  fake a middleware to pass this test -- but adding a name to it is a
+  decision left in the diff for review, not a silent default, and the second
+  assertion below fails the day the allowlist drifts from what's on disk
+  (a renamed or deleted function left in it, masking the fact that nothing
+  in `src/` claims to be that entry any more).
+*/
+test("every server function in src/ is gated, or is named on the public allowlist", () => {
+  const PUBLIC_SERVER_FNS = new Set([
+    // The one thing an unclaimed desk must answer before anyone can sign in.
+    "src/lib/news/claim.ts::deskClaimState",
+    // The public evidence trail behind a published story -- readable by anyone
+    // who can read the story itself.
+    "src/lib/news/evidence.ts::getPublicEvidence",
+    "src/lib/news/evidence.ts::listPublicHistory",
+    "src/lib/news/evidence.ts::listPublicVersionsForUrl",
+    "src/lib/news/evidence.ts::comparePublicEvidence",
+    // The public paper itself.
+    "src/lib/news/public.ts::listPublishedArticles",
+    "src/lib/news/public.ts::getPublishedArticle",
+    "src/lib/news/public.ts::listPublishedByTopic",
+    "src/lib/news/public.ts::searchPublished",
+    "src/lib/news/public.ts::listPublicCorrections",
+  ]);
+  const GATES = new Set(["deskMiddleware", "authMiddleware"]);
+
+  const found = discoverAllServerFns(join(ROOT, "src"));
+  assert.ok(found.length >= 60, `expected dozens of server functions, found ${found.length} -- the walk may be broken`);
+
+  const ungated = found
+    .filter((fn) => !PUBLIC_SERVER_FNS.has(`${fn.file}::${fn.name}`))
+    .filter((fn) => !fn.middleware.some((m) => GATES.has(m)))
+    .map((fn) => `${fn.file}::${fn.name}`);
+  assert.deepEqual(
+    ungated,
+    [],
+    `these server functions carry no deskMiddleware/authMiddleware and are not on the public allowlist:\n  ${ungated.join("\n  ")}`,
+  );
+
+  const foundKeys = new Set(found.map((fn) => `${fn.file}::${fn.name}`));
+  const stale = [...PUBLIC_SERVER_FNS].filter((k) => !foundKeys.has(k));
+  assert.deepEqual(stale, [], `the public allowlist names a server function that no longer exists on disk: ${stale.join(", ")}`);
 });
 
 test("membership rejects a second identity (unauthorized publish path)", () => {
@@ -579,5 +719,77 @@ test("no live doc claims the ordinary test suite spends money", () => {
     offenders,
     [],
     `the suite is hermetic; these lines still say running it costs something:\n  ${offenders.join("\n  ")}`,
+  );
+});
+
+/**
+ * DOC-003 (2026-08-29 documentation audit): desk searches leave the machine
+ * via a third-party chain (Exa, then DuckDuckGo, Bing, Brave, Wikipedia --
+ * src/lib/news/search-web.ts), unconditionally, on an editor's action. The
+ * landing page's "Zero trackers" badge is true only of the reader's pages,
+ * and nothing used to say so. Two invariants now enforced:
+ *
+ *  1. The landing badge (or any doc claiming zero outside requests) must
+ *     scope that claim to the reader -- never state it unqualified.
+ *  2. At least one reader-facing doc must actually name the third-party
+ *     search chain, so the disclosure this test protects cannot be quietly
+ *     deleted.
+ */
+test("the 'zero outside requests' claim is scoped to the reader, not the desk", () => {
+  const text = readFileSync(join(ROOT, "docs/index.html"), "utf8");
+  const offenders = [];
+  text.split(/\r?\n/).forEach((line, i) => {
+    if (!/zero outside requests/i.test(line)) return;
+    // The badge and any restatement must carry a reader/page scope on the
+    // same line -- an unqualified "zero outside requests" reads as covering
+    // the whole product, which is false once the desk is used.
+    if (/reader|page/i.test(line)) return;
+    offenders.push(`docs/index.html:${i + 1}  ${line.trim().slice(0, 120)}`);
+  });
+  assert.deepEqual(
+    offenders,
+    [],
+    `"zero outside requests" must be scoped to the reader's page, not asserted unqualified:\n  ${offenders.join("\n  ")}`,
+  );
+});
+
+test("at least one reader-facing doc discloses the desk's third-party search chain", () => {
+  const files = ["README.md", join("docs", "setup.md"), join("docs", "manual.md")];
+  const found = files.some((rel) => {
+    let text;
+    try {
+      text = readFileSync(join(ROOT, rel), "utf8");
+    } catch {
+      return false;
+    }
+    return /mcp\.exa\.ai/i.test(text) && /duckduckgo/i.test(text);
+  });
+  assert.ok(
+    found,
+    "none of README.md, docs/setup.md, docs/manual.md name the Exa/DuckDuckGo search chain -- the desk-egress disclosure (DOC-003) appears to have been removed",
+  );
+});
+
+/**
+ * DOC-006 (2026-08-29 documentation audit): the repo root ships a second
+ * product identity -- AGENTS.md opens "You are Grok Build... App Builder
+ * Workspace" and AGENTS.project.md is a personal sandbox handoff runbook,
+ * both unscoped, so a GitHub visitor who opens either meets an unrelated
+ * product. Both files now carry a scope note saying they are build-tooling,
+ * not TownReporter documentation. This guards against that note being lost
+ * on a future edit to either file.
+ */
+test("AGENTS.md and AGENTS.project.md carry a scope note disclaiming product docs", () => {
+  const offenders = [];
+  for (const rel of ["AGENTS.md", "AGENTS.project.md"]) {
+    const text = readFileSync(join(ROOT, rel), "utf8");
+    if (!/not\b[^.]{0,60}TownReporter[^.]{0,40}(documentation|product)/i.test(text)) {
+      offenders.push(rel);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `these files are missing the scope note that keeps a GitHub reader from mistaking them for TownReporter's own docs: ${offenders.join(", ")}`,
   );
 });

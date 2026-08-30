@@ -46,6 +46,20 @@ function StoryPage() {
   const [body, setBody] = useState("");
   const [topic, setTopic] = useState("council");
   const [scratch, setScratch] = useState("");
+  /*
+    Publishing is the only irreversible thing on this page, and it was the
+    only one that did not ask.
+
+    An audit put it plainly: one unconfirmed click puts a story on a public
+    website, in a product whose whole premise is that a human deliberately
+    decides what prints -- while Delete, which keeps a copy for thirty days,
+    gets a paragraph of consequence and a second click. The weights were the
+    wrong way round.
+
+    Same inline pattern the desk already uses for Delete, so it is a shape
+    the editor recognises rather than a new dialog to learn.
+  */
+  const [confirmingPublish, setConfirmingPublish] = useState(false);
   const [msg, setMsg] = useState("");
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
   const [waitingSince, setWaitingSince] = useState<number | null>(null);
@@ -355,12 +369,33 @@ function StoryPage() {
                   Save edits
                 </InkButton>
                 {canPublish ? (
-                  <InkButton
-                    disabled={publish.isPending || !headline.trim() || !body.trim()}
-                    onClick={() => publish.mutate()}
-                  >
-                    {publish.isPending ? "Publishing…" : "Publish to the paper"}
-                  </InkButton>
+                  confirmingPublish ? (
+                    <>
+                      <span className="note">
+                        This puts the story on the public paper and in the feed, under
+                        your name, now. Corrections are published, not silent edits.
+                      </span>
+                      <InkButton
+                        disabled={publish.isPending}
+                        onClick={() => {
+                          setConfirmingPublish(false);
+                          publish.mutate();
+                        }}
+                      >
+                        {publish.isPending ? "Publishing…" : "Yes, print it"}
+                      </InkButton>
+                      <InkButton tone="quiet" onClick={() => setConfirmingPublish(false)}>
+                        Not yet
+                      </InkButton>
+                    </>
+                  ) : (
+                    <InkButton
+                      disabled={publish.isPending || !headline.trim() || !body.trim()}
+                      onClick={() => setConfirmingPublish(true)}
+                    >
+                      Publish to the paper
+                    </InkButton>
+                  )
                 ) : null}
               </>
             ) : null}

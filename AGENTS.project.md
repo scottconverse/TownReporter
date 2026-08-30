@@ -2,6 +2,16 @@
 
 This file is law for this workspace. Read it before you reply to "download", "zip", "source", or "give me the file." Re-deriving this costs him tokens. Do not re-derive it.
 
+**Scope note (2026-08-29):** this is a personal handoff runbook for getting a
+zip out of the Grok Build sandbox chat during development — it is not
+TownReporter product documentation. The "Forbidden" list below is about
+*this sandbox's chat/preview UI failing to serve a file*, not about the
+shipped product: `/get-the-code` and `/TownReporter.zip` are real, documented
+routes in the running app (`docs/manual.md` Part 6, `src/routes/get-the-code.tsx`,
+`` src/routes/TownReporter[.]zip.tsx ``) and answer 200 / 307 on every build.
+Nothing below forbids that product route; it forbids relying on the *sandbox
+preview's copy* of it as a file-handoff mechanism, which is unreliable here.
+
 ## Download — the only method
 
 When he asks for the source / zip / tree / download:

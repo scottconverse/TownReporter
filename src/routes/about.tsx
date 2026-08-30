@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { PaperShell } from "@/components/paper-chrome";
-import { PAPER } from "@/lib/paper";
+import { EDITOR_EMAIL, PAPER } from "@/lib/paper";
 
 export const Route = createFileRoute("/about")({
   /*
@@ -45,6 +46,19 @@ function About() {
           replacement for either. We cover the packets most people never sit
           through, and we show the exact documents we used.
         </p>
+        {EDITOR_EMAIL ? (
+          <p>
+            <strong>Corrections and tips.</strong> Write the editor at{" "}
+            <a className="text-rust underline" href={`mailto:${EDITOR_EMAIL}`}>
+              {EDITOR_EMAIL}
+            </a>
+            . Every correction we make is published at{" "}
+            <Link className="text-rust underline" to="/corrections">
+              Corrections
+            </Link>
+            , and on the story itself.
+          </p>
+        ) : null}
       </div>
     </PaperShell>
   );

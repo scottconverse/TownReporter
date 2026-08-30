@@ -440,6 +440,14 @@ The editorial writer is Opus deliberately: it is the one call where the writing
   leaves this machine. CI runs it against both the built server and the dev
   server on every push.
 
+This is scoped to the reader's pages. **Working the desk is not trackerless** —
+Scan, Draft and Dark Desk send model calls to your configured provider, and
+every search (the research pass, PULL, and every Dark Desk hop) goes to a
+third-party chain: Exa's hosted endpoint first, then DuckDuckGo, Bing, Brave
+and Wikipedia (`src/lib/news/search-web.ts`), unconditionally and with no key.
+See [docs/setup.md — What leaves this machine](setup.md#what-leaves-this-machine)
+for the full table.
+
 The Server page used to carry a **Reader privacy** row. It was removed in
 0.5.1. It fetched the front page and searched the HTML for outside hosts, which
 could not see a tracker added by JavaScript after the page loaded -- and an

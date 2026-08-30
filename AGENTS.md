@@ -1,3 +1,11 @@
+> **Scope note (added 2026-08-29):** this file is a build-tool contract for
+> the Grok Build / App Builder sandbox this repository was originally
+> scaffolded with. It is **not** documentation of TownReporter, the product —
+> that starts at [README.md](README.md). It stays in the repo because parts
+> of it are still load-bearing for the dev toolchain (see
+> `scripts/with-app-env.mjs` and `.grok/app-env.json`). A person reading
+> about the newsroom itself should stop here and go to the README instead.
+
 # App Builder Workspace
 
 **The single source of truth** for the App Builder sandbox contract. You are

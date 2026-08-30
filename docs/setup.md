@@ -18,7 +18,38 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it. |
 | **A database** | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres). |
 
-Windows, macOS, and Linux all work. The app binds `0.0.0.0:8080`.
+Windows, macOS, and Linux all work.
+
+`npm run dev` always serves on `0.0.0.0:8080` — that port is hard-coded in
+`vite.config.ts` (`strictPort: true`) as the live-preview contract for the
+build tooling this repo was scaffolded with, and it does **not** read `PORT`.
+The **built** server (`npm start`, `.output/server/index.mjs`) is the one that
+honours `PORT` (default `3000`) and `HOST` (default every interface — set
+`HOST=127.0.0.1` when a tunnel or reverse proxy fronts it).
+
+---
+
+## What leaves this machine
+
+Reading the paper sends nothing anywhere: fonts are self-hosted in
+`public/fonts/`, there is no analytics script, and `npm run smoke` proves a
+cold load makes zero requests to any outside host — it loads the front page in
+a real browser and fails the build if any request leaves the machine.
+
+**Working the desk is different.** Three kinds of traffic leave this machine
+on an editor's action:
+
+| What | Triggered by | Where it goes |
+|---|---|---|
+| **Model calls** | Scan, Draft, Dark Desk, Opinion | Whichever provider you configured above — the Claude Code CLI path goes to Anthropic under your own login; `LLM_BASE_URL` pointed at a local gateway keeps it on this box. |
+| **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard). |
+| **Searches** | The research pass, PULL, and every Dark Desk hop | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key, and there is currently no setting to keep a search on this machine — the chain is unconditional. |
+
+The third row is the one to know before you use it: a name, an LLC, a
+contract number, or an unpublished rumour typed into Dark Desk is seen by
+whichever of those providers answers the query. This is unrelated to reader
+privacy above — the "zero outside requests" claim is about the paper's own
+pages, not the desk.
 
 ---
 

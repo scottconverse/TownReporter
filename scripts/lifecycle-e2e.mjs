@@ -65,7 +65,16 @@ async function main() {
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Dek").fill(why);
   await page.getByLabel("Body").fill(body);
+  /*
+    Publishing asks once now, and that is the point of these two lines.
+
+    It used to be a single unconfirmed click that put a story on a public
+    website -- while Delete, which keeps a copy for thirty days, asked
+    twice. If someone removes the confirmation, the second click here finds
+    no "Yes, print it" and this walk fails, which is the behaviour we want.
+  */
   await page.getByRole("button", { name: "Publish to the paper" }).click();
+  await page.getByRole("button", { name: "Yes, print it" }).click();
   await page.getByText("On the paper").waitFor({ timeout: 30_000 });
 
   await page.getByRole("link", { name: "Read it on the paper" }).click();
