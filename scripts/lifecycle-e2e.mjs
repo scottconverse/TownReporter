@@ -90,7 +90,20 @@ async function main() {
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
   await page.getByRole("link", { name: "Published", exact: true }).first().click();
   await page.waitForURL(/\/desk\/published/);
-  await page.getByRole("button", { name: "Post correction" }).first().click({ force: true });
+  // Click until the form actually opens. A force-click that lands before
+  // React has hydrated the handler silently does nothing, and this walk
+  // clicks faster than any person can -- CI caught the page in exactly that
+  // window (the captured DOM showed the button present, the form absent).
+  for (let i = 0; i < 6; i++) {
+    await page.getByRole("button", { name: "Post correction" }).first().click({ force: true });
+    const open = await page
+      .getByPlaceholder("What was wrong")
+      .waitFor({ timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (open) break;
+    if (i === 5) throw new Error("the correction form never opened after six clicks");
+  }
   await page.getByPlaceholder("What was wrong").fill(correction);
   await page.getByRole("button", { name: "Publish correction" }).click({ force: true });
   await page.getByText(/Tuesday evening/).waitFor({ timeout: 20_000 }).catch(() => {});

@@ -19,8 +19,8 @@ import { checkedUrl } from "./browser-guard.mjs";
 
 const base = checkedUrl(process.env.PASTE_BASE_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const stamp = Date.now();
-const email = `paste-${stamp}@townreporter.test`;
-const password = "paste-e2e-pass";
+const email = process.env.E2E_DESK_EMAIL ?? `paste-${stamp}@townreporter.test`;
+const password = process.env.E2E_DESK_PASSWORD ?? "paste-e2e-pass";
 const headline = `Longmont is about to declare First and Main blighted ${stamp}`;
 
 /*
@@ -68,12 +68,26 @@ async function main() {
 
   console.log(`paste editorial: ${base}`);
 
+  /*
+    Create the desk, or sign in if it is already claimed. This script runs
+    SECOND in its CI job (after sources-reach-the-reader claims the desk),
+    and the sign-in page has no "Name" field to wait for. Credentials are
+    shared through E2E_DESK_EMAIL / E2E_DESK_PASSWORD.
+  */
   await page.goto(`${base}/login`, { waitUntil: "networkidle" });
-  await page.getByLabel("Name").fill("Paste Editor");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create editor account" }).click();
+  const loginHeading = page.getByRole("heading", { name: /Create the desk|Editor sign-in/ });
+  await loginHeading.waitFor();
+  if (/Create the desk/.test((await loginHeading.textContent()) ?? "")) {
+    await page.getByLabel("Name").fill("Paste Editor");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(password);
+    await page.getByLabel("Confirm password").fill(password);
+    await page.getByRole("button", { name: "Create editor account" }).click();
+  } else {
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(password);
+    await page.getByRole("button", { name: "Sign in with email" }).click();
+  }
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
   step("owns the desk");
 

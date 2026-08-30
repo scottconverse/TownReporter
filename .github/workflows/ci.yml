@@ -262,6 +262,10 @@ jobs:
       HOST: 127.0.0.1
       DELETE_CORR_BASE_URL: http://127.0.0.1:8080
       TOWNREPORTER_CLAUDE_CODE: "0"
+      # Both scripts in this job share one desk: delete-corrections creates
+      # this account, opinion-desk signs in with it.
+      E2E_DESK_EMAIL: e2e-delete-corr@townreporter.test
+      E2E_DESK_PASSWORD: e2e-delete-corr-shared-pass
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -311,6 +315,12 @@ jobs:
     name: A source on a lead reaches the reader
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Both scripts in this job share one desk: the first creates this
+      # account, the second signs in with it (the desk has one editor, so a
+      # second create would wait forever on a Name field that is not there).
+      E2E_DESK_EMAIL: e2e-sources@townreporter.test
+      E2E_DESK_PASSWORD: e2e-sources-shared-pass
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

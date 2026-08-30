@@ -54,12 +54,32 @@ async function main() {
 
   console.log(`opinion desk: ${base}`);
 
+  /*
+    Create the desk, or sign in if it is already claimed.
+
+    This script runs SECOND in its CI job, after delete-corrections-e2e has
+    already claimed the desk on the shared server. It unconditionally filled
+    the "Name" field -- which only exists on the first-run create form -- and
+    waited 45 seconds for a field the sign-in page does not have. The two
+    scripts share credentials through E2E_DESK_EMAIL / E2E_DESK_PASSWORD so
+    the second can sign in as the first.
+  */
+  const email = process.env.E2E_DESK_EMAIL ?? `opinion-${stamp}@townreporter.test`;
+  const password = process.env.E2E_DESK_PASSWORD ?? "opinion-walk-pass";
   await page.goto(`${base}/login`, { waitUntil: "networkidle" });
-  await page.getByLabel("Name").fill("Opinion Walk");
-  await page.getByLabel("Email").fill(`opinion-${stamp}@townreporter.test`);
-  await page.getByLabel("Password", { exact: true }).fill("opinion-walk-pass");
-  await page.getByLabel("Confirm password").fill("opinion-walk-pass");
-  await page.getByRole("button", { name: "Create editor account" }).click();
+  const loginHeading = page.getByRole("heading", { name: /Create the desk|Editor sign-in/ });
+  await loginHeading.waitFor();
+  if (/Create the desk/.test((await loginHeading.textContent()) ?? "")) {
+    await page.getByLabel("Name").fill("Opinion Walk");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(password);
+    await page.getByLabel("Confirm password").fill(password);
+    await page.getByRole("button", { name: "Create editor account" }).click();
+  } else {
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(password);
+    await page.getByRole("button", { name: "Sign in with email" }).click();
+  }
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
   step("owns the desk");
 

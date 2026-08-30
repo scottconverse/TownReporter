@@ -252,6 +252,12 @@ export function spawnBuiltServer(
       PORT: String(port),
       HOST: "127.0.0.1",
       TOWNREPORTER_CLAUDE_CODE: "0",
+      // The server refuses to start with a real DATABASE_URL and no session
+      // secret (server/plugins/require-auth-secret.ts) -- correct for an
+      // operator, a silent "server never came up" for a test. A scratch
+      // database's sessions do not outlive the test, so a fixed test secret
+      // is fine, and a caller's own value still wins via process.env/extraEnv.
+      BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ?? "pg-admin-test-secret",
       ...extraEnv,
     },
     stdio: "ignore",

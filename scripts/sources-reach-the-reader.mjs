@@ -35,9 +35,11 @@ page.setDefaultTimeout(45_000);
 try {
   await page.goto(`${base}/login`, { waitUntil: "networkidle" });
   await page.getByLabel("Name").fill("Sources Editor");
-  await page.getByLabel("Email").fill(`sources-${stamp}@townreporter.test`);
-  await page.getByLabel("Password", { exact: true }).fill("sources-e2e-pass");
-  await page.getByLabel("Confirm password").fill("sources-e2e-pass");
+  // Shared with paste-editorial-e2e, which runs second in this job and signs
+  // in as this account (the desk only ever has one editor).
+  await page.getByLabel("Email").fill(process.env.E2E_DESK_EMAIL ?? `sources-${stamp}@townreporter.test`);
+  await page.getByLabel("Password", { exact: true }).fill(process.env.E2E_DESK_PASSWORD ?? "sources-e2e-pass");
+  await page.getByLabel("Confirm password").fill(process.env.E2E_DESK_PASSWORD ?? "sources-e2e-pass");
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
   step("owns the desk");

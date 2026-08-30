@@ -47,8 +47,10 @@ if (!databaseUrl) {
 }
 
 const stamp = Date.now();
-const email = `corr-${stamp}@townreporter.test`;
-const password = "delete-corr-e2e-pass";
+// Shared with opinion-desk-e2e, which runs second in this job and signs in
+// as this account (the desk only ever has one editor).
+const email = process.env.E2E_DESK_EMAIL ?? `corr-${stamp}@townreporter.test`;
+const password = process.env.E2E_DESK_PASSWORD ?? "delete-corr-e2e-pass";
 const leadHeadline = `Water board revisits the Kimbark tap fee ${stamp}`;
 const body = "The water board revisited the Kimbark tap fee at its Tuesday session.";
 const correctionText = `The fee is $4,200, not $2,400 ${stamp}.`;
