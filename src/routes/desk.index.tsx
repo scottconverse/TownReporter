@@ -442,6 +442,11 @@ function DeskHome() {
                   <b className="mem-e">{m.entity}</b> <span className="meta-inline">{m.last_angle}</span>
                 </p>
               ))}
+              {/* Every sibling widget explains its empty state; this one rendered
+                  a bare heading over nothing (UX-002). */}
+              {(memory.data ?? []).length === 0 ? (
+                <p className="meta">No beat memory yet — it builds as you publish.</p>
+              ) : null}
             </div>
           </section>
         </div>

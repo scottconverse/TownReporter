@@ -506,6 +506,8 @@
 .desk-ltr .rule2 {margin-top:10px;height:5px;border-top:3px solid var(--fg);border-bottom:1px solid var(--fg)}
 .desk-ltr .rule1 {border-bottom:1px solid var(--fg)}
 .desk-ltr .deskname {display:flex;align-items:center;gap:2px;padding:2px 0}
+/* Mobile-only disclosure for the desk nav (UX-001); invisible from 640px up. */
+.desk-ltr .nav-toggle {display:none;font-size:12px;text-transform:uppercase;letter-spacing:.12em;padding:8px 14px;color:var(--fg2);background:none;border:none;width:100%;text-align:center;cursor:pointer}
 .desk-ltr .nav-item {font-size:12px;text-transform:uppercase;letter-spacing:.12em;padding:8px 14px;color:var(--fg2);border-bottom:2px solid transparent}
 .desk-ltr .nav-item:hover {color:var(--fg)}
 .desk-ltr .nav-item.on {color:var(--adeep);border-bottom-color:var(--a)}
@@ -847,10 +849,19 @@
   .desk-ltr .mast-date,
   .desk-ltr .brand-sub { display: none; }
   .desk-ltr .pub-row { grid-template-columns: 1fr; }
+  /*
+    Fold the desk nav behind one Menu button (UX-001). Two wrapped rows of
+    links taxed every phone screen before its heading; folded is not hidden —
+    one tap stacks all eight links full-width.
+  */
   .desk-ltr .deskname { flex-wrap: wrap; gap: 0; }
+  .desk-ltr .nav-toggle { display: block; }
+  .desk-ltr .deskname .nav-item { display: none; }
+  .desk-ltr .deskname.nav-open .nav-item { display: block; width: 100%; text-align: center; }
   .desk-ltr .nav-item { padding: 7px 10px; letter-spacing: 0.08em; }
   .desk-ltr .nav-sep { display: none; }
   .desk-ltr .nav-dark { margin-left: auto; }
+  .desk-ltr .deskname.nav-open .nav-dark { margin: 4px 0; }
   .desk-ltr .mast-tools { flex-wrap: wrap; gap: 10px; }
   .desk-ltr .btn.small { min-height: 36px; padding: 8px 12px; }
   .desk-ltr .reader-index { max-height: 220px; }

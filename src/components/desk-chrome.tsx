@@ -234,14 +234,36 @@ export function LeaveEditorControl({ email }: { email: string }) {
 
 function DeskNav() {
   const matchRoute = useMatchRoute();
+  /*
+    Folded behind one "Menu" button on a phone (UX-001).
+
+    At 375px the eight desk links wrapped to two rows of chrome between the
+    masthead and the page heading — an editor triaging a scan from a phone
+    paid that tax on every screen. Folded is not hidden: one tap shows every
+    link, stacked; from 640px up the nav renders exactly as before.
+  */
+  const [open, setOpen] = useState(false);
   return (
-    <nav className="deskname">
+    <nav className={"deskname" + (open ? " nav-open" : "")}>
+      <button
+        type="button"
+        className="nav-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        Menu {open ? "▴" : "▾"}
+      </button>
       {LINKS.map((l) => {
         const active = Boolean(
           matchRoute({ to: l.to, fuzzy: !("exact" in l && l.exact) }),
         );
         return (
-          <Link key={l.to} to={l.to} className={"nav-item" + (active ? " on" : "")}>
+          <Link
+            key={l.to}
+            to={l.to}
+            onClick={() => setOpen(false)}
+            className={"nav-item" + (active ? " on" : "")}
+          >
             {l.label}
           </Link>
         );
@@ -249,6 +271,7 @@ function DeskNav() {
       <span className="nav-sep" aria-hidden />
       <Link
         to="/desk/dark"
+        onClick={() => setOpen(false)}
         className={"nav-item nav-dark" + (matchRoute({ to: "/desk/dark" }) ? " on" : "")}
       >
         Dark Desk

@@ -1,6 +1,6 @@
 import { Link, useMatchRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, Search, X } from "lucide-react";
+import { ChevronDown, ExternalLink, Search, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { COUNCIL_VOTES_URL, PAPER, formatDate } from "@/lib/paper";
 import { inputClass } from "@/components/desk-chrome";
@@ -155,6 +155,17 @@ function ArchiveSearch() {
 
 function PaperNav() {
   const matchRoute = useMatchRoute();
+  /*
+    Collapsed behind one "Sections" button on a phone (UX-001).
+
+    At 375px the open nav, the search glass, the desk button, and the topic
+    chips stacked to roughly 1300 pixels of chrome before the first headline —
+    two full screens of scrolling on the surface most readers of a local paper
+    arrive on. A disclosure keeps every section reachable in one tap (the
+    earlier sideways-scroller ban still stands: nothing is cut off, it is
+    folded), and from `sm` up the nav renders exactly as before.
+  */
+  const [open, setOpen] = useState(false);
   const currentTopic = useRouterState({
     select: (st) => (st.location.search as { topic?: string }).topic,
   });
@@ -184,8 +195,21 @@ function PaperNav() {
       breakpoint.
     */
     <div className="flex flex-col border-y-2 border-ink lg:flex-row lg:items-stretch">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex min-h-11 w-full items-center justify-center gap-1 px-2 text-[12px] font-medium tracking-[0.12em] text-ink uppercase sm:hidden"
+      >
+        Sections
+        <ChevronDown
+          className={"size-4 transition-transform duration-150 " + (open ? "rotate-180" : "")}
+          strokeWidth={1.75}
+          aria-hidden
+        />
+      </button>
       {/*
-        Wraps. Never scrolls sideways.
+        From `sm` up: wraps, never scrolls sideways.
 
         This was a horizontal scroller with a fade, and at 665px it simply cut
         off after "Corrections" — city council votes and RSS were unreachable
@@ -195,9 +219,15 @@ function PaperNav() {
         number said "one row" while two items were invisible.
 
         A newspaper nav is allowed to be two lines. It is not allowed to hide
-        half its sections.
+        half its sections. Below `sm` the whole list folds behind the Sections
+        button above — folded is not hidden: one tap shows every link, stacked.
       */}
-      <nav className="flex w-full min-w-0 flex-wrap items-center justify-center gap-x-5 px-1 py-1 text-[12px] font-medium tracking-[0.12em] uppercase lg:w-auto lg:flex-1">
+      <nav
+        className={
+          (open ? "flex" : "hidden") +
+          " w-full min-w-0 flex-col items-stretch px-1 py-1 text-[12px] font-medium tracking-[0.12em] uppercase sm:flex sm:flex-row sm:flex-wrap sm:items-center sm:justify-center sm:gap-x-5 lg:w-auto lg:flex-1"
+        }
+      >
         {items.map((item) => {
           /*
             Opinion and The paper are the same route with different search.
@@ -214,8 +244,9 @@ function PaperNav() {
               key={item.label}
               to={item.to}
               search={"search" in item ? item.search : { topic: undefined, q: undefined }}
+              onClick={() => setOpen(false)}
               className={
-                "inline-flex min-h-11 shrink-0 items-center border-b-2 px-1 transition-[color,border-color] duration-150 ease-out " +
+                "inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 px-1 transition-[color,border-color] duration-150 ease-out sm:justify-start " +
                 (active
                   ? "border-rust text-rust"
                   : "border-transparent text-ink hover:text-rust")
@@ -229,7 +260,7 @@ function PaperNav() {
           href={COUNCIL_VOTES_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex min-h-11 shrink-0 items-center border-b-2 border-transparent px-1 transition-[color] duration-150 ease-out hover:text-rust"
+          className="inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 border-transparent px-1 transition-[color] duration-150 ease-out hover:text-rust sm:justify-start"
         >
           City council votes
           <ExternalLink className="ml-1 size-3" strokeWidth={1.75} aria-hidden />
@@ -237,7 +268,7 @@ function PaperNav() {
         </a>
         <a
           href="/feed"
-          className="inline-flex min-h-11 shrink-0 items-center border-b-2 border-transparent px-1 transition-[color] duration-150 ease-out hover:text-rust"
+          className="inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 border-transparent px-1 transition-[color] duration-150 ease-out hover:text-rust sm:justify-start"
         >
           RSS
         </a>
@@ -274,9 +305,16 @@ function AuthSlot() {
   }
   if (unclaimed) {
     return (
+      /*
+        Quiet on a phone, solid from `sm` up (UX-003). As a full-contrast ink
+        block this was the single strongest element on a 375px first screen —
+        ahead of the paper's own wordmark, on a surface whose audience is
+        readers, not editors. Same link, same place; it just stops shouting
+        where space is scarce.
+      */
       <Link
         to="/login"
-        className="pressable inline-flex min-h-11 items-center bg-ink px-3 text-[11px] tracking-[0.12em] text-paper uppercase hover:bg-ink-2"
+        className="pressable inline-flex min-h-11 items-center border border-ink px-3 text-[11px] tracking-[0.12em] text-ink uppercase hover:bg-ink hover:text-paper sm:border-0 sm:bg-ink sm:text-paper sm:hover:bg-ink-2"
       >
         {createEditorCopy().paper}
       </Link>
