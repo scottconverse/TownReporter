@@ -384,3 +384,82 @@ export const deleteEditorial = createServerFn({ method: "POST" })
     await audit(context.userId, "delete-editorial", gone[0].headline.slice(0, 120));
     return { ok: true as const, trashId };
   });
+
+/**
+ * File a piece the editor wrote somewhere else.
+ *
+ * The Opinion desk could only ever GENERATE. An editor who wrote a column in
+ * their own editor -- or in another session, in their own voice, which is the
+ * whole point of a voice file living outside this repository -- had no way to
+ * get it onto the desk. The only route in was a recovery script that wanted a
+ * model CLI output envelope and a user id read out of the database.
+ *
+ * Nothing new is parsed here. `parseEditorial` already understands the shape
+ * the desk itself produces -- body, then CLAIMS AND SOURCES, then EDITOR'S
+ * FACT SHEET, then the image prompt -- so a piece written elsewhere in that
+ * shape arrives with its receipts attached and its fact sheet intact.
+ *
+ * It lands as a DRAFT, always. Publishing is a person's deliberate click, and
+ * a paste box is exactly the wrong place to weaken that.
+ */
+export const fileWrittenEditorial = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((text: string) => text)
+  .handler(async ({ context, data: text }) => {
+    const body = String(text ?? "").trim();
+    if (!body) return { ok: false as const, error: "Nothing to file yet." };
+    // A whole column is tens of kilobytes; a megabyte is a mistake or an
+    // attack, and either way the honest answer is to refuse before parsing.
+    if (body.length > 400_000) {
+      return { ok: false as const, error: "That is too long to be a column. Trim it and try again." };
+    }
+
+    const { parseEditorial } = await import("./editorial");
+    const { fileEditorial } = await import("./editorial.server");
+    const ed = parseEditorial(body);
+    if (!ed.body.trim()) {
+      return {
+        ok: false as const,
+        error: "No article text found. Paste the piece itself, headline first.",
+      };
+    }
+
+    const result = await fileEditorial(
+      {
+        userId: context.userId,
+        newsroomId: context.newsroomId ?? DEFAULT_NEWSROOM_ID,
+        subject: ed.headline || "Filed by the editor",
+        pointers: [],
+        // Kept on the draft so the record says a person wrote this, not a model.
+        sourceKind: "written-by-the-editor",
+        sourceRef: "pasted into the Opinion desk",
+      },
+      ed,
+    );
+    if (!result.ok) return { ok: false as const, error: result.error };
+
+    /*
+      The desk lists editorial REQUESTS, not drafts.
+
+      `fileEditorial` writes the draft and stops there; the request row is
+      created by the job path and updated when the model finishes. Filing
+      without one produced a draft that existed in the database, reported
+      success to the editor, and appeared nowhere on the screen -- the walk
+      caught it on its first run, four steps in, which is precisely the class
+      of defect a green unit test would have missed.
+
+      Written as already finished, because it is: a person wrote it, and there
+      is no work outstanding for anything to wait on.
+    */
+    const sql = await getSql();
+    await sql`
+      insert into editorial_requests
+        (user_id, newsroom_id, subject, source_kind, source_ref, draft_id, finished_at)
+      values (${context.userId}, ${context.newsroomId ?? DEFAULT_NEWSROOM_ID},
+              ${ed.headline || "Filed by the editor"}, ${"written-by-the-editor"},
+              ${"pasted into the Opinion desk"}, ${result.draftId}, now())
+    `;
+
+    await audit(context.userId, "file-written-editorial", (ed.headline || "").slice(0, 120));
+    return { ok: true as const, draftId: result.draftId, headline: ed.headline };
+  });

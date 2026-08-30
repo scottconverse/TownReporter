@@ -254,3 +254,14 @@ jobs:
             echo "dev server did not come up"; tail -n 80 /tmp/sources.log; exit 1;
           }
           node scripts/sources-reach-the-reader.mjs
+
+      # A piece written outside the desk has to reach the desk and stop there.
+      # This walk's first run caught filing reporting success while the editor
+      # saw nothing on screen, and it fails if a pasted piece ever reaches the
+      # public paper or the feed without a person publishing it.
+      - name: File a piece written outside the desk
+        env:
+          BETTER_AUTH_SECRET: ci-sources-secret-not-for-production
+          PASTE_BASE_URL: http://127.0.0.1:8080
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/paste-editorial-e2e.mjs

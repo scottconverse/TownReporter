@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead, areaClass, inputClass } from "@/components/desk-chrome";
 import { ListSkeleton } from "@/components/states";
-import { deleteEditorial, getEditorial, listEditorials, opinionReadiness, startEditorial } from "@/lib/news/opinion";
+import { deleteEditorial, fileWrittenEditorial, getEditorial, listEditorials, opinionReadiness, startEditorial } from "@/lib/news/opinion";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { formatDateTime } from "@/lib/paper";
 
@@ -29,6 +29,17 @@ function OpinionPage() {
   const [askedFor, setAskedFor] = useState("");
   const [openId, setOpenId] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
+  /*
+    A piece the editor wrote somewhere else.
+
+    This desk could only generate, so a column written in the operator's own
+    voice -- in their own editor, or in another session against the voice file
+    that deliberately lives outside this repository -- had no way in. Closed by
+    default: the common case is still writing one here, and an always-open
+    textarea would say otherwise.
+  */
+  const [written, setWritten] = useState("");
+  const [showWritten, setShowWritten] = useState(false);
   // Which row is asking "are you sure". Null when nothing is.
   const [confirmId, setConfirmId] = useState<number | null>(null);
   // The trash id of the last delete, so Undo is here rather than on Server.
@@ -49,6 +60,21 @@ function OpinionPage() {
     queryKey: ["editorial", openId],
     queryFn: () => getEditorial({ data: openId! }),
     enabled: openId != null,
+  });
+
+  const fileWritten = useMutation({
+    mutationFn: (text: string) => fileWrittenEditorial({ data: text }),
+    onSuccess: (r) => {
+      if (!r.ok) {
+        setNotice(r.error);
+        return;
+      }
+      setWritten("");
+      setShowWritten(false);
+      setNotice("Filed as a draft. Read it below, then publish when you are ready.");
+      void qc.invalidateQueries({ queryKey: ["editorials"] });
+    },
+    onError: () => setNotice("That would not file. Nothing was changed."),
   });
 
   const start = useMutation({
@@ -161,6 +187,47 @@ function OpinionPage() {
             {notice ? <span className="text-sm text-muted">{notice}</span> : null}
           </div>
         </div>
+      </section>
+
+      <section className="mt-10">
+        <SecHead
+          title="Or file one you wrote"
+          sub="Paste a finished piece. It lands as a draft, exactly like one written here, and nothing publishes without your click."
+        />
+        {showWritten ? (
+          <div className="mt-4 max-w-2xl space-y-3">
+            <label className="block">
+              <span className="text-[11px] tracking-[0.14em] text-muted uppercase">
+                The piece
+              </span>
+              <textarea
+                className={areaClass + " mt-1 w-full"}
+                rows={14}
+                value={written}
+                onChange={(e) => setWritten(e.target.value)}
+                placeholder="Headline on the first line, then the piece. CLAIMS AND SOURCES, EDITOR'S FACT SHEET and the image prompt are picked up if they are there."
+              />
+            </label>
+            <div className="flex items-center gap-3">
+              <InkButton
+                tone="solid"
+                onClick={() => fileWritten.mutate(written)}
+                disabled={fileWritten.isPending || written.trim().length < 40}
+              >
+                {fileWritten.isPending ? "Filing…" : "File it as a draft"}
+              </InkButton>
+              <InkButton tone="quiet" onClick={() => setShowWritten(false)}>
+                Cancel
+              </InkButton>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4">
+            <InkButton tone="ghost" onClick={() => setShowWritten(true)}>
+              Paste a piece I wrote
+            </InkButton>
+          </div>
+        )}
       </section>
 
       {undo != null ? (

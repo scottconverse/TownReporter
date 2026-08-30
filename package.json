@@ -28,7 +28,8 @@
     "smoke": "node scripts/smoke-built-server.mjs",
     "test:flows": "node scripts/desk-flows-e2e.mjs",
     "test:sources": "node scripts/sources-reach-the-reader.mjs",
-    "lint": "eslint . --max-warnings 40"
+    "lint": "eslint . --max-warnings 40",
+    "test:paste": "node scripts/paste-editorial-e2e.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
