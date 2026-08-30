@@ -97,18 +97,19 @@ promotion. **Clear to push and promote.**
 
 ## Verification ledger
 
-- VERIFIED: ENG-201 SSRF finding as described (render path check-then-Chromium-reconnect) | artifacts/audit-townreporter-2026-08-30/01-engineering-deepdive.md:46
-- VERIFIED: ENG-202 finding (drain interval dev-only; /api/cron/monitors 503 without CRON_SECRET) | artifacts/audit-townreporter-2026-08-30/01-engineering-deepdive.md:83
-- VERIFIED: UX-001 finding (uncollapsed navs, ~1300px chrome at 375px) | artifacts/audit-townreporter-2026-08-30/02-uiux-deepdive.md:68
-- VERIFIED: ENG-201 fix — proxy resolves via guardedLookup and dials the vetted IP; loopback CONNECT answered 403, public example.com:443 answered 200 Connection Established, run live this session | src/lib/news/render-proxy.ts:1
-- VERIFIED: ENG-205 test exists and was mutation-proven red with the guard bypassed, green restored | src/lib/news/render-proxy.test.ts:47
-- VERIFIED: ENG-202 fix — Nitro plugin twin, no NODE_ENV gate (grep across ops/*.ps1 and .env.example found no NODE_ENV; a gate would no-op in production) | server/plugins/dark-desk-scheduler.ts:20
-- VERIFIED: UX-001 fix live at 375x812 — Sections disclosure aria-expanded=true, all 7 links, nav display flex, driven in the browser this session | src/components/paper-chrome.tsx:169
-- VERIFIED: desk-nav fold + Menu toggle (static: typecheck + lint clean; not driven live, no dev-desk credentials at hand) | src/components/desk-chrome.tsx:235
-- VERIFIED: suite green after all fixes — 609 tests, 588 pass, 0 fail, 21 skipped, run this session | package.json:23
-- VERIFIED: pushed to github/main c0aca66, rev-list left-right 0 0 | ops/promote.ps1:1
-- VERIFIED: walkthrough first-run pass (I performed it: create desk, file lead, voice-absent Opinion banner, all deps absent) | artifacts/walkthrough-2026-08-30/REPORT.md:1
-- UNVERIFIED: Docs role detail (docs "unusually self-auditing"; every spot-checked claim held) - taken from the Technical Writer agent's summary; I did not independently re-read 03-documentation-deepdive.md
-- UNVERIFIED: Test role detail (RUN_LIVE_MODEL gating meta-test, glob self-check, 608-count reproduction) - taken from the Test Engineer agent's summary; I did not independently re-read 04-test-deepdive.md
-- UNVERIFIED: QA role detail (XSS payloads inert, clean server log, RSS at /feed) - taken from the QA agent's summary; I did not independently re-read 05-qa-deepdive.md
-- UNVERIFIED: severity roll-up table rows for Docs/Tests/QA - transcribed from the role agents' returned counts, not re-tallied from their files
+VERIFIED: ENG-201 SSRF finding as described (render path check-then-Chromium-reconnect) | artifacts/audit-townreporter-2026-08-30/01-engineering-deepdive.md:46
+VERIFIED: ENG-202 finding (drain interval dev-only; /api/cron/monitors 503 without CRON_SECRET) | artifacts/audit-townreporter-2026-08-30/01-engineering-deepdive.md:83
+VERIFIED: UX-001 finding (uncollapsed navs, ~1300px chrome at 375px) | artifacts/audit-townreporter-2026-08-30/02-uiux-deepdive.md:68
+VERIFIED: ENG-201 fix wired into both Chromium contexts via guardedContext; loopback CONNECT answered 403 and public example.com:443 answered 200 Connection Established in a live run this session | src/lib/news/render-fetch.ts:99
+VERIFIED: ENG-202 fix is a Nitro plugin twin with no NODE_ENV gate (grep across ops/*.ps1 and .env.example found no NODE_ENV; a gate would no-op in production) | server/plugins/dark-desk-scheduler.ts:20
+VERIFIED: UX-001 fix live at 375x812 — Sections disclosure aria-expanded=true, all 7 links, nav display flex, driven in the browser this session | src/components/paper-chrome.tsx:156
+VERIFIED: desk-nav fold + Menu toggle (static: typecheck + lint clean; not driven live, no dev-desk credentials at hand) | src/components/desk-chrome.tsx:235
+VERIFIED: promote script order (backup, stop own install only, ff to origin/main, build, start, verify) | ops/promote.ps1:1
+VERIFIED: manual's env table now points at .env.example and the watchdog diagram no longer hard-codes 3000 | docs/manual.md:725
+UNVERIFIED: ENG-205 mutation run (red with guard bypassed, green restored) and the 609/588/0 suite counts - performed and observed in this session's tool output, but the test and package.json were authored/edited rather than re-read afterward
+UNVERIFIED: push to github/main and rev-list 0 0 - observed in this session's git output, no file to cite
+UNVERIFIED: walkthrough first-run pass - I performed it in the browser this session (create desk, file lead, voice-absent banner); the REPORT.md recording it is my own writing
+UNVERIFIED: Docs role detail (docs "unusually self-auditing"; every spot-checked claim held) - taken from the Technical Writer agent's summary; I did not independently re-read 03-documentation-deepdive.md
+UNVERIFIED: Test role detail (RUN_LIVE_MODEL gating meta-test, glob self-check, 608-count reproduction) - taken from the Test Engineer agent's summary; I did not independently re-read 04-test-deepdive.md
+UNVERIFIED: QA role detail (XSS payloads inert, clean server log, RSS at /feed) - taken from the QA agent's summary; I did not independently re-read 05-qa-deepdive.md
+UNVERIFIED: severity roll-up table rows for Docs/Tests/QA - transcribed from the role agents' returned counts, not re-tallied from their files
