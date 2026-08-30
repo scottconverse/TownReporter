@@ -634,7 +634,7 @@ inside the repository, is rejected.
 ```mermaid
 flowchart TB
     T["Scheduled task<br/>every 5 minutes"] --> WD["watchdog.ps1"]
-    WD --> C1{"App answering<br/>on PORT (3000)?"}
+    WD --> C1{"App answering<br/>on PORT from .env?"}
     C1 -->|no| R1["Start the app"]
     C1 -->|yes| C2{"cloudflared<br/>running?"}
     R1 --> C2
@@ -723,6 +723,9 @@ flowchart TB
 | `/desk/ops` | Server. Health and the few buttons worth having. |
 
 ## Environment
+
+The variables an operator most often touches. The complete inventory, with a
+comment on each, is [`.env.example`](../.env.example).
 
 | Variable | Effect |
 |---|---|
