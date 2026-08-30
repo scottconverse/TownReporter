@@ -1,4 +1,4 @@
-import { getSql } from "@/lib/db";
+import { getSql } from "../db.ts";
 
 const HOURLY: Record<string, number> = {
   scan: 10,

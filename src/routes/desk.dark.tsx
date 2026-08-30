@@ -141,7 +141,21 @@ function DarkPage() {
     onSuccess: (res) => {
       if (!res || res.ok !== true) {
         const raw = res && "error" in res ? String(res.error ?? "") : "Research failed";
-        const msg = editorError(raw) || raw || "Research failed";
+        /*
+          A preflight refusal (QA-002) carries its own `kind`, and its
+          `error` field is already the plain-English guidance
+          (`scanPreflight`'s GUIDANCE table) — never engine text. Routing it
+          through `editorError` was actively harmful: that function's
+          `/AI is not available/i` and `/claude code/i` matchers, written for
+          mid-round failures, caught the guidance sentence too (it names
+          "Claude Code" as one of the setup options) and rewrote it into
+          "The writing model did not finish this round... Click Keep digging
+          to continue" — inviting exactly the retry-that-cannot-help the
+          preflight exists to prevent. Show the guidance as written for a
+          refusal; keep `editorError`'s translation for every other failure.
+        */
+        const isPreflightRefusal = Boolean(res && typeof res === "object" && "kind" in res);
+        const msg = isPreflightRefusal ? raw : editorError(raw) || raw || "Research failed";
         showWorkNotice(msg, false);
         setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
         clearPhase();

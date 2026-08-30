@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getSql } from "@/lib/db";
-import { deskMiddleware } from "./desk-auth";
-import { grokChat, parseJsonBlock, providerBudget, probeProvider } from "./ai";
-import { DARK_SYSTEM, darkSystemFor } from "./dark-prompt";
-import { assertRate, audit } from "./ops";
+import { getSql } from "../db.ts";
+import { deskMiddleware } from "./desk-auth.ts";
+import { grokChat, parseJsonBlock, providerBudget, probeProvider } from "./ai.ts";
+import { DARK_SYSTEM, darkSystemFor } from "./dark-prompt.ts";
+import { assertRate, audit } from "./ops.ts";
 import {
   checkBaselines,
   ensureInvestigateSchema,
@@ -11,21 +11,21 @@ import {
   researchLoop,
   resurfaceDeadEnds,
   runDueMonitors,
-} from "./investigate";
-import { sanitizePublicUrls } from "./schema";
-import type { ArticleRow, MemoryRow, SourceRow } from "./types";
-import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look";
-import { openInvestigationForEditor } from "./dark-open";
-import { titlesOverlap, topicFromText } from "./desk-copy";
-import { DEFAULT_NEWSROOM_ID } from "./membership";
-import { TIP_SUBREDDIT, TIP_SUBREDDIT_QUERIES } from "@/lib/paper";
+} from "./investigate.ts";
+import { sanitizePublicUrls } from "./schema.ts";
+import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
+import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
+import { openInvestigationForEditor } from "./dark-open.ts";
+import { titlesOverlap, topicFromText } from "./desk-copy.ts";
+import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
+import { TIP_SUBREDDIT, TIP_SUBREDDIT_QUERIES } from "../paper.ts";
 import {
   BRIEF_SYSTEM,
   briefIsUseful,
   briefPack,
   parseBrief,
   type InvestigationBrief,
-} from "./dark-brief";
+} from "./dark-brief.ts";
 import {
   PRESETS,
   SCOPE_LABEL,
@@ -35,8 +35,8 @@ import {
   estimateMinutes,
   stanceFor,
   type DarkDials,
-} from "./dark-dials";
-import { enqueueJob, type DeskJob } from "./jobs";
+} from "./dark-dials.ts";
+import { enqueueJob, type DeskJob } from "./jobs.ts";
 
 function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
@@ -66,7 +66,7 @@ async function darkPreflightRefusal(): Promise<{
   detail: string;
   retryable: boolean;
 } | null> {
-  const { scanPreflight } = await import("./preflight");
+  const { scanPreflight } = await import("./preflight.ts");
   const ready = scanPreflight(await probeProvider());
   if (ready.ok) return null;
   return {
@@ -78,7 +78,7 @@ async function darkPreflightRefusal(): Promise<{
   };
 }
 
-export { openInvestigationForEditor } from "./dark-open";
+export { openInvestigationForEditor } from "./dark-open.ts";
 
 export type DarkSignalRow = {
   id: number;
@@ -1170,9 +1170,9 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     await ensureDarkSchema();
     await assertRate(context.userId, "reddit");
-    const { sweepRedditFeeds } = await import("./reddit.server");
+    const { sweepRedditFeeds } = await import("./reddit.server.ts");
     const { subredditNewFeed, subredditSearchFeed, pickCivicPosts, redditAnomaly, civicScore } =
-      await import("./reddit");
+      await import("./reddit.ts");
     const sub = TIP_SUBREDDIT;
 
     const feeds = [
