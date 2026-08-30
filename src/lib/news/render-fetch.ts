@@ -1,4 +1,5 @@
 import { assertPublicHttpUrl } from "./fetch-url.ts";
+import { startGuardedRenderProxy } from "./render-proxy.ts";
 import { looksLikeAppShell } from "./render-detect.ts";
 
 export { hostNeedsRendering, looksLikeAppShell, needsRenderedFetch } from "./render-detect.ts";
@@ -15,6 +16,7 @@ type ChromiumBrowser = {
   newContext: (opts: {
     userAgent: string;
     javaScriptEnabled: boolean;
+    proxy?: { server: string };
   }) => Promise<{
     newPage: () => Promise<{
       route: (pattern: string, handler: (route: { request: () => { url: () => string }; abort: () => unknown; continue: () => unknown }) => void) => Promise<void>;
@@ -96,6 +98,22 @@ async function getBrowser(): Promise<ChromiumBrowser | null> {
   return launching;
 }
 
+/**
+ * Context options with the DNS-rebinding guard (ENG-201) welded on.
+ *
+ * Routes Chromium through the loopback proxy that resolves each host once via
+ * `guardedLookup` and dials the vetted IP, so Chromium never performs a second,
+ * rebindable lookup — for the top navigation or any subresource. If the proxy
+ * cannot start (never, on a server), the pre-existing per-request
+ * `assertPublicHttpUrl` guard still blocks the common cases.
+ */
+async function guardedContext(
+  base: { userAgent: string; javaScriptEnabled: boolean },
+): Promise<{ userAgent: string; javaScriptEnabled: boolean; proxy?: { server: string } }> {
+  const proxy = await startGuardedRenderProxy();
+  return proxy ? { ...base, proxy: { server: `http://127.0.0.1:${proxy.port}` } } : base;
+}
+
 export async function fetchRenderedPage(raw: string): Promise<RenderedPage | null> {
   if (typeof window !== "undefined") return null;
   const start = await assertPublicHttpUrl(raw);
@@ -104,7 +122,7 @@ export async function fetchRenderedPage(raw: string): Promise<RenderedPage | nul
   return withSlot(async () => {
     let ctx: Awaited<ReturnType<ChromiumBrowser["newContext"]>>;
     try {
-      ctx = await br.newContext({ userAgent: UA, javaScriptEnabled: true });
+      ctx = await br.newContext(await guardedContext({ userAgent: UA, javaScriptEnabled: true }));
     } catch (err) {
       // A dead browser fails right here. Drop it so the next caller relaunches
       // instead of inheriting the corpse.
@@ -173,11 +191,13 @@ export async function scrapeYoutubeShowTranscript(videoId: string): Promise<stri
   return withSlot(async () => {
     let ctx: Awaited<ReturnType<ChromiumBrowser["newContext"]>>;
     try {
-      ctx = await br.newContext({
-        userAgent:
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        javaScriptEnabled: true,
-      });
+      ctx = await br.newContext(
+        await guardedContext({
+          userAgent:
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          javaScriptEnabled: true,
+        }),
+      );
     } catch (err) {
       dropBrowser(err instanceof Error ? err.message : "newContext failed");
       return "";
