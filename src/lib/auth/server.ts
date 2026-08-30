@@ -34,6 +34,7 @@ import { bearer, genericOAuth } from "better-auth/plugins";
 import { getCookie } from "@tanstack/react-start/server";
 import { randomBytes } from "node:crypto";
 import { Pool } from "pg";
+import { accountSignInLockout } from "./account-lockout.server";
 import { ensureDbReady, getPglite } from "../db";
 import { emailAndPasswordEnabled } from "./email-password";
 import { GATE_PROVIDER_ID, gateIdentitySessions, safeTanstackStartCookies } from "./gate-session.server";
@@ -255,6 +256,14 @@ export const auth = betterAuth({
     Storage is in memory, so a restart clears the counters. That is a real
     limit, written down rather than papered over: it is bounded by how often
     the process restarts, not by anything an attacker controls.
+
+    All of the above buckets by the visitor's address (see the `ipAddress`
+    comment in `advanced` below), so it is only as strong as that address is
+    genuine. `accountSignInLockout()` in the plugins list is the backstop
+    that does not depend on it: it buckets by the account being attacked, not
+    by anything the caller sends, so rotating a header cannot move it. See
+    `account-lockout.server.ts` for the full design and why it locks out the
+    real operator too rather than only the attacker.
   */
   rateLimit: {
     enabled: true,
@@ -311,7 +320,14 @@ export const auth = betterAuth({
       `cf-connecting-ip` is set by Cloudflare's edge and cannot be forged by a
       visitor coming through the tunnel; `x-forwarded-for` is the fallback for
       any other front end. Something on the same LAN hitting the port directly
-      could spoof either, and would be no worse off than before this existed.
+      could spoof either header -- and, having done so, is no longer "no worse
+      off than before this existed": a forged header lets it pick a fresh
+      bucket on every request, which is a way *around* this throttle, not
+      merely a way to be as unguarded as if it were absent. Measured: 25 wrong
+      passwords from a fixed header gets 10 refusals then blocked; the same 25
+      rotating the header through 25 values gets 24 through. `account-lockout
+      .server.ts`'s per-account lock is the backstop for exactly that case --
+      it keys on the email being attacked, which no header can rotate.
     */
     ipAddress: {
       ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"],
@@ -328,6 +344,11 @@ export const auth = betterAuth({
 
   plugins: [
     gateIdentitySessions(),
+
+    // Per-account sign-in lockout -- keys on the email being attacked, not on
+    // any request header, so it still holds when `cf-connecting-ip` /
+    // `x-forwarded-for` are attacker-chosen. See `account-lockout.server.ts`.
+    accountSignInLockout(),
 
     // One genericOAuth provider per upstream (when auth is on), all federating
     // to the broker with the SAME client and differing only by the `idp` hint.

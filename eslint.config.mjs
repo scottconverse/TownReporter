@@ -19,6 +19,12 @@ export default tseslint.config(
       // git and out of the lint budget. The reports beside them are the
       // deliverable; these are the throwaway that produced them.
       "artifacts/**",
+      // Agent worktrees. A workflow that isolates a role gives it a throwaway
+      // copy of the repository under .claude/worktrees/, and if that role runs
+      // a build, the copy carries a full .output/ of minified bundles. Linting
+      // somebody else’s scratch build turned the whole run red with hundreds of
+      // errors in generated code, which is noise that hides the real ones.
+      ".claude/**",
     ],
   },
   js.configs.recommended,

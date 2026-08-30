@@ -229,11 +229,20 @@ export async function ensureBuilt(repoRoot: string): Promise<void> {
   }
 }
 
-/** Spawn the just-built production server against `dbUrl`, on `port`. */
+/**
+ * Spawn the just-built production server against `dbUrl`, on `port`.
+ *
+ * `extraEnv` lets a test override tuning that only exists to be shrunk for a
+ * test -- e.g. `ACCOUNT_LOCKOUT_WINDOW_SECONDS` (see `account-lockout.server.ts`),
+ * where the production default is minutes and no real test should wait that
+ * long for a window to lapse. Anything not overridden inherits the parent
+ * process's env, same as before this parameter existed.
+ */
 export function spawnBuiltServer(
   repoRoot: string,
   dbUrl: string,
   port: number,
+  extraEnv: NodeJS.ProcessEnv = {},
 ): ChildProcess {
   return spawn(process.execPath, [join(repoRoot, ".output", "server", "index.mjs")], {
     cwd: repoRoot,
@@ -243,6 +252,7 @@ export function spawnBuiltServer(
       PORT: String(port),
       HOST: "127.0.0.1",
       TOWNREPORTER_CLAUDE_CODE: "0",
+      ...extraEnv,
     },
     stdio: "ignore",
   });
