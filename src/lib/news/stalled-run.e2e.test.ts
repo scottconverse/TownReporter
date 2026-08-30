@@ -108,13 +108,22 @@ if (dbProbe.ok) {
     const db = new Client({ connectionString: dbUrl });
     await db.connect();
     try {
-      const { rows } = await db.query(
-        `select newsroom_members.user_id from newsroom_members
-         join "user" on "user".id = newsroom_members.user_id
-         where "user".email = $1`,
-        [OWNER_EMAIL],
-      );
-      userId = rows[0]?.user_id;
+      /*
+        Poll, don't read once. The membership row lands moments after the
+        signup response, and on a loaded CI runner (six servers, six
+        browsers) a single immediate read lost that race -- the user row was
+        there, members=[] was not yet. Locally the write always won.
+      */
+      for (let i = 0; i < 30 && !userId; i++) {
+        const { rows } = await db.query(
+          `select newsroom_members.user_id from newsroom_members
+           join "user" on "user".id = newsroom_members.user_id
+           where "user".email = $1`,
+          [OWNER_EMAIL],
+        );
+        userId = rows[0]?.user_id;
+        if (!userId) await new Promise((r) => setTimeout(r, 1000));
+      }
       if (!userId) {
         const users = await db.query(`select id, email from "user"`);
         const members = await db.query(`select user_id, role, newsroom_id from newsroom_members`);
