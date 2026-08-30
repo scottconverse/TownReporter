@@ -146,6 +146,32 @@ export async function claudeCodeChat(opts: {
    */
   allowedTools?: string[];
 }): Promise<ClaudeCodeResult> {
+  /*
+    The voice-and-tools invariant, made structural (ENG-107).
+
+    A call that hands over a private system-prompt file AND a tool that can
+    reach the network is a complete exfiltration channel for whatever that
+    file contains: the model can be told, by something it fetched, to act on
+    the file it is holding. The editorial writer used to be exactly that
+    call. It is now two calls — a gathering pass with tools and no file, a
+    writing pass with the file and no tools — and this check is what keeps
+    that split from quietly reopening. Every caller of this function goes
+    through here, so a future edit that adds a tool back to the writing pass,
+    or adds tools to some other call that also starts passing a voice-like
+    file, fails loudly on its very first run instead of shipping silently.
+
+    Checked before `findClaudeCli()` so the refusal never depends on whether
+    a CLI binary happens to be installed on this machine.
+  */
+  if (opts.systemPromptFile && (opts.allowedTools?.length ?? 0) > 0) {
+    throw new Error(
+      "Refusing to combine systemPromptFile with any allowedTools in one Claude Code call: " +
+        "a private system prompt and network-capable tools must never share a call " +
+        "(ENG-107). Split into a tool-enabled pass with no systemPromptFile and a " +
+        "systemPromptFile pass with no allowedTools.",
+    );
+  }
+
   const bin = await findClaudeCli();
   if (!bin) return { ok: false, error: CLAUDE_CLI_MISSING };
 

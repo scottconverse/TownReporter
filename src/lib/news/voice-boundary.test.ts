@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { findVoiceFile, assertNotAnArgument, VOICE_ENV } from "./voice.server.ts";
+import { claudeCodeChat, resetClaudeCliCache } from "./ai-claude-code.server.ts";
 
 /**
  * The private voice must never reach a command line. Executable contract.
@@ -135,6 +136,143 @@ describe("the voice never becomes a command-line argument", () => {
       code,
       /readFileSync|readFile\(/,
       "the editorial writer must never open the voice file itself",
+    );
+  });
+});
+
+/**
+ * ENG-107: the voice must never be in a call that has any tool enabled.
+ *
+ * This used to be true only because `writeEditorial` happened to write it
+ * that way — nothing stopped a future edit from putting `allowedTools` back
+ * on the same call as `systemPromptFile`, the way it originally shipped
+ * (research and writing were one call, with WebSearch/WebFetch on AND the
+ * voice loaded). `claudeCodeChat` in ai-claude-code.server.ts now refuses
+ * outright when both are present on the same call, so the invariant holds
+ * for every current and future caller, not just the one that motivated it.
+ *
+ * These are behavioural, not textual: they call the real exported function
+ * with real option objects and check what it actually does, so they cannot
+ * be satisfied by an unrelated string appearing somewhere in the file. The
+ * env manipulation keeps them free of any real spawn, and therefore free of
+ * any billed model call: `CLAUDE_CLI_PATH` is pointed at a path that cannot
+ * exist, so a call that gets PAST the invariant check resolves to
+ * `CLAUDE_CLI_MISSING` rather than spawning anything.
+ */
+describe("the voice and a tool can never share a Claude Code call", () => {
+  const originalCliPath = process.env.CLAUDE_CLI_PATH;
+  const originalClaudeCode = process.env.TOWNREPORTER_CLAUDE_CODE;
+
+  // Two layers, both real: pointing CLAUDE_CLI_PATH at a binary that cannot
+  // exist means `findClaudeCli` fails and `claudeCodeChat` never spawns
+  // anything, no matter what is installed on the machine running this suite.
+  // TOWNREPORTER_CLAUDE_CODE=0 is redundant with that for this direct
+  // `claudeCodeChat` call specifically, but it is the same "take the
+  // provider out of the chain first" the newsroom-security gate expects
+  // (scripts/newsroom-security.test.mjs), and it is what `resolveClaudeCode`
+  // actually reads, so it is the honest way to say "no live model" here too.
+  function useMissingCli() {
+    process.env.CLAUDE_CLI_PATH = join(
+      tmpdir(),
+      `definitely-not-a-real-claude-binary-${process.pid}-${Date.now()}`,
+    );
+    process.env.TOWNREPORTER_CLAUDE_CODE = "0";
+    resetClaudeCliCache();
+  }
+
+  after(() => {
+    if (originalCliPath === undefined) delete process.env.CLAUDE_CLI_PATH;
+    else process.env.CLAUDE_CLI_PATH = originalCliPath;
+    if (originalClaudeCode === undefined) delete process.env.TOWNREPORTER_CLAUDE_CODE;
+    else process.env.TOWNREPORTER_CLAUDE_CODE = originalClaudeCode;
+    resetClaudeCliCache();
+  });
+
+  it("refuses a call that combines systemPromptFile with a non-empty allowedTools", async () => {
+    useMissingCli();
+    await assert.rejects(
+      claudeCodeChat({
+        system: "",
+        systemPromptFile: join(tmpdir(), "irrelevant-voice-path.txt"),
+        user: "write the piece",
+        model: "claude-opus-5",
+        timeoutMs: 1_000,
+        allowedTools: ["WebFetch"],
+      }),
+      /systemPromptFile.*allowedTools|allowedTools.*systemPromptFile/is,
+      "a call with both the voice file and a tool must be refused before it can run",
+    );
+  });
+
+  it(
+    "the EXACT mutation that must turn the test above red: restoring the pre-fix single call " +
+      "(systemPromptFile AND allowedTools: EDITORIAL_TOOLS together, as writeEditorial's one " +
+      "claudeCodeChat call did before ENG-107) is the shape asserted rejects here — reverting " +
+      "editorial.server.ts to that shape, or deleting the guard above, makes this pass instead",
+    async () => {
+      useMissingCli();
+      const result = claudeCodeChat({
+        system: "",
+        systemPromptFile: join(tmpdir(), "irrelevant-voice-path.txt"),
+        user: "write the piece",
+        model: "claude-opus-5",
+        timeoutMs: 1_000,
+        allowedTools: ["WebSearch", "WebFetch"],
+      });
+      await assert.rejects(result);
+    },
+  );
+
+  it("still allows a tools-only call (the gathering pass) to reach CLI lookup", async () => {
+    useMissingCli();
+    const result = await claudeCodeChat({
+      system: "research instructions",
+      user: "look into it",
+      model: "claude-haiku-4-5-20251001",
+      timeoutMs: 1_000,
+      allowedTools: ["WebSearch", "WebFetch"],
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(
+        result.error,
+        /Claude Code CLI not found/,
+        "must fail on CLI lookup, not on the voice-and-tools guard",
+      );
+    }
+  });
+
+  it("still allows a voice-only call (the writing pass) to reach CLI lookup", async () => {
+    useMissingCli();
+    const result = await claudeCodeChat({
+      system: "",
+      systemPromptFile: join(tmpdir(), "irrelevant-voice-path.txt"),
+      user: "write the piece",
+      model: "claude-opus-5",
+      timeoutMs: 1_000,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(
+        result.error,
+        /Claude Code CLI not found/,
+        "must fail on CLI lookup, not on the voice-and-tools guard",
+      );
+    }
+  });
+
+  it("writeEditorial's writing-pass call site never passes allowedTools alongside systemPromptFile", () => {
+    const src = readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8");
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    const writeCallStart = code.indexOf("systemPromptFile: found.voice.path");
+    assert.notEqual(writeCallStart, -1, "the writing-pass call must still pass the voice path");
+    // The call object closes at the next top-level `});` after the marker.
+    const callEnd = code.indexOf("});", writeCallStart);
+    const callSlice = code.slice(writeCallStart, callEnd === -1 ? undefined : callEnd);
+    assert.doesNotMatch(
+      callSlice,
+      /allowedTools/,
+      "the writing-pass call object must not mention allowedTools at all",
     );
   });
 });

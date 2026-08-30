@@ -3,7 +3,9 @@ import { claudeCodeChat } from "./ai-claude-code.server";
 import { findVoiceFile } from "./voice.server";
 import {
   EDITORIAL_TOOLS,
+  RESEARCH_INSTRUCTIONS,
   buildEditorialPack,
+  buildWritingPack,
   opinionHeadline,
   parseEditorial,
   type Editorial,
@@ -13,12 +15,20 @@ import {
 /**
  * Writing an editorial, and filing it as a draft.
  *
- * The voice does its own research — that is its whole posture — so this is a
- * long call with web tools on, not the usual text-in/text-out. Everything else
- * here is plumbing: assemble pointers, hand them over, file the five parts.
+ * Two model calls, not one — ENG-107. Research and writing used to be a
+ * single call with WebSearch/WebFetch on AND the voice file loaded, which put
+ * the operator's private editorial voice in the same context as pages an
+ * editor — or the piece's own subject — pointed it at, while it held a tool
+ * that could send data back out. Now: a gathering pass has the tools and
+ * never sees the voice, on the cheap planner model; its plain-text output
+ * feeds a writing pass that has the voice and no tools at all, on the
+ * expensive model. `claudeCodeChat` in ai-claude-code.server.ts refuses to
+ * run a call that combines `systemPromptFile` with any `allowedTools` — that
+ * is the structural half of this fix; this file is the shape half.
  *
- * The voice file is never read into this process. Only its path goes to the
- * CLI, which reads it directly. See `voice.server.ts` for why that matters.
+ * The voice file is never read into this process either way. Only its path
+ * goes to the CLI, which reads it directly. See `voice.server.ts` for why
+ * that matters.
  */
 
 /**
@@ -37,6 +47,16 @@ import {
  *
  * This is a ceiling, not a target. Nothing waits on it: the desk enqueues a job
  * and returns at once, and the page counts up while it works.
+ *
+ * ENG-107 split research and writing into two calls (see `writeEditorial`),
+ * so this ceiling now applies PER PASS, not once. The gathering pass is the
+ * one these measurements describe; the writing pass has no tools and is
+ * expected to be faster, but reuses the same generous ceiling rather than a
+ * separately tuned one — one knob for the operator, and the two runs above
+ * were the whole spread this ceiling was set from in the first place. Worst
+ * case, a piece now takes up to roughly double the wall-clock time this
+ * comment's numbers describe; the operator accepted that as proportionate to
+ * an editorial's existing ~$23 / ~24-minute cost.
  */
 const EDITORIAL_TIMEOUT_DEFAULT_MS = 2_700_000;
 
@@ -111,7 +131,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
     Checked before the voice file is read: no point looking up a file we
     cannot use.
   */
-  const { resolveClaudeCode } = await import("./ai");
+  const { resolveClaudeCode, plannerModel } = await import("./ai");
   if (!resolveClaudeCode()) {
     return {
       ok: false,
@@ -123,21 +143,56 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
   const found = await findVoiceFile();
   if (!found.ok) return { ok: false, error: found.error };
 
-  const pack = buildEditorialPack({
+  /*
+    Pass one: gathering. Tools on, voice absent — this call never receives
+    `systemPromptFile`, so it cannot see the voice at all. It runs on the
+    cheap planner model, because it is retrieval, not the product.
+
+    `plannerModel()` returns "" when the app's *general* provider is not
+    Claude (an OpenAI-compatible gateway, say) — that means "no opinion,
+    keep the caller's model" for callers that pass a provider-native model
+    id. This call always goes straight to the `claude` CLI regardless of
+    what `resolveProvider()` picked elsewhere, so an empty answer has to
+    fall back to a real Claude model id here rather than an empty string.
+  */
+  const gatherModel = plannerModel() || "claude-haiku-4-5-20251001";
+  const researchPack = buildEditorialPack({
     subject: input.subject,
     pointers: input.pointers,
     ourStory: input.ourStory,
     askedFor: input.askedFor,
   });
 
+  const research = await claudeCodeChat({
+    system: RESEARCH_INSTRUCTIONS,
+    user: researchPack,
+    model: gatherModel,
+    allowedTools: EDITORIAL_TOOLS,
+    timeoutMs: editorialTimeoutMs(),
+  });
+  if (!research.ok) return { ok: false, error: research.error };
+
+  /*
+    Pass two: writing. Voice present, tools absent — `allowedTools` is
+    omitted entirely, not passed as an empty configuration the voice could
+    somehow widen. `claudeCodeChat` refuses outright if a future edit ever
+    puts both a `systemPromptFile` and a non-empty `allowedTools` on the same
+    call, so this split is enforced below the call site too, not only here.
+  */
+  const writingPack = buildWritingPack({
+    subject: input.subject,
+    ourStory: input.ourStory,
+    askedFor: input.askedFor,
+    research: research.text,
+  });
+
   const out = await claudeCodeChat({
     system: "",
     systemPromptFile: found.voice.path,
-    user: pack,
+    user: writingPack,
     // Opus, deliberately. This is the one call in the newsroom where the
     // writing IS the product; it is not the place to save four dollars.
     model: process.env.TOWNREPORTER_EDITORIAL_MODEL?.trim() || "claude-opus-5",
-    allowedTools: EDITORIAL_TOOLS,
     timeoutMs: editorialTimeoutMs(),
   });
   if (!out.ok) return { ok: false, error: out.error };
