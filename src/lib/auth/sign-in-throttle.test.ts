@@ -1,74 +1,190 @@
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { Client } from "pg";
+import {
+  ensureBuilt,
+  probePostgres,
+  resolveAdminUrl,
+  run,
+  spawnBuiltServer,
+  waitForServer,
+  withDatabase,
+  type ChildProcess,
+} from "../test-support/pg-admin.ts";
+import { join } from "node:path";
 
 /**
- * Password guessing must be throttled, and must not be throttled by NODE_ENV.
+ * Password guessing must actually be throttled. Executable contract, not text.
  *
- * An audit sent eighty wrong passwords in 6.3 seconds against a built server
- * and got eighty 401s -- no delay, no lockout. Better Auth ships the rule that
- * would have stopped it, but `rateLimit.enabled` defaults to `isProduction`,
- * and this app is started by a Windows scheduled task running
- * `node .output/server/index.mjs`, which sets no NODE_ENV. The protection
- * existed and was off on the one deployment exposed to the internet.
+ * The previous version of this file read server.ts and pattern-matched
+ * `rateLimit: { enabled: true` and the customRules block. It went green when
+ * `rateLimit.enabled` was flipped to `false` and the live block was preserved
+ * verbatim inside a `/* previously: *\/` comment two lines below -- the regex
+ * anchored on `rateLimit:\s*\{` and never looked at what came after `enabled:`
+ * closely enough to notice the block it matched was dead. A comment satisfies
+ * a grep. It does not satisfy an attacker.
  *
- * Measured after the fix, against a running built server:
- *   fresh attacker IP:  401 x10, then 429 for every attempt after
- *   honest operator IP: 200 on the first try, during the attack
+ * This version builds the app, boots the real compiled server (the one
+ * `node .output/server/index.mjs` runs in production) against a disposable
+ * scratch database, and sends it real `/api/auth/sign-in/email` requests. It
+ * cannot be fooled by a comment, an import, or a nearby unrelated `enabled:
+ * true`, because it never reads server.ts at all -- it reads the server's
+ * responses. `src/lib/auth/server.ts` is unimportable directly under Node's
+ * `--experimental-strip-types` (pglite-dialect.ts uses TypeScript parameter
+ * properties, which strip-only mode explicitly rejects), so a real HTTP round
+ * trip against the build is not a preference here, it is the only route in.
  *
- * That second line is the one people forget. The limiter buckets by client IP,
- * so an attacker exhausts their own budget. Behind a Cloudflare Tunnel every
- * request arrives from 127.0.0.1, and without an IP header to read the limiter
- * files the whole internet under one key -- at which point ten guesses from a
- * stranger lock the journalist out of their own desk and the fix becomes the
- * outage. Hence the header configuration, asserted here alongside the limit.
+ * This needs a real Postgres reachable at `TEST_POSTGRES_ADMIN_URL` (or the
+ * local default -- see src/lib/test-support/pg-admin.ts). Without one it
+ * skips, with a reason, rather than failing a machine that has no database at
+ * all. CI runs it for real: see the `postgres-integration` job in
+ * .github/workflows/ci.yml.
+ *
+ * Three things this proves, all from the wire, none from the source text:
+ *
+ *   1. throttling is actually on: a burst of wrong-password attempts against
+ *      one account gets cut off well short of Better Auth's default 3-per-10s
+ *      -- if it were not, either every attempt would keep returning 401, or
+ *      the built server would 500 fetching a config it never enabled;
+ *   2. the window is long enough to matter: Better Auth stamps a 429 with an
+ *      `X-Retry-After` header equal to the configured window (see
+ *      node_modules/better-auth/dist/api/rate-limiter/index.mjs,
+ *      `getRetryAfter`), so the actual configured seconds are readable
+ *      without waiting seconds for them;
+ *   3. the limiter buckets by the header the tunnel sets, not by socket
+ *      address: a second `cf-connecting-ip` gets its own budget. Every
+ *      request in this file arrives from 127.0.0.1, so this is the one
+ *      property that would be invisible without spoofing the header --
+ *      which is exactly the situation the real Cloudflare Tunnel deployment
+ *      is in.
  */
-const src = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+
+const repoRoot = new URL("../../../", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+const PSQL_ADMIN_URL = resolveAdminUrl();
+const PORT = 3861;
+const BASE_URL = `http://127.0.0.1:${PORT}`;
+const dbName = `townreporter_test_throttle_${process.pid}_${Date.now()}`;
+
+let server: ChildProcess | undefined;
+
+const dbProbe = await probePostgres(PSQL_ADMIN_URL);
+const skip = dbProbe.ok ? false : dbProbe.reason;
+
+async function signIn(email: string, password: string, ip: string): Promise<Response> {
+  return fetch(`${BASE_URL}/api/auth/sign-in/email`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "cf-connecting-ip": ip },
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+if (dbProbe.ok) {
+  before(async () => {
+    const admin = new Client({ connectionString: PSQL_ADMIN_URL });
+    await admin.connect();
+    await admin.query(`CREATE DATABASE ${dbName}`);
+    await admin.end();
+
+    const dbUrl = withDatabase(PSQL_ADMIN_URL, dbName);
+    await ensureBuilt(repoRoot);
+    await run(process.execPath, [join(repoRoot, "scripts", "migrate.mjs")], repoRoot, {
+      ...process.env,
+      DATABASE_URL: dbUrl,
+    });
+
+    server = spawnBuiltServer(repoRoot, dbUrl, PORT);
+    await waitForServer(BASE_URL, 30_000);
+  }, 180_000);
+
+  after(async () => {
+    server?.kill();
+    const admin = new Client({ connectionString: PSQL_ADMIN_URL });
+    await admin.connect();
+    await admin.query(
+      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`,
+      [dbName],
+    );
+    await admin.query(`DROP DATABASE IF EXISTS ${dbName}`);
+    await admin.end();
+  }, 30_000);
+}
 
 describe("sign-in is throttled", () => {
-  it("turns rate limiting on rather than inheriting the environment default", () => {
-    /*
-      Anchored to `rateLimit: {` itself, not to a window of characters after it.
+  it(
+    "cuts off a burst of wrong-password guesses well short of an unthrottled run",
+    { skip },
+    async () => {
+      const ip = "10.60.1.1";
+      const statuses: number[] = [];
+      for (let i = 0; i < 15; i += 1) {
+        const res = await signIn("nobody@example.com", "guess-the-password", ip);
+        statuses.push(res.status);
+        if (res.status === 429) break;
+      }
+      const blockedAt = statuses.indexOf(429);
+      assert.ok(
+        blockedAt >= 0,
+        `sent ${statuses.length} rapid guesses and never got a 429 (statuses: ${statuses.join(",")}); ` +
+          "rate limiting is not actually engaged",
+      );
+      // Better Auth's own default is 3 attempts per 10s; this app's custom rule
+      // is meant to be more forgiving for a real operator (10 per 5 minutes)
+      // but still bounded. Anything past 20 is the "no real limit" failure mode
+      // the original audit found (eighty guesses, eighty 401s).
+      assert.ok(
+        blockedAt < 20,
+        `${blockedAt} wrong-password attempts were allowed before a 429 -- too many for a desk ` +
+          "with one account and no password reset",
+      );
+    },
+  );
 
-      The first version of this assertion read 600 characters from the block and
-      searched them for `enabled: true`. It passed with `rateLimit.enabled` set
-      to FALSE, because `emailAndPassword: { enabled: true }` sits inside that
-      window. A gate that cannot fail is worse than no gate; this one was caught
-      by mutating the flag and watching it stay green.
-    */
-    assert.match(
-      src,
-      /rateLimit:\s*\{\s*enabled:\s*true/,
-      "rateLimit.enabled defaults to isProduction, and this app starts with no NODE_ENV; " +
-        "it must be set to true immediately inside the rateLimit block",
+  it("sets a window long enough to stop a patient attacker, not just a burst", { skip }, async () => {
+    const ip = "10.60.1.2";
+    let last: Response | undefined;
+    for (let i = 0; i < 20; i += 1) {
+      last = await signIn("nobody@example.com", "guess-the-password", ip);
+      if (last.status === 429) break;
+    }
+    assert.equal(last?.status, 429, "could not reach a throttled state to read its window");
+    // Better Auth stamps X-Retry-After with the configured rule's window in
+    // seconds (see getRetryAfter in the rate-limiter source) -- reading it
+    // off a live 429 proves the actual configured value without waiting the
+    // window out.
+    const retryAfter = Number(last?.headers.get("x-retry-after"));
+    assert.ok(
+      Number.isFinite(retryAfter) && retryAfter >= 60,
+      `X-Retry-After was ${last?.headers.get("x-retry-after")}; a window under 60s stops a ` +
+        "burst but not the patient attack that works against one known account",
     );
   });
 
-  it("keeps a slow-guessing rule on the sign-in path", () => {
-    const at = src.indexOf("customRules");
-    assert.ok(at > 0, "no customRules block");
-    const rules = src.slice(at, at + 400);
-    assert.match(rules, /"\/sign-in\/email":/, "no custom rule for the sign-in path");
-    const m = rules.match(/"\/sign-in\/email":\s*\{\s*window:\s*(\d+),\s*max:\s*(\d+)/);
-    assert.ok(m, `could not read the sign-in rule from: ${rules.slice(0, 200)}`);
-    const [, window, max] = m;
-    assert.ok(
-      Number(window) >= 60,
-      `a ${window}s window only stops a burst; the patient attack is the one that works ` +
-        `against a single known account`,
-    );
-    assert.ok(
-      Number(max) <= 20,
-      `${max} attempts per window is too many for a desk with one account and no password reset`,
-    );
-  });
+  it("reads the visitor's real address, so an attacker cannot lock out the operator", { skip }, async () => {
+    const attackerIp = "10.60.1.3";
+    let attackerBlocked = false;
+    for (let i = 0; i < 20; i += 1) {
+      const res = await signIn("nobody@example.com", "guess-the-password", attackerIp);
+      if (res.status === 429) {
+        attackerBlocked = true;
+        break;
+      }
+    }
+    assert.ok(attackerBlocked, "could not exhaust the attacker IP's budget to set up this check");
 
-  it("reads the visitor's real address, so an attacker cannot lock out the operator", () => {
-    assert.match(
-      src,
-      /ipAddressHeaders:\s*\[[^\]]*"cf-connecting-ip"/,
-      "behind the tunnel every request comes from 127.0.0.1; without a header to read, " +
-        "the limiter files the whole internet under one key and the throttle becomes a lockout",
+    // Behind the tunnel every socket connection is 127.0.0.1; if the limiter
+    // ever stopped reading cf-connecting-ip and fell back to the socket
+    // address, every visitor -- attacker and operator alike -- would share
+    // one bucket, and the attacker above would have just locked everyone out.
+    const operatorRes = await signIn(
+      "operator@example.com",
+      "guess-the-password",
+      "10.60.1.200",
+    );
+    assert.notEqual(
+      operatorRes.status,
+      429,
+      "a different cf-connecting-ip got throttled by another address's attempts -- the limiter " +
+        "is not reading the header, so behind the tunnel the whole internet shares one bucket",
     );
   });
 });

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { jobs } from "./ci-yaml.mjs";
 
 /**
  * Every browser walk that claims a desk must have a server to itself.
@@ -28,22 +29,6 @@ const CLAIMERS = [
   "scripts/sources-reach-the-reader.mjs",
 ];
 
-/** Split the workflow into jobs by indentation, without a YAML parser. */
-function jobs() {
-  const out = {};
-  let current = null;
-  for (const line of ci.split(/\r?\n/)) {
-    const m = /^ {2}([a-z0-9][a-z0-9-]*):\s*$/.exec(line);
-    if (m) {
-      current = m[1];
-      out[current] = [];
-      continue;
-    }
-    if (current) out[current].push(line);
-  }
-  return out;
-}
-
 test("each desk-claiming walk exists and is referenced by CI", () => {
   for (const s of CLAIMERS) {
     readFileSync(join(ROOT, s), "utf8"); // throws if the script is gone
@@ -53,7 +38,7 @@ test("each desk-claiming walk exists and is referenced by CI", () => {
 
 test("no CI job runs two walks that both claim the desk", () => {
   const offenders = [];
-  for (const [name, body] of Object.entries(jobs())) {
+  for (const [name, body] of Object.entries(jobs(ci))) {
     const text = body.join("\n");
     const found = CLAIMERS.filter((s) => text.includes(s));
     if (found.length > 1) {
@@ -68,7 +53,7 @@ test("no CI job runs two walks that both claim the desk", () => {
 
 test("every job that runs a desk-claiming walk starts its own server", () => {
   const offenders = [];
-  for (const [name, body] of Object.entries(jobs())) {
+  for (const [name, body] of Object.entries(jobs(ci))) {
     const text = body.join("\n");
     if (!CLAIMERS.some((s) => text.includes(s))) continue;
     if (!/npm run dev|npm start/.test(text)) {

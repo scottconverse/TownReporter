@@ -130,15 +130,27 @@ jobs:
           }
           node scripts/smoke-built-server.mjs
 
-  # The unit suite runs against PGLite, which has no pg_trgm, so the archive
-  # search's index checks skip there and announce it. Skipping is honest but it
-  # is not coverage: without this job the claim that /?q= is an indexed lookup
-  # is only ever asserted on a developer's machine.
+  # The unit suite runs against PGLite, which has no pg_trgm and no admin
+  # connection to create a scratch database from, so three files that need a
+  # REAL Postgres skip there and announce why (see
+  # src/lib/test-support/pg-admin.ts). Skipping is honest but it is not
+  # coverage: without this job those three properties -- the archive search is
+  # an indexed lookup, sign-in is actually rate-limited, and giving up the
+  # desk refuses a mismatched confirmation -- are only ever asserted on a
+  # developer's machine.
   #
-  # This runs the real migrations against a real Postgres, then re-runs the
-  # 20,000-story benchmark from scratch and fails if the index does not help.
-  search-index:
-    name: Archive search is indexed, on a real Postgres
+  # This gives them a real Postgres. `TEST_POSTGRES_ADMIN_URL` is how they find
+  # it: the tests used to hardcode a developer's own `127.0.0.1:5433`, which is
+  # exactly the port/user/password this service does NOT use, so they could
+  # never have passed here. scripts/postgres-tests-are-covered.test.mjs fails
+  # the build if a file capable of this skip is ever removed from this list
+  # without a replacement.
+  #
+  # Also runs the real migrations against `townreporter_ci` and re-runs the
+  # 20,000-story search benchmark from scratch, failing if the index does not
+  # help -- a property no single test file above measures.
+  postgres-integration:
+    name: The three Postgres-only properties, on a real Postgres
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -153,7 +165,9 @@ jobs:
           --health-timeout 5s --health-retries 20
     env:
       DATABASE_URL: postgres://postgres:ci@127.0.0.1:5432/townreporter_ci
+      TEST_POSTGRES_ADMIN_URL: postgres://postgres:ci@127.0.0.1:5432/postgres
       BETTER_AUTH_SECRET: ci-search-secret-not-for-production
+      TOWNREPORTER_CLAUDE_CODE: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -161,9 +175,10 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      - run: npx playwright install --with-deps chromium
       - run: node scripts/migrate.mjs
-      - name: The indexes exist and can serve the query
-        run: node --experimental-strip-types --test src/lib/news/search-index.test.ts
+      - name: Sign-in throttling, giving up the desk, and the search index -- each against its own scratch database
+        run: node --experimental-strip-types --test src/lib/auth/sign-in-throttle.test.ts src/lib/news/leave-desk.test.ts src/lib/news/search-index.test.ts
       - name: The index actually makes the search cheaper
         run: node scripts/search-index-proof.mjs
 

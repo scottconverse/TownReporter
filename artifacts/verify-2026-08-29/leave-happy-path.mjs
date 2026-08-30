@@ -1,0 +1,18 @@
+import { chromium } from "playwright";
+const base = "http://127.0.0.1:3600";
+const b = await chromium.launch(); const ctx = await b.newContext({ extraHTTPHeaders: { "cf-connecting-ip": "192.0.2.77" } }); const p = await ctx.newPage(); p.setDefaultTimeout(45000);
+await p.goto(`${base}/login`, { waitUntil: "networkidle" });
+await p.getByLabel("Email").fill("desk-owner@example.com");
+await p.getByLabel("Password", { exact: true }).fill("correct-horse-battery-1");
+await p.getByRole("button", { name: /Sign in/i }).click();
+await p.getByRole("link", { name: "Queue", exact: true }).waitFor();
+await p.goto(`${base}/desk/ops`, { waitUntil: "networkidle" });
+await p.locator("button.leave-editor").click();
+await p.locator("#leave-confirm-email").fill("desk-owner@example.com");
+await p.locator("button.leave-yes").click();
+await p.waitForTimeout(5000);
+console.log("url after leaving:", p.url());
+await p.goto(`${base}/login`, { waitUntil: "networkidle" });
+const h = await p.locator("h1,h2").first().innerText();
+console.log("login heading after leaving:", h);
+await b.close();

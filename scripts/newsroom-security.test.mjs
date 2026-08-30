@@ -1,10 +1,114 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * Pull the `run:` command lines out of one job's `steps:` list in a GitHub
+ * Actions workflow, without a YAML dependency (js-yaml is only present in
+ * this repo as townreporter-web's extraneous transitive install -- not a
+ * declared dependency here, and out of bounds to reach into).
+ *
+ * This still has to be structural, not a flat grep over the whole file: a
+ * `#` comment describing a step is not a step. The indentation rules of a
+ * GitHub Actions workflow are simple enough to walk by hand -- a job is a
+ * `  name:` line at 2-space indent, its `steps:` is the list under it, each
+ * step starts with a `- ` at a fixed deeper indent, and a step ends at the
+ * next line back at that indent (or shallower). Comment lines start with
+ * `#`, never `-`, so they fall out of every step boundary this walks.
+ */
+function jobRunLines(ciText, jobName) {
+  const lines = ciText.split(/\r?\n/);
+  const jobHeader = new RegExp(`^  ${jobName}:\\s*$`);
+  const jobStart = lines.findIndex((l) => jobHeader.test(l));
+  assert.notEqual(jobStart, -1, `job "${jobName}" not found in ci.yml`);
+  let jobEnd = lines.length;
+  for (let i = jobStart + 1; i < lines.length; i++) {
+    if (/^ {2}\S/.test(lines[i])) {
+      jobEnd = i;
+      break;
+    }
+  }
+  const jobLines = lines.slice(jobStart + 1, jobEnd);
+  const stepsStart = jobLines.findIndex((l) => /^\s*steps:\s*$/.test(l));
+  assert.notEqual(stepsStart, -1, `job "${jobName}" has no steps: list`);
+  const stepIndentMatch = jobLines.slice(stepsStart + 1).find((l) => /\S/.test(l));
+  const stepIndent = stepIndentMatch ? stepIndentMatch.match(/^\s*/)[0].length : 0;
+
+  const out = [];
+  let inRunBlock = false;
+  let blockIndent = 0;
+  for (const line of jobLines.slice(stepsStart + 1)) {
+    if (/^\s*$/.test(line)) continue;
+    const indent = line.match(/^\s*/)[0].length;
+    if (indent < stepIndent) break; // left the steps: list entirely
+    const stripped = line.trim();
+    if (inRunBlock) {
+      if (indent > blockIndent) {
+        out.push(stripped);
+        continue;
+      }
+      inRunBlock = false; // fell through to the next key/step below
+    }
+    const singleLine = stripped.match(/^-?\s*run:\s*(.+)$/);
+    const blockScalar = stripped.match(/^-?\s*run:\s*\|\s*$/);
+    if (blockScalar) {
+      inRunBlock = true;
+      blockIndent = indent;
+    } else if (singleLine) {
+      out.push(singleLine[1].trim());
+    }
+  }
+  return out;
+}
+
+/**
+ * Bracket-count an `if (COND) { BODY }` guard out of TypeScript source,
+ * anchored at the first occurrence of `anchor` inside COND.
+ *
+ * Regex alone can't isolate this: the condition itself contains parens
+ * (`shouldCommitFetchHashes({ ... })`), so a naive `/if \(.*?\)/` stops at the
+ * first `)` it meets, which lands inside the call. Counting brackets finds
+ * the real end of the condition and of the block that follows it, so the
+ * extracted text is exactly what the JS engine would treat as the guard —
+ * not a string that merely contains the right names.
+ */
+function extractIfGuard(src, anchor) {
+  const anchorIdx = src.indexOf(anchor);
+  assert.notEqual(anchorIdx, -1, `anchor not found in source: ${anchor}`);
+  const ifIdx = src.lastIndexOf("if (", anchorIdx);
+  assert.notEqual(ifIdx, -1, `no enclosing "if (" before anchor: ${anchor}`);
+  let depth = 0;
+  let condStart = -1;
+  let i = ifIdx + 3;
+  for (; i < src.length; i++) {
+    if (src[i] === "(") {
+      if (depth === 0) condStart = i + 1;
+      depth++;
+    } else if (src[i] === ")") {
+      depth--;
+      if (depth === 0) break;
+    }
+  }
+  const condition = src.slice(condStart, i);
+  let j = i + 1;
+  while (/\s/.test(src[j])) j++;
+  assert.equal(src[j], "{", "guard must be a braced block, not a single-statement if");
+  let bdepth = 0;
+  const bodyStart = j + 1;
+  let k = j;
+  for (; k < src.length; k++) {
+    if (src[k] === "{") bdepth++;
+    else if (src[k] === "}") {
+      bdepth--;
+      if (bdepth === 0) break;
+    }
+  }
+  return { ifIdx, condition, body: src.slice(bodyStart, k), blockEnd: k };
+}
 
 function everyServerFnHasMiddleware(src, middleware) {
   const names = [...src.matchAll(/export const (\w+) = createServerFn/g)].map((m) => m[1]);
@@ -18,13 +122,38 @@ function everyServerFnHasMiddleware(src, middleware) {
   return missing;
 }
 
-test("sanitizePublicUrls is the journalism URL gate, not an origin allowlist", () => {
-  const src = readFileSync(join(ROOT, "src/lib/news/schema.ts"), "utf8");
-  assert.match(src, /export function sanitizePublicUrls/);
-  assert.match(src, /assertHttpUrl/);
-  assert.doesNotMatch(src, /allowed\.has\(u\.origin\)/);
-  assert.match(src, /ScanResultSchema/);
-  assert.match(src, /DraftResultSchema/);
+/*
+  This used to be a source-text match: `assert.match(src, /assertHttpUrl/)`.
+  That is satisfied by the import line alone, so the actual defect an audit
+  introduced here -- swapping `assertHttpUrl(raw.trim())` for a bare
+  `new URL(raw.trim())` inside sanitizePublicUrls -- left every assertion
+  green, because "assertHttpUrl" still appeared in the file (in the now-dead
+  import) and nothing checked what the function actually *returns*.
+
+  Running the real function is not just feasible here, it is strictly
+  stronger: schema.ts has no Node built-ins, so Node's default TS type
+  stripping (this repo targets Node 22+, which supports it) loads it
+  directly, no build step, no mock. Feed it URLs a bare `new URL()` parses
+  happily but the SSRF/internal-host gate must reject, and check what comes
+  out the other side.
+*/
+test("sanitizePublicUrls is the journalism URL gate, not an origin allowlist", async () => {
+  const mod = await import(pathToFileURL(join(ROOT, "src/lib/news/schema.ts")).href);
+  const blocked = [
+    "http://127.0.0.1/admin", // loopback
+    "http://169.254.169.254/latest/meta-data/", // cloud metadata endpoint
+    "http://[::1]/", // IPv6 loopback
+    "http://internal-service.internal/", // reserved TLD-ish suffix
+    "http://my-desk.local/", // mDNS suffix
+    "ftp://example.com/file", // non-http(s) scheme
+    "not a url at all",
+  ];
+  const allowed = "https://example.com/a-real-story";
+  const out = mod.sanitizePublicUrls([...blocked, allowed, allowed]); // + a dupe
+  // Every blocked entry must be gone and the one legitimate URL survives,
+  // deduplicated -- that's the whole contract of the function, proven by
+  // running it rather than by hoping a call site was left unmodified.
+  assert.deepEqual(out, [allowed]);
 });
 
 test("every desk and dark mutation is gated by deskMiddleware", () => {
@@ -98,13 +227,64 @@ test("SSRF: fetch follows redirects manually and re-asserts each hop", () => {
   assert.match(src, /isIP\(host\) && isBlockedAddress\(host\)/);
 });
 
-test("scan does not stamp last_hash until the writing pass succeeds", () => {
+/*
+  The old version asserted "shouldCommitFetchHashes" appears in desk.ts and
+  that one specific dead SQL string ("...last_hash = ${hash}...") is absent.
+  Neither checks what the guard does. The introduced defect changed
+  `if (!shouldCommitFetchHashes(...))` to `if (false && !shouldCommitFetchHashes(...))`
+  -- the identifier is still right there, the old dead-SQL string was never
+  the shape of the real code anyway, and the guard now can never fire, so
+  every scan stamps last_hash even when the writing pass produced nothing
+  usable. Both old assertions stayed green.
+
+  desk.ts can't be safely imported and run in this suite: importing it runs
+  a module graph that reaches @tanstack/react-start, a live DB pool and
+  outbound HTTP (grokChat, ingestUrl) at import or call time, none of which
+  belong in a source-text/behavioural unit test. What *can* be exercised for
+  real is the guard's own condition -- bracket-extracted from desk.ts, then
+  evaluated as actual JavaScript with the real, unmodified
+  shouldCommitFetchHashes imported from schema.ts. `false && ...` and other
+  neutered variants change what that expression evaluates to; the identifier
+  match alone never would have.
+*/
+test("scan does not stamp last_hash until the writing pass succeeds", async () => {
   const desk = readFileSync(join(ROOT, "src/lib/news/desk.ts"), "utf8");
   assert.match(desk, /pendingHashes/);
-  assert.match(desk, /shouldCommitFetchHashes/);
   assert.match(desk, /previousScanNeedsReread/);
   assert.match(desk, /parseScanResult/);
-  assert.doesNotMatch(desk, /set last_hash = \$\{hash\}, last_fetched_at = now\(\)/);
+
+  const { condition, body, ifIdx, blockEnd } = extractIfGuard(
+    desk,
+    "shouldCommitFetchHashes({ aiOk: true",
+  );
+  // The guard's own body must be the thing that stops the commit, not a
+  // side-effect-free no-op left standing while the condition was gutted.
+  assert.match(body, /throw new Error/, "the guard must actually abort the scan");
+
+  const schema = await import(pathToFileURL(join(ROOT, "src/lib/news/schema.ts")).href);
+  const evalGuard = (parseError) =>
+     
+    // condition text is the point: it is the exact expression the running
+    // code branches on, not a paraphrase of it.
+    new Function(
+      "shouldCommitFetchHashes",
+      "data",
+      `return (${condition});`,
+    )(schema.shouldCommitFetchHashes, { parseError });
+
+  // A clean pass (no parse error): the guard must be false, i.e. must NOT
+  // take the abort path, so pendingHashes get committed.
+  assert.equal(evalGuard(null), false, "a successful writing pass must not trip the guard");
+  // A failed writing pass: the guard must be true, i.e. MUST abort before
+  // any hash gets stamped. `false && ...` fails exactly this line, because
+  // it can never be true no matter what parseError says.
+  assert.equal(evalGuard("Writing pass returned no usable JSON."), true, "a failed writing pass must trip the guard");
+
+  // The commit loop must textually follow the whole guarded block, not sit
+  // ahead of it where the throw could no longer prevent it from running.
+  const commitLoopIdx = desk.indexOf("for (const p of pendingHashes)");
+  assert.ok(commitLoopIdx > blockEnd, "the pendingHashes commit loop must come after the guard, not before it");
+  assert.ok(ifIdx > desk.indexOf("const data = parseScanResult(raw)"), "the guard must run after parsing, not before");
 });
 
 test("scan never auto-promotes model URLs to official or Tier A", () => {
@@ -214,13 +394,41 @@ test("every test file on disk is discovered by npm test", () => {
 
   Audit finding TE-05.
 */
+/*
+  `assert.match(ci, /npm run build/)` is satisfied by the prose comment above
+  the smoke-built job -- which literally says "It never ran `npm run build`"
+  while explaining the bug this test exists to prevent. Deleting the actual
+  `- run: npm run build` step left that comment standing, so the regex never
+  noticed the step was gone.
+
+  A workflow file has no code to execute, so there is no behavioural
+  equivalent to "run it and see" -- this genuinely is a source-shape check.
+  What anchors it is parsing the YAML instead of grepping the text: a YAML
+  comment is not data, so js-yaml throws it away before this test ever sees
+  it, and a step string has to be an actual step in an actual job's `steps`
+  list, not a run anywhere near the word "build". A `- run: npm run build`
+  removed from the steps array cannot be satisfied by a comment, an env var
+  named BUILD, or a step that runs "npm run build:dev" (different script).
+*/
 test("CI builds, boots and smoke-tests in a browser", () => {
   const ci = readFileSync(join(ROOT, ".github", "workflows", "ci.yml"), "utf8");
-  assert.match(ci, /npm run build/, "CI must build");
-  assert.match(ci, /npm start/, "CI must boot the built server");
-  assert.match(ci, /smoke-built-server\.mjs/, "CI must run the browser smoke");
-  assert.match(ci, /smoke-dev:/, "CI must smoke the documented dev path too");
-  assert.match(ci, /smoke-built:/, "CI must smoke the built server too");
+
+  const builtSteps = jobRunLines(ci, "smoke-built");
+  assert.ok(builtSteps.includes("npm run build"), "smoke-built must have a step that runs exactly `npm run build`");
+  assert.ok(
+    builtSteps.some((l) => l === "npm start" || l.startsWith("npm start ")),
+    "smoke-built must boot the built server with npm start",
+  );
+  assert.ok(
+    builtSteps.some((l) => l.includes("smoke-built-server.mjs")),
+    "smoke-built must run the browser smoke script",
+  );
+
+  const devSteps = jobRunLines(ci, "smoke-dev");
+  assert.ok(
+    devSteps.some((l) => l.includes("smoke-built-server.mjs")),
+    "smoke-dev must smoke the documented dev path with the same browser script",
+  );
 });
 
 test("the smoke script actually opens a browser", () => {
