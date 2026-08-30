@@ -1,0 +1,159 @@
+<#
+  Put the current main branch onto this install, safely and repeatably.
+
+  Promotion had been a sequence of commands typed from memory, which is how a
+  running server got rebuilt underneath itself earlier in this project: every
+  health check answered 200 while the editor's desk was dead in the browser for
+  twelve minutes. The order below is the lesson from that. Nothing is built
+  while the server is up.
+
+  What it does, in order:
+
+    1. refuses if this checkout has uncommitted work, so nothing is lost
+    2. backs the database up, and refuses to continue if the dump looks empty
+    3. records what is on the paper now, to compare against afterwards
+    4. stops THIS install's server (not the shared Postgres, not other installs)
+    5. fetches and fast-forwards to origin/main
+    6. installs dependencies only if the lockfile actually moved
+    7. builds
+    8. starts, and waits for the port
+    9. verifies: local page, public page, and the same number of stories
+
+  If step 9 fails it says so loudly and tells you where the backup is. It does
+  not roll back on its own: an automatic rollback of a half-applied migration
+  is a worse problem than a stopped paper, and the operator should decide.
+
+  It promotes the install it LIVES IN, found from its own location, not a path
+  passed to it. Running the development copy promotes the development copy.
+  That is deliberate: the alternative is a script that can be pointed at the
+  live paper by accident from a checkout that is mid-edit.
+
+  ASCII only: Windows PowerShell 5.1 reads a BOM-less UTF-8 file as ANSI.
+
+  Usage:
+    powershell -ExecutionPolicy Bypass -File ops\promote.ps1
+    powershell -ExecutionPolicy Bypass -File ops\promote.ps1 -WhatIf
+#>
+[CmdletBinding(SupportsShouldProcess = $true)]
+param()
+
+$ErrorActionPreference = "Stop"
+$ops = $PSScriptRoot
+$app = Split-Path -Parent $ops
+. (Join-Path $ops "lib-port.ps1")
+
+function Say($msg) { Write-Host "  $msg" }
+function Die($msg) { Write-Host ""; Write-Host "  STOP. $msg" -ForegroundColor Yellow; Write-Host ""; exit 1 }
+
+Set-Location $app
+Write-Host ""
+Write-Host "  Promoting $app (port $port)"
+Write-Host "  ------------------------------------------------------------"
+
+# --- 1. nothing uncommitted -------------------------------------------------
+$dirty = (& git status --porcelain) | Where-Object { $_ -notmatch '^\?\?' }
+if ($dirty) {
+  Say "uncommitted changes here:"
+  $dirty | ForEach-Object { Say "    $_" }
+  Die "Commit or stash them first. A build would bury them."
+}
+
+# --- 2. backup --------------------------------------------------------------
+$dbUrl = (Get-Content (Join-Path $app ".env") | Where-Object { $_ -match '^\s*DATABASE_URL\s*=' } | Select-Object -First 1)
+if (-not $dbUrl) { Die "No DATABASE_URL in .env, so there is nothing to back up and no paper to promote." }
+$dbName = ($dbUrl -split '/')[-1].Trim()
+$backupDir = Join-Path (Split-Path -Parent $app) "townreporter-backups"
+New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+$backup = Join-Path $backupDir ("{0}_{1}.sql" -f $dbName, (Get-Date -Format "yyyy-MM-dd_HHmm"))
+
+if ($PSCmdlet.ShouldProcess($dbName, "back up to $backup")) {
+  & "$env:USERPROFILE\scoop\apps\postgresql\current\bin\pg_dump.exe" -p 5433 -U postgres -d $dbName -f $backup
+  if (-not (Test-Path $backup)) { Die "pg_dump wrote nothing. Not promoting without a backup." }
+  $bytes = (Get-Item $backup).Length
+  # A dump of a real newsroom is megabytes. Anything tiny means it dumped an
+  # empty or wrong database, and continuing would promote over live data with
+  # no way back.
+  if ($bytes -lt 100000) { Die "The backup is only $bytes bytes, which is too small to be this database. Not promoting." }
+  Say "backup: $backup ($([math]::Round($bytes/1MB,1)) MB)"
+}
+
+# --- 3. what is on the paper now -------------------------------------------
+$before = & "$env:USERPROFILE\scoop\apps\postgresql\current\bin\psql.exe" -p 5433 -U postgres -d $dbName -tAc "select count(*) from articles where status='published'"
+$before = "$before".Trim()
+Say "published stories now: $before"
+
+# --- 4. stop this install ---------------------------------------------------
+if ($PSCmdlet.ShouldProcess("the app on port $port", "stop")) {
+  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ops "stop-townreporter.ps1")
+  Start-Sleep -Seconds 2
+}
+
+# --- 5. fetch and fast-forward ---------------------------------------------
+$lockBefore = if (Test-Path "package-lock.json") { (Get-FileHash "package-lock.json").Hash } else { "" }
+if ($PSCmdlet.ShouldProcess("origin/main", "fast-forward")) {
+  & git fetch origin --quiet
+  $head = (& git rev-parse HEAD).Trim()
+  $target = (& git rev-parse origin/main).Trim()
+  if ($head -eq $target) {
+    Say "already at origin/main ($($head.Substring(0,7)))"
+  } else {
+    & git merge --ff-only origin/main
+    if ($LASTEXITCODE -ne 0) { Die "Could not fast-forward. This checkout has diverged from origin/main." }
+    Say "moved $($head.Substring(0,7)) -> $($target.Substring(0,7))"
+  }
+}
+
+# --- 6. dependencies, only if the lockfile moved ---------------------------
+$lockAfter = if (Test-Path "package-lock.json") { (Get-FileHash "package-lock.json").Hash } else { "" }
+if ($lockBefore -ne $lockAfter) {
+  Say "the lockfile changed; installing dependencies"
+  if ($PSCmdlet.ShouldProcess("dependencies", "npm ci")) { & npm ci }
+} else {
+  Say "lockfile unchanged; skipping install"
+}
+
+# --- 7. build (the server is DOWN here, on purpose) ------------------------
+if ($PSCmdlet.ShouldProcess("the app", "build")) {
+  Say "building"
+  & npm run build
+  if ($LASTEXITCODE -ne 0) { Die "The build failed. The paper is still down. Backup: $backup" }
+}
+
+# --- 8. start ---------------------------------------------------------------
+if ($PSCmdlet.ShouldProcess("the app", "start")) {
+  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ops "start-townreporter.ps1")
+  for ($i = 0; $i -lt 60 -and -not (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue); $i++) {
+    Start-Sleep -Seconds 1
+  }
+}
+
+# --- 9. verify --------------------------------------------------------------
+Write-Host ""
+Say "checking"
+$fail = @()
+
+try {
+  $local = (Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 30).StatusCode
+  if ($local -eq 200) { Say "[ OK ] the paper answers on $port" } else { $fail += "local answered $local" }
+} catch { $fail += "local did not answer: $($_.Exception.Message)" }
+
+$site = $env:PUBLIC_SITE_URL
+if (-not $site) { $site = "https://townreporter.org" }
+try {
+  $pub = (Invoke-WebRequest $site -UseBasicParsing -TimeoutSec 40).StatusCode
+  if ($pub -eq 200) { Say "[ OK ] $site answers" } else { $fail += "$site answered $pub" }
+} catch { $fail += "$site did not answer: $($_.Exception.Message)" }
+
+$after = & "$env:USERPROFILE\scoop\apps\postgresql\current\bin\psql.exe" -p 5433 -U postgres -d $dbName -tAc "select count(*) from articles where status='published'"
+$after = "$after".Trim()
+if ($after -eq $before) { Say "[ OK ] still $after published stories" }
+else { $fail += "published stories went from $before to $after" }
+
+Write-Host ""
+if ($fail.Count -gt 0) {
+  $fail | ForEach-Object { Write-Host "  [FAIL] $_" -ForegroundColor Yellow }
+  Die "Promotion finished but the paper is not healthy. The backup is at $backup"
+}
+Write-Host "  Promoted. The paper is up and the archive is intact." -ForegroundColor Green
+Write-Host "  Backup kept at $backup"
+Write-Host ""
