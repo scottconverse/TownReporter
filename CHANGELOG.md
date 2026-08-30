@@ -2,11 +2,40 @@
 
 Current release: **0.5.1**.
 
-## 0.5.1 — 2026-08-29
+## 0.5.1 — 2026-08-30
 
 The paper went dark for hours and nothing said so. That is the shape of this
 release: the newsroom now watches itself, the reader is nobody's product, and
 the investigative desk finally does the thing it was built to do.
+
+**Hardening pass (August 30)**
+
+A release-gate audit — first-run walkthrough plus a five-role review — ran
+against the finished candidate, and what it found went in before the tag:
+
+- The archive search is index-backed. It was an unindexed substring scan over
+  every published body that any anonymous reader could trigger; trigram
+  indexes keep the behaviour identical and make it a lookup (measured at
+  20,000 stories: 220 ms to 0.1 ms).
+- The rendered-page fetcher can no longer be steered onto this machine or the
+  local network. The browser it drives now resolves every address through the
+  same guard the plain fetcher uses, so a hostile site cannot answer a safety
+  check with one address and hand the connection a different one.
+- The built server recovers stuck background work by itself, on the same
+  schedule the dev server always had. Before, a job orphaned by a crash waited
+  for the next human click.
+- On a phone, both the paper and the desk fold their navigation behind a
+  single button. A reader used to scroll nearly two screens of chrome before
+  the first headline.
+- A failed desk fetch now says so and offers "Try again." It used to spin
+  forever, or worse, render as an empty page that looked like there was
+  nothing to show.
+- Beat memory explains itself when empty; screen-reader heading order no
+  longer skips a level on Published; the voice file's containment check
+  resolves links before comparing paths, so a link pointing back into the
+  public repo counts as inside it.
+- Four megabytes of audit screenshots left the repository; a gate keeps
+  every non-report file out of it from now on.
 
 **Availability**
 

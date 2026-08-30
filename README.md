@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.5.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.1)** — 29 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.5.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.1)** — 30 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
