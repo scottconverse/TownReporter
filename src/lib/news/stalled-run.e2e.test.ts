@@ -143,7 +143,7 @@ if (dbProbe.ok) {
 }
 
 describe("a run that died mid-work", () => {
-  it("tells the editor the scan stopped, instead of spinning forever with Run disabled", { skip }, async () => {
+  it("tells the editor the scan stopped, instead of spinning forever with Run disabled", { skip, timeout: 120_000 }, async () => {
     if (!page) throw new Error("no browser page");
     const dbUrl = withDatabase(PSQL_ADMIN_URL, dbName);
     const db = new Client({ connectionString: dbUrl });
@@ -162,7 +162,14 @@ describe("a run that died mid-work", () => {
       await db.end();
     }
 
-    await page.goto(`${BASE_URL}/desk/scan`, { waitUntil: "networkidle" });
+    /*
+      domcontentloaded, NOT networkidle: the scan desk polls its run status
+      on an interval, so on a slow runner the network never goes idle and the
+      goto hangs until the harness cancels the whole subtest ("test did not
+      finish before its parent"). The waitFor below is the real readiness
+      signal. Same lesson render-fetch.ts already carries about Municode.
+    */
+    await page.goto(`${BASE_URL}/desk/scan`, { waitUntil: "domcontentloaded" });
 
     // The dead-end this guards against: the Run button staying disabled
     // because the page believes a scan is still in flight.
@@ -173,6 +180,13 @@ describe("a run that died mid-work", () => {
       "the Run scan button is still disabled -- the page thinks a dead run is live",
     );
 
+    // Wait for the banner rather than racing the query that discovers the
+    // stalled run -- under CI load the first paint can precede that fetch.
+    await page
+      .getByText(/stopped without finishing/i)
+      .first()
+      .waitFor({ timeout: 30_000 })
+      .catch(() => undefined);
     const bodyText = (await page.textContent("body")) ?? "";
     assert.ok(
       /stopped without finishing/i.test(bodyText),
