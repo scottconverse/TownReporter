@@ -260,7 +260,12 @@ export function spawnBuiltServer(
       BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ?? "pg-admin-test-secret",
       ...extraEnv,
     },
-    stdio: "ignore",
+    // Silent by default; PG_TEST_SERVER_LOGS=1 streams the spawned server's
+    // own output into the test log. Server-side failures inside a loader are
+    // caught and degrade to an empty result on the page, so with stdio
+    // ignored the only visible symptom is "the search found nothing" -- the
+    // console.error naming the real cause went nowhere.
+    stdio: process.env.PG_TEST_SERVER_LOGS === "1" ? "inherit" : "ignore",
   });
 }
 

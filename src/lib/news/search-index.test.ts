@@ -215,11 +215,17 @@ describe("the search actually finds what the contract promises, end to end", () 
   it("matches a body substring case-insensitively, through the real running app", { skip }, async () => {
     const res = await fetch(`${BASE_URL}/?q=${encodeURIComponent(marker.toLowerCase())}`);
     const html = await res.text();
+    // On failure, show the part that matters: node's assert diff truncates the
+    // page before the main content, so a miss printed 6KB of <head> and nav
+    // and cut off exactly where the answer was. The chip rail ends where the
+    // stories (or the empty-state) begin.
+    const afterChips = html.slice(html.lastIndexOf("chip-rail")).slice(0, 2600);
     assert.match(
       html,
       /Marker headline published/,
       "a lowercase query did not find a story whose body contains the marker in mixed case -- " +
-        "the search is not doing case-insensitive substring matching against body",
+        "the search is not doing case-insensitive substring matching against body. " +
+        `What the page shows after the chip rail:\n${afterChips}`,
     );
   });
 

@@ -176,6 +176,11 @@ jobs:
       TEST_POSTGRES_ADMIN_URL: postgres://postgres:ci@127.0.0.1:5432/postgres
       BETTER_AUTH_SECRET: ci-search-secret-not-for-production
       TOWNREPORTER_CLAUDE_CODE: "0"
+      # Stream each spawned server's own stdout/stderr into the job log. A
+      # loader failure degrades to an empty page and the console.error naming
+      # the cause otherwise goes to stdio:"ignore" -- the search failure here
+      # was undiagnosable without it.
+      PG_TEST_SERVER_LOGS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
