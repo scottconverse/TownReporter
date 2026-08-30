@@ -10,12 +10,30 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 export type JobKind = "scan" | "draft" | "dark" | "editorial";
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
+/**
+ * Two lanes, not one. Audit finding ENG-105: a single serial drainer meant a
+ * 40-minute editorial held `draining` true for the whole run, so a Scan or
+ * Draft queued behind it did not start until the editorial finished.
+ *
+ * `editorial` is its own lane at concurrency 1 -- it is the one kind that is
+ * both slow and where running two at once buys nothing (the Opinion desk is
+ * one voice, one piece at a time). Everything else shares `default`, so Scan
+ * and Draft jobs drain independently of whatever Opinion is doing.
+ */
+export type JobLane = "editorial" | "default";
+
+/** Every job kind maps to exactly one lane; this is the only place that decides. */
+export function laneForKind(kind: JobKind): JobLane {
+  return kind === "editorial" ? "editorial" : "default";
+}
+
 export type DeskJob = {
   id: number;
   newsroom_id: number;
   user_id: string;
   kind: JobKind;
   subject_id: number;
+  lane: JobLane;
   status: JobStatus;
   stage: string;
   error: string | null;
@@ -25,7 +43,20 @@ export type DeskJob = {
   finished_at: string | null;
 };
 
-let draining = false;
+/**
+ * How many jobs a lane's drainer will run at once. `editorial` stays at 1 on
+ * purpose (see JobLane above). `default` gets 2 so a Draft does not sit
+ * behind a slow Scan either -- together with the one editorial slot that is
+ * up to 3 jobs open at once, each doing its own `pg` queries against the one
+ * pool `db.ts` opens. That pool takes its size from `pg`'s own default
+ * (`new Pool({ connectionString })` sets no `max`, so it is 10), and 3
+ * concurrent jobs plus ordinary request traffic comfortably fit under that --
+ * this is the number to revisit if `max` is ever set explicitly (ENG-104).
+ */
+const LANE_CONCURRENCY: Record<JobLane, number> = { editorial: 1, default: 2 };
+
+/** One `draining` flag per lane, not one for the whole drainer. */
+const draining: Record<JobLane, boolean> = { editorial: false, default: false };
 
 export async function ensureJobsSchema() {
   const sql = await getSql();
@@ -49,6 +80,22 @@ export async function ensureJobsSchema() {
   await sql.query(`
     create index if not exists desk_jobs_open_idx
       on desk_jobs (newsroom_id, kind, subject_id, status, id desc)
+  `);
+  /*
+    The same column + backfill + index as migrations/0019_job_lanes.sql, for
+    the same reason the 0017 index is declared twice: this covers the
+    embedded PGLite path where migrations do not run.
+    `jobs.test.ts` asserts the two definitions agree. Audit finding ENG-105.
+  */
+  await sql.query(`alter table desk_jobs add column if not exists lane text`);
+  await sql.query(`
+    update desk_jobs
+    set lane = case when kind = 'editorial' then 'editorial' else 'default' end
+    where lane is null
+  `);
+  await sql.query(`
+    create index if not exists desk_jobs_lane_idx
+      on desk_jobs (lane, status, id asc)
   `);
   /*
     The same partial unique index as migrations/0017_one_open_job.sql.
@@ -77,11 +124,53 @@ export async function ensureJobsSchema() {
  * so only a genuinely dead process trips it.
  */
 export const STALE_RUNNING_SECONDS = 120;
-const HEARTBEAT_MS = 30_000;
+/** Exported so a test can assert the timing invariant that makes the
+ * heartbeat actually work: it must fire well inside the reclaim window, or a
+ * slow-but-alive job would still get mistaken for a dead one. */
+export const HEARTBEAT_MS = 30_000;
 
 /** Unique per execution. `randomUUID` is available on every supported runtime. */
 function mintClaimToken(): string {
   return globalThis.crypto.randomUUID();
+}
+
+/**
+ * The real work behind each job kind, dispatched by dynamic import exactly as
+ * before lanes existed -- moved here, unchanged, so `executeJob` can go
+ * through one seam instead of a hard-coded if/else chain.
+ */
+async function realWork(job: DeskJob): Promise<void> {
+  if (job.kind === "draft") {
+    const { performDraftWork } = await import("./desk.ts");
+    await performDraftWork(job);
+  } else if (job.kind === "scan") {
+    const { performScanWork } = await import("./desk.ts");
+    await performScanWork(job);
+  } else if (job.kind === "dark") {
+    const { performDarkRound } = await import("./dark.ts");
+    await performDarkRound(job);
+  } else if (job.kind === "editorial") {
+    const { performEditorialWork } = await import("./editorial.server.ts");
+    await performEditorialWork(job);
+  }
+}
+
+let runWork: (job: DeskJob) => Promise<void> = realWork;
+
+/**
+ * Test-only seam: swap what `executeJob` does for its actual work, without
+ * touching the claim/heartbeat/lane machinery around it.
+ *
+ * A real 40-minute editorial cannot run in a test -- no model provider is
+ * configured, and it would cost money if one were. This is how
+ * jobs.test.ts's lane-isolation test models "a long job occupies its lane"
+ * honestly: a fast stand-in that hangs on a promise the test controls, so the
+ * test can assert a `default`-lane job finishes while the stand-in is still
+ * "running", then let the stand-in resolve and clean up. Call with no
+ * argument to restore the real dispatch.
+ */
+export function __setJobWorkForTest(fn?: (job: DeskJob) => Promise<void>) {
+  runWork = fn ?? realWork;
 }
 
 export async function latestJob(opts: {
@@ -92,7 +181,7 @@ export async function latestJob(opts: {
   await ensureJobsSchema();
   const sql = await getSql();
   const rows = await sql<DeskJob>`
-    select id, newsroom_id, user_id, kind, subject_id, status, stage, error,
+    select id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
            created_at, updated_at, started_at, finished_at
     from desk_jobs
     where newsroom_id = ${opts.newsroomId} and kind = ${opts.kind} and subject_id = ${opts.subjectId}
@@ -112,7 +201,7 @@ export async function findOpenJob(opts: {
   const rows =
     opts.subjectId != null
       ? await sql<DeskJob>`
-          select id, newsroom_id, user_id, kind, subject_id, status, stage, error,
+          select id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
                  created_at, updated_at, started_at, finished_at
           from desk_jobs
           where newsroom_id = ${opts.newsroomId}
@@ -123,7 +212,7 @@ export async function findOpenJob(opts: {
           limit 1
         `
       : await sql<DeskJob>`
-          select id, newsroom_id, user_id, kind, subject_id, status, stage, error,
+          select id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
                  created_at, updated_at, started_at, finished_at
           from desk_jobs
           where newsroom_id = ${opts.newsroomId}
@@ -167,11 +256,12 @@ export async function enqueueJob(opts: {
     row the winner created — so every caller gets the same job, which is what
     they all wanted. Audit finding ENG-004.
   */
+  const lane = laneForKind(opts.kind);
   const created = await sql<DeskJob>`
-    insert into desk_jobs (newsroom_id, user_id, kind, subject_id, status, stage)
-    values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${"queued"}, ${"Queued"})
+    insert into desk_jobs (newsroom_id, user_id, kind, subject_id, lane, status, stage)
+    values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${lane}, ${"queued"}, ${"Queued"})
     on conflict do nothing
-    returning id, newsroom_id, user_id, kind, subject_id, status, stage, error,
+    returning id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
               created_at, updated_at, started_at, finished_at
   `;
   const job =
@@ -181,9 +271,9 @@ export async function enqueueJob(opts: {
     // Lost the race and the winner finished before we looked. Rare, and the
     // honest answer is to try once more rather than invent a job row.
     const retry = await sql<DeskJob>`
-      insert into desk_jobs (newsroom_id, user_id, kind, subject_id, status, stage)
-      values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${"queued"}, ${"Queued"})
-      returning id, newsroom_id, user_id, kind, subject_id, status, stage, error,
+      insert into desk_jobs (newsroom_id, user_id, kind, subject_id, lane, status, stage)
+      values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${lane}, ${"queued"}, ${"Queued"})
+      returning id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
                 created_at, updated_at, started_at, finished_at
     `;
     if (opts.kick !== false) kickJobs();
@@ -206,34 +296,72 @@ export async function setJobStage(id: number, stage: string) {
   `;
 }
 
-/** Finish queued (or stale running) jobs. Same process, or a cron wake-up. */
-export async function drainQueuedJobs(): Promise<{ ran: number }> {
-  if (draining) return { ran: 0 };
-  draining = true;
+/**
+ * Drain one lane. Each lane has its own `draining` flag, so a caller already
+ * draining `editorial` does not block a caller trying to drain `default` --
+ * that independence is the entire point of ENG-105's fix. Within a lane,
+ * `LANE_CONCURRENCY[lane]` workers run in parallel, each looping the same
+ * "claim one, run it, look for the next" shape the original single-lane
+ * drainer used.
+ *
+ * Two workers can race for the same row: both `select`s can return it before
+ * either has claimed it. That is safe, not just tolerated -- `executeJob`'s
+ * claim is a conditional `update ... where status = 'queued' or (stale)`, so
+ * only one of them actually flips the row to `running`; the loser's `took`
+ * comes back `false` and it just loops around to look again. Nothing here
+ * needs `for update skip locked` because the correctness already lives in
+ * that one update, exactly as it did before lanes existed.
+ */
+async function drainLane(lane: JobLane): Promise<{ ran: number }> {
+  if (draining[lane]) return { ran: 0 };
+  draining[lane] = true;
   let ran = 0;
   try {
     await ensureJobsSchema();
     const sql = await getSql();
-    for (let n = 0; n < 8; n++) {
-      const next = await sql<DeskJob>`
-        select id, newsroom_id, user_id, kind, subject_id, status, stage, error,
-               created_at, updated_at, started_at, finished_at
-        from desk_jobs
-        where status = 'queued'
-           or (status = 'running' and updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
-        order by id asc
-        limit 1
-      `;
-      if (!next[0]) break;
-      const took = await executeJob(next[0]);
-      if (took) ran += 1;
-    }
+    const concurrency = LANE_CONCURRENCY[lane];
+    const workers = Array.from({ length: concurrency }, () =>
+      (async () => {
+        for (let n = 0; n < 8; n++) {
+          const next = await sql<DeskJob>`
+            select id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
+                   created_at, updated_at, started_at, finished_at
+            from desk_jobs
+            where lane = ${lane}
+              and (
+                status = 'queued'
+                or (status = 'running' and updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
+              )
+            order by id asc
+            limit 1
+          `;
+          if (!next[0]) break;
+          const took = await executeJob(next[0]);
+          if (took) ran += 1;
+          // A lost claim race is not "nothing left" -- loop again rather than
+          // stopping this worker while a sibling worker (or another job
+          // entirely) may still be waiting in this same lane.
+        }
+      })(),
+    );
+    await Promise.all(workers);
   } catch (err) {
-    console.error("[jobs] drain failed", err);
+    console.error(`[jobs] drain failed (lane=${lane})`, err);
   } finally {
-    draining = false;
+    draining[lane] = false;
   }
   return { ran };
+}
+
+/**
+ * Finish queued (or stale running) jobs across both lanes. Same process, or
+ * a cron wake-up. The two lanes drain concurrently -- that is what makes a
+ * queued Scan or Draft start while a 40-minute editorial is still running,
+ * instead of waiting for it. Audit finding ENG-105.
+ */
+export async function drainQueuedJobs(): Promise<{ ran: number }> {
+  const [editorial, rest] = await Promise.all([drainLane("editorial"), drainLane("default")]);
+  return { ran: editorial.ran + rest.ran };
 }
 
 export async function executeJob(job: DeskJob): Promise<boolean> {
@@ -271,19 +399,7 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
   (beat as unknown as { unref?: () => void }).unref?.();
 
   try {
-    if (job.kind === "draft") {
-      const { performDraftWork } = await import("./desk.ts");
-      await performDraftWork(job);
-    } else if (job.kind === "scan") {
-      const { performScanWork } = await import("./desk.ts");
-      await performScanWork(job);
-    } else if (job.kind === "dark") {
-      const { performDarkRound } = await import("./dark.ts");
-      await performDarkRound(job);
-    } else if (job.kind === "editorial") {
-      const { performEditorialWork } = await import("./editorial.server.ts");
-      await performEditorialWork(job);
-    }
+    await runWork(job);
     // `claim_token` guard: if we were declared stale and someone else took the
     // job, this write must not clobber their result.
     await sql`

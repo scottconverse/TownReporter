@@ -125,23 +125,55 @@ async function checkDatabase(): Promise<HealthCheck[]> {
 async function checkJobs(): Promise<HealthCheck[]> {
   try {
     const sql = await getSql();
-    const rows = await sql<{ status: string; n: number; oldest: string | null }>`
-      select status, count(*)::int as n, min(created_at)::text as oldest
-      from desk_jobs group by status
+    /*
+      Broken out by lane, status and kind rather than just status: since
+      ENG-105 split the drainer into an `editorial` lane and a `default`
+      lane, a bare "N queued" no longer tells the operator anything true
+      about why the pile is not moving -- a queued Scan is NOT waiting on a
+      running editorial any more, that is the whole point of the fix. What
+      it may be waiting on is the `default` lane's own concurrency (2 at a
+      time). This is what turns a bare "Queued" into a reason.
+    */
+    const rows = await sql<{ lane: string; status: string; kind: string; n: number; oldest: string | null }>`
+      select coalesce(lane, 'default') as lane, status, kind, count(*)::int as n,
+             min(created_at)::text as oldest
+      from desk_jobs
+      where status in ('queued', 'running', 'failed')
+      group by coalesce(lane, 'default'), status, kind
     `;
-    const by = new Map(rows.map((r) => [r.status, r]));
-    const running = by.get("running")?.n ?? 0;
-    const queued = by.get("queued")?.n ?? 0;
-    const failed = by.get("failed")?.n ?? 0;
-    const oldestRunning = by.get("running")?.oldest;
+    const running = rows.filter((r) => r.status === "running").reduce((a, r) => a + r.n, 0);
+    const queued = rows.filter((r) => r.status === "queued").reduce((a, r) => a + r.n, 0);
+    const failed = rows.filter((r) => r.status === "failed").reduce((a, r) => a + r.n, 0);
+    const runningRows = rows.filter((r) => r.status === "running");
+    const oldestRunning = runningRows
+      .map((r) => r.oldest)
+      .filter((v): v is string => Boolean(v))
+      .sort()[0];
     const oldestMs = oldestRunning ? Date.now() - new Date(oldestRunning).getTime() : 0;
+
+    // Name what a queued job in each lane is actually behind -- the running
+    // kind(s) occupying that SAME lane's concurrency, never the other lane's.
+    const waitNotes: string[] = [];
+    for (const lane of ["editorial", "default"] as const) {
+      const laneQueued = rows.some((r) => r.lane === lane && r.status === "queued");
+      if (!laneQueued) continue;
+      const laneRunningKinds = runningRows.filter((r) => r.lane === lane).map((r) => r.kind);
+      waitNotes.push(
+        laneRunningKinds.length
+          ? `${lane} queue waiting on ${laneRunningKinds.join(", ")}`
+          : `${lane} queue waiting for its turn`,
+      );
+    }
+
     return [
       {
         id: "jobs",
         label: "Work queue",
         state: jobsState(running, failed, oldestMs),
         value: `${running} running · ${queued} queued · ${failed} failed`,
-        note: running && oldestRunning ? `oldest started ${formatAgo(oldestRunning)}` : "",
+        note: [running && oldestRunning ? `oldest started ${formatAgo(oldestRunning)}` : "", ...waitNotes]
+          .filter(Boolean)
+          .join(" · "),
       },
     ];
   } catch {
