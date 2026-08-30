@@ -59,7 +59,49 @@ void ensureDbReady();
 const globalAuthRef = globalThis as typeof globalThis & {
   __grokAuthPreviewSecret__?: string;
 };
+/**
+ * The signing secret, or a refusal.
+ *
+ * With no BETTER_AUTH_SECRET this minted a fresh random one per process. In a
+ * preview that is right -- sessions live in an in-memory database that dies
+ * with the process anyway, and a stable secret across a hot reload is the
+ * whole point.
+ *
+ * On a real install it is a quiet trap. Every restart invalidates every
+ * session, so the journalist is signed out with no message and no reason,
+ * and on this product a watchdog restarts the app whenever it looks unwell.
+ * The symptom -- 'it keeps logging me out' -- points nowhere near the cause,
+ * and there is no password reset to fall back on. A gate audit filed it as
+ * ENG-109.
+ *
+ * A real DATABASE_URL is what tells the two apart: sessions that outlive the
+ * process need a secret that outlives it too. So that case refuses to start
+ * and says how to fix it, rather than starting and behaving strangely later.
+ * Refusing at boot is the kinder failure: it happens once, at the moment
+ * somebody is already looking at the terminal.
+ */
 function previewAuthSecret(): string {
+  const persistentDatabase = Boolean(process.env.DATABASE_URL?.trim());
+  if (persistentDatabase) {
+    // A template literal, so the message needs no escape sequences at all --
+    // an earlier attempt at this block lost its newline escape three times to
+    // the shell that wrote it, and the linter cannot see a mangled one.
+    throw new Error(
+      [
+        `BETTER_AUTH_SECRET is not set.`,
+        ``,
+        `Sessions are signed with it. Without one this process invents a secret`,
+        `that dies when it does, so every restart signs the editor out with no`,
+        `explanation -- and the watchdog restarts this app on its own.`,
+        ``,
+        `Generate one and put it in .env:`,
+        ``,
+        `  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`,
+        ``,
+        `  BETTER_AUTH_SECRET=<the value it printed>`,
+      ].join(String.fromCharCode(10)),
+    );
+  }
   globalAuthRef.__grokAuthPreviewSecret__ ??= randomBytes(32).toString("hex");
   return globalAuthRef.__grokAuthPreviewSecret__;
 }
