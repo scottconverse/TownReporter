@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql, type Sql } from "@/lib/db";
 import {
-  keepACopy,
   reinsert,
   repointRequests,
+  TRASH_DAYS,
   type Snapshot,
   type TrashKind,
   type TrashRow,
@@ -31,22 +31,33 @@ import { DEFAULT_NEWSROOM_ID } from "./membership";
  * one does not silently start dropping it on restore.
  */
 
-/** How long a deleted thing waits before it is really gone. */
-export const TRASH_DAYS = 30;
-
 export type { TrashKind, TrashRow } from "./trash-store";
-export { keepACopy, reinsert, snapshotArticle, snapshotDraft, snapshotLead } from "./trash-store";
+export {
+  keepACopy,
+  reinsert,
+  snapshotArticle,
+  snapshotDraft,
+  snapshotLead,
+  TRASH_DAYS,
+  purgeAllOldTrash,
+} from "./trash-store";
 
 function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
 }
 
 /**
- * Throw out what has been in the trash longer than the window.
+ * Throw out what has been in the trash longer than the window, for the
+ * newsroom whose list was just opened.
  *
- * Lazy on purpose: called when the list is read, so there is no scheduled task
- * to forget and no way for the purge to run against a database nobody is
- * looking at.
+ * Lazy on purpose: called when the list is read, so an editor who opens Trash
+ * never sees a stale row hanging around. This alone used to be the *only*
+ * trigger that ever ran a purge, which meant "thirty days" was really "thirty
+ * days, if someone happens to look" — see `purgeAllOldTrash` in
+ * `trash-store.ts` for the unattended half of the fix (ENG-106), wired into
+ * the five-minute cron tick in `monitors-cron.ts`. Kept here as
+ * belt-and-braces: it costs nothing and keeps this list self-consistent even
+ * if the cron tick has not run yet.
  */
 async function purgeOld(sql: Sql, newsroomId: number): Promise<void> {
   await sql`

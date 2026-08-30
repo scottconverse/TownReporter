@@ -1,4 +1,4 @@
-import { getSql } from "../db.ts";
+import { ensureSchemaOnce, getSql } from "../db.ts";
 import { PAPER } from "../paper.ts";
 import { grokChat, parseJsonBlock, plannerModel, providerBudget } from "./ai.ts";
 import {
@@ -31,7 +31,12 @@ import {
   ingestDocument,
   type PdfPage,
 } from "./ingest.ts";
-import { searchWithFallback, waybackCopies, type SearchAttempt, type WebHit } from "./search-web.ts";
+import {
+  searchWithFallback,
+  waybackCopies,
+  type SearchAttempt,
+  type WebHit,
+} from "./search-web.ts";
 import { retrieveRelevantChunks } from "./retrieve.ts";
 import { identityKey, isConfirmedSame, resolveEntityName } from "./entity-resolve.ts";
 import { sanitizePublicUrls } from "./schema.ts";
@@ -423,55 +428,55 @@ create table if not exists artifact_blobs (
 create index if not exists artifact_blobs_version_idx on artifact_blobs (version_id);
 `;
 
+// The 73 `create table`/`create index` statements above, plus the 32
+// `alter table ... add column`/index-rename statements below, as one ordered
+// list. `ensureSchemaOnce` (src/lib/db.ts) fingerprints this exact list and
+// only replays it against a database that doesn't already carry a matching
+// fingerprint — see that function's doc comment for why that is safe across
+// restarts, redeploys (a changed statement list gets a new fingerprint) and
+// a database dropped and recreated under a live process (the fingerprint
+// table goes with it, so the next call sees nothing and reruns everything).
+const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
+  ...SCHEMA_SQL.split(";")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  `alter table artifact_versions add column if not exists extracted_sha256 text`,
+  `alter table artifact_versions add column if not exists raw_sha256 text`,
+  `alter table artifact_versions add column if not exists newsroom_id integer not null default 1`,
+  `alter table frontier_items add column if not exists newsroom_id integer not null default 1`,
+  `alter table entities add column if not exists newsroom_id integer not null default 1`,
+  `alter table relationships add column if not exists newsroom_id integer not null default 1`,
+  `alter table claims add column if not exists newsroom_id integer not null default 1`,
+  `alter table hypotheses add column if not exists newsroom_id integer not null default 1`,
+  `alter table anomalies add column if not exists newsroom_id integer not null default 1`,
+  `alter table dead_ends add column if not exists newsroom_id integer not null default 1`,
+  `alter table search_log add column if not exists newsroom_id integer not null default 1`,
+  `alter table recurring_baselines add column if not exists newsroom_id integer not null default 1`,
+  `alter table entity_aliases add column if not exists newsroom_id integer not null default 1`,
+  `alter table investigation_entities add column if not exists newsroom_id integer not null default 1`,
+  `alter table entity_matches add column if not exists newsroom_id integer not null default 1`,
+  `alter table search_attempts add column if not exists newsroom_id integer not null default 1`,
+  `alter table investigations add column if not exists newsroom_id integer not null default 1`,
+  `alter table artifacts add column if not exists newsroom_id integer not null default 1`,
+  `alter table source_monitors add column if not exists newsroom_id integer not null default 1`,
+  `alter table capture_events add column if not exists newsroom_id integer not null default 1`,
+  `alter table artifact_versions drop constraint if exists artifact_versions_user_id_url_content_hash_key`,
+  `drop index if exists artifact_versions_user_id_url_content_hash_key`,
+  `create unique index if not exists artifact_versions_newsroom_url_hash on artifact_versions (newsroom_id, url, content_hash)`,
+  `alter table entities drop constraint if exists entities_user_id_canonical_key`,
+  `drop index if exists entities_user_id_canonical_key`,
+  `create unique index if not exists entities_newsroom_canonical on entities (newsroom_id, canonical)`,
+  `alter table source_monitors drop constraint if exists source_monitors_user_id_url_key`,
+  `drop index if exists source_monitors_user_id_url_key`,
+  `create unique index if not exists source_monitors_newsroom_url on source_monitors (newsroom_id, url)`,
+  `alter table recurring_baselines drop constraint if exists recurring_baselines_user_id_key_key`,
+  `drop index if exists recurring_baselines_user_id_key_key`,
+  `create unique index if not exists recurring_baselines_newsroom_key on recurring_baselines (newsroom_id, key)`,
+];
+
 export async function ensureInvestigateSchema() {
   const sql = await getSql();
-  for (const stmt of SCHEMA_SQL.split(";").map((s) => s.trim()).filter(Boolean)) {
-    try {
-      await sql.query(stmt);
-    } catch {
-      /* already exists / older PGLite */
-    }
-  }
-  for (const extra of [
-    `alter table artifact_versions add column if not exists extracted_sha256 text`,
-    `alter table artifact_versions add column if not exists raw_sha256 text`,
-    `alter table artifact_versions add column if not exists newsroom_id integer not null default 1`,
-    `alter table frontier_items add column if not exists newsroom_id integer not null default 1`,
-    `alter table entities add column if not exists newsroom_id integer not null default 1`,
-    `alter table relationships add column if not exists newsroom_id integer not null default 1`,
-    `alter table claims add column if not exists newsroom_id integer not null default 1`,
-    `alter table hypotheses add column if not exists newsroom_id integer not null default 1`,
-    `alter table anomalies add column if not exists newsroom_id integer not null default 1`,
-    `alter table dead_ends add column if not exists newsroom_id integer not null default 1`,
-    `alter table search_log add column if not exists newsroom_id integer not null default 1`,
-    `alter table recurring_baselines add column if not exists newsroom_id integer not null default 1`,
-    `alter table entity_aliases add column if not exists newsroom_id integer not null default 1`,
-    `alter table investigation_entities add column if not exists newsroom_id integer not null default 1`,
-    `alter table entity_matches add column if not exists newsroom_id integer not null default 1`,
-    `alter table search_attempts add column if not exists newsroom_id integer not null default 1`,
-    `alter table investigations add column if not exists newsroom_id integer not null default 1`,
-    `alter table artifacts add column if not exists newsroom_id integer not null default 1`,
-    `alter table source_monitors add column if not exists newsroom_id integer not null default 1`,
-    `alter table capture_events add column if not exists newsroom_id integer not null default 1`,
-    `alter table artifact_versions drop constraint if exists artifact_versions_user_id_url_content_hash_key`,
-    `drop index if exists artifact_versions_user_id_url_content_hash_key`,
-    `create unique index if not exists artifact_versions_newsroom_url_hash on artifact_versions (newsroom_id, url, content_hash)`,
-    `alter table entities drop constraint if exists entities_user_id_canonical_key`,
-    `drop index if exists entities_user_id_canonical_key`,
-    `create unique index if not exists entities_newsroom_canonical on entities (newsroom_id, canonical)`,
-    `alter table source_monitors drop constraint if exists source_monitors_user_id_url_key`,
-    `drop index if exists source_monitors_user_id_url_key`,
-    `create unique index if not exists source_monitors_newsroom_url on source_monitors (newsroom_id, url)`,
-    `alter table recurring_baselines drop constraint if exists recurring_baselines_user_id_key_key`,
-    `drop index if exists recurring_baselines_user_id_key_key`,
-    `create unique index if not exists recurring_baselines_newsroom_key on recurring_baselines (newsroom_id, key)`,
-  ]) {
-    try {
-      await sql.query(extra);
-    } catch {
-      /* older process */
-    }
-  }
+  await ensureSchemaOnce(sql, "investigate", INVESTIGATE_SCHEMA_STATEMENTS);
 }
 
 function canonical(name: string) {
@@ -549,7 +554,12 @@ function parsePlan(raw: unknown): HopPlan {
   plan.questions = Array.isArray(o.questions) ? o.questions.map(String).slice(0, 12) : [];
   const arr = <T>(key: string) => (Array.isArray(o[key]) ? (o[key] as T[]) : []);
   for (const e of arr<Record<string, unknown>>("entities")) {
-    if (e?.name) plan.entities.push({ name: String(e.name), kind: String(e.kind ?? "unknown"), why: String(e.why ?? "") });
+    if (e?.name)
+      plan.entities.push({
+        name: String(e.name),
+        kind: String(e.kind ?? "unknown"),
+        why: String(e.why ?? ""),
+      });
   }
   for (const r of arr<Record<string, unknown>>("relationships")) {
     if (r?.from && r?.to) {
@@ -699,7 +709,13 @@ function asFetched(
   url: string,
 ): Awaited<ReturnType<FetchFn>> {
   if (got && typeof got.ok === "boolean") {
-    return { ...got, extras: got.extras ?? [], text: got.text ?? "", title: got.title || url, status: got.status ?? 0 };
+    return {
+      ...got,
+      extras: got.extras ?? [],
+      text: got.text ?? "",
+      title: got.title || url,
+      status: got.status ?? 0,
+    };
   }
   return { ok: false, status: 0, text: "", title: url, extras: [] };
 }
@@ -778,7 +794,14 @@ async function addFrontierFromRefs(
 export async function persistDiscovery(
   userId: string,
   investigationId: number,
-  item: { kind: string; label: string; why: string; evidence?: string; priority?: number; query?: string },
+  item: {
+    kind: string;
+    label: string;
+    why: string;
+    evidence?: string;
+    priority?: number;
+    query?: string;
+  },
 ) {
   const sql = await getSql();
   const label = item.label.slice(0, 240);
@@ -904,25 +927,30 @@ async function recordStrategyTried(
   const row = rows[0];
   if (!row) return { remaining: remainingStrategies("unknown", label, []), exhausted: false };
   const tried = parseJsonArray(row.strategies_tried);
-  if (strategyKey && !tried.includes(strategyKey) && strategyKey !== "adhoc") tried.push(strategyKey);
+  if (strategyKey && !tried.includes(strategyKey) && strategyKey !== "adhoc")
+    tried.push(strategyKey);
   const queries = parseJsonArray(row.queries_tried);
   if (query && !queries.includes(query)) queries.push(query);
   const budget = parseJsonArray(row.strategies_budget);
-  const remaining = remainingStrategies(row.kind, label, tried.length ? tried : budget.length ? tried : []);
+  const remaining = remainingStrategies(
+    row.kind,
+    label,
+    tried.length ? tried : budget.length ? tried : [],
+  );
   const zeroCount = (row.search_zero_count ?? 0) + (zero ? 1 : 0);
   await sql`
     update frontier_items
     set strategies_tried = ${JSON.stringify(tried)},
         queries_tried = ${JSON.stringify(queries).slice(0, 4000)},
         search_zero_count = ${zeroCount},
-        next_steps = ${remaining.map((s) => s.query).join(" | ").slice(0, 800)}
+        next_steps = ${remaining
+          .map((s) => s.query)
+          .join(" | ")
+          .slice(0, 800)}
     where id = ${row.id}
   `;
   const exhausted =
-    row.kind !== "url" &&
-    remaining.length === 0 &&
-    (tried.length > 0 || budget.length > 0) &&
-    zero;
+    row.kind !== "url" && remaining.length === 0 && (tried.length > 0 || budget.length > 0) && zero;
   return { remaining, exhausted };
 }
 
@@ -955,7 +983,8 @@ export async function rememberCapture(opts: {
   }
   const fullText = (opts.text ?? "").slice(0, ARCHIVE_TEXT_CAP);
   const extractedHash = opts.hash || (await sha256(fullText || url));
-  const rawHash = opts.rawBytes && opts.rawBytes.byteLength > 0 ? await sha256Bytes(opts.rawBytes) : null;
+  const rawHash =
+    opts.rawBytes && opts.rawBytes.byteLength > 0 ? await sha256Bytes(opts.rawBytes) : null;
   const versionHash = rawHash ?? extractedHash;
   const existing = await sql<{ id: number }>`
     select id from artifact_versions
@@ -1051,7 +1080,12 @@ export async function rememberCapture(opts: {
   `;
   const captureEventId = cap[0]!.id;
 
-  if (versionId && opts.rawBytes && opts.rawBytes.byteLength > 0 && opts.rawBytes.byteLength <= 4_000_000) {
+  if (
+    versionId &&
+    opts.rawBytes &&
+    opts.rawBytes.byteLength > 0 &&
+    opts.rawBytes.byteLength <= 4_000_000
+  ) {
     const alreadyBlob = await sql<{ c: number }>`
       select count(*)::int as c from artifact_blobs where version_id = ${versionId}
     `;
@@ -1114,7 +1148,13 @@ async function maybeWatch(
   if (!spec) return;
   const sql = await getSql();
   const awaitingTape = /no transcript yet|upcoming live stream/i.test(text);
-  const cadenceHours = awaitingTape ? 6 : spec.kind === "meeting" ? 24 : spec.kind === "report" ? 48 : 72;
+  const cadenceHours = awaitingTape
+    ? 6
+    : spec.kind === "meeting"
+      ? 24
+      : spec.kind === "report"
+        ? 48
+        : 72;
   const structure = JSON.stringify(structureSnapshot(title, "", extras));
   const existing = await sql<{ id: number }>`
     select id from source_monitors where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url} limit 1
@@ -1192,8 +1232,8 @@ function baselineSpec(url: string, title: string): { key: string; kind: string }
     )
   ) {
     kind = "meeting";
-  }
-  else if (/(water|utility|wastewater|drinking).{0,40}(report|quality)/.test(blob)) kind = "report";
+  } else if (/(water|utility|wastewater|drinking).{0,40}(report|quality)/.test(blob))
+    kind = "report";
   else if (/budget|cafr|financial.?report/.test(blob)) kind = "report";
   else if (/staff.?report|packet/.test(blob)) kind = "packet";
   else if (/procurement|purchasing|bid|rfp/.test(blob)) kind = "report";
@@ -1206,11 +1246,20 @@ function baselineSpec(url: string, title: string): { key: string; kind: string }
   } catch {
     /* keep */
   }
-  const key = `${kind}:${path.replace(/\/\d{4}([/-]\d{1,2}){0,2}/g, "").replace(/\/\d{4,8}\b/g, "").slice(0, 200)}`;
+  const key = `${kind}:${path
+    .replace(/\/\d{4}([/-]\d{1,2}){0,2}/g, "")
+    .replace(/\/\d{4,8}\b/g, "")
+    .slice(0, 200)}`;
   return { key, kind };
 }
 
-export async function observeBaseline(userId: string, url: string, title: string, at?: Date, extras: string[] = []) {
+export async function observeBaseline(
+  userId: string,
+  url: string,
+  title: string,
+  at?: Date,
+  extras: string[] = [],
+) {
   const spec = baselineSpec(url, title);
   if (!spec) return;
   const sql = await getSql();
@@ -1353,11 +1402,20 @@ export async function retrievePack(
       return { ...a, score };
     })
     .sort((a, b) => b.score - a.score);
-  const picked = [...seeds, ...scored.filter((a) => !seeds.some((s) => s.url === a.url)).slice(0, 8)];
+  const picked = [
+    ...seeds,
+    ...scored.filter((a) => !seeds.some((s) => s.url === a.url)).slice(0, 8),
+  ];
 
   const chunkHits =
     lowered.length > 0
-      ? await sql<{ excerpt: string; page_number: number | null; locator: string; version_id: number; url: string }>`
+      ? await sql<{
+          excerpt: string;
+          page_number: number | null;
+          locator: string;
+          version_id: number;
+          url: string;
+        }>`
           select c.excerpt, c.page_number, c.locator, c.version_id, av.url
           from artifact_chunks c
           join artifact_versions av on av.id = c.version_id
@@ -1373,12 +1431,24 @@ export async function retrievePack(
     .filter((c) => lowered.some((t) => c.excerpt.toLowerCase().includes(t)))
     .slice(0, 8);
 
-  const frontier = await sql<{ label: string; kind: string; why: string; priority: number; next_steps: string; status: string }>`
+  const frontier = await sql<{
+    label: string;
+    kind: string;
+    why: string;
+    priority: number;
+    next_steps: string;
+    status: string;
+  }>`
     select label, kind, why, priority, next_steps, status from frontier_items
     where investigation_id = ${investigationId}
     order by priority desc, id asc limit 16
   `;
-  const hyps = await sql<{ body: string; status: string; supporting: string; contradicting: string }>`
+  const hyps = await sql<{
+    body: string;
+    status: string;
+    supporting: string;
+    contradicting: string;
+  }>`
     select body, status, supporting, contradicting from hypotheses
     where investigation_id = ${investigationId}
     order by id desc limit 12
@@ -1390,7 +1460,13 @@ export async function retrievePack(
     where ie.investigation_id = ${investigationId}
     order by ie.id desc limit 20
   `;
-  const historical = await sql<{ name: string; kind: string; why: string; investigation_id: number; verdict: string | null }>`
+  const historical = await sql<{
+    name: string;
+    kind: string;
+    why: string;
+    investigation_id: number;
+    verdict: string | null;
+  }>`
     select e.name, e.kind, e.why, ie.investigation_id, m.verdict
     from entities e
     join investigation_entities ie on ie.entity_id = e.id
@@ -1450,20 +1526,31 @@ export async function retrievePack(
     `ANOMALIES:\n${anoms.map((a) => `${a.kind}: ${a.summary}`).join("\n") || "(none)"}`,
     `DEAD ENDS:\n${dead.map((d) => `${d.hypothesis} — ${d.dismissed_because}`).join("\n") || "(none)"}`,
     `SEARCHES:\n${searches.map((s) => `${s.state ?? "unknown"} ${s.query}`).join("\n") || "(none)"}`,
-    `RELEVANT ARTIFACTS:\n${picked
-      .map((a) => {
-        const rec = a as { version_id?: number | null; capture_event_id?: number | null; content_hash?: string };
-        const head = `### [capture:${rec.capture_event_id ?? "—"} version:${rec.version_id ?? "—"} hash:${(rec.content_hash ?? "").slice(0, 12)}] ${a.title}\n${a.url}\n`;
-        if (a.full_text.length <= PLANNER_TEXT_CAP) return head + a.full_text;
-        const hits = retrieveRelevantChunks([{ url: a.url, title: a.title, text: a.full_text }], terms, {
-          budgetChars: PLANNER_TEXT_CAP,
-          perDoc: 6,
-        });
-        const body =
-          hits.map((c) => `[${c.locator}] ${c.excerpt}`).join("\n") || a.full_text.slice(0, PLANNER_TEXT_CAP);
-        return head + body;
-      })
-      .join("\n\n") || "(none)"}`,
+    `RELEVANT ARTIFACTS:\n${
+      picked
+        .map((a) => {
+          const rec = a as {
+            version_id?: number | null;
+            capture_event_id?: number | null;
+            content_hash?: string;
+          };
+          const head = `### [capture:${rec.capture_event_id ?? "—"} version:${rec.version_id ?? "—"} hash:${(rec.content_hash ?? "").slice(0, 12)}] ${a.title}\n${a.url}\n`;
+          if (a.full_text.length <= PLANNER_TEXT_CAP) return head + a.full_text;
+          const hits = retrieveRelevantChunks(
+            [{ url: a.url, title: a.title, text: a.full_text }],
+            terms,
+            {
+              budgetChars: PLANNER_TEXT_CAP,
+              perDoc: 6,
+            },
+          );
+          const body =
+            hits.map((c) => `[${c.locator}] ${c.excerpt}`).join("\n") ||
+            a.full_text.slice(0, PLANNER_TEXT_CAP);
+          return head + body;
+        })
+        .join("\n\n") || "(none)"
+    }`,
     `CHUNK HITS:\n${matchedChunks.map((c) => `[version:${c.version_id} page:${c.page_number ?? "—"} ${c.locator}] ${c.excerpt.slice(0, 500)}`).join("\n") || "(none)"}`,
   ].join("\n\n");
 }
@@ -1713,7 +1800,10 @@ export async function researchLoop(opts: {
           )
         `;
       }
-      if (attempt.state !== "SEARCH_SUCCESS_RESULTS" && attempt.state !== "SEARCH_SUCCESS_ZERO_RESULTS") {
+      if (
+        attempt.state !== "SEARCH_SUCCESS_RESULTS" &&
+        attempt.state !== "SEARCH_SUCCESS_ZERO_RESULTS"
+      ) {
         await sql`
           insert into anomalies (user_id, investigation_id, kind, summary, details)
           values (
@@ -1783,7 +1873,13 @@ export async function researchLoop(opts: {
     }
 
     while (fetchedThisHop.length < FETCHES_PER_HOP) {
-      const url = [...new Set(sanitizePublicUrls([...toFetch]).map(canon).filter((u) => !fetchedThisRun.has(u)))][0];
+      const url = [
+        ...new Set(
+          sanitizePublicUrls([...toFetch])
+            .map(canon)
+            .filter((u) => !fetchedThisRun.has(u)),
+        ),
+      ][0];
       if (!url) break;
       fetchedThisRun.add(url);
       fetchedThisHop.push(url);
@@ -1936,7 +2032,8 @@ export async function researchLoop(opts: {
           const mon = await sql<{ typical_structure: string | null }>`
             select typical_structure from source_monitors where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url} limit 1
           `;
-          if (mon[0]?.typical_structure) prevSnap = JSON.parse(mon[0].typical_structure) as StructureSnapshot;
+          if (mon[0]?.typical_structure)
+            prevSnap = JSON.parse(mon[0].typical_structure) as StructureSnapshot;
         } catch {
           prevSnap = null;
         }
@@ -2180,7 +2277,12 @@ async function resolveProvenance(
         locator: hint.locator ?? null,
       });
     }
-    const art = await sql<{ version_id: number | null; capture_event_id: number | null; content_hash: string; url: string }>`
+    const art = await sql<{
+      version_id: number | null;
+      capture_event_id: number | null;
+      content_hash: string;
+      url: string;
+    }>`
       select version_id, capture_event_id, content_hash, url from artifacts
       where investigation_id = ${investigationId} and url = ${source}
       order by id desc limit 1
@@ -2280,7 +2382,11 @@ async function persistPlan(userId: string, investigationId: number, plan: HopPla
     }
     if (!merge && resolved.matched && resolved.canonical !== c) {
       const verdict =
-        resolved.verdict === "possible" ? "possible-same" : resolved.verdict === "same" ? "possible-same" : resolved.verdict;
+        resolved.verdict === "possible"
+          ? "possible-same"
+          : resolved.verdict === "same"
+            ? "possible-same"
+            : resolved.verdict;
       try {
         await sql`
           insert into entity_aliases (user_id, canonical, alias, verdict, evidence)

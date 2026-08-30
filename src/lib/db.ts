@@ -11,7 +11,9 @@ function readEnv(key: string): string | undefined {
 }
 
 function isVercelRuntime(): boolean {
-  return typeof process !== "undefined" && Boolean(process.env["VERCEL"] || process.env["VERCEL_ENV"]);
+  return (
+    typeof process !== "undefined" && Boolean(process.env["VERCEL"] || process.env["VERCEL_ENV"])
+  );
 }
 
 function readDatabaseUrl(): string | undefined {
@@ -41,14 +43,8 @@ export const dbSource: DbSource = getDbSource();
  *   const rows2 = await sql.query("select * from todos where id = $1", [id]);
  */
 export interface Sql {
-  <T = Record<string, unknown>>(
-    strings: TemplateStringsArray,
-    ...values: unknown[]
-  ): Promise<T[]>;
-  query<T = Record<string, unknown>>(
-    text: string,
-    params?: unknown[],
-  ): Promise<T[]>;
+  <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;
+  query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]>;
 }
 
 /**
@@ -113,6 +109,17 @@ function createNeonSql(): Promise<Sql> {
       throw new Error("DATABASE_URL is not set");
     }
     const pool = new Pool({ connectionString });
+    // pg's Pool emits 'error' on any IDLE client that dies -- a killed
+    // connection, a restarted Postgres, a database dropped out from under it
+    // (exactly the "rebuilt underneath a running process" case this file's
+    // ensureSchemaOnce is written to survive). With no listener, Node treats
+    // that as an unhandled 'error' event and crashes the whole process. The
+    // pool already reconnects lazily on the next query; this only stops that
+    // routine event from taking the server down with it.
+    pool.on("error", (err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[db] pool error on an idle client (pool recovers on next query): ${message}`);
+    });
     globalRef.__pgPool__ = pool;
     return toSql(async <T>(text: string, params: unknown[]) => {
       const res = await pool.query(text, params);
@@ -168,9 +175,7 @@ async function createPgliteSql(): Promise<Sql> {
       // Node unit tests have no Vite glob transform; investigate schema is applied by ensureInvestigateSchema.
       migrations = {};
     }
-    const doneRows = await pg.query<{ name: string }>(
-      "select name from _migrations",
-    );
+    const doneRows = await pg.query<{ name: string }>("select name from _migrations");
     const done = doneRows.rows.map((r) => r.name);
     for (const { name, path } of pendingMigrations(Object.keys(migrations), done)) {
       // Apply + record atomically (parity with scripts/migrate.mjs) so a failed
@@ -273,6 +278,80 @@ export async function withTransaction<T>(fn: (sql: Sql) => Promise<T>): Promise<
 }
 
 /**
+ * Run a batch of idempotent DDL statements (`create table if not exists`,
+ * `alter table ... add column if not exists`, etc.) at most once per
+ * *database*, not once per process.
+ *
+ * Several modules under `src/lib/news/` declare their own tables inline and
+ * re-run that DDL as the first line of every RPC handler — 111 statements on
+ * the Dark Desk path alone, each a full round trip, replayed even though
+ * every object already exists (ENG-104, `artifacts/gate-townreporter-2026-08-30/`).
+ *
+ * The obvious fix — a module-level boolean set after the first successful
+ * run — is wrong on this codebase: PGLite's dev instance and this repo's own
+ * integration tests routinely drop and recreate the database a long-lived
+ * process is still pointed at (a fresh scratch DB per test file, a `db:reset`
+ * against a running dev server). A boolean would keep reporting "ensured"
+ * for a database that has none of these objects, and the first RPC after the
+ * rebuild would fail against tables that were never recreated.
+ *
+ * So nothing is cached in process memory. Instead, the fact is recorded IN
+ * the database itself, in `_schema_ensure_state`, keyed by `name` and a
+ * fingerprint of the exact statement list. A rebuilt database loses that
+ * table along with everything else, so the very next call sees no matching
+ * row and reruns the batch — the check is only ever as stale as the
+ * database it reads, which cannot be stale. Changing the statement list
+ * (adding, removing, or reordering a DDL line) changes the fingerprint too,
+ * so a code change that needs new objects is picked up on the next call
+ * without anyone needing to remember to bump a version number by hand.
+ *
+ * Cost: two round trips (create-marker-table-if-needed, then a fingerprint
+ * lookup) when the schema is already current, instead of `statements.length`
+ * — down from 111 to 2 on the Dark Desk path. Every statement stays
+ * idempotent and is still wrapped so one already-applied or unsupported
+ * statement (older PGLite) can't abort the batch — unchanged from before.
+ */
+export async function ensureSchemaOnce(
+  sql: Sql,
+  name: string,
+  statements: readonly string[],
+): Promise<void> {
+  await sql.query(`
+    create table if not exists _schema_ensure_state (
+      name text primary key,
+      fingerprint text not null,
+      ensured_at timestamptz not null default now()
+    )
+  `);
+  const fingerprint = await fingerprintOf(statements);
+  const [row] = await sql.query<{ fingerprint: string }>(
+    `select fingerprint from _schema_ensure_state where name = $1`,
+    [name],
+  );
+  if (row?.fingerprint === fingerprint) return;
+
+  for (const stmt of statements) {
+    try {
+      await sql.query(stmt);
+    } catch {
+      /* already exists / older PGLite */
+    }
+  }
+
+  await sql.query(
+    `insert into _schema_ensure_state (name, fingerprint, ensured_at)
+     values ($1, $2, now())
+     on conflict (name) do update set fingerprint = excluded.fingerprint, ensured_at = now()`,
+    [name, fingerprint],
+  );
+}
+
+async function fingerprintOf(statements: readonly string[]): Promise<string> {
+  const { createHash } = await import("node:crypto");
+  return createHash("sha1").update(statements.join(" ")).digest("hex");
+}
+
+/**
  * Finish DB bootstrap before the server handles traffic.
  *
  * - **PGLite** (preview / no `DATABASE_URL`): open the in-memory DB and apply
@@ -285,6 +364,21 @@ export async function withTransaction<T>(fn: (sql: Sql) => Promise<T>): Promise<
 export function ensureDbReady(): Promise<void> {
   if (getDbSource() !== "pglite") return Promise.resolve();
   return getSql().then(() => undefined);
+}
+
+/**
+ * Test-only escape hatch: end the pg `Pool` this process opened, if any.
+ *
+ * A test that talks to a real Postgres through `getSql()` -- rather than
+ * spawning the built server as its own child process, the way the other
+ * Postgres-integration tests do -- shares this module's memoized pool, which
+ * this file otherwise never closes (a long-lived server is supposed to keep
+ * it open for its own lifetime). Without this, such a test process hangs on
+ * an open socket instead of exiting. No-op when no pool was ever created
+ * (PGLite backend, or `getSql()` was never called).
+ */
+export async function closePoolForTests(): Promise<void> {
+  await globalRef.__pgPool__?.end();
 }
 
 // Server-only eager start: kick PGLite bootstrap as soon as this module loads in

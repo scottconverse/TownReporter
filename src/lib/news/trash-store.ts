@@ -8,6 +8,9 @@ import type { Sql } from "../db.ts";
  * aliases and cannot load `@tanstack/react-start`.
  */
 
+/** How long a deleted thing waits before it is really gone. */
+export const TRASH_DAYS = 30;
+
 export type TrashKind = "lead" | "draft" | "article";
 
 export type TrashRow = {
@@ -171,5 +174,61 @@ export async function repointRequests(
       ])
       .catch(() => undefined);
   }
+}
+
+/**
+ * One sweep tick can remove at most this many rows.
+ *
+ * The sweep runs unattended, every five minutes, off a server clock nobody is
+ * watching. If that clock ever jumped forward — a bad NTP sync, a VM host
+ * hiccup, a manual `Set-Date` slip — a single unbounded DELETE would treat
+ * everything as overdue and empty the table in one tick, with no chance to
+ * notice before it was gone. Capping the batch turns that failure mode into
+ * "the operator has a few extra minutes to notice a suspiciously large purge
+ * count in the audit log," instead of "everything from every newsroom is
+ * gone before anyone could react." A clock that is merely slow just delays
+ * expiry, which is the safe direction and needs no guard.
+ */
+const PURGE_BATCH_LIMIT = 500;
+
+/**
+ * Sweep every newsroom's trash past the window, not just the one whose list
+ * happens to be open.
+ *
+ * This is the fix for ENG-106: the only DELETE that ever ran against
+ * `deleted_items` was a side effect of `listTrash` (see `trash.ts`), which
+ * means a desk that never opens the Trash panel keeps every deleted lead,
+ * draft and article forever, and all of it rides into every backup taken
+ * meanwhile. Called from the five-minute cron tick (`monitors-cron.ts`),
+ * which already exists, already fails closed without `CRON_SECRET`, and
+ * already isolates one failing step from the rest — reusing it means there
+ * is no *second* scheduled task for the next audit to find missing.
+ *
+ * Deliberately newsroom-independent: a per-newsroom `WHERE` clause would
+ * require enumerating newsrooms here and would silently stop expiring a
+ * newsroom added after this was written.
+ *
+ * A single `DELETE ... RETURNING` is one statement, so Postgres runs it in
+ * one implicit transaction: if the process dies mid-sweep the database still
+ * has either all of this batch's rows gone or none of them, never half. What
+ * this can NOT protect against is a migration that renames or drops a column
+ * this statement depends on — that turns into a thrown error, which is
+ * deliberately NOT swallowed here (contrast the lazy purge in `trash.ts`,
+ * which is best-effort because it rides along on a page load). The caller
+ * logs a thrown error to `audit_events` so a broken sweep is visible to
+ * whoever looks, rather than disappearing the way this bug did originally.
+ */
+export async function purgeAllOldTrash(sql: Sql): Promise<number> {
+  const gone = await sql<{ id: number }>`
+    delete from deleted_items
+    where id in (
+      select id from deleted_items
+      where deleted_at < now() - make_interval(days => ${TRASH_DAYS})
+      order by deleted_at asc
+      limit ${PURGE_BATCH_LIMIT}
+    )
+    returning id
+  `;
+  return gone.length;
 }
 

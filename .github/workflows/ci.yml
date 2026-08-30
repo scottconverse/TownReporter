@@ -100,6 +100,14 @@ jobs:
             echo "built server did not come up"; tail -n 80 /tmp/built.log; exit 1;
           }
           node scripts/smoke-built-server.mjs
+      # A gate audit found no protective headers on any route, which made the
+      # Server page's restart controls clickjackable: a framed page's click is
+      # a genuine same-origin request, so the session guard is satisfied. Only
+      # the browser can refuse the frame. This asks a real browser.
+      - name: The desk refuses to be framed
+        env:
+          SECURITY_HEADERS_BASE_URL: http://127.0.0.1:3000
+        run: node scripts/security-headers-e2e.mjs
 
   smoke-dev:
     name: Documented dev path works in a browser
@@ -181,6 +189,8 @@ jobs:
         run: node --experimental-strip-types --test src/lib/auth/sign-in-throttle.test.ts src/lib/news/leave-desk.test.ts src/lib/news/search-index.test.ts src/lib/news/public-surfaces.no-leak.test.ts src/lib/news/stalled-run.e2e.test.ts
       - name: The index actually makes the search cheaper
         run: node scripts/search-index-proof.mjs
+      - name: ensureDarkSchema survives a database rebuilt underneath the running process (ENG-104)
+        run: node --experimental-strip-types --test src/lib/news/dark-schema-rebuild.test.ts
 
   # These two walks each need an UNCLAIMED desk: they create their own owner
   # at /login, and the first account in owns the newsroom.

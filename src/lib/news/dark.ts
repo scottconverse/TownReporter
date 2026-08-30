@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getSql } from "../db.ts";
+import { ensureSchemaOnce, getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { grokChat, parseJsonBlock, providerBudget, probeProvider } from "./ai.ts";
 import { DARK_SYSTEM, darkSystemFor } from "./dark-prompt.ts";
@@ -172,40 +172,36 @@ type DarkJson = {
   }[];
 };
 
-async function ensureDarkSchema() {
-  const sql = await getSql();
-  await sql.query(`
-    create table if not exists investigation_briefs (
+// The inline DDL this desk owns directly (dark_* tables + the brief/settings
+// tables). Kept as a plain statement list — rather than issued one at a time
+// as before — so `ensureSchemaOnce` (src/lib/db.ts) can fingerprint the whole
+// batch and skip it entirely once the database already has these objects.
+// See that function's doc comment for why a per-process boolean would be
+// wrong here (a rebuilt database under a live process must not look "ensured").
+const DARK_SCHEMA_STATEMENTS: readonly string[] = [
+  `create table if not exists investigation_briefs (
       investigation_id integer primary key,
       newsroom_id integer not null default 1,
       brief_json text not null default '{}',
       generated_at timestamptz not null default now()
-    )
-  `);
-  await sql.query(`
-    create table if not exists dark_settings (
+    )`,
+  `create table if not exists dark_settings (
       newsroom_id integer primary key,
       dig integer not null default 4,
       nerve integer not null default 5,
       scope text not null default 'city',
       updated_at timestamptz not null default now()
-    )
-  `);
-  await sql.query(`
-    create table if not exists dark_runs (
+    )`,
+  `create table if not exists dark_runs (
       id serial primary key,
       user_id text not null,
       started_at timestamptz not null default now(),
       finished_at timestamptz,
       summary text,
       error text
-    )
-  `);
-  await sql.query(
-    `create index if not exists dark_runs_user_idx on dark_runs (user_id, started_at desc)`,
-  );
-  await sql.query(`
-    create table if not exists dark_signals (
+    )`,
+  `create index if not exists dark_runs_user_idx on dark_runs (user_id, started_at desc)`,
+  `create table if not exists dark_signals (
       id serial primary key,
       user_id text not null,
       run_id integer references dark_runs(id) on delete set null,
@@ -225,18 +221,10 @@ async function ensureDarkSchema() {
       handoff text not null default 'HOLD FOR PATTERN',
       investigation_id integer,
       created_at timestamptz not null default now()
-    )
-  `);
-  await sql.query(
-    `create index if not exists dark_signals_user_idx on dark_signals (user_id, created_at desc)`,
-  );
-  try {
-    await sql.query(`alter table dark_signals add column if not exists investigation_id integer`);
-  } catch {
-    /* older PGLite */
-  }
-  await sql.query(`
-    create table if not exists dark_promises (
+    )`,
+  `create index if not exists dark_signals_user_idx on dark_signals (user_id, created_at desc)`,
+  `alter table dark_signals add column if not exists investigation_id integer`,
+  `create table if not exists dark_promises (
       id serial primary key,
       user_id text not null,
       who_promised text not null,
@@ -245,11 +233,13 @@ async function ensureDarkSchema() {
       source_cite text,
       status text not null default 'open',
       created_at timestamptz not null default now()
-    )
-  `);
-  await sql.query(
-    `create index if not exists dark_promises_user_idx on dark_promises (user_id, created_at desc)`,
-  );
+    )`,
+  `create index if not exists dark_promises_user_idx on dark_promises (user_id, created_at desc)`,
+];
+
+export async function ensureDarkSchema() {
+  const sql = await getSql();
+  await ensureSchemaOnce(sql, "dark", DARK_SCHEMA_STATEMENTS);
   await ensureInvestigateSchema();
 }
 
@@ -328,7 +318,12 @@ export const listInvestigations = createServerFn({ method: "GET" })
 
 async function gatherWorthALook(newsroomId: number): Promise<WorthSeed[]> {
   const sql = await getSql();
-  const anomalies = await sql<{ kind: string; summary: string; url: string | null; details: string }>`
+  const anomalies = await sql<{
+    kind: string;
+    summary: string;
+    url: string | null;
+    details: string;
+  }>`
     select kind, summary, url, details from anomalies
     where newsroom_id = ${newsroomId}
     order by id desc limit 24
@@ -486,17 +481,38 @@ export const getInvestigation = createServerFn({ method: "GET" })
       order by ie.id desc
       limit 12
     `;
-    const relationships = await sql<{ from_name: string; to_name: string; kind: string; evidence: string; version_id: number | null; capture_event_id: number | null; provenance_status: string | null }>`
+    const relationships = await sql<{
+      from_name: string;
+      to_name: string;
+      kind: string;
+      evidence: string;
+      version_id: number | null;
+      capture_event_id: number | null;
+      provenance_status: string | null;
+    }>`
       select from_name, to_name, kind, evidence, version_id, capture_event_id, provenance_status from relationships
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 40
     `;
-    const claims = await sql<{ body: string; kind: string; evidence: string; confidence: number | null; version_id: number | null; capture_event_id: number | null; provenance_status: string | null }>`
+    const claims = await sql<{
+      body: string;
+      kind: string;
+      evidence: string;
+      confidence: number | null;
+      version_id: number | null;
+      capture_event_id: number | null;
+      provenance_status: string | null;
+    }>`
       select body, kind, evidence, confidence, version_id, capture_event_id, provenance_status from claims
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 40
     `;
-    const hypotheses = await sql<{ body: string; status: string; supporting: string; contradicting: string }>`
+    const hypotheses = await sql<{
+      body: string;
+      status: string;
+      supporting: string;
+      contradicting: string;
+    }>`
       select body, status, supporting, contradicting from hypotheses
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 20
@@ -511,7 +527,13 @@ export const getInvestigation = createServerFn({ method: "GET" })
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 20
     `;
-    const searches = await sql<{ hop: number; query: string; state: string | null; provider: string | null; generated_json: string | null }>`
+    const searches = await sql<{
+      hop: number;
+      query: string;
+      state: string | null;
+      provider: string | null;
+      generated_json: string | null;
+    }>`
       select hop, query, state, provider, generated_json from search_log
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 40
@@ -677,12 +699,21 @@ async function synthesizeSignals(
   const ai = await grokChat(darkSystemFor(dials), pack.slice(0, 28000), 3200, {
     timeoutMs: providerBudget().callMs,
   });
-  if (!ai?.ok) return { stored: 0, summary: "", error: (ai && "error" in ai ? ai.error : "Empty model response") as string | undefined };
+  if (!ai?.ok)
+    return {
+      stored: 0,
+      summary: "",
+      error: (ai && "error" in ai ? ai.error : "Empty model response") as string | undefined,
+    };
 
   const parsed = parseJsonBlock<DarkJson>(ai.text) ?? {};
   const summary = String(parsed.editor_summary ?? "").slice(0, 2000);
   const gaps = (parsed.inventory_gaps ?? []).join("; ").slice(0, 800);
-  const header = [summary, gaps ? `Gaps: ${gaps}` : "", parsed.window ? `Window: ${parsed.window}` : ""]
+  const header = [
+    summary,
+    gaps ? `Gaps: ${gaps}` : "",
+    parsed.window ? `Window: ${parsed.window}` : "",
+  ]
     .filter(Boolean)
     .join("\n");
 
@@ -737,7 +768,8 @@ async function synthesizeSignals(
 }
 
 function asDarkError(err: unknown): string {
-  if (err && typeof err === "object" && "error" in err) return String((err as { error: unknown }).error);
+  if (err && typeof err === "object" && "error" in err)
+    return String((err as { error: unknown }).error);
   return err instanceof Error ? err.message : "Dark desk failed";
 }
 
@@ -798,7 +830,9 @@ async function executeDarkRun(
       synth.summary,
       `Hops ${loop.hops} of ${budget.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
       `Setting: dig ${dials.dig}/10, nerve ${dials.nerve}/10 (${stanceFor(dials).label}), scope ${dials.scope}.`,
-      revived.length ? `Prior dead ends matched: ${revived.map((r) => r.hypothesis).join("; ")}` : "",
+      revived.length
+        ? `Prior dead ends matched: ${revived.map((r) => r.hypothesis).join("; ")}`
+        : "",
       synth.error ? `Synthesis: ${synth.error}` : "",
     ]
       .filter(Boolean)
@@ -809,7 +843,11 @@ async function executeDarkRun(
       set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null}
       where id = ${runId}
     `;
-    await audit(userId, "dark", `run ${runId} inv ${investigationId} hops ${loop.hops} signals ${synth.stored}`);
+    await audit(
+      userId,
+      "dark",
+      `run ${runId} inv ${investigationId} hops ${loop.hops} signals ${synth.stored}`,
+    );
     if (synth.error && !loop.paused) {
       await markInvestigationPaused(userId, investigationId, synth.error);
     }
@@ -1215,11 +1253,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       filed += 1;
     }
 
-    await audit(
-      context.userId,
-      "reddit",
-      `r/${sub} read ${sweep.posts.length} filed ${filed}`,
-    );
+    await audit(context.userId, "reddit", `r/${sub} read ${sweep.posts.length} filed ${filed}`);
 
     return {
       ok: true as const,
@@ -1232,10 +1266,11 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       reason: sweep.reason ?? "",
       log: sweep.log,
       // Shown to the editor so a thin result is explainable rather than mysterious.
-      topScores: picked.slice(0, 5).map((p) => ({ title: p.title, score: civicScore(p), url: p.url })),
+      topScores: picked
+        .slice(0, 5)
+        .map((p) => ({ title: p.title, score: civicScore(p), url: p.url })),
     };
   });
-
 
 /**
  * The dials, as stored for this newsroom.
@@ -1292,7 +1327,6 @@ export const saveDarkDials = createServerFn({ method: "POST" })
       minutes: estimateMinutes(d),
     };
   });
-
 
 /**
  * Write the read-me-first block for one investigation.

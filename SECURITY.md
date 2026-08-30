@@ -19,15 +19,19 @@ There is one active release line, maintained by one person.
 **Do not open a public GitHub issue.** A public issue tells every operator
 running a clone at the same moment it tells the maintainer.
 
-Preferred: use GitHub's private vulnerability reporting for this repository
-(the **Security** tab → **Report a vulnerability**), if it is enabled here —
-that route reaches the maintainer without a public issue and without a
-manually-monitored inbox.
+Use GitHub's private vulnerability reporting for this repository: the
+**Security** tab, then **Report a vulnerability**. It is enabled — verified
+against the API rather than assumed, and a test in this repository fails if it
+is ever switched off while this document still points at it.
 
-Backup / if that flow is not available: **`<security contact address — maintainer to fill in>`**.
-This project's only other public contact today, `tips@townreporter.org`, is
-documented in `SELF-HOSTING.md` as a receive-only newspaper tip line and is
-not represented here as a security channel.
+That route reaches the maintainer without a public issue and without an inbox
+anyone has to remember to check. There is deliberately no email address here.
+This document previously carried a placeholder where one was meant to go,
+which is worse than having none: it reads as a channel and is not one.
+
+`tips@townreporter.org` is NOT a security channel. It is a receive-only
+newspaper tip line, documented as such in `SELF-HOSTING.md`. Reporting a
+vulnerability there gets it read by whoever reads reader mail.
 
 Please include, however you report:
 

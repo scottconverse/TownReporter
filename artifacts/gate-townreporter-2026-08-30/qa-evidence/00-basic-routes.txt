@@ -1,0 +1,68 @@
+== / ==
+HTTP/1.1 200 
+content-type: text/html; charset=utf-8
+Date: Sun, 30 Aug 2026 16:09:52 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+
+== /desk (no session) ==
+HTTP/1.1 200 
+content-type: text/html; charset=utf-8
+Date: Sun, 30 Aug 2026 16:09:53 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+
+== /desk/queue (no session) ==
+HTTP/1.1 200 
+content-type: text/html; charset=utf-8
+Date: Sun, 30 Aug 2026 16:09:53 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+
+== /login ==
+HTTP/1.1 200 
+content-type: text/html; charset=utf-8
+Date: Sun, 30 Aug 2026 16:09:53 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+
+== /feed.ts ==
+HTTP/1.1 200 
+cache-control: public, max-age=300
+content-type: application/rss+xml; charset=utf-8
+Date: Sun, 30 Aug 2026 16:09:53 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+
+== /sitemap.xml ==
+HTTP/1.1 200 
+cache-control: public, max-age=600
+content-type: application/xml; charset=utf-8
+Date: Sun, 30 Aug 2026 16:09:53 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+
+== /robots.txt ==
+HTTP/1.1 200 OK
+content-length: 758
+content-type: text/plain; charset=utf-8
+etag: "2f6-vYDhW+of2DelvItlHaeeSvmom4I"
+last-modified: Sat, 29 Aug 2026 20:25:25 GMT
+Date: Sun, 30 Aug 2026 16:09:53 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+== nonexistent route ==
+HTTP/1.1 404 
+content-type: text/html; charset=utf-8
+Date: Sun, 30 Aug 2026 16:09:53 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+

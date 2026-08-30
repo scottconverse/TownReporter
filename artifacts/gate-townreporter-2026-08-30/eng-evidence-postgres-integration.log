@@ -1,0 +1,51 @@
+(node:7328) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+▶ sign-in is throttled
+  ✔ cuts off a burst of wrong-password guesses well short of an unthrottled run (48.0418ms)
+  ✔ sets a window long enough to stop a patient attacker, not just a burst (21.244ms)
+  ✔ reads the visitor's real address, so an attacker cannot lock out the operator (23.3026ms)
+✔ sign-in is throttled (82727.3433ms)
+(node:27520) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+▶ giving up the desk
+  ✔ refuses unless the caller types the address it is signed in as (722.9242ms)
+  ✔ is not rendered in the chrome of every desk page (0.5353ms)
+  ✔ the confirmation names what is lost (0.4439ms)
+✔ giving up the desk (13100.1269ms)
+(node:23164) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+▶ no editor-only field reaches a reader, on any public surface
+  ✔ the front page (12.169ms)
+  ✔ the article page (16.8606ms)
+  ✔ a topic page (8.6163ms)
+  ✔ archive search (9.735ms)
+  ✔ the corrections page, after it hydrates and fetches its own data (1054.0404ms)
+  ✔ the RSS feed (4.9514ms)
+  ✔ the sitemap (2.5504ms)
+  ✔ robots.txt (2.3058ms)
+✔ no editor-only field reaches a reader, on any public surface (1112.4947ms)
+(node:41768) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+▶ the search actually finds what the contract promises, end to end
+  ✔ matches a body substring case-insensitively, through the real running app (14.5004ms)
+  ✔ never surfaces a draft, no matter what its body contains (9.8541ms)
+  ✔ does not sweep the body for a query shorter than the floor (6.501ms)
+✔ the search actually finds what the contract promises, end to end (31.7469ms)
+▶ the public archive search is index-backed
+  ✔ carries a partial trigram index on every column the search reads (14.4529ms)
+  ✔ the query still says published, and still refuses a two-character scan (0.5245ms)
+✔ the public archive search is index-backed (15.1753ms)
+(node:11324) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+▶ a run that died mid-work
+  ✔ tells the editor the scan stopped, instead of spinning forever with Run disabled (841.2084ms)
+✔ a run that died mid-work (13000.0719ms)
+ℹ tests 20
+ℹ suites 6
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 198086.0524
+PG_EXIT=0
