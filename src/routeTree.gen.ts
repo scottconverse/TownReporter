@@ -18,6 +18,7 @@ import { Route as FeedRouteImport } from './routes/feed'
 import { Route as GetTheCodeRouteImport } from './routes/get-the-code'
 import { Route as HowWeReportRouteImport } from './routes/how-we-report'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ArticlesSlugRouteImport } from './routes/articles.$slug'
 import { Route as DeskIndexRouteImport } from './routes/desk.index'
@@ -79,6 +80,11 @@ const HowWeReportRoute = HowWeReportRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
+  id: '/robots.txt',
+  path: '/robots.txt',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
@@ -177,6 +183,7 @@ export interface FileRoutesByFullPath {
   '/get-the-code': typeof GetTheCodeRoute
   '/how-we-report': typeof HowWeReportRoute
   '/login': typeof LoginRoute
+  '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
@@ -204,6 +211,7 @@ export interface FileRoutesByTo {
   '/get-the-code': typeof GetTheCodeRoute
   '/how-we-report': typeof HowWeReportRoute
   '/login': typeof LoginRoute
+  '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
@@ -233,6 +241,7 @@ export interface FileRoutesById {
   '/get-the-code': typeof GetTheCodeRoute
   '/how-we-report': typeof HowWeReportRoute
   '/login': typeof LoginRoute
+  '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
@@ -263,6 +272,7 @@ export interface FileRouteTypes {
     | '/get-the-code'
     | '/how-we-report'
     | '/login'
+    | '/robots.txt'
     | '/sitemap.xml'
     | '/articles/$slug'
     | '/desk/dark'
@@ -290,6 +300,7 @@ export interface FileRouteTypes {
     | '/get-the-code'
     | '/how-we-report'
     | '/login'
+    | '/robots.txt'
     | '/sitemap.xml'
     | '/articles/$slug'
     | '/desk/dark'
@@ -318,6 +329,7 @@ export interface FileRouteTypes {
     | '/get-the-code'
     | '/how-we-report'
     | '/login'
+    | '/robots.txt'
     | '/sitemap.xml'
     | '/articles/$slug'
     | '/desk/dark'
@@ -347,6 +359,7 @@ export interface RootRouteChildren {
   GetTheCodeRoute: typeof GetTheCodeRoute
   HowWeReportRoute: typeof HowWeReportRoute
   LoginRoute: typeof LoginRoute
+  RobotsDottxtRoute: typeof RobotsDottxtRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ArticlesSlugRoute: typeof ArticlesSlugRoute
   EvidenceVersionIdRoute: typeof EvidenceVersionIdRoute
@@ -418,6 +431,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/robots.txt': {
+      id: '/robots.txt'
+      path: '/robots.txt'
+      fullPath: '/robots.txt'
+      preLoaderRoute: typeof RobotsDottxtRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sitemap.xml': {
@@ -582,6 +602,7 @@ const rootRouteChildren: RootRouteChildren = {
   GetTheCodeRoute: GetTheCodeRoute,
   HowWeReportRoute: HowWeReportRoute,
   LoginRoute: LoginRoute,
+  RobotsDottxtRoute: RobotsDottxtRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   ArticlesSlugRoute: ArticlesSlugRoute,
   EvidenceVersionIdRoute: EvidenceVersionIdRoute,
