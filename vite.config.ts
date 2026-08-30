@@ -221,26 +221,51 @@ function darkDeskMonitorPlugin(): Plugin {
   };
 }
 
-function stubPlaywrightOnClient(): Plugin {
+/**
+ * Keep server-only modules out of the browser bundle.
+ *
+ * Two of them reach the client graph through a dynamic import and, left alone,
+ * drag their whole payload into `.output/public`:
+ *
+ *  - Playwright, whose launch the client never calls.
+ *  - PGLite, the server-side fallback database (`src/lib/db.ts`, behind an
+ *    `await import` and used only when DATABASE_URL is unset). A gate audit
+ *    found its WebAssembly published to the reader-facing asset directory: a
+ *    10 MB .wasm, a 6 MB .data and a 0.4 MB initdb -- 16.4 MB, 93% of the
+ *    public assets, referenced by no client script and served to every reader
+ *    anonymously. The server keeps its own copy under `.output/server`, which
+ *    is the only one that is ever used.
+ *
+ * On the client build (`options.ssr` false) these resolve to an inert stub; on
+ * the server build the real modules load untouched. Nothing the app runs is
+ * affected -- only what a browser is asked to download.
+ */
+function stubServerOnlyOnClient(): Plugin {
+  const isPglite = (id: string) =>
+    id === "@electric-sql/pglite" || id.startsWith("@electric-sql/pglite/");
+  const isPlaywright = (id: string) =>
+    id === "playwright" ||
+    id === "playwright-core" ||
+    id.startsWith("playwright/") ||
+    id.startsWith("playwright-core/") ||
+    id === "chromium-bidi" ||
+    id.startsWith("chromium-bidi/");
   return {
-    name: "stub-playwright-on-client",
+    name: "stub-server-only-on-client",
     enforce: "pre",
     resolveId(id, _importer, options) {
       if (options?.ssr) return;
-      if (
-        id === "playwright" ||
-        id === "playwright-core" ||
-        id.startsWith("playwright/") ||
-        id.startsWith("playwright-core/") ||
-        id === "chromium-bidi" ||
-        id.startsWith("chromium-bidi/")
-      ) {
-        return "\0stub-playwright";
-      }
+      if (isPlaywright(id)) return "\0stub-playwright";
+      if (isPglite(id)) return "\0stub-pglite";
     },
     load(id) {
       if (id === "\0stub-playwright") {
         return "export const chromium = { launch: async () => null }; export default {};";
+      }
+      if (id === "\0stub-pglite") {
+        // The browser must never reach this. Throwing rather than returning a
+        // fake keeps a real client-side use from failing silently.
+        return 'export class PGlite { constructor() { throw new Error("PGlite is server-only"); } }; export default {};';
       }
     },
   };
@@ -275,7 +300,7 @@ export default defineConfig(({ command, isPreview }) => ({
     appEnvPlugin(),
     // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
     grokPwaPlugin(),
-    stubPlaywrightOnClient(),
+    stubServerOnlyOnClient(),
     tailwindcss(),
     tanstackStart(),
     ...(command === "build" || isPreview
