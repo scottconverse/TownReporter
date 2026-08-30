@@ -232,3 +232,34 @@ export async function purgeAllOldTrash(sql: Sql): Promise<number> {
   return gone.length;
 }
 
+/**
+ * Take the Opinion desk's record away with a purged editorial.
+ *
+ * An editorial draft is pointed at by the `editorial_requests` row that asked
+ * for it. Deleting the draft nulls that pointer -- this snapshot keeps the ids
+ * so `repointRequests` can put them back on a restore -- but PURGING meant the
+ * writing was gone for good while the request stayed on the Opinion desk,
+ * showing a subject and a finished time with no piece and no error. It read as
+ * work still running that had actually been thrown away on purpose, and the
+ * desk's Delete was keyed on the draft, so it could not be removed at all.
+ *
+ * Found on the live paper: an editorial purged at 10:44 one morning left a row
+ * that could not be cleared for the rest of the day.
+ *
+ * Only rows whose pointer is already null are removed, so a request that has
+ * since been repointed at a live draft is never touched.
+ */
+export async function forgetPurgedRequests(
+  sql: Sql,
+  newsroomId: number,
+  requestIds: readonly number[],
+): Promise<number> {
+  const ids = requestIds.filter((n) => Number.isFinite(n));
+  if (!ids.length) return 0;
+  const gone = await sql<{ id: number }>`
+    delete from editorial_requests
+    where id = any(${ids}) and newsroom_id = ${newsroomId} and draft_id is null
+    returning id
+  `;
+  return gone.length;
+}

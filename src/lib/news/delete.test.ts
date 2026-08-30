@@ -4,6 +4,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { getPglite, getSql } from "../db.ts";
 import {
+  forgetPurgedRequests,
+  keepACopy,
   reinsert,
   repointRequests,
   snapshotArticle,
@@ -404,5 +406,123 @@ describe("deleting a story takes its corrections", () => {
       corrFirst < artNext,
       "corrections must go first — ON DELETE SET NULL makes the reverse order a no-op",
     );
+  });
+});
+
+/**
+ * Purging an editorial must not leave its request on the Opinion desk.
+ *
+ * Found on the live paper. An editorial was written, deleted, restored a few
+ * times, then purged from the trash at 10:44 one morning. The writing went, as
+ * asked. What stayed was the `editorial_requests` row that had asked for it,
+ * showing a subject and a finished time with no piece and no error -- reading
+ * exactly like work still in progress that had actually been thrown away on
+ * purpose. It could not be removed, because the desk's Delete was keyed on a
+ * draft that no longer existed.
+ *
+ * The pointer is nulled when the draft is deleted, so by purge time the row and
+ * the draft look unrelated. The snapshot is what still knows: it stores the
+ * request ids so a restore can repoint them, and purge now uses the same list
+ * to take them away.
+ */
+describe("purging an editorial", () => {
+  it("takes the Opinion desk row with it", async () => {
+    const sql = await getSql();
+    const user = `purge-req-${Date.now()}`;
+    const newsroomId = 94200;
+
+    const draft = await sql<{ id: number }>`
+      insert into drafts (user_id, newsroom_id, headline, dek, body, topic, source_urls, form)
+      values (${user}, ${newsroomId}, ${"OPINION: a piece that gets purged"}, ${""},
+              ${"Body."}, ${"opinion"}, ${"[]"}, ${"editorial"})
+      returning id
+    `;
+    const draftId = draft[0]!.id;
+
+    const req = await sql<{ id: number }>`
+      insert into editorial_requests (user_id, newsroom_id, subject, draft_id)
+      values (${user}, ${newsroomId}, ${"a piece that gets purged"}, ${draftId})
+      returning id
+    `;
+    const requestId = req[0]!.id;
+
+    const snap = await snapshotDraft(sql, draftId);
+    assert.deepEqual(snap?.requestIds, [requestId], "the snapshot did not capture the request");
+
+    await keepACopy({
+      sql,
+      newsroomId,
+      userId: user,
+      kind: "draft",
+      refId: draftId,
+      label: "OPINION: a piece that gets purged",
+      snapshot: snap!,
+    });
+    await sql`delete from drafts where id = ${draftId}`;
+    /*
+      The live schema nulls the pointer through the foreign key; this
+      in-memory one has no cascade, so the delete is modelled explicitly,
+      exactly as the restore test above does. What is under test is what
+      purge does with a NULLED pointer, not who nulled it.
+    */
+    await sql`update editorial_requests set draft_id = null where draft_id = ${draftId}`;
+
+    // The pointer is nulled by the delete, which is why purge cannot find the
+    // request by looking at it -- only the snapshot still knows.
+    const orphan = await sql<{ draft_id: number | null }>`
+      select draft_id from editorial_requests where id = ${requestId}
+    `;
+    assert.equal(orphan[0]?.draft_id, null, "the delete should have nulled the pointer");
+
+    // Purge the way the server function does: drop the trash row, then forget
+    // the requests its snapshot named.
+    const item = await sql<{ payload: string }>`
+      delete from deleted_items where newsroom_id = ${newsroomId} and ref_id = ${draftId}
+      returning payload
+    `;
+    const payload = JSON.parse(item[0]!.payload) as { requestIds?: number[] };
+    await forgetPurgedRequests(sql, newsroomId, payload.requestIds ?? []);
+
+    const left = await sql<{ n: number }>`
+      select count(*)::int as n from editorial_requests where id = ${requestId}
+    `;
+    assert.equal(
+      left[0]?.n,
+      0,
+      "the request stayed on the Opinion desk after its piece was purged, unremovable",
+    );
+  });
+
+  it("leaves alone a request that still points at a live draft", async () => {
+    const sql = await getSql();
+    const user = `purge-keep-${Date.now()}`;
+    const newsroomId = 94201;
+
+    const draft = await sql<{ id: number }>`
+      insert into drafts (user_id, newsroom_id, headline, dek, body, topic, source_urls, form)
+      values (${user}, ${newsroomId}, ${"OPINION: still here"}, ${""}, ${"Body."},
+              ${"opinion"}, ${"[]"}, ${"editorial"})
+      returning id
+    `;
+    const draftId = draft[0]!.id;
+    const req = await sql<{ id: number }>`
+      insert into editorial_requests (user_id, newsroom_id, subject, draft_id)
+      values (${user}, ${newsroomId}, ${"still here"}, ${draftId})
+      returning id
+    `;
+    const requestId = req[0]!.id;
+
+    // A stale snapshot naming a request that has since been repointed at a
+    // live draft must not take it away.
+    const removed = await forgetPurgedRequests(sql, newsroomId, [requestId]);
+    assert.equal(removed, 0, "it removed a request whose piece is still on the desk");
+
+    const still = await sql<{ n: number }>`
+      select count(*)::int as n from editorial_requests where id = ${requestId}
+    `;
+    assert.equal(still[0]?.n, 1, "the live request was deleted");
+
+    await sql`delete from editorial_requests where id = ${requestId}`;
+    await sql`delete from drafts where id = ${draftId}`;
   });
 });

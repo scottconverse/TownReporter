@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql, type Sql } from "@/lib/db";
 import {
+  forgetPurgedRequests,
   reinsert,
   repointRequests,
   TRASH_DAYS,
@@ -172,12 +173,39 @@ export const purgeTrashItem = createServerFn({ method: "POST" })
   .validator((id: number) => id)
   .handler(async ({ context, data: id }) => {
     const sql = await getSql();
-    const gone = await sql<{ label: string }>`
+    const gone = await sql<{ label: string; kind: TrashKind; payload: string }>`
       delete from deleted_items
       where id = ${id} and newsroom_id = ${owned(context)}
-      returning label
+      returning label, kind, payload
     `;
     if (!gone[0]) return { ok: false as const, error: "Already gone." };
+
+    /*
+      Take the Opinion desk's record with it.
+
+      An editorial draft is pointed at by the `editorial_requests` row that
+      asked for it. Deleting the draft nulls that pointer -- the snapshot keeps
+      the ids so a restore can put it back -- but PURGING meant the writing was
+      gone for good while the request stayed on the Opinion desk forever,
+      showing a subject, a finished time, no piece and no error. It looked like
+      work still running that had actually been thrown away on purpose, and
+      because the desk's Delete was keyed on the draft, it could not be removed.
+
+      The operator hit exactly this: an editorial purged at 10:44 one morning
+      left a row that could not be cleared for the rest of the day.
+
+      Best effort on purpose. The purge itself has already happened and
+      reporting failure now would be a lie; a leftover request is untidy, not
+      dangerous, and it can be cleared from the desk by hand.
+    */
+    if (gone[0].kind === "draft") {
+      try {
+        const snap = JSON.parse(gone[0].payload) as Snapshot;
+        await forgetPurgedRequests(sql, owned(context), snap.requestIds ?? []);
+      } catch {
+        /* unreadable snapshot: the purge itself still stands */
+      }
+    }
     await audit(context.userId, "purge", gone[0].label.slice(0, 120));
     return { ok: true as const };
   });
