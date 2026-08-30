@@ -157,6 +157,20 @@ function StoryPage() {
       if (looksLikeDraftTimeout(res.error)) return;
       setWaitingSince(null);
       setSlowWait(false);
+      /*
+        A refusal that arrives with a `kind` came from the provider
+        preflight, which already knows exactly what is missing and what to
+        do about it. Running that through editorDraftError re-derives the
+        answer from the prose and gets it wrong: the guidance mentions
+        Claude Code, the mapper matches /claude code/, and the editor is
+        told "the writing model did not finish this draft, click Draft with
+        AI again" -- a retry that cannot succeed, for a draft that was never
+        attempted. Prefer the structured answer over pattern-matching it.
+      */
+      if ("kind" in res && res.kind) {
+        setMsg(res.error);
+        return;
+      }
       setMsg(editorDraftError(res.error) ?? res.error);
     },
     onError: async (err) => {

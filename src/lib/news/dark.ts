@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
-import { grokChat, parseJsonBlock, providerBudget } from "./ai";
+import { grokChat, parseJsonBlock, providerBudget, probeProvider } from "./ai";
 import { DARK_SYSTEM, darkSystemFor } from "./dark-prompt";
 import { assertRate, audit } from "./ops";
 import {
@@ -14,7 +14,7 @@ import {
 } from "./investigate";
 import { sanitizePublicUrls } from "./schema";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types";
-import { rankWorthItems, presentWorthItem, type WorthSeed } from "./worth-a-look";
+import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look";
 import { openInvestigationForEditor } from "./dark-open";
 import { titlesOverlap, topicFromText } from "./desk-copy";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
@@ -40,6 +40,42 @@ import { enqueueJob, type DeskJob } from "./jobs";
 
 function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
+}
+
+/**
+ * Same question Scan asks before it spends anything: is a model actually
+ * reachable? Dark Desk did not ask it.
+ *
+ * An outside audit ran a dig with no provider configured and watched it
+ * report SUCCESS: the planner fell back on every hop, `dark_runs.error` came
+ * back "AI is not available…", and `desk_jobs.status` still landed on
+ * `completed` with twelve cards filed from whatever the heuristic crawler
+ * happened to fetch (mostly LinkedIn — QA-002). Nothing downstream of the
+ * job queue can tell a real dig from that fallback, so the fix is the same
+ * one Scan already has: refuse before a job is even enqueued, so no run,
+ * no cards, no false "completed".
+ *
+ * Returns the same `{ ok: false, ... }` shape `runScan` returns so the UI's
+ * existing error handling (which already knows how to show a refusal) works
+ * unchanged; returns null when the desk should proceed.
+ */
+async function darkPreflightRefusal(): Promise<{
+  ok: false;
+  kind: string;
+  error: string;
+  detail: string;
+  retryable: boolean;
+} | null> {
+  const { scanPreflight } = await import("./preflight");
+  const ready = scanPreflight(await probeProvider());
+  if (ready.ok) return null;
+  return {
+    ok: false as const,
+    kind: ready.kind,
+    error: ready.guidance,
+    detail: ready.detail,
+    retryable: ready.retryable,
+  };
 }
 
 export { openInvestigationForEditor } from "./dark-open";
@@ -351,8 +387,8 @@ async function gatherWorthALook(newsroomId: number): Promise<WorthSeed[]> {
     where newsroom_id = ${newsroomId} and status in ('open', 'unclear')
     order by id desc limit 8
   `.catch(() => []);
-  return rankWorthItems({ anomalies, monitors, leads, frontier, signals, promises }).map(
-    presentWorthItem,
+  return presentWorthItems(
+    rankWorthItems({ anomalies, monitors, leads, frontier, signals, promises }),
   );
 }
 
@@ -798,6 +834,8 @@ export const runDarkDesk = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: { paste: string; investigationId?: number }) => input)
   .handler(async ({ context, data }) => {
+    const refusal = await darkPreflightRefusal();
+    if (refusal) return refusal;
     await ensureDarkSchema();
     await assertRate(context.userId, "dark");
     return executeDarkRun(context.userId, {
@@ -844,29 +882,44 @@ export const findSomethingToDigInto = createServerFn({ method: "POST" })
     return opened;
   });
 
+/**
+ * The actual work of "keep digging" — pulled out of the server function so
+ * it can be called (and tested) with a plain `{ userId, newsroomId }`
+ * context instead of a live authenticated request.
+ *
+ * This is the one place a "dark" job gets enqueued for an existing
+ * investigation, which makes it the right and only place to ask
+ * `darkPreflightRefusal()`: refusing here means no job row is ever written,
+ * so there is nothing for the queue to mark `completed` while lying about
+ * what happened.
+ */
+export async function startDarkRound(context: { userId: string; newsroomId?: number }, id: number) {
+  const refusal = await darkPreflightRefusal();
+  if (refusal) return refusal;
+  await ensureDarkSchema();
+  await assertRate(context.userId, "dark");
+  const sql = await getSql();
+  const inv = await sql<{ id: number }>`
+    select id from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
+  `;
+  if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
+  await sql`
+    update investigations set status = ${"investigating"}, updated_at = now()
+    where id = ${id} and newsroom_id = ${owned(context)}
+  `;
+  const job = await enqueueJob({
+    userId: context.userId,
+    newsroomId: owned(context),
+    kind: "dark",
+    subjectId: id,
+  });
+  return { ok: true as const, pending: true as const, jobId: job.id, investigationId: id };
+}
+
 export const continueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((id: number) => id)
-  .handler(async ({ context, data: id }) => {
-    await ensureDarkSchema();
-    await assertRate(context.userId, "dark");
-    const sql = await getSql();
-    const inv = await sql<{ id: number }>`
-      select id from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
-    `;
-    if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
-    await sql`
-      update investigations set status = ${"investigating"}, updated_at = now()
-      where id = ${id} and newsroom_id = ${owned(context)}
-    `;
-    const job = await enqueueJob({
-      userId: context.userId,
-      newsroomId: owned(context),
-      kind: "dark",
-      subjectId: id,
-    });
-    return { ok: true as const, pending: true as const, jobId: job.id, investigationId: id };
-  });
+  .handler(async ({ context, data: id }) => startDarkRound(context, id));
 
 export async function performDarkRound(job: DeskJob) {
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };

@@ -5,6 +5,7 @@ import {
   looksLikeUrl,
   organizationFromUrl,
   sourceLineFromUrl,
+  titlesOverlap,
   withoutUrls,
   worthTitle,
 } from "./desk-copy.ts";
@@ -268,14 +269,66 @@ export function withReservedTipSlots(
   return [...kept, ...keptTips].sort((a, b) => b.priority - a.priority);
 }
 
+/**
+ * `frontier_items.why` is a bookkeeping breadcrumb `investigate.ts` writes for
+ * itself (`persistDiscovery` calls such as `Attachment/document link on
+ * ${url}` and the literal `Discovered this hop — fetch next`) — never
+ * editorial copy. The old cleanup ran `withoutUrls()` first and only then
+ * replaced "Attachment/document link on" with "linked from", which threw the
+ * URL away before the phrase that named it, leaving "linked from" — a label
+ * with its object cut off — as the whole sentence. `Discovered this hop —
+ * fetch next` had no rewrite here at all (only the unrelated `plainEditorText`
+ * in desk-copy.ts caught it, and that function is never called on this path).
+ * An outside audit caught both landing verbatim as card headlines and summary
+ * lines, with duplicates, because nothing stood between the breadcrumb and
+ * the screen (UX-003).
+ *
+ * Recognise the breadcrumb shapes by pattern and rewrite them to full
+ * sentences BEFORE any URL stripping, so the source is described instead of
+ * discarded.
+ */
+function rewriteFrontierBreadcrumb(why: string): string {
+  const attachedFrom = why.match(/^Attachment\/document link on (https?:\/\/\S+)/i);
+  if (attachedFrom) {
+    const host = organizationFromUrl(attachedFrom[1]);
+    return host
+      ? `Linked from a document ${host} published.`
+      : "Linked from a document Dark Desk already had open.";
+  }
+  if (/^Discovered this hop/i.test(why)) {
+    return "Turned up while following an earlier record. Dark Desk has not opened it yet.";
+  }
+  const deferred = why.match(/^Fetch (.+?) — deferred, not closed/i);
+  if (deferred) {
+    return "Dark Desk tried to open this and could not yet — it is still on the list.";
+  }
+  if (/^Scanned or image-only document/i.test(why)) {
+    return "A scanned or image-only document Dark Desk could not fully read yet.";
+  }
+  return why;
+}
+
+/**
+ * The last line of defence. Even after `rewriteFrontierBreadcrumb`, nothing
+ * guarantees some other caller of `rankWorthItems` never hands it a raw
+ * breadcrumb or an empty string — so before a headline or summary line ships,
+ * check it isn't one of the exact fragments the audit found on screen (or
+ * blank) and swap in a sentence that is honest about not knowing more.
+ */
+const TEMPLATE_LEAK = /^(linked from|discovered this hop\b.*|attachment\/document link on\b.*)$/i;
+
+function isTemplateLeak(text: string): boolean {
+  const t = text.trim();
+  return t.length === 0 || TEMPLATE_LEAK.test(t);
+}
+
 function stripInternalJargon(text: string): string {
-  return withoutUrls(text)
+  return withoutUrls(rewriteFrontierBreadcrumb(text))
     .replace(/Previously parked\s*\([^)]*\)\.?\s*/gi, "")
     .replace(/Reopened from resolved:?\s*/gi, "")
     .replace(/Prior:\s*Fetched\.?/gi, "")
     .replace(/\bfrontier\b/gi, "lead")
     .replace(/\b(reopened_from|prior_status|closed_reason)\b/gi, "")
-    .replace(/Attachment\/document link on/gi, "linked from")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -313,10 +366,22 @@ export function presentWorthItem(item: WorthSeed): WorthSeed {
       .replace(/Prior Dark Desk signal \([^)]+\)\.?/i, "A previous Dark Desk pass left this open.")
       .replace(/High-newsworthiness scanner lead \([^)]+\)\.?/i, "The scanner ranked this as worth a reporter’s time.");
   }
-  if (!happened || looksLikeUrl(happened)) {
+  if (!happened || looksLikeUrl(happened) || isTemplateLeak(happened)) {
     happened = url
       ? `This turned up while Dark Desk was reviewing ${org || "a public page"}.`
-      : happened || "Something on the beat changed enough to put this on the desk.";
+      : "Something on the beat changed enough to put this on the desk.";
+  }
+  /*
+    Last check before `why` becomes a card's summary line. `rewriteFrontierBreadcrumb`
+    and the `else if` above cover the shapes this code knows how to happen; this
+    catches anything that got through anyway (a new breadcrumb text nobody has
+    seen yet, for instance) rather than trusting every upstream path to be
+    exhaustive. Same reasoning as the `happened` guard just above.
+  */
+  if (isTemplateLeak(why)) {
+    why = url
+      ? `Dark Desk found this while reviewing ${org || "a public page"}; nobody has verified it yet.`
+      : "Dark Desk found this while following an earlier record; nobody has verified it yet.";
   }
   return {
     ...item,
@@ -326,4 +391,26 @@ export function presentWorthItem(item: WorthSeed): WorthSeed {
     badge,
     source_line: url ? sourceLineFromUrl(url) : withoutUrls(item.evidence).slice(0, 160),
   };
+}
+
+/**
+ * `presentWorthItem` per card, then a final duplicate pass over the titles it
+ * actually produced.
+ *
+ * `rankWorthItems` already de-duplicates, but on the key it has at that
+ * point — `source_url || title.toLowerCase()` from the *raw* engine title,
+ * before `presentWorthItem` rewrites it. Two frontier items with different
+ * URLs (an original page and its own PDF attachment, say) can both collapse
+ * to the same rewritten headline and summary once presented — that is what
+ * the audit saw as "several cards were exact duplicates" (UX-003). Re-check
+ * after presentation, on the text the editor will actually read.
+ */
+export function presentWorthItems(items: WorthSeed[]): WorthSeed[] {
+  const presented = items.map(presentWorthItem);
+  const kept: WorthSeed[] = [];
+  for (const item of presented) {
+    if (kept.some((k) => titlesOverlap(k.title, item.title) && k.why === item.why)) continue;
+    kept.push(item);
+  }
+  return kept;
 }

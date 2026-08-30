@@ -737,6 +737,36 @@ export const draftLead = createServerFn({ method: "POST" })
     if (leads[0].status === "killed") {
       return { ok: false as const, error: "Restore this lead before drafting." };
     }
+
+    /*
+      Check the model BEFORE spending the draft, exactly as runScan does.
+
+      This enqueued unconditionally. An audit clicked "Draft with AI" on a
+      first-run paper with no provider, watched it say "Reporting first --
+      following the trail, then drafting. Stay on this page." for THIRTY-SIX
+      SECONDS, and then be told the writing model is not set up and that
+      fixing it "is an operator job". The operator is the person reading the
+      sentence: this product is for one journalist running it herself.
+
+      The desk already knew. The Scan page had said so on the same visit,
+      from the same probe, before anything was clicked. Spending half a
+      minute of someone's attention to tell them a thing you knew before they
+      asked is the part that makes a product feel opaque.
+
+      Refusing here costs nothing and says what to do.
+    */
+    const { scanPreflight } = await import("./preflight");
+    const ready = scanPreflight(await probeProvider());
+    if (!ready.ok) {
+      return {
+        ok: false as const,
+        kind: ready.kind,
+        error: ready.guidance,
+        detail: ready.detail,
+        retryable: ready.retryable,
+      };
+    }
+
     await assertRate(context.userId, "draft");
     const job = await enqueueJob({
       userId: context.userId,

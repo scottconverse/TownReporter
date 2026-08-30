@@ -357,7 +357,10 @@ export function editorDraftError(raw: string | null | undefined): string | null 
   // again when the model is not installed, or has declined the request, sends
   // them round a loop that cannot succeed.
   if (/cli not found/i.test(t) || /AI is not available/i.test(t)) {
-    return "The writing model is not set up on this machine. Nothing you click will fix it — that is an operator job.";
+    // "That is an operator job" was the old wording. This paper is run by
+    // one journalist on her own machine: she IS the operator, so the line
+    // told her to go and ask herself. Name the step instead.
+    return "No writing model is set up yet. Sign in to Claude Code on this machine, or set ANTHROPIC_API_KEY — docs/setup.md has both. Nothing is spent until one of them answers.";
   }
   if (/declined this request/i.test(t)) {
     return "The writing model declined this request. Clicking again will not change that; try rewording the lead, or draft it yourself.";
