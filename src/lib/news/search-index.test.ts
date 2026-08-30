@@ -103,6 +103,10 @@ const dbProbe = integrationRequested()
 // Skipped entirely when there is no reachable Postgres -- see the file
 // comment for why the tests below still register (skipped, with a reason)
 // rather than silently vanishing.
+// Captured BEFORE this file redirects DATABASE_URL to its scratch database:
+// the third failure diagnostic below asks whether the server is secretly
+// reading the job-level database instead of the per-file override.
+const ORIGINAL_DATABASE_URL = process.env.DATABASE_URL;
 let probeClient: Client | undefined;
 if (dbProbe.ok) {
   const admin = new Client({ connectionString: PSQL_ADMIN_URL });
@@ -243,6 +247,32 @@ describe("the search actually finds what the contract promises, end to end", () 
     } catch (err) {
       feedSays = `feed fetch failed: ${err instanceof Error ? err.message : String(err)}`;
     }
+    /*
+      Third discriminator: is the server reading the JOB-level database
+      instead of the scratch one? Seed a distinct marker into the original
+      DATABASE_URL (townreporter_ci in CI) and re-ask the feed. If THAT
+      marker appears, the spawn-time DATABASE_URL override is being lost.
+    */
+    let originSays = "no original DATABASE_URL to test";
+    if (ORIGINAL_DATABASE_URL) {
+      try {
+        const origin = new Client({ connectionString: ORIGINAL_DATABASE_URL });
+        await origin.connect();
+        await origin.query(
+          `insert into articles (user_id, slug, headline, dek, body, topic, status)
+           values ('search-probe', $1, 'Origin-db marker headline', 'dek', 'origin db probe', 'council', 'published')
+           on conflict do nothing`,
+          [`origin-probe-${process.pid}`],
+        );
+        await origin.end();
+        const feed2 = await (await fetch(`${BASE_URL}/feed`)).text();
+        originSays = /Origin-db marker headline/.test(feed2)
+          ? "the server IS reading the job-level DATABASE_URL, not the scratch override"
+          : "the server is not reading the job-level DATABASE_URL either";
+      } catch (err) {
+        originSays = `origin-db probe failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
     let probeSays = "probe unavailable";
     if (probeClient) {
       try {
@@ -261,7 +291,7 @@ describe("the search actually finds what the contract promises, end to end", () 
       /Marker headline published/,
       "a lowercase query did not find a story whose body contains the marker in mixed case -- " +
         "the search is not doing case-insensitive substring matching against body. " +
-        `${probeSays}; ${feedSays}. What the page shows after the chip rail:\n${afterChips}`,
+        `${probeSays}; ${feedSays}; ${originSays}. What the page shows after the chip rail:\n${afterChips}`,
     );
   });
 
