@@ -27,9 +27,11 @@ artifacts/*.bin
 artifacts/*.html
 artifacts/RENAME-TO-ZIP.txt
 
-# Audit evidence: the written reports are the deliverable and stay tracked.
-# The screenshots and capture scripts behind them are reproducible output,
-# and 29 MB of them briefly went in here -- which is the exact defect
-# ENG-010 was about. Reports in, evidence out.
-artifacts/audit-*/uiux-screens/
-artifacts/audit-*/qa-evidence/
+# Audit evidence: the written reports are the deliverable and stay tracked;
+# the screenshots and capture data behind them are reproducible output.
+# Per-prefix rules (artifacts/audit-*/...) rotted -- gate-* and gauntlet-*
+# evidence slipped past them (ENG-010). This is prefix-proof: ignore every
+# file under artifacts/, then re-include only the Markdown reports.
+artifacts/**
+!artifacts/**/
+!artifacts/**/*.md
