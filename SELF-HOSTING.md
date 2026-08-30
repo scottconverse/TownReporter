@@ -86,10 +86,19 @@ that reads the operator's login out of their profile.
 
 ### Without a terminal
 
-`ops/TownReporter Control.cmd`, and a **TownReporter Control** shortcut on the
-Desktop. Double-click, pick a number: check, restart the paper, restart the
-tunnel, start everything, stop everything. It cannot publish or delete
-anything. `ops/status.ps1` is the read-only check on its own, and it works when
+`ops/TownReporter Control.cmd`. Double-click, pick a number: check, restart the
+paper, restart the tunnel, start everything, stop everything. It cannot publish
+or delete anything.
+
+For a Desktop icon, run this once:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ops\install-shortcut.ps1
+```
+
+It creates the shortcut as `cmd /k`, deliberately. A shortcut pointing straight
+at the `.cmd` lets the console close the instant the batch file ends, which is
+how the answer you asked for disappears before you can read it. `ops/status.ps1` is the read-only check on its own, and it works when
 the paper is down — which is exactly when `/desk/ops` cannot answer.
 
 Manual control:

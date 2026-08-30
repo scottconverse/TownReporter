@@ -28,7 +28,7 @@ if "%choice%"=="2" goto restart
 if "%choice%"=="3" goto tunnel
 if "%choice%"=="4" goto startall
 if "%choice%"=="5" goto stopall
-if "%choice%"=="0" exit /b 0
+if "%choice%"=="0" exit
 goto menu
 
 :check
