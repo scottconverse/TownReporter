@@ -31,6 +31,9 @@ export function PaperSetupForm({
   const [state, setState] = useState(initial?.state ?? "");
   const [timezone, setTimezone] = useState(initial?.timezone ?? "America/Denver");
   const [tagline, setTagline] = useState(initial?.tagline ?? "");
+  const [councilVotesUrl, setCouncilVotesUrl] = useState(
+    firstRun ? "" : (initial?.councilVotesUrl ?? ""),
+  );
   /*
     On a first run the watch list starts EMPTY.
 
@@ -57,6 +60,7 @@ export function PaperSetupForm({
           state: state.trim(),
           timezone: timezone.trim(),
           tagline: tagline.trim(),
+          councilVotesUrl,
           watchlist: rows
             .filter((r) => r.url.trim())
             .map((r) => ({
@@ -114,6 +118,19 @@ export function PaperSetupForm({
             onChange={(e) => setTagline(e.target.value)}
             placeholder="The river town's paper of record."
           />
+        </label>
+        <label className="block text-sm">
+          Council votes site <span className="text-ink-2">(optional)</span>
+          <input
+            className={inputClass + " mt-1 w-full"}
+            value={councilVotesUrl}
+            onChange={(e) => setCouncilVotesUrl(e.target.value)}
+            placeholder="https://yourcitycouncil.org/"
+          />
+          <span className="mt-1 block text-xs text-ink-2">
+            Linked from the paper's nav. Leave it blank and the link is not shown --
+            better than sending your readers to another town's council.
+          </span>
         </label>
         <label className="block text-sm">
           City

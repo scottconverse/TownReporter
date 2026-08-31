@@ -160,7 +160,15 @@ function mergeRow(row: PaperSettingsRow | undefined, base: PaperConfig): PaperCo
     kicker: row.kicker?.trim() || base.kicker,
     deck: row.deck?.trim() || base.deck,
     trust: row.trust?.trim() || base.trust,
-    councilVotesUrl: row.council_votes_url?.trim() || base.councilVotesUrl,
+    /*
+      An empty string here means "this paper has no council-votes site", the
+      same way an empty list means none. Only a NULL column -- never set --
+      falls back to the shipped Longmont address.
+    */
+    councilVotesUrl:
+      row.council_votes_url === null || row.council_votes_url === undefined
+        ? base.councilVotesUrl
+        : row.council_votes_url.trim(),
     youtubeChannels: asStringArray(row.youtube_channels) ?? base.youtubeChannels,
     meetingKeywords: asStringArray(row.meeting_keywords) ?? base.meetingKeywords,
     seedSources: asSeedSources(row.seed_sources) ?? base.seedSources,
@@ -341,7 +349,7 @@ export const getPaperConfigForEditor = createServerFn({ method: "GET" })
   });
 
 /** Is there a paper_settings row for this newsroom with onboarded = true? */
-async function isOnboarded(newsroomId: number): Promise<boolean> {
+export async function isOnboarded(newsroomId: number): Promise<boolean> {
   await ensurePaperSettingsSchema();
   const sql = await getSql();
   const rows = await sql<{ onboarded: boolean | null }>`
@@ -374,6 +382,8 @@ export type FirstRunSetupInput = {
   state: string;
   timezone: string;
   tagline: string;
+  /** Blank is a real answer: this paper has no council-votes site. */
+  councilVotesUrl: string;
   watchlist: SeedSource[];
 };
 
@@ -399,6 +409,7 @@ function cleanSetupInput(raw: unknown): FirstRunSetupInput {
     state: String(v.state ?? "").trim(),
     timezone: String(v.timezone ?? "").trim(),
     tagline: String(v.tagline ?? "").trim(),
+    councilVotesUrl: String(v.councilVotesUrl ?? "").trim(),
     watchlist,
   };
 }
@@ -448,6 +459,9 @@ export const completeFirstRunSetup = createServerFn({ method: "POST" })
           facts they have already given, so they are written from the name
           and the city. The Server page can still edit them afterwards.
         */
+        // Always written, even blank: blank means this paper has no council
+        // site, and must not inherit Longmont's.
+        councilVotesUrl: data.councilVotesUrl ?? "",
         kicker: `Independent civic reporting  ·  ${data.city}`,
         deck: `${data.name} follows ${data.city}'s meetings, money, contracts and public records — then keeps digging when something changes, disappears or doesn't add up. Human-edited. Sources shown.`,
         seedSources: data.watchlist,

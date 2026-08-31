@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql, withTransaction } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
-import { getPaperConfig } from "./paper-settings";
+import { getPaperConfig, isOnboarded } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
@@ -64,6 +64,18 @@ async function ensureDraftMemoColumn() {
 }
 
 async function ensureSeeds(userId: string) {
+  /*
+    Nothing is seeded until setup says which city this is.
+
+    getPaperConfig falls back to the shipped Longmont watch list when no
+    settings row exists, and this runs from listSources on the desk's first
+    render -- before the redirect to /desk/setup lands. A brand-new paper in
+    another state was therefore given all eleven of Longmont's real civic
+    sources, marked accepted and Tier A, and the scanner would go and fetch
+    them. They were permanent: setup never removed them and there is no bulk
+    delete. Found by the release walkthrough, not by a unit test.
+  */
+  if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return;
   const sql = await getSql();
   const config = await getPaperConfig();
   for (const s of config.seedSources) {

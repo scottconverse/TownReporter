@@ -142,7 +142,15 @@ describe("the configured paper identity, not Longmont's", () => {
 
     const body = (await page.textContent("body")) ?? "";
     assert.match(body, /Riverbend Record/);
-    assert.match(body, /Riverbend, Ohio/);
+    assert.match(body, /Riverbend, Ohio/);    /*
+      The rendered HTML, not just the visible text.
+
+      The release walkthrough found "City council votes" hard-linked to
+      longmontcitycouncil.org on every configured paper. A text-only
+      assertion cannot see an href, so it passed. This one would not have.
+    */
+    const html = await page.content();
+    assert.doesNotMatch(html, /longmont/i, "Longmont must not survive setup anywhere in the page, hrefs included");
 
     /*
       CITY-SETUP final slice: the whole front page, including the article

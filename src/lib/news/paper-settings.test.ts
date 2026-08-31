@@ -221,12 +221,16 @@ describe("the config is read fresh", () => {
   });
 });
 
-describe("ensureSeeds falls back to Longmont SEED_SOURCES", () => {
-  it("ensureSeeds() (via getPaperConfig) still seeds the shipped Longmont list when no settings row exists", async () => {
-    // desk.ts's ensureSeeds() now reads getPaperConfig().seedSources instead
-    // of the SEED_SOURCES constant directly. This proves that indirection is
-    // transparent for the existing Longmont install: with no paper_settings
-    // row for newsroom 1, the value it inserts is byte-for-byte SEED_SOURCES.
+describe("the default watch list", () => {
+  it("with no settings row, the config still reports the shipped Longmont list byte for byte", async () => {
+    /*
+      This asserts the config, not the seeding -- the old name said
+      "ensureSeeds... still seeds" and this test never called ensureSeeds.
+      That name is now wrong as well as inaccurate: ensureSeeds refuses to
+      write anything until setup is complete, because seeding before setup
+      handed a new city all of Longmont's real civic sources (release
+      walkthrough, Blocker 1). desk.ts owns that gate and its own test.
+    */
     await clearRow(DEFAULT_NEWSROOM_ID);
     const config = await getPaperConfig(DEFAULT_NEWSROOM_ID);
     assert.deepEqual(config.seedSources, SEED_SOURCES);

@@ -259,6 +259,16 @@ function PaperNav() {
             </Link>
           );
         })}
+        {/*
+          No configured council site means no link.
+
+          This pointed at longmontcitycouncil.org for every paper, because the
+          fallback is Longmont's and nothing in setup ever set it -- so a
+          reader in another state clicking "City council votes" was sent to
+          Longmont's real council. The paper already refuses to print a dead
+          pointer elsewhere (see EDITOR_EMAIL in paper.ts); same rule here.
+        */}
+        {paper.councilVotesUrl ? (
         <a
           href={paper.councilVotesUrl}
           target="_blank"
@@ -269,6 +279,7 @@ function PaperNav() {
           <ExternalLink className="ml-1 size-3" strokeWidth={1.75} aria-hidden />
           <span className="sr-only">(opens another site)</span>
         </a>
+        ) : null}
         <a
           href="/feed"
           className="inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 border-transparent px-1 transition-[color] duration-150 ease-out hover:text-rust focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rust sm:justify-start"
