@@ -124,8 +124,14 @@ function findLeaveEditorClientRpc(): { file: string; exportName: string } {
     if (!f.endsWith(".js")) continue;
     const src = readFileSync(join(assetsDir, f), "utf8");
     if (!src.includes(functionId)) continue;
+    /*
+      The helper names are the minifier's choice, not ours. This pattern
+      hard-coded `X(` and `W(` and held for weeks -- until v0.5.3 added four
+      server functions to the same chunk and the minifier dealt every helper
+      a different letter. Any identifier works where any identifier can be.
+    */
     const localMatch = src.match(
-      new RegExp("var\\s+(\\w+)\\s*=\\s*X\\(\\{method:`POST`\\}\\)[\\s\\S]{0,150}?handler\\(W\\(`" + functionId + "`\\)\\)"),
+      new RegExp("var\\s+(\\w+)\\s*=\\s*\\w+\\(\\{method:`POST`\\}\\)[\\s\\S]{0,150}?handler\\(\\w+\\(`" + functionId + "`\\)\\)"),
     );
     if (!localMatch) continue;
     const local = localMatch[1];
