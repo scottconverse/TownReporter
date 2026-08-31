@@ -9,7 +9,14 @@
 */
 
 import { createServerFn } from "@tanstack/react-start";
-import { authMiddleware } from "@/lib/auth/middleware";
+/*
+  Relative, not the `@/` alias. Vite resolves that alias and plain Node does
+  not, and this module IS loaded by node --test (paper-settings.test.ts, and
+  anything that reaches it through desk.ts), so an alias here fails CI with
+  "Cannot find package '@/lib'". claim.ts can use the alias because no
+  node --test file loads it.
+*/
+import { authMiddleware } from "../auth/middleware.ts";
 import { getSql } from "../db.ts";
 import { PAPER, COUNCIL_VOTES_URL, SEED_SOURCES } from "../paper.ts";
 import type { PaperIdentity } from "../paper-context.tsx";
@@ -323,3 +330,142 @@ export async function savePaperConfig(
   cache.delete(me.newsroomId);
   return getPaperConfig(me.newsroomId);
 }
+
+/*
+  CITY-SETUP final slice: first-run setup.
+
+  `onboarded` is a bare flag on the same paper_settings row, not folded into
+  PaperConfig/PaperConfigPatch above -- it is administrative state ("has the
+  owner completed the setup form"), not an identity field a page renders, so
+  it never needs to reach getPaperIdentityFn or the client PaperIdentity
+  shape.
+*/
+
+/**
+ * The current editor's newsroom's live PaperConfig -- used to prefill the
+ * setup form (both on the first-run gate and the Server page's "Paper
+ * setup" section) so re-running setup starts from what's already there,
+ * not blank fields.
+ */
+export const getPaperConfigForEditor = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const me = await requireEditor(context.userId);
+    return getPaperConfig(me.newsroomId);
+  });
+
+/** Is there a paper_settings row for this newsroom with onboarded = true? */
+async function isOnboarded(newsroomId: number): Promise<boolean> {
+  await ensurePaperSettingsSchema();
+  const sql = await getSql();
+  const rows = await sql<{ onboarded: boolean | null }>`
+    select onboarded from paper_settings where newsroom_id = ${newsroomId} limit 1
+  `;
+  return rows[0]?.onboarded === true;
+}
+
+/**
+ * Owner-only: does this newsroom still need the first-run setup screen?
+ * A signed-in editor (not owner) always gets `needsSetup: false` -- only the
+ * owner can run setup, so there is nothing for anyone else to be routed to.
+ */
+export const firstRunSetupState = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    try {
+      const me = await requireEditor(context.userId);
+      if (me.role !== "owner") return { needsSetup: false as const };
+      return { needsSetup: !(await isOnboarded(me.newsroomId)) };
+    } catch (err) {
+      if (err instanceof ForbiddenError) return { needsSetup: false as const };
+      throw err;
+    }
+  });
+
+export type FirstRunSetupInput = {
+  name: string;
+  city: string;
+  state: string;
+  timezone: string;
+  tagline: string;
+  watchlist: SeedSource[];
+};
+
+function cleanSetupInput(raw: unknown): FirstRunSetupInput {
+  const v = (raw ?? {}) as Partial<FirstRunSetupInput>;
+  const watchlist = Array.isArray(v.watchlist)
+    ? v.watchlist
+        .filter(
+          (s): s is SeedSource =>
+            Boolean(s) && typeof s === "object" && typeof (s as SeedSource).url === "string",
+        )
+        .map((s) => ({
+          url: s.url.trim(),
+          title: (s.title ?? "").trim() || s.url.trim(),
+          kind: s.kind ?? "official",
+          tier: s.tier ?? "A",
+        }))
+        .filter((s) => s.url.length > 0)
+    : [];
+  return {
+    name: String(v.name ?? "").trim(),
+    city: String(v.city ?? "").trim(),
+    state: String(v.state ?? "").trim(),
+    timezone: String(v.timezone ?? "").trim(),
+    tagline: String(v.tagline ?? "").trim(),
+    watchlist,
+  };
+}
+
+/**
+ * The whole first-run setup form, in one owner-only RPC: writes the paper's
+ * identity (name / city / state / timezone / tagline / watch list) through
+ * the same savePaperConfig() every later settings edit goes through, marks
+ * this newsroom onboarded, and rewrites the seeded welcome ARTICLE so it
+ * reads for the configured city instead of migrations/0002_newsroom.sql's
+ * hard-coded Longmont copy. Reachable twice: once as the gate after
+ * claiming a fresh desk (src/routes/desk.setup.tsx via the desk.index
+ * redirect), and again any time afterward from the Server page, so a wrong
+ * answer during setup is fixable without touching a file.
+ */
+export const completeFirstRunSetup = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((raw: unknown) => cleanSetupInput(raw))
+  .handler(async ({ context, data }) => {
+    try {
+      if (!data.name || !data.city || !data.state || !data.timezone) {
+        return {
+          ok: false as const,
+          error: "Paper name, city, state and timezone are required.",
+        };
+      }
+      const me = await requireEditor(context.userId);
+      if (me.role !== "owner") {
+        throw new ForbiddenError("Only the owner can set up the paper.");
+      }
+      const cfg = await savePaperConfig(context.userId, {
+        name: data.name,
+        city: data.city,
+        state: data.state,
+        location: `${data.city}, ${data.state}`,
+        timezone: data.timezone,
+        tagline: data.tagline || null,
+        seedSources: data.watchlist,
+      });
+
+      await ensurePaperSettingsSchema();
+      const sql = await getSql();
+      await sql`
+        update paper_settings set onboarded = true, updated_at = now()
+        where newsroom_id = ${me.newsroomId}
+      `;
+      cache.delete(me.newsroomId);
+
+      await writeWelcomeArticle(me.newsroomId, cfg);
+
+      return { ok: true as const };
+    } catch (err) {
+      if (err instanceof ForbiddenError) return { ok: false as const, error: err.message };
+      throw err;
+    }
+  });
