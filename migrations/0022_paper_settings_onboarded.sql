@@ -1,0 +1,11 @@
+-- CITY-SETUP final slice: a flag saying whether the owner has completed the
+-- first-run setup form (paper name, city, state, timezone, tagline, watch
+-- list). Additive and defaulted false, so an existing install (which has
+-- never seen this column) reads as "not onboarded" -- which is correct: it
+-- is exactly the Longmont install that shipped before this slice existed,
+-- and it is not silently re-gated behind the new screen because desk.setup
+-- only appears when the owner explicitly opens it themselves after this
+-- migration runs (see src/routes/desk.setup.tsx and desk.index.tsx: the
+-- redirect only fires the FIRST time an owner claims a fresh desk, gated on
+-- `deskIsClaimed` transition, never on an existing owner's session).
+alter table paper_settings add column if not exists onboarded boolean not null default false;

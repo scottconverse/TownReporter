@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { getSql } from "../db.ts";
 import { PAPER, COUNCIL_VOTES_URL, SEED_SOURCES } from "../paper.ts";
 import { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS } from "./youtube.ts";
@@ -8,7 +9,7 @@ import {
   ensurePaperSettingsSchema,
   getPaperConfig,
   savePaperConfig,
-  runWithPaperConfigCache,
+  clearPaperConfigCache,
 } from "./paper-settings.ts";
 
 /*
@@ -197,31 +198,38 @@ describe("savePaperConfig ownership", () => {
   });
 });
 
-describe("request-scoped cache", () => {
-  it("reuses the same object within one runWithPaperConfigCache scope", async () => {
-    const newsroomId = 900_201;
+describe("the config cache", () => {
+  it("serves a repeat read without going back to the database", async () => {
+    const newsroomId = 900_010;
     await clearRow(newsroomId);
-    await runWithPaperConfigCache(async () => {
-      const first = await getPaperConfig(newsroomId);
-      const second = await getPaperConfig(newsroomId);
-      assert.equal(first, second);
-    });
+    clearPaperConfigCache();
+    const first = await getPaperConfig(newsroomId);
+    const second = await getPaperConfig(newsroomId);
+    assert.equal(first, second, "the second read should be the cached object");
   });
 
-  it("does not leak a cached value across separate scopes", async () => {
-    const newsroomId = 900_202;
+  it("clearing it makes the next read see a row written behind its back", async () => {
+    const newsroomId = 900_011;
     await clearRow(newsroomId);
-    const before = await runWithPaperConfigCache(() => getPaperConfig(newsroomId));
-    assert.equal(before.name, PAPER.name);
-
+    clearPaperConfigCache();
+    assert.equal((await getPaperConfig(newsroomId)).city, PAPER.city);
     const sql = await getSql();
-    await sql`
-      insert into paper_settings (newsroom_id, name)
-      values (${newsroomId}, ${"Second Scope Gazette"})
-    `;
-    const after = await runWithPaperConfigCache(() => getPaperConfig(newsroomId));
-    assert.equal(after.name, "Second Scope Gazette");
+    await sql`insert into paper_settings (newsroom_id, city) values (${newsroomId}, ${"Riverbend"})`;
+    clearPaperConfigCache();
+    assert.equal((await getPaperConfig(newsroomId)).city, "Riverbend");
     await clearRow(newsroomId);
+    clearPaperConfigCache();
+  });
+
+  it("has no server-only import that could reach the browser", async () => {
+    /*
+      The regression this replaces: an AsyncLocalStorage cache here put
+      `node:async_hooks` in the client graph and every desk page rendered
+      "Something went wrong". CI caught it; a local run did not, because the
+      browser tests skip without a Postgres URL.
+    */
+    const src = await readFile(new URL("./paper-settings.ts", import.meta.url), "utf8");
+    assert.doesNotMatch(src, /from "node:/, "no node: import belongs in this module");
   });
 });
 

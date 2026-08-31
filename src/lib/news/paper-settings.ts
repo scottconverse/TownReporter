@@ -8,13 +8,14 @@
   the constant when its column is null.
 */
 
-import { AsyncLocalStorage } from "node:async_hooks";
 import { createServerFn } from "@tanstack/react-start";
+import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "../db.ts";
 import { PAPER, COUNCIL_VOTES_URL, SEED_SOURCES } from "../paper.ts";
 import type { PaperIdentity } from "../paper-context.tsx";
 import { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS } from "./youtube.ts";
 import { requireEditor, ForbiddenError, DEFAULT_NEWSROOM_ID } from "./membership.ts";
+import { writeWelcomeArticle } from "./welcome-article.ts";
 
 export type SeedSource = (typeof SEED_SOURCES)[number];
 
@@ -81,6 +82,8 @@ export async function ensurePaperSettingsSchema() {
       unique (newsroom_id)
     )
   `);
+  // CITY-SETUP final slice: mirrors migrations/0022_paper_settings_onboarded.sql
+  await sql.query(`alter table paper_settings add column if not exists onboarded boolean not null default false`);
 }
 
 function defaultConfig(): PaperConfig {
@@ -171,20 +174,26 @@ async function loadPaperConfig(newsroomId: number): Promise<PaperConfig> {
 }
 
 /*
-  Request-scoped cache.
+  A small process-level cache.
 
-  No existing per-request cache primitive was found under src/lib/news/ (the
-  only AsyncLocalStorage use in the codebase is src/lib/auth/isolation.server.ts,
-  a same-site request guard with no state store to reuse), so this is a small
-  self-contained ALS store local to this module. `runWithPaperConfigCache`
-  is optional: nothing outside this module is required to call it, and
-  getPaperConfig() falls back to fetching fresh (no caching, always correct)
-  when no store is active -- exactly today's per-call behaviour.
+  This was an AsyncLocalStorage request cache, and it broke the desk: this
+  module is reached from code that also ends up in the client graph, so Vite
+  externalised `node:async_hooks` for the browser and every desk page died on
+  "Module node:async_hooks has been externalized for browser compatibility".
+  CI caught it; a local `npm test` did not, because the browser tests skip
+  without a Postgres URL.
+
+  A plain Map has no server-only import and cannot repeat that. The TTL is
+  short because the only writer is the owner changing the paper's own
+  settings, and savePaperConfig clears the entry outright -- the window only
+  matters for a second process that did not perform the write.
 */
-const cacheStorage = new AsyncLocalStorage<Map<number, PaperConfig>>();
+const CACHE_TTL_MS = 30_000;
+const cache = new Map<number, { at: number; value: PaperConfig }>();
 
-export function runWithPaperConfigCache<T>(fn: () => Promise<T>): Promise<T> {
-  return cacheStorage.run(new Map(), fn);
+/** Drop every cached entry. Exported for tests. */
+export function clearPaperConfigCache() {
+  cache.clear();
 }
 
 /**
@@ -194,11 +203,10 @@ export function runWithPaperConfigCache<T>(fn: () => Promise<T>): Promise<T> {
  * wherever a column is null or the row does not exist.
  */
 export async function getPaperConfig(newsroomId: number = DEFAULT_NEWSROOM_ID): Promise<PaperConfig> {
-  const cache = cacheStorage.getStore();
-  const hit = cache?.get(newsroomId);
-  if (hit) return hit;
+  const hit = cache.get(newsroomId);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
   const value = await loadPaperConfig(newsroomId);
-  cache?.set(newsroomId, value);
+  cache.set(newsroomId, { at: Date.now(), value });
   return value;
 }
 
@@ -311,7 +319,7 @@ export async function savePaperConfig(
     params,
   );
 
-  // Invalidate this newsroom's request-scoped cache entry, if any is active.
-  cacheStorage.getStore()?.delete(me.newsroomId);
+  // The owner just changed it; never serve the old copy from cache.
+  cache.delete(me.newsroomId);
   return getPaperConfig(me.newsroomId);
 }
