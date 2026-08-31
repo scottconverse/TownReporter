@@ -1,6 +1,38 @@
 # Changelog
 
-Current release: **0.5.5**.
+Current release: **0.5.6**.
+
+## 0.5.6 — 2026-08-31
+
+**A second city needs no file edits at all.** The paper's identity — name,
+city, state, timezone, tagline, watch list, video channels, meeting
+keywords, council-votes link, editor contact email — lives in the database
+now. A new owner is asked for it once, on a setup screen that appears after
+claiming the desk, and can change it later from the Server page. The
+welcome article is written for the city being set up. The Pull excerpts,
+the model prompts, the search queries, the on-subject check, the dates on
+every page and the RSS feed all follow the configured city and timezone.
+
+**Before setup, the paper claims to be nobody.** A fresh install used to
+serve Longmont's masthead, Longmont's welcome article and a live link to
+Longmont's real city council to anyone who visited. It now shows a plain
+"not yet set up" state and publishes nothing until the owner finishes
+setup. Installs that already have an owner are marked set-up automatically
+and render exactly as before.
+
+**Three release walkthroughs hunted the leaks.** Each found real ones: the
+watch list pre-seeded with Longmont's eleven civic sources, the council
+link hard-wired to another town, the setup form arriving with "Longmont"
+already typed in the City box, the About page naming another city's
+newspaper, a corrections address for the wrong town. All closed, each with
+a browser test that reads the rendered HTML — links included — so a leak
+cannot hide in an href again.
+
+**The Server page stops reaching across installs.** On a machine running
+the live paper and a dev copy, the dev copy's Server page reported the
+production tunnel as its own and offered to restart it — and the restart
+script stopped every cloudflared on the machine. One install now owns the
+tunnel (`TOWNREPORTER_TUNNEL=1`); every other install says so and refuses.
 
 ## 0.5.5 — 2026-08-30
 
