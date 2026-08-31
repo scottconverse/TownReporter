@@ -399,80 +399,61 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - name: Boot the built server on the spare port and confirm it answers
+      # One step, on purpose. The runner tears down a step's child processes
+      # when the step ends, so an app booted in one step is gone by the next.
+      - name: Kill the app and prove the watchdog brings it back
         shell: pwsh
         run: |
-          $env:PORT = $env:WATCHDOG_APP_PORT
-          $env:HOST = "127.0.0.1"
-          $node = (Get-Command node).Source
-          # No -NoNewWindow: the runner tears down the step's own process tree,
-          # and this server has to outlive the step that starts it.
-          Start-Process -FilePath $node -ArgumentList ".output/server/index.mjs" `
-            -RedirectStandardOutput app.out.log -RedirectStandardError app.err.log -WindowStyle Hidden
-          $up = $false
-          for ($i = 0; $i -lt 60 -and -not $up; $i++) {
-            try {
-              $r = Invoke-WebRequest "http://127.0.0.1:$($env:WATCHDOG_APP_PORT)/" -UseBasicParsing -TimeoutSec 2
-              if ($r.StatusCode -eq 200) { $up = $true }
-            } catch {}
-            if (-not $up) { Start-Sleep -Seconds 2 }
-          }
-          if (-not $up) {
-            Get-Content app.out.log,app.err.log -ErrorAction SilentlyContinue
-            throw "built server did not come up on $($env:WATCHDOG_APP_PORT)"
-          }
-      # The watchdog refuses to touch the app while it believes Postgres is
-      # down (on purpose -- see ops/watchdog.ps1). This runner has no real
-      # Postgres, so a bare TCP listener on WATCHDOG_PG_PORT stands in: the
-      # watchdog only ever does a port-listen check before deciding it is safe
-      # to restart the app.
-      - name: Fake a listening Postgres so the watchdog is willing to touch the app
-        shell: pwsh
-        run: |
-          # Detached, for the same reason the app is: a Start-Job background job
-          # dies with the step that created it.
-          Start-Process -FilePath (Get-Command pwsh).Source `
-            -ArgumentList "-NoProfile","-File","scripts/ci-fake-listener.ps1","-Port",$env:WATCHDOG_PG_PORT `
-            -WindowStyle Hidden
-          $listening = $false
-          for ($i = 0; $i -lt 30 -and -not $listening; $i++) {
-            $listening = [bool](Get-NetTCPConnection -LocalPort $env:WATCHDOG_PG_PORT -State Listen -ErrorAction SilentlyContinue)
-            if (-not $listening) { Start-Sleep -Milliseconds 500 }
-          }
-          if (-not $listening) { throw "fake postgres listener never came up on $($env:WATCHDOG_PG_PORT)" }
-      - name: Kill the app that holds the spare port
-        shell: pwsh
-        run: |
-          # Kill whoever holds the port, not a remembered PID -- the same way
-          # the watchdog identifies the app it is repairing.
-          $owners = @(Get-NetTCPConnection -LocalPort $env:WATCHDOG_APP_PORT -State Listen -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty OwningProcess -Unique)
-          if ($owners.Count -eq 0) { throw "nothing was listening on $($env:WATCHDOG_APP_PORT) -- the app died on its own and the test would prove nothing" }
-          foreach ($owner in $owners) { Stop-Process -Id $owner -Force }
-          Start-Sleep -Seconds 2
-          $stillUp = [bool](Get-NetTCPConnection -LocalPort $env:WATCHDOG_APP_PORT -State Listen -ErrorAction SilentlyContinue)
-          if ($stillUp) { throw "app port $($env:WATCHDOG_APP_PORT) is still listening after the kill -- the test would prove nothing" }
-      - name: Run the watchdog against the killed app
-        shell: pwsh
-        run: pwsh -NoProfile -File ops/watchdog.ps1
-      - name: The watchdog must have brought the app back
-        shell: pwsh
-        run: |
-          $up = $false
-          for ($i = 0; $i -lt 45 -and -not $up; $i++) {
-            try {
-              $r = Invoke-WebRequest "http://127.0.0.1:$($env:WATCHDOG_APP_PORT)/" -UseBasicParsing -TimeoutSec 2
-              if ($r.StatusCode -eq 200) { $up = $true }
-            } catch {}
-            if (-not $up) { Start-Sleep -Seconds 2 }
-          }
-          Get-Content logs/watchdog.log -ErrorAction SilentlyContinue
-          if (-not $up) { throw "watchdog did not bring the app back on $($env:WATCHDOG_APP_PORT)" }
-      - name: Stop the fake Postgres listener
-        if: always()
-        shell: pwsh
-        run: |
-          $owners = @(Get-NetTCPConnection -LocalPort $env:WATCHDOG_PG_PORT -State Listen -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty OwningProcess -Unique)
-          foreach ($owner in $owners) { Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue }
+          $ErrorActionPreference = "Stop"
+          $port = $env:WATCHDOG_APP_PORT
 
+          # The watchdog refuses to touch the app while it believes Postgres is
+          # down (on purpose -- see ops/watchdog.ps1). This runner has no real
+          # Postgres, so a bare TCP listener stands in: the watchdog only does a
+          # port-listen check before deciding it is safe to restart the app.
+          $pg = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, [int]$env:WATCHDOG_PG_PORT)
+          $pg.Start()
+
+          function Wait-Up($seconds) {
+            for ($i = 0; $i -lt $seconds; $i++) {
+              try {
+                $r = Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 2
+                if ($r.StatusCode -eq 200) { return $true }
+              } catch {}
+              Start-Sleep -Seconds 1
+            }
+            return $false
+          }
+
+          try {
+            $env:PORT = $port
+            $env:HOST = "127.0.0.1"
+            $node = (Get-Command node).Source
+            Start-Process -FilePath $node -ArgumentList ".output/server/index.mjs" `
+              -RedirectStandardOutput app.out.log -RedirectStandardError app.err.log -NoNewWindow
+            if (-not (Wait-Up 90)) {
+              Get-Content app.out.log,app.err.log -ErrorAction SilentlyContinue
+              throw "built server did not come up on $port"
+            }
+
+            # Kill whoever holds the port, not a remembered PID -- the same way
+            # the watchdog identifies the app it is repairing.
+            $owners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty OwningProcess -Unique)
+            if ($owners.Count -eq 0) { throw "nothing was listening on $port -- the app died on its own and the test would prove nothing" }
+            foreach ($owner in $owners) { Stop-Process -Id $owner -Force }
+            Start-Sleep -Seconds 2
+            if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
+              throw "app port $port is still listening after the kill -- the test would prove nothing"
+            }
+
+            pwsh -NoProfile -File ops/watchdog.ps1
+            $back = Wait-Up 90
+            Get-Content logs/watchdog.log -ErrorAction SilentlyContinue
+            if (-not $back) { throw "watchdog did not bring the app back on $port" }
+          } finally {
+            $pg.Stop()
+            $owners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty OwningProcess -Unique)
+            foreach ($owner in $owners) { Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue }
+          }
