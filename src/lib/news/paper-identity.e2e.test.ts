@@ -133,6 +133,16 @@ if (dbProbe.ok) {
     // The owner lands straight on the first-run setup gate (desk.index's
     // redirect, driven by firstRunSetupState()).
     await page.waitForURL(/\/desk\/setup/, { timeout: 45_000 });
+    /*
+      The form must arrive BLANK. The third release walkthrough found the
+      City box pre-filled with the real value "Longmont" -- an operator who
+      accepted the form got a paper whose database says Longmont, Colorado.
+      Asserting the empty state here keeps that from coming back.
+    */
+    await page.getByLabel("Paper name").waitFor();
+    assert.equal(await page.getByLabel("Paper name").inputValue(), "", "paper name must not be pre-filled");
+    assert.equal(await page.getByLabel("City", { exact: true }).inputValue(), "", "city must not arrive pre-filled with Longmont");
+    assert.equal(await page.getByLabel("State", { exact: true }).inputValue(), "", "state must not arrive pre-filled with Colorado");
     await page.getByLabel("Paper name").fill("Riverbend Record");
     await page.getByLabel("Tagline").fill("The river town's paper of record.");
     await page.getByLabel("City").fill("Riverbend");

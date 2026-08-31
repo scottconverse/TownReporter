@@ -26,13 +26,25 @@ export function PaperSetupForm({
   firstRun?: boolean;
   submitLabel?: string;
 }) {
-  const [name, setName] = useState(initial?.name ?? "");
-  const [city, setCity] = useState(initial?.city ?? "");
-  const [state, setState] = useState(initial?.state ?? "");
+  /*
+    Every identity field starts blank on a first run, not just the council
+    link and the watch list. `initial` falls back to the shipped Longmont
+    constants, so the City box arrived reading "Longmont" as a real value --
+    an operator who accepted the form got a paper whose database says
+    Longmont, Colorado. The third release walkthrough caught it, in the one
+    set of fields the first two rounds of this exact fix did not touch.
+    Timezone keeps a working default: it is a machine string, not a town.
+  */
+  const [name, setName] = useState(firstRun ? "" : (initial?.name ?? ""));
+  const [city, setCity] = useState(firstRun ? "" : (initial?.city ?? ""));
+  const [state, setState] = useState(firstRun ? "" : (initial?.state ?? ""));
   const [timezone, setTimezone] = useState(initial?.timezone ?? "America/Denver");
-  const [tagline, setTagline] = useState(initial?.tagline ?? "");
+  const [tagline, setTagline] = useState(firstRun ? "" : (initial?.tagline ?? ""));
   const [councilVotesUrl, setCouncilVotesUrl] = useState(
     firstRun ? "" : (initial?.councilVotesUrl ?? ""),
+  );
+  const [editorEmail, setEditorEmail] = useState(
+    firstRun ? "" : (initial?.editorEmail ?? ""),
   );
   /*
     On a first run the watch list starts EMPTY.
@@ -61,6 +73,7 @@ export function PaperSetupForm({
           timezone: timezone.trim(),
           tagline: tagline.trim(),
           councilVotesUrl,
+          editorEmail,
           watchlist: rows
             .filter((r) => r.url.trim())
             .map((r) => ({
@@ -130,6 +143,20 @@ export function PaperSetupForm({
           <span className="mt-1 block text-xs text-ink-2">
             Linked from the paper's nav. Leave it blank and the link is not shown --
             better than sending your readers to another town's council.
+          </span>
+        </label>
+        <label className="block text-sm">
+          Editor contact email <span className="text-ink-2">(optional)</span>
+          <input
+            className={inputClass + " mt-1 w-full"}
+            type="email"
+            value={editorEmail}
+            onChange={(e) => setEditorEmail(e.target.value)}
+            placeholder="editor@example.org"
+          />
+          <span className="mt-1 block text-xs text-ink-2">
+            Shown on About and Corrections as the way to reach the editor.
+            Blank shows no address at all.
           </span>
         </label>
         <label className="block text-sm">

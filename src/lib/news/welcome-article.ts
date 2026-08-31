@@ -20,7 +20,7 @@ function welcomeBody(cfg: PaperConfig): string {
   const { name, city, state, tagline } = cfg;
   return `${name} is a small civic newspaper for ${city}, ${state}. It is not a newsletter mill and it is not an autonomous news robot.
 
-The public site is the paper: headlines, recaps, corrections, and a permanent record of what we chose to print. Behind it sits a desk. An editor-in-chief signs in, points Grok at official sources, reviews every draft, and hits publish. Nothing on this masthead goes live because a model felt confident.
+The public site is the paper: headlines, recaps, corrections, and a permanent record of what we chose to print. Behind it sits a desk. An editor-in-chief signs in, points its writing model at official sources, reviews every draft, and hits publish. Nothing on this masthead goes live because a model felt confident.
 
 What we cover
 The public record for ${city} -- council and public-body meetings, budgets, planning and land use, and the local institutions readers depend on. Public meetings, packets, and notices -- the documents most people never open.
@@ -29,7 +29,7 @@ What we will not do
 We will not quote social apps as fact. We will not invent votes, dollar figures, or speakers. We will not hide a correction. We will not pretend a video auto-caption is a verbatim transcript; captions are a map of topics, and quotes get checked.
 
 How a story gets here
-The editor keeps a source list. On Scan, Grok fetches those pages, compares them to the last snapshot, and files leads. On Draft, it writes a recap with attributed claims and named sources. The editor edits, holds, kills, or publishes. Beat memory records what already ran so the next scan does not reprint yesterday as news.
+The editor keeps a source list. On Scan, the model fetches those pages, compares them to the last snapshot, and files leads. On Draft, it writes a recap with attributed claims and named sources. The editor edits, holds, kills, or publishes. Beat memory records what already ran so the next scan does not reprint yesterday as news.
 
 This first item is the paper introducing itself. The next items will be reported from the live public record, by an editor who can still say no.${tagline ? `\n\n${tagline}` : ""}`;
 }

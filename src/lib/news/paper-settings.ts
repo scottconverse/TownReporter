@@ -458,6 +458,8 @@ export type FirstRunSetupInput = {
   tagline: string;
   /** Blank is a real answer: this paper has no council-votes site. */
   councilVotesUrl: string;
+  /** Blank is a real answer: no address is shown at all. */
+  editorEmail: string;
   watchlist: SeedSource[];
 };
 
@@ -484,6 +486,7 @@ function cleanSetupInput(raw: unknown): FirstRunSetupInput {
     timezone: String(v.timezone ?? "").trim(),
     tagline: String(v.tagline ?? "").trim(),
     councilVotesUrl: String(v.councilVotesUrl ?? "").trim(),
+    editorEmail: String(v.editorEmail ?? "").trim(),
     watchlist,
   };
 }
@@ -536,6 +539,10 @@ export const completeFirstRunSetup = createServerFn({ method: "POST" })
         // Always written, even blank: blank means this paper has no council
         // site, and must not inherit Longmont's.
         councilVotesUrl: data.councilVotesUrl ?? "",
+        // Stored even when blank: an empty column means "show no address at
+        // all", while NULL would fall back to the build-time email -- which
+        // on a shared build can belong to another town entirely.
+        editorEmail: data.editorEmail ?? "",
         kicker: `Independent civic reporting  ·  ${data.city}`,
         deck: `${data.name} follows ${data.city}'s meetings, money, contracts and public records — then keeps digging when something changes, disappears or doesn't add up. Human-edited. Sources shown.`,
         seedSources: data.watchlist,
