@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.5.2](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.2).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.5.3](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.3).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -258,9 +258,9 @@ BETTER_AUTH_SECRET=generate-a-long-random-string
 
 ### A second editor
 
-The first signed-in user is inserted into `newsroom_members` as `owner`. After that, Create editor account is gone and new accounts are rejected.
+The first signed-in user is inserted into `newsroom_members` as `owner`. After that, Create editor account is gone and new accounts are rejected — with one keyed exception.
 
-There is no invite UI yet (0.5.1 has not named it). Do not turn auth off to “fix” this. Share the owner login, or wait for invite.
+**Invite an editor** lives at the bottom of the Server page (`/desk/ops`), owner only. Type their email address, copy the one-time link it mints, and hand it over however you like. The link is bound to exactly that address, expires in seven days, burns on use, and the person sets their own password. They arrive as an **editor**: everything on the desk works for them, but they cannot invite others, and “Give up the desk” only removes their own seat — the newsroom stays yours. The server stores only a hash of the link, so copy it when it is shown; minting again for the same address replaces the old link. Do not turn auth off to “fix” anything.
 
 ### Cron (source monitors)
 

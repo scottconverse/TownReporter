@@ -2,7 +2,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "../db.ts";
 import {
+  acceptInvite,
+  checkInvite,
   claimOwner,
+  createInvite,
   DEFAULT_NEWSROOM_ID,
   deskIsClaimed,
   ensureNewsroomSchema,
@@ -101,6 +104,42 @@ export const leaveEditor = createServerFn({ method: "POST" })
       if (err instanceof ForbiddenError) {
         return { ok: false as const, error: err.message };
       }
+      throw err;
+    }
+  });
+
+/*
+  Invites (v0.5.3). Owner mints a one-time link for a named address; the link
+  opens the create-account door for exactly that address; accepting burns it
+  and seats an editor, not an owner. Full mechanics in membership.ts.
+*/
+export const inviteEditor = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((email: unknown) => String(email ?? ""))
+  .handler(async ({ context, data: email }) => {
+    try {
+      const token = await createInvite(context.userId, email);
+      return { ok: true as const, token };
+    } catch (err) {
+      if (err instanceof ForbiddenError) return { ok: false as const, error: err.message };
+      throw err;
+    }
+  });
+
+/** Anonymous: is this invite link live? Names only the invited address. */
+export const inviteState = createServerFn({ method: "GET" })
+  .validator((token: unknown) => String(token ?? ""))
+  .handler(async ({ data: token }) => checkInvite(token));
+
+export const acceptEditorInvite = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((token: unknown) => String(token ?? ""))
+  .handler(async ({ context, data: token }) => {
+    try {
+      const editor = await acceptInvite(context.userId, token);
+      return { ok: true as const, role: editor.role };
+    } catch (err) {
+      if (err instanceof ForbiddenError) return { ok: false as const, error: err.message };
       throw err;
     }
   });

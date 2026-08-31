@@ -321,13 +321,15 @@ export const auth = betterAuth({
   ...(emailAndPasswordEnabled ? { emailAndPassword: { enabled: true } } : {}),
 
   // After the newsroom has an owner, new Better Auth users (email or OAuth) are
-  // a dead door. Existing editor sign-in is unchanged.
+  // a dead door -- with one keyed opening: an unexpired, unused invite minted
+  // by the owner FOR THIS EXACT ADDRESS lets the signup through. The invite is
+  // burned (and the editor seat written) in acceptInvite, after sign-in.
   databaseHooks: {
     user: {
       create: {
         async before(user) {
-          const { deskIsClaimed } = await import("../news/membership");
-          if (await deskIsClaimed()) {
+          const { signupOpenFor } = await import("../news/membership");
+          if (!(await signupOpenFor(user.email ?? ""))) {
             throw new Error(
               "This desk already has an editor. Sign in if that's you.",
             );

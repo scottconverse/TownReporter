@@ -13,6 +13,7 @@ import { getOpsHealth, runOpsAction } from "@/lib/ops/dashboard";
 import { OPS_ACTIONS, type OpsActionId } from "@/lib/ops/actions";
 import { formatAgo, overallState, type HealthState } from "@/lib/ops/health";
 import { TRASH_DAYS, listTrash, purgeTrashItem, restoreTrashItem } from "@/lib/news/trash";
+import { inviteEditor, myDesk } from "@/lib/news/claim";
 import { formatDateTime } from "@/lib/paper";
 
 export const Route = createFileRoute("/desk/ops")({
@@ -249,6 +250,7 @@ function OpsPage() {
         every five minutes and restarts whatever has stopped. Its log is above.
       </p>
 
+      <InviteAnEditor />
       <GiveUpTheDesk />
     </DeskShell>
   );
@@ -375,6 +377,82 @@ function RecentlyDeleted() {
  * that path. It belongs here, at the bottom of the page an operator visits on
  * purpose, and nowhere else.
  */
+/**
+ * Invite a second editor (v0.5.3). Owner-only, enforced server-side; the UI
+ * simply does not render the form for an invited editor. The minted link is
+ * shown ONCE -- the server stores only a hash -- so the owner copies it here
+ * and hands it over however they like. It expires in seven days, works for
+ * exactly the named address, and burns on use.
+ */
+function InviteAnEditor() {
+  const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const [email, setEmail] = useState("");
+  const [link, setLink] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const mint = useMutation({
+    mutationFn: () => inviteEditor({ data: email }),
+    onSuccess: (r) => {
+      if (!r.ok) {
+        setErr(r.error);
+        return;
+      }
+      setErr(null);
+      setCopied(false);
+      setLink(`${window.location.origin}/login?invite=${r.token}`);
+    },
+    onError: (e) => setErr(e instanceof Error ? e.message : "That did not mint."),
+  });
+  if (me.data?.role !== "owner") return null;
+  return (
+    <section className="mt-16 border-t border-rule pt-8">
+      <SecHead
+        title="Invite an editor"
+        sub="A one-time link for one email address. It expires in seven days, and the person sets their own password. Editors can do everything but invite others or give up the desk."
+      />
+      <div className="mt-4 max-w-2xl space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="block text-sm">
+            Their email
+            <input
+              className="mt-1 min-h-11 border border-rule bg-paper px-3 py-2 text-sm text-ink focus:border-ink focus:outline-none"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="colleague@example.org"
+            />
+          </label>
+          <InkButton
+            small
+            disabled={mint.isPending || !email.trim()}
+            onClick={() => mint.mutate()}
+          >
+            {mint.isPending ? "Minting…" : "Make the invite link"}
+          </InkButton>
+        </div>
+        {err ? <p className="text-sm text-rust">{err}</p> : null}
+        {link ? (
+          <div className="border border-rule bg-paper-2 p-3">
+            <p className="text-xs tracking-[0.14em] text-muted uppercase">
+              Shown once — copy it now
+            </p>
+            <p className="mt-1 text-sm break-all">{link}</p>
+            <InkButton
+              tone="quiet"
+              small
+              onClick={() => {
+                void navigator.clipboard.writeText(link).then(() => setCopied(true));
+              }}
+            >
+              {copied ? "Copied" : "Copy link"}
+            </InkButton>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function GiveUpTheDesk() {
   const { user, isPending } = useCurrentUserState();
   const email = user?.primaryEmail ?? "";

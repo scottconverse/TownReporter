@@ -4,11 +4,16 @@ import { GROK_PROVIDERS, authClient, signIn } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
 import { PAPER } from "@/lib/paper";
-import { claimDesk, deskClaimState } from "@/lib/news/claim";
+import { acceptEditorInvite, claimDesk, deskClaimState, inviteState } from "@/lib/news/claim";
 import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-export const Route = createFileRoute("/login")({ component: Login });
+export const Route = createFileRoute("/login")({
+  validateSearch: (s: Record<string, unknown>): { invite?: string } => ({
+    invite: typeof s.invite === "string" && s.invite ? s.invite : undefined,
+  }),
+  component: Login,
+});
 
 /** Must match `BEARER_KEY` in `@/lib/auth/client` — preview iframe can't read cookies. */
 const PREVIEW_BEARER_KEY = "grok-auth.bearer-token";
@@ -71,7 +76,30 @@ function Login() {
   const [name, setName] = useState("");
   const claim = useQuery({ queryKey: ["desk-claim"], queryFn: () => deskClaimState() });
   const claimed = claim.isError || Boolean(claim.data?.claimed);
-  const mode: "create" | "signin" = claimed ? "signin" : wantCreate ? "create" : "signin";
+  /*
+    An invite link opens the create door through the claimed-desk wall for
+    exactly one address (v0.5.3). The token is validated server-side; a dead
+    link degrades to plain sign-in with the reason shown.
+  */
+  const { invite } = Route.useSearch();
+  const inviteQ = useQuery({
+    queryKey: ["invite", invite],
+    queryFn: () => inviteState({ data: invite! }),
+    enabled: Boolean(invite),
+    staleTime: 60_000,
+  });
+  const invited = Boolean(invite && inviteQ.data?.ok);
+  const invitedEmail = inviteQ.data?.ok ? inviteQ.data.email : "";
+  useEffect(() => {
+    if (invitedEmail) setEmail(invitedEmail);
+  }, [invitedEmail]);
+  const mode: "create" | "signin" = invited
+    ? "create"
+    : claimed
+      ? "signin"
+      : wantCreate
+        ? "create"
+        : "signin";
   const taken = deskTakenLoginCopy();
   /*
     Waiting has to end in an answer, not in "Opening..." forever.
@@ -116,6 +144,15 @@ function Login() {
       first desk request. Calling claimDesk from the form was only ever the
       token path.
     */
+    if (invited && invite) {
+      // Burn the invite and take the editor seat before the desk asks who we are.
+      const seated = await acceptEditorInvite({ data: invite });
+      if (!seated.ok) {
+        setBusy(null);
+        setError(seated.error);
+        return;
+      }
+    }
     await qc.invalidateQueries({ queryKey: ["desk-claim"] });
     await qc.invalidateQueries({ queryKey: ["my-desk"] });
     await navigate({ to: "/desk" });
@@ -152,7 +189,7 @@ function Login() {
 
   async function onEmailSignUp() {
     setError(null);
-    if (claimed) {
+    if (claimed && !invited) {
       setError(taken.api);
       return;
     }
@@ -199,18 +236,22 @@ function Login() {
     ? "The desk did not answer"
     : claim.isPending
       ? "Editor desk"
-      : mode === "create"
-        ? "Create the desk"
-        : taken.title;
+      : invited
+        ? "You're invited to this desk"
+        : mode === "create"
+          ? "Create the desk"
+          : taken.title;
   const blurb = stalled
     ? "This page could not reach the newsroom. That is usually the server being down or still starting; it can also mean the page failed to load properly. Try again, and if it keeps happening check the server is running."
     : claim.isPending
     ? "One moment."
-    : mode === "create"
-      ? "First person in owns the newsroom. If you already created an account, submit again with the same email and password — we will sign you in."
-      : claimed
-        ? taken.body
-        : "Sign in with the password you set for this desk.";
+    : invited
+      ? `The owner invited ${invitedEmail} to edit this paper. Set a password and you are in. The link works once.`
+      : mode === "create"
+        ? "First person in owns the newsroom. If you already created an account, submit again with the same email and password — we will sign you in."
+        : claimed
+          ? taken.body
+          : "Sign in with the password you set for this desk.";
 
   return (
     <main
@@ -240,6 +281,11 @@ function Login() {
           <h1 className="mt-2 font-display text-3xl font-semibold">{heading}</h1>
           <p className="mt-2 text-sm text-muted">{blurb}</p>
         </div>
+        {invite && inviteQ.data && !inviteQ.data.ok ? (
+          <p className="border border-rust/40 bg-paper-2 px-3 py-2 text-sm text-ink">
+            {inviteQ.data.reason} You can still sign in below if you already have an account.
+          </p>
+        ) : null}
         {error ? (
           <p className="border border-rust/40 bg-paper-2 px-3 py-2 text-sm text-ink">
             {error}
@@ -278,7 +324,15 @@ function Login() {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              // The invite is issued to one address; the field says so.
+              readOnly={invited}
+              aria-describedby={invited ? "invite-lock" : undefined}
             />
+            {invited ? (
+              <span id="invite-lock" className="mt-1 block text-xs text-muted">
+                The invite was issued to this address.
+              </span>
+            ) : null}
           </label>
           <label className="block text-sm">
             Password

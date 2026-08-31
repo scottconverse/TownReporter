@@ -1,6 +1,16 @@
 # Changelog
 
-Current release: **0.5.2**.
+Current release: **0.5.3**.
+
+## 0.5.3 — 2026-08-30
+
+A second person can join the desk. **Invite an editor**, at the bottom of
+the Server page, mints a one-time link for one email address: it expires in
+seven days, burns on use, and the person sets their own password and
+arrives as an editor -- everything works for them, but they cannot invite
+others, and leaving removes only their own seat. The signup wall stays
+shut for everyone else; the invite is the single keyed door through it
+(there were, it turned out, TWO walls -- the release walk found the second).
 
 ## 0.5.2 — 2026-08-30
 

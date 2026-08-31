@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.5.2](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.2).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.5.3](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.3).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). The whole system, including how it is built, is [manual.md](manual.md). This page is the newsroom, in the order you use it.
 
@@ -30,7 +30,7 @@ Notes:
 
 - Self-host uses email + password. Google / X buttons only appear on the grok.me preview.
 - The first account is the owner. There is no setup token; it was removed in 0.5.1.
-- A second person cannot create an account unless the editor has left. There is no invite button yet. See [setup.md](setup.md#a-second-editor).
+- A second person joins by invite: the owner mints a one-time link under **Invite an editor** on the Server page. See [setup.md](setup.md#a-second-editor).
 - If the desk sits on “Opening the desk,” use Sign in again. Session expired.
 
 ---

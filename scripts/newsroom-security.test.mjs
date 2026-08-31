@@ -278,6 +278,10 @@ test("every server function in src/ is gated, or is named on the public allowlis
   const PUBLIC_SERVER_FNS = new Set([
     // The one thing an unclaimed desk must answer before anyone can sign in.
     "src/lib/news/claim.ts::deskClaimState",
+    // Is this invite link live? The invitee is BY DEFINITION not signed in
+    // yet. Takes an unguessable 64-hex token, compares only its hash, and
+    // reveals nothing about any address unless the token itself is valid.
+    "src/lib/news/claim.ts::inviteState",
     // The public evidence trail behind a published story -- readable by anyone
     // who can read the story itself.
     "src/lib/news/evidence.ts::getPublicEvidence",
