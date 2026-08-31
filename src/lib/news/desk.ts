@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql, withTransaction } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
-import { PAPER, SEED_SOURCES, slugify, parseUrlList } from "@/lib/paper";
+import { PAPER, slugify, parseUrlList } from "@/lib/paper";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
@@ -40,6 +40,7 @@ import { provenanceFromUrls } from "./findings";
 import { composeZeroLeadSummary, kindFromSourceUrl } from "./desk-copy";
 import { enqueueJob, findOpenJob, kickJobs, latestJob, runLooksStalled, type DeskJob } from "./jobs";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
+import { getPaperConfig } from "./paper-settings";
 import type {
   DraftRow,
   LeadRow,
@@ -64,7 +65,8 @@ async function ensureDraftMemoColumn() {
 
 async function ensureSeeds(userId: string) {
   const sql = await getSql();
-  for (const s of SEED_SOURCES) {
+  const config = await getPaperConfig();
+  for (const s of config.seedSources) {
     await sql`
       insert into sources (user_id, url, title, kind, tier, status)
       values (${userId}, ${s.url}, ${s.title}, ${s.kind}, ${s.tier}, 'accepted')

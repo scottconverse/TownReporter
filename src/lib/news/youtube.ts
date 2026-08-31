@@ -99,7 +99,7 @@ export type ListedVideo = {
   tab: "streams" | "videos" | "rss";
 };
 
-const MEETING_KEYWORDS = [
+export const MEETING_KEYWORDS = [
   "council",
   "meeting",
   "session",
