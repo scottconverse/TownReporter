@@ -161,3 +161,21 @@ UNVERIFIED: the 0.5.5 changelog entry is inaccurate for its contents - not check
   on green, and only after a real lite+walkthrough gate with nothing but nits
   left.
 - Promote after each item (batched here for CivicCast).
+
+## A stale /goal will block every turn
+
+The active `/goal` Stop hook is still the **v0.5.1 audit list** (TE-01..06,
+TW-002..009, UIUX-02..05, ENG-008..010). Those 20 items are finished and
+shipped — verified in code: `package.json:23` and `:26`, `ci.yml:102`,
+`editorial.server.ts:75`, `states.tsx:364`, `desk-chrome.tsx:129`,
+`desk.published.tsx:148`, `migrations/0018_search_index.sql`,
+`voice.server.ts:1`, tag `v0.5.1`, and `artifacts/` down to 744K of Markdown
+behind `scripts/artifacts-are-reports-only.test.mjs`.
+
+The hook's evaluator only sees the post-compaction window, so it reads work
+done earlier in the same session as never done, and blocks. It cannot be
+satisfied by working: the only way to "show the work" would be to undo and
+rebuild shipped features.
+
+**Only Scott can clear it.** Do not redo finished work to appease it, and do
+not let it push you into starting something new while paused.
