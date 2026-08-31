@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { PAPER } from "@/lib/paper";
+import { usePaper } from "@/lib/paper-context";
 
 function Ornament({
   busy = false,
@@ -26,7 +26,7 @@ function Ornament({
 
 export function ScreenPending({
   title,
-  kicker = PAPER.kicker,
+  kicker,
   hint = "Setting type…",
   night = false,
   action,
@@ -44,6 +44,8 @@ export function ScreenPending({
    */
   awaitingSession?: boolean;
 }) {
+  const paper = usePaper();
+  const resolvedKicker = kicker ?? paper.kicker;
   return (
     <div
       className={
@@ -58,7 +60,7 @@ export function ScreenPending({
     >
       <div className="enter-fade max-w-sm text-center">
         <p className="text-[11px] tracking-[0.16em] text-rust uppercase">
-          {kicker}
+          {resolvedKicker}
         </p>
         <h1 className="mt-2 font-display text-3xl font-semibold">{title}</h1>
         <div className="mt-6">

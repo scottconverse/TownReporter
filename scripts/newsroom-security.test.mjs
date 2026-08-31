@@ -294,6 +294,11 @@ test("every server function in src/ is gated, or is named on the public allowlis
     "src/lib/news/public.ts::listPublishedByTopic",
     "src/lib/news/public.ts::searchPublished",
     "src/lib/news/public.ts::listPublicCorrections",
+    // The paper's public identity (name/city/tagline/etc, CITY-SETUP slice
+    // B) -- fetched once per page load, before any session exists, by every
+    // reader-facing route via __root.tsx's beforeLoad. No newsroom-internal
+    // field (youtubeChannels/meetingKeywords/seedSources) leaves this fn.
+    "src/lib/news/paper-settings.ts::getPaperIdentityFn",
   ]);
   const GATES = new Set(["deskMiddleware", "authMiddleware"]);
 

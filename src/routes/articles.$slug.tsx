@@ -5,7 +5,8 @@ import { StoryBody } from "@/components/story-body";
 import { EmptyState, StorySkeleton } from "@/components/states";
 import { inkGhost } from "@/components/desk-chrome";
 import { getPublishedArticle, listPublishedArticles } from "@/lib/news/public";
-import { PAPER, formatDate, parseUrlList, siteUrl } from "@/lib/paper";
+import { formatDate, parseUrlList, siteUrl } from "@/lib/paper";
+import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-context";
 import { ProvenanceBlock } from "@/components/provenance";
 
 export const Route = createFileRoute("/articles/$slug")({
@@ -50,18 +51,19 @@ export const Route = createFileRoute("/articles/$slug")({
    * repeated across the whole archive. For a paper whose distribution is people
    * sharing links, that is the difference between a story travelling and not.
    */
-  head: ({ loaderData, params }) => {
+  head: ({ loaderData, params, match }) => {
     const article = loaderData;
     if (!article) return {};
+    const paper = match.context.paper ?? DEFAULT_PAPER_IDENTITY;
     const url = siteUrl(`/articles/${params.slug}`);
-    const title = `${article.headline} — ${PAPER.name}`;
-    const description = (article.dek || PAPER.tagline).slice(0, 300);
+    const title = `${article.headline} — ${paper.name}`;
+    const description = (article.dek || paper.tagline).slice(0, 300);
     return {
       meta: [
         { title },
         { name: "description", content: description },
         { property: "og:type", content: "article" },
-        { property: "og:site_name", content: PAPER.name },
+        { property: "og:site_name", content: paper.name },
         { property: "og:title", content: article.headline },
         { property: "og:description", content: description },
         { property: "og:url", content: url },

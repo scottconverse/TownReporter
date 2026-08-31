@@ -1,7 +1,8 @@
 import { Link, useMatchRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { formatDate, PAPER } from "@/lib/paper";
+import { formatDate } from "@/lib/paper";
+import { usePaper } from "@/lib/paper-context";
 import { UserButton } from "@/lib/auth/gates";
 import { signOut } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
@@ -61,6 +62,7 @@ export function DeskShell({
   lede?: React.ReactNode;
   hideTitle?: boolean;
 }) {
+  const paper = usePaper();
   const { user, isPending } = useCurrentUserState();
   const { mode, choose } = useDeskMode();
   const nightPage = night || mode === "dark";
@@ -78,10 +80,10 @@ export function DeskShell({
         <div className="mast-row">
           <div className="mast-brand">
             <Link to="/" className="brand">
-              {PAPER.name}
+              {paper.name}
             </Link>
             <span className="brand-sub">
-              {night ? "Dark Desk — investigates, never prints" : `Editor's desk — ${PAPER.city}`}
+              {night ? "Dark Desk — investigates, never prints" : `Editor's desk — ${paper.city}`}
             </span>
           </div>
           <div className="mast-date">{formatDate(new Date())}</div>

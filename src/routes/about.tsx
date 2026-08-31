@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { PaperShell } from "@/components/paper-chrome";
-import { EDITOR_EMAIL, PAPER } from "@/lib/paper";
+import { EDITOR_EMAIL } from "@/lib/paper";
+import { DEFAULT_PAPER_IDENTITY, usePaper } from "@/lib/paper-context";
 
 export const Route = createFileRoute("/about")({
   /*
@@ -9,11 +10,14 @@ export const Route = createFileRoute("/about")({
     the paper open in several tabs could not tell them apart, and search results
     listed them all under one name.
   */
-  head: () => ({ meta: [{ title: `About this paper — ${PAPER.name}` }] }),
+  head: ({ match }) => ({
+    meta: [{ title: `About this paper — ${(match.context.paper ?? DEFAULT_PAPER_IDENTITY).name}` }],
+  }),
   component: About,
 });
 
 function About() {
+  const PAPER = usePaper();
   return (
     <PaperShell compact>
       <h1 className="enter-fade font-display text-4xl font-semibold">
@@ -28,7 +32,7 @@ function About() {
           for {PAPER.location}. The public record is only the beginning.
         </p>
         <p>
-          We follow Longmont’s meetings, money, contracts and public records —
+          We follow {PAPER.city}’s meetings, money, contracts and public records —
           then keep digging when something changes, disappears or doesn’t add
           up. A human editor still decides what is published. There is no
           fully automated path to the masthead. {PAPER.trust}

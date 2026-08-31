@@ -7,7 +7,9 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
-import { PAPER, siteUrl } from "@/lib/paper";
+import { siteUrl } from "@/lib/paper";
+import { DEFAULT_PAPER_IDENTITY, PaperProvider } from "@/lib/paper-context";
+import { getPaperIdentityFn } from "@/lib/news/paper-settings";
 import appCss from "../styles.css?url";
 import { useState } from "react";
 
@@ -43,25 +45,41 @@ if (typeof window !== "undefined") {
 }
 
 export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: `${PAPER.name} — ${PAPER.location}` },
-      {
-        name: "description",
-        content:
-          "Independent civic reporting for Longmont, Colorado. The public record is only the beginning. Human-edited. Sources shown.",
-      },
-      { name: "theme-color", content: "#F6F1E7" },
-      // Site-wide share card. Article routes override the title, description
-      // and URL; the image is the same for all of them.
-      { property: "og:type", content: "website" },
-      { property: "og:site_name", content: PAPER.name },
-      { property: "og:image", content: siteUrl("/og.jpg") },
-      { name: "twitter:image", content: siteUrl("/og.jpg") },
-    ],
-    links: [
+  /*
+    Fetched ONCE per page load, on the server: this `beforeLoad` runs a
+    single time per navigation, and its returned object is merged into every
+    descendant route's `context` (TanStack's normal context-inheritance
+    behaviour) -- not re-fetched per component or per route. Falls back to
+    the shipped PAPER constant if the call ever throws, so a database hiccup
+    degrades to today's fixed copy rather than a broken page.
+  */
+  beforeLoad: async () => {
+    try {
+      return { paper: await getPaperIdentityFn() };
+    } catch (err) {
+      console.error("[paper] identity fetch failed, using shipped default", err);
+      return { paper: DEFAULT_PAPER_IDENTITY };
+    }
+  },
+  head: ({ match }) => {
+    const paper = match.context.paper ?? DEFAULT_PAPER_IDENTITY;
+    return {
+      meta: [
+        { charSet: "utf-8" },
+        { name: "viewport", content: "width=device-width, initial-scale=1" },
+        { title: `${paper.name} — ${paper.location}` },
+        // The deck IS this sentence, and it is configurable. Hard-coding it
+        // here left a second city describing Longmont in its own <head>.
+        { name: "description", content: `${paper.deck} ${paper.trust}` },
+        { name: "theme-color", content: "#F6F1E7" },
+        // Site-wide share card. Article routes override the title, description
+        // and URL; the image is the same for all of them.
+        { property: "og:type", content: "website" },
+        { property: "og:site_name", content: paper.name },
+        { property: "og:image", content: siteUrl("/og.jpg") },
+        { name: "twitter:image", content: siteUrl("/og.jpg") },
+      ],
+      links: [
       /*
         The fonts are served from this origin, not from Google.
 
@@ -79,12 +97,14 @@ export const Route = createRootRoute({
       // does not exist — a 404 on every page load and a blank tab icon.
       // public/favicon.svg was shipped but never referenced.
       { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
-    ],
-  }),
+      ],
+    };
+  },
   component: Root,
 });
 
 function Root() {
+  const { paper } = Route.useRouteContext();
   const [client] = useState(
     () =>
       new QueryClient({
@@ -125,7 +145,9 @@ function Root() {
         <PreviewHostBridge />
         <AuthProvider>
           <QueryClientProvider client={client}>
-            <Outlet />
+            <PaperProvider value={paper}>
+              <Outlet />
+            </PaperProvider>
           </QueryClientProvider>
         </AuthProvider>
         <Scripts />

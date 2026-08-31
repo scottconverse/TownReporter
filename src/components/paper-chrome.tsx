@@ -2,7 +2,8 @@ import { Link, useMatchRoute, useNavigate, useRouterState } from "@tanstack/reac
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ExternalLink, Search, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { COUNCIL_VOTES_URL, PAPER, formatDate } from "@/lib/paper";
+import { formatDate } from "@/lib/paper";
+import { usePaper } from "@/lib/paper-context";
 import { inputClass } from "@/components/desk-chrome";
 import { APP_VERSION } from "@/lib/version";
 import { SignedIn, SignedOut, UserButton } from "@/lib/auth/gates";
@@ -11,6 +12,7 @@ import { deskClaimState } from "@/lib/news/claim";
 import { createEditorCopy } from "@/lib/news/desk-copy";
 
 export function Masthead({ compact = false }: { compact?: boolean }) {
+  const paper = usePaper();
   const today = formatDate(new Date());
   const Name = compact ? "p" : "h1";
   return (
@@ -22,7 +24,7 @@ export function Masthead({ compact = false }: { compact?: boolean }) {
         Skip to stories
       </a>
       <div className="flex items-center justify-between gap-3 border-b border-rule px-1 py-1 text-[11px] tracking-[0.14em] text-muted uppercase">
-        <span>{PAPER.kicker}</span>
+        <span>{paper.kicker}</span>
         <span className="hidden sm:inline">{today}</span>
         <AuthSlot />
       </div>
@@ -45,19 +47,19 @@ export function Masthead({ compact = false }: { compact?: boolean }) {
                 : "font-display text-4xl font-semibold tracking-tight text-ink sm:text-6xl"
             }
           >
-            {PAPER.name}
+            {paper.name}
           </Name>
           <p className="mt-2 text-sm tracking-[0.18em] text-muted uppercase">
-            {PAPER.location}
+            {paper.location}
           </p>
         </Link>
         {!compact && (
           <>
             <p className="mx-auto mt-3 max-w-md font-display text-base italic text-ink-2">
-              {PAPER.tagline}
+              {paper.tagline}
             </p>
             <p className="mx-auto mt-1 text-[11px] tracking-[0.16em] text-muted uppercase">
-              {PAPER.trust}
+              {paper.trust}
             </p>
           </>
         )}
@@ -154,6 +156,7 @@ function ArchiveSearch() {
 }
 
 function PaperNav() {
+  const paper = usePaper();
   const matchRoute = useMatchRoute();
   /*
     Collapsed behind one "Sections" button on a phone (UX-001).
@@ -257,7 +260,7 @@ function PaperNav() {
           );
         })}
         <a
-          href={COUNCIL_VOTES_URL}
+          href={paper.councilVotesUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 border-transparent px-1 transition-[color] duration-150 ease-out hover:text-rust focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rust sm:justify-start"
@@ -354,6 +357,7 @@ export function PaperShell({
   children: React.ReactNode;
   compact?: boolean;
 }) {
+  const paper = usePaper();
   return (
     <div className="min-h-dvh bg-paper text-ink">
       <div className="mx-auto max-w-5xl px-4 py-4 sm:px-6">
@@ -372,7 +376,7 @@ export function PaperShell({
         </main>
         <footer className="mt-8 border-t border-ink pt-4 pb-10 text-sm text-muted">
           <p>
-            {PAPER.name} {APP_VERSION} · {PAPER.location}. {PAPER.tagline} Free to reprint with
+            {paper.name} {APP_VERSION} · {paper.location}. {paper.tagline} Free to reprint with
             credit and a link back. Verify details against the official record.
           </p>
         </footer>

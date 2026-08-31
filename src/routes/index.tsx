@@ -10,7 +10,8 @@ import {
   listPublishedByTopic,
   searchPublished,
 } from "@/lib/news/public";
-import { PAPER, TOPICS, formatShortDate } from "@/lib/paper";
+import { TOPICS, formatShortDate } from "@/lib/paper";
+import { usePaper } from "@/lib/paper-context";
 
 type Search = { topic?: string; q?: string };
 
@@ -29,6 +30,7 @@ export const Route = createFileRoute("/")({
 });
 
 function Home() {
+  const PAPER = usePaper();
   const { topic, q } = Route.useSearch();
   const initial = Route.useLoaderData();
   const { data, isPending, isFetching, isPlaceholderData, isError, refetch } = useQuery({

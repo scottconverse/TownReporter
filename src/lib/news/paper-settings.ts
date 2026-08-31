@@ -9,8 +9,10 @@
 */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
 import { PAPER, COUNCIL_VOTES_URL, SEED_SOURCES } from "../paper.ts";
+import type { PaperIdentity } from "../paper-context.tsx";
 import { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS } from "./youtube.ts";
 import { requireEditor, ForbiddenError, DEFAULT_NEWSROOM_ID } from "./membership.ts";
 
@@ -199,6 +201,31 @@ export async function getPaperConfig(newsroomId: number = DEFAULT_NEWSROOM_ID): 
   cache?.set(newsroomId, value);
   return value;
 }
+
+/**
+ * The paper's identity fields only, shaped for the client (`PaperIdentity`
+ * in src/lib/paper-context.tsx) and fetched ONCE per page load: the root
+ * route's `beforeLoad` is the only caller (see src/routes/__root.tsx), and
+ * its result is threaded down through route context / React context rather
+ * than re-fetched per component.
+ */
+export const getPaperIdentityFn = createServerFn({ method: "GET" }).handler(
+  async (): Promise<PaperIdentity> => {
+    const cfg = await getPaperConfig();
+    return {
+      name: cfg.name,
+      city: cfg.city,
+      state: cfg.state,
+      location: cfg.location,
+      timezone: cfg.timezone,
+      tagline: cfg.tagline,
+      kicker: cfg.kicker,
+      deck: cfg.deck,
+      trust: cfg.trust,
+      councilVotesUrl: cfg.councilVotesUrl,
+    };
+  },
+);
 
 export type PaperConfigPatch = Partial<{
   name: string | null;

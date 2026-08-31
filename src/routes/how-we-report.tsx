@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PaperShell } from "@/components/paper-chrome";
-import { PAPER } from "@/lib/paper";
+import { DEFAULT_PAPER_IDENTITY, usePaper } from "@/lib/paper-context";
 
 export const Route = createFileRoute("/how-we-report")({
   /*
@@ -8,11 +8,14 @@ export const Route = createFileRoute("/how-we-report")({
     the paper open in several tabs could not tell them apart, and search results
     listed them all under one name.
   */
-  head: () => ({ meta: [{ title: `How we report — ${PAPER.name}` }] }),
+  head: ({ match }) => ({
+    meta: [{ title: `How we report — ${(match.context.paper ?? DEFAULT_PAPER_IDENTITY).name}` }],
+  }),
   component: How,
 });
 
 function How() {
+  const PAPER = usePaper();
   return (
     <PaperShell compact>
       <h1 className="enter-fade font-display text-4xl font-semibold">
@@ -21,9 +24,9 @@ function How() {
       <div className="stagger-in mt-6 max-w-2xl space-y-4 text-lg leading-7 text-ink-2">
         <p>
           <strong className="text-ink">Watch.</strong> The desk keeps a list of
-          Longmont civic sources — city, council, planning, NextLight, St. Vrain
-          Valley Schools, Boulder County. That list is a starting point, not a
-          fence. Newly discovered public records are fair game.
+          {" "}{PAPER.city} civic sources — the city, its council, planning,
+          the schools, the county, the local utility. That list is a starting
+          point, not a fence. Newly discovered public records are fair game.
         </p>
         <p>
           <strong className="text-ink">Detect.</strong> Scans and background

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { GROK_PROVIDERS, authClient, signIn } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
-import { PAPER } from "@/lib/paper";
+import { usePaper } from "@/lib/paper-context";
 import { acceptEditorInvite, claimDesk, deskClaimState, inviteState } from "@/lib/news/claim";
 import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -64,6 +64,7 @@ function showGrokOAuth() {
 }
 
 function Login() {
+  const PAPER = usePaper();
   const { user } = useCurrentUserState();
   const navigate = useNavigate();
   const qc = useQueryClient();

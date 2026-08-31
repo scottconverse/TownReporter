@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getSql } from "@/lib/db";
-import { PAPER } from "@/lib/paper";
 import { collapsePrintedDuplicates } from "@/lib/news/desk-copy";
 import { DEFAULT_NEWSROOM_ID } from "@/lib/news/membership";
+import { getPaperConfig } from "@/lib/news/paper-settings";
 
 /** XML text escape. Used for every value that is not inside CDATA. */
 function xmlEscape(value: string): string {
@@ -45,6 +45,8 @@ export const Route = createFileRoute("/feed")({
   server: {
     handlers: {
       GET: async ({ request }) => {
+        // Fetched once per feed request, not per row.
+        const paper = await getPaperConfig();
         const origin = siteOrigin(request);
         let rows: {
           slug: string;
@@ -88,10 +90,10 @@ export const Route = createFileRoute("/feed")({
         const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
 <channel>
-  <title>${xmlText(`${PAPER.name} — ${PAPER.location}`)}</title>
+  <title>${xmlText(`${paper.name} — ${paper.location}`)}</title>
   <link>${xmlEscape(origin)}</link>
   <atom:link href="${xmlEscape(`${origin}/feed`)}" rel="self" type="application/rss+xml" />
-  <description>${xmlText(PAPER.tagline)}</description>
+  <description>${xmlText(paper.tagline)}</description>
   <language>en-us</language>
   ${items}
 </channel>

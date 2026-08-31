@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SourceZipBackupLink, SourceZipButton, SourceZipUrl } from "@/components/source-zip";
-import { PAPER } from "@/lib/paper";
+import { usePaper } from "@/lib/paper-context";
 import { APP_VERSION } from "@/lib/version";
 
 export const Route = createFileRoute("/get-the-code")({
@@ -8,6 +8,7 @@ export const Route = createFileRoute("/get-the-code")({
 });
 
 function GetTheCode() {
+  const PAPER = usePaper();
   return (
     <main
       className="grid min-h-dvh place-items-center bg-paper px-6 text-ink"

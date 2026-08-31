@@ -8,10 +8,12 @@ import { deleteLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadS
 import { restoreTrashItem } from "@/lib/news/trash";
 import { nearDuplicate, openLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
 import { TOPICS } from "@/lib/paper";
+import { usePaper } from "@/lib/paper-context";
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
 
 function QueuePage() {
+  const PAPER = usePaper();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { data: leads = [], isPending, isError, error, refetch, isRefetching } = useQuery({
@@ -127,7 +129,7 @@ function QueuePage() {
                 onChange={(e) => setWhy(e.target.value)}
                 required
                 minLength={8}
-                placeholder="Why this is news in Longmont today"
+                placeholder={`Why this is news in ${PAPER.city} today`}
               />
             </Field>
             <Field label="Topic">
