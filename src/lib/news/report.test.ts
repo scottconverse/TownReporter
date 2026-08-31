@@ -19,6 +19,7 @@ import {
   resolvePublicFindings,
   stripAiFiller,
   stripReporterNotebook,
+  uncreditedOutlets,
   type ProvenanceItem,
 } from "./report.ts";
 import type { LeadRow } from "./types.ts";
@@ -629,6 +630,63 @@ describe("linkOutletInBody misattribution", () => {
     assert.match(out, /\[Daily Camera\]\(/);
   });
 });
+
+describe("uncreditedOutlets", () => {
+  /**
+   * The "how we report" page promises that a story leaning on another
+   * newsroom's work names them in the body, not just in the sources panel.
+   * This is the check for the naming half of that promise -- a warning, not
+   * a gate, because a source can sit in `source_urls` as background rather
+   * than something the story hangs on.
+   */
+  it("does not warn when the outlet is named in the body", () => {
+    const body = "The Longmont Times-Call reported Thursday that the board acted.";
+    const url = "https://www.timescall.com/2026/08/28/front-range-rail-sales-tax-ballot/";
+    assert.deepEqual(uncreditedOutlets(body, [url]), []);
+  });
+
+  it("warns when the outlet's URL is cited but its name never appears", () => {
+    const body = "The board acted on the sales tax Thursday.";
+    const url = "https://www.timescall.com/2026/08/28/front-range-rail-sales-tax-ballot/";
+    assert.deepEqual(uncreditedOutlets(body, [url]), ["Longmont Times-Call"]);
+  });
+
+  it("does not warn when only the outlet's short alias is used", () => {
+    const body = "The Leader first reported the closure last week.";
+    const url = "https://www.longmontleader.com/local-news/church-commits-40k-for-san-lazaro";
+    assert.deepEqual(uncreditedOutlets(body, [url]), []);
+  });
+
+  it("does not warn when there are no recognised-outlet sources", () => {
+    const body = "A home exploded on 15th Avenue on Aug. 8.";
+    const url = "https://www.uchealth.org/newsroom/longs-peak-hospital-expansion-halfway/";
+    assert.deepEqual(uncreditedOutlets(body, [url]), []);
+  });
+
+  it("flags each uncredited outlet once, in source order", () => {
+    const body = "The board voted Thursday.";
+    const urls = [
+      "https://www.timescall.com/2026/08/28/front-range-rail-sales-tax-ballot/",
+      "https://www.dailycamera.com/2026/08/28/boulder-county-rail-tax-vote/",
+      "https://www.timescall.com/2026/08/28/front-range-rail-sales-tax-ballot/",
+    ];
+    assert.deepEqual(uncreditedOutlets(body, urls), ["Longmont Times-Call", "Daily Camera"]);
+  });
+});
+
+describe("uncreditedOutlets: a word that merely contains an alias is not a credit", () => {
+  it("does not treat 'the leadership' as naming the Leader", () => {
+    const body = "The leadership voted late, and the packet changed before the vote.";
+    const out = uncreditedOutlets(body, ["https://www.longmontleader.com/story/one"]);
+    assert.deepEqual(out, ["Longmont Leader"], "a substring inside a longer word is not a credit");
+  });
+
+  it("still accepts the real short alias standing on its own", () => {
+    const body = "The Leader reported the packet changed before the vote.";
+    assert.deepEqual(uncreditedOutlets(body, ["https://www.longmontleader.com/story/one"]), []);
+  });
+});
+
 
 describe("provenance titles", () => {
   const URL_ = "https://www.longmontleader.com/local-news/church-commits-40k-for-san-lazaro";

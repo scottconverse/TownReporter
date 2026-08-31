@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, Field, InkButton, leadOrigin } from "@/components/desk-chrome";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import { draftLead, getLead, publishLead, pullTodo, saveDraft, saveReportingNotes } from "@/lib/news/desk";
+import { uncreditedOutlets } from "@/lib/news/report";
 import { formatShortDate, parseUrlList, TOPICS } from "@/lib/paper";
 import {
   applyTodoPatch,
@@ -316,6 +317,17 @@ function StoryPage() {
     if (!notes.verify.length && verify) notes.verify = [verify];
   }
   const score = data.lead.newsworthiness ?? 0;
+  /*
+    The "how we report" page promises that leaning on another newsroom's
+    reporting gets them named in the body, not just linked. Linking was
+    already enforced (see `linkOutletInBody`); naming rested on model
+    instruction and an editor's eye alone. This checks the editable draft
+    body against the lead's own sources at the moment of publishing, when
+    both are final. It only warns -- a source can be background rather than
+    something the story hangs on, and that call stays the editor's.
+  */
+  const draftSources = parseUrlList(data.draft?.source_urls ?? "[]");
+  const uncredited = uncreditedOutlets(body, draftSources.length > 0 ? draftSources : sources);
 
   return (
     <DeskShell title={data.lead.headline} kicker="Workbench" hideTitle>
@@ -403,6 +415,13 @@ function StoryPage() {
                         This puts the story on the public paper and in the feed, under
                         your name, now. Corrections are published, not silent edits.
                       </span>
+                      {uncredited.length > 0 ? (
+                        <span className="note">
+                          {uncredited.length === 1
+                            ? `The body never names ${uncredited[0]}, though it's in the sources. If the story leans on their reporting, we said we'd say so.`
+                            : `The body never names ${uncredited.join(" or ")}, though they're in the sources. If the story leans on their reporting, we said we'd say so.`}
+                        </span>
+                      ) : null}
                       <InkButton
                         disabled={publish.isPending}
                         onClick={() => {

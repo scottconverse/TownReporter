@@ -67,6 +67,43 @@ function dropBrowser(reason: string) {
   browser = null;
 }
 
+// Chromium's own OS-level renderer sandbox is the real barrier between a
+// hostile page (arbitrary JS from a civic site we don't control) and this
+// server's privileges. `--no-sandbox` disables it. It exists as a flag
+// because the sandbox fails to *initialize* in some environments — running
+// as root, or a container without the right namespaces/seccomp support —
+// and Chromium just refuses to launch at all there. Most deploys aren't
+// that environment, so the flag should not be on by default: a renderer
+// exploit in fetched page content should stay inside Chromium's jail, not
+// land with the process's own privileges. `TOWNREPORTER_CHROMIUM_NO_SANDBOX=1`
+// is the documented escape hatch for the boxes that genuinely need it.
+const SANDBOX_ESCAPE_HATCH = "TOWNREPORTER_CHROMIUM_NO_SANDBOX";
+const BASE_CHROMIUM_ARGS = ["--disable-dev-shm-usage", "--disable-gpu"];
+
+/**
+ * The launch args to use *before* any runtime fallback. Exported so a test
+ * can assert the default omits `--no-sandbox` without spinning up real
+ * Chromium — this is the exact decision ENG-203 hardened, so it is the one
+ * thing a mutation here must not be able to slip past unnoticed.
+ */
+export function sandboxedLaunchArgs(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (env[SANDBOX_ESCAPE_HATCH] === "1") {
+    // Operator opted out explicitly. Costs the OS-level renderer jail.
+    return ["--no-sandbox", ...BASE_CHROMIUM_ARGS];
+  }
+  return BASE_CHROMIUM_ARGS;
+}
+
+async function launchChromium(
+  mod: { chromium: { launch: (opts: Record<string, unknown>) => Promise<ChromiumBrowser> } },
+  args: string[],
+): Promise<ChromiumBrowser> {
+  return (await mod.chromium.launch({
+    headless: true,
+    args,
+  })) as unknown as ChromiumBrowser;
+}
+
 async function getBrowser(): Promise<ChromiumBrowser | null> {
   if (typeof window !== "undefined") return null;
   if (process.env["VERCEL"] || process.env["TOWNREPORTER_NO_PLAYWRIGHT"] === "1") return null;
@@ -83,10 +120,26 @@ async function getBrowser(): Promise<ChromiumBrowser | null> {
       const mod = (await import(/* @vite-ignore */ spec)) as {
         chromium: { launch: (opts: Record<string, unknown>) => Promise<ChromiumBrowser> };
       };
-      browser = (await mod.chromium.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-      })) as unknown as ChromiumBrowser;
+      const args = sandboxedLaunchArgs();
+      if (args.includes("--no-sandbox")) {
+        browser = await launchChromium(mod, args);
+        return browser;
+      }
+      try {
+        browser = await launchChromium(mod, args);
+      } catch (err) {
+        // The sandbox failed to *initialize* (root user, missing container
+        // namespaces), not a code bug we can retry away. Fall back once so a
+        // render worker on such a box doesn't just stop working, but say so
+        // loudly — silently running unsandboxed is the one thing worse than
+        // a warning nobody reads.
+        console.warn(
+          `[render] Chromium sandbox failed to start (${err instanceof Error ? err.message : String(err)}); ` +
+            `relaunching WITHOUT the OS sandbox. A renderer exploit can now reach this process's privileges. ` +
+            `Set ${SANDBOX_ESCAPE_HATCH}=1 to silence this warning on boxes where the sandbox can never start.`,
+        );
+        browser = await launchChromium(mod, ["--no-sandbox", ...BASE_CHROMIUM_ARGS]);
+      }
       return browser;
     } catch {
       browser = null;

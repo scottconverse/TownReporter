@@ -310,6 +310,58 @@ export function outletNamesForHost(url: string): string[] {
   return [];
 }
 
+/*
+  "We name them" is a promise about the printed body, and nothing checked it.
+
+  `linkOutletInBody` above turns a name that is already in the prose into a
+  link; it has never asked whether the name got there in the first place. A
+  draft can lean on the Leader's reporting for a whole paragraph, cite the
+  Leader's URL in its sources, and never once say "Longmont Leader" — the
+  story reads as the paper's own work while the sources panel quietly carries
+  the debt. That gap is invisible to an editor unless they open the sources
+  panel and read the body side by side, which is exactly the sort of check a
+  deadline skips.
+
+  This does not decide anything. A source can sit in `source_urls` as
+  background — confirmation, a document referenced once, a name spelled a
+  particular way — without the story hanging on it, and that is a legitimate
+  editorial call this function has no way to make. It only flags outlets it
+  can name whose URL is in the sources and whose name (in any of its known
+  forms) never appears in the body, so a human decides whether the omission
+  is fine or an unpaid debt.
+*/
+/**
+ * The text as space-delimited words, padded at both ends.
+ *
+ * Whole-word matching without a regex to escape. "the Leader" is one of the
+ * Leader's own aliases, and a body reading "the leadership voted" CONTAINS
+ * that alias as a substring -- which counted as a credit and silently
+ * withheld the warning. Padding both sides means the comparison can only
+ * succeed on whole words: " the leadership " does not contain " the leader ".
+ */
+function spacedWords(text: string): string {
+  return ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+}
+
+export function uncreditedOutlets(body: string, sourceUrls: string[]): string[] {
+  const seen = new Set<string>();
+  const missing: string[] = [];
+  for (const url of sourceUrls) {
+    const names = outletNamesForHost(url);
+    if (names.length === 0) continue;
+    const primary = names[0]!;
+    if (seen.has(primary)) continue;
+    const credited = names.some((name) => spacedWords(body).includes(spacedWords(name)));
+    if (!credited) {
+      seen.add(primary);
+      missing.push(primary);
+    } else {
+      seen.add(primary);
+    }
+  }
+  return missing;
+}
+
 /** First mention of another newsroom becomes a link to the story URL, not a homepage. */
 export function linkOutletInBody(body: string, urls: string[]): string {
   let out = body;

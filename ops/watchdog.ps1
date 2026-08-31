@@ -24,10 +24,26 @@
   Every decision is logged with the value it was based on. The first version
   wrote "app DOWN" and nothing else, which was indistinguishable from a broken
   probe -- and that is exactly what it turned out to be.
+
+  TEST-003: three seams, each an env var that defaults to the exact value the
+  live paper already used, so an unset environment produces byte-identical
+  behavior to before this change. They exist so a CI runner can point the
+  watchdog at a disposable app/Postgres pair instead of this machine's real
+  ones -- the recovery story was covered only by static/parse tests, never by
+  an actual kill-and-recover. Get these defaults wrong and the watchdog aims
+  at the wrong socket on the machine that runs the live paper.
+    WATCHDOG_APP_PORT    - port the app is checked/repaired on (default: the
+                            .env-derived port from lib-port.ps1, same as always)
+    WATCHDOG_PG_PORT     - port Postgres is checked/repaired on (default: 5433)
+    WATCHDOG_START_SCRIPT - script used to (re)start the app (default:
+                            start-townreporter.ps1, same as always)
 #>
 
 . (Join-Path $PSScriptRoot "lib-port.ps1")
 $ErrorActionPreference = "Stop"
+if ($env:WATCHDOG_APP_PORT) { $port = $env:WATCHDOG_APP_PORT }
+$pgPort = if ($env:WATCHDOG_PG_PORT) { $env:WATCHDOG_PG_PORT } else { "5433" }
+$startScript = if ($env:WATCHDOG_START_SCRIPT) { $env:WATCHDOG_START_SCRIPT } else { Join-Path $PSScriptRoot "start-townreporter.ps1" }
 $app = Split-Path -Parent $PSScriptRoot
 $logDir = Join-Path $app "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
@@ -71,10 +87,11 @@ $repaired = @()
 
 # --- Postgres -------------------------------------------------------------
 # 5433, not the default: another Postgres that does not belong to this project
-# owns 5432 on this machine.
-$pgUp = Test-Port 5433
+# owns 5432 on this machine. (WATCHDOG_PG_PORT overrides this for a test run;
+# see the header comment -- production never sets it, so this is 5433 there.)
+$pgUp = Test-Port $pgPort
 if (-not $pgUp) {
-  Write-Log "postgres: no listener on 5433, starting"
+  Write-Log "postgres: no listener on $pgPort, starting"
   $bin  = "$env:USERPROFILE\scoop\apps\postgresql\current\bin"
   $data = "$env:USERPROFILE\scoop\persist\postgresql\data"
   $pgLog = "$env:USERPROFILE\scoop\persist\postgresql\pg.log"
@@ -84,8 +101,8 @@ if (-not $pgUp) {
     # Three minutes, for the same reason as start-townreporter.ps1: crash
     # recovery after an unclean shutdown outran a thirty second wait on this
     # machine by twenty-three seconds.
-    for ($i = 0; $i -lt 180 -and -not (Test-Port 5433); $i++) { Start-Sleep -Seconds 1 }
-    $pgUp = Test-Port 5433
+    for ($i = 0; $i -lt 180 -and -not (Test-Port $pgPort); $i++) { Start-Sleep -Seconds 1 }
+    $pgUp = Test-Port $pgPort
     if ($pgUp) { $repaired += "postgres" }
   } catch {
     Write-Log "postgres: start failed: $($_.Exception.Message)"
@@ -100,7 +117,7 @@ $appCode = 0
 $appError = ""
 if ($appPort) {
   try {
-    $appCode = (Invoke-WebRequest "http://localhost:3000/" -UseBasicParsing -TimeoutSec 20).StatusCode
+    $appCode = (Invoke-WebRequest "http://localhost:$port/" -UseBasicParsing -TimeoutSec 20).StatusCode
   } catch {
     $appError = $_.Exception.Message
   }
@@ -112,14 +129,32 @@ if (-not $appHealthy) {
   if (-not $pgUp) {
     Write-Log "app: postgres is down, not starting the app against a dead database"
   } else {
-    # Clear a process holding the port but not serving, or the start script
-    # no-ops on its own port check. Matched by command line, never by image
-    # name: other node.exe processes on this machine belong to other software.
-    $stale = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-      Where-Object { $_.CommandLine -like "*.output/server/index.mjs*" })
-    foreach ($p in $stale) {
-      Write-Log "app: stopping stale PID $($p.ProcessId)"
-      Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+    # Clear a process holding THIS port but not serving, or the start script
+    # no-ops on its own port check.
+    #
+    # Scoped to the port, not to every matching command line. The sweep used
+    # to enumerate all node.exe whose command line contained
+    # ".output/server/index.mjs" and kill every one -- which is every install
+    # of this app on the machine, not just the one being repaired. On the
+    # operator's box, where the live paper and a development copy run side by
+    # side, an unhealthy app on one port would have taken the healthy one on
+    # the other down with it, and pointing the WATCHDOG_APP_PORT seam at a
+    # test instance would have killed the live paper outright.
+    #
+    # Both parts of the check still matter: the owner of the port, AND that
+    # it is this app -- never an image-name match, because other node.exe
+    # processes on this machine belong to other software.
+    $owners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+      Select-Object -ExpandProperty OwningProcess -Unique)
+    foreach ($owner in $owners) {
+      $p = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue
+      if (-not $p) { continue }
+      if ($p.Name -ne 'node.exe' -or $p.CommandLine -notlike "*.output/server/index.mjs*") {
+        Write-Log "app: port $port is held by PID $owner ($($p.Name)), which is not this app -- not touching it"
+        continue
+      }
+      Write-Log "app: stopping stale PID $owner on port $port"
+      Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
     }
     <#
       Launch the start script as a DETACHED process, not with `&`.
@@ -137,7 +172,7 @@ if (-not $appHealthy) {
       $exe = if ($shell) { $shell.Source } else { "powershell.exe" }
       Start-Process -FilePath $exe `
         -ArgumentList "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", `
-                      "-File", (Join-Path $PSScriptRoot "start-townreporter.ps1") `
+                      "-File", $startScript `
         -WindowStyle Hidden
       for ($i = 0; $i -lt 45 -and -not (Test-Port $port); $i++) { Start-Sleep -Seconds 1 }
       if (Test-Port $port) { $repaired += "app" } else { Write-Log "app: still no listener after start" }

@@ -145,7 +145,10 @@ test("PowerShell ops scripts parse", { skip: !onWindows ? "PowerShell only" : fa
 test("both start paths wait long enough for a cold Postgres", () => {
   for (const name of ["start-townreporter.ps1", "watchdog.ps1"]) {
     const text = readFileSync(join(OPS, name), "utf8");
-    const waits = [...text.matchAll(/\$i -lt (\d+) -and -not \(Test-Port 5433\)/g)];
+    // watchdog.ps1 checks $pgPort (TEST-003: overridable for CI, defaulting to
+    // 5433 -- that default is asserted separately, in the seam test above);
+    // start-townreporter.ps1 has no such override and still checks 5433 literally.
+    const waits = [...text.matchAll(/\$i -lt (\d+) -and -not \(Test-Port (?:5433|\$pgPort)\)/g)];
     assert.ok(waits.length > 0, `ops/${name}: no wait loop for Postgres on 5433 found`);
     for (const [, seconds] of waits) {
       assert.ok(
@@ -177,6 +180,59 @@ test("the watchdog stands down while a promote is running, and the promote arran
   assert.match(pr, /assets\/\[A-Za-z0-9_.-\]\+\\.js/, "promote must verify a real script asset, not just the front page");
 });
 
+/**
+ * TEST-003: the watchdog's port/start-mechanism overrides exist so a CI
+ * runner can point it at a disposable app instead of the live one, but a
+ * wrong default here would silently repoint the PRODUCTION watchdog at the
+ * wrong socket or the wrong start script on the machine that runs the live
+ * paper -- an unset environment (every real run) must still resolve to
+ * exactly 5433, and to start-townreporter.ps1. Both are asserted, not just
+ * that the env var names exist, because a seam with the wrong default is
+ * worse than no seam: it looks safe and is not.
+ */
+test("the watchdog's CI override seam exists and its defaults are still production's values", () => {
+  const wd = readFileSync(join(OPS, "watchdog.ps1"), "utf8");
+  assert.match(wd, /WATCHDOG_APP_PORT/, "watchdog must accept an app-port override for CI");
+  assert.match(wd, /WATCHDOG_PG_PORT/, "watchdog must accept a postgres-port override for CI");
+  assert.match(wd, /WATCHDOG_START_SCRIPT/, "watchdog must accept a start-script override for CI");
+
+  // The postgres-port default must still be 5433 wherever WATCHDOG_PG_PORT is
+  // read: `else { "5433" }`, not some other literal.
+  const pgPortAssign = wd.match(/\$pgPort\s*=\s*if\s*\(\$env:WATCHDOG_PG_PORT\)\s*\{[^}]*\}\s*else\s*\{\s*"(\d+)"\s*\}/);
+  assert.ok(pgPortAssign, "could not find the $pgPort default assignment to check");
+  assert.equal(pgPortAssign[1], "5433", "the postgres-port override's default drifted off production's 5433");
+
+  // The start-script default must still resolve to start-townreporter.ps1,
+  // the same script the logon task and every other production caller use.
+  const startScriptAssign = wd.match(/\$startScript\s*=\s*if\s*\(\$env:WATCHDOG_START_SCRIPT\)\s*\{[^}]*\}\s*else\s*\{([^}]*)\}/);
+  assert.ok(startScriptAssign, "could not find the $startScript default assignment to check");
+  assert.match(
+    startScriptAssign[1],
+    /start-townreporter\.ps1/,
+    "the start-script override's default drifted off production's start-townreporter.ps1",
+  );
+
+  // The app-port override must feed the SAME $port variable lib-port.ps1
+  // already sets from .env, not a parallel variable the rest of the script
+  // ignores -- otherwise overriding it would change what is checked but not
+  // what is repaired, or vice versa.
+  assert.match(
+    wd,
+    /if\s*\(\$env:WATCHDOG_APP_PORT\)\s*\{\s*\$port\s*=\s*\$env:WATCHDOG_APP_PORT\s*\}/,
+    "WATCHDOG_APP_PORT must override the same $port variable used everywhere else in the script",
+  );
+
+  // The app health probe must follow $port, not a hardcoded port -- otherwise
+  // WATCHDOG_APP_PORT would change what gets repaired but the health check
+  // would still probe production's socket, which is exactly the kind of
+  // three-answers-to-one-question bug lib-port.ps1 already exists to prevent.
+  assert.match(
+    wd,
+    /Invoke-WebRequest\s+"http:\/\/localhost:\$port\//,
+    "the app health probe must use $port, not a hardcoded port number",
+  );
+});
+
 test("the shared test build asks whether it is needed before it rebuilds", () => {
   /*
     ensureBuilt used to treat "I got the lock" as "I build". The lock is
@@ -204,4 +260,34 @@ test("the shared test build asks whether it is needed before it rebuilds", () =>
     firstCheck > 0 && lockAt > 0 && firstCheck < lockAt,
     "the first freshness check must come BEFORE the lock is acquired",
   );
+});
+
+test("the watchdog only stops the process holding the port it is repairing", () => {
+  /*
+    The stale-process sweep used to enumerate every node.exe whose command
+    line contained ".output/server/index.mjs" and kill all of them -- which
+    is every install of this app on the machine, not just the one being
+    repaired. The operator's box runs the live paper and a development copy
+    side by side, so an unhealthy app on one port would have taken the
+    healthy one on the other down with it; and once WATCHDOG_APP_PORT could
+    aim the watchdog at a test instance, a recovery test would have killed
+    the live paper outright.
+
+    The sweep must start from "who holds this port", and must still confirm
+    the owner is this app before stopping it.
+  */
+  const wd = readFileSync(join(OPS, "watchdog.ps1"), "utf8");
+  const sweep = wd.slice(wd.indexOf("Clear a process holding"), wd.indexOf("Launch the start script"));
+  assert.match(
+    sweep,
+    /Get-NetTCPConnection -LocalPort \$port/,
+    "the sweep must find its target by the port it is repairing",
+  );
+  assert.doesNotMatch(
+    sweep,
+    /Get-CimInstance Win32_Process -Filter "Name='node\.exe'"/,
+    "the sweep must not enumerate every node process on the machine",
+  );
+  assert.match(sweep, /index\.mjs/, "it must still confirm the owner is this app, not just any port holder");
+  assert.match(sweep, /Stop-Process -Id \$owner/, "it must stop the port's owner, not a list of matches");
 });
