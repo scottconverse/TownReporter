@@ -29,6 +29,7 @@ import { Route as DeskOpsRouteImport } from './routes/desk.ops'
 import { Route as DeskPublishedRouteImport } from './routes/desk.published'
 import { Route as DeskQueueRouteImport } from './routes/desk.queue'
 import { Route as DeskScanRouteImport } from './routes/desk.scan'
+import { Route as DeskSetupRouteImport } from './routes/desk.setup'
 import { Route as DeskSourcesRouteImport } from './routes/desk.sources'
 import { Route as EvidenceVersionIdRouteImport } from './routes/evidence.$versionId'
 import { Route as EvidenceCompareRouteImport } from './routes/evidence.compare'
@@ -137,6 +138,11 @@ const DeskScanRoute = DeskScanRouteImport.update({
   path: '/scan',
   getParentRoute: () => DeskRoute,
 } as any)
+const DeskSetupRoute = DeskSetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => DeskRoute,
+} as any)
 const DeskSourcesRoute = DeskSourcesRouteImport.update({
   id: '/sources',
   path: '/sources',
@@ -193,6 +199,7 @@ export interface FileRoutesByFullPath {
   '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
+  '/desk/setup': typeof DeskSetupRoute
   '/desk/sources': typeof DeskSourcesRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
@@ -221,6 +228,7 @@ export interface FileRoutesByTo {
   '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
+  '/desk/setup': typeof DeskSetupRoute
   '/desk/sources': typeof DeskSourcesRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
@@ -251,6 +259,7 @@ export interface FileRoutesById {
   '/desk/published': typeof DeskPublishedRoute
   '/desk/queue': typeof DeskQueueRoute
   '/desk/scan': typeof DeskScanRoute
+  '/desk/setup': typeof DeskSetupRoute
   '/desk/sources': typeof DeskSourcesRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
@@ -282,6 +291,7 @@ export interface FileRouteTypes {
     | '/desk/published'
     | '/desk/queue'
     | '/desk/scan'
+    | '/desk/setup'
     | '/desk/sources'
     | '/evidence/$versionId'
     | '/evidence/compare'
@@ -310,6 +320,7 @@ export interface FileRouteTypes {
     | '/desk/published'
     | '/desk/queue'
     | '/desk/scan'
+    | '/desk/setup'
     | '/desk/sources'
     | '/evidence/$versionId'
     | '/evidence/compare'
@@ -339,6 +350,7 @@ export interface FileRouteTypes {
     | '/desk/published'
     | '/desk/queue'
     | '/desk/scan'
+    | '/desk/setup'
     | '/desk/sources'
     | '/evidence/$versionId'
     | '/evidence/compare'
@@ -510,6 +522,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskScanRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/desk/setup': {
+      id: '/desk/setup'
+      path: '/setup'
+      fullPath: '/desk/setup'
+      preLoaderRoute: typeof DeskSetupRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/desk/sources': {
       id: '/desk/sources'
       path: '/sources'
@@ -570,6 +589,7 @@ interface DeskRouteChildren {
   DeskPublishedRoute: typeof DeskPublishedRoute
   DeskQueueRoute: typeof DeskQueueRoute
   DeskScanRoute: typeof DeskScanRoute
+  DeskSetupRoute: typeof DeskSetupRoute
   DeskSourcesRoute: typeof DeskSourcesRoute
   DeskIndexRoute: typeof DeskIndexRoute
   DeskStoryLeadIdRoute: typeof DeskStoryLeadIdRoute
@@ -584,6 +604,7 @@ const DeskRouteChildren: DeskRouteChildren = {
   DeskPublishedRoute: DeskPublishedRoute,
   DeskQueueRoute: DeskQueueRoute,
   DeskScanRoute: DeskScanRoute,
+  DeskSetupRoute: DeskSetupRoute,
   DeskSourcesRoute: DeskSourcesRoute,
   DeskIndexRoute: DeskIndexRoute,
   DeskStoryLeadIdRoute: DeskStoryLeadIdRoute,

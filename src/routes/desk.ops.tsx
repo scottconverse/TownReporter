@@ -15,6 +15,8 @@ import { formatAgo, overallState, type HealthState } from "@/lib/ops/health";
 import { TRASH_DAYS, listTrash, purgeTrashItem, restoreTrashItem } from "@/lib/news/trash";
 import { inviteEditor, myDesk } from "@/lib/news/claim";
 import { usePaperDateFormatters } from "@/lib/paper-context";
+import { PaperSetupForm } from "@/components/paper-setup-form";
+import { getPaperConfigForEditor } from "@/lib/news/paper-settings";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -250,6 +252,7 @@ function OpsPage() {
         every five minutes and restarts whatever has stopped. Its log is above.
       </p>
 
+      <PaperSetup />
       <InviteAnEditor />
       <GiveUpTheDesk />
     </DeskShell>
@@ -385,6 +388,31 @@ function RecentlyDeleted() {
  * and hands it over however they like. It expires in seven days, works for
  * exactly the named address, and burns on use.
  */
+/**
+ * CITY-SETUP final slice: the same setup form as the first-run gate
+ * (src/routes/desk.setup.tsx), reachable again here so a mistake made
+ * during setup -- the wrong timezone, a typo in the city -- is fixable
+ * without touching a file. Owner-only, same as Invite an editor below.
+ */
+function PaperSetup() {
+  const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const current = useQuery({
+    queryKey: ["paper-config-for-setup"],
+    queryFn: () => getPaperConfigForEditor(),
+    enabled: me.data?.role === "owner",
+  });
+  if (me.data?.role !== "owner") return null;
+  return (
+    <section className="mt-16 border-t border-rule pt-8">
+      <SecHead
+        title="Paper setup"
+        sub="The paper's name, city, state, timezone, tagline and starting watch list. Saving also rewrites the welcome article on the front page to match."
+      />
+      {current.isPending ? null : <PaperSetupForm initial={current.data} submitLabel="Save" />}
+    </section>
+  );
+}
+
 function InviteAnEditor() {
   const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
   const [email, setEmail] = useState("");

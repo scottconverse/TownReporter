@@ -9,7 +9,6 @@ import {
   ensurePaperSettingsSchema,
   getPaperConfig,
   savePaperConfig,
-  clearPaperConfigCache,
 } from "./paper-settings.ts";
 
 /*
@@ -198,36 +197,25 @@ describe("savePaperConfig ownership", () => {
   });
 });
 
-describe("the config cache", () => {
-  it("serves a repeat read without going back to the database", async () => {
+describe("the config is read fresh", () => {
+  it("a row written behind its back is visible on the very next read", async () => {
+    /*
+      Two caches were tried here and both shipped a paper showing the wrong
+      city: an AsyncLocalStorage one that dragged node:async_hooks into the
+      browser bundle, and a TTL Map whose entry was cleared in one server
+      chunk while the RSS feed read from another. This asserts the absence of
+      both.
+    */
     const newsroomId = 900_010;
     await clearRow(newsroomId);
-    clearPaperConfigCache();
-    const first = await getPaperConfig(newsroomId);
-    const second = await getPaperConfig(newsroomId);
-    assert.equal(first, second, "the second read should be the cached object");
-  });
-
-  it("clearing it makes the next read see a row written behind its back", async () => {
-    const newsroomId = 900_011;
-    await clearRow(newsroomId);
-    clearPaperConfigCache();
     assert.equal((await getPaperConfig(newsroomId)).city, PAPER.city);
     const sql = await getSql();
     await sql`insert into paper_settings (newsroom_id, city) values (${newsroomId}, ${"Riverbend"})`;
-    clearPaperConfigCache();
     assert.equal((await getPaperConfig(newsroomId)).city, "Riverbend");
     await clearRow(newsroomId);
-    clearPaperConfigCache();
   });
 
   it("has no server-only import that could reach the browser", async () => {
-    /*
-      The regression this replaces: an AsyncLocalStorage cache here put
-      `node:async_hooks` in the client graph and every desk page rendered
-      "Something went wrong". CI caught it; a local run did not, because the
-      browser tests skip without a Postgres URL.
-    */
     const src = await readFile(new URL("./paper-settings.ts", import.meta.url), "utf8");
     assert.doesNotMatch(src, /from "node:/, "no node: import belongs in this module");
   });

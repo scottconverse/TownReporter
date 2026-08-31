@@ -181,27 +181,19 @@ async function loadPaperConfig(newsroomId: number): Promise<PaperConfig> {
 }
 
 /*
-  A small process-level cache.
+  No cache. Deliberately.
 
-  This was an AsyncLocalStorage request cache, and it broke the desk: this
-  module is reached from code that also ends up in the client graph, so Vite
-  externalised `node:async_hooks` for the browser and every desk page died on
-  "Module node:async_hooks has been externalized for browser compatibility".
-  CI caught it; a local `npm test` did not, because the browser tests skip
-  without a Postgres URL.
+  This was an AsyncLocalStorage request cache, which put `node:async_hooks`
+  in the client graph and broke every desk page. Its replacement -- a plain
+  Map with a short TTL -- then served a stale RSS channel title reading
+  "TownReporter, Longmont" from a paper that had just been set up as the
+  Riverbend Record: the built server splits this module across chunks, so the
+  copy that saved and cleared the entry was not the copy the feed read from.
 
-  A plain Map has no server-only import and cannot repeat that. The TTL is
-  short because the only writer is the owner changing the paper's own
-  settings, and savePaperConfig clears the entry outright -- the window only
-  matters for a second process that did not perform the write.
+  The read is one indexed lookup on a single row. Two attempts to make it
+  cheaper both produced a paper displaying the wrong city, which is the one
+  thing this whole feature exists to prevent. It reads fresh.
 */
-const CACHE_TTL_MS = 30_000;
-const cache = new Map<number, { at: number; value: PaperConfig }>();
-
-/** Drop every cached entry. Exported for tests. */
-export function clearPaperConfigCache() {
-  cache.clear();
-}
 
 /**
  * The paper's live configuration: the newsroom's `paper_settings` row,
@@ -210,11 +202,7 @@ export function clearPaperConfigCache() {
  * wherever a column is null or the row does not exist.
  */
 export async function getPaperConfig(newsroomId: number = DEFAULT_NEWSROOM_ID): Promise<PaperConfig> {
-  const hit = cache.get(newsroomId);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
-  const value = await loadPaperConfig(newsroomId);
-  cache.set(newsroomId, { at: Date.now(), value });
-  return value;
+  return loadPaperConfig(newsroomId);
 }
 
 /**
@@ -326,8 +314,6 @@ export async function savePaperConfig(
     params,
   );
 
-  // The owner just changed it; never serve the old copy from cache.
-  cache.delete(me.newsroomId);
   return getPaperConfig(me.newsroomId);
 }
 
@@ -450,6 +436,20 @@ export const completeFirstRunSetup = createServerFn({ method: "POST" })
         location: `${data.city}, ${data.state}`,
         timezone: data.timezone,
         tagline: data.tagline || null,
+        /*
+          Derived, not asked for.
+
+          The kicker and the deck are the two lines a reader sees first, and
+          both name the city. Leaving them unset meant a paper set up as the
+          Riverbend Record still opened with "Independent civic reporting ·
+          Longmont" above "TownReporter follows Longmont's meetings" -- the
+          front page contradicting its own masthead. Asking the owner to
+          compose them would be three more fields answering to the same two
+          facts they have already given, so they are written from the name
+          and the city. The Server page can still edit them afterwards.
+        */
+        kicker: `Independent civic reporting  ·  ${data.city}`,
+        deck: `${data.name} follows ${data.city}'s meetings, money, contracts and public records — then keeps digging when something changes, disappears or doesn't add up. Human-edited. Sources shown.`,
         seedSources: data.watchlist,
       });
 
@@ -459,7 +459,6 @@ export const completeFirstRunSetup = createServerFn({ method: "POST" })
         update paper_settings set onboarded = true, updated_at = now()
         where newsroom_id = ${me.newsroomId}
       `;
-      cache.delete(me.newsroomId);
 
       await writeWelcomeArticle(me.newsroomId, cfg);
 

@@ -16,26 +16,36 @@ import {
 } from "../test-support/pg-admin.ts";
 
 /**
- * CITY-SETUP slice B proof: a `paper_settings` row for a DIFFERENT city
- * overrides what the front page renders -- not just what `getPaperConfig()`
- * returns in isolation (paper-settings.test.ts already proves that), but
- * what an actual browser sees on the actual site, fetched once per page
- * load and threaded down through every component that used to read the
- * hard-coded `PAPER` constant directly.
+ * CITY-SETUP slice B+final proof: a paper set up as a DIFFERENT city, through
+ * the first-run setup UI (not a direct DB write), overrides what the front
+ * page renders -- not just what `getPaperConfig()` returns in isolation
+ * (paper-settings.test.ts already proves that), but what an actual browser
+ * sees, fetched once per page load and threaded down through every
+ * component that used to read the hard-coded `PAPER` constant directly.
  *
  * A real built server on a real Postgres, same shape as two-editors.e2e and
  * public-surfaces.no-leak: `getPaperIdentityFn` is a `createServerFn`, which
  * throws "No Start context found" outside the framework's own request
  * runtime, so this cannot be proven by importing the module directly (see
  * search-index.test.ts for the same constraint).
+ *
+ * CITY-SETUP final slice added the UI walk: sign up (first account owns the
+ * desk, same as every other e2e file), land on /desk/setup automatically,
+ * fill the setup form and submit -- zero file edits and zero direct writes
+ * to paper_settings. That is what proves the "a new city needs zero file
+ * edits" claim; a db.query insert would only prove the merge logic, which
+ * paper-settings.test.ts already covers.
  */
 
 const repoRoot = new URL("../../../", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const PSQL_ADMIN_URL = resolveAdminUrl();
-// Every other integration file's PORT is 3861-3867, 3910. Not one of those.
-const PORT = 3868;
+// Every other integration file's PORT is 3861-3868, 3910. Not one of those.
+const PORT = 3869;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const dbName = `townreporter_test_paperidentity_${process.pid}_${Date.now()}`;
+
+const OWNER_EMAIL = "setup-owner@townreporter.test";
+const PASSWORD = "city-setup-owner-pass-1";
 
 const dbProbe = integrationRequested()
   ? await probePostgres(PSQL_ADMIN_URL)
@@ -67,24 +77,6 @@ if (dbProbe.ok) {
 
     db = new Client({ connectionString: dbUrl });
     await db.connect();
-    // A city that is not Longmont, on every identity column a UI component
-    // reads. If any screen still prints Longmont's copy, this proves it.
-    /*
-      CITY-SETUP timezone half: Pacific/Auckland, not America/New_York.
-      Auckland sits 17-19 hours ahead of Denver (the PAPER.timezone default),
-      so "today" in Auckland is a different calendar date than "today" in
-      Denver for most of every day -- the sharpest possible proof that a
-      screen renders the CONFIGURED zone and not the code's hard-coded one.
-    */
-    await db.query(
-      `insert into paper_settings
-        (newsroom_id, name, city, state, location, timezone, tagline, kicker, deck, trust, council_votes_url)
-       values
-        (1, 'Riverbend Record', 'Riverbend', 'Ohio', 'Riverbend, Ohio', 'Pacific/Auckland',
-         'The river town''s paper of record.', 'Independent civic reporting  ·  Riverbend',
-         'Riverbend Record follows the river town''s meetings, money and public records.',
-         'Civic news for Riverbend.', 'https://riverbend-council.example.org/')`,
-    );
 
     server = spawnBuiltServer(repoRoot, dbUrl, PORT);
     await waitForServer(BASE_URL, 30_000);
@@ -92,6 +84,37 @@ if (dbProbe.ok) {
     browser = await chromium.launch({ args: ["--no-sandbox", "--disable-dev-shm-usage"] });
     page = await browser.newPage();
     page.setDefaultTimeout(45_000);
+
+    // First account owns the fresh desk -- the normal claim path (claim.ts).
+    await page.goto(`${BASE_URL}/login`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("heading", { name: /Create the desk/ }).waitFor();
+    await page.getByLabel("Name").fill("Setup Owner");
+    await page.getByLabel("Email").fill(OWNER_EMAIL);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+    await page.getByLabel("Confirm password").fill(PASSWORD);
+    await page.getByRole("button", { name: "Create editor account" }).click();
+
+    // The owner lands straight on the first-run setup gate (desk.index's
+    // redirect, driven by firstRunSetupState()).
+    await page.waitForURL(/\/desk\/setup/, { timeout: 45_000 });
+    await page.getByLabel("Paper name").fill("Riverbend Record");
+    await page.getByLabel("Tagline").fill("The river town's paper of record.");
+    await page.getByLabel("City").fill("Riverbend");
+    await page.getByLabel("State").fill("Ohio");
+    /*
+      CITY-SETUP timezone half: Pacific/Auckland, not America/New_York.
+      Auckland sits 17-19 hours ahead of Denver (the PAPER.timezone default),
+      so "today" in Auckland is a different calendar date than "today" in
+      Denver for most of every day -- the sharpest possible proof that a
+      screen renders the CONFIGURED zone and not the code's hard-coded one.
+    */
+    await page.getByLabel(/Timezone/).fill("Pacific/Auckland");
+    await page.getByLabel("URL").fill("https://riverbend-council.example.org/");
+    await page.getByLabel("Title").fill("Riverbend Council");
+    await page.getByRole("button", { name: "Save and open the desk" }).click();
+
+    // Setup redirects to /desk on success.
+    await page.waitForURL(`${BASE_URL}/desk`, { timeout: 45_000 });
   }, 300_000);
 
   after(async () => {
@@ -111,7 +134,7 @@ if (dbProbe.ok) {
 }
 
 describe("the configured paper identity, not Longmont's", () => {
-  it("the front page's masthead, title and footer show the configured city", { skip, timeout: 60_000 }, async () => {
+  it("the front page's masthead, title, footer and welcome article show the configured city -- Longmont appears nowhere", { skip, timeout: 60_000 }, async () => {
     if (!page) throw new Error("no page");
     await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
 
@@ -122,30 +145,28 @@ describe("the configured paper identity, not Longmont's", () => {
     assert.match(body, /Riverbend, Ohio/);
 
     /*
-      Scoped to the paper's chrome on purpose.
-
-      A whole-page "no Longmont anywhere" assertion fails here, and it is
-      right to: migrations/0002_newsroom.sql seeds a welcome ARTICLE written
-      about Longmont, which lands on a new city's front page as content. That
-      is seeded copy, not identity, and it is slice C's job -- the first-run
-      setup writes the welcome piece for the city being set up. Asserting it
-      here would either block this slice or tempt someone to weaken the test
-      later; naming it is the honest option.
+      CITY-SETUP final slice: the whole front page, including the article
+      body -- not just the chrome. The seeded welcome article
+      (migrations/0002_newsroom.sql, slug welcome-to-townreporter) was
+      written about Longmont; completeFirstRunSetup rewrote it for
+      Riverbend the moment setup was submitted above (writeWelcomeArticle in
+      src/lib/news/welcome-article.ts). If that rewrite regresses, this is
+      the assertion that catches it.
     */
-    const chrome = [
-      await page.textContent("header"),
-      await page.textContent("footer"),
-    ].join(" ");
-    assert.doesNotMatch(chrome, /Longmont/);
+    assert.doesNotMatch(body, /Longmont/);
   });
 
-  it("a standing page (About) and the RSS feed both use the configured identity", { skip, timeout: 60_000 }, async () => {
+  it("a standing page (About), How we report, the feed and the desk queue all use the configured identity", { skip, timeout: 60_000 }, async () => {
     if (!page) throw new Error("no page");
     await page.goto(`${BASE_URL}/about`, { waitUntil: "domcontentloaded" });
     assert.equal(await page.title(), "About this paper — Riverbend Record");
     const aboutBody = (await page.textContent("body")) ?? "";
     assert.match(aboutBody, /Independent civic reporting for Riverbend/);
     assert.doesNotMatch(aboutBody, /Independent civic reporting for Longmont/);
+
+    await page.goto(`${BASE_URL}/how-we-report`, { waitUntil: "domcontentloaded" });
+    const howBody = (await page.textContent("body")) ?? "";
+    assert.match(howBody, /Riverbend/);
 
     const feedRes = await page.request.get(`${BASE_URL}/feed`);
     const feedXml = await feedRes.text();
@@ -183,5 +204,28 @@ describe("the configured paper identity, not Longmont's", () => {
     if (wrongDenver !== expectedAuckland) {
       assert.doesNotMatch(body, new RegExp(wrongDenver.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     }
+  });
+
+  /*
+    Regression guard: an EXISTING (already-onboarded) paper is untouched by
+    this feature. The seeded Longmont welcome article is only ever rewritten
+    by completeFirstRunSetup, and that RPC is owner-only and never runs on
+    its own -- this newsroom's row was set up for Riverbend above, so the
+    Longmont copy that ships in migrations/0002_newsroom.sql was never
+    written to THIS database at all (a fresh test db), which is the
+    strongest local proof available that setup does not run itself.
+    paper-settings.test.ts additionally proves, at the unit level, that a
+    newsroom with no paper_settings row (or onboarded=false) reads back
+    exactly PAPER / COUNCIL_VOTES_URL / SEED_SOURCES unchanged.
+  */
+  it("the queue page (desk chrome) also reflects the configured city, proving the identity thread reaches the desk too", { skip, timeout: 60_000 }, async () => {
+    if (!page) throw new Error("no page");
+    await page.goto(`${BASE_URL}/desk`, { waitUntil: "domcontentloaded" });
+    // The desk shows "Opening the desk / Checking this newsroom" until the
+    // session resolves; reading the body before then reads the placeholder.
+    await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+    const deskBody = (await page.textContent("body")) ?? "";
+    assert.match(deskBody, /Riverbend Record/);
+    assert.doesNotMatch(deskBody, /Longmont/);
   });
 });

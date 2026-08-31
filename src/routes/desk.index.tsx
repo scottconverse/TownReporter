@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { firstRunSetupState } from "@/lib/news/paper-settings";
 import { Busy, InkButton, SecHead } from "@/components/desk-chrome";
 import { LeadRowView } from "@/components/desk-leads";
 import { DeskShell } from "@/components/desk-chrome";
@@ -42,6 +43,24 @@ function DeskHome() {
   const { formatDateTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  /*
+    CITY-SETUP final slice: the owner sees the first-run setup screen
+    exactly once, right after claiming a fresh desk. `needsSetup` goes
+    false the moment completeFirstRunSetup runs (see paper-settings.ts) and
+    stays false, so re-visiting the desk later never redirects again --
+    only the Server page's "Paper setup" section reaches /desk/setup after
+    that, on purpose.
+  */
+  const setupState = useQuery({
+    queryKey: ["first-run-setup"],
+    queryFn: () => firstRunSetupState(),
+  });
+  useEffect(() => {
+    if (setupState.data?.needsSetup) {
+      void navigate({ to: "/desk/setup" });
+    }
+  }, [setupState.data, navigate]);
+
   const sources = useQuery({ queryKey: ["sources"], queryFn: () => listSources() });
   const leads = useQuery({ queryKey: ["leads"], queryFn: () => listLeads() });
   const scans = useQuery({
