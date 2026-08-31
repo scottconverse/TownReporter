@@ -461,6 +461,14 @@
   font-size: 14px;
   line-height: 1.5;
 }
+/* Keyboard focus must stay visible against both the light and dark desk
+   backgrounds. The global :focus-visible rule (styles.css ~line 77) uses a
+   fixed rust outline, which loses almost all contrast on the dark desk
+   background (~1.8:1). Swap it for the desk's themed foreground color,
+   which is chosen per-theme to contrast against --bg. */
+.desk-ltr :focus-visible {
+  outline-color: var(--fg);
+}
 .desk-ltr.night, .desk-ltr .nightpanel {
   --bg: var(--n-bg);
   --bg2: var(--n-bg2);
@@ -655,7 +663,7 @@
 .desk-ltr .f-lab .chip {display:inline-flex;margin-bottom:0}
 .desk-ltr .f input, .desk-ltr .f select, .desk-ltr .f textarea, .desk-ltr .bulk, .desk-ltr .corr-form textarea, .desk-ltr .tipbox textarea {width:100%;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:13px;padding:7px 10px;min-height:34px}
 .desk-ltr .f textarea, .desk-ltr .bulk, .desk-ltr .corr-form textarea, .desk-ltr .tipbox textarea {line-height:1.55;min-height:0}
-.desk-ltr .f input:focus, .desk-ltr .f select:focus, .desk-ltr .f textarea:focus, .desk-ltr .bulk:focus, .desk-ltr .corr-form textarea:focus, .desk-ltr .tipbox textarea:focus {border-color:var(--fg);outline:none}
+.desk-ltr .f input:focus, .desk-ltr .f select:focus, .desk-ltr .f textarea:focus, .desk-ltr .bulk:focus, .desk-ltr .corr-form textarea:focus, .desk-ltr .tipbox textarea:focus {border-color:var(--fg);outline:2px solid var(--fg);outline-offset:2px}
 .desk-ltr .f input:disabled, .desk-ltr .f textarea:disabled {opacity:.6}
 .desk-ltr .bulk {margin-bottom:10px}
 .desk-ltr .src-add {display:grid;grid-template-columns:1.4fr 1fr auto;gap:12px;align-items:end;margin-top:18px}
@@ -710,7 +718,7 @@
 .desk-ltr .note-hint {font-size:11.5px;color:var(--mut);margin:8px 0 0;font-style:italic}
 .desk-ltr .note-add {display:flex;gap:8px;margin-top:14px}
 .desk-ltr .note-add input {flex:1;min-width:0;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:12.5px;padding:6px 9px}
-.desk-ltr .note-add input:focus {border-color:var(--fg);outline:none}
+.desk-ltr .note-add input:focus {border-color:var(--fg);outline:2px solid var(--fg);outline-offset:2px}
 .desk-ltr .notes-disc {margin-top:18px;border:1px solid var(--fg)}
 .desk-ltr .notes-disc summary {font-family:var(--fd);font-weight:600;font-size:13px;padding:10px 14px;cursor:pointer;list-style-position:inside}
 .desk-ltr .notes-disc .notes {margin:0;border:none;border-top:1px solid var(--line)}

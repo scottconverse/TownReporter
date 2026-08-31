@@ -332,9 +332,9 @@ export function Field({
 }
 
 export const inputClass =
-  "border border-rule bg-paper px-3 py-2 text-sm text-ink focus:border-ink focus:outline-none min-h-11";
+  "border border-rule bg-paper px-3 py-2 text-sm text-ink focus:border-ink focus:outline-2 focus:outline-offset-2 focus:outline-[var(--fg,var(--color-ink))] min-h-11";
 export const areaClass =
-  "border border-rule bg-paper px-3 py-2 text-sm text-ink focus:border-ink focus:outline-none min-h-11";
+  "border border-rule bg-paper px-3 py-2 text-sm text-ink focus:border-ink focus:outline-2 focus:outline-offset-2 focus:outline-[var(--fg,var(--color-ink))] min-h-11";
 
 export function Score({ v }: { v: number }) {
   return (

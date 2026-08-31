@@ -106,7 +106,7 @@ function ArchiveSearch() {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Search the archive"
-        className="inline-flex min-h-11 shrink-0 items-center px-3 text-ink transition-[color] duration-150 ease-out hover:text-rust"
+        className="inline-flex min-h-11 shrink-0 items-center px-3 text-ink transition-[color] duration-150 ease-out hover:text-rust focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rust"
       >
         <Search className="size-4" strokeWidth={1.75} aria-hidden />
       </button>
@@ -145,7 +145,7 @@ function ArchiveSearch() {
           setOpen(false);
           if (current) void navigate({ to: "/", search: { q: undefined, topic: undefined } });
         }}
-        className="inline-flex min-h-11 items-center px-2 text-muted hover:text-rust"
+        className="inline-flex min-h-11 items-center px-2 text-muted hover:text-rust focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rust"
       >
         <X className="size-4" strokeWidth={1.75} aria-hidden />
       </button>
@@ -199,7 +199,7 @@ function PaperNav() {
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex min-h-11 w-full items-center justify-center gap-1 px-2 text-[12px] font-medium tracking-[0.12em] text-ink uppercase sm:hidden"
+        className="flex min-h-11 w-full items-center justify-center gap-1 px-2 text-[12px] font-medium tracking-[0.12em] text-ink uppercase focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rust sm:hidden"
       >
         Sections
         <ChevronDown
@@ -246,7 +246,7 @@ function PaperNav() {
               search={"search" in item ? item.search : { topic: undefined, q: undefined }}
               onClick={() => setOpen(false)}
               className={
-                "inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 px-1 transition-[color,border-color] duration-150 ease-out sm:justify-start " +
+                "inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 px-1 transition-[color,border-color] duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rust sm:justify-start " +
                 (active
                   ? "border-rust text-rust"
                   : "border-transparent text-ink hover:text-rust")
@@ -260,7 +260,7 @@ function PaperNav() {
           href={COUNCIL_VOTES_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 border-transparent px-1 transition-[color] duration-150 ease-out hover:text-rust sm:justify-start"
+          className="inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 border-transparent px-1 transition-[color] duration-150 ease-out hover:text-rust focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rust sm:justify-start"
         >
           City council votes
           <ExternalLink className="ml-1 size-3" strokeWidth={1.75} aria-hidden />
@@ -268,7 +268,7 @@ function PaperNav() {
         </a>
         <a
           href="/feed"
-          className="inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 border-transparent px-1 transition-[color] duration-150 ease-out hover:text-rust sm:justify-start"
+          className="inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 border-transparent px-1 transition-[color] duration-150 ease-out hover:text-rust focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rust sm:justify-start"
         >
           RSS
         </a>
@@ -277,7 +277,7 @@ function PaperNav() {
       <ArchiveSearch />
       <Link
         to="/desk"
-        className="pressable inline-flex min-h-11 shrink-0 items-center bg-ink px-3 text-[12px] font-medium tracking-[0.12em] text-paper uppercase hover:bg-ink-2"
+        className="pressable inline-flex min-h-11 shrink-0 items-center bg-ink px-3 text-[12px] font-medium tracking-[0.12em] text-paper uppercase hover:bg-ink-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rust"
       >
         Editor desk
       </Link>

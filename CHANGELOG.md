@@ -1,6 +1,35 @@
 # Changelog
 
-Current release: **0.5.4**.
+Current release: **0.5.5**.
+
+## 0.5.5 — 2026-08-30
+
+Repairs from a live incident, plus two small fixes that were measured
+rather than assumed.
+
+**The paper served a half-written build for eleven minutes.** The v0.5.4
+promotion stopped the app to rebuild; the watchdog, which checks every five
+minutes, saw "app down" and started it 45 seconds before the build finished
+writing. The running server then answered with pages naming script files
+that no longer existed -- the front page still returned 200, which is why
+the promotion's own check passed. Now the promotion tells the watchdog to
+stand down before it stops anything (with a thirty-minute cap, so a promote
+that dies cannot silence the watchdog for good), and its final check fetches
+a script the served page itself names, not just the front page. A tab left
+open across a deploy now quietly reloads itself once instead of showing
+"Failed to fetch dynamically imported module".
+
+**A signed-in editor was told to sign in.** Every desk navigation flashed
+"If this sits here, use Sign in" for about 150 milliseconds -- advice for a
+problem that had not happened. Measured frame by frame, fixed by letting the
+offer wait a beat, and measured again to confirm it is gone.
+
+**Keyboard focus is visible everywhere**, as a real outline rather than a
+border-color swap, in both the light and dark desk themes.
+
+**Two clicks on Scan at the wrong moment could error** instead of joining
+the scan already running. A narrow double-race in the job queue now
+coalesces like every other path.
 
 ## 0.5.4 — 2026-08-30
 
