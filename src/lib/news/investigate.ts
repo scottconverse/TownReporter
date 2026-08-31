@@ -1,5 +1,5 @@
 import { ensureSchemaOnce, getSql } from "../db.ts";
-import { PAPER } from "../paper.ts";
+import { getPaperConfig } from "./paper-settings.ts";
 import { grokChat, parseJsonBlock, plannerModel, providerBudget } from "./ai.ts";
 import {
   CLAIM_HYGIENE_RULES,
@@ -1262,6 +1262,7 @@ export async function observeBaseline(
 ) {
   const spec = baselineSpec(url, title);
   if (!spec) return;
+  const paperConfig = await getPaperConfig(DEFAULT_NEWSROOM_ID);
   const sql = await getSql();
   const prev = await sql<{
     last_seen: string | null;
@@ -1285,8 +1286,8 @@ export async function observeBaseline(
       cadence = Math.round(((prev[0].cadence_days || 30) + gap) / 2);
     }
   }
-  const weekday = now.toLocaleDateString("en-US", { weekday: "long", timeZone: PAPER.timezone });
-  const nth = nthWeekday(now);
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long", timeZone: paperConfig.timezone });
+  const nth = nthWeekday(now, paperConfig.timezone);
   const snap = structureSnapshot(title, "", extras);
   const meeting = extractMeetingInstant(title);
   let lead = prev[0]?.usual_lead_hours ?? null;

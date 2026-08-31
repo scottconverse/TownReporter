@@ -238,11 +238,11 @@ export function detectMissingCadence(
   return out;
 }
 
-export function nthWeekday(d: Date): string {
+export function nthWeekday(d: Date, timeZone: string = PAPER.timezone): string {
   const parts = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     day: "numeric",
-    timeZone: PAPER.timezone,
+    timeZone,
   }).formatToParts(d);
   const day = Number(parts.find((p) => p.type === "day")?.value || "1");
   const wd = parts.find((p) => p.type === "weekday")?.value || "Thursday";

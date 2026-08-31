@@ -180,7 +180,20 @@ function asDate(iso: string | Date | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export function formatDate(iso: string | Date | null | undefined) {
+/*
+  CITY-SETUP slice C1: an optional `timeZone` param, defaulting to
+  PAPER.timezone.
+
+  These three helpers are imported by client components (paper-chrome.tsx,
+  provenance.tsx, article/route files) that this module must stay safe for --
+  no server/db import here, ever (see the file-top note). The configured
+  timezone lives in request-scoped React context (`PaperIdentity.timezone` in
+  paper-context.tsx), not in this module, so the caller -- which already has
+  that context via usePaperIdentity() -- is the right place to supply it. A
+  caller that passes nothing renders exactly what it renders today, which is
+  the "no settings row" no-behaviour-change requirement.
+*/
+export function formatDate(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
   const d = asDate(iso);
   if (!d) return "";
   return d.toLocaleDateString("en-US", {
@@ -188,22 +201,22 @@ export function formatDate(iso: string | Date | null | undefined) {
     month: "long",
     day: "numeric",
     year: "numeric",
-    timeZone: PAPER.timezone,
+    timeZone,
   });
 }
 
-export function formatShortDate(iso: string | Date | null | undefined) {
+export function formatShortDate(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
   const d = asDate(iso);
   if (!d) return "";
   return d.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-    timeZone: PAPER.timezone,
+    timeZone,
   });
 }
 
-export function formatDateTime(iso: string | Date | null | undefined) {
+export function formatDateTime(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
   const d = asDate(iso);
   if (!d) return "";
   return d.toLocaleString("en-US", {
@@ -212,7 +225,7 @@ export function formatDateTime(iso: string | Date | null | undefined) {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-    timeZone: PAPER.timezone,
+    timeZone,
   });
 }
 
