@@ -28,6 +28,18 @@ function SignInLink() {
 function DeskGate() {
   const { user, isPending } = useCurrentUserState();
   const [gaveUp, setGaveUp] = useState(false);
+  /*
+    The sign-in remedy waits a beat before it appears.
+
+    Measured on this screen (QA-002, frame-by-frame over three navigations):
+    a signed-in editor going straight to a desk route saw "Opening the desk
+    -- If this sits here, use Sign in" for about 150ms every time. The
+    session resolves in a blink, so the offer was advice to fix a problem
+    that had not happened, shown to someone already signed in. Nothing was
+    broken; the copy was just faster than the truth. Below the threshold the
+    screen simply says it is opening.
+  */
+  const [slowEnoughToOfferSignIn, setSlowEnoughToOfferSignIn] = useState(false);
   const desk = useQuery({
     queryKey: ["my-desk"],
     queryFn: () => myDesk(),
@@ -41,7 +53,11 @@ function DeskGate() {
       return;
     }
     const t = window.setTimeout(() => setGaveUp(true), SESSION_WAIT_MS);
-    return () => window.clearTimeout(t);
+    const hint = window.setTimeout(() => setSlowEnoughToOfferSignIn(true), 1200);
+    return () => {
+      window.clearTimeout(t);
+      window.clearTimeout(hint);
+    };
   }, [user]);
 
   if (user) {
@@ -94,8 +110,8 @@ function DeskGate() {
       <ScreenPending
         title="Opening the desk"
         kicker="Editor desk"
-        hint="If this sits here, use Sign in."
-        action={<SignInLink />}
+        hint={slowEnoughToOfferSignIn ? "If this sits here, use Sign in." : undefined}
+        action={slowEnoughToOfferSignIn ? <SignInLink /> : undefined}
         awaitingSession
       />
     );

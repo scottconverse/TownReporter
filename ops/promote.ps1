@@ -145,6 +145,19 @@ Say "published stories now: $before"
   stops exactly one process: whatever holds this install's port.
 #>
 if ($PSCmdlet.ShouldProcess("the app on port $port", "stop")) {
+  <#
+    Hold the watchdog off BEFORE the first destructive step. During the
+    v0.5.4 promotion the five-minute watchdog saw the deliberately-stopped
+    app, "repaired" it 45 seconds before the build finished writing, and the
+    paper served a half-written build -- old pages naming script files that
+    no longer existed. watchdog.ps1 stands down while this marker is under
+    30 minutes old; the age cap keeps a promote that dies here from
+    silencing the watchdog forever.
+  #>
+  New-Item -ItemType Directory -Force -Path (Join-Path $app "logs") | Out-Null
+  $promoteMarker = Join-Path $app "logs\promote-in-progress"
+  Set-Content -Path $promoteMarker -Value (Get-Date -Format o) -Encoding ASCII
+
   $owners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
               Select-Object -ExpandProperty OwningProcess -Unique)
   foreach ($owner in $owners) {
@@ -210,6 +223,25 @@ try {
   if ($local -eq 200) { Say "[ OK ] the paper answers on $port" } else { $fail += "local answered $local" }
 } catch { $fail += "local did not answer: $($_.Exception.Message)" }
 
+<#
+  A 200 from the front page is server-side HTML and proves nothing about the
+  client: during the watchdog-race incident the paper answered 200 while
+  every script asset 500d and every click was dead. So fetch a script the
+  page itself names -- if the served HTML and the on-disk build disagree,
+  this is the line that catches it.
+#>
+try {
+  $html = (Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 30).Content
+  $m = [regex]::Match($html, '/assets/[A-Za-z0-9_.-]+\.js')
+  if (-not $m.Success) {
+    $fail += "the served page names no script asset at all"
+  } else {
+    $assetCode = (Invoke-WebRequest "http://127.0.0.1:$port$($m.Value)" -UseBasicParsing -TimeoutSec 30).StatusCode
+    if ($assetCode -eq 200) { Say "[ OK ] the page's own script asset serves ($($m.Value))" }
+    else { $fail += "script asset $($m.Value) answered $assetCode -- served HTML and built assets disagree" }
+  }
+} catch { $fail += "script asset check failed: $($_.Exception.Message)" }
+
 $site = $env:PUBLIC_SITE_URL
 if (-not $site) { $site = "https://townreporter.org" }
 try {
@@ -223,6 +255,13 @@ if ($after -eq $before) { Say "[ OK ] still $after published stories" }
 else { $fail += "published stories went from $before to $after" }
 
 Write-Host ""
+<#
+  The marker comes off on BOTH paths. On success the promote is over; on
+  failure the watchdog is the only automatic thing that can still help, so
+  muzzling it for the rest of the 30-minute cap would make a bad promote
+  worse. The operator message stays the authority either way.
+#>
+Remove-Item (Join-Path $app "logs\promote-in-progress") -Force -ErrorAction SilentlyContinue
 if ($fail.Count -gt 0) {
   $fail | ForEach-Object { Write-Host "  [FAIL] $_" -ForegroundColor Yellow }
   Die "Promotion finished but the paper is not healthy. The backup is at $backup"

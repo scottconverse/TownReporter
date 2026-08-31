@@ -11,6 +11,37 @@ import { PAPER, siteUrl } from "@/lib/paper";
 import appCss from "../styles.css?url";
 import { useState } from "react";
 
+/*
+  A tab left open across a deploy heals itself.
+
+  Every promote replaces the content-hashed script files, so a page loaded
+  before the deploy asks for chunks that no longer exist the moment the
+  reader clicks anything -- and got "Something went wrong: Failed to fetch
+  dynamically imported module" (seen live on three of the operator's own
+  tabs after v0.5.4). Vite announces exactly this as `vite:preloadError`;
+  one reload fetches the current page and the current chunks together. The
+  sessionStorage guard allows a single automatic attempt per minute so a
+  genuinely broken deploy still shows its error instead of reload-looping.
+*/
+if (typeof window !== "undefined") {
+  window.addEventListener("vite:preloadError", (event) => {
+    let last = 0;
+    try {
+      last = Number(sessionStorage.getItem("chunk-reload-at") ?? 0);
+    } catch {
+      /* storage can be unavailable; reload once anyway */
+    }
+    if (Date.now() - last < 60_000) return; // let the error screen show
+    try {
+      sessionStorage.setItem("chunk-reload-at", String(Date.now()));
+    } catch {
+      /* best effort */
+    }
+    event.preventDefault();
+    window.location.reload();
+  });
+}
+
 export const Route = createRootRoute({
   head: () => ({
     meta: [

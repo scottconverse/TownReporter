@@ -156,3 +156,23 @@ test("both start paths wait long enough for a cold Postgres", () => {
     }
   }
 });
+
+test("the watchdog stands down while a promote is running, and the promote arranges it", () => {
+  /*
+    The v0.5.4 incident: promote stopped the app, the watchdog "repaired" it
+    45 seconds before the build finished writing, and the paper served a
+    half-written build. Three parts, each load-bearing: the watchdog honors
+    the marker, the promote writes it BEFORE stopping anything, and the
+    marker ages out so a dead promote cannot muzzle the watchdog forever.
+  */
+  const wd = readFileSync(join(OPS, "watchdog.ps1"), "utf8");
+  const pr = readFileSync(join(OPS, "promote.ps1"), "utf8");
+  assert.match(wd, /promote-in-progress/, "watchdog must know the marker");
+  assert.match(wd, /standing down/i, "watchdog must stand down on a fresh marker");
+  assert.match(wd, /30/, "the marker must age out");
+  assert.match(pr, /promote-in-progress/, "promote must write the marker");
+  const writeAt = pr.indexOf("promote-in-progress");
+  const stopAt = pr.indexOf("stopping the app");
+  assert.ok(writeAt > 0 && stopAt > 0 && writeAt < stopAt, "the marker must be written BEFORE the app is stopped");
+  assert.match(pr, /assets\/\[A-Za-z0-9_.-\]\+\\.js/, "promote must verify a real script asset, not just the front page");
+});

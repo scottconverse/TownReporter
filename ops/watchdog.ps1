@@ -45,6 +45,28 @@ function Test-Port($p) {
   [bool](Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)
 }
 
+# --- Promote in progress? Stand down. --------------------------------------
+# The v0.5.4 promote stopped the app to rebuild; this watchdog saw "app down"
+# and started it 45 seconds BEFORE the build finished writing. The paper then
+# served a half-written build: old pages in memory naming script files that no
+# longer existed on disk, every client action dead, while the front page still
+# answered 200. A repair fired mid-surgery is not a repair.
+#
+# promote.ps1 writes this marker before it stops anything and deletes it when
+# its own verification passes. The age cap means a promote that DIES mid-run
+# cannot silence the watchdog forever: after 30 minutes the guard lapses and
+# normal repairs resume.
+$promoteMarker = Join-Path $app "logs\promote-in-progress"
+if (Test-Path $promoteMarker) {
+  $ageMin = ((Get-Date) - (Get-Item $promoteMarker).LastWriteTime).TotalMinutes
+  if ($ageMin -lt 30) {
+    Write-Log ("promote in progress (marker {0:N1} min old): standing down" -f $ageMin)
+    exit 0
+  }
+  Write-Log ("promote marker is {0:N1} min old -- treating the promote as dead and resuming" -f $ageMin)
+  Remove-Item $promoteMarker -Force -ErrorAction SilentlyContinue
+}
+
 $repaired = @()
 
 # --- Postgres -------------------------------------------------------------
