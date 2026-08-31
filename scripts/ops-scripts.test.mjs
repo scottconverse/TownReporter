@@ -176,3 +176,32 @@ test("the watchdog stands down while a promote is running, and the promote arran
   assert.ok(writeAt > 0 && stopAt > 0 && writeAt < stopAt, "the marker must be written BEFORE the app is stopped");
   assert.match(pr, /assets\/\[A-Za-z0-9_.-\]\+\\.js/, "promote must verify a real script asset, not just the front page");
 });
+
+test("the shared test build asks whether it is needed before it rebuilds", () => {
+  /*
+    ensureBuilt used to treat "I got the lock" as "I build". The lock is
+    released the moment the first build finishes, so a test file arriving
+    late found it free and rebuilt -- emptying .output underneath servers
+    its siblings were already serving from. The victim failed on ENOENT for
+    a script chunk it had already named in HTML it had sent: the same shape
+    as the v0.5.4 production incident, where a watchdog restart landed
+    mid-build. Five integration files hid it; a sixth exposed it in CI.
+
+    Two properties keep it shut: the freshness check exists, and it is
+    consulted BOTH before taking the lock and again while holding it.
+  */
+  const src = readFileSync(join(ROOT, "src", "lib", "test-support", "pg-admin.ts"), "utf8");
+  assert.match(src, /function buildIsCurrent/, "the freshness check must exist");
+  const body = src.slice(src.indexOf("export async function ensureBuilt"));
+  const checks = [...body.matchAll(/buildIsCurrent\(repoRoot\)/g)];
+  assert.ok(
+    checks.length >= 2,
+    `ensureBuilt must consult buildIsCurrent before acquiring the lock AND again under it; found ${checks.length}`,
+  );
+  const firstCheck = body.indexOf("buildIsCurrent(repoRoot)");
+  const lockAt = body.indexOf("acquireBuildLock()");
+  assert.ok(
+    firstCheck > 0 && lockAt > 0 && firstCheck < lockAt,
+    "the first freshness check must come BEFORE the lock is acquired",
+  );
+});

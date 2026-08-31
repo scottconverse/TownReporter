@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "pg";
@@ -196,13 +196,93 @@ async function waitForBuildDone(timeoutMs: number): Promise<void> {
  * can never observe "done" for a build that has not actually run yet in this
  * process group.
  */
+/**
+ * Newest mtime under a directory, or 0. Used to ask whether an existing
+ * build is older than the source it was built from.
+ */
+function newestMtime(dir: string): number {
+  let newest = 0;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const e of entries) {
+    const full = join(dir, e.name);
+    if (e.isDirectory()) {
+      newest = Math.max(newest, newestMtime(full));
+    } else {
+      try {
+        newest = Math.max(newest, statSync(full).mtimeMs);
+      } catch {
+        /* raced with a write; ignore */
+      }
+    }
+  }
+  return newest;
+}
+
+/**
+ * Is the build on disk finished AND newer than the source it came from?
+ *
+ * The marker alone is not enough: it outlives the process that wrote it, so
+ * a marker from an earlier `npm test` would vouch for a build that no
+ * longer matches the tree. Comparing it against the newest source file is
+ * the honest question -- "is what is in .output what this code builds?"
+ */
+function buildIsCurrent(repoRoot: string): boolean {
+  if (!existsSync(DONE_MARKER)) return false;
+  if (!existsSync(join(repoRoot, ".output", "server", "index.mjs"))) return false;
+  let markerAt: number;
+  try {
+    markerAt = statSync(DONE_MARKER).mtimeMs;
+  } catch {
+    return false;
+  }
+  const newestSource = Math.max(
+    newestMtime(join(repoRoot, "src")),
+    newestMtime(join(repoRoot, "server")),
+    newestMtime(join(repoRoot, "migrations")),
+    ...["package.json", "vite.config.ts"].map((f) => {
+      try {
+        return statSync(join(repoRoot, f)).mtimeMs;
+      } catch {
+        return 0;
+      }
+    }),
+  );
+  return markerAt >= newestSource;
+}
+
 export async function ensureBuilt(repoRoot: string): Promise<void> {
+  /*
+    Ask FIRST whether a current build already exists.
+
+    This function used to go straight for the lock, and "I got the lock"
+    meant "I build" -- with no check that the work was already done. The
+    lock is released the moment the first build finishes, so a test file
+    that reached this line LATE found the lock free and rebuilt, emptying
+    .output underneath servers its siblings were already serving from. The
+    victim saw ENOENT on a script chunk whose name was in HTML it had
+    already sent: the same shape as the v0.5.4 production incident, where a
+    watchdog restart landed mid-build.
+
+    Five integration files hid this by all arriving during the first build.
+    Adding a sixth (two-editors) put one of them past the finish line, and
+    the stalled-run walk failed on a chunk that no longer existed.
+  */
+  if (buildIsCurrent(repoRoot)) return;
+
   const gotLock = acquireBuildLock();
   if (!gotLock) {
     await waitForBuildDone(120_000);
     return;
   }
   try {
+    // Re-check under the lock: a build may have finished while we waited to
+    // acquire it, and rebuilding on top of live servers is the whole bug.
+    if (buildIsCurrent(repoRoot)) return;
     rmSync(DONE_MARKER, { force: true });
     const buildEnv: NodeJS.ProcessEnv = { ...process.env };
     delete buildEnv.DATABASE_URL;
