@@ -31,6 +31,31 @@ border-color swap, in both the light and dark desk themes.
 the scan already running. A narrow double-race in the job queue now
 coalesces like every other path.
 
+**The watchdog would have killed the live paper.** Its stale-process sweep
+stopped every `node.exe` running this app anywhere on the machine, not the
+one on the port it was repairing -- and this machine runs the live paper and
+a development copy side by side. It now starts from whoever holds that port,
+and still confirms the owner is this app before stopping it.
+
+**Watchdog recovery is proven by machine now, not by outage.** A Windows CI
+job boots the built server on a spare port, kills it, runs the watchdog, and
+fails unless the app comes back. It also fails if the port was already empty
+before the kill, so it cannot pass by killing nothing.
+
+**Hostile pages render inside Chromium's sandbox again.** `--no-sandbox` is
+gone from the default launch; `TOWNREPORTER_CHROMIUM_NO_SANDBOX=1` is the
+documented opt-out for machines where the sandbox cannot start, and a failed
+sandboxed launch falls back once while saying plainly what it gave up.
+
+**Publishing warns when a source newsroom goes uncredited.** If a local
+outlet's story is in the sources and the body never names them, you are told
+before you print. It warns, never blocks -- a source can be background
+rather than leaned on -- and the editor still decides.
+
+**Dependencies:** pglite moves to 0.5.8. Nitro stays where it is: the pin is
+what npm resolves as latest, and the only non-beta release is eight months
+older.
+
 ## 0.5.4 — 2026-08-30
 
 Two editors, one story, at the same time -- now tested. A permanent
