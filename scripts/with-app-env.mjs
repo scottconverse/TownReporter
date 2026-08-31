@@ -169,17 +169,22 @@ function main(argv) {
     Postgres before catching itself. One line at startup makes that mistake
     visible on the first screen instead of discoverable from suspicious data.
     Credentials are not printed; only where it points.
+
+    stdout, NOT stderr. The production start script pipes this command with
+    2>&1 under $ErrorActionPreference = "Stop", where one byte of native
+    stderr is a terminating error -- the stderr version of this line stopped
+    the start script after migrate and took the live paper down to a 502.
   */
   if (env.DATABASE_URL) {
     try {
       const u = new URL(env.DATABASE_URL);
       const from = process.env.DATABASE_URL !== undefined ? "environment" : ".env";
-      console.error(`[with-app-env] DATABASE_URL -> ${u.hostname}:${u.port || "5432"}${u.pathname} (from ${from})`);
+      console.log(`[with-app-env] DATABASE_URL -> ${u.hostname}:${u.port || "5432"}${u.pathname} (from ${from})`);
     } catch {
-      console.error("[with-app-env] DATABASE_URL is set but unparseable");
+      console.log("[with-app-env] DATABASE_URL is set but unparseable");
     }
   } else {
-    console.error("[with-app-env] DATABASE_URL unset -- PGLite in-memory");
+    console.log("[with-app-env] DATABASE_URL unset -- PGLite in-memory");
   }
   // `node` is this very runtime — use its real path rather than a PATH lookup.
   // Avoids the shell entirely (and its DEP0190 warning on every run).
