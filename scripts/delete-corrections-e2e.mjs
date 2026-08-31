@@ -33,6 +33,7 @@
 import { chromium } from "playwright";
 import pg from "pg";
 import { checkedUrl } from "./browser-guard.mjs";
+import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
 
 const base = checkedUrl(
   process.env.DELETE_CORR_BASE_URL || "http://127.0.0.1:8080",
@@ -194,6 +195,7 @@ async function main() {
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await completeFirstRunSetup(page, base);
   step("first account owns the desk with no setup token");
 
   // ── File, write, publish ───────────────────────────────────────────────────

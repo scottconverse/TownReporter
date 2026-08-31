@@ -16,6 +16,7 @@
  */
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
+import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
 
 const base = checkedUrl(process.env.SOURCES_BASE_URL || "http://127.0.0.1:3200").replace(/\/$/, "");
 const stamp = Date.now();
@@ -42,6 +43,7 @@ try {
   await page.getByLabel("Confirm password").fill(process.env.E2E_DESK_PASSWORD ?? "sources-e2e-pass");
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await completeFirstRunSetup(page, base);
   step("owns the desk");
 
   await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
