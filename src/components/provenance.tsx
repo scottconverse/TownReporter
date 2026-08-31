@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { formatDateTime, formatShortDate } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
 import type { ProvenanceItem, StoryFinding } from "@/lib/news/findings";
 
 export function ProvenanceBlock({
@@ -11,6 +11,7 @@ export function ProvenanceBlock({
   findings?: StoryFinding[] | null;
   form?: string | null;
 }) {
+  const { formatDateTime, formatShortDate } = usePaperDateFormatters();
   const urls = new Set(items.map((p) => p.url));
   const versions = new Set(
     items.map((p) => p.version_id).filter((id): id is number => id != null),

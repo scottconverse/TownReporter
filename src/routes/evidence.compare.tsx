@@ -4,7 +4,7 @@ import { PaperShell } from "@/components/paper-chrome";
 import { EmptyState, StorySkeleton } from "@/components/states";
 import { inkGhost } from "@/components/desk-chrome";
 import { comparePublicEvidence } from "@/lib/news/evidence";
-import { formatDateTime } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
 
 type Search = { url?: string; a?: number; b?: number };
 
@@ -35,6 +35,7 @@ function observationLabel(kind: string, disappeared: boolean): string {
 }
 
 function ComparePage() {
+  const { formatDateTime } = usePaperDateFormatters();
   const search = Route.useSearch();
   const loaded = Route.useLoaderData();
   const { data, isPending } = useQuery({

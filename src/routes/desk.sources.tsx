@@ -5,7 +5,7 @@ import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { addSource, addSourcesBulk, listSources, setSourceStatus } from "@/lib/news/desk";
 import { editorFetchError, kindFromSourceUrl, tierFromKind } from "@/lib/news/desk-copy";
-import { formatShortDate } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
 import type { SourceRow } from "@/lib/news/types";
 
 export const Route = createFileRoute("/desk/sources")({ component: SourcesPage });
@@ -239,6 +239,7 @@ function SourceTable({
   addedId?: number | null;
   onStatus: (id: number, status: "accepted" | "rejected") => void;
 }) {
+  const { formatShortDate } = usePaperDateFormatters();
   return (
     <table className="ltable">
       <thead>

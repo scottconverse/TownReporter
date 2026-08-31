@@ -69,11 +69,18 @@ if (dbProbe.ok) {
     await db.connect();
     // A city that is not Longmont, on every identity column a UI component
     // reads. If any screen still prints Longmont's copy, this proves it.
+    /*
+      CITY-SETUP timezone half: Pacific/Auckland, not America/New_York.
+      Auckland sits 17-19 hours ahead of Denver (the PAPER.timezone default),
+      so "today" in Auckland is a different calendar date than "today" in
+      Denver for most of every day -- the sharpest possible proof that a
+      screen renders the CONFIGURED zone and not the code's hard-coded one.
+    */
     await db.query(
       `insert into paper_settings
         (newsroom_id, name, city, state, location, timezone, tagline, kicker, deck, trust, council_votes_url)
        values
-        (1, 'Riverbend Record', 'Riverbend', 'Ohio', 'Riverbend, Ohio', 'America/New_York',
+        (1, 'Riverbend Record', 'Riverbend', 'Ohio', 'Riverbend, Ohio', 'Pacific/Auckland',
          'The river town''s paper of record.', 'Independent civic reporting  ·  Riverbend',
          'Riverbend Record follows the river town''s meetings, money and public records.',
          'Civic news for Riverbend.', 'https://riverbend-council.example.org/')`,
@@ -144,5 +151,37 @@ describe("the configured paper identity, not Longmont's", () => {
     const feedXml = await feedRes.text();
     assert.match(feedXml, /Riverbend Record — Riverbend, Ohio/);
     assert.doesNotMatch(feedXml, /TownReporter — Longmont/);
+  });
+
+  /*
+    CITY-SETUP slice C2 proof: the masthead's "today" (Masthead in
+    src/components/paper-chrome.tsx, via usePaperDateFormatters ->
+    formatDate) renders in the paper's CONFIGURED timezone -- not
+    PAPER.timezone (America/Denver), which is what every call site rendered
+    before this slice regardless of what paper_settings said.
+  */
+  it("the masthead date is computed in the configured timezone, not Denver's", { skip, timeout: 60_000 }, async () => {
+    if (!page) throw new Error("no page");
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+
+    const dateOpts: Intl.DateTimeFormatOptions = {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    };
+    const now = new Date();
+    const expectedAuckland = now.toLocaleDateString("en-US", { ...dateOpts, timeZone: "Pacific/Auckland" });
+    const wrongDenver = now.toLocaleDateString("en-US", { ...dateOpts, timeZone: "America/Denver" });
+
+    const body = (await page.textContent("body")) ?? "";
+    assert.match(body, new RegExp(expectedAuckland.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    // Only meaningful when the two zones actually disagree on the date right
+    // now, which is true for the large majority of every 24h period given a
+    // 17-19 hour offset -- but guard the assertion so a run during the small
+    // overlap window doesn't produce a false failure.
+    if (wrongDenver !== expectedAuckland) {
+      assert.doesNotMatch(body, new RegExp(wrongDenver.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    }
   });
 });

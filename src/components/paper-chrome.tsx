@@ -2,8 +2,7 @@ import { Link, useMatchRoute, useNavigate, useRouterState } from "@tanstack/reac
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ExternalLink, Search, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { formatDate } from "@/lib/paper";
-import { usePaper } from "@/lib/paper-context";
+import { usePaper, usePaperDateFormatters } from "@/lib/paper-context";
 import { inputClass } from "@/components/desk-chrome";
 import { APP_VERSION } from "@/lib/version";
 import { SignedIn, SignedOut, UserButton } from "@/lib/auth/gates";
@@ -13,6 +12,7 @@ import { createEditorCopy } from "@/lib/news/desk-copy";
 
 export function Masthead({ compact = false }: { compact?: boolean }) {
   const paper = usePaper();
+  const { formatDate } = usePaperDateFormatters();
   const today = formatDate(new Date());
   const Name = compact ? "p" : "h1";
   return (

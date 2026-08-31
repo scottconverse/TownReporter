@@ -1,8 +1,7 @@
 import { Link, useMatchRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { formatDate } from "@/lib/paper";
-import { usePaper } from "@/lib/paper-context";
+import { usePaper, usePaperDateFormatters } from "@/lib/paper-context";
 import { UserButton } from "@/lib/auth/gates";
 import { signOut } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
@@ -63,6 +62,7 @@ export function DeskShell({
   hideTitle?: boolean;
 }) {
   const paper = usePaper();
+  const { formatDate } = usePaperDateFormatters();
   const { user, isPending } = useCurrentUserState();
   const { mode, choose } = useDeskMode();
   const nightPage = night || mode === "dark";

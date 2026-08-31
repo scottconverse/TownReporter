@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Chip, InkButton, Score, leadOrigin } from "@/components/desk-chrome";
-import { formatAge, formatShortDate } from "@/lib/paper";
+import { formatAge } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
 import type { PrintedDup } from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
 
@@ -30,6 +31,7 @@ export function LeadRowView({
   onDelete?: () => void;
   roomy?: boolean;
 }) {
+  const { formatShortDate } = usePaperDateFormatters();
   const [confirming, setConfirming] = useState(false);
   const score = lead.newsworthiness ?? 0;
   return (

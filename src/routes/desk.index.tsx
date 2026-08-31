@@ -32,13 +32,14 @@ import {
   workingQueueEmptyCopy,
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
-import { formatDateTime, formatShortDate } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
 
 export const Route = createFileRoute("/desk/")({ component: DeskHome });
 
 const OPEN_KEY = "townreporter.dark.openId";
 
 function DeskHome() {
+  const { formatDateTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const sources = useQuery({ queryKey: ["sources"], queryFn: () => listSources() });

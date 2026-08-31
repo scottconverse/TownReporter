@@ -5,11 +5,12 @@ import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { listScans, listSources, runScan } from "@/lib/news/desk";
 import { editorScanError, scanCountsLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
-import { formatDateTime } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
 
 export const Route = createFileRoute("/desk/scan")({ component: ScanPage });
 
 function ScanPage() {
+  const { formatDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   const scans = useQuery({
     queryKey: ["scans"],

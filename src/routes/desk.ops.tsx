@@ -14,7 +14,7 @@ import { OPS_ACTIONS, type OpsActionId } from "@/lib/ops/actions";
 import { formatAgo, overallState, type HealthState } from "@/lib/ops/health";
 import { TRASH_DAYS, listTrash, purgeTrashItem, restoreTrashItem } from "@/lib/news/trash";
 import { inviteEditor, myDesk } from "@/lib/news/claim";
-import { formatDateTime } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -267,6 +267,7 @@ function OpsPage() {
  * and the two drafts on it" are different things to get back.
  */
 function RecentlyDeleted() {
+  const { formatDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   const [note, setNote] = useState("");
   const [confirmPurge, setConfirmPurge] = useState<number | null>(null);

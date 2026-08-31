@@ -4,7 +4,7 @@ import { PaperShell } from "@/components/paper-chrome";
 import { EmptyState, StorySkeleton } from "@/components/states";
 import { inkGhost } from "@/components/desk-chrome";
 import { getPublicEvidence } from "@/lib/news/evidence";
-import { formatDateTime } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
 
 export const Route = createFileRoute("/evidence/$versionId")({
   loader: ({ params }) => getPublicEvidence({ data: Number(params.versionId) }),
@@ -21,6 +21,7 @@ function observationLabel(kind: string, disappeared: boolean): string {
 }
 
 function EvidencePage() {
+  const { formatDateTime } = usePaperDateFormatters();
   const { versionId } = Route.useParams();
   const loaded = Route.useLoaderData();
   const { data, isPending } = useQuery({

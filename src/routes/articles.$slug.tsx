@@ -5,8 +5,8 @@ import { StoryBody } from "@/components/story-body";
 import { EmptyState, StorySkeleton } from "@/components/states";
 import { inkGhost } from "@/components/desk-chrome";
 import { getPublishedArticle, listPublishedArticles } from "@/lib/news/public";
-import { formatDate, parseUrlList, siteUrl } from "@/lib/paper";
-import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-context";
+import { parseUrlList, siteUrl } from "@/lib/paper";
+import { DEFAULT_PAPER_IDENTITY, usePaperDateFormatters } from "@/lib/paper-context";
 import { ProvenanceBlock } from "@/components/provenance";
 
 export const Route = createFileRoute("/articles/$slug")({
@@ -94,6 +94,7 @@ export const Route = createFileRoute("/articles/$slug")({
 });
 
 function ArticlePage() {
+  const { formatDate } = usePaperDateFormatters();
   const { slug } = Route.useParams();
   const loaded = Route.useLoaderData();
   const { data: article, isPending } = useQuery({

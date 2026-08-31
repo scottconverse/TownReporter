@@ -6,7 +6,7 @@ import { ListSkeleton, ScreenError } from "@/components/states";
 import { deleteEditorial, discardEditorialRequest, fileWrittenEditorial, getEditorial, listEditorials, opinionReadiness, publishEditorial, startEditorial } from "@/lib/news/opinion";
 import { stalledRunCopy } from "@/lib/news/desk-copy";
 import { restoreTrashItem } from "@/lib/news/trash";
-import { formatDateTime } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
 
 export const Route = createFileRoute("/desk/opinion")({
   head: () => ({ meta: [{ title: "Opinion — TownReporter" }] }),
@@ -25,6 +25,7 @@ export const Route = createFileRoute("/desk/opinion")({
  * then shows the piece when it lands.
  */
 function OpinionPage() {
+  const { formatDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   const [subject, setSubject] = useState("");
   const [askedFor, setAskedFor] = useState("");

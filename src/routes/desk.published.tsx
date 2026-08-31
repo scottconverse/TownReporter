@@ -5,11 +5,12 @@ import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { addCorrection, deleteArticle, listMemory, listPublishedDesk } from "@/lib/news/desk";
 import { restoreTrashItem } from "@/lib/news/trash";
-import { formatShortDate } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
 
 export const Route = createFileRoute("/desk/published")({ component: PublishedPage });
 
 function PublishedPage() {
+  const { formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
   const { isError: pubIsError, error: pubError, refetch: pubRefetch, isRefetching: pubRefetching } = published;

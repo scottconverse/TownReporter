@@ -4,8 +4,8 @@ import { PaperShell } from "@/components/paper-chrome";
 import { EmptyState, ListSkeleton } from "@/components/states";
 import { inkGhost } from "@/components/desk-chrome";
 import { listPublicCorrections } from "@/lib/news/public";
-import { EDITOR_EMAIL, formatShortDate } from "@/lib/paper";
-import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-context";
+import { EDITOR_EMAIL } from "@/lib/paper";
+import { DEFAULT_PAPER_IDENTITY, usePaperDateFormatters } from "@/lib/paper-context";
 
 export const Route = createFileRoute("/corrections")({
   /*
@@ -20,6 +20,7 @@ export const Route = createFileRoute("/corrections")({
 });
 
 function Corrections() {
+  const { formatShortDate } = usePaperDateFormatters();
   const { data: items = [], isPending } = useQuery({
     queryKey: ["corrections"],
     queryFn: () => listPublicCorrections(),

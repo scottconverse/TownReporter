@@ -37,7 +37,7 @@ import {
   stalledRunCopy,
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
-import { formatDateTime, formatShortDate } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import {
   InvestigationBriefCard,
@@ -53,6 +53,7 @@ export const Route = createFileRoute("/desk/dark")({
 const OPEN_KEY = "townreporter.dark.openId";
 
 function DarkPage() {
+  const { formatDateTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   const [paste, setPaste] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -648,6 +649,7 @@ function DeskFileCard({
   onKeep: () => void;
   onPark: () => void;
 }) {
+  const { formatShortDate } = usePaperDateFormatters();
   const records = Number(row.records ?? 0);
   const still = Number(row.still_open ?? 0);
   return (
@@ -756,6 +758,7 @@ function InvestigationWorkspace({
   onWriteBrief: () => void;
   briefPending: boolean;
 }) {
+  const { formatShortDate } = usePaperDateFormatters();
   const [frN, setFrN] = useState(6);
   useEffect(() => {
     setFrN(6);
@@ -1015,6 +1018,7 @@ function OpenedRecords({
     excerpt?: string;
   }[];
 }) {
+  const { formatShortDate } = usePaperDateFormatters();
   const ordered = artifacts.slice().reverse();
   function previewOf(a: (typeof ordered)[number]) {
     return readableCapture({

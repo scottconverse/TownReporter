@@ -5,7 +5,8 @@ import { Busy, DeskShell, Field, InkButton, leadOrigin } from "@/components/desk
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import { draftLead, getLead, publishLead, pullTodo, saveDraft, saveReportingNotes } from "@/lib/news/desk";
 import { uncreditedOutlets } from "@/lib/news/report";
-import { formatShortDate, parseUrlList, TOPICS } from "@/lib/paper";
+import { parseUrlList, TOPICS } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
 import {
   applyTodoPatch,
   notesHaveMemo,
@@ -39,6 +40,7 @@ function answered<T>(res: T | undefined | null): res is T {
 }
 
 function StoryPage() {
+  const { formatShortDate } = usePaperDateFormatters();
   const { leadId } = Route.useParams();
   const id = Number(leadId);
   const qc = useQueryClient();
