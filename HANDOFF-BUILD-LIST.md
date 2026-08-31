@@ -119,7 +119,7 @@ VERIFIED: and stops only that owner, after confirming it is this app | ops/watch
 VERIFIED: the watchdog stands down while a promote marker is fresh | ops/watchdog.ps1:75
 VERIFIED: the gate that keeps the sweep port-scoped | scripts/ops-scripts.test.mjs:265
 VERIFIED: the gate that keeps ensureBuilt checking before it builds | scripts/ops-scripts.test.mjs:236
-VERIFIED: pglite is locked at 0.5.8 | package-lock.json:526
+VERIFIED: pglite is locked at 0.5.8 | package-lock.json:527
 VERIFIED: the app's own version constant reads 0.5.5 | src/lib/version.ts:2
 
 ## Runtime observations
