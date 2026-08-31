@@ -102,25 +102,25 @@ fake second city with zero file edits.
 Claims about the code, each tied to a line I opened. Claims about the running
 system have no file to cite and are kept separate, below.
 
-VERIFIED: the masthead constant a new city must edit lives here | src/lib/paper.ts:1
-VERIFIED: the watch list a new city must edit lives here | src/lib/paper.ts:71
-VERIFIED: SEED_SOURCES is consumed only by ensureSeeds, which upserts with on-conflict-do-nothing | src/lib/news/desk.ts:65
-VERIFIED: the meeting-title keywords a new city must edit | src/lib/news/youtube.ts:102
-VERIFIED: the city video channels a new city must edit | src/lib/news/youtube.ts:120
-VERIFIED: the credit warning compares whole words, so an alias inside a longer word is not a credit | src/lib/news/report.ts:342
-VERIFIED: the credit warning itself, returning outlets named in sources but not in the body | src/lib/news/report.ts:346
-VERIFIED: Chromium's default launch args no longer include --no-sandbox | src/lib/news/render-fetch.ts:94
-VERIFIED: the sandbox opt-out is a single documented env var, not a code change | src/lib/news/render-fetch.ts:89
-VERIFIED: ensureBuilt asks whether a current build exists BEFORE taking the lock | src/lib/test-support/pg-admin.ts:275
-VERIFIED: and asks again while holding it, which is what stops a rebuild under live servers | src/lib/test-support/pg-admin.ts:285
-VERIFIED: the freshness check compares the marker against the newest source file | src/lib/test-support/pg-admin.ts:234
-VERIFIED: the watchdog's stale sweep starts from who holds the port being repaired | ops/watchdog.ps1:147
-VERIFIED: and stops only that owner, after confirming it is this app | ops/watchdog.ps1:157
-VERIFIED: the watchdog stands down while a promote marker is fresh | ops/watchdog.ps1:75
-VERIFIED: the gate that keeps the sweep port-scoped | scripts/ops-scripts.test.mjs:265
-VERIFIED: the gate that keeps ensureBuilt checking before it builds | scripts/ops-scripts.test.mjs:236
-VERIFIED: pglite is locked at 0.5.8 | package-lock.json:527
-VERIFIED: the app's own version constant reads 0.5.5 | src/lib/version.ts:2
+VERIFIED: the masthead constant a new city must edit lives here | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/paper.ts:1
+VERIFIED: the watch list a new city must edit lives here | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/paper.ts:71
+VERIFIED: SEED_SOURCES is consumed only by ensureSeeds, which upserts with on-conflict-do-nothing | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/desk.ts:65
+VERIFIED: the meeting-title keywords a new city must edit | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/youtube.ts:102
+VERIFIED: the city video channels a new city must edit | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/youtube.ts:120
+VERIFIED: the credit warning compares whole words, so an alias inside a longer word is not a credit | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/report.ts:342
+VERIFIED: the credit warning itself, returning outlets named in sources but not in the body | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/report.ts:346
+VERIFIED: Chromium's default launch args no longer include --no-sandbox | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/render-fetch.ts:94
+VERIFIED: the sandbox opt-out is a single documented env var, not a code change | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/render-fetch.ts:89
+VERIFIED: ensureBuilt asks whether a current build exists BEFORE taking the lock | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/test-support/pg-admin.ts:275
+VERIFIED: and asks again while holding it, which is what stops a rebuild under live servers | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/test-support/pg-admin.ts:285
+VERIFIED: the freshness check compares the marker against the newest source file | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/test-support/pg-admin.ts:234
+VERIFIED: the watchdog's stale sweep starts from who holds the port being repaired | C:/Users/scott/Desktop/Code/townreporter-dev/ops/watchdog.ps1:147
+VERIFIED: and stops only that owner, after confirming it is this app | C:/Users/scott/Desktop/Code/townreporter-dev/ops/watchdog.ps1:157
+VERIFIED: the watchdog stands down while a promote marker is fresh | C:/Users/scott/Desktop/Code/townreporter-dev/ops/watchdog.ps1:75
+VERIFIED: the gate that keeps the sweep port-scoped | C:/Users/scott/Desktop/Code/townreporter-dev/scripts/ops-scripts.test.mjs:265
+VERIFIED: the gate that keeps ensureBuilt checking before it builds | C:/Users/scott/Desktop/Code/townreporter-dev/scripts/ops-scripts.test.mjs:236
+VERIFIED: pglite is locked at 0.5.8 | C:/Users/scott/Desktop/Code/townreporter-dev/package-lock.json:527
+VERIFIED: the app's own version constant reads 0.5.5 | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/version.ts:2
 
 ## Runtime observations
 
