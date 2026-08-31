@@ -270,14 +270,42 @@ export async function enqueueJob(opts: {
   if (!job) {
     // Lost the race and the winner finished before we looked. Rare, and the
     // honest answer is to try once more rather than invent a job row.
+    //
+    // A narrow double-race can occur between the first findOpenJob miss (above)
+    // and this retry insert: the original winner's job finishes, then a third
+    // caller creates a new open row for the same (newsroom_id, kind, subject_id)
+    // before this retry insert runs. The partial unique index would reject the
+    // insert with a constraint violation, surfacing a 500 error. ON CONFLICT DO
+    // NOTHING makes this insert silent instead; if it lost that race too, the
+    // findOpenJob below finds the third caller's row and returns it. The design
+    // intent is that concurrent enqueues always coalesce, never error.
     const retry = await sql<DeskJob>`
       insert into desk_jobs (newsroom_id, user_id, kind, subject_id, lane, status, stage)
       values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${lane}, ${"queued"}, ${"Queued"})
+      on conflict do nothing
       returning id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
                 created_at, updated_at, started_at, finished_at
     `;
-    if (opts.kick !== false) kickJobs();
-    return retry[0]!;
+    if (retry[0]) {
+      if (opts.kick !== false) kickJobs();
+      return retry[0];
+    }
+    // Lost the race a second time: another caller inserted an open row while
+    // we were retrying. Find and return it.
+    const coalescedJob = await findOpenJob({
+      newsroomId,
+      kind: opts.kind,
+      subjectId: opts.subjectId,
+    });
+    if (coalescedJob) {
+      if (opts.kick !== false) kickJobs();
+      return coalescedJob;
+    }
+    // If we still have nothing, that is a real error — something went wrong
+    // and we have exhausted our retry logic.
+    throw new Error(
+      `Failed to enqueue job after double-race: no open job for newsroom=${newsroomId}, kind=${opts.kind}, subject=${opts.subjectId}`,
+    );
   }
   if (opts.kick !== false) kickJobs();
   return job;

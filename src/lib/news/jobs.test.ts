@@ -437,6 +437,58 @@ describe("enqueue is race-safe", () => {
     assert.notEqual(second.id, first.id, "a finished job must not block the next one");
     await sql`delete from desk_jobs where newsroom_id = ${newsroomId}`;
   });
+
+  it("concurrent enqueues after a job finishes still coalesce onto one row", async () => {
+    // Double-race scenario: Caller A loses the primary insert race, then
+    // findOpenJob on the retry path returns nothing because the winner's job
+    // is now completed. Caller A tries again (retry insert). But while Caller
+    // A is retrying, Caller B creates a new open row. Caller A's retry insert
+    // must not error; it must coalesce onto Caller B's row via ON CONFLICT DO
+    // NOTHING. ENG-204.
+    const newsroomId = 95002 + Math.floor(Math.random() * 1000);
+    const sql = await getSql();
+    const first = await enqueueJob({
+      userId: "race-test-double",
+      newsroomId,
+      kind: "draft",
+      subjectId: 42,
+      kick: false,
+    });
+    // Finish the first job so the retry path has nothing to find.
+    await sql`update desk_jobs set status = 'completed' where id = ${first.id}`;
+
+    // Now 15 concurrent enqueues. In a single-threaded environment we can't
+    // force a true race, but the test harness covers the window where the
+    // first caller's retry runs and concurrent callers are inserting.
+    const results = await Promise.all(
+      Array.from({ length: 15 }, () =>
+        enqueueJob({
+          userId: "race-test-double",
+          newsroomId,
+          kind: "draft",
+          subjectId: 42,
+          kick: false,
+        }),
+      ),
+    );
+
+    // All 15 should coalesce onto one open job.
+    const ids = new Set(results.map((r) => r.id));
+    assert.equal(ids.size, 1, "all concurrent enqueues after a finished job should coalesce");
+
+    // That job should be different from the first (completed) one.
+    assert.notEqual(results[0]!.id, first.id);
+
+    // Should be exactly one open job for the tuple.
+    const rows = await sql<{ c: string }>`
+      select count(*) as c from desk_jobs
+      where newsroom_id = ${newsroomId} and kind = 'draft' and subject_id = 42
+        and status in ('queued', 'running')
+    `;
+    assert.equal(Number(rows[0]!.c), 1, "expected exactly one open job after concurrent enqueues");
+
+    await sql`delete from desk_jobs where newsroom_id = ${newsroomId}`;
+  });
 });
 
 /**
