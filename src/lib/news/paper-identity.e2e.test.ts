@@ -35,6 +35,19 @@ import {
  * to paper_settings. That is what proves the "a new city needs zero file
  * edits" claim; a db.query insert would only prove the merge logic, which
  * paper-settings.test.ts already covers.
+ *
+ * Release-walkthrough Blocker fix: the SAME database is also the sharpest
+ * available proof of the pre-setup state -- before this file's own signup
+ * step runs, this is a brand-new, unclaimed install, exactly what the
+ * walkthrough described ("before anyone has claimed the desk"). The
+ * pre-setup snapshot below is captured with this file's one server, one
+ * browser and one database, in the moments before signup -- not a second
+ * server -- both to avoid doubling this file's already-heavy resource use
+ * (five files in this repo already build the app and boot a real server;
+ * see src/lib/test-support/pg-admin.ts on why they are made to run one at a
+ * time) and because ordering two `it`s deterministically before/after a
+ * shared setup step is not guaranteed by node's test runner, while a single
+ * `before()` awaiting each step in sequence is.
  */
 
 const repoRoot = new URL("../../../", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -61,6 +74,14 @@ let browser: Browser | undefined;
 let page: Page | undefined;
 let db: Client | undefined;
 
+// Captured in before(), in the window between the server coming up and the
+// first signup -- see the file comment for why this is a snapshot rather
+// than its own server+browser.
+let preSetupHtml = "";
+let preSetupBody = "";
+let preSetupFeedXml = "";
+let preSetupCorrectionsBody = "";
+
 if (dbProbe.ok) {
   before(async () => {
     const admin = new Client({ connectionString: PSQL_ADMIN_URL });
@@ -84,6 +105,21 @@ if (dbProbe.ok) {
     browser = await chromium.launch({ args: ["--no-sandbox", "--disable-dev-shm-usage"] });
     page = await browser.newPage();
     page.setDefaultTimeout(45_000);
+
+    /*
+      Release-walkthrough Blocker fix: before anyone signs up, this database
+      has no owner and no paper_settings row at all -- the exact state the
+      walkthrough described. Snapshot it now; the `it`s below just assert on
+      these strings, so this ordering is a plain sequential await, not a
+      test-runner scheduling assumption.
+    */
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+    preSetupHtml = await page.content();
+    preSetupBody = (await page.textContent("body")) ?? "";
+    const feedRes = await page.request.get(`${BASE_URL}/feed`);
+    preSetupFeedXml = await feedRes.text();
+    await page.goto(`${BASE_URL}/corrections`, { waitUntil: "domcontentloaded" });
+    preSetupCorrectionsBody = (await page.textContent("body")) ?? "";
 
     // First account owns the fresh desk -- the normal claim path (claim.ts).
     await page.goto(`${BASE_URL}/login`, { waitUntil: "domcontentloaded" });
@@ -132,6 +168,35 @@ if (dbProbe.ok) {
     await admin.end();
   }, 30_000);
 }
+
+describe("release-walkthrough Blocker fix: before anyone has claimed the desk or run setup", () => {
+  it("the front page does not serve Longmont's identity, does not link Longmont's real council, and does not print the seeded welcome article", { skip, timeout: 60_000 }, async () => {
+    assert.doesNotMatch(
+      preSetupHtml,
+      /longmont/i,
+      "an unconfigured install must not claim to be Longmont's paper anywhere, hrefs included",
+    );
+    // The masthead nav's council link is entirely absent (see
+    // src/components/paper-chrome.tsx: it only renders when
+    // paper.councilVotesUrl is non-empty), not merely pointed elsewhere.
+    assert.doesNotMatch(preSetupHtml, /City council votes/);
+
+    // The migration-seeded article (migrations/0002_newsroom.sql, slug
+    // welcome-to-townreporter) must not be publicly readable pre-setup.
+    assert.doesNotMatch(preSetupBody, /A civic paper for Longmont, edited by a human/);
+    assert.doesNotMatch(preSetupBody, /TownReporter is a small civic newspaper for Longmont/);
+
+    // It also does not claim to be a real, generic town's paper -- an
+    // honest "not set up" state is what the release walkthrough asked for.
+    assert.match(preSetupBody, /not.{0,20}set up|awaiting setup/i);
+  });
+
+  it("the article API surfaces (feed, corrections) are empty too, not just the front page's rendering", { skip, timeout: 60_000 }, async () => {
+    assert.doesNotMatch(preSetupFeedXml, /longmont/i);
+    assert.doesNotMatch(preSetupFeedXml, /<item>/);
+    assert.doesNotMatch(preSetupCorrectionsBody, /longmont/i);
+  });
+});
 
 describe("the configured paper identity, not Longmont's", () => {
   it("the front page's masthead, title, footer and welcome article show the configured city -- Longmont appears nowhere", { skip, timeout: 60_000 }, async () => {

@@ -151,6 +151,22 @@ if (dbProbe.ok) {
     DATABASE_URL: dbUrl,
   });
 
+  /*
+    CITY-SETUP release-walkthrough Blocker fix: nothing published is public
+    until the owner has completed first-run setup (see
+    src/lib/news/public-settings.ts's getPublicPaperConfig and every reader
+    in public.ts / feed.ts). This fixture seeds an operating newsroom
+    directly via SQL, the same way an already-running desk looks -- so it
+    marks itself onboarded the same way migrations/0023 would for a real
+    claimed install, or every assertion below (which predate that gate and
+    have nothing to do with it) would see an empty, gated site instead of
+    the fixture content they are actually testing.
+  */
+  await probeClient.query(
+    `insert into paper_settings (newsroom_id, onboarded) values (1, true)
+     on conflict (newsroom_id) do update set onboarded = true`,
+  );
+
   // A published story and a correction on it, each carrying the real,
   // NOT NULL user_id column production writes on every insert.
   await probeClient.query(

@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { getSql } from "@/lib/db";
 import { collapsePrintedDuplicates } from "@/lib/news/desk-copy";
 import { DEFAULT_NEWSROOM_ID } from "@/lib/news/membership";
-import { getPaperConfig } from "@/lib/news/paper-settings";
+import { getPublicPaperConfig, isOnboarded } from "@/lib/news/paper-settings";
 
 /** XML text escape. Used for every value that is not inside CDATA. */
 function xmlEscape(value: string): string {
@@ -45,8 +45,10 @@ export const Route = createFileRoute("/feed")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        // Fetched once per feed request, not per row.
-        const paper = await getPaperConfig();
+        // Fetched once per feed request, not per row. Public-facing, same as
+        // getPaperIdentityFn: before first-run setup completes this reads as
+        // the neutral placeholder, never the shipped Longmont identity.
+        const paper = await getPublicPaperConfig();
         const origin = siteOrigin(request);
         let rows: {
           slug: string;
@@ -54,25 +56,30 @@ export const Route = createFileRoute("/feed")({
           dek: string;
           published_at: string;
         }[] = [];
-        try {
-          const sql = await getSql();
-          rows = await sql<{
-            slug: string;
-            headline: string;
-            dek: string;
-            published_at: string;
-          }>`
-            select slug, headline, dek, published_at
-            from articles
-            where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
-            order by published_at desc
-            limit 40
-          `;
-        } catch (err) {
-          // Match the rest of the public surface (see lib/news/public.ts): a
-          // database hiccup serves an empty feed, it does not 500 the route.
-          console.error("[paper] feed failed", err);
-          rows = [];
+        // Same rule as src/lib/news/public.ts: nothing published is public
+        // until the owner has completed first-run setup, including the
+        // migration-seeded welcome article.
+        if (await isOnboarded(DEFAULT_NEWSROOM_ID)) {
+          try {
+            const sql = await getSql();
+            rows = await sql<{
+              slug: string;
+              headline: string;
+              dek: string;
+              published_at: string;
+            }>`
+              select slug, headline, dek, published_at
+              from articles
+              where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
+              order by published_at desc
+              limit 40
+            `;
+          } catch (err) {
+            // Match the rest of the public surface (see lib/news/public.ts): a
+            // database hiccup serves an empty feed, it does not 500 the route.
+            console.error("[paper] feed failed", err);
+            rows = [];
+          }
         }
         const items = collapsePrintedDuplicates(rows)
           .map((r) => {

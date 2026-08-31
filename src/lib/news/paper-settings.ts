@@ -18,7 +18,7 @@ import { createServerFn } from "@tanstack/react-start";
 */
 import { authMiddleware } from "../auth/middleware.ts";
 import { getSql } from "../db.ts";
-import { PAPER, COUNCIL_VOTES_URL, SEED_SOURCES } from "../paper.ts";
+import { PAPER, COUNCIL_VOTES_URL, SEED_SOURCES, EDITOR_EMAIL } from "../paper.ts";
 import type { PaperIdentity } from "../paper-context.tsx";
 import { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS } from "./youtube.ts";
 import { requireEditor, ForbiddenError, DEFAULT_NEWSROOM_ID } from "./membership.ts";
@@ -40,6 +40,8 @@ export type PaperConfig = {
   youtubeChannels: string[];
   meetingKeywords: string[];
   seedSources: SeedSource[];
+  /** Runtime override for EDITOR_EMAIL (src/lib/paper.ts). Null means "use the build-time value." */
+  editorEmail: string | null;
 };
 
 type PaperSettingsRow = {
@@ -56,6 +58,7 @@ type PaperSettingsRow = {
   youtube_channels: unknown;
   meeting_keywords: unknown;
   seed_sources: unknown;
+  editor_email: string | null;
 };
 
 /**
@@ -91,6 +94,8 @@ export async function ensurePaperSettingsSchema() {
   `);
   // CITY-SETUP final slice: mirrors migrations/0022_paper_settings_onboarded.sql
   await sql.query(`alter table paper_settings add column if not exists onboarded boolean not null default false`);
+  // CITY-SETUP release-walkthrough Critical fix: mirrors migrations/0024_paper_settings_editor_email.sql
+  await sql.query(`alter table paper_settings add column if not exists editor_email text`);
 }
 
 function defaultConfig(): PaperConfig {
@@ -108,7 +113,60 @@ function defaultConfig(): PaperConfig {
     youtubeChannels: [...LONGMONT_YOUTUBE_CHANNELS],
     meetingKeywords: [...MEETING_KEYWORDS],
     seedSources: SEED_SOURCES.map((s) => ({ ...s })),
+    editorEmail: EDITOR_EMAIL,
   };
+}
+
+/*
+  CITY-SETUP release-walkthrough Blocker fix.
+
+  What an install shows to the PUBLIC before anyone has completed first-run
+  setup. Never a real town's identity: a fresh database with no
+  `paper_settings` row used to fall through defaultConfig() -- the shipped
+  Longmont constants -- straight to the public site, not just the owner's
+  desk. A brand-new install's masthead read "TownReporter — Longmont,
+  Colorado", its nav linked https://longmontcitycouncil.org/, and the
+  migration-seeded welcome article read as Longmont's own paper introducing
+  itself -- all before anyone had claimed the desk.
+
+  `onboarded` is the signal for "has an owner actually run setup" --
+  migrations/0023_paper_settings_onboard_existing.sql marks any install that
+  already had a claimed newsroom onboarded, so this placeholder only ever
+  reaches a genuinely unconfigured install; the existing production paper
+  (onboarded via that migration) is untouched.
+*/
+const UNCONFIGURED_PAPER_CONFIG: PaperConfig = {
+  name: "TownReporter",
+  city: "",
+  state: "",
+  location: "Not yet set up",
+  timezone: "UTC",
+  tagline: "This installation has not been configured yet.",
+  kicker: "Awaiting setup",
+  deck:
+    "This paper hasn't been set up yet. An editor needs to sign in and complete first-run setup before real coverage appears here.",
+  trust: "Awaiting setup.",
+  councilVotesUrl: "",
+  youtubeChannels: [],
+  meetingKeywords: [],
+  seedSources: [],
+  editorEmail: null,
+};
+
+/**
+ * The PaperConfig the public site (and only the public site) may render:
+ * the real, live-merged config once the owner has completed first-run
+ * setup, or the neutral placeholder above until then. Every caller that
+ * serves the anonymous internet -- getPaperIdentityFn, the RSS feed, and
+ * every function in src/lib/news/public.ts -- goes through this, not
+ * getPaperConfig() directly, which stays the desk-only "current config,
+ * defaults and all" read used to prefill the setup form.
+ */
+export async function getPublicPaperConfig(
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
+): Promise<PaperConfig> {
+  if (!(await isOnboarded(newsroomId))) return UNCONFIGURED_PAPER_CONFIG;
+  return getPaperConfig(newsroomId);
 }
 
 /** Parse a jsonb column that may already be an array (PGLite) or a JSON string (Neon `text`-decoded jsonb still arrives parsed). */
@@ -172,6 +230,16 @@ function mergeRow(row: PaperSettingsRow | undefined, base: PaperConfig): PaperCo
     youtubeChannels: asStringArray(row.youtube_channels) ?? base.youtubeChannels,
     meetingKeywords: asStringArray(row.meeting_keywords) ?? base.meetingKeywords,
     seedSources: asSeedSources(row.seed_sources) ?? base.seedSources,
+    /*
+      Same rule as councilVotesUrl: an empty string is a real answer ("this
+      paper has no editor contact address"), which lets an owner turn off an
+      inherited build-time address. Only a NULL column -- never set -- falls
+      back to EDITOR_EMAIL.
+    */
+    editorEmail:
+      row.editor_email === null || row.editor_email === undefined
+        ? base.editorEmail
+        : row.editor_email.trim() || null,
   };
 }
 
@@ -180,7 +248,7 @@ async function loadPaperConfig(newsroomId: number): Promise<PaperConfig> {
   const sql = await getSql();
   const rows = await sql<PaperSettingsRow>`
     select name, city, state, location, timezone, tagline, kicker, deck, trust,
-           council_votes_url, youtube_channels, meeting_keywords, seed_sources
+           council_votes_url, youtube_channels, meeting_keywords, seed_sources, editor_email
     from paper_settings
     where newsroom_id = ${newsroomId}
     limit 1
@@ -222,7 +290,10 @@ export async function getPaperConfig(newsroomId: number = DEFAULT_NEWSROOM_ID): 
  */
 export const getPaperIdentityFn = createServerFn({ method: "GET" }).handler(
   async (): Promise<PaperIdentity> => {
-    const cfg = await getPaperConfig();
+    // Public-facing: goes through getPublicPaperConfig(), not
+    // getPaperConfig(), so an install that has not completed first-run
+    // setup never serves the shipped Longmont identity to the internet.
+    const cfg = await getPublicPaperConfig();
     return {
       name: cfg.name,
       city: cfg.city,
@@ -234,6 +305,7 @@ export const getPaperIdentityFn = createServerFn({ method: "GET" }).handler(
       deck: cfg.deck,
       trust: cfg.trust,
       councilVotesUrl: cfg.councilVotesUrl,
+      editorEmail: cfg.editorEmail,
     };
   },
 );
@@ -252,6 +324,7 @@ export type PaperConfigPatch = Partial<{
   youtubeChannels: string[] | null;
   meetingKeywords: string[] | null;
   seedSources: SeedSource[] | null;
+  editorEmail: string | null;
 }>;
 
 const COLUMN_BY_FIELD: Record<keyof PaperConfigPatch, string> = {
@@ -268,6 +341,7 @@ const COLUMN_BY_FIELD: Record<keyof PaperConfigPatch, string> = {
   youtubeChannels: "youtube_channels",
   meetingKeywords: "meeting_keywords",
   seedSources: "seed_sources",
+  editorEmail: "editor_email",
 };
 
 const JSONB_FIELDS = new Set<keyof PaperConfigPatch>([

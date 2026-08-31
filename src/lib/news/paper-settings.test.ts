@@ -8,6 +8,8 @@ import { ensureNewsroomSchema } from "./membership.ts";
 import {
   ensurePaperSettingsSchema,
   getPaperConfig,
+  getPublicPaperConfig,
+  isOnboarded,
   savePaperConfig,
 } from "./paper-settings.ts";
 
@@ -220,6 +222,70 @@ describe("the config is read fresh", () => {
     assert.doesNotMatch(src, /from "node:/, "no node: import belongs in this module");
   });
 });
+
+describe("getPublicPaperConfig -- release-walkthrough Blocker fix", () => {
+  it("a newsroom with no paper_settings row at all (a truly fresh database) is not onboarded and gets the neutral placeholder, never Longmont's identity", async () => {
+    const newsroomId = 900_020;
+    await clearRow(newsroomId);
+    assert.equal(await isOnboarded(newsroomId), false);
+    const cfg = await getPublicPaperConfig(newsroomId);
+    // "TownReporter" is the software's own name -- shared by both the
+    // placeholder and the shipped Longmont default -- so the identity check
+    // that actually distinguishes them is city/location/council, not name.
+    assert.notEqual(cfg.city, PAPER.city);
+    assert.notEqual(cfg.location, PAPER.location);
+    assert.doesNotMatch(cfg.name + cfg.location + cfg.deck + cfg.councilVotesUrl, /longmont/i);
+    assert.equal(cfg.councilVotesUrl, "", "an unconfigured install must not link a real town's council");
+    // getPaperConfig() (the desk-only read, used to prefill the setup form)
+    // is unaffected -- it still falls back to the shipped constants.
+    assert.equal((await getPaperConfig(newsroomId)).name, PAPER.name);
+  });
+
+  it("once onboarded, getPublicPaperConfig returns the real configured identity", async () => {
+    const newsroomId = 900_021;
+    await clearRow(newsroomId);
+    const sql = await getSql();
+    await sql`
+      insert into paper_settings (newsroom_id, name, city, onboarded)
+      values (${newsroomId}, ${"Boulder Bugle"}, ${"Boulder"}, true)
+    `;
+    const cfg = await getPublicPaperConfig(newsroomId);
+    assert.equal(cfg.name, "Boulder Bugle");
+    assert.equal(cfg.city, "Boulder");
+    await clearRow(newsroomId);
+  });
+
+  it("migrations/0023_paper_settings_onboard_existing.sql marks an already-claimed newsroom onboarded, so an install like the live production paper (a claimed desk that predates first-run setup) is never blanked by the public gate", async () => {
+    const newsroomId = 900_022;
+    const ownerId = "paper-settings-backfill-owner";
+    await clearRow(newsroomId);
+    await seat(ownerId, "owner", newsroomId);
+    // Exactly the state the live paper was in before this migration existed:
+    // a claimed newsroom with no paper_settings row, therefore not onboarded.
+    assert.equal(await isOnboarded(newsroomId), false);
+
+    const migrationSql = await readFile(
+      new URL("../../../migrations/0023_paper_settings_onboard_existing.sql", import.meta.url),
+      "utf8",
+    );
+    await sql_query(migrationSql);
+
+    assert.equal(await isOnboarded(newsroomId), true);
+    // And the public gate now serves the real (fallback-to-shipped) config,
+    // not the neutral placeholder -- the existing paper renders unchanged.
+    const cfg = await getPublicPaperConfig(newsroomId);
+    assert.equal(cfg.name, PAPER.name);
+    assert.equal(cfg.city, PAPER.city);
+
+    await forgetMember(ownerId);
+    await clearRow(newsroomId);
+  });
+});
+
+async function sql_query(text: string) {
+  const sql = await getSql();
+  await sql.query(text);
+}
 
 describe("the default watch list", () => {
   it("with no settings row, the config still reports the shipped Longmont list byte for byte", async () => {

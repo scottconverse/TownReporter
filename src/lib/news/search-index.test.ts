@@ -129,6 +129,20 @@ if (dbProbe.ok) {
     ...process.env,
     DATABASE_URL: dbUrl,
   });
+
+  /*
+    CITY-SETUP release-walkthrough Blocker fix: searchPublished (and every
+    other reader in public.ts) now refuses to serve anything until the
+    owner has completed first-run setup. This fixture seeds an operating
+    newsroom directly via SQL, so it marks itself onboarded the same way
+    migrations/0023 would for a real claimed install -- otherwise every
+    search assertion below sees an empty, gated site regardless of the
+    trigram behavior it actually tests.
+  */
+  await probeClient.query(
+    `insert into paper_settings (newsroom_id, onboarded) values (1, true)
+     on conflict (newsroom_id) do update set onboarded = true`,
+  );
 }
 
 const { SEARCH_MIN_INDEXED } = await import("./public.ts");

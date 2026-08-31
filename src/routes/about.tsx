@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { PaperShell } from "@/components/paper-chrome";
-import { EDITOR_EMAIL } from "@/lib/paper";
 import { DEFAULT_PAPER_IDENTITY, usePaper } from "@/lib/paper-context";
 
 export const Route = createFileRoute("/about")({
@@ -18,6 +17,7 @@ export const Route = createFileRoute("/about")({
 
 function About() {
   const PAPER = usePaper();
+  const EDITOR_EMAIL = PAPER.editorEmail;
   return (
     <PaperShell compact>
       <h1 className="enter-fade font-display text-4xl font-semibold">
@@ -46,9 +46,10 @@ function About() {
           trails the announcing source did not include.
         </p>
         <p>
-          We are not the Longmont Times-Call, not the city, and not a
-          replacement for either. We cover the packets most people never sit
-          through, and we show the exact documents we used.
+          We are not the city government, and we are not a replacement for
+          the old local newspaper. We cover the
+          packets most people never sit through, and we show the exact
+          documents we used.
         </p>
         {EDITOR_EMAIL ? (
           <p>

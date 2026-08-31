@@ -12,6 +12,7 @@ import { createContext, useContext, useMemo } from "react";
 import {
   PAPER,
   COUNCIL_VOTES_URL,
+  EDITOR_EMAIL,
   formatDate,
   formatShortDate,
   formatDateTime,
@@ -28,6 +29,8 @@ export type PaperIdentity = {
   deck: string;
   trust: string;
   councilVotesUrl: string;
+  /** Runtime-configurable editor contact address; falls back to the build-time EDITOR_EMAIL. */
+  editorEmail: string | null;
 };
 
 /**
@@ -46,6 +49,7 @@ export const DEFAULT_PAPER_IDENTITY: PaperIdentity = {
   deck: PAPER.deck,
   trust: PAPER.trust,
   councilVotesUrl: COUNCIL_VOTES_URL,
+  editorEmail: EDITOR_EMAIL,
 };
 
 const PaperContext = createContext<PaperIdentity>(DEFAULT_PAPER_IDENTITY);

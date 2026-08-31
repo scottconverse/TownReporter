@@ -7,6 +7,7 @@ import { parseUrlList } from "../paper.ts";
 import { provenanceFromUrls, parseFindings, resolvePublicFindings, type ProvenanceItem, type StoryFinding } from "./findings.ts";
 import { collapsePrintedDuplicates } from "./desk-copy.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
+import { isOnboarded } from "./paper-settings.ts";
 
 function publicArticle(
   row: ArticleRow,
@@ -32,6 +33,11 @@ function publicArticle(
 
 export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
   async () => {
+    // CITY-SETUP release-walkthrough Blocker fix: before first-run setup
+    // completes, nothing published is public -- including the
+    // migration-seeded Longmont welcome article (migrations/0002_newsroom.sql),
+    // which used to render on a fresh install's front page.
+    if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as ArticleRow[];
     try {
       const sql = await getSql();
       return sql<ArticleRow>`
@@ -52,6 +58,7 @@ export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
 export const getPublishedArticle = createServerFn({ method: "GET" })
   .validator((slug: string) => slug)
   .handler(async ({ data: slug }) => {
+    if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return null;
     try {
       const sql = await getSql();
       const rows = await sql<ArticleRow>`
@@ -81,6 +88,7 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
 export const listPublishedByTopic = createServerFn({ method: "GET" })
   .validator((topic: string) => topic)
   .handler(async ({ data: topic }) => {
+    if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as ArticleRow[];
     try {
       const sql = await getSql();
       return sql<ArticleRow>`
@@ -111,6 +119,7 @@ export const searchPublished = createServerFn({ method: "GET" })
   .validator((q: string) => q.trim().slice(0, 80))
   .handler(async ({ data: q }) => {
     if (!q) return [] as ArticleRow[];
+    if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as ArticleRow[];
     try {
       const sql = await getSql();
       const like = `%${q}%`;
@@ -147,6 +156,7 @@ export const searchPublished = createServerFn({ method: "GET" })
 
 export const listPublicCorrections = createServerFn({ method: "GET" }).handler(
   async () => {
+    if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as CorrectionRow[];
     try {
       const sql = await getSql();
       return sql<CorrectionRow & { slug: string | null }>`
