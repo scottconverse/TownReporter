@@ -405,9 +405,10 @@ jobs:
           $env:PORT = $env:WATCHDOG_APP_PORT
           $env:HOST = "127.0.0.1"
           $node = (Get-Command node).Source
-          $proc = Start-Process -FilePath $node -ArgumentList ".output/server/index.mjs" `
-            -RedirectStandardOutput app.out.log -RedirectStandardError app.err.log -PassThru -NoNewWindow
-          "APP_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # No -NoNewWindow: the runner tears down the step's own process tree,
+          # and this server has to outlive the step that starts it.
+          Start-Process -FilePath $node -ArgumentList ".output/server/index.mjs" `
+            -RedirectStandardOutput app.out.log -RedirectStandardError app.err.log -WindowStyle Hidden
           $up = $false
           for ($i = 0; $i -lt 60 -and -not $up; $i++) {
             try {
@@ -428,24 +429,26 @@ jobs:
       - name: Fake a listening Postgres so the watchdog is willing to touch the app
         shell: pwsh
         run: |
-          $job = Start-Job -ScriptBlock {
-            param($listenPort)
-            $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $listenPort)
-            $listener.Start()
-            Start-Sleep -Seconds 900
-            $listener.Stop()
-          } -ArgumentList ([int]$env:WATCHDOG_PG_PORT)
-          "PG_JOB_ID=$($job.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # Detached, for the same reason the app is: a Start-Job background job
+          # dies with the step that created it.
+          Start-Process -FilePath (Get-Command pwsh).Source `
+            -ArgumentList "-NoProfile","-File","scripts/ci-fake-listener.ps1","-Port",$env:WATCHDOG_PG_PORT `
+            -WindowStyle Hidden
           $listening = $false
           for ($i = 0; $i -lt 30 -and -not $listening; $i++) {
             $listening = [bool](Get-NetTCPConnection -LocalPort $env:WATCHDOG_PG_PORT -State Listen -ErrorAction SilentlyContinue)
             if (-not $listening) { Start-Sleep -Milliseconds 500 }
           }
           if (-not $listening) { throw "fake postgres listener never came up on $($env:WATCHDOG_PG_PORT)" }
-      - name: Kill the app by the PID this job captured
+      - name: Kill the app that holds the spare port
         shell: pwsh
         run: |
-          Stop-Process -Id $env:APP_PID -Force
+          # Kill whoever holds the port, not a remembered PID -- the same way
+          # the watchdog identifies the app it is repairing.
+          $owners = @(Get-NetTCPConnection -LocalPort $env:WATCHDOG_APP_PORT -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+          if ($owners.Count -eq 0) { throw "nothing was listening on $($env:WATCHDOG_APP_PORT) -- the app died on its own and the test would prove nothing" }
+          foreach ($owner in $owners) { Stop-Process -Id $owner -Force }
           Start-Sleep -Seconds 2
           $stillUp = [bool](Get-NetTCPConnection -LocalPort $env:WATCHDOG_APP_PORT -State Listen -ErrorAction SilentlyContinue)
           if ($stillUp) { throw "app port $($env:WATCHDOG_APP_PORT) is still listening after the kill -- the test would prove nothing" }
@@ -469,8 +472,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          if ($env:PG_JOB_ID) {
-            Stop-Job -Id $env:PG_JOB_ID -ErrorAction SilentlyContinue
-            Remove-Job -Id $env:PG_JOB_ID -Force -ErrorAction SilentlyContinue
-          }
+          $owners = @(Get-NetTCPConnection -LocalPort $env:WATCHDOG_PG_PORT -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique)
+          foreach ($owner in $owners) { Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue }
 
