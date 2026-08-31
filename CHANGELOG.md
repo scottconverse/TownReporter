@@ -1,6 +1,17 @@
 # Changelog
 
-Current release: **0.5.3**.
+Current release: **0.5.4**.
+
+## 0.5.4 — 2026-08-30
+
+Two editors, one story, at the same time -- now tested. A permanent
+integration harness drives two signed-in browser sessions (owner and an
+invited editor) against a built server on a real Postgres and races them:
+a save against a deleted lead loses with a message and no crash; a
+double-save ends last-write-wins with one whole body; and two simultaneous
+publishes print exactly one article -- the second confirm found the
+two-step publish guard doing its job. The invite table also moves into a
+real migration.
 
 ## 0.5.3 — 2026-08-30
 

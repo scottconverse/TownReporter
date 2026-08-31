@@ -1,6 +1,6 @@
 # TownReporter — the manual
 
-**Version 0.5.3 · 30 August 2026**
+**Version 0.5.4 · 30 August 2026**
 
 TownReporter is a civic newsroom you run yourself. A public paper on the front,
 a signed-in editor's desk behind it. It watches a city's meetings, packets,

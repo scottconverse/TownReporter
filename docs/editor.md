@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.5.3](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.3).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.5.4](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.4).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). The whole system, including how it is built, is [manual.md](manual.md). This page is the newsroom, in the order you use it.
 
