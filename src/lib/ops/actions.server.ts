@@ -104,6 +104,18 @@ export async function runOpsActionById(
   const spec = SPECS[id];
   if (!action || !spec) return { ok: false, id, output: "Unknown action." };
 
+  // Refused here, not just hidden in the UI: a dev install's Server page was
+  // one click from restarting the LIVE paper's tunnel, because cloudflared
+  // and its scheduled task are machine-wide while this button is per-install.
+  if (id === "restart-tunnel" && process.env.TOWNREPORTER_TUNNEL !== "1") {
+    return {
+      ok: false,
+      id,
+      output:
+        "This install does not manage the tunnel. Set TOWNREPORTER_TUNNEL=1 in the install that owns it.",
+    };
+  }
+
   const exe = spec.exe === "node" ? process.execPath : "powershell.exe";
   const args = spec.args(root);
 

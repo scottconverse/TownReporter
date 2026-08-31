@@ -185,6 +185,28 @@ async function checkTunnel(): Promise<HealthCheck[]> {
   if (!isWindows) {
     return [{ id: "tunnel", label: "Tunnel", state: "unknown", value: "not a Windows host" }];
   }
+  /*
+    Only the install that owns the tunnel gets a real answer.
+
+    cloudflared.exe is counted machine-wide, and this machine runs the live
+    paper and a development copy side by side -- so the dev instance's Server
+    page reported production's tunnel as its own, "running (2 processes) OK",
+    and offered a Restart button pointed at the live paper's route to the
+    internet. The release walkthrough caught it. An install now claims the
+    tunnel with TOWNREPORTER_TUNNEL=1 in its environment; every other
+    install says plainly that the tunnel is not its to watch or touch.
+  */
+  if (process.env.TOWNREPORTER_TUNNEL !== "1") {
+    return [
+      {
+        id: "tunnel",
+        label: "Cloudflare tunnel",
+        state: "unknown",
+        value: "not managed by this install",
+        note: "Set TOWNREPORTER_TUNNEL=1 in the install that owns the tunnel.",
+      },
+    ];
+  }
   try {
     const out = await powershell(
       "@(Get-CimInstance Win32_Process -Filter \"Name='cloudflared.exe'\" -ErrorAction SilentlyContinue).Count",

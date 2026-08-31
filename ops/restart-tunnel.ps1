@@ -24,11 +24,11 @@ Write-Log "tunnel restart requested"
 #>
 Start-Sleep -Seconds 4
 
-Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" -ErrorAction SilentlyContinue |
-  ForEach-Object {
-    Write-Log "  stopping PID $($_.ProcessId)"
-    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-  }
+# Stopping the scheduled task ends the cloudflared it started -- and ONLY
+# that one. The old version swept every cloudflared.exe on the machine by
+# image name, which on a box running more than one install means killing
+# tunnels that are not this install's to touch. Kill-by-image-name has bitten
+# this machine before; it does not come back.
 try { Stop-ScheduledTask -TaskName "TownReporter Tunnel" -ErrorAction SilentlyContinue } catch {}
 Start-Sleep -Seconds 2
 Start-ScheduledTask -TaskName "TownReporter Tunnel"

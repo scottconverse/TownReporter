@@ -291,3 +291,30 @@ test("the watchdog only stops the process holding the port it is repairing", () 
   assert.match(sweep, /index\.mjs/, "it must still confirm the owner is this app, not just any port holder");
   assert.match(sweep, /Stop-Process -Id \$owner/, "it must stop the port's owner, not a list of matches");
 });
+
+test("the tunnel restart never sweeps cloudflared by image name", () => {
+  /*
+    The old script enumerated every cloudflared.exe on the machine and
+    stopped them all -- on a box running the live paper and a dev copy side
+    by side, that is the dev install killing production's route to the
+    internet. It now stops only what its own scheduled task started. This
+    gate fails if a Stop-Process ever again feeds from an image-name filter
+    in this script.
+  */
+  const script = readFileSync(join(ROOT, "ops", "restart-tunnel.ps1"), "utf8");
+  const enumerated = /Filter\s+"Name='cloudflared\.exe'"[\s\S]{0,200}?Stop-Process/;
+  assert.ok(
+    !enumerated.test(script),
+    "restart-tunnel.ps1 stops processes enumerated by image name again",
+  );
+});
+
+test("a non-owner install refuses the tunnel restart server-side, not just in the UI", () => {
+  const src = readFileSync(join(ROOT, "src", "lib", "ops", "actions.server.ts"), "utf8");
+  assert.match(
+    src,
+    /restart-tunnel.*TOWNREPORTER_TUNNEL|TOWNREPORTER_TUNNEL[\s\S]{0,400}?restart-tunnel/s,
+    "runOpsActionById no longer gates restart-tunnel on TOWNREPORTER_TUNNEL",
+  );
+});
+
