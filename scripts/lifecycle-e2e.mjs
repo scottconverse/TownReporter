@@ -20,7 +20,7 @@ const password = "lifecycle-e2e-pass";
 const headline = `Council sets a special session on the water plant ${stamp}`;
 const why = "The packet posted this morning with a new date.";
 const body =
-  "Longmont City Council set a special session on the water plant. The packet is on the city site.";
+  "Testerville City Council set a special session on the water plant. The packet is on the city site.";
 const correction = "The session is Tuesday evening, not Wednesday morning.";
 
 let page;
@@ -83,7 +83,7 @@ async function main() {
   await page.waitForURL(/\/articles\//, { timeout: 20_000, waitUntil: "commit" });
   const articleUrl = page.url();
   await page.getByRole("heading", { level: 1, name: /water plant/i }).waitFor();
-  await page.getByText(/Longmont City Council set a special session on the water plant/i).waitFor();
+  await page.getByText(/Testerville City Council set a special session on the water plant/i).waitFor();
 
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
   // Was "Leave as editor", which sat in the header of every desk page. It moved

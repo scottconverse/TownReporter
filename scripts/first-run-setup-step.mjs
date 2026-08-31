@@ -13,10 +13,12 @@
   because a submit clicked before hydration is a click into dead HTML.
 */
 export async function completeFirstRunSetup(page, base, opts = {}) {
+  // An obviously-fake town, so "Longmont" in a test artifact always means a
+  // real leak and never this fixture -- an audit lost time on exactly that.
   const fields = [
-    ["Paper name", opts.name ?? "TownReporter"],
-    ["City", opts.city ?? "Longmont"],
-    ["State", opts.state ?? "Colorado"],
+    ["Paper name", opts.name ?? "Testerville Ledger"],
+    ["City", opts.city ?? "Testerville"],
+    ["State", opts.state ?? "Wyoming"],
   ];
   await page.goto(`${base}/desk/setup`, { waitUntil: "networkidle" });
   await page.getByLabel("Paper name", { exact: true }).waitFor({ timeout: 45_000 });
