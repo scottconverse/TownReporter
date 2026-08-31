@@ -1,6 +1,14 @@
 # Changelog
 
-Current release: **0.5.1**.
+Current release: **0.5.2**.
+
+## 0.5.2 — 2026-08-30
+
+The Pull button on the story workbench now drops the passage that answers
+the pulled line -- readable paragraphs, breaks intact -- instead of the
+first 1,600 flattened characters of a page's navigation. Its own release
+gate hardened it twice: a long-document crash path became a loop, and a
+live walk caught the excerpt anchoring on a page title.
 
 ## 0.5.1 — 2026-08-30
 

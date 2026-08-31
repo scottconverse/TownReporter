@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.5.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.1)** — 30 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.5.2](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.2)** — 30 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
@@ -76,7 +76,11 @@ Same six moves the paper itself describes at `/how-we-report`:
 
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
-### This release (0.5.1)
+### Recent releases
+
+- **0.5.2** — the workbench's Pull button drops the passage that answers the pulled line, readable paragraphs intact, instead of a page-top wall of navigation.
+
+#### 0.5.1
 
 - **The newsroom watches itself.** The paper was offline for hours and nothing said so. A watchdog now checks the app, the tunnel and the public URL every five minutes and restarts what is down. A [Server page](docs/manual.md#the-server-page) shows all of it.
 - **The reader is nobody's product.** Fonts are served from this machine, a third-party script was removed from every page, and a cold load of the paper makes zero outside requests.
