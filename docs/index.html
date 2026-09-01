@@ -525,7 +525,7 @@ npm run dev
           <p>The coding harness is stripped from every call — including your own <code>CLAUDE.md</code> and skills, which have no business inside a news prompt.</p>
           <p>Local expects an LM Studio-compatible server on <code>127.0.0.1:1234</code> with the named Qwen model loaded. Zen is hosted by OpenCode, so that choice sends the prompt there. Codex and Claude reuse their signed-in CLI sessions and check readiness before enqueue.</p>
           <p>Prefer a gateway? Any OpenAI-compatible <code>/v1/chat/completions</code> endpoint works with three <code>LLM_*</code> vars — LiteLLM, Bifrost, Helicone, MLflow, Kong, Ollama, OpenAI or OpenRouter. It becomes the forced Story Automatic provider and the configured provider for Scan and Dark Desk.</p>
-          <p>Opinion has its own frontier picker. Claude Opus through signed-in Claude Code is enabled. Codex Sol fails closed before spending until the operator can explicitly authorize sending the private editorial voice to OpenAI.</p>
+          <p>Opinion has its own frontier picker. Automatic tries Codex Sol, then Claude Opus. Codex receives the configured editorial voice over stdin; Claude Code reads it by file path. Both keep research separate from the tool-free writing pass.</p>
           <p>Unset <code>DATABASE_URL</code> and you get embedded PGLite. Fine for a look. <strong>Data dies when the process stops.</strong> A newsroom wants Postgres.</p>
         </div>
         <p class="cap"><a href="https://github.com/scottconverse/TownReporter/blob/main/docs/manual.md"><b>The manual</b></a>

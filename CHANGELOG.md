@@ -15,10 +15,11 @@ Current release: **0.5.6**.
   full reporting pipeline during the release gate. A failed job's actionable
   provider detail now survives a page reload instead of disappearing with the
   click; the release gate also completed and filed a full Story through Zen.
-- **Opinion has a frontier picker and fails closed at its private boundary.**
-  Claude Opus is enabled. Codex Sol remains unavailable until the operator can
-  explicitly authorize sending the private editorial voice to OpenAI; it
-  refuses before research, enqueue, or spend rather than inferring consent.
+- **Opinion has a working frontier ladder.** Automatic tries Codex Sol, then
+  Claude Opus; explicit choices never fall back. Codex uses a web-search
+  research pass that never sees the voice, then receives the configured voice
+  over stdin for a tool-free writing pass. Claude keeps its path-only voice
+  handoff. Neither provider puts the voice in argv.
 - **Model choice has a real migration.** Migration 0025 adds the durable choice
   to Story jobs and Opinion requests. Its fresh-install path now creates the
   historically lazy Opinion request table before altering it, with a PGlite

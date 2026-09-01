@@ -1,4 +1,4 @@
-import { realpath, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
 /**
@@ -11,8 +11,10 @@ import { isAbsolute, relative, resolve } from "node:path";
  *
  * Two rules, both enforced here:
  *
- *  1. This module never returns the file's CONTENTS. It returns a path. The
- *     model CLI reads the file itself via `--system-prompt-file`.
+ *  1. The ordinary lookup returns only a path. Claude Code reads that path via
+ *     `--system-prompt-file`. The separately authorized OpenAI Codex path may
+ *     read the text through `readVoiceTextForOpenAiCodex`; that text travels
+ *     over stdin and is never placed on a command line.
  *
  *  2. That matters more than it sounds. Command-line arguments are readable by
  *     every process on the machine — this session listed running processes and
@@ -111,6 +113,30 @@ export async function findVoiceFile(): Promise<
   } catch {
     // The path itself is safe to name — it is a location, not the writing.
     return { ok: false, error: `Cannot read the voice file at ${path}.` };
+  }
+}
+
+/**
+ * Read the validated voice for the operator-authorized OpenAI Codex Opinion
+ * path. Keep this as a destination-named function so a future provider cannot
+ * inherit that authorization accidentally.
+ */
+export async function readVoiceTextForOpenAiCodex(): Promise<
+  { ok: true; text: string } | { ok: false; error: string }
+> {
+  const found = await findVoiceFile();
+  if (!found.ok) return found;
+  try {
+    // Resolve again at the read boundary. Callers cannot use this helper to
+    // send an arbitrary path, and a changed link is checked by findVoiceFile.
+    const canonical = await realpath(found.voice.path);
+    const text = await readFile(canonical, "utf8");
+    if (Buffer.byteLength(text, "utf8") !== found.voice.bytes) {
+      return { ok: false, error: `The editorial voice changed while it was being read. Try again.` };
+    }
+    return { ok: true, text };
+  } catch {
+    return { ok: false, error: `Cannot read the voice file configured by ${VOICE_ENV}.` };
   }
 }
 

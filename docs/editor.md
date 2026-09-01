@@ -450,7 +450,7 @@ How we report, in public: `/how-we-report`.
 | Zen MiMo is unreachable | This machine is offline or OpenCode Zen is unavailable | Restore network access or choose another provider; Zen is provider-hosted |
 | Codex is missing or signed out | Codex CLI/OAuth is unavailable on the server machine | Install/open Codex, sign in, and try again; check `CODEX_CLI_PATH` / `CODEX_HOME` only for unusual layouts |
 | Claude is missing or signed out | Claude Code CLI login is unavailable | Install/open Claude Code and sign in, or configure the Claude API path |
-| Codex Opinion says it is not enabled | Private voice-to-OpenAI authorization is intentionally absent | Choose Claude Opus; Codex Opinion fails closed before spending |
+| Codex Opinion cannot start | Codex is missing, signed out, or unavailable | Open Codex and sign in, then try again; choose Claude Opus if you want that provider instead |
 | Scan fetched, filed nothing | Nothing new, or the model declined | Read the summary. Not automatically a bug. |
 | Draft with AI ran, form still empty | The click died; the writing pass may still be finishing | Stay on the page. It fills when the draft lands. Reload only if you left. |
 | Redraft shows a sign-in / setCookie error | Cookie helper threw even though you are signed in | Click Redraft again. Fixed in 0.3.7. |

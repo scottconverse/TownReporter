@@ -62,7 +62,7 @@ describe("model choice contract", () => {
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
-      "Uses Claude Opus. Codex Opinion stays disabled until its separate voice-file authorization is granted.",
+      "Tries Codex Sol, then Claude Opus. The selected provider writes the whole editorial; explicit choices never fall back.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),
@@ -70,13 +70,13 @@ describe("model choice contract", () => {
     );
   });
 
-  it("gives Opinion only setup steps that can actually unlock Opinion", () => {
+  it("gives Opinion setup steps for both authorized frontier providers", () => {
     const guidance = opinionProviderProblem(
       "AI is not available. Set ANTHROPIC_API_KEY, XAI_API_KEY, or LLM_BASE_URL.",
     );
+    assert.match(guidance, /Codex/);
     assert.match(guidance, /Claude Code/);
     assert.match(guidance, /ANTHROPIC_API_KEY/);
-    assert.match(guidance, /cannot use xAI or a generic LLM gateway/i);
     assert.doesNotMatch(guidance, /set .*XAI_API_KEY|set .*LLM_BASE_URL/i);
   });
 });

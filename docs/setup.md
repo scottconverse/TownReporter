@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 |---|---|
 | **Node** | 22 or newer (`node -v`). Types in this repo are Node 22. |
 | **npm** | Comes with Node. `npm install` is enough. |
-| **A model** | Story can use a configured OpenAI-compatible gateway, an LM Studio-compatible Local Qwen, provider-hosted Zen, or signed-in Codex/Claude CLIs. Scan and Dig use the configured provider below. Opinion currently requires signed-in Claude Code. |
+| **A model** | Story can use a configured OpenAI-compatible gateway, an LM Studio-compatible Local Qwen, provider-hosted Zen, or signed-in Codex/Claude CLIs. Scan and Dig use the configured provider below. Opinion uses signed-in Codex or Claude. |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it. |
 | **A database** | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres). |
 
@@ -41,7 +41,7 @@ on an editor's action:
 
 | What | Triggered by | Where it goes |
 |---|---|---|
-| **Model calls** | Scan, Draft, Dark Desk, Opinion | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it selects OpenCode Zen, Codex Terra, or Claude Opus before enqueue. Local is explicit-only. Opinion currently uses Claude Code. |
+| **Model calls** | Scan, Draft, Dark Desk, Opinion | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it selects OpenCode Zen, Codex Terra, or Claude Opus before enqueue. Local is explicit-only. Opinion Automatic tries Codex Sol, then Claude Opus. |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard). |
 | **Searches** | The research pass, PULL, and every Dark Desk hop | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key, and there is currently no setting to keep a search on this machine — the chain is unconditional. |
 
@@ -225,10 +225,8 @@ repository rules, local shell/file tools, browser/computer tools, apps, plugins,
 hooks, skills, and multi-agent capabilities disabled. The Story call is
 tool-free; only the prompt sent over stdin reaches the provider.
 
-Opinion displays Automatic, Codex Sol and Claude Opus, but Claude Opus through
-the signed-in Claude Code CLI is the only enabled path today. Codex Opinion refuses before research, enqueue, or
-spend because sending the private editorial voice to OpenAI requires explicit
-operator authorization; TownReporter does not infer it from a Codex login.
+Opinion displays Automatic, Codex Sol and Claude Opus. Automatic tries Codex
+Sol first, then Claude Opus. Explicit choices never fall back.
 
 ### The Opinion voice
 
@@ -243,10 +241,9 @@ Rules the app enforces, not conventions:
 - The path must be absolute. A relative path is refused.
 - A path **inside this repository** is refused. The voice is meant to stay out
   of version control.
-- On the enabled Claude path, only the path reaches the CLI; the file is read
-  by Claude Code, never loaded into the app's memory and never passed as an
-  inline argument. Codex Opinion remains disabled rather than changing this
-  boundary without explicit authorization.
+- On Claude, only the path reaches the CLI; Claude Code reads the file.
+- On Codex, TownReporter reads the validated file and sends its text to OpenAI
+  over stdin for the tool-free writing pass. It never enters argv or logs.
 - A path long enough to look like an inlined prompt is refused outright.
 
 Without the variable, the Opinion desk says so and spends nothing. Everything
