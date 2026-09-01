@@ -45,14 +45,16 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Run it (about five minutes)
 
-You need **Node 22+**. You do **not** need an AI key if [Claude Code](https://code.claude.com) is installed and signed in — the desk uses that login. Otherwise see [Model](#model--your-claude-code-login-by-default) below.
+You need **Node 22+**. Story drafting can use a local model, the provider-hosted
+Zen endpoint, or an existing Codex or Claude login; API keys are optional. Scan
+and Dark Desk still use the configured provider. See [Model](#model--automatic-ladder-with-an-editor-override) below.
 
 ```bash
 git clone https://github.com/scottconverse/TownReporter.git
 cd TownReporter
 npm install
 npx playwright install chromium   # meeting transcripts + JS civic sites
-cp .env.example .env              # no AI key needed if Claude Code is signed in
+cp .env.example .env              # choose local, CLI login, or optional API settings
 npm run dev                       # http://localhost:8080
 ```
 
@@ -151,24 +153,54 @@ Details and the honest limits of a city swap are in [docs/setup.md](docs/setup.m
 
 ---
 
-## Model — your Claude Code login, by default
+## Model — automatic ladder, with an editor override
 
-**Nothing to set.** If the [Claude Code](https://code.claude.com) CLI is installed and signed in, Scan, Draft and Dark Desk use it. Your subscription does the work; there is no key to buy or paste.
+Every active Queue row has its own **Writing model** picker beside **Draft with
+AI**; the story workbench has the same control beside Draft or Redraft. The
+default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
+pair names a gateway, Automatic uses that gateway and no other provider.
+Otherwise it checks provider-hosted Zen MiMo, Codex Terra, then Claude Opus,
+chooses the first ready provider before enqueueing, and stores that effective
+choice on the job. Every reporting and writing pass in that run uses the same
+provider. Local Qwen stays available as an explicit choice, but is not in
+Automatic because a loaded local model does not prove it can finish the full
+reporting pipeline.
+
+Pick Local, Zen, Codex Terra, frontier Codex Sol, or frontier Claude Opus to
+force that provider for one run. Explicit choices never fall back. Local expects
+an LM Studio-compatible server at `127.0.0.1:1234` with
+`qwen/qwen3.6-35b-a3b` loaded. Zen is hosted by OpenCode, so selecting it sends
+the draft prompt there. The endpoint/model compatibility overrides are listed
+in [docs/setup.md](docs/setup.md#per-run-picker).
+
+Codex and Claude use the operator's existing signed-in CLI/OAuth sessions; no
+API key is required. Readiness is checked before enqueueing. If a login expires,
+the desk refuses and tells the editor which app to open and sign in to.
+`CODEX_CLI_PATH`, `CODEX_HOME`, and `CLAUDE_CLI_PATH` are available when normal
+discovery cannot find the binary or Codex state directory.
+Personal coding rules, skills and project instructions are not loaded into
+news prompts on either CLI path.
 
 Your own `CLAUDE.md`, skills and plugins are **not** loaded into news prompts — the harness is stripped on every call.
 
-First match wins:
+For **Scan and Dark Desk**, configured-provider precedence is:
 
 | Set this | What runs |
 |---|---|
-| `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint, including a local model |
+| `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; also forces Story Automatic to this gateway |
 | `ANTHROPIC_API_KEY` | Claude, billed to that key |
 | *nothing* | **Claude, through your Claude Code login** |
 | `XAI_API_KEY` | Grok |
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
-**One exception, on purpose.** The Opinion desk always uses the Claude Code CLI, whatever else you set. Its voice file is passed as a path so it never reaches a command line, and it writes with web search — neither of which an OpenAI-compatible endpoint offers. With `TOWNREPORTER_CLAUDE_CODE=0` it refuses rather than using the CLI behind your back. Everything else follows your choice; the per-feature table is in [docs/manual.md](docs/manual.md#which-feature-uses-which-provider).
+**Opinion uses a smaller frontier picker.** Claude Opus through the signed-in
+Claude Code CLI is the enabled writing path today. It keeps tool-enabled research separate from the private,
+voice-guided, tool-free writing pass. Codex Sol is visible but fails closed
+before spending: enabling it would send the private editorial voice to OpenAI,
+which requires explicit operator authorization that TownReporter does not infer.
+Automatic therefore requires ready Claude Opus today. Local and Zen are not
+offered on Opinion.
 
 ### Other models — one OpenAI-compatible URL
 
@@ -190,7 +222,9 @@ LLM_API_KEY=sk-...
 LLM_MODEL=claude-sonnet-4-5
 ```
 
-If `LLM_BASE_URL` or `LLM_API_KEY` is set, that wins over Grok.
+If `LLM_BASE_URL` is set — or `LLM_API_KEY` and `LLM_MODEL` are both set —
+that configured gateway wins over Grok for configured-provider features and is
+the exclusive Story Automatic provider.
 
 ---
 
@@ -265,7 +299,12 @@ No. Scan files leads. Draft writes a story into the workbench. Publish is a pers
 Yes. The first owner completes **Set up the paper**, and can revise the same database-backed settings later on the Server page. No source edit or rebuild is required. See [docs/setup.md](docs/setup.md#point-it-at-another-city).
 
 **Do I have to pay for an AI key?**
-No. If Claude Code is signed in on the machine, the desk uses that login and there is no key at all. Set `ANTHROPIC_API_KEY` if you would rather bill a key, or point `LLM_BASE_URL` at any OpenAI-compatible endpoint — Ollama and other local models count, and cost nothing per word. `XAI_API_KEY` still runs Grok.
+No. Story drafting can use the local picker rung, provider-hosted Zen, or a
+signed-in Codex/Claude CLI. Set `ANTHROPIC_API_KEY` if you would rather bill a
+Claude key, or point `LLM_BASE_URL` at an OpenAI-compatible endpoint. That
+configured gateway becomes the forced Story Automatic provider and remains the
+configured provider for Scan and Dark Desk. `XAI_API_KEY` still runs Grok for
+configured-provider features.
 
 **Are YouTube captions the official record?**
 No. Captions are a map of the tape. Minutes and the packet are the official record. Names in captions are often wrong. Dark Desk is told this; drafts still need a human check.
@@ -280,7 +319,18 @@ Give it a subject, a sentence, or a URL and it writes an unsigned editorial — 
 No. Fonts are served from this machine, there is no analytics script, and a cold load makes zero requests to any outside host. The Server page checks that and will tell you if it stops being true.
 
 **Does anything leave my machine when I use the desk?**
-Yes, and it is worth knowing which things. Reading the paper sends nothing anywhere — that is the claim above, and it only covers the reader. Working the desk is different: pages you watch and documents you pull are fetched from the sites that host them; model calls go to whichever provider you configured; and searches — the research pass, PULL, and every Dark Desk hop — go to a third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia. None of them needs an API key, and there is no setting to keep a search on this machine — the chain runs unconditionally (`src/lib/news/search-web.ts`). That means a name, an LLC, or a contract number you type into Dark Desk is seen by whichever of those providers answers it.
+Yes, and it is worth knowing which things. Reading the paper sends nothing
+anywhere — that is the claim above, and it only covers the reader. Working the
+desk is different: pages you watch and documents you pull are fetched from the
+sites that host them; Scan and Dark Desk model calls go to the configured
+provider; Story calls go to the effective provider stored for that run (which
+may be provider-hosted Zen, Codex, or Claude); and searches — the research pass,
+PULL, and every Dark Desk hop — go to a third-party search chain, tried in
+order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing,
+Brave and Wikipedia. None needs an API key, and there is no setting to keep a
+search on this machine — the chain runs unconditionally
+(`src/lib/news/search-web.ts`). That means a name, an LLC, or a contract number
+you type into Dark Desk is seen by whichever provider answers it.
 
 **What are the Dark Desk dials?**
 *Dig* is how far it chases — hops, searches, whether it leaves the watch list. *Nerve* is how speculative it may be — how sure it has to be before it writes a signal down, and whether it may propose a theory or only ask a question. Three floors never move at any setting: no invented claims of paid influence, everything is labelled, and every theory carries what would kill it.

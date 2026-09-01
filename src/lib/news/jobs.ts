@@ -33,6 +33,7 @@ export type DeskJob = {
   user_id: string;
   kind: JobKind;
   subject_id: number;
+  model_choice: string;
   lane: JobLane;
   status: JobStatus;
   stage: string;
@@ -67,6 +68,7 @@ export async function ensureJobsSchema() {
       user_id text not null,
       kind text not null,
       subject_id integer not null default 0,
+      model_choice text not null default 'auto',
       status text not null default 'queued',
       stage text not null default '',
       error text,
@@ -116,6 +118,7 @@ export async function ensureJobsSchema() {
   // Identifies WHICH execution owns a running row. Without it a stale-reclaim
   // and the original executor both write results for the same job.
   await sql.query(`alter table desk_jobs add column if not exists claim_token text`);
+  await sql.query(`alter table desk_jobs add column if not exists model_choice text not null default 'auto'`);
 }
 
 /**
@@ -181,7 +184,7 @@ export async function latestJob(opts: {
   await ensureJobsSchema();
   const sql = await getSql();
   const rows = await sql<DeskJob>`
-    select id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
+    select id, newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage, error,
            created_at, updated_at, started_at, finished_at
     from desk_jobs
     where newsroom_id = ${opts.newsroomId} and kind = ${opts.kind} and subject_id = ${opts.subjectId}
@@ -201,7 +204,7 @@ export async function findOpenJob(opts: {
   const rows =
     opts.subjectId != null
       ? await sql<DeskJob>`
-          select id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
+          select id, newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage, error,
                  created_at, updated_at, started_at, finished_at
           from desk_jobs
           where newsroom_id = ${opts.newsroomId}
@@ -212,7 +215,7 @@ export async function findOpenJob(opts: {
           limit 1
         `
       : await sql<DeskJob>`
-          select id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
+          select id, newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage, error,
                  created_at, updated_at, started_at, finished_at
           from desk_jobs
           where newsroom_id = ${opts.newsroomId}
@@ -229,6 +232,7 @@ export async function enqueueJob(opts: {
   newsroomId?: number;
   kind: JobKind;
   subjectId: number;
+  modelChoice?: string;
   kick?: boolean;
 }): Promise<DeskJob> {
   await ensureJobsSchema();
@@ -258,10 +262,10 @@ export async function enqueueJob(opts: {
   */
   const lane = laneForKind(opts.kind);
   const created = await sql<DeskJob>`
-    insert into desk_jobs (newsroom_id, user_id, kind, subject_id, lane, status, stage)
-    values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${lane}, ${"queued"}, ${"Queued"})
+    insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage)
+    values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${lane}, ${"queued"}, ${"Queued"})
     on conflict do nothing
-    returning id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
+    returning id, newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage, error,
               created_at, updated_at, started_at, finished_at
   `;
   const job =
@@ -280,10 +284,10 @@ export async function enqueueJob(opts: {
     // findOpenJob below finds the third caller's row and returns it. The design
     // intent is that concurrent enqueues always coalesce, never error.
     const retry = await sql<DeskJob>`
-      insert into desk_jobs (newsroom_id, user_id, kind, subject_id, lane, status, stage)
-      values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${lane}, ${"queued"}, ${"Queued"})
+      insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage)
+      values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${lane}, ${"queued"}, ${"Queued"})
       on conflict do nothing
-      returning id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
+      returning id, newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage, error,
                 created_at, updated_at, started_at, finished_at
     `;
     if (retry[0]) {
@@ -352,7 +356,7 @@ async function drainLane(lane: JobLane): Promise<{ ran: number }> {
       (async () => {
         for (let n = 0; n < 8; n++) {
           const next = await sql<DeskJob>`
-            select id, newsroom_id, user_id, kind, subject_id, lane, status, stage, error,
+            select id, newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage, error,
                    created_at, updated_at, started_at, finished_at
             from desk_jobs
             where lane = ${lane}

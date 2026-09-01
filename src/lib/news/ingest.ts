@@ -573,7 +573,6 @@ export async function ingestUrl(raw: string): Promise<IngestResult> {
   if (yt) return { text: yt.text, titleHint: yt.title, extras: yt.extras ?? [] };
   const pg = await ingestPrimeGov(url);
   if (pg) return { text: pg.text, titleHint: pg.title, extras: pg.extras };
-  const host = url.hostname.replace(/^www\./, "");
   const path = url.pathname.toLowerCase();
 
   const res = await fetchPublicHttp(url);

@@ -4,11 +4,12 @@ import { useState } from "react";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { LeadRowView } from "@/components/desk-leads";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
-import { deleteLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
+import { deleteLead, draftLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { nearDuplicate, openLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
 import { TOPICS } from "@/lib/paper";
 import { usePaper } from "@/lib/paper-context";
+import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
 
@@ -62,6 +63,42 @@ function QueuePage() {
   const [topic, setTopic] = useState("council");
   const [url, setUrl] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [draftNotices, setDraftNotices] = useState<Record<number, { kind: "ok" | "err"; text: string }>>({});
+  const [draftingIds, setDraftingIds] = useState<number[]>([]);
+  const queueDraft = useMutation({
+    mutationFn: (input: { leadId: number; modelChoice: StoryModelChoice }) => draftLead({ data: input }),
+    onMutate: ({ leadId }) => setDraftingIds((ids) => [...ids.filter((id) => id !== leadId), leadId]),
+    onSuccess: (res, { leadId }) => {
+      if (res?.ok) {
+        setDraftNotices((notices) => ({
+          ...notices,
+          [leadId]: {
+            kind: "ok",
+            text: `Draft queued with ${modelChoiceLabel(res.modelChoice)}. Open the lead to watch it arrive.`,
+          },
+        }));
+      } else {
+        setDraftNotices((notices) => ({
+          ...notices,
+          [leadId]: {
+            kind: "err",
+            text: res?.error
+              ? `${res.error}${"detail" in res && res.detail ? `\n\n${res.detail}` : ""}`
+              : "That draft did not queue.",
+          },
+        }));
+      }
+      void qc.invalidateQueries({ queryKey: ["leads"] });
+    },
+    onError: (error, { leadId }) => setDraftNotices((notices) => ({
+      ...notices,
+      [leadId]: {
+        kind: "err",
+        text: error instanceof Error ? error.message : "That draft did not queue.",
+      },
+    })),
+    onSettled: (_data, _error, { leadId }) => setDraftingIds((ids) => ids.filter((id) => id !== leadId)),
+  });
   const file = useMutation({
     mutationFn: () => fileLead({ data: { headline, why, topic, url } }),
     onSuccess: async (res) => {
@@ -225,6 +262,16 @@ function QueuePage() {
               onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
               onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}
               onDelete={() => remove.mutate(l.id)}
+              onDraft={(modelChoice) => {
+                setDraftNotices((notices) => {
+                  const next = { ...notices };
+                  delete next[l.id];
+                  return next;
+                });
+                queueDraft.mutate({ leadId: l.id, modelChoice });
+              }}
+              drafting={draftingIds.includes(l.id)}
+              draftNotice={draftNotices[l.id] ?? null}
             />
           ))}
         </div>

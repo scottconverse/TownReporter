@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 |---|---|
 | **Node** | 22 or newer (`node -v`). Types in this repo are Node 22. |
 | **npm** | Comes with Node. `npm install` is enough. |
-| **A model** | The [Claude Code CLI](https://claude.com/claude-code), signed in. Scan, Draft, Dig and Opinion refuse to run without it, and say so before you type anything. No API key goes in a file. |
+| **A model** | Story can use a configured OpenAI-compatible gateway, an LM Studio-compatible Local Qwen, provider-hosted Zen, or signed-in Codex/Claude CLIs. Scan and Dig use the configured provider below. Opinion currently requires signed-in Claude Code. |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it. |
 | **A database** | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres). |
 
@@ -41,7 +41,7 @@ on an editor's action:
 
 | What | Triggered by | Where it goes |
 |---|---|---|
-| **Model calls** | Scan, Draft, Dark Desk, Opinion | Whichever provider you configured above — the Claude Code CLI path goes to Anthropic under your own login; `LLM_BASE_URL` pointed at a local gateway keeps it on this box. |
+| **Model calls** | Scan, Draft, Dark Desk, Opinion | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it selects OpenCode Zen, Codex Terra, or Claude Opus before enqueue. Local is explicit-only. Opinion currently uses Claude Code. |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard). |
 | **Searches** | The research pass, PULL, and every Dark Desk hop | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key, and there is currently no setting to keep a search on this machine — the chain is unconditional. |
 
@@ -63,7 +63,9 @@ npx playwright install chromium
 cp .env.example .env
 ```
 
-Edit `.env`. **The minimum that produces a working desk is nothing at all** — if the [Claude Code](https://code.claude.com) CLI is installed and signed in, the desk uses that login. Check with:
+Edit `.env`. **The minimum that produces every enabled desk feature is a
+signed-in [Claude Code](https://code.claude.com) CLI**; Story alone can also run
+through Local, Zen, Codex, or a configured gateway. Check Claude with:
 
 ```bash
 claude --version
@@ -107,16 +109,16 @@ All of these are documented in [`.env.example`](../.env.example).
 
 ### Model
 
-Resolution order, first match wins:
+Configured-provider resolution for **Scan and Dark Desk**, first match wins:
 
 | # | Set this | What runs |
 |---|---|---|
-| 1 | `LLM_BASE_URL` or `LLM_API_KEY` + `LLM_MODEL` | any OpenAI-compatible endpoint, including a local model |
+| 1 | `LLM_BASE_URL` or `LLM_API_KEY` + `LLM_MODEL` | any OpenAI-compatible endpoint; also forces Story Automatic to this gateway |
 | 2 | `ANTHROPIC_API_KEY` | Claude, billed to that key |
 | 3 | *nothing* | **Claude, through your local Claude Code login** |
 | 4 | `XAI_API_KEY` | Grok |
 
-#### Claude Code — the default, no key
+#### Claude Code — configured-provider default, no key
 
 Install the CLI and sign in once:
 
@@ -160,7 +162,11 @@ XAI_API_KEY=xai-...
 
 #### Any other model — three vars, no extra package
 
-TownReporter POSTs to `{LLM_BASE_URL}/chat/completions` with `Authorization: Bearer {LLM_API_KEY}`. If `LLM_BASE_URL` or `LLM_API_KEY` is set, that **wins over everything above** — which is how you point the desk at a local model.
+TownReporter POSTs to `{LLM_BASE_URL}/chat/completions` with `Authorization:
+Bearer {LLM_API_KEY}`. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
+pair is set, that wins for Scan and Dark Desk and becomes Story Automatic's
+exclusive provider. An explicit Story picker choice still means exactly that
+named provider and never falls back.
 
 ```
 LLM_BASE_URL=http://127.0.0.1:4000/v1
@@ -183,6 +189,47 @@ LLM_MODEL=claude-sonnet-4-5
 
 Resolution lives in `src/lib/news/ai.ts` (`resolveProvider()`); the Claude Code path is `ai-claude-code.server.ts`.
 
+#### Per-run picker
+
+Every active Queue row and the story workbench default to **Automatic**. A
+configured `LLM_*` gateway is forced for Automatic. Without one, TownReporter
+checks provider-hosted Zen MiMo, Codex Terra, then Claude Opus and
+stores the first ready provider on the job before it is enqueued. Every pass in
+that Story run uses the same effective provider. A named choice forces only
+that provider; explicit choices never fall back. Local Qwen remains explicit
+instead of Automatic: `/models` can prove it is loaded, but not that the loaded
+model will finish TownReporter's full multi-pass reporting job.
+
+| Choice | Default identity | Prerequisite / boundary |
+|---|---|---|
+| Local Qwen | `http://127.0.0.1:1234/v1`, `qwen/qwen3.6-35b-a3b` | Run an LM Studio-compatible `/v1` server and load the exact model id. The readiness check calls `/models`. |
+| Zen MiMo | `https://opencode.ai/zen/v1`, `mimo-v2.5-free` | Provider-hosted. Draft prompts leave this machine and go to OpenCode. Network/provider availability and pricing are controlled by OpenCode. |
+| Codex Terra | `gpt-5.6-terra` | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token. |
+| Codex Sol | `gpt-5.6-sol` | Same Codex login; frontier Story override. |
+| Claude Opus | `claude-opus-5` | Signed-in Claude Code, or `ANTHROPIC_API_KEY`. |
+
+Compatibility overrides:
+
+```env
+TOWNREPORTER_LOCAL_BASE_URL=http://127.0.0.1:1234/v1
+TOWNREPORTER_LOCAL_MODEL=qwen/qwen3.6-35b-a3b
+TOWNREPORTER_ZEN_BASE_URL=https://opencode.ai/zen/v1
+TOWNREPORTER_ZEN_MODEL=mimo-v2.5-free
+TOWNREPORTER_CODEX_TERRA_MODEL=gpt-5.6-terra
+TOWNREPORTER_CODEX_SOL_MODEL=gpt-5.6-sol
+```
+
+Set `CODEX_CLI_PATH` or `CODEX_HOME` only if normal discovery cannot find the
+binary or OAuth state. Codex Story calls run ephemerally with user configuration,
+repository rules, local shell/file tools, browser/computer tools, apps, plugins,
+hooks, skills, and multi-agent capabilities disabled. The Story call is
+tool-free; only the prompt sent over stdin reaches the provider.
+
+Opinion displays Automatic, Codex Sol and Claude Opus, but Claude Opus through
+the signed-in Claude Code CLI is the only enabled path today. Codex Opinion refuses before research, enqueue, or
+spend because sending the private editorial voice to OpenAI requires explicit
+operator authorization; TownReporter does not infer it from a Codex login.
+
 ### The Opinion voice
 
 The Opinion desk writes in a voice held in a **file on disk**, named by path:
@@ -196,17 +243,18 @@ Rules the app enforces, not conventions:
 - The path must be absolute. A relative path is refused.
 - A path **inside this repository** is refused. The voice is meant to stay out
   of version control.
-- Only the path ever reaches a command line. The file is read by the model CLI
-  itself, never loaded into the app's memory and never passed as an argument —
-  command lines are readable by every process on the machine.
+- On the enabled Claude path, only the path reaches the CLI; the file is read
+  by Claude Code, never loaded into the app's memory and never passed as an
+  inline argument. Codex Opinion remains disabled rather than changing this
+  boundary without explicit authorization.
 - A path long enough to look like an inlined prompt is refused outright.
 
 Without the variable, the Opinion desk says so and spends nothing. Everything
 else on the desk works.
 
-`TOWNREPORTER_EDITORIAL_MODEL` overrides the model for that one call. It
-defaults to Opus deliberately: it is the only call in the newsroom where the
-writing *is* the product.
+`TOWNREPORTER_EDITORIAL_MODEL` overrides the **Claude Opinion writing model**.
+It defaults to Opus deliberately: it is the only call in the newsroom where
+the writing *is* the product. It does not change Story choices or Codex models.
 
 Note the length, and the cost. A piece takes ten to forty minutes, because the
 voice researches before it writes. Three measured runs:
@@ -346,7 +394,10 @@ Two things stop working there, both by design:
 - **Chromium does not run.** Playwright needs a real browser on the machine; a serverless function cannot open one. Transcripts and JavaScript-heavy civic sites (Municode) will not be read.
 - **Background jobs get chopped up.** A serverless invocation may freeze once the click returns, so Scan / Draft / Keep digging only finish when the monitors ping arrives.
 
-Also note there is no Claude Code CLI on a serverless host — set `ANTHROPIC_API_KEY` or the `LLM_*` trio instead.
+Also note there is no Claude Code CLI on a serverless host — set
+`ANTHROPIC_API_KEY` or the `LLM_*` trio for Scan, Dark Desk, and Story instead.
+Opinion is unavailable on that host because its enabled private-voice path
+requires the local Claude Code CLI.
 
 Scan, Draft, and Dark Keep digging persist a job and return. This long-lived process drains waiting jobs. A Vercel serverless invocation may freeze after the click returns — those jobs finish when the monitors ping (`GET /api/cron/monitors` with `CRON_SECRET`) hits. The paper and a typed draft still deploy without that ping; Scan / Draft / Keep digging need it on a host that sleeps.
 

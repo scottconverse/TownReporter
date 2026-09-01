@@ -289,6 +289,7 @@ export function InkButton({
   tone = "solid",
   type = "button",
   small = false,
+  ariaLabel,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
@@ -296,6 +297,7 @@ export function InkButton({
   tone?: "solid" | "ghost" | "danger" | "invert" | "quiet";
   type?: "button" | "submit";
   small?: boolean;
+  ariaLabel?: string;
 }) {
   const cls =
     "btn" +
@@ -304,7 +306,7 @@ export function InkButton({
     (tone === "quiet" ? " quiet" : "") +
     (small ? " small" : "");
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={cls}>
+    <button type={type} onClick={onClick} disabled={disabled} className={cls} aria-label={ariaLabel}>
       {children}
     </button>
   );

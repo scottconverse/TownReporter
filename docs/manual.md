@@ -162,6 +162,10 @@ The scanner files here, Dark Desk files here, and so do you. The number on the
 left is the score. `NEW`, `DRAFTED`, `HELD`, `KILLED` are the states. Nothing
 prints until you open a lead and publish it.
 
+Each active row has its own Writing model picker and Draft/Redraft with AI
+button. Automatic resolves one ready provider before enqueue and the result is
+shown on that same row. A named provider never falls back.
+
 ## The story workbench
 
 `/desk/story/:id` — where a lead becomes a story.
@@ -170,7 +174,9 @@ prints until you open a lead and publish it.
 
 The lead and the reporting notes are on the left and never print. The draft is
 on the right: headline, dek, topic, body. **Redraft** rewrites the story from
-the notes. **PULL** next to an unfinished to-do goes and fetches that specific
+the notes with the provider selected beside it. A failed job's message remains
+after reload and includes safe provider detail when available. **PULL** next to
+an unfinished to-do goes and fetches that specific
 document. **Publish to the paper** is the gate — after that, the story is only
 ever corrected, never silently edited.
 
@@ -216,6 +222,13 @@ the headline and there is no byline, because an unsigned editorial is the
 paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
 
+Opinion shows Automatic, Claude Opus and Codex Sol. Claude Opus through Claude
+Code is the enabled path today. Codex Sol refuses before enqueue or spend because TownReporter does
+not infer permission to send the private editorial voice to OpenAI. Automatic
+therefore requires ready Claude Opus today. The page lists every missing voice,
+installation, or login prerequisite and stays disabled while readiness is
+unknown.
+
 **Edit**, on the row, opens the piece in its own workbench at
 `/desk/story/draft/:id`: headline, dek, topic and the piece itself, plus the two
 boxes that never print. Save, publish, or delete it from there.
@@ -259,9 +272,9 @@ settings or invite another editor.
 
 ## Five minutes, on your own machine
 
-You need **Node 22+**. You do **not** need an AI key if
-[Claude Code](https://code.claude.com) is installed and signed in — the desk
-uses that login.
+You need **Node 22+**. API keys are optional: Story can use Local, Zen, or an
+existing Codex/Claude login. A signed-in [Claude Code](https://code.claude.com)
+CLI supplies every currently enabled model-backed desk feature, including Opinion.
 
 ```bash
 git clone https://github.com/scottconverse/TownReporter.git
@@ -297,41 +310,42 @@ db:migrate`.
 
 ## The model
 
-First match wins:
+Configured-provider precedence for Scan and Dark Desk is:
 
 | Set this | What runs |
 |---|---|
-| `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint, including a local model |
+| `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; also forces Story Automatic to it |
 | `ANTHROPIC_API_KEY` | Claude, billed to that key |
 | *nothing* | **Claude, through your Claude Code login** |
 | `XAI_API_KEY` | Grok |
 
 ### Which feature uses which provider
 
-The provider you select drives every model call **except one**, and the
-exception is deliberate.
+Scan and Dark Desk use the configured provider. Draft and Opinion additionally
+have an editor-facing, per-run picker.
 
 | Feature | Provider | Model |
 |---|---|---|
-| Scan, Draft (research/write/edit) | the one you selected | the one you configured |
+| Scan | configured provider | configured model |
+| Draft (Queue or workbench) | configured gateway forced for Automatic when set; otherwise first ready Zen → Codex Terra → Claude Opus rung; explicit choice never falls back | Local Qwen is explicit-only; Zen MiMo, Codex Terra/Sol, or Claude Opus |
 | Dark Desk synthesis and brief | the one you selected | the one you configured |
 | Dark Desk **planner** | the one you selected | Haiku **only when the provider is Claude**; otherwise your configured model |
-| **Opinion (editorials)** | **always the Claude Code CLI** | Opus, or `TOWNREPORTER_EDITORIAL_MODEL` |
+| **Opinion (editorials)** | signed-in Claude Code enabled; Codex fails closed pending explicit private-voice authorization | Claude Opus today; Codex Sol is visible but disabled |
 
-**Why Opinion is different.** The editorial voice is handed to the CLI as
-`--system-prompt-file`, so the file never becomes a command-line argument that
-any process on the machine could read. The piece is also written with WebSearch
-and WebFetch. No OpenAI-compatible endpoint offers either, so Opinion cannot go
-through the provider chain. If you set `TOWNREPORTER_CLAUDE_CODE=0`, Opinion
-refuses and says so — it does not quietly use the CLI anyway.
+**Why Opinion has fewer choices.** Its private voice is handed to Claude Code
+by file path only for the tool-free writing pass; the app never reads it.
+Local and Zen are not offered. Codex research isolation exists, but its writing
+pass remains disabled because sending the voice text to OpenAI requires
+explicit authorization. Automatic requires Claude until that setting exists.
 
 **The planner split.** Planning on Haiku costs about a quarter of planning on
 Opus for the same output, so the desk substitutes it — but only on a Claude
 provider. Pointing `LLM_BASE_URL` at LM Studio does not make the desk ask a
 local endpoint for a Claude model; it uses yours.
 
-Pointing `LLM_BASE_URL` at a local model sends everything except Opinion local,
-including the story writing.
+Pointing `LLM_BASE_URL` at a local model sends Scan, Dark Desk, and Story
+Automatic to that gateway. An explicit Story choice still forces its named
+provider. Opinion remains on its separate Claude boundary.
 What that actually costs in quality was measured on this machine:
 [docs/local-models.md](local-models.md).
 
@@ -340,7 +354,8 @@ it reloads a fixed preamble on every call, so a draft takes minutes rather than
 seconds; the time budgets adjust on their own.
 
 Your own `CLAUDE.md`, skills and plugins are **not** loaded into news prompts.
-The harness is stripped on every call with `--setting-sources ""`.
+Claude strips settings with `--setting-sources ""`. Codex Story runs
+ephemerally with user rules and every local/tool capability disabled.
 
 ## The Opinion voice
 
@@ -351,9 +366,9 @@ TOWNREPORTER_VOICE_FILE=C:/Users/you/.townreporter/voice/your-voice.md
 ```
 
 The file is deliberately outside the repository, and the app refuses a path
-inside it. Only the **path** ever reaches a command line — the file itself is
-read by the CLI, never loaded into the app's memory and never passed as an
-argument, because command lines are readable by every process on the machine.
+inside it. On the enabled Claude path, only the **path** reaches the CLI — the
+file itself is read by Claude Code, never loaded into the app's memory and never
+passed inline. Codex Opinion is disabled rather than weakening that boundary.
 Without the file, the Opinion desk says so and spends nothing.
 
 ## Serving it publicly
@@ -412,7 +427,7 @@ fields remain blank; they do not inherit Longmont's values.
 | Fetching | `undici`, with a connect-time SSRF guard | The address approved is the address connected to |
 | Rendering | Playwright Chromium | JS-heavy civic portals and YouTube "Show transcript" |
 | PDFs | `unpdf` | Text extraction; image-only PDFs are honestly reported as unread |
-| Model | Claude Code CLI, Anthropic SDK, or any OpenAI-compatible URL | Provider is chosen at call time, not at build time |
+| Model | Codex/Claude CLIs, Anthropic SDK, OpenCode Zen, or any OpenAI-compatible URL | Provider is resolved before enqueue and stored on each Story job |
 
 ## Server functions and the desk boundary
 
@@ -473,8 +488,10 @@ The editorial writer is Opus deliberately: it is the one call where the writing
   server on every push.
 
 This is scoped to the reader's pages. **Working the desk is not trackerless** —
-Scan, Draft and Dark Desk send model calls to your configured provider, and
-every search (the research pass, PULL, and every Dark Desk hop) goes to a
+Scan and Dark Desk send model calls to the configured provider. Story sends
+each run to its persisted effective provider: the configured gateway, or the
+selected/ready Zen, Codex, Claude, or explicit Local choice. Every search (the
+research pass, PULL, and every Dark Desk hop) goes to a
 third-party chain: Exa's hosted endpoint first, then DuckDuckGo, Bing, Brave
 and Wikipedia (`src/lib/news/search-web.ts`), unconditionally and with no key.
 See [docs/setup.md — What leaves this machine](setup.md#what-leaves-this-machine)
@@ -532,6 +549,8 @@ flowchart TB
 
     subgraph models["Whichever model you point it at"]
         CC["Claude Code CLI<br/>(no API key)"]
+        CX["Codex CLI<br/>(OAuth, Story tool-free)"]
+        ZEN["OpenCode Zen<br/>(provider-hosted)"]
         API["Anthropic API"]
         OAI["Any OpenAI-compatible URL<br/>incl. a local model"]
     end
@@ -646,20 +665,23 @@ flowchart LR
         VOICE["The voice file<br/>~/.townreporter/voice/*.md"]
     end
 
-    CLI["Claude Code CLI"]
+    CLI["Claude Code CLI<br/>enabled"]
+    CODEX["Codex Sol<br/>fails closed before spend"]
 
     UI --> PACK
     PACK -->|"over stdin"| CLI
     VOICE -.->|"path only,<br/>read by the CLI"| CLI
     CLI --> PARSE --> DRAFTS --> UI
+    UI -.->|"private voice needs<br/>explicit OpenAI authorization"| CODEX
 
     style private fill:#2a2320,color:#fff
     style VOICE fill:#7a2d2d,color:#fff
 ```
 
-The voice file is never read into the app's memory and never becomes a command
-line argument. The app holds a path and a refusal: a relative path, or any path
-inside the repository, is rejected.
+On the enabled Claude path, the voice file is never read into the app's memory
+and never becomes inline prompt text. The app holds a path and a refusal: a
+relative path, or any path inside the repository, is rejected. Codex Opinion
+adds another refusal until its OpenAI destination is explicitly authorized.
 
 ## Keeping it online
 
@@ -712,18 +734,18 @@ erDiagram
 
 ```mermaid
 flowchart TB
-    CALL["A desk call"] --> Q1{"LLM_BASE_URL<br/>or LLM_API_KEY?"}
-    Q1 -->|yes| OAI["OpenAI-compatible endpoint<br/>(LiteLLM · Ollama · anything)"]
-    Q1 -->|no| Q2{"ANTHROPIC_API_KEY?"}
-    Q2 -->|yes| SDK["Anthropic API"]
-    Q2 -->|no| Q3{"Claude Code CLI<br/>installed and signed in?"}
-    Q3 -->|yes| CC["The CLI — no key, no per-call bill"]
-    Q3 -->|no| Q4{"XAI_API_KEY?"}
-    Q4 -->|yes| GROK["Grok"]
-    Q4 -->|no| NONE["Say so. Spend nothing."]
+    CALL["A model-backed desk action"] --> KIND{"Story picker?"}
+    KIND -->|no: Scan / Dark| CFG["Configured precedence<br/>LLM gateway → Anthropic key → Claude CLI → Grok"]
+    KIND -->|yes: Automatic| Q1{"LLM_* configured?"}
+    Q1 -->|yes| OAI["Use that gateway only"]
+    Q1 -->|no| READY["First ready<br/>Zen → Codex Terra → Claude Opus"]
+    KIND -->|yes: named choice| ONE["Use only that provider<br/>no fallback"]
+    OAI --> SAVE["Persist effective provider on job"]
+    READY --> SAVE
+    ONE --> SAVE
+    SAVE --> RUN["Every Story pass uses the same provider"]
 
-    style CC fill:#1c1a17,color:#fff
-    style NONE fill:#3a2a2a,color:#fff
+    style SAVE fill:#1c1a17,color:#fff
 ```
 
 ---
@@ -765,9 +787,12 @@ comment on each, is [`.env.example`](../.env.example).
 | `DATABASE_URL` | Postgres. Unset means throwaway PGLite. |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | Extra origins allowed to sign in, comma-separated |
 | `TOWNREPORTER_VOICE_FILE` | Absolute path to the Opinion voice, outside the repo |
-| `TOWNREPORTER_EDITORIAL_MODEL` | Override the editorial model (default Opus) |
+| `TOWNREPORTER_EDITORIAL_MODEL` | Override the Claude Opinion writing model (default Opus) |
 | `ANTHROPIC_API_KEY` | Bill Claude to a key instead of using the CLI login |
-| `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL` | Any OpenAI-compatible endpoint |
+| `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL` | Configured provider for Scan/Dark; forced Story Automatic provider |
+| `TOWNREPORTER_LOCAL_BASE_URL` · `TOWNREPORTER_LOCAL_MODEL` | Local picker identity; defaults `127.0.0.1:1234/v1` and `qwen/qwen3.6-35b-a3b` |
+| `TOWNREPORTER_ZEN_BASE_URL` · `TOWNREPORTER_ZEN_MODEL` | Zen picker identity; defaults OpenCode Zen and `mimo-v2.5-free` |
+| `TOWNREPORTER_CODEX_TERRA_MODEL` · `TOWNREPORTER_CODEX_SOL_MODEL` | Codex picker model ids; defaults `gpt-5.6-terra` / `gpt-5.6-sol` |
 | `XAI_API_KEY` | Grok |
 | `CRON_SECRET` | Lets an external monitor ping the job runner |
 | `HOST` | What the server binds to. Unset means every interface, LAN included. Set `127.0.0.1` when a tunnel or proxy fronts it. |

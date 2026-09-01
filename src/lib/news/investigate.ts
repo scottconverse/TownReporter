@@ -1,11 +1,7 @@
 import { ensureSchemaOnce, getSql } from "../db.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { grokChat, parseJsonBlock, plannerModel, providerBudget } from "./ai.ts";
-import {
-  CLAIM_HYGIENE_RULES,
-  isSelfReferential,
-  labelAfterCitationCheck,
-} from "./claim-hygiene.ts";
+import { isSelfReferential, labelAfterCitationCheck } from "./claim-hygiene.ts";
 import { DARK_PLANNER } from "./dark-prompt.ts";
 import {
   classifyClaimKind,
@@ -477,10 +473,6 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
 export async function ensureInvestigateSchema() {
   const sql = await getSql();
   await ensureSchemaOnce(sql, "investigate", INVESTIGATE_SCHEMA_STATEMENTS);
-}
-
-function canonical(name: string) {
-  return identityKey(name);
 }
 
 export function emptyPlan(): HopPlan {

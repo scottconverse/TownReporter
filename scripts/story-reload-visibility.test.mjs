@@ -1,0 +1,36 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const desk = await readFile(new URL("../src/lib/news/desk.ts", import.meta.url), "utf8");
+const story = await readFile(
+  new URL("../src/routes/desk.story.$leadId.tsx", import.meta.url),
+  "utf8",
+);
+
+test("Story reload hydrates the durable draft and retains the latest job result", () => {
+  assert.match(
+    desk,
+    /latestJob\(\{\s*newsroomId:[\s\S]*?kind:\s*"draft"[\s\S]*?subjectId:\s*id\s*\}\)/,
+    "getLead must reload the durable draft job instead of relying on mutation memory",
+  );
+  assert.match(desk, /return\s*\{[\s\S]*?lead,[\s\S]*?draft,[\s\S]*?job,/);
+  assert.match(
+    story,
+    /if\s*\(!waitingSince\)[\s\S]*?setHeadline\(d\.headline\)[\s\S]*?setBody\(stripReporterNotebook\(d\.body\s*\?\?\s*""\)\)/,
+    "a newly loaded page must hydrate its editor fields from the saved draft",
+  );
+});
+
+test("Story reload surfaces a durable failed job when no newer click message exists", () => {
+  assert.match(
+    story,
+    /previousJobError\s*=\s*!waiting\s*&&\s*!msg\s*&&\s*data\?\.job\?\.status\s*===\s*"failed"/,
+    "a reload must derive the error from the durable failed job",
+  );
+  assert.match(
+    story,
+    /\(msg\s*\|\|\s*previousJobError\)[\s\S]*?<Notice[\s\S]*?>\{msg\s*\|\|\s*previousJobError\}<\/Notice>/,
+    "the recovered failure must be rendered as an editor-visible notice",
+  );
+});

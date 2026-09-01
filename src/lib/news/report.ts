@@ -9,6 +9,8 @@ import { webSearch } from "./search-web.ts";
 import { getSql } from "../db.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import type { LeadRow, MemoryRow } from "./types.ts";
+import type { StoryModelChoice } from "./model-choice.ts";
+import type { EffectiveProviderChoice } from "./ai.ts";
 import { stripReporterNotebook } from "./strip-draft.ts";
 import { titlesOverlap } from "./desk-copy.ts";
 
@@ -1036,11 +1038,19 @@ export async function reportAndDraft(
     memory: Pick<MemoryRow, "entity" | "last_angle">[];
     extraEvidence?: string;
     extraUrls?: string[];
+    modelChoice?: StoryModelChoice;
   },
   deps: ReportDeps = {},
 ): Promise<ReportedDraft | { error: string }> {
   const started = Date.now();
-  const limits = providerBudget();
+  let effectiveModelChoice: EffectiveProviderChoice | undefined = opts.modelChoice;
+  if (effectiveModelChoice === "auto") {
+    const { probeProvider } = await import("./ai.ts");
+    const ready = await probeProvider("auto");
+    if (!ready.ok) return { error: ready.error };
+    effectiveModelChoice = ready.choice;
+  }
+  const limits = providerBudget(effectiveModelChoice);
   const budget = deps.budgetMs ?? limits.wallMs;
   const reserve = deps.budgetMs ? DRAFT_WRITE_RESERVE_MS : limits.reserveMs;
   const timeLeft = () => budget - (Date.now() - started);
@@ -1056,7 +1066,7 @@ export async function reportAndDraft(
       if (timeLeft() < 5_000) {
         return { ok: false, error: "The draft ran out of time before this step." };
       }
-      return grokChat(system, user, maxTokens, { timeoutMs: ms });
+      return grokChat(system, user, maxTokens, { timeoutMs: ms, choice: effectiveModelChoice });
     });
 
   const seedUrls = sanitizePublicUrls([...opts.urls, ...(opts.extraUrls ?? [])]).slice(0, 6);
@@ -1244,7 +1254,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     .filter(Boolean)
     .join("\n\n");
 
-  if (timeLeft() < 4_000) return { error: "xAI request timed out" };
+  if (timeLeft() < 4_000) return { error: "The draft ran out of time before writing." };
   const writeAi = await chat(REPORT_WRITE_SYSTEM, packet, 2200);
   if (!writeAi.ok) return { error: writeAi.error };
   const coerced = coerceDraft(writeAi.text, {

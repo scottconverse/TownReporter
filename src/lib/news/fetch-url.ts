@@ -1,4 +1,4 @@
-import { assertHttpUrl, isBlockedAddress, isIP, sha256 } from "./url-guard.ts";
+import { assertHttpUrl, isBlockedAddress, isIP } from "./url-guard.ts";
 import { htmlToPlainText } from "./html-text.ts";
 
 export { assertHttpUrl, isBlockedAddress, sha256, sha256Bytes } from "./url-guard.ts";

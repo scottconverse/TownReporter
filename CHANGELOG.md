@@ -4,6 +4,26 @@ Current release: **0.5.6**.
 
 ## Unreleased
 
+- **The editor chooses the writing model per run.** Queue and story workbench
+  drafts now offer Automatic plus direct Local, Zen, Codex Terra, Codex Sol and
+  Claude Opus choices. Automatic uses a configured `LLM_*` gateway exclusively
+  when present; otherwise it resolves the first ready Zen → Codex Terra →
+  Claude Opus rung before enqueueing. That effective choice is stored on the
+  durable job and used for every pass. Explicit choices never fall back. Queue
+  puts the picker and result beside each lead's Draft/Redraft action. Local
+  remains an explicit choice after a loaded local model failed to complete the
+  full reporting pipeline during the release gate. A failed job's actionable
+  provider detail now survives a page reload instead of disappearing with the
+  click; the release gate also completed and filed a full Story through Zen.
+- **Opinion has a frontier picker and fails closed at its private boundary.**
+  Claude Opus is enabled. Codex Sol remains unavailable until the operator can
+  explicitly authorize sending the private editorial voice to OpenAI; it
+  refuses before research, enqueue, or spend rather than inferring consent.
+- **Model choice has a real migration.** Migration 0025 adds the durable choice
+  to Story jobs and Opinion requests. Its fresh-install path now creates the
+  historically lazy Opinion request table before altering it, with a PGlite
+  regression test for the failure found during this release's first-run gate.
+
 - **Paper setup now controls meeting discovery end to end.** The setup and
   Server screens expose the paper's YouTube meeting channels and meeting-title
   keywords. Channel scans, meeting classification and sister-tape transcript

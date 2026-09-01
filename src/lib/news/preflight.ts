@@ -14,7 +14,13 @@
 export type ProbeResult = { ok: true; label: string } | { ok: false; error: string };
 
 /** Which kind of not-ready this is. They need different words and different buttons. */
-export type PreflightKind = "unconfigured" | "cli-missing" | "timeout" | "unknown";
+export type PreflightKind =
+  | "unconfigured"
+  | "cli-missing"
+  | "codex-missing"
+  | "provider-auth"
+  | "timeout"
+  | "unknown";
 
 export type Preflight =
   | { ok: true }
@@ -41,6 +47,10 @@ const GUIDANCE: Record<PreflightKind, string> = {
     "No model is set up yet. Either sign in to Claude Code on this machine, or set ANTHROPIC_API_KEY, or point LLM_BASE_URL at any OpenAI-compatible endpoint — a local model counts. See docs/setup.md. Nothing is spent until one of those answers.",
   "cli-missing":
     "Claude Code is the default and it is not installed here. Install it with `npm i -g @anthropic-ai/claude-code` and run `claude` once to sign in, or set CLAUDE_CLI_PATH to its binary, or set ANTHROPIC_API_KEY to bill a key instead. See docs/setup.md.",
+  "codex-missing":
+    "Codex is not installed on this machine. Install the Codex CLI, open Codex and sign in, then choose Codex again. Nothing was queued or spent.",
+  "provider-auth":
+    "The selected model is signed out. Open that provider on this machine, sign in, then choose it again. Nothing was queued or spent.",
   timeout:
     "The model was reachable but did not answer in time. This one is worth starting again. If it keeps happening, the machine may be busy or the provider slow.",
   unknown:
@@ -62,11 +72,15 @@ export function scanPreflight(probe: ProbeResult): Preflight {
   const detail = probe.error ?? "";
   const kind: PreflightKind = /timed out|timeout/i.test(detail)
     ? "timeout"
-    : /CLI not found|claude-code|CLAUDE_CLI_PATH/i.test(detail)
-      ? "cli-missing"
-      : /not available|ANTHROPIC_API_KEY|LLM_BASE_URL|XAI_API_KEY/i.test(detail)
-        ? "unconfigured"
-        : "unknown";
+    : /Codex is not installed|Codex CLI.*not found/i.test(detail)
+      ? "codex-missing"
+      : /CLI not found|claude-code|CLAUDE_CLI_PATH/i.test(detail)
+        ? "cli-missing"
+        : /signed out|not logged|unauthorized|sign in/i.test(detail)
+          ? "provider-auth"
+          : /not available|ANTHROPIC_API_KEY|LLM_BASE_URL|XAI_API_KEY/i.test(detail)
+            ? "unconfigured"
+            : "unknown";
 
   return {
     ok: false,

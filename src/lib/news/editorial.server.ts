@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { claudeCodeChat } from "./ai-claude-code.server";
 import { findVoiceFile } from "./voice.server";
+import { opinionModelChoice, type OpinionModelChoice } from "./model-choice.ts";
 import {
   EDITORIAL_TOOLS,
   RESEARCH_INSTRUCTIONS,
@@ -110,6 +111,7 @@ export type WriteEditorialInput = {
   sourceKind: string;
   sourceRef: string;
   leadId?: number | null;
+  modelChoice?: OpinionModelChoice;
 };
 
 export type WriteEditorialResult =
@@ -131,15 +133,6 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
     Checked before the voice file is read: no point looking up a file we
     cannot use.
   */
-  const { resolveClaudeCode, plannerModel } = await import("./ai");
-  if (!resolveClaudeCode()) {
-    return {
-      ok: false,
-      error:
-        "The Opinion desk needs the Claude Code CLI, and it is switched off or missing here. It cannot use ANTHROPIC_API_KEY or LLM_BASE_URL: the voice is handed over as a file path so it never reaches a command line, and the piece is written with web search. Unset TOWNREPORTER_CLAUDE_CODE=0, or install and sign in to Claude Code. See docs/setup.md.",
-    };
-  }
-
   const found = await findVoiceFile();
   if (!found.ok) return { ok: false, error: found.error };
 
@@ -155,7 +148,6 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
     what `resolveProvider()` picked elsewhere, so an empty answer has to
     fall back to a real Claude model id here rather than an empty string.
   */
-  const gatherModel = plannerModel() || "claude-haiku-4-5-20251001";
   const researchPack = buildEditorialPack({
     subject: input.subject,
     pointers: input.pointers,
@@ -163,38 +155,53 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
     askedFor: input.askedFor,
   });
 
-  const research = await claudeCodeChat({
-    system: RESEARCH_INSTRUCTIONS,
-    user: researchPack,
-    model: gatherModel,
-    allowedTools: EDITORIAL_TOOLS,
-    timeoutMs: editorialTimeoutMs(),
-  });
-  if (!research.ok) return { ok: false, error: research.error };
+  const runPair = async (choice: "claude-frontier" | "codex-frontier") => {
+    if (choice === "claude-frontier") {
+      const { resolveClaudeCode, plannerModel } = await import("./ai");
+      if (!resolveClaudeCode()) {
+        return { ok: false as const, error: "Claude is unavailable. Open Claude Code, sign in, then try again." };
+      }
+      const research = await claudeCodeChat({
+        system: RESEARCH_INSTRUCTIONS,
+        user: researchPack,
+        model: plannerModel() || "claude-haiku-4-5-20251001",
+        allowedTools: EDITORIAL_TOOLS,
+        timeoutMs: editorialTimeoutMs(),
+      });
+      if (!research.ok) return research;
+      return claudeCodeChat({
+        system: "",
+        systemPromptFile: found.voice.path,
+        user: buildWritingPack({
+          subject: input.subject,
+          ourStory: input.ourStory,
+          askedFor: input.askedFor,
+          research: research.text,
+        }),
+        model: process.env.TOWNREPORTER_EDITORIAL_MODEL?.trim() || "claude-opus-5",
+        timeoutMs: editorialTimeoutMs(),
+      });
+    }
 
-  /*
-    Pass two: writing. Voice present, tools absent — `allowedTools` is
-    omitted entirely, not passed as an empty configuration the voice could
-    somehow widen. `claudeCodeChat` refuses outright if a future edit ever
-    puts both a `systemPromptFile` and a non-empty `allowedTools` on the same
-    call, so this split is enforced below the call site too, not only here.
-  */
-  const writingPack = buildWritingPack({
-    subject: input.subject,
-    ourStory: input.ourStory,
-    askedFor: input.askedFor,
-    research: research.text,
-  });
+    /*
+      Codex research support is implemented by codexChat({ webSearch: true }),
+      with every local capability disabled. The private voice cannot be handed
+      to Codex by path: that would give an untrusted agent local file access.
+      Sending the voice text to OpenAI requires the operator's explicit
+      payload-and-destination authorization, which is not inferred here.
+      Refuse before spending the research pass until that authorization is
+      represented by an explicit product setting.
+    */
+    return {
+      ok: false as const,
+      error:
+        "Codex Opinion is not enabled yet. Its research boundary is ready, but sending the private editorial voice to OpenAI requires explicit authorization. Choose Claude Opus for Opinion.",
+    };
+  };
 
-  const out = await claudeCodeChat({
-    system: "",
-    systemPromptFile: found.voice.path,
-    user: writingPack,
-    // Opus, deliberately. This is the one call in the newsroom where the
-    // writing IS the product; it is not the place to save four dollars.
-    model: process.env.TOWNREPORTER_EDITORIAL_MODEL?.trim() || "claude-opus-5",
-    timeoutMs: editorialTimeoutMs(),
-  });
+  const choice = opinionModelChoice(input.modelChoice);
+  let out = await runPair(choice === "auto" ? "claude-frontier" : choice);
+  if (!out.ok && choice === "auto") out = await runPair("codex-frontier");
   if (!out.ok) return { ok: false, error: out.error };
 
   const ed = parseEditorial(out.text);
@@ -272,12 +279,14 @@ export async function ensureEditorialRequestSchema() {
       asked_for text not null default '',
       pointers_json text not null default '[]',
       our_story_json text,
+      model_choice text not null default 'auto',
       draft_id integer,
       error text,
       created_at timestamptz not null default now(),
       finished_at timestamptz
     )
   `);
+  await sql.query(`alter table editorial_requests add column if not exists model_choice text not null default 'auto'`);
 }
 
 export async function performEditorialWork(job: {
@@ -296,8 +305,9 @@ export async function performEditorialWork(job: {
     asked_for: string;
     pointers_json: string;
     our_story_json: string | null;
+    model_choice: string;
   }>`
-    select id, subject, source_kind, source_ref, asked_for, pointers_json, our_story_json
+    select id, subject, source_kind, source_ref, asked_for, pointers_json, our_story_json, model_choice
     from editorial_requests
     where id = ${job.subject_id} and newsroom_id = ${job.newsroom_id} limit 1
   `;
@@ -326,6 +336,7 @@ export async function performEditorialWork(job: {
     askedFor: req.asked_for,
     sourceKind: req.source_kind,
     sourceRef: req.source_ref,
+    modelChoice: opinionModelChoice(req.model_choice),
   });
 
   if (!result.ok) {

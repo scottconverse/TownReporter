@@ -23,7 +23,6 @@
   privacy check on the Server page came to match nothing at all and report
   a clean result unconditionally.
 */
-// eslint-disable-next-line no-control-regex
 const CONTROL = new RegExp(
   // NUL through backspace, vertical tab and form feed, then SO through US, and DEL.
   // eslint-disable-next-line no-control-regex

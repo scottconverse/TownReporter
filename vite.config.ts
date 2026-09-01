@@ -256,13 +256,15 @@ function stubServerOnlyOnClient(): Plugin {
     resolveId(id, _importer, options) {
       if (options?.ssr) return;
       if (isPlaywright(id)) return "\0stub-playwright";
-      if (isPglite(id)) return "\0stub-pglite";
+      // Keep "pglite" out of the emitted public filename too. The payload
+      // gate deliberately treats any browser asset with that name as a leak.
+      if (isPglite(id)) return "\0server-db-stub";
     },
     load(id) {
       if (id === "\0stub-playwright") {
         return "export const chromium = { launch: async () => null }; export default {};";
       }
-      if (id === "\0stub-pglite") {
+      if (id === "\0server-db-stub") {
         // The browser must never reach this. Throwing rather than returning a
         // fake keeps a real client-side use from failing silently.
         return 'export class PGlite { constructor() { throw new Error("PGlite is server-only"); } }; export default {};';

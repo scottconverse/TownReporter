@@ -37,6 +37,26 @@ function fakeJob(over: Partial<DeskJob>): DeskJob {
 }
 
 describe("desk jobs", () => {
+  it("persists the editor's model choice on the queued job", async () => {
+    const newsroomId = 91000;
+    const enqueueWithModel = enqueueJob as unknown as (
+      opts: Parameters<typeof enqueueJob>[0] & { modelChoice: string },
+    ) => Promise<DeskJob & { model_choice: string }>;
+    const job = await enqueueWithModel({
+      userId: `job-model-${Date.now()}`,
+      newsroomId,
+      kind: "draft",
+      subjectId: 515151,
+      modelChoice: "codex-frontier",
+      kick: false,
+    });
+    assert.equal(job.model_choice, "codex-frontier");
+    const latest = (await latestJob({ newsroomId, kind: "draft", subjectId: 515151 })) as
+      | (DeskJob & { model_choice: string })
+      | null;
+    assert.equal(latest?.model_choice, "codex-frontier");
+  });
+
   it("reuses a queued/running job for the same subject", async () => {
     const user = `job-${Date.now()}`;
     const newsroomId = 91001;
@@ -58,6 +78,29 @@ describe("desk jobs", () => {
     const latest = await latestJob({ newsroomId, kind: "draft", subjectId: 424242 });
     assert.equal(latest?.id, a.id);
     assert.ok(latest?.status === "queued" || latest?.status === "running");
+  });
+
+  it("keeps the first persisted model authoritative when conflicting requests coalesce", async () => {
+    const newsroomId = 91002;
+    const subjectId = 424243;
+    const first = await enqueueJob({
+      userId: `job-choice-${Date.now()}`,
+      newsroomId,
+      kind: "draft",
+      subjectId,
+      modelChoice: "local",
+      kick: false,
+    });
+    const second = await enqueueJob({
+      userId: `job-choice-${Date.now()}-second`,
+      newsroomId,
+      kind: "draft",
+      subjectId,
+      modelChoice: "codex-frontier",
+      kick: false,
+    });
+    assert.equal(second.id, first.id);
+    assert.equal(second.model_choice, "local", "a coalesced caller must receive the real persisted choice");
   });
 
   it("finds an open scan without knowing the run id", async () => {
