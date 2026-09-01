@@ -111,7 +111,6 @@ export const MEETING_KEYWORDS = [
   "neighborhood",
   "planning",
   "zoning",
-  "lura",
   "pre-session",
 ];
 
@@ -208,21 +207,19 @@ export function pickSisterMatch<T extends { title: string }>(title: string, othe
   return others.find((o) => sameMeeting(title, o.title)) ?? null;
 }
 
-export function isMeetingTitle(title: string): boolean {
+export function isMeetingTitle(title: string, keywords = MEETING_KEYWORDS): boolean {
   const t = title.toLowerCase();
   if (SKIP_TITLES.test(t)) return false;
-  return MEETING_KEYWORDS.some((k) => t.includes(k));
+  return keywords.some((k) => t.includes(k.toLowerCase()));
 }
 
 export function pickMeetingVideos<T extends { title: string; duration?: number }>(
   videos: T[],
   max = 8,
+  keywords = MEETING_KEYWORDS,
 ): T[] {
-  const meetings = videos.filter((v) => isMeetingTitle(v.title));
-  if (meetings.length) return meetings.slice(0, max);
-  return [...videos]
-    .sort((a, b) => (b.duration ?? 0) - (a.duration ?? 0))
-    .slice(0, max);
+  const meetings = videos.filter((v) => isMeetingTitle(v.title, keywords));
+  return meetings.slice(0, max);
 }
 
 export function parseChannelTabHtml(html: string, tab: ListedVideo["tab"]): ListedVideo[] {
@@ -475,8 +472,8 @@ export function describeLiveStatus(player: {
   if (player.captions) {
     return {
       live: player.isLiveContent ? "ended" : "vod",
-      note: player.captions.includes("Public Media")
-        ? "Transcript from Longmont Public Media (same meeting). City tape had none. Auto-captions; names may be wrong; verify quotes against the video."
+      note: player.captions.includes("Transcript from a configured sister channel")
+        ? "Transcript from a configured sister channel (same meeting). The original tape had none. Auto-captions; names may be wrong; verify quotes against the video."
         : "Transcript captured from More → Show transcript. Auto-captions; names may be wrong; verify quotes against the video.",
     };
   }
@@ -486,16 +483,44 @@ export function describeLiveStatus(player: {
   return { live: "vod", note: "No Show transcript control on this video." };
 }
 
-async function transcriptFromSisterChannel(title: string, alreadyId: string): Promise<string> {
-  if (!title || !isMeetingTitle(title)) return "";
-  for (const ch of LONGMONT_YOUTUBE_CHANNELS) {
+type YoutubeSettings = {
+  channels: string[];
+  meetingKeywords: string[];
+};
+
+async function currentYoutubeSettings(): Promise<YoutubeSettings> {
+  try {
+    const { getPaperConfig } = await import("./paper-settings.ts");
+    const config = await getPaperConfig();
+    return {
+      channels: config.youtubeChannels,
+      meetingKeywords: config.meetingKeywords,
+    };
+  } catch {
+    return {
+      // A settings-read failure must never make a second city inspect the
+      // shipped example's real channels. The ingest will still handle the URL
+      // the editor explicitly opened, but sister-channel discovery fails shut.
+      channels: [],
+      meetingKeywords: MEETING_KEYWORDS,
+    };
+  }
+}
+
+async function transcriptFromSisterChannel(
+  title: string,
+  alreadyId: string,
+  settings: YoutubeSettings,
+): Promise<string> {
+  if (!title || !isMeetingTitle(title, settings.meetingKeywords)) return "";
+  for (const ch of settings.channels) {
     try {
       const listed = await listChannelVideos(ch);
       const hit = listed.find((v) => v.id !== alreadyId && sameMeeting(title, v.title));
       if (!hit) continue;
       const text = await scrapeShowTranscript(hit.id);
       if (text.length > 80) {
-        return `Transcript from Longmont Public Media / ${ch} ${hit.url} (same meeting; other tape had none).\n${text}`;
+        return `Transcript from a configured sister channel / ${ch} ${hit.url} (same meeting; other tape had none).\n${text}`;
       }
     } catch {
       /* next channel */
@@ -504,7 +529,12 @@ async function transcriptFromSisterChannel(title: string, alreadyId: string): Pr
   return "";
 }
 
-async function captureVideo(id: string, listedTitle = "", published = ""): Promise<string> {
+async function captureVideo(
+  id: string,
+  settings: YoutubeSettings,
+  listedTitle = "",
+  published = "",
+): Promise<string> {
   const player = await fetchPlayer(id);
   let captions = player ? await fetchCaptions(id, player.captionTracks) : "";
   const upcoming =
@@ -514,7 +544,7 @@ async function captureVideo(id: string, listedTitle = "", published = ""): Promi
     captions = await scrapeShowTranscript(id);
   }
   if (!captions && !upcoming) {
-    const alt = await transcriptFromSisterChannel(player?.title || listedTitle, id);
+    const alt = await transcriptFromSisterChannel(player?.title || listedTitle, id, settings);
     if (alt) captions = alt;
   }
   const status = describeLiveStatus({
@@ -546,9 +576,10 @@ export type YoutubeIngest = { text: string; title: string; extras: string[] };
 
 export async function ingestYoutube(url: URL): Promise<YoutubeIngest | null> {
   if (!isYoutubeUrl(url)) return null;
+  const settings = await currentYoutubeSettings();
   const videoId = youtubeVideoId(url);
   if (videoId) {
-    const text = await captureVideo(videoId);
+    const text = await captureVideo(videoId, settings);
     const title = text.match(/^Title: (.+)$/m)?.[1] ?? `YouTube ${videoId}`;
     let extras: string[] = [];
     try {
@@ -571,7 +602,7 @@ export async function ingestYoutube(url: URL): Promise<YoutubeIngest | null> {
   const listed = await listChannelVideos(url.toString());
   const notes: string[] = [];
   const handle = url.toString().toLowerCase();
-  for (const ch of LONGMONT_YOUTUBE_CHANNELS) {
+  for (const ch of settings.channels) {
     if (handle.includes((ch.split("@")[1] ?? "___").toLowerCase())) continue;
     try {
       const alt = await listChannelVideos(ch);
@@ -582,7 +613,7 @@ export async function ingestYoutube(url: URL): Promise<YoutubeIngest | null> {
         }
       }
       for (const a of alt) {
-        if (!isMeetingTitle(a.title)) continue;
+        if (!isMeetingTitle(a.title, settings.meetingKeywords)) continue;
         if (listed.some((v) => v.id === a.id || sameMeeting(v.title, a.title))) continue;
         listed.push(a);
         notes.push(`Only listed on ${ch}: ${a.title} ${a.url}`);
@@ -591,7 +622,11 @@ export async function ingestYoutube(url: URL): Promise<YoutubeIngest | null> {
       /* sister channel is optional */
     }
   }
-  const meetings = pickMeetingVideos(listed.filter((v) => !/keyboard shortcut/i.test(v.title)), 12);
+  const meetings = pickMeetingVideos(
+    listed.filter((v) => !/keyboard shortcut/i.test(v.title)),
+    12,
+    settings.meetingKeywords,
+  );
   const extras = meetings.slice(0, 6).map((v) => v.url);
   const title = listed[0]?.title
     ? `YouTube channel ${url.pathname}`
@@ -604,7 +639,7 @@ export async function ingestYoutube(url: URL): Promise<YoutubeIngest | null> {
     "",
     "Recent videos:",
     ...listed.map((v) => {
-      const tag = isMeetingTitle(v.title) ? "meeting" : v.tab;
+      const tag = isMeetingTitle(v.title, settings.meetingKeywords) ? "meeting" : v.tab;
       return `- [${tag}] ${v.published || v.tab} ${v.title} ${v.url}`;
     }),
   ];

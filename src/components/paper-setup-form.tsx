@@ -46,6 +46,12 @@ export function PaperSetupForm({
   const [editorEmail, setEditorEmail] = useState(
     firstRun ? "" : (initial?.editorEmail ?? ""),
   );
+  const [youtubeChannels, setYoutubeChannels] = useState(
+    firstRun ? "" : (initial?.youtubeChannels ?? []).join("\n"),
+  );
+  const [meetingKeywords, setMeetingKeywords] = useState(
+    (initial?.meetingKeywords ?? []).join("\n"),
+  );
   /*
     On a first run the watch list starts EMPTY.
 
@@ -74,6 +80,14 @@ export function PaperSetupForm({
           tagline: tagline.trim(),
           councilVotesUrl,
           editorEmail,
+          youtubeChannels: youtubeChannels
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean),
+          meetingKeywords: meetingKeywords
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean),
           watchlist: rows
             .filter((r) => r.url.trim())
             .map((r) => ({
@@ -188,6 +202,35 @@ export function PaperSetupForm({
             placeholder="America/New_York"
             required
           />
+        </label>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-sm">
+          Meeting video channels <span className="text-ink-2">(optional)</span>
+          <textarea
+            className={inputClass + " mt-1 min-h-32 w-full"}
+            value={youtubeChannels}
+            onChange={(e) => setYoutubeChannels(e.target.value)}
+            placeholder={"https://www.youtube.com/@RiverbendCity\nhttps://www.youtube.com/@RiverbendPublicMedia"}
+          />
+          <span className="mt-1 block text-xs text-ink-2">
+            One YouTube channel URL per line. TownReporter checks these channels
+            for meeting recordings and usable transcripts.
+          </span>
+        </label>
+        <label className="block text-sm">
+          Meeting title keywords
+          <textarea
+            className={inputClass + " mt-1 min-h-32 w-full"}
+            value={meetingKeywords}
+            onChange={(e) => setMeetingKeywords(e.target.value)}
+            placeholder={"city council\nplanning commission\nzoning appeals"}
+          />
+          <span className="mt-1 block text-xs text-ink-2">
+            One phrase per line. Only recent videos whose titles contain one of
+            these phrases are treated as meeting candidates.
+          </span>
         </label>
       </div>
 

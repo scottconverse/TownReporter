@@ -37,6 +37,7 @@ It is not the Longmont Times-Call, not the city, and not a replacement for eithe
 | Dark Desk UI contract | [docs/dark-desk-editor.md](docs/dark-desk-editor.md) |
 | Local models, measured on real prompts | [docs/local-models.md](docs/local-models.md) |
 | Marketing / GitHub Pages landing | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
+| Contributing changes | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings → Pages → Deploy from a branch → `main` / `/docs`**. The token that pushes this repo cannot flip that switch.
 
@@ -55,9 +56,9 @@ cp .env.example .env              # no AI key needed if Claude Code is signed in
 npm run dev                       # http://localhost:8080
 ```
 
-Open [http://localhost:8080/login](http://localhost:8080/login) and **create an editor account** (email + password). The first account becomes the newsroom owner — there is no setup token. The account lives in your database, and sign-in is limited to ten attempts every five minutes per address.
+Open [http://localhost:8080/login](http://localhost:8080/login) and **create an editor account** (email + password). The first account becomes the newsroom owner — there is no setup token. TownReporter then opens **Set up the paper**: enter the paper name, city, state, timezone, contact details, starting watch list, meeting-video channels and meeting-title keywords. Nothing is published before that setup is saved. The account and paper settings live in your database, and sign-in is limited to ten attempts every five minutes per address.
 
-The public paper is `/`. The desk is `/desk`.
+The public paper is `/`. The desk is `/desk`; first-run setup is `/desk/setup`, and the owner can revise it later under **Server → Paper setup**.
 
 Full operator notes — Postgres, Vercel, other models, pointing it at another city — are in [docs/setup.md](docs/setup.md). How to run the desk is in [docs/editor.md](docs/editor.md).
 
@@ -67,7 +68,7 @@ Full operator notes — Postgres, Vercel, other models, pointing it at another c
 
 Same six moves the paper itself describes at `/how-we-report`:
 
-1. **Watch.** A list of civic sources: city site, council, planning, PrimeGov, NextLight, St. Vrain Valley Schools, Boulder County, the city YouTube channel, Longmont Public Media. That list is a starting point, not a fence.
+1. **Watch.** A list of civic sources: city site, council, planning, agenda portal, school district, utility and meeting-video channels. The Longmont edition ships with a working list; every new installation chooses its own.
 2. **Detect.** A scan fetches those pages, hashes them against the last snapshot, and flags what changed, what disappeared, and what failed to appear when it usually does.
 3. **Follow.** Before a story is drafted, the desk asks what the announcing source leaves unexplained, then follows attachments, names, contracts, parcels, prior meetings.
 4. **Preserve.** Significant captures are stored. If a record later vanishes, the captured version remains, and the article says so.
@@ -136,11 +137,15 @@ Also in 0.3.3–0.3.8: Mountain Time masthead, overlapping printed headlines col
 
 ## Point it at another city
 
-There is no city-picker UI. Edit the seed and rebuild.
+No code edit or rebuild is required. The owner fills out **Set up the paper** after creating the first account:
 
-1. [`src/lib/paper.ts`](src/lib/paper.ts) — `PAPER` (name, city, state, location, **timezone**, kicker, deck) and `SEED_SOURCES` (your city site, council, agenda portal, school district, PEG channel).
-2. [`src/lib/news/youtube.ts`](src/lib/news/youtube.ts) — `LONGMONT_YOUTUBE_CHANNELS` if you have a city channel and a public-media sister.
-3. If the city uses PrimeGov, add `https://{city}.primegov.com/public/portal` as an official source. The ingest already speaks that API.
+1. Paper name, tagline, city, state, IANA timezone, optional council-votes link and editor contact.
+2. A starting watch list: city site, council, agenda portal, school district, utility and other reporting sources.
+3. Optional YouTube meeting channels, one URL per line, plus the title phrases that identify meetings on those channels.
+
+The same form stays available under **Server → Paper setup**. Saving it changes the public masthead, city copy, local clock, contact links, watch list and meeting-video discovery. A blank optional field means none; it never borrows another town's value. Before setup, the public site shows a neutral “not yet set up” page and no articles.
+
+If the city uses PrimeGov, put its public portal URL in the watch list. The ingest already speaks that API.
 
 Details and the honest limits of a city swap are in [docs/setup.md](docs/setup.md#point-it-at-another-city).
 
@@ -257,7 +262,7 @@ It is a newsroom you run. Stories that print have a human gate. It is not a news
 No. Scan files leads. Draft writes a story into the workbench. Publish is a person.
 
 **Can I use this for any city?**
-Yes, by editing `paper.ts` (and the YouTube channel list). There is no config UI yet. See [docs/setup.md](docs/setup.md#point-it-at-another-city).
+Yes. The first owner completes **Set up the paper**, and can revise the same database-backed settings later on the Server page. No source edit or rebuild is required. See [docs/setup.md](docs/setup.md#point-it-at-another-city).
 
 **Do I have to pay for an AI key?**
 No. If Claude Code is signed in on the machine, the desk uses that login and there is no key at all. Set `ANTHROPIC_API_KEY` if you would rather bill a key, or point `LLM_BASE_URL` at any OpenAI-compatible endpoint — Ollama and other local models count, and cost nothing per word. `XAI_API_KEY` still runs Grok.
@@ -281,7 +286,7 @@ Yes, and it is worth knowing which things. Reading the paper sends nothing anywh
 *Dig* is how far it chases — hops, searches, whether it leaves the watch list. *Nerve* is how speculative it may be — how sure it has to be before it writes a signal down, and whether it may propose a theory or only ask a question. Three floors never move at any setting: no invented claims of paid influence, everything is labelled, and every theory carries what would kill it.
 
 **Can two people edit?**
-The first signed-in user is owner. Later accounts get 403 unless you add them to `newsroom_members`. There is no “invite editor” screen yet. See [docs/setup.md](docs/setup.md#a-second-editor).
+The first signed-in user is owner. Under **Server → Invite an editor**, the owner enters an email and copies a one-time link. It expires in seven days, works only for that address, and creates an editor seat without sharing the owner login. See [docs/setup.md](docs/setup.md#a-second-editor).
 
 **What does a run cost?**
 Scan, draft, and Dark Desk each call the model. A Longmont-sized scan is the expensive click; drafting one story is cheaper; a Dark Desk round is five short passes. Set a spending limit on the provider. Exact dollars depend on the model you point at.
@@ -297,7 +302,7 @@ No. [docs/index.html](docs/index.html) is a static landing page. The app is Node
 npm test
 ```
 
-Deterministic, offline and free by default — no provider is contacted and nothing is billed. The live model evaluation is separate and opt-in (`RUN_LIVE_MODEL_TESTS=1 npm run test:live-model`), because a default suite that calls a paid API is neither reproducible nor free. Meeting ingest, retrieval, draft stripping, Mountain Time dates, printed-headline collapse, version lock, auth, and Dark Desk loop coverage live in `src/lib/news/*.test.ts`.
+Deterministic, offline and free by default — no provider is contacted and nothing is billed. The live model evaluation is separate and opt-in (`RUN_LIVE_MODEL_TESTS=1 npm run test:live-model`), because a default suite that calls a paid API is neither reproducible nor free. Meeting ingest, retrieval, draft stripping, configured-timezone dates, printed-headline collapse, version lock, auth, paper setup, and Dark Desk loop coverage live in `src/lib/news/*.test.ts`.
 
 ---
 

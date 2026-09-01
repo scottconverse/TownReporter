@@ -5,6 +5,7 @@ import {
   extractChannelId,
   isMeetingTitle,
   isYoutubeChannel,
+  MEETING_KEYWORDS,
   parseChannelTabHtml,
   parseTranscriptPanel,
   pickMeetingVideos,
@@ -61,6 +62,18 @@ describe("parseTranscriptPanel", () => {
 });
 
 describe("meeting filter", () => {
+  it("uses the configured paper's meeting keywords", () => {
+    assert.equal(isMeetingTitle("Riverbend Zoning Appeals - August 31", ["zoning appeals"]), true);
+    assert.equal(isMeetingTitle("City Council Regular Session - August 31", ["zoning appeals"]), false);
+    assert.deepEqual(
+      pickMeetingVideos([{ title: "Parks summer concert", duration: 18_000 }], 8, [
+        "zoning appeals",
+      ]),
+      [],
+    );
+    assert.equal(MEETING_KEYWORDS.includes("lura"), false);
+  });
+
   it("keeps council and neighborhood meetings, drops TWIC promo", () => {
     assert.equal(isMeetingTitle("City Council Regular Session - 08/25/2026"), true);
     assert.equal(isMeetingTitle("206 S. Main Street Neighborhood Meeting"), true);

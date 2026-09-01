@@ -37,6 +37,12 @@ const execFileAsync = promisify(execFile);
 const WRAPPER = join(projectRoot(), "scripts/with-app-env.mjs");
 const PRINT_FLAG = "process.stdout.write(String(process.env.VITE_AUTH_ENABLED));";
 
+function childOutputAfterDatabaseDiagnostic(stdout) {
+  const [diagnostic, ...childOutput] = stdout.split("\n");
+  assert.match(diagnostic, /^\[with-app-env\] DATABASE_URL (?:-> |is set but unparseable|unset )/);
+  return childOutput.join("\n");
+}
+
 function makeWorkspace(appEnvJson) {
   const root = mkdtempSync(join(tmpdir(), "app-env-"));
   if (appEnvJson !== undefined) {
@@ -93,23 +99,23 @@ test("vite loadEnv resolves the wrapped value", () => {
   assert.equal(merged.VITE_AUTH_ENABLED, "false");
 });
 
-test("the wrapped command runs with the app env applied", async () => {
+test("the wrapped command reports its database and runs with the app env applied", async () => {
   const { stdout } = await execFileAsync(process.execPath, [
     WRAPPER,
     process.execPath,
     "-e",
     PRINT_FLAG,
   ]);
-  assert.equal(stdout, "undefined");
+  assert.equal(childOutputAfterDatabaseDiagnostic(stdout), "undefined");
 });
 
-test("the wrapped command sees an explicit override, not the file value", async () => {
+test("the wrapper reports its database and the command sees an explicit override", async () => {
   const { stdout } = await execFileAsync(
     process.execPath,
     [WRAPPER, process.execPath, "-e", PRINT_FLAG],
     { env: { ...process.env, VITE_AUTH_ENABLED: "true" } },
   );
-  assert.equal(stdout, "true");
+  assert.equal(childOutputAfterDatabaseDiagnostic(stdout), "true");
 });
 
 test("the wrapper propagates the command's exit code", async () => {
@@ -144,5 +150,5 @@ test("the CLI still runs when invoked through a symlinked path", SKIP_SYMLINK, a
     "-e",
     PRINT_FLAG,
   ]);
-  assert.equal(stdout, "undefined");
+  assert.equal(childOutputAfterDatabaseDiagnostic(stdout), "undefined");
 });

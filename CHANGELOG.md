@@ -2,6 +2,19 @@
 
 Current release: **0.5.6**.
 
+## Unreleased
+
+- **Paper setup now controls meeting discovery end to end.** The setup and
+  Server screens expose the paper's YouTube meeting channels and meeting-title
+  keywords. Channel scans, meeting classification and sister-tape transcript
+  recovery read those saved values instead of silently using Longmont's
+  defaults.
+- The environment-wrapper test now checks its database diagnostic separately
+  from child-process output, matching the deliberate stdout behavior used by
+  CI and operators.
+- README, operator setup, editor manual, full manual and landing page now
+  describe the actual 0.5.6 first-run, Paper setup and invitation screens.
+
 ## 0.5.6 — 2026-08-31
 
 **A second city needs no file edits at all.** The paper's identity — name,

@@ -77,7 +77,22 @@ Then:
 npm run dev
 ```
 
-Open the paper. Top right: **Create editor**. Email + password. That account is stored in **your** database, becomes the newsroom **owner**, and the button disappears. First person in owns the desk. There is no setup token — it was removed in 0.5.1, because a one-person newsroom that could not re-issue the token had a lock with no locksmith. Sign-in allows ten attempts every five minutes from any one address, so a desk on the open internet is not a desk open to guessing. To hand the newsroom to someone else, use **Give up the desk** at the bottom of the Server page; it asks you to type your email address, because it cannot be undone.
+Open the paper. Top right: **Create editor**. Email + password. That account is stored in **your** database, becomes the newsroom **owner**, and the button disappears. First person in owns the desk. There is no setup token — it was removed in 0.5.1, because a one-person newsroom that could not re-issue the token had a lock with no locksmith. Sign-in allows ten attempts every five minutes from any one address, so a desk on the open internet is not a desk open to guessing.
+
+The next screen is **Set up the paper**. Enter:
+
+- paper name, tagline, city, state and an [IANA timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones);
+- the optional council-votes link and editor contact address;
+- the starting watch list;
+- optional YouTube meeting channels, one URL per line; and
+- meeting-title keywords, one phrase per line.
+
+Save once and the desk opens. Before that moment, the public site shows a
+neutral “Not yet set up” page and no articles. The same form remains under
+**Server → Paper setup**, so a typo or a changed source never requires a code
+edit or rebuild.
+
+To hand the newsroom to someone else, use **Give up the desk** at the bottom of the Server page; it asks you to type your email address, because it cannot be undone.
 
 - Paper: `http://localhost:8080/`
 - Desk: `http://localhost:8080/desk`
@@ -344,43 +359,43 @@ npm test
 npm run test:lifecycle   # needs the app on :8080 and Playwright Chromium
 ```
 
-Node’s built-in test runner. No network, no model calls. Coverage includes PrimeGov catalog matching, YouTube meeting join (including the June-vs-August museum false join), retrieval skipping hold-music transcript heads, draft notebook stripping, Mountain Time masthead dates, printed-headline collapse, workbench draft-landing, auth gates, the Dark Desk loop, and durable jobs. CI also runs one Playwright lifecycle: create the desk, file a lead, publish, post a correction.
+Node’s built-in test runner. No network, no model calls. Coverage includes PrimeGov catalog matching, configured YouTube meeting discovery (including the June-vs-August museum false join), retrieval skipping hold-music transcript heads, draft notebook stripping, configured-timezone masthead dates, printed-headline collapse, paper setup, workbench draft-landing, auth gates, the Dark Desk loop, and durable jobs. CI also runs one Playwright lifecycle: create the desk, set up the paper, file a lead, publish, post a correction.
 
 ---
 
 ## Point it at another city
 
-There is no settings screen for this. That is deliberate in 0.5.1 — the Longmont edition is the working proof, and a half-built city picker would lie. Edit the seed, rebuild.
+The city setup is database-backed and owner-operated. Use **Set up the paper**
+on first run, or **Server → Paper setup** later.
 
-### 1. The masthead and the watch list
+### 1. Masthead, locality and contact
 
-[`src/lib/paper.ts`](../src/lib/paper.ts):
+Set the paper name, tagline, city, state and IANA timezone. The save derives the
+reader-facing kicker and deck from those choices, changes the public clock and
+meeting-cadence math, and rewrites the seeded welcome article for the city.
+Optional council-votes and editor-contact fields may be left blank; blank means
+the corresponding public link or address is not shown.
 
-```ts
-export const PAPER = {
-  name: "TownReporter",
-  city: "YourCity",
-  state: "YourState",
-  location: "YourCity, YourState",
-  timezone: "America/Denver", // IANA. Masthead and meeting cadence use this, not UTC.
-  tagline: "The public record is only the beginning.",
-  kicker: "Independent civic reporting  ·  YourCity",
-  deck: "…",
-  trust: "Civic news, human-edited.",
-} as const;
-```
+### 2. Watch list
 
-Replace `SEED_SOURCES` with your city site, council, agenda portal, planning, utility, school district, county, and video channels. `kind` is `official` | `news` | `youtube`. `tier` is `A` (primary record) or `B`.
+Add the city site, council, agenda portal, planning department, utility, school
+district, county and local reporting sources. You can add or retire individual
+entries later at `/desk/sources`.
 
-Seeds upsert on desk boot (`on conflict do nothing`). Changing a seed later does not rewrite an already-accepted source — add or retire those from `/desk/sources`.
+### 3. YouTube meeting channels
 
-### 2. YouTube sister channels
+Under **Meeting video channels**, put the official city channel first and any
+PEG or public-media sister channels after it, one URL per line. If one tape has
+no captions, TownReporter can use a matching sister tape. Same-meeting titles
+are merged only when their date clues agree.
 
-[`src/lib/news/youtube.ts`](../src/lib/news/youtube.ts) — `LONGMONT_YOUTUBE_CHANNELS`. Put the official city channel first and the PEG / public-media channel second if you have one. Same-meeting titles are merged (month must match, so a June museum board does not join an August one). If the city tape has no captions, the sister tape is used.
+Under **Meeting title keywords**, list the phrases that identify civic meetings
+in your channels — for example `city council`, `planning commission`, or
+`zoning appeals`. These saved values drive both meeting filtering and
+sister-channel transcript matching. A blank channel list means TownReporter
+uses none; it never falls back to Longmont after setup.
 
-Meeting-keyword filter and skip-list (`tldw`, block parties, cruise night) live in the same file. Edit them if your city’s video titles look different.
-
-### 3. PrimeGov
+### 4. PrimeGov
 
 If the city uses PrimeGov, add the public portal:
 
@@ -392,15 +407,17 @@ Ingest uses `ListUpcomingMeetings` / `ListArchivedMeetings?year=` and `CompiledD
 
 If the city uses Legistar, Granicus, CivicClerk, BoardDocs, or Municode instead, add those URLs as official sources. The Playwright render path already knows those hosts.
 
-### 4. Topics
+### 5. Topics
 
 `TOPICS` in `paper.ts` is the paper’s section list (council, budget, housing, …). Change it if your beat list is different. The queue’s “file a lead” dropdown reads this array.
 
-### What a city swap does **not** do yet
+### What city setup does **not** do
 
-- Rewrite copy that names Longmont in About / How we report / some desk chrome. Search the repo for `Longmont` after you change `PAPER.city`.
-- Invent a PrimeGov tenant from the city name. You add the URL.
-- Migrate an existing PGLite/Postgres archive from Longmont to the new city. Start a fresh database.
+- Invent an agenda portal from the city name. Add the exact public URL.
+- Replace the built-in topic taxonomy. That remains the advanced `TOPICS`
+  constant in `src/lib/paper.ts`.
+- Convert an existing town's archive into a different town's archive. Use a
+  fresh database for a different publication.
 - Give you legal cover. You are the publisher.
 
 ---

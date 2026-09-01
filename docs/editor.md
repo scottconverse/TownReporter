@@ -23,8 +23,9 @@ A draft, a reporting note, a research memo, a Dark Desk file — none of that is
 ## Sign in
 
 1. On a new paper, top right: **Create editor**. That opens `/login`. Email + password. You own the desk. The button is gone after that.
-2. Later visits: **Editor desk** or **Sign in**. Anyone can still read the paper without an account.
-3. **Give up the desk** (Server page, at the bottom) drops the owner. The paper stays, Create editor comes back, and the next person to open the sign-in page owns the desk -- including the archive, the Dark Desk files and the Server controls. You cannot take it back, so it asks you to type your email address first. It used to be a button in the header of every desk page; an audit showed how easily that is mistaken for Sign out.
+2. The first time, **Set up the paper** opens next. Name the paper and city, choose the timezone, add the starting sources and tell it which YouTube channels and title phrases identify local meetings. Save to open the desk.
+3. Later visits: **Editor desk** or **Sign in**. Anyone can still read the paper without an account.
+4. **Give up the desk** (Server page, at the bottom) drops the owner. The paper stays, Create editor comes back, and the next person to open the sign-in page owns the desk -- including the archive, the Dark Desk files and the Server controls. You cannot take it back, so it asks you to type your email address first. It used to be a button in the header of every desk page; an audit showed how easily that is mistaken for Sign out.
 
 Notes:
 
@@ -55,7 +56,7 @@ Scan does not publish. Draft does not publish. Dark Desk does not publish. **Pub
 
 ## Sources (`/desk/sources`)
 
-The watch list. Longmont ships with city, council, agendas, PrimeGov, planning, NextLight, St. Vrain Valley Schools, Boulder County, the library, `@CityofLongmont`, and `@LongmontPublicMedia`.
+The watch list chosen during Paper setup. The Longmont edition ships with city, council, agendas, PrimeGov, planning, NextLight, St. Vrain Valley Schools, Boulder County, the library, `@CityofLongmont`, and `@LongmontPublicMedia`; a new installation starts with the sources its owner enters.
 
 **Add one:** paste a URL, optional title, add. YouTube URLs are tagged as YouTube; everything else starts as official / tier A.
 
@@ -183,7 +184,7 @@ How they join: a council video titled like `08/25/2026` joins that day’s packe
 - Auto-captions invent names. “Kimbark” will come out as something else. Do not publish a proper name off a caption without a check.
 - Quotes need a check. Play the tape or read the packet.
 - Upcoming livestreams have **no transcript yet**. The desk rechecks; you do not invent one.
-- `@LongmontPublicMedia` is the sister tape. If the city channel has no captions, we use theirs. Same rules.
+- Any extra channel listed under **Paper setup → Meeting video channels** is a sister tape. If the first channel has no captions, the desk can use a matching tape from one of those channels. Same rules.
 
 **Minutes not posted** after 36 hours (council / commission / board / authority, skipping cancel / continued / TBD) is a catalog note. It is a reason to look, not a story by itself.
 
@@ -319,6 +320,15 @@ routing — not that a reader in another town can reach you. Rows worth knowing:
 Every button says what it will do before it does it. The two that interrupt the
 paper ask twice.
 
+Owners also have:
+
+- **Paper setup** — change the public identity, timezone, contact links, watch
+  list, meeting-video channels and meeting-title keywords. Saving takes effect
+  from the database; no rebuild is needed.
+- **Invite an editor** — enter the person's email, then copy the one-time link.
+  It is valid for that address only, expires after seven days and disappears
+  after use.
+
 ---
 
 ## Delete
@@ -392,7 +402,7 @@ Readers get:
 
 Homepages are not stand-ins for documents. Disappeared sources say so.
 
-The paper’s clock is **Mountain Time** (`America/Denver`). A Wednesday evening does not print as Thursday UTC.
+The paper’s clock uses the IANA timezone saved in **Paper setup**. A local Wednesday evening does not print as Thursday UTC just because the host uses UTC.
 
 Overlapping printed headlines collapse; the longer body stays. Quiet-zone ×2 and survey ×2 drop. Distinct sessions (Airport Vision vs the Boulder County joint session) stay side by side. Search and live archive URLs are unchanged.
 
@@ -412,9 +422,9 @@ How we report, in public: `/how-we-report`.
 | Draft is a rewrite of the Leader | The pass never opened the company page | Pull the still-to-pull line for their press release, then redraft. |
 | Meeting has no transcript | Livestream hasn’t ended, or Playwright missing | Wait for the 6-hour recheck, or operator installs Chromium |
 | Names in a draft are wrong | Auto-captions | Check the packet. Fix the draft. Do not publish the caption. |
-| Dates look a day ahead | Host clock in UTC | Masthead uses `PAPER.timezone`. Tell the operator if it is still UTC. |
+| Dates look a day ahead | Paper timezone is wrong or missing | Owner: open Server → Paper setup and save the correct IANA timezone. |
 | Two nearly identical headlines on the paper | Same news, two drafts published | The paper collapses overlapping headlines and keeps the longer body. |
-| Second person gets 403 | They are not in `newsroom_members` | Operator adds them. First user is owner. |
+| Second person gets 403 | They signed up without a valid invite, or used the wrong email | Owner: create a fresh link under Server → Invite an editor and have them use the exact invited address. |
 | Editorial says Failed with a timeout | The piece ran past the writer's limit | Ask again. If it repeats, the operator can raise `EDITORIAL_TIMEOUT_MS`. Nothing is lost but the run. |
 | Editorial never starts, says no voice | `TOWNREPORTER_VOICE_FILE` is unset or points nowhere | Operator: set it to an absolute path outside the repo |
 | The paper is down and the desk still works | The tunnel, not the app | Server page → Restart the tunnel. The watchdog also does this within five minutes. |
@@ -429,6 +439,6 @@ How we report, in public: `/how-we-report`.
 - It will not decide if something is worth printing. You will.
 - It will not file a CORA request.
 - It will not be your lawyer. First Amendment copy in related tools is not legal advice; this desk does not even ship that prompt.
-- It will not watch a city you did not seed. City swap is an operator edit of `paper.ts`, not a dropdown.
+- It will not invent a city's sources. The owner supplies them in Paper setup and can maintain them under Sources.
 
 You are the publisher. The software is the library, the tape machine, and a very fast intern who still has to be edited.

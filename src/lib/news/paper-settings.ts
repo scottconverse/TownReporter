@@ -461,9 +461,11 @@ export type FirstRunSetupInput = {
   /** Blank is a real answer: no address is shown at all. */
   editorEmail: string;
   watchlist: SeedSource[];
+  youtubeChannels: string[];
+  meetingKeywords: string[];
 };
 
-function cleanSetupInput(raw: unknown): FirstRunSetupInput {
+export function cleanSetupInput(raw: unknown): FirstRunSetupInput {
   const v = (raw ?? {}) as Partial<FirstRunSetupInput>;
   const watchlist = Array.isArray(v.watchlist)
     ? v.watchlist
@@ -479,6 +481,13 @@ function cleanSetupInput(raw: unknown): FirstRunSetupInput {
         }))
         .filter((s) => s.url.length > 0)
     : [];
+  const cleanStringList = (value: unknown) =>
+    Array.isArray(value)
+      ? value
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter(Boolean)
+      : [];
   return {
     name: String(v.name ?? "").trim(),
     city: String(v.city ?? "").trim(),
@@ -488,6 +497,8 @@ function cleanSetupInput(raw: unknown): FirstRunSetupInput {
     councilVotesUrl: String(v.councilVotesUrl ?? "").trim(),
     editorEmail: String(v.editorEmail ?? "").trim(),
     watchlist,
+    youtubeChannels: cleanStringList(v.youtubeChannels),
+    meetingKeywords: cleanStringList(v.meetingKeywords),
   };
 }
 
@@ -546,6 +557,8 @@ export const completeFirstRunSetup = createServerFn({ method: "POST" })
         kicker: `Independent civic reporting  ·  ${data.city}`,
         deck: `${data.name} follows ${data.city}'s meetings, money, contracts and public records — then keeps digging when something changes, disappears or doesn't add up. Human-edited. Sources shown.`,
         seedSources: data.watchlist,
+        youtubeChannels: data.youtubeChannels,
+        meetingKeywords: data.meetingKeywords,
       });
 
       await ensurePaperSettingsSchema();

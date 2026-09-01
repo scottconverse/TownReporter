@@ -112,6 +112,25 @@ You are responsible for everything that appears on the paper.
 The full editor's guide, with what to click and what each screen is for, is
 [docs/editor.md](editor.md). This is the tour.
 
+## Set up the paper
+
+`/desk/setup` — the first screen after the owner creates a fresh desk.
+
+![Set up the paper](images/13-paper-setup.png)
+
+The owner names the paper and its city, chooses the IANA timezone, adds an
+optional council-votes link and editor contact, then supplies the first watch
+list. Two new boxes control meeting discovery: **Meeting video channels**
+accepts one YouTube channel URL per line, and **Meeting title keywords** accepts
+the phrases that distinguish council, board and commission tapes from ordinary
+city videos.
+
+Saving the form writes those choices to the database, rewrites the welcome
+article for the configured city, and opens the desk. Until it is saved, the
+public site says “Not yet set up” and publishes no stories. The owner can change
+every choice later under **Server → Paper setup**; no code edit or rebuild is
+required.
+
 ## The desk
 
 `/desk` — what needs you, and everything in flight.
@@ -223,6 +242,11 @@ run, free disk, and whether the reader made any outside request.
 The buttons are few and each says what it will do before it does it. The two
 that interrupt the paper ask twice.
 
+The owner also sees **Paper setup**, with the same fields used on first run, and
+**Invite an editor**, which creates a one-time, email-bound link that expires
+after seven days. Editors can work the whole desk but cannot change owner-only
+settings or invite another editor.
+
 ## Published
 
 `/desk/published` — what is live, and its corrections.
@@ -253,7 +277,9 @@ account becomes the newsroom owner. There is no setup token: it was removed in
 lock with no locksmith. Sign-in is limited to ten attempts every five minutes
 from any one address, which is what keeps an open desk from being a guessable
 one.
-public host, set that token — signing up alone must not own the desk.
+
+After account creation, complete **Set up the paper**. The public paper remains
+neutral and empty until that form is saved.
 
 The public paper is `/`. The desk is `/desk`.
 
@@ -352,18 +378,23 @@ processes of the app — a restart cannot be performed by the process being
 restarted, and a tunnel restart cannot report its result over the tunnel it just
 killed.
 
-Deployment notes for other hosts, and the honest limits of a city swap, are in
+Deployment notes for other hosts, and the remaining limits of a city setup, are in
 [docs/setup.md](setup.md).
 
 ## Point it at another city
 
-There is no city-picker UI yet. Edit the seed and rebuild.
+Use the owner-only **Paper setup** form. On a fresh install it opens
+automatically; later it lives on the Server page.
 
-1. `src/lib/paper.ts` — `PAPER` (name, city, state, location, **timezone**,
-   kicker, deck) and `SEED_SOURCES`.
-2. `src/lib/news/youtube.ts` — the channel list, if the city streams.
-3. If the city uses PrimeGov, add `https://{city}.primegov.com/public/portal`
-   as an official source. The ingest already speaks that API.
+1. Set the paper name, tagline, city, state, timezone, contact and optional
+   council-votes link.
+2. Add the official pages worth watching.
+3. Add meeting-video channel URLs and the title phrases used by that city.
+4. If the city uses PrimeGov, add its public portal to the watch list.
+
+The masthead, city copy, local dates, public links, source list and YouTube
+meeting discovery all change from the saved database settings. Blank optional
+fields remain blank; they do not inherit Longmont's values.
 
 ---
 
@@ -391,8 +422,9 @@ Every desk action is a `createServerFn` with `deskMiddleware`, which:
 2. resolves the user from the session (never from anything the client sends),
 3. requires that user to be an owner or editor of this newsroom.
 
-The user id is never taken from the client. A second identity that signs up gets
-403 until it is added to `newsroom_members`.
+The user id is never taken from the client. Open signup closes after the owner
+claims the desk. A second person joins only through the one-time link created by
+the owner under **Server → Invite an editor**.
 
 ## Jobs
 
@@ -711,6 +743,7 @@ flowchart TB
 | `/evidence/compare` | Two captures of the same URL, side by side |
 | `/get-the-code` · `/TownReporter.zip` | Download this newsroom's own source |
 | `/login` | Create an editor account, or sign in |
+| `/desk/setup` | First-run paper setup; redirects away after setup is complete |
 | `/desk` | The desk — what needs you |
 | `/desk/sources` | Watch list, and bulk paste |
 | `/desk/scan` | Fetch and file leads. The expensive button. |
@@ -720,7 +753,7 @@ flowchart TB
 | `/desk/published` | Live stories and corrections |
 | `/desk/dark` | Dark Desk. Investigates, never prints. |
 | `/desk/opinion` | Opinion. Unsigned editorials. |
-| `/desk/ops` | Server. Health and the few buttons worth having. |
+| `/desk/ops` | Server. Health, Paper setup, editor invites and the few operational buttons worth having. |
 
 ## Environment
 

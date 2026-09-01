@@ -7,6 +7,7 @@ import { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS } from "./youtube.ts";
 import { ensureNewsroomSchema } from "./membership.ts";
 import {
   ensurePaperSettingsSchema,
+  cleanSetupInput,
   getPaperConfig,
   getPublicPaperConfig,
   isOnboarded,
@@ -76,6 +77,24 @@ describe("paper config defaults", () => {
 });
 
 describe("paper config overrides", () => {
+  it("first-run setup keeps the owner's video channels and meeting keywords", () => {
+    const input = cleanSetupInput({
+      name: " Riverbend Record ",
+      city: " Riverbend ",
+      state: " Ohio ",
+      timezone: " America/New_York ",
+      tagline: " Local records, followed. ",
+      councilVotesUrl: " https://riverbend.example.gov/votes ",
+      editorEmail: " editor@riverbend.example ",
+      youtubeChannels: [" https://youtube.com/@RiverbendCity ", "", 17],
+      meetingKeywords: [" Council ", "", null, "Planning Commission"],
+      watchlist: [],
+    });
+
+    assert.deepEqual(input.youtubeChannels, ["https://youtube.com/@RiverbendCity"]);
+    assert.deepEqual(input.meetingKeywords, ["Council", "Planning Commission"]);
+  });
+
   it("a partial row only overrides the fields it sets", async () => {
     const newsroomId = 900_002;
     await clearRow(newsroomId);
