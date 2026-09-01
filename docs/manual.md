@@ -222,12 +222,11 @@ the headline and there is no byline, because an unsigned editorial is the
 paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
 
-Opinion shows Automatic, Claude Opus and Codex Sol. Claude Opus through Claude
-Code is the enabled path today. Codex Sol refuses before enqueue or spend because TownReporter does
-not infer permission to send the private editorial voice to OpenAI. Automatic
-therefore requires ready Claude Opus today. The page lists every missing voice,
-installation, or login prerequisite and stays disabled while readiness is
-unknown.
+Opinion shows Automatic, Codex Sol and Claude Opus. Automatic tries Codex Sol,
+then Claude Opus; an explicit choice never falls back. Codex sends the
+configured editorial voice text to OpenAI over stdin, while Claude Code reads
+the voice by file path. The page lists every missing voice, installation, or
+login prerequisite and stays disabled while readiness is unknown.
 
 **Edit**, on the row, opens the piece in its own workbench at
 `/desk/story/draft/:id`: headline, dek, topic and the piece itself, plus the two
@@ -330,13 +329,13 @@ have an editor-facing, per-run picker.
 | Draft (Queue or workbench) | configured gateway forced for Automatic when set; otherwise first ready Zen → Codex Terra → Claude Opus rung; explicit choice never falls back | Local Qwen is explicit-only; Zen MiMo, Codex Terra/Sol, or Claude Opus |
 | Dark Desk synthesis and brief | the one you selected | the one you configured |
 | Dark Desk **planner** | the one you selected | Haiku **only when the provider is Claude**; otherwise your configured model |
-| **Opinion (editorials)** | signed-in Claude Code enabled; Codex fails closed pending explicit private-voice authorization | Claude Opus today; Codex Sol is visible but disabled |
+| **Opinion (editorials)** | Automatic tries signed-in Codex, then Claude; explicit choices never fall back | Codex Sol or Claude Opus |
 
-**Why Opinion has fewer choices.** Its private voice is handed to Claude Code
-by file path only for the tool-free writing pass; the app never reads it.
-Local and Zen are not offered. Codex research isolation exists, but its writing
-pass remains disabled because sending the voice text to OpenAI requires
-explicit authorization. Automatic requires Claude until that setting exists.
+**Why Opinion has fewer choices.** Local and Zen are not offered because an
+editorial uses the paper's configured voice and frontier research. Claude Code
+receives the voice by file path. Codex receives the validated voice text over
+stdin, never argv, for a tool-free writing pass. Its separate research pass has
+web search but never sees the voice.
 
 **The planner split.** Planning on Haiku costs about a quarter of planning on
 Opus for the same output, so the desk substitutes it — but only on a Claude
@@ -345,7 +344,7 @@ local endpoint for a Claude model; it uses yours.
 
 Pointing `LLM_BASE_URL` at a local model sends Scan, Dark Desk, and Story
 Automatic to that gateway. An explicit Story choice still forces its named
-provider. Opinion remains on its separate Claude boundary.
+provider. Opinion keeps its separate Codex/Claude frontier ladder.
 What that actually costs in quality was measured on this machine:
 [docs/local-models.md](local-models.md).
 
@@ -366,9 +365,9 @@ TOWNREPORTER_VOICE_FILE=C:/Users/you/.townreporter/voice/your-voice.md
 ```
 
 The file is deliberately outside the repository, and the app refuses a path
-inside it. On the enabled Claude path, only the **path** reaches the CLI — the
-file itself is read by Claude Code, never loaded into the app's memory and never
-passed inline. Codex Opinion is disabled rather than weakening that boundary.
+inside it. On Claude, only the **path** reaches the CLI. On Codex, TownReporter
+reads the validated file and sends its text to OpenAI over stdin for the
+tool-free writing pass. It never becomes a command-line argument or log entry.
 Without the file, the Opinion desk says so and spends nothing.
 
 ## Serving it publicly
@@ -670,18 +669,19 @@ flowchart LR
 
     UI --> PACK
     PACK -->|"over stdin"| CLI
-    VOICE -.->|"path only,<br/>read by the CLI"| CLI
+    VOICE -.->|"Claude: path only"| CLI
+    VOICE -.->|"Codex: text over stdin"| CODEX
     CLI --> PARSE --> DRAFTS --> UI
-    UI -.->|"private voice needs<br/>explicit OpenAI authorization"| CODEX
+    UI -->|"Codex Sol"| CODEX
 
     style private fill:#2a2320,color:#fff
     style VOICE fill:#7a2d2d,color:#fff
 ```
 
-On the enabled Claude path, the voice file is never read into the app's memory
-and never becomes inline prompt text. The app holds a path and a refusal: a
-relative path, or any path inside the repository, is rejected. Codex Opinion
-adds another refusal until its OpenAI destination is explicitly authorized.
+On Claude, the voice file is never read into the app's memory and never becomes
+inline prompt text. On Codex, the app reads the validated voice and sends it to
+OpenAI over stdin. Neither path places it in argv. A relative path, or any path
+inside the public repository, is rejected.
 
 ## Keeping it online
 

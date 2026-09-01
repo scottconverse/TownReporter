@@ -1,6 +1,6 @@
 import { getSql } from "@/lib/db";
 import { claudeCodeChat } from "./ai-claude-code.server";
-import { findVoiceFile } from "./voice.server";
+import { findVoiceFile, readVoiceTextForOpenAiCodex } from "./voice.server";
 import { opinionModelChoice, type OpinionModelChoice } from "./model-choice.ts";
 import {
   EDITORIAL_TOOLS,
@@ -27,9 +27,10 @@ import {
  * run a call that combines `systemPromptFile` with any `allowedTools` — that
  * is the structural half of this fix; this file is the shape half.
  *
- * The voice file is never read into this process either way. Only its path
- * goes to the CLI, which reads it directly. See `voice.server.ts` for why
- * that matters.
+ * Claude receives only the voice path. The operator has separately authorized
+ * OpenAI Codex Opinion, so that path reads the validated voice text and sends
+ * it through stdin to a Codex call with every local tool disabled. The voice
+ * is never placed in argv, logs, or a tool-enabled call.
  */
 
 /**
@@ -183,25 +184,38 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
       });
     }
 
-    /*
-      Codex research support is implemented by codexChat({ webSearch: true }),
-      with every local capability disabled. The private voice cannot be handed
-      to Codex by path: that would give an untrusted agent local file access.
-      Sending the voice text to OpenAI requires the operator's explicit
-      payload-and-destination authorization, which is not inferred here.
-      Refuse before spending the research pass until that authorization is
-      represented by an explicit product setting.
-    */
-    return {
-      ok: false as const,
-      error:
-        "Codex Opinion is not enabled yet. Its research boundary is ready, but sending the private editorial voice to OpenAI requires explicit authorization. Choose Claude Opus for Opinion.",
-    };
+    const { codexChat } = await import("./ai-codex.server.ts");
+    const model = process.env.TOWNREPORTER_CODEX_SOL_MODEL?.trim() || "gpt-5.6-sol";
+    const research = await codexChat({
+      system: RESEARCH_INSTRUCTIONS,
+      user: researchPack,
+      model,
+      timeoutMs: editorialTimeoutMs(),
+      webSearch: true,
+    });
+    if (!research.ok) return research;
+
+    // Research has web search but never the voice. Writing has the voice but
+    // no search or local tools. Both prompts travel over stdin.
+    const voice = await readVoiceTextForOpenAiCodex();
+    if (!voice.ok) return voice;
+    return codexChat({
+      system: "",
+      systemPromptText: voice.text,
+      user: buildWritingPack({
+        subject: input.subject,
+        ourStory: input.ourStory,
+        askedFor: input.askedFor,
+        research: research.text,
+      }),
+      model,
+      timeoutMs: editorialTimeoutMs(),
+    });
   };
 
   const choice = opinionModelChoice(input.modelChoice);
-  let out = await runPair(choice === "auto" ? "claude-frontier" : choice);
-  if (!out.ok && choice === "auto") out = await runPair("codex-frontier");
+  let out = await runPair(choice === "auto" ? "codex-frontier" : choice);
+  if (!out.ok && choice === "auto") out = await runPair("claude-frontier");
   if (!out.ok) return { ok: false, error: out.error };
 
   const ed = parseEditorial(out.text);

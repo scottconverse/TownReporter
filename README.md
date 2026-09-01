@@ -194,13 +194,11 @@ For **Scan and Dark Desk**, configured-provider precedence is:
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
-**Opinion uses a smaller frontier picker.** Claude Opus through the signed-in
-Claude Code CLI is the enabled writing path today. It keeps tool-enabled research separate from the private,
-voice-guided, tool-free writing pass. Codex Sol is visible but fails closed
-before spending: enabling it would send the private editorial voice to OpenAI,
-which requires explicit operator authorization that TownReporter does not infer.
-Automatic therefore requires ready Claude Opus today. Local and Zen are not
-offered on Opinion.
+**Opinion uses a smaller frontier picker.** Automatic tries Codex Sol, then
+Claude Opus. Both paths keep tool-enabled research separate from the
+voice-guided, tool-free writing pass. Codex sends the configured editorial
+voice text to OpenAI over stdin; Claude Code receives the voice by file path.
+An explicit choice never falls back. Local and Zen are not offered on Opinion.
 
 ### Other models — one OpenAI-compatible URL
 

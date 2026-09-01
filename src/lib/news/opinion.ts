@@ -62,21 +62,20 @@ async function checkOpinionReadiness(choice: OpinionModelChoice) {
   if (!voice.ok) problems.push(voice.error);
 
   const { probeProvider } = await import("./ai");
-  const codexOpinionDisabled =
-    "Codex Opinion is not enabled yet because sending the private editorial voice to OpenAI needs explicit authorization. Choose Claude Opus for Opinion.";
-  if (choice === "codex-frontier") problems.push(codexOpinionDisabled);
-  const probes = choice === "auto"
-    ? [await probeProvider("claude-frontier")]
-    : choice === "codex-frontier"
-      ? []
-      : [await probeProvider(choice)];
-  const selected = probes.find((probe) => probe.ok);
-  if (!selected) {
-    problems.push(...probes.flatMap((probe) => {
-      if (probe.ok) return [];
-      return [opinionProviderProblem(probe.error)];
-    }));
+  const candidates = choice === "auto"
+    ? (["codex-frontier", "claude-frontier"] as const)
+    : ([choice] as const);
+  let selected: Awaited<ReturnType<typeof probeProvider>> | undefined;
+  const providerProblems: string[] = [];
+  for (const candidate of candidates) {
+    const probe = await probeProvider(candidate);
+    if (probe.ok) {
+      selected = probe;
+      break;
+    }
+    providerProblems.push(opinionProviderProblem(probe.error));
   }
+  if (!selected) problems.push(...providerProblems);
   const effectiveChoice = selected?.ok && selected.choice !== "configured"
     ? opinionModelChoice(selected.choice)
     : choice;

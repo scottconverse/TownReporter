@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findVoiceFile, assertNotAnArgument, VOICE_ENV } from "./voice.server.ts";
+import {
+  findVoiceFile,
+  readVoiceTextForOpenAiCodex,
+  assertNotAnArgument,
+  VOICE_ENV,
+} from "./voice.server.ts";
 import { claudeCodeChat, resetClaudeCliCache } from "./ai-claude-code.server.ts";
 
 /**
@@ -97,6 +102,20 @@ describe("the voice never becomes a command-line argument", () => {
         "findVoiceFile returned more than a path and a byte count -- it must never carry the file's contents",
       );
     }
+  });
+
+  it("reads the validated voice only through the destination-specific Codex boundary", async () => {
+    const outside = join(tmpdir(), `voice-codex-probe-${process.pid}-${Date.now()}.txt`);
+    scratchFiles.push(outside);
+    const expected = "authorized editorial voice text. ".repeat(30);
+    writeFileSync(outside, expected);
+    process.env[VOICE_ENV] = outside;
+
+    const found = await findVoiceFile();
+    assert.equal(found.ok, true);
+    if (!found.ok) return;
+    const read = await readVoiceTextForOpenAiCodex();
+    assert.deepEqual(read, { ok: true, text: expected });
   });
 
   it("refuses to inline anything long enough to be a voice file", () => {

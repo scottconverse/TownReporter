@@ -46,11 +46,11 @@ export function modelChoiceHelp(
     return `Uses only ${selected.label} for this run; no fallback.`;
   }
   return scope === "opinion"
-    ? "Uses Claude Opus. Codex Opinion stays disabled until its separate voice-file authorization is granted."
+    ? "Tries Codex Sol, then Claude Opus. The selected provider writes the whole editorial; explicit choices never fall back."
     : "Uses your configured gateway when set; otherwise tries Zen MiMo, Codex Terra, then Claude Opus. Local Qwen is available by explicit choice.";
 }
 
 export function opinionProviderProblem(error: string): string {
   if (!/AI is not available/i.test(error)) return error;
-  return "Claude Opus is not available. Sign in to Claude Code on this machine, or set ANTHROPIC_API_KEY. Opinion cannot use xAI or a generic LLM gateway because its private voice stays on the approved Claude path.";
+  return "No Opinion model is available. Sign in to Codex or Claude Code on this machine, or set ANTHROPIC_API_KEY.";
 }
