@@ -156,7 +156,7 @@ if (dbProbe.ok) {
     */
     await page.getByLabel(/Timezone/).fill("Pacific/Auckland");
     await page.getByLabel("URL").fill("https://riverbend-council.example.org/");
-    await page.getByLabel("Title").fill("Riverbend Council");
+    await page.getByLabel("Title", { exact: true }).fill("Riverbend Council");
     await page.getByRole("button", { name: "Save and open the desk" }).click();
 
     // Setup redirects to /desk on success.
