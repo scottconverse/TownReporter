@@ -343,7 +343,7 @@ export function Notice({
   */
   return (
     <p
-      className={"enter-fade-fast mt-3 border px-3 py-2.5 text-sm " + color}
+      className={"enter-rise mt-3 whitespace-pre-line border px-3 py-2.5 text-sm " + color}
       role={kind === "err" ? "alert" : "status"}
       aria-live={kind === "err" ? "assertive" : "polite"}
       aria-atomic="true"

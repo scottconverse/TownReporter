@@ -45,6 +45,30 @@ describe("scan preflight", () => {
     assert.equal(p.retryable, false);
   });
 
+  it("keeps Codex installation and provider login failures actionable", () => {
+    const missing = scanPreflight({
+      ok: false,
+      error: "Codex is not installed. Install the Codex CLI, then sign in from Codex and try again.",
+    });
+    assert.equal(missing.ok, false);
+    if (!missing.ok) {
+      assert.equal(missing.kind, "codex-missing");
+      assert.match(missing.guidance, /install the Codex CLI/i);
+      assert.equal(missing.retryable, false);
+    }
+
+    const signedOut = scanPreflight({
+      ok: false,
+      error: "Codex is signed out. Open Codex, sign in, then try again.",
+    });
+    assert.equal(signedOut.ok, false);
+    if (!signedOut.ok) {
+      assert.equal(signedOut.kind, "provider-auth");
+      assert.match(signedOut.guidance, /sign in/i);
+      assert.equal(signedOut.retryable, false);
+    }
+  });
+
   it("treats a timeout as the one kind worth trying again", () => {
     const p = scanPreflight({ ok: false, error: "Claude Code request timed out after 150s" });
     assert.equal(p.ok, false);

@@ -7,6 +7,8 @@ import { deleteEditorial, discardEditorialRequest, fileWrittenEditorial, getEdit
 import { stalledRunCopy } from "@/lib/news/desk-copy";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context";
+import { ModelPicker } from "@/components/model-picker";
+import type { OpinionModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/opinion")({
   head: () => ({ meta: [{ title: "Opinion — TownReporter" }] }),
@@ -29,6 +31,7 @@ function OpinionPage() {
   const qc = useQueryClient();
   const [subject, setSubject] = useState("");
   const [askedFor, setAskedFor] = useState("");
+  const [modelChoice, setModelChoice] = useState<OpinionModelChoice>("auto");
   const [openId, setOpenId] = useState<number | null>(null);
   /*
     Where the opened piece is drawn, so it can be scrolled to.
@@ -59,7 +62,10 @@ function OpinionPage() {
 
   // Asked before anything is typed: a dependency you cannot satisfy should be
   // visible while you are deciding whether to start. Audit finding UIUX-05.
-  const ready = useQuery({ queryKey: ["opinion-ready"], queryFn: () => opinionReadiness() });
+  const ready = useQuery({
+    queryKey: ["opinion-ready", modelChoice],
+    queryFn: () => opinionReadiness({ data: modelChoice }),
+  });
 
   const list = useQuery({
     queryKey: ["editorials"],
@@ -123,7 +129,7 @@ function OpinionPage() {
   });
 
   const start = useMutation({
-    mutationFn: () => startEditorial({ data: { subject, askedFor } }),
+    mutationFn: () => startEditorial({ data: { subject, askedFor, modelChoice } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         setNotice(res?.error ?? "That did not start.");
@@ -205,13 +211,24 @@ function OpinionPage() {
           title="Write one"
           sub="A subject, a URL, or a sentence. A pasted link gets opened and read before anything is written."
         />
-        {ready.data && !ready.data.ready ? (
-          <p
-            role="status"
-            className="mt-4 max-w-2xl border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust"
-          >
-            <b>This desk cannot write yet.</b> {ready.data.why}
+        {ready.isPending || ready.isFetching ? (
+          <p role="status" className="mt-4 max-w-2xl border border-rule bg-paper-2 px-3 py-2.5 text-sm text-muted">
+            Checking the editorial voice and writing model…
           </p>
+        ) : ready.isError ? (
+          <div role="alert" className="mt-4 max-w-2xl border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust">
+            <b>The desk could not check the writing model.</b> Nothing can be queued until the check succeeds.{" "}
+            <button type="button" className="inline-link" onClick={() => void ready.refetch()}>
+              Check again
+            </button>
+          </div>
+        ) : ready.data && !ready.data.ready ? (
+          <div role="alert" className="mt-4 max-w-2xl border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust">
+            <b>This desk cannot write yet.</b>
+            <ul className="mt-1 list-disc pl-5">
+              {ready.data.problems.map((problem, index) => <li key={`${index}-${problem}`}>{problem}</li>)}
+            </ul>
+          </div>
         ) : null}
         <div className="mt-4 max-w-2xl space-y-3">
           <label className="block">
@@ -237,17 +254,26 @@ function OpinionPage() {
               placeholder="Angle, a document to start from, a length"
             />
           </label>
+          <ModelPicker
+            scope="opinion"
+            value={modelChoice}
+            onChange={setModelChoice}
+            disabled={start.isPending}
+          />
           <div className="flex items-center gap-3">
             <InkButton
               tone="solid"
               onClick={() => start.mutate()}
               disabled={
                 start.isPending ||
+                ready.isPending ||
+                ready.isFetching ||
+                ready.isError ||
                 subject.trim().length < 6 ||
-                (ready.data ? !ready.data.ready : false)
+                !ready.data?.ready
               }
             >
-              {start.isPending ? "Starting…" : "Write an editorial"}
+              {start.isPending ? "Starting…" : ready.isPending || ready.isFetching ? "Checking…" : "Write an editorial"}
             </InkButton>
             {notice ? <span className="text-sm text-muted">{notice}</span> : null}
           </div>

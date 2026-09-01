@@ -334,7 +334,7 @@
     <div class="wrap strip-in">
       <span class="fact"><b>MIT</b> licensed</span>
       <span class="fact"><b>Node 22</b></span>
-      <span class="fact"><b>Claude Code</b> login, or any API key · no key required</span>
+      <span class="fact"><b>Local, Zen, Codex or Claude</b> · API keys optional</span>
       <span class="fact">Self-host <b>email + password</b></span>
       <span class="fact"><b>Zero</b> trackers on the reader's page · zero outside requests</span>
       <span class="fact">Nothing prints until an editor <b>publishes</b></span>
@@ -346,7 +346,7 @@
     <p class="eyebrow">What you actually get</p>
     <h2>A paper on the front, a working desk behind it</h2>
     <div class="prose">
-      <p>These are screenshots of the running Longmont edition, not mockups.</p>
+      <p>These are screenshots of the release-candidate desk using throwaway Longmont reporting content, not mockups.</p>
     </div>
     <figure style="margin:26px 0 0">
       <img src="images/01-front-page.png" alt="The TownReporter front page" style="width:100%;border:1px solid var(--rule);display:block">
@@ -358,7 +358,7 @@
     </figure>
     <figure style="margin:26px 0 0">
       <img src="images/07-story-editor.png" alt="The story workbench" style="width:100%;border:1px solid var(--rule);display:block">
-      <figcaption class="cap" style="margin-top:8px">The workbench. The lead and the reporting notes on the left never print. PULL fetches one specific document. Publish is the only gate.</figcaption>
+      <figcaption class="cap" style="margin-top:8px">The workbench. The model picker fixes one provider for the whole run; notes on the left never print, and Publish is still the only gate.</figcaption>
     </figure>
     <figure style="margin:26px 0 0">
       <img src="images/08-dark-desk.png" alt="Dark Desk" style="width:100%;border:1px solid var(--rule);display:block">
@@ -505,7 +505,7 @@
 
   <section id="start" class="wrap">
     <p class="eyebrow">Install</p>
-    <h2>Clone it. Create an editor. It uses the Claude Code you already have.</h2>
+    <h2>Clone it. Create an editor. Pick the writing model at the desk.</h2>
     <div class="grid-2">
       <div>
         <pre><span class="t-dim"># Node 22+, then:</span>
@@ -514,16 +514,18 @@ cd TownReporter
 npm install
 npx playwright install chromium
 cp .env.example .env
-<span class="t-dim"># no AI key needed — it uses your Claude Code login</span>
+<span class="t-dim"># API keys optional — local and signed-in CLI paths supported</span>
 npm run dev
 <span class="t-ok"># http://localhost:8080/login — create the owner account</span></pre>
         <p class="cap">Playwright Chromium is for <b>Show transcript</b> and JS civic sites (Municode). PrimeGov packets still work without it — they are a JSON API.</p>
       </div>
       <div>
         <div class="prose">
-          <p><strong>No API key by default.</strong> If the <a href="https://code.claude.com">Claude Code</a> CLI is installed and signed in, Scan, Draft and Dark Desk use that login. Your subscription does the work; nothing to buy, nothing to paste.</p>
+          <p><strong>Pick per story.</strong> Every Queue row and the story workbench put a model picker beside <b>Draft with AI</b>. Automatic uses your configured gateway when set; otherwise it chooses the first ready provider-hosted Zen MiMo, Codex Terra or Claude Opus before the job starts, then keeps that provider for every pass. Local Qwen remains available by explicit choice. Named choices never fall back.</p>
           <p>The coding harness is stripped from every call — including your own <code>CLAUDE.md</code> and skills, which have no business inside a news prompt.</p>
-          <p>Prefer a key? Set <code>ANTHROPIC_API_KEY</code> and it wins. Prefer something else entirely? Any OpenAI-compatible <code>/v1/chat/completions</code> endpoint works with three env vars — LiteLLM, Bifrost, Helicone, MLflow, Kong, Ollama, OpenAI, OpenRouter, or a local model. That wins over both. <code>XAI_API_KEY</code> still runs Grok.</p>
+          <p>Local expects an LM Studio-compatible server on <code>127.0.0.1:1234</code> with the named Qwen model loaded. Zen is hosted by OpenCode, so that choice sends the prompt there. Codex and Claude reuse their signed-in CLI sessions and check readiness before enqueue.</p>
+          <p>Prefer a gateway? Any OpenAI-compatible <code>/v1/chat/completions</code> endpoint works with three <code>LLM_*</code> vars — LiteLLM, Bifrost, Helicone, MLflow, Kong, Ollama, OpenAI or OpenRouter. It becomes the forced Story Automatic provider and the configured provider for Scan and Dark Desk.</p>
+          <p>Opinion has its own frontier picker. Claude Opus through signed-in Claude Code is enabled. Codex Sol fails closed before spending until the operator can explicitly authorize sending the private editorial voice to OpenAI.</p>
           <p>Unset <code>DATABASE_URL</code> and you get embedded PGLite. Fine for a look. <strong>Data dies when the process stops.</strong> A newsroom wants Postgres.</p>
         </div>
         <p class="cap"><a href="https://github.com/scottconverse/TownReporter/blob/main/docs/manual.md"><b>The manual</b></a>
@@ -557,7 +559,7 @@ npm run dev
       <li><b>PGLite is a demo database.</b> Use Postgres if you care about the archive.</li>
       <li><b>Setup needs real sources.</b> TownReporter cannot infer the right agenda portal, meeting channels or local title vocabulary from a city name. The owner supplies them.</li>
       <li><b>Dark Desk has no publish button.</b> That is not a missing feature.</li>
-      <li><b>Working the desk is not trackerless.</b> The "zero outside requests" badge above is about the reader's page. Scan, Draft and Dark Desk send model calls to your configured provider and searches to a third-party chain (Exa, then DuckDuckGo, Bing, Brave, Wikipedia) — see <a href="setup.md#what-leaves-this-machine">What leaves this machine</a>.</li>
+      <li><b>Working the desk is not trackerless.</b> The "zero outside requests" badge above is about the reader's page. Scan and Dark Desk use the configured provider; each Story run uses its persisted configured, Automatic, or explicit provider. Searches use a third-party chain (Exa, then DuckDuckGo, Bing, Brave, Wikipedia) — see <a href="setup.md#what-leaves-this-machine">What leaves this machine</a>.</li>
     </ul>
   </section>
 

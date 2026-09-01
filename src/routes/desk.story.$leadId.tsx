@@ -15,6 +15,8 @@ import {
 } from "@/lib/news/notes";
 import { editorDraftError, draftHasLanded, stalledRunCopy } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
+import { ModelPicker } from "@/components/model-picker";
+import type { StoryModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
   component: StoryPage,
@@ -49,6 +51,7 @@ function StoryPage() {
   const [body, setBody] = useState("");
   const [topic, setTopic] = useState("council");
   const [scratch, setScratch] = useState("");
+  const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   /*
     Publishing is the only irreversible thing on this page, and it was the
     only one that did not ask.
@@ -81,6 +84,18 @@ function StoryPage() {
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });
+
+  const previousJobError = !waiting && !msg && data?.job?.status === "failed"
+    ? editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish."
+    : "";
+
+  useEffect(() => {
+    if (waitingSince || (data?.job?.status !== "queued" && data?.job?.status !== "running")) return;
+    hadBodyAtStart.current = Boolean(data.draft?.body);
+    bodyAtStart.current = data.draft?.body ?? "";
+    const started = Date.parse(data.job.started_at ?? data.job.created_at ?? "");
+    setWaitingSince(Number.isFinite(started) ? started : Date.now());
+  }, [data?.draft?.body, data?.job, waitingSince]);
 
   useEffect(() => {
     if (data?.articleSlug) setPublishedSlug(data.articleSlug);
@@ -170,7 +185,7 @@ function StoryPage() {
       await saveReportingNotes({
         data: { leadId: id, scratch, todos: parseNotes(data?.lead.notes_json).todo },
       });
-      return draftLead({ data: id });
+      return draftLead({ data: { leadId: id, modelChoice } });
     },
     onMutate: () => {
       setMsg("");
@@ -202,7 +217,7 @@ function StoryPage() {
         attempted. Prefer the structured answer over pattern-matching it.
       */
       if ("kind" in res && res.kind) {
-        setMsg(res.error);
+        setMsg("detail" in res && res.detail ? `${res.error}\n\n${res.detail}` : res.error);
         return;
       }
       setMsg(editorDraftError(res.error) ?? res.error);
@@ -395,15 +410,23 @@ function StoryPage() {
         <section className="story-work">
           <div className="work-bar">
             {!locked && !onPaper ? (
-              <InkButton
-                disabled={waiting}
-                onClick={() => {
-                  if (waiting) return;
-                  draft.mutate();
-                }}
-              >
-                {waiting ? "Drafting…" : data.draft?.body ? "Redraft" : "Draft with AI"}
-              </InkButton>
+              <>
+                <ModelPicker
+                  value={modelChoice}
+                  onChange={setModelChoice}
+                  disabled={waiting}
+                  compact
+                />
+                <InkButton
+                  disabled={waiting}
+                  onClick={() => {
+                    if (waiting) return;
+                    draft.mutate();
+                  }}
+                >
+                  {waiting ? "Drafting…" : data.draft?.body ? "Redraft" : "Draft with AI"}
+                </InkButton>
+              </>
             ) : null}
             {data.draft && !locked && !onPaper ? (
               <>
@@ -479,8 +502,8 @@ function StoryPage() {
             />
           ) : null}
           {publish.isPending ? <Busy label="Sending this to the paper…" /> : null}
-          {msg && !onPaper ? (
-            <Notice kind={msg === "Saved." ? "ok" : "err"}>{msg}</Notice>
+          {(msg || previousJobError) && !onPaper ? (
+            <Notice kind={msg === "Saved." ? "ok" : "err"}>{msg || previousJobError}</Notice>
           ) : null}
 
           {data.draft || body ? (

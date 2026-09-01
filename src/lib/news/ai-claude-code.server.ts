@@ -92,6 +92,52 @@ export function resetClaudeCliCache() {
 export const CLAUDE_CLI_MISSING =
   "Claude Code CLI not found. Install it (npm i -g @anthropic-ai/claude-code) and sign in with `claude`, set CLAUDE_CLI_PATH to its binary, or set ANTHROPIC_API_KEY instead.";
 
+export async function probeClaudeCode(label = "Claude"): Promise<
+  { ok: true; label: string } | { ok: false; error: string }
+> {
+  const bin = await findClaudeCli();
+  if (!bin) return { ok: false, error: CLAUDE_CLI_MISSING };
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(bin, ["auth", "status", "--json"], {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      resolve({ ok: false, error: CLAUDE_CLI_MISSING });
+      return;
+    }
+    let stdout = "";
+    let settled = false;
+    const finish = (result: { ok: true; label: string } | { ok: false; error: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      finish({ ok: false, error: "Claude login check timed out." });
+      killTree(child);
+    }, 10_000);
+    timer.unref?.();
+    child.stdout?.on("data", (chunk) => (stdout += String(chunk)));
+    child.on("error", () => finish({ ok: false, error: CLAUDE_CLI_MISSING }));
+    child.on("close", (code) => {
+      try {
+        const status = JSON.parse(stdout) as { loggedIn?: boolean };
+        if (code === 0 && status.loggedIn) return finish({ ok: true, label });
+      } catch {
+        /* use the actionable signed-out message below */
+      }
+      finish({
+        ok: false,
+        error: "Claude is signed out. Open Claude Code, sign in, then try again.",
+      });
+    });
+  });
+}
+
 /**
  * End a spawned CLI and everything it started.
  *
@@ -105,7 +151,13 @@ function killTree(child: { pid?: number; kill: (sig?: NodeJS.Signals) => boolean
   const pid = child.pid;
   if (pid && process.platform === "win32") {
     try {
-      spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { windowsHide: true });
+      const killer = spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { windowsHide: true });
+      killer.on("error", () => child.kill());
+      killer.on("close", (code) => {
+        if (code !== 0) child.kill();
+      });
+      const fallback = setTimeout(() => child.kill(), 500);
+      fallback.unref?.();
       return;
     } catch {
       /* fall through to the plain kill */

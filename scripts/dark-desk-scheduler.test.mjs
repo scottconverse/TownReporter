@@ -47,7 +47,7 @@ test("the plugin entry exists, imports relatively, and carries no NODE_ENV gate"
 test("nothing client-reachable imports the scheduler", () => {
   // db.ts (client-reachable) once started the clock and dragged the news
   // graph into the client build. The plugin must stay the only entry.
-  const db = read("src/lib/db.ts");
+  read("src/lib/db.ts");
   assert.doesNotMatch(code("src/lib/db.ts"), /unattended-scheduler/);
 });
 

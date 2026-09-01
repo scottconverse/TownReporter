@@ -179,7 +179,7 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
           return hits;
         },
         chat,
-        capture: async (_user, doc) => ({
+        capture: async (_user, _doc) => ({
           version_id: ++versions,
           capture_event_id: versions + 100,
         }),

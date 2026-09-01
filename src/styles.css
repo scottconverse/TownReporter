@@ -726,6 +726,15 @@
   .desk-ltr .story-grid {grid-template-columns:1fr;gap:22px}
 }
 .desk-ltr .work-bar {display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.desk-ltr .model-picker {display:grid;grid-template-columns:auto minmax(190px,1fr);align-items:center;gap:4px 9px;max-width:420px;margin:12px 0}
+.desk-ltr .model-picker.compact {margin:0;grid-template-columns:auto minmax(170px,230px)}
+.desk-ltr .model-picker-label {font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.desk-ltr .model-picker select {min-height:34px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:13px;padding:6px 28px 6px 9px}
+.desk-ltr .model-picker select:focus {border-color:var(--fg);outline:2px solid var(--fg);outline-offset:2px}
+.desk-ltr .model-picker-help {grid-column:2;font-size:11px;color:var(--muted)}
+.desk-ltr .queue-draft-controls {display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin-top:9px}
+.desk-ltr .queue-draft-controls .model-picker {margin:0}
+@media (max-width:640px){.desk-ltr .model-picker,.desk-ltr .model-picker.compact{grid-template-columns:1fr;width:100%;max-width:none}.desk-ltr .model-picker-help{grid-column:1}}
 .desk-ltr .work-form {margin-top:16px;display:grid;gap:12px}
 .desk-ltr .dark-lede {max-width:560px;font-size:13px;color:var(--fg2);margin:0;text-align:right}
 .desk-ltr .piles {display:grid;grid-template-columns:1fr 1fr 1fr;margin-top:10px}

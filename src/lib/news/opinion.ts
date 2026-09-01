@@ -6,6 +6,7 @@ import { enqueueJob, latestJob, runLooksStalled } from "./jobs";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { assertHttpUrl } from "./url-guard";
 import { siteUrl } from "@/lib/paper";
+import { opinionModelChoice, opinionProviderProblem, type OpinionModelChoice } from "./model-choice.ts";
 
 /**
  * The Opinion desk.
@@ -54,20 +55,39 @@ export type EditorialRow = {
  *
  * Cheap: a stat and an env read. No model call, nothing spent.
  */
+async function checkOpinionReadiness(choice: OpinionModelChoice) {
+  const problems: string[] = [];
+  const { findVoiceFile } = await import("./voice.server");
+  const voice = await findVoiceFile();
+  if (!voice.ok) problems.push(voice.error);
+
+  const { probeProvider } = await import("./ai");
+  const codexOpinionDisabled =
+    "Codex Opinion is not enabled yet because sending the private editorial voice to OpenAI needs explicit authorization. Choose Claude Opus for Opinion.";
+  if (choice === "codex-frontier") problems.push(codexOpinionDisabled);
+  const probes = choice === "auto"
+    ? [await probeProvider("claude-frontier")]
+    : choice === "codex-frontier"
+      ? []
+      : [await probeProvider(choice)];
+  const selected = probes.find((probe) => probe.ok);
+  if (!selected) {
+    problems.push(...probes.flatMap((probe) => {
+      if (probe.ok) return [];
+      return [opinionProviderProblem(probe.error)];
+    }));
+  }
+  const effectiveChoice = selected?.ok && selected.choice !== "configured"
+    ? opinionModelChoice(selected.choice)
+    : choice;
+  return { ready: problems.length === 0, why: problems.join(" "), problems, effectiveChoice };
+}
+
 export const opinionReadiness = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .handler(async () => {
-    const { resolveClaudeCode } = await import("./ai");
-    if (!resolveClaudeCode()) {
-      return {
-        ready: false as const,
-        why: "The Opinion desk needs the Claude Code CLI, and it is switched off or missing here. It cannot use an API key or a gateway instead: the voice is handed over as a file path so it never reaches a command line, and the piece is written with web search.",
-      };
-    }
-    const { findVoiceFile } = await import("./voice.server");
-    const voice = await findVoiceFile();
-    if (!voice.ok) return { ready: false as const, why: voice.error };
-    return { ready: true as const, why: "" };
+  .validator((choice?: string) => opinionModelChoice(choice))
+  .handler(async ({ data: choice }) => {
+    return checkOpinionReadiness(choice);
   });
 
 export const listEditorials = createServerFn({ method: "GET" })
@@ -146,21 +166,15 @@ export const getEditorial = createServerFn({ method: "GET" })
  */
 export const startEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { subject: string; askedFor?: string; articleSlug?: string }) => input)
+  .validator((input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string }) => input)
   .handler(async ({ context, data }) => {
     const { ensureEditorialRequestSchema } = await import("./editorial.server");
-    const { findVoiceFile } = await import("./voice.server");
-
-    // Fail before spending a job slot: without the voice there is no editorial.
-    const voice = await findVoiceFile();
-    if (!voice.ok) return { ok: false as const, error: voice.error };
-
     const subject = String(data.subject ?? "").trim().slice(0, 400);
+    const modelChoice = opinionModelChoice(data.modelChoice);
     if (subject.length < 6) {
       return { ok: false as const, error: "Give it a subject, a URL, or a sentence to work from." };
     }
 
-    await assertRate(context.userId, "editorial");
     await ensureEditorialRequestSchema();
     const sql = await getSql();
 
@@ -202,13 +216,21 @@ export const startEditorial = createServerFn({ method: "POST" })
       }
     }
 
+    // Repeat the UI's cheap readiness check at the commit boundary. The
+    // browser check can be stale, fail, or be bypassed; no request or job is
+    // created unless both the voice and selected provider are ready now.
+    const readiness = await checkOpinionReadiness(modelChoice);
+    if (!readiness.ready) return { ok: false as const, error: readiness.why };
+    const effectiveChoice = readiness.effectiveChoice;
+    await assertRate(context.userId, "editorial");
+
     const rows = await sql<{ id: number }>`
       insert into editorial_requests
-        (user_id, newsroom_id, subject, source_kind, source_ref, asked_for, pointers_json, our_story_json)
+        (user_id, newsroom_id, subject, source_kind, source_ref, asked_for, pointers_json, our_story_json, model_choice)
       values (${context.userId}, ${owned(context)}, ${subject}, ${sourceKind}, ${sourceRef},
               ${String(data.askedFor ?? "").slice(0, 600)},
               ${JSON.stringify(pointers).slice(0, 8000)},
-              ${ourStory ? JSON.stringify(ourStory) : null})
+              ${ourStory ? JSON.stringify(ourStory) : null}, ${effectiveChoice})
       returning id
     `;
     const requestId = rows[0]!.id;
@@ -218,9 +240,10 @@ export const startEditorial = createServerFn({ method: "POST" })
       newsroomId: owned(context),
       kind: "editorial",
       subjectId: requestId,
+      modelChoice: effectiveChoice,
     });
     await audit(context.userId, "editorial", `request ${requestId} from ${sourceKind}`);
-    return { ok: true as const, requestId, jobId: job.id };
+    return { ok: true as const, requestId, jobId: job.id, modelChoice: effectiveChoice };
   });
 
 /**

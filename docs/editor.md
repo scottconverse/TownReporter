@@ -91,7 +91,10 @@ One pass: fetch every **accepted** source, then one model read for leads and pro
 - Stay on the page while it runs.
 - When it files leads, open the queue. When it files nothing, that can be “nothing moved,” not a crash. The page will say which.
 
-If AI is unavailable you will get a straight error. Usually that means the Claude Code CLI is not installed or not signed in on the machine running the desk, and no key is set instead. That is an operator problem ([setup.md](setup.md)).
+If AI is unavailable you will get a straight error. Scan uses the operator's
+configured provider, so the fix may be a gateway/key change or restoring the
+Claude Code login on the machine running the desk. That is an operator problem
+([setup.md](setup.md)).
 
 ---
 
@@ -111,7 +114,14 @@ Statuses you will use:
 | **Killed** | No. Still listed under Killed if you need to undo. |
 | **Published** | Live on the paper. Lives under Published, not the working queue. |
 
-Open a lead to go to the workbench. Nothing prints from this list.
+Every active lead has its own compact **Writing model** picker beside **Draft
+with AI** (or **Redraft with AI** after a draft exists). Automatic uses the
+operator's configured gateway when one is set; otherwise it chooses the first
+ready Zen MiMo, Codex Terra, or Claude Opus provider. Local Qwen remains a
+named choice. A named choice uses only that provider and never falls back. The result appears on the same
+row and names the provider the server actually queued. **Open** takes you to
+the workbench to watch the draft land and edit it. Nothing prints from this
+list.
 
 A meeting on the calendar is not automatically a story. A five-hour council tape is not automatically a story. Those are records. You decide if there is news.
 
@@ -129,7 +139,19 @@ The lead and the notes are on the left and never print. The draft is on the righ
 
 **Draft with AI** runs a research pass first: the company’s or agency’s own press release and records, then stakeholders, history, and competing accounts. It writes a story into the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
 
-Stay on the page. If the click dies before the reply comes back, the workbench keeps looking until the draft is on the lead, then fills the form. You should not need to reload. If a real failure happens, the page says so — click again.
+The picker beside it controls this run. **Automatic** uses a configured
+`LLM_*` gateway exclusively when present; otherwise it checks Zen MiMo, Codex
+Terra and Claude Opus in that order, chooses the first ready one
+before enqueueing, and keeps it for every reporting and writing pass. Choose a
+named model to force only Local, provider-hosted Zen, Codex Terra, frontier
+Codex Sol, or frontier Claude Opus. Explicit choices never fall back. Redraft
+has the same picker.
+
+Stay on the page. If the click dies before the reply comes back, the workbench
+keeps looking until the draft is on the lead, then fills the form. You should
+not need to reload. If a real failure happens, its message survives a reload
+and includes the provider's safe diagnostic detail when available. Fix what it
+names, then click Draft/Redraft again.
 
 When the reporting hangs on another newsroom, the draft should name them and link the **story URL** so they get the traffic. A homepage or `/local-news` index is not that URL. Their rewrite is not a substitute for the company’s own announcement. If the desk only has a listing, notes ask you to pull the full URL; do not publish a paraphrase of their legal claims as if TownReporter established them.
 
@@ -273,6 +295,14 @@ Where the paper says what it thinks.
 Type a subject, a sentence, or paste a URL, and press **Write an editorial**. A
 pasted link gets opened and read before anything is written.
 
+Choose **Automatic**, **Codex Sol**, or **Claude Opus** first. Claude Opus
+through the signed-in Claude Code CLI is the enabled Opinion path today. Codex Sol is shown but refuses before enqueue
+or spend: TownReporter will not send the private editorial voice to OpenAI
+without explicit operator authorization. Automatic therefore requires ready
+Claude Opus today. Readiness lists every missing prerequisite — voice file,
+installation, or login — before the button is enabled, and the server checks
+again when you click.
+
 What comes back:
 
 - `OPINION:` at the front of the headline, so it cannot be mistaken for a
@@ -414,7 +444,13 @@ How we report, in public: `/how-we-report`.
 
 | You see | Likely | What to do |
 |---|---|---|
-| “AI is not available” | No model configured | Operator: sign in to Claude Code on that machine, or set `ANTHROPIC_API_KEY` / `LLM_*` ([setup.md](setup.md)) |
+| Automatic says no model is ready | Configured gateway failed, or every Automatic provider failed readiness | Fix the configured gateway; otherwise restore access to Zen, sign in to Codex, or sign in/configure Claude. Local is explicit-only ([setup.md](setup.md#per-run-picker)) |
+| Local Qwen is unreachable | LM Studio-compatible server is stopped or not on `127.0.0.1:1234` | Start it, or set `TOWNREPORTER_LOCAL_BASE_URL` |
+| Local Qwen says the model is not loaded | The exact configured model is absent | Load `qwen/qwen3.6-35b-a3b`, or set `TOWNREPORTER_LOCAL_MODEL` to the loaded id |
+| Zen MiMo is unreachable | This machine is offline or OpenCode Zen is unavailable | Restore network access or choose another provider; Zen is provider-hosted |
+| Codex is missing or signed out | Codex CLI/OAuth is unavailable on the server machine | Install/open Codex, sign in, and try again; check `CODEX_CLI_PATH` / `CODEX_HOME` only for unusual layouts |
+| Claude is missing or signed out | Claude Code CLI login is unavailable | Install/open Claude Code and sign in, or configure the Claude API path |
+| Codex Opinion says it is not enabled | Private voice-to-OpenAI authorization is intentionally absent | Choose Claude Opus; Codex Opinion fails closed before spending |
 | Scan fetched, filed nothing | Nothing new, or the model declined | Read the summary. Not automatically a bug. |
 | Draft with AI ran, form still empty | The click died; the writing pass may still be finishing | Stay on the page. It fills when the draft lands. Reload only if you left. |
 | Redraft shows a sign-in / setCookie error | Cookie helper threw even though you are signed in | Click Redraft again. Fixed in 0.3.7. |

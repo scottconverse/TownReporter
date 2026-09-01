@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { grokChat, parseJsonBlock, providerBudget, probeProvider } from "./ai.ts";
-import { DARK_SYSTEM, darkSystemFor } from "./dark-prompt.ts";
+import { darkSystemFor } from "./dark-prompt.ts";
 import { assertRate, audit } from "./ops.ts";
 import {
   checkBaselines,

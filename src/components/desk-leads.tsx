@@ -5,6 +5,9 @@ import { formatAge } from "@/lib/paper";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import type { PrintedDup } from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
+import { ModelPicker } from "@/components/model-picker";
+import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
+import { Notice } from "@/components/states";
 
 export function LeadRowView({
   lead,
@@ -13,6 +16,9 @@ export function LeadRowView({
   onBack,
   onKill,
   onDelete,
+  onDraft,
+  drafting = false,
+  draftNotice = null,
   roomy = false,
 }: {
   lead: LeadRow;
@@ -29,10 +35,14 @@ export function LeadRowView({
    * two-click delete on a row this small is the whole safety net it needs.
    */
   onDelete?: () => void;
+  onDraft?: (modelChoice: StoryModelChoice) => void;
+  drafting?: boolean;
+  draftNotice?: { kind: "ok" | "err"; text: string } | null;
   roomy?: boolean;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   const [confirming, setConfirming] = useState(false);
+  const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const score = lead.newsworthiness ?? 0;
   return (
     <div className={"lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")}>
@@ -110,6 +120,25 @@ export function LeadRowView({
             </span>
           ) : null}
         </p>
+        {lead.status !== "killed" && lead.status !== "published" && onDraft ? (
+          <div className="queue-draft-controls">
+            <ModelPicker
+              value={modelChoice}
+              onChange={setModelChoice}
+              disabled={drafting}
+              compact
+            />
+            <InkButton
+              small
+              disabled={drafting}
+              onClick={() => onDraft(modelChoice)}
+              ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${lead.headline} with ${modelChoiceLabel(modelChoice)}`}
+            >
+              {drafting ? "Queuing…" : lead.status === "drafted" ? "Redraft with AI" : "Draft with AI"}
+            </InkButton>
+          </div>
+        ) : null}
+        {draftNotice ? <Notice kind={draftNotice.kind}>{draftNotice.text}</Notice> : null}
         {dup ? (
           <p className="meta">
             ≈ covers “{dup.note}”, published {formatShortDate(dup.publishedAt)}

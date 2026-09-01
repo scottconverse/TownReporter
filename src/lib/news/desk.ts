@@ -41,6 +41,7 @@ import { provenanceFromUrls } from "./findings";
 import { buildScanUserMessage, composeZeroLeadSummary, kindFromSourceUrl } from "./desk-copy";
 import { enqueueJob, findOpenJob, kickJobs, latestJob, runLooksStalled, type DeskJob } from "./jobs";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
+import { modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import type {
   DraftRow,
   LeadRow,
@@ -674,6 +675,7 @@ export async function performDraftWork(job: DeskJob) {
     memory,
     extraEvidence: prevNotes.scratch,
     extraUrls: moreUrls,
+    modelChoice: storyModelChoice(job.model_choice),
   });
   if ("error" in reported) throw new Error(reported.error);
 
@@ -738,8 +740,10 @@ export async function performDraftWork(job: DeskJob) {
 
 export const draftLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((leadId: number) => leadId)
-  .handler(async ({ context, data: leadId }) => {
+  .validator((input: number | { leadId: number; modelChoice?: string }) => input)
+  .handler(async ({ context, data }) => {
+    const leadId = typeof data === "number" ? data : data.leadId;
+    const modelChoice = storyModelChoice(typeof data === "number" ? "auto" : data.modelChoice);
     const sql = await getSql();
     const leads = await sql<{ id: number; status: string }>`
       select id, status from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
@@ -767,7 +771,8 @@ export const draftLead = createServerFn({ method: "POST" })
       Refusing here costs nothing and says what to do.
     */
     const { scanPreflight } = await import("./preflight");
-    const ready = scanPreflight(await probeProvider());
+    const providerProbe = await probeProvider(modelChoice);
+    const ready = scanPreflight(providerProbe);
     if (!ready.ok) {
       return {
         ok: false as const,
@@ -778,14 +783,34 @@ export const draftLead = createServerFn({ method: "POST" })
       };
     }
 
+    const effectiveChoice = providerProbe.ok && providerProbe.choice !== "configured"
+      ? providerProbe.choice
+      : modelChoice;
+
     await assertRate(context.userId, "draft");
     const job = await enqueueJob({
       userId: context.userId,
       newsroomId: owned(context),
       kind: "draft",
       subjectId: leadId,
+      modelChoice: effectiveChoice,
     });
-    return { ok: true as const, pending: true as const, jobId: job.id };
+    const persistedChoice = storyModelChoice(job.model_choice);
+    if (persistedChoice !== effectiveChoice) {
+      return {
+        ok: false as const,
+        kind: "model-conflict" as const,
+        error: `This lead is already drafting with ${modelChoiceLabel(persistedChoice)}. Open it to watch that run finish before choosing another model.`,
+        modelChoice: persistedChoice,
+        jobId: job.id,
+      };
+    }
+    return {
+      ok: true as const,
+      pending: true as const,
+      jobId: job.id,
+      modelChoice: persistedChoice,
+    };
   });
 
 export const saveReportingNotes = createServerFn({ method: "POST" })

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { htmlToPlainText, looksLikeHtml, readableCapture } from "./html-text.ts";
+import { htmlToPlainText, readableCapture } from "./html-text.ts";
 
 describe("htmlToPlainText", () => {
   it("turns a page into sentences, not tags", () => {

@@ -1,6 +1,13 @@
 type GrokOk = { ok: true; text: string };
 type GrokErr = { ok: false; error: string };
 
+import { storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
+
+export type EffectiveProviderChoice = StoryModelChoice | "configured";
+export type ProviderProbe =
+  | { ok: true; label: string; choice: EffectiveProviderChoice }
+  | { ok: false; error: string };
+
 /** Same copy the working v1–v4 desks used when the platform key is absent. */
 export const GROK_UNAVAILABLE =
   "AI is not available. Set ANTHROPIC_API_KEY for Claude (default), or XAI_API_KEY for Grok, or LLM_BASE_URL for any OpenAI-compatible gateway (LiteLLM, Bifrost, Helicone, MLflow, Kong, Ollama).";
@@ -33,10 +40,16 @@ export type ClaudeCodeConfig = {
   label: string;
 };
 
+export type CodexConfig = {
+  model: string;
+  label: string;
+};
+
 /** The desk speaks to exactly one of these per call. */
 export type Provider =
   | ({ kind: "anthropic" } & AnthropicConfig)
   | ({ kind: "claude-code" } & ClaudeCodeConfig)
+  | ({ kind: "codex" } & CodexConfig)
   | ({ kind: "openai" } & LlmConfig);
 
 function trimSlash(url: string): string {
@@ -122,7 +135,54 @@ export function resolveClaudeCode(): ClaudeCodeConfig | null {
  * the box can take over without touching code; Grok stays as the last fallback
  * for an existing XAI_API_KEY.
  */
-export function resolveProvider(): Provider | null {
+function explicitProvider(choice: StoryModelChoice): Provider | null {
+  if (choice === "local") {
+    return {
+      kind: "openai",
+      apiKey: "not-needed",
+      baseUrl: trimSlash(env("TOWNREPORTER_LOCAL_BASE_URL") || "http://127.0.0.1:1234/v1"),
+      model: env("TOWNREPORTER_LOCAL_MODEL") || "qwen/qwen3.6-35b-a3b",
+      label: "Local Qwen",
+    };
+  }
+  if (choice === "zen") {
+    return {
+      kind: "openai",
+      apiKey: "not-needed",
+      baseUrl: trimSlash(env("TOWNREPORTER_ZEN_BASE_URL") || "https://opencode.ai/zen/v1"),
+      model: env("TOWNREPORTER_ZEN_MODEL") || "mimo-v2.5-free",
+      label: "Zen MiMo",
+    };
+  }
+  if (choice === "codex-balanced") {
+    return {
+      kind: "codex",
+      model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra",
+      label: "Codex Terra",
+    };
+  }
+  if (choice === "codex-frontier") {
+    return {
+      kind: "codex",
+      model: env("TOWNREPORTER_CODEX_SOL_MODEL") || "gpt-5.6-sol",
+      label: "Codex Sol",
+    };
+  }
+  if (choice === "claude-frontier") {
+    const api = resolveAnthropic();
+    if (api) return { kind: "anthropic", ...api, model: "claude-opus-5", label: "Claude Opus" };
+    const cli = resolveClaudeCode();
+    return cli ? { kind: "claude-code", ...cli, model: "claude-opus-5", label: "Claude Opus" } : null;
+  }
+  return null;
+}
+
+export function resolveProvider(choice?: StoryModelChoice | string): Provider | null {
+  if (choice === "configured") {
+    const configured = customGateway();
+    return configured ? { kind: "openai", ...configured } : null;
+  }
+  if (choice && choice !== "auto") return explicitProvider(storyModelChoice(choice));
   const custom = customGateway();
   if (custom) return { kind: "openai", ...custom };
   const claude = resolveAnthropic();
@@ -139,15 +199,75 @@ export function resolveProvider(): Provider | null {
  * this says whether it can actually run — which for the CLI means the binary is
  * on disk. Async because that is a filesystem question.
  */
-export async function probeProvider(): Promise<
-  { ok: true; label: string } | { ok: false; error: string }
-> {
-  const provider = resolveProvider();
+function connectionError(label: string, err: unknown): string {
+  const name = err instanceof Error ? err.name : "";
+  return /Timeout|Abort/i.test(name)
+    ? `${label} readiness check timed out.`
+    : `${label} is unreachable. Check that it is running and that this machine is online.`;
+}
+
+async function probeOpenAi(provider: Extract<Provider, { kind: "openai" }>): Promise<ProviderProbe> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (provider.apiKey && provider.apiKey !== "not-needed") {
+    headers.Authorization = `Bearer ${provider.apiKey}`;
+  }
+  try {
+    const res = await fetch(`${provider.baseUrl}/models`, {
+      headers,
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: `${provider.label} rejected its credentials. Sign in or update its key.` };
+    }
+    if (!res.ok) return { ok: false, error: `${provider.label} readiness check failed (${res.status}).` };
+    const body = (await res.json().catch(() => null)) as { data?: { id?: string }[] } | null;
+    if (Array.isArray(body?.data) && !body.data.some((entry) => entry.id === provider.model)) {
+      return { ok: false, error: `${provider.label} is running but model ${provider.model} is not loaded.` };
+    }
+    return { ok: true, label: provider.label, choice: "configured" };
+  } catch (err) {
+    return { ok: false, error: connectionError(provider.label, err) };
+  }
+}
+
+export async function probeProvider(choice?: EffectiveProviderChoice | string): Promise<ProviderProbe> {
+  if (choice === "auto") {
+    const configured = customGateway();
+    if (configured) {
+      const result = await probeOpenAi({ kind: "openai", ...configured });
+      return result.ok ? { ...result, choice: "configured" } : result;
+    }
+    const failures: string[] = [];
+    for (const rung of ["zen", "codex-balanced", "claude-frontier"] as const) {
+      const result = await probeProvider(rung);
+      if (result.ok) return result;
+      failures.push(result.error);
+    }
+    return { ok: false, error: `No model in the Automatic ladder is ready. ${failures.join(" ")}` };
+  }
+  const provider = resolveProvider(choice);
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
-  if (provider.kind !== "claude-code") return { ok: true, label: provider.label };
-  const { findClaudeCli, CLAUDE_CLI_MISSING } = await import("./ai-claude-code.server.ts");
-  const bin = await findClaudeCli();
-  return bin ? { ok: true, label: provider.label } : { ok: false, error: CLAUDE_CLI_MISSING };
+  if (provider.kind === "codex") {
+    const { probeCodex } = await import("./ai-codex.server.ts");
+    const result = await probeCodex(provider.label);
+    return result.ok
+      ? { ...result, choice: storyModelChoice(choice) }
+      : result;
+  }
+  if (provider.kind === "openai") {
+    const result = await probeOpenAi(provider);
+    return result.ok
+      ? { ...result, choice: choice === "configured" ? "configured" : storyModelChoice(choice) }
+      : result;
+  }
+  if (provider.kind !== "claude-code") {
+    return { ok: true, label: provider.label, choice: storyModelChoice(choice) };
+  }
+  const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
+  const result = await probeClaudeCode(provider.label);
+  return result.ok
+    ? { ...result, choice: storyModelChoice(choice || "claude-frontier") }
+    : result;
 }
 
 /**
@@ -220,9 +340,17 @@ export async function grokChat(
   system: string,
   user: string,
   maxTokens = 1400,
-  opts?: { timeoutMs?: number; model?: string },
+  opts?: { timeoutMs?: number; model?: string; choice?: EffectiveProviderChoice },
 ): Promise<GrokOk | GrokErr> {
-  const provider = resolveProvider();
+  if (opts?.choice === "auto") {
+    // Pick once before the call. Multi-pass pipelines resolve this once more at
+    // their boundary and pass the effective choice to every pass, so a story
+    // never silently changes author midway through.
+    const ready = await probeProvider("auto");
+    if (!ready.ok) return ready;
+    return grokChat(system, user, maxTokens, { ...opts, choice: ready.choice });
+  }
+  const provider = resolveProvider(opts?.choice);
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
 
   const timeoutMs = opts?.timeoutMs ?? 45_000;
@@ -250,6 +378,10 @@ export async function grokChat(
       timeoutMs,
     });
   }
+  if (provider.kind === "codex") {
+    const { codexChat } = await import("./ai-codex.server.ts");
+    return codexChat({ system, user, model, timeoutMs });
+  }
   const llm = provider;
   const url = `${llm.baseUrl}/chat/completions`;
   const payload = {
@@ -268,37 +400,45 @@ export async function grokChat(
     headers.Authorization = `Bearer ${llm.apiKey}`;
   }
 
+  const deadline = Date.now() + timeoutMs;
+  const remaining = () => Math.max(1, deadline - Date.now());
   let res: Response;
   try {
     res = await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.timeout(remaining()),
     });
-  } catch {
-    return { ok: false, error: `${llm.label} request timed out` };
+  } catch (err) {
+    return { ok: false, error: connectionError(llm.label, err) };
   }
   if (res.status === 429 || res.status >= 500) {
     if (timeoutMs < 30_000) {
       return { ok: false, error: `${llm.label} API error ${res.status}` };
     }
-    await new Promise((r) => setTimeout(r, 800));
+    if (remaining() <= 1_000) return { ok: false, error: `${llm.label} API error ${res.status}` };
+    await new Promise((r) => setTimeout(r, Math.min(800, remaining())));
     try {
       res = await fetch(url, {
         method: "POST",
         headers,
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(remaining()),
       });
-    } catch {
-      return { ok: false, error: `${llm.label} request timed out` };
+    } catch (err) {
+      return { ok: false, error: connectionError(llm.label, err) };
     }
   }
   if (!res.ok) return { ok: false, error: `${llm.label} API error ${res.status}` };
   const body = (await res.json()) as {
-    choices?: { message?: { content?: string } }[];
+    error?: { message?: string } | string;
+    choices?: { message?: { content?: string; reasoning_content?: string } }[];
   };
+  if (body.error) {
+    const detail = typeof body.error === "string" ? body.error : body.error.message;
+    return { ok: false, error: `${llm.label} API error${detail ? `: ${detail}` : ""}` };
+  }
   const text = body.choices?.[0]?.message?.content?.trim() ?? "";
   if (!text) return { ok: false, error: "Empty model response" };
   return { ok: true, text };
@@ -368,11 +508,16 @@ export function plannerModel(): string {
   return isClaude ? "claude-haiku-4-5-20251001" : "";
 }
 
-export function providerBudget(): ProviderBudget {
-  const provider = resolveProvider();
-  if (provider?.kind === "claude-code") {
+export function providerBudget(choice?: StoryModelChoice | string): ProviderBudget {
+  const provider = resolveProvider(choice);
+  if (choice === "auto") {
+    return { wallMs: 660_000, callMs: 180_000, reserveMs: 180_000 };
+  }
+  if (provider?.kind === "claude-code" || provider?.kind === "codex") {
     return { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 };
   }
+  if (choice === "local") return { wallMs: 540_000, callMs: 180_000, reserveMs: 180_000 };
+  if (choice === "zen") return { wallMs: 420_000, callMs: 120_000, reserveMs: 150_000 };
   return { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 };
 }
 

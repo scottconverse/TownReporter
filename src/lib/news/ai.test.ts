@@ -6,6 +6,8 @@ import {
   grokChat,
   isGrokAvailable,
   parseJsonBlock,
+  probeProvider,
+  providerBudget,
   resolveAnthropic,
   resolveLlm,
   resolveProvider,
@@ -22,6 +24,24 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   }
   try {
     fn();
+  } finally {
+    for (const k of keys) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
+  }
+}
+
+async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () => Promise<T>) {
+  const prev: Record<string, string | undefined> = {};
+  const keys = ["XAI_API_KEY", "GROK_API_KEY", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "OPENAI_API_KEY", "XAI_MODEL", "XAI_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_EFFORT", "TOWNREPORTER_CLAUDE_CODE", "CLAUDE_CLI_PATH"];
+  for (const k of keys) prev[k] = process.env[k];
+  for (const k of keys) delete process.env[k];
+  for (const [k, v] of Object.entries(vars)) {
+    if (v !== undefined) process.env[k] = v;
+  }
+  try {
+    return await fn();
   } finally {
     for (const k of keys) {
       if (prev[k] === undefined) delete process.env[k];
@@ -102,6 +122,67 @@ describe("resolveAnthropic", () => {
 });
 
 describe("resolveProvider", () => {
+  it("honours deployment overrides for every picker-backed provider", () => {
+    withEnv(
+      {
+        TOWNREPORTER_LOCAL_BASE_URL: "http://local.test/v1",
+        TOWNREPORTER_LOCAL_MODEL: "local-model",
+        TOWNREPORTER_ZEN_BASE_URL: "https://zen.test/v1",
+        TOWNREPORTER_ZEN_MODEL: "zen-model",
+        TOWNREPORTER_CODEX_TERRA_MODEL: "balanced-model",
+        TOWNREPORTER_CODEX_SOL_MODEL: "frontier-model",
+      },
+      () => {
+        const overrideKeys = [
+          "TOWNREPORTER_LOCAL_BASE_URL",
+          "TOWNREPORTER_LOCAL_MODEL",
+          "TOWNREPORTER_ZEN_BASE_URL",
+          "TOWNREPORTER_ZEN_MODEL",
+          "TOWNREPORTER_CODEX_TERRA_MODEL",
+          "TOWNREPORTER_CODEX_SOL_MODEL",
+        ];
+        try {
+          const choose = resolveProvider as unknown as (choice: string) => ReturnType<typeof resolveProvider>;
+          assert.equal(choose("local")?.baseUrl, "http://local.test/v1");
+          assert.equal(choose("local")?.model, "local-model");
+          assert.equal(choose("zen")?.baseUrl, "https://zen.test/v1");
+          assert.equal(choose("zen")?.model, "zen-model");
+          assert.equal(choose("codex-balanced")?.model, "balanced-model");
+          assert.equal(choose("codex-frontier")?.model, "frontier-model");
+        } finally {
+          for (const key of overrideKeys) delete process.env[key];
+        }
+      },
+    );
+  });
+
+  it("resolves the editor's explicit free and frontier choices independently of env precedence", () => {
+    withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () => {
+      const choose = resolveProvider as unknown as (choice: string) => ReturnType<typeof resolveProvider>;
+      assert.deepEqual(
+        choose("local"),
+        {
+          kind: "openai",
+          apiKey: "not-needed",
+          baseUrl: "http://127.0.0.1:1234/v1",
+          model: "qwen/qwen3.6-35b-a3b",
+          label: "Local Qwen",
+        },
+      );
+      assert.equal(choose("zen")?.model, "mimo-v2.5-free");
+      assert.equal(choose("codex-balanced")?.model, "gpt-5.6-terra");
+      assert.equal(choose("codex-frontier")?.model, "gpt-5.6-sol");
+      assert.equal(choose("claude-frontier")?.model, "claude-opus-5");
+    });
+  });
+
+  it("gives local, free-cloud, and CLI work enough wall clock", () => {
+    const budget = providerBudget as unknown as (choice: string) => ReturnType<typeof providerBudget>;
+    assert.ok(budget("local").callMs >= 180_000);
+    assert.ok(budget("zen").callMs >= 120_000);
+    assert.ok(budget("codex-frontier").wallMs >= 420_000);
+  });
+
   it("is null when nothing is configured and the CLI is ruled out", () => {
     withEnv(BARE, () => assert.equal(resolveProvider(), null));
   });
@@ -182,6 +263,87 @@ describe("grokChat", () => {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
       }
+    }
+  });
+});
+
+describe("model-picker provider readiness", () => {
+  it("proves the selected local model is actually loaded", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: [{ id: "qwen/qwen3.6-35b-a3b" }] }), { status: 200 });
+    try {
+      await withEnvAsync(BARE, async () => {
+        const result = await probeProvider("local");
+        assert.equal(result.ok, true);
+        if (result.ok) assert.equal(result.choice, "local");
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("refuses a running local server when the named model is not loaded", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: [{ id: "some-other-model" }] }), { status: 200 });
+    try {
+      const result = await probeProvider("local");
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.match(result.error, /not loaded/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("treats an explicit configured gateway as Automatic's forced provider", async () => {
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = async (input) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ data: [{ id: "desk-model" }] }), { status: 200 });
+    };
+    try {
+      await withEnvAsync({ ...BARE, LLM_BASE_URL: "http://gateway.test/v1", LLM_MODEL: "desk-model" }, async () => {
+        const result = await probeProvider("auto");
+        assert.equal(result.ok, true);
+        if (result.ok) assert.equal(result.choice, "configured");
+      });
+      assert.deepEqual(urls, ["http://gateway.test/v1/models"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps Local available explicitly but starts Automatic at proven hosted providers", async () => {
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = async (input) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ data: [{ id: "mimo-v2.5-free" }] }), { status: 200 });
+    };
+    try {
+      await withEnvAsync(BARE, async () => {
+        const result = await probeProvider("auto");
+        assert.equal(result.ok, true);
+        if (result.ok) assert.equal(result.choice, "zen");
+      });
+      assert.deepEqual(urls, ["https://opencode.ai/zen/v1/models"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("distinguishes an unreachable provider from a timeout", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new TypeError("connection refused"); };
+    try {
+      const result = await probeProvider("local");
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.match(result.error, /unreachable/i);
+        assert.doesNotMatch(result.error, /timed out/i);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
     }
   });
 });
