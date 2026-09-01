@@ -155,7 +155,7 @@ if (dbProbe.ok) {
       screen renders the CONFIGURED zone and not the code's hard-coded one.
     */
     await page.getByLabel(/Timezone/).fill("Pacific/Auckland");
-    await page.getByLabel("URL").fill("https://riverbend-council.example.org/");
+    await page.getByLabel("URL", { exact: true }).fill("https://riverbend-council.example.org/");
     await page.getByLabel("Title", { exact: true }).fill("Riverbend Council");
     await page.getByRole("button", { name: "Save and open the desk" }).click();
 
