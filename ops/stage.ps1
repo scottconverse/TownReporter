@@ -14,10 +14,19 @@
 
   ASCII only: Windows PowerShell 5.1 reads a BOM-less UTF-8 file as ANSI.
 
+  The restored backup carries only the real owner's account, whose password
+  nobody but the operator knows -- so by default this also upserts a second,
+  disposable sign-in (staging@townreporter.test) into townreporter_dev right
+  after the restore, via scripts\stage-editor.mjs, so the coordinator can open
+  the staged desk too. Pass -StageEditor:$false to skip that. Those
+  credentials live ONLY in townreporter_dev and vanish the next time this
+  script restores a fresh backup over it -- see docs\staging.md.
+
   Usage:
     powershell -ExecutionPolicy Bypass -File ops\stage.ps1
     powershell -ExecutionPolicy Bypass -File ops\stage.ps1 -Backup <path>
     powershell -ExecutionPolicy Bypass -File ops\stage.ps1 -Port 3100 -NoBuild
+    powershell -ExecutionPolicy Bypass -File ops\stage.ps1 -StageEditor:$false
     powershell -ExecutionPolicy Bypass -File ops\stage.ps1 -Status
     powershell -ExecutionPolicy Bypass -File ops\stage.ps1 -Stop
 #>
@@ -28,7 +37,8 @@ param(
   [switch]$NoBuild,
   [switch]$AllowDirty,
   [switch]$Stop,
-  [switch]$Status
+  [switch]$Status,
+  [bool]$StageEditor = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -201,6 +211,21 @@ if ($r.ExitCode -ne 0) { Die "psql failed reading the story count from $dbName (
 $storyCount = $r.Output.Trim()
 Say "stories with a publish date in $dbName : $storyCount"
 
+# --- 3b. stage a sign-in nobody has to guess ---------------------------------
+$stagingCredentialsPrinted = $false
+if ($StageEditor) {
+  Say "upserting the staging editor account (scripts\stage-editor.mjs)"
+  $prevDbUrl = $env:DATABASE_URL
+  $env:DATABASE_URL = "postgres://postgres@127.0.0.1:$pgPort/$dbName"
+  $r = Invoke-External { node scripts/stage-editor.mjs }
+  $env:DATABASE_URL = $prevDbUrl
+  Write-Host $r.Output
+  if ($r.ExitCode -ne 0) { Die "scripts\stage-editor.mjs failed (exit $($r.ExitCode)). $dbName now holds the restored backup with no staging sign-in." }
+  $stagingCredentialsPrinted = $true
+} else {
+  Say "skipping the staging editor account (-StageEditor:`$false)"
+}
+
 # --- 4. build, unless -NoBuild -----------------------------------------------
 $outputServer = Join-Path $app ".output\server\index.mjs"
 if (-not $NoBuild) {
@@ -324,4 +349,8 @@ $state | ConvertTo-Json | Set-Content -Path $stateFile -Encoding ASCII
 Write-Host "  STAGING UP: http://127.0.0.1:$Port/desk -- walk the changed screens, then run ops\stage.ps1 -Stop" -ForegroundColor Green
 Write-Host "  stories with a publish date: $storyCount"
 Write-Host "  version: $version   backup: $($backupFile.Name)"
+if ($stagingCredentialsPrinted) {
+  Write-Host "  staging sign-in:  staging@townreporter.test / staging-walk-2026"
+  Write-Host "  (exists only in $dbName -- gone on the next restore; see docs\staging.md)"
+}
 Write-Host ""

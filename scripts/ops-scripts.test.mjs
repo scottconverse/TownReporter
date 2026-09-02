@@ -4,6 +4,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { assertStagingDatabase } from "./stage-editor.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OPS = join(ROOT, "ops");
@@ -345,5 +346,84 @@ test("ops/stage.ps1 exists, stays ASCII, and never names port 3000 or the townre
   );
   assert.match(text, /Port -eq 3000/, "ops/stage.ps1 must refuse -Port 3000, the live paper's port");
   assert.doesNotMatch(text, /Stop-Process\s+-Name/i, "ops/stage.ps1 must not stop a process by image name");
+});
+
+/**
+ * scripts/stage-editor.mjs upserts a staging sign-in into townreporter_dev
+ * (the disposable copy `ops/stage.ps1` restores real production data into).
+ * The one thing standing between this script and a real account is
+ * `assertStagingDatabase`: it must refuse anything whose database name is
+ * not exactly `townreporter_dev` -- not the live `townreporter` database,
+ * not a lookalike name, not a missing/unparseable URL.
+ */
+test("stage-editor's guard accepts only townreporter_dev", () => {
+  assert.equal(
+    assertStagingDatabase("postgres://postgres@127.0.0.1:5433/townreporter_dev").ok,
+    true,
+  );
+});
+
+test("stage-editor's guard refuses the live townreporter database", () => {
+  const r = assertStagingDatabase("postgres://postgres@127.0.0.1:5433/townreporter");
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /townreporter_dev/);
+});
+
+test("stage-editor's guard refuses a lookalike database name", () => {
+  for (const url of [
+    "postgres://postgres@127.0.0.1:5433/townreporter_dev2",
+    "postgres://postgres@127.0.0.1:5433/townreporter_devx",
+    "postgres://postgres@127.0.0.1:5433/townreporter_development",
+    "postgres://postgres@127.0.0.1:5433/postgres",
+  ]) {
+    assert.equal(assertStagingDatabase(url).ok, false, `expected a refusal for ${url}`);
+  }
+});
+
+test("stage-editor's guard is indifferent to host, since only the database name matters", () => {
+  assert.equal(
+    assertStagingDatabase("postgres://postgres@remote-host:5433/townreporter_dev").ok,
+    true,
+  );
+});
+
+test("stage-editor's guard refuses a missing or unparseable DATABASE_URL", () => {
+  assert.equal(assertStagingDatabase(undefined).ok, false);
+  assert.equal(assertStagingDatabase("").ok, false);
+  assert.equal(assertStagingDatabase("   ").ok, false);
+  assert.equal(assertStagingDatabase("not a url at all").ok, false);
+});
+
+/**
+ * The same guard, exercised end-to-end by actually spawning the script --
+ * this is what the task asked to prove, not just the pure function in
+ * isolation: `node scripts/stage-editor.mjs` with a wrong DATABASE_URL must
+ * exit non-zero and must never attempt a database connection.
+ */
+test("spawning stage-editor.mjs with a non-townreporter_dev DATABASE_URL exits non-zero", () => {
+  const scriptPath = join(ROOT, "scripts", "stage-editor.mjs");
+  assert.throws(() => {
+    execFileSync(process.execPath, [scriptPath], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        DATABASE_URL: "postgres://postgres@127.0.0.1:5433/townreporter",
+      },
+      timeout: 15_000,
+    });
+  }, /Command failed|exit code/i);
+});
+
+test("spawning stage-editor.mjs with no DATABASE_URL exits non-zero", () => {
+  const scriptPath = join(ROOT, "scripts", "stage-editor.mjs");
+  const env = { ...process.env };
+  delete env.DATABASE_URL;
+  assert.throws(() => {
+    execFileSync(process.execPath, [scriptPath], {
+      encoding: "utf8",
+      env,
+      timeout: 15_000,
+    });
+  });
 });
 
