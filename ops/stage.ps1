@@ -45,6 +45,16 @@ $ErrorActionPreference = "Stop"
 
 $ops = $PSScriptRoot
 $app = Split-Path -Parent $ops
+
+# lib-port.ps1 sets $port (case-insensitively the same variable as this
+# script's -Port param) as a side effect of dot-sourcing it, so stash the
+# requested staging port first and restore it right after -- otherwise
+# sourcing it here would silently replace "stage on 3100" with "stage on
+# whatever the live app's .env says", which is a different port entirely.
+$requestedPort = $Port
+. (Join-Path $ops "lib-port.ps1")
+$Port = $requestedPort
+
 $backupDir = Join-Path (Split-Path -Parent $app) "townreporter-backups"
 $pidFile = Join-Path $ops ".stage.pid"
 $stateFile = Join-Path $ops ".stage.json"
@@ -83,8 +93,11 @@ function Invoke-External([scriptblock]$Script) {
 }
 
 function Test-PortFree([int]$p) {
-  $listeners = @(Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)
-  return $listeners.Count -eq 0
+  # Test-TownReporterPort (lib-port.ps1): staging always binds 127.0.0.1, so
+  # an IPv6-only listener on the same port number from an unrelated program
+  # is not a collision and must not block -- or falsely report as still
+  # occupied after -Stop -- a staging run.
+  return -not (Test-TownReporterPort $p)
 }
 
 function Get-StagedPort {

@@ -51,11 +51,15 @@ Start-Process -FilePath $exe `
                 "-File", (Join-Path $PSScriptRoot "start-townreporter.ps1") `
   -WindowStyle Hidden
 
+# Test-TownReporterPort (lib-port.ps1), not a bare Get-NetTCPConnection: an
+# unfiltered check is satisfied by a listener on ANY address family,
+# including an unrelated program's IPv6-only listener on the same port
+# number (the 2026-09-02 incident) -- that is not this app coming back up.
 for ($i = 0; $i -lt 45; $i++) {
-  if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { break }
+  if (Test-TownReporterPort $port) { break }
   Start-Sleep -Seconds 1
 }
-if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
+if (Test-TownReporterPort $port) {
   Write-Log "back up"
 } else {
   Write-Log "FAILED to come back up"

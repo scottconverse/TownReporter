@@ -17,6 +17,8 @@ $data = "$env:USERPROFILE\scoop\persist\postgresql\data"
 $log  = "$env:USERPROFILE\scoop\persist\postgresql\pg.log"
 
 function Test-Port($p) {
+  # Postgres binds both address families, so an unfiltered check is fine
+  # here -- this is only ever used for 5433, never for the app's own port.
   [bool](Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)
 }
 
@@ -67,7 +69,22 @@ if ((Test-Path $appLog) -and ((Get-Item $appLog).Length -gt 5MB)) {
 
 & node scripts/with-app-env.mjs node scripts/migrate.mjs 2>&1 | Add-Content $appLog
 
-if (-not (Test-Port $port)) {
+<#
+  2026-09-02 incident: an unrelated dev server held [::1]:$port (IPv6 only).
+  A plain Test-Port saw a listener and never started the real app; the site
+  served 502 for ~25 minutes. Test-TownReporterPort (lib-port.ps1) only
+  counts a listener on an address this app can actually bind to, so an
+  IPv6-only foreign listener no longer counts as "already up".
+#>
+if (-not (Test-TownReporterPort $port)) {
+  $otherOwners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+    Where-Object { (Get-TownReporterPortOwner $port) -notcontains $_.OwningProcess })
+  if ($otherOwners.Count -gt 0) {
+    $o = $otherOwners[0]
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($o.OwningProcess)" -ErrorAction SilentlyContinue
+    $name = if ($proc) { $proc.Name } else { "unknown" }
+    "port $port has an IPv6-only listener PID $($o.OwningProcess) ($name) from another program; it does not block the paper" | Add-Content $appLog
+  }
   # Start-Process, not `| Add-Content`: a PowerShell pipeline holds an exclusive
   # write handle for as long as the app runs, so the log could not be read while
   # the thing you wanted to debug was happening. Redirected process handles allow

@@ -28,6 +28,8 @@ network (`0.0.0.0:8080`) for phone/LAN testing.
 The **built** server (`npm start`, `.output/server/index.mjs`) is the one that
 honours `PORT` (default `3000`) and `HOST` (default every interface — set
 `HOST=127.0.0.1` when a tunnel or reverse proxy fronts it).
+Only IPv4 listeners on the paper's port count; another program's IPv6-only
+listener does not block a start.
 
 ---
 

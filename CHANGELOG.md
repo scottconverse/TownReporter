@@ -2,6 +2,21 @@
 
 Current release: **0.6.2**.
 
+## 0.6.3 — 2026-09-02
+
+- **Ops port checks now know the difference between IPv4 and IPv6.** During
+  the 0.6.2 promote, an unrelated dev server held `[::1]:3000` (IPv6 only)
+  while TownReporter binds `127.0.0.1:3000` (IPv4); the ops scripts' port
+  checks had no address filter, saw a listener either way, and concluded the
+  paper was already up — it never started, and the site served 502 for about
+  25 minutes until someone started it by hand. `ops/lib-port.ps1` now exposes
+  `Test-TownReporterPort` / `Get-TownReporterPortOwner`, which only count a
+  listener on an address this app can actually bind to (127.0.0.1, 0.0.0.0,
+  or the `.env` `HOST` value); every port check across the start script, the
+  watchdog, restart-app, promote, status and stage now goes through it, and
+  every health probe uses `127.0.0.1` instead of `localhost` (which can
+  resolve to `::1`).
+
 ## 0.6.2 — 2026-09-02
 
 - **One provider registry.** What a writing model IS — its label, its model

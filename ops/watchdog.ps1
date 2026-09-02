@@ -58,6 +58,8 @@ function Write-Log($msg) {
 }
 
 function Test-Port($p) {
+  # Postgres binds both address families, so an unfiltered check is fine
+  # here -- kept only for the Postgres probes below, never the app's port.
   [bool](Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)
 }
 
@@ -112,12 +114,19 @@ if (-not $pgUp) {
 # --- App ------------------------------------------------------------------
 # A port being open is not enough: a node process can hold 3000 while serving
 # errors. Ask for a real page.
-$appPort = Test-Port $port
+#
+# Test-TownReporterPort (lib-port.ps1), not the address-blind Test-Port: on
+# 2026-09-02 an unrelated dev server held [::1]:$port (IPv6 only) while this
+# app binds 127.0.0.1:$port (IPv4). The old unfiltered check saw a listener
+# and concluded the paper was already up; it never got started and the site
+# served 502 for ~25 minutes. localhost is avoided for the same reason -- it
+# can resolve to ::1 and probe the wrong socket.
+$appPort = Test-TownReporterPort $port
 $appCode = 0
 $appError = ""
 if ($appPort) {
   try {
-    $appCode = (Invoke-WebRequest "http://localhost:$port/" -UseBasicParsing -TimeoutSec 20).StatusCode
+    $appCode = (Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 20).StatusCode
   } catch {
     $appError = $_.Exception.Message
   }
@@ -144,9 +153,20 @@ if (-not $appHealthy) {
     # Both parts of the check still matter: the owner of the port, AND that
     # it is this app -- never an image-name match, because other node.exe
     # processes on this machine belong to other software.
-    $owners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-      Select-Object -ExpandProperty OwningProcess -Unique)
-    foreach ($owner in $owners) {
+    # Log an IPv6-only listener separately from a real (IPv4-family) holder:
+    # it is a different program on a different address family and does not
+    # block this app from starting, so it is neither stopped nor reported as
+    # "held by PID X" the way a real collision is.
+    $bindableOwners = Get-TownReporterPortOwner $port
+    $otherListeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+      Where-Object { $bindableOwners -notcontains $_.OwningProcess })
+    if ($bindableOwners.Count -eq 0 -and $otherListeners.Count -gt 0) {
+      $o = $otherListeners[0]
+      $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($o.OwningProcess)" -ErrorAction SilentlyContinue
+      $name = if ($p) { $p.Name } else { "unknown" }
+      Write-Log "app: port $port has an IPv6-only listener PID $($o.OwningProcess) ($name) from another program; it does not block the paper"
+    }
+    foreach ($owner in $bindableOwners) {
       $p = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue
       if (-not $p) { continue }
       if ($p.Name -ne 'node.exe' -or $p.CommandLine -notlike "*.output/server/index.mjs*") {
@@ -174,8 +194,29 @@ if (-not $appHealthy) {
         -ArgumentList "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", `
                       "-File", $startScript `
         -WindowStyle Hidden
-      for ($i = 0; $i -lt 45 -and -not (Test-Port $port); $i++) { Start-Sleep -Seconds 1 }
-      if (Test-Port $port) { $repaired += "app" } else { Write-Log "app: still no listener after start" }
+      <#
+        Verify the app actually answers on 127.0.0.1, not just that a socket
+        is listening: a listener with no page behind it, or one on the wrong
+        address family, is not a repair. 45s budget, explicit FAILED on the
+        way out either way -- a silent "did not repair" reads the same as no
+        check at all, which is exactly how this app's port check went blind
+        to an IPv6-only foreign listener before.
+      #>
+      $repairedOk = $false
+      for ($i = 0; $i -lt 45; $i++) {
+        if (Test-TownReporterPort $port) {
+          try {
+            $code = (Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 5).StatusCode
+            if ($code -eq 200) { $repairedOk = $true; break }
+          } catch { }
+        }
+        Start-Sleep -Seconds 1
+      }
+      if ($repairedOk) {
+        $repaired += "app"
+      } else {
+        Write-Log "app: FAILED to come up healthy on 127.0.0.1:$port within 45s of starting it"
+      }
     } catch {
       Write-Log "app: start failed: $($_.Exception.Message)"
     }

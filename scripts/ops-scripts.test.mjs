@@ -229,8 +229,9 @@ test("the watchdog's CI override seam exists and its defaults are still producti
   // three-answers-to-one-question bug lib-port.ps1 already exists to prevent.
   assert.match(
     wd,
-    /Invoke-WebRequest\s+"http:\/\/localhost:\$port\//,
-    "the app health probe must use $port, not a hardcoded port number",
+    /Invoke-WebRequest\s+"http:\/\/127\.0\.0\.1:\$port\//,
+    "the app health probe must use $port, not a hardcoded port number " +
+      "(and 127.0.0.1, not localhost, which can resolve to ::1 -- see TW-INC-2026-09-02)",
   );
 });
 
@@ -427,3 +428,55 @@ test("spawning stage-editor.mjs with no DATABASE_URL exits non-zero", () => {
   });
 });
 
+
+/**
+ * TW-INC-2026-09-02: an unrelated dev server held [::1]:3000 (IPv6 only)
+ * during the 0.6.2 promote. A plain `Get-NetTCPConnection -LocalPort $p
+ * -State Listen` has no address filter, so it was satisfied by that
+ * listener, concluded TownReporter was already up, and never started it --
+ * the site served 502 for ~25 minutes. Every port check for the app's own
+ * port must go through the address-aware helper in lib-port.ps1 instead.
+ * A plain check on 5433 is fine: Postgres binds both address families, so
+ * that one is deliberately left alone (and called out as such in-file).
+ */
+test("no ops script checks a port with a bare Get-NetTCPConnection, except the Postgres 5433 check", () => {
+  for (const name of readdirSync(OPS).filter((f) => f.endsWith(".ps1"))) {
+    if (name === "lib-port.ps1") continue; // where the helper itself lives
+    const text = readFileSync(join(OPS, name), "utf8");
+    const usesHelper = /Test-TownReporterPort|Get-TownReporterPortOwner/.test(text);
+    for (const line of text.split("\n")) {
+      if (!/Get-NetTCPConnection\s+-LocalPort/.test(line)) continue;
+      const isPostgresCheck = /5433/.test(line);
+      assert.ok(
+        isPostgresCheck || usesHelper,
+        `ops/${name}: "${line.trim()}" checks a port without going through the address-aware ` +
+          `helper (Test-TownReporterPort / Get-TownReporterPortOwner) and is not the 5433 Postgres check`,
+      );
+    }
+  }
+});
+
+/** localhost can resolve to ::1; every app health probe must use 127.0.0.1. */
+test("no ops script probes http://localhost", () => {
+  for (const name of readdirSync(OPS).filter((f) => f.endsWith(".ps1"))) {
+    const text = readFileSync(join(OPS, name), "utf8");
+    assert.doesNotMatch(
+      text,
+      /https?:\/\/localhost[:/]/i,
+      `ops/${name}: probes localhost, which can resolve to ::1 -- use 127.0.0.1`,
+    );
+  }
+});
+
+/** The two functions this incident's fix depends on must actually exist. */
+test("lib-port.ps1 defines Test-TownReporterPort and Get-TownReporterPortOwner", () => {
+  const text = readFileSync(join(OPS, "lib-port.ps1"), "utf8");
+  assert.match(text, /function Test-TownReporterPort/, "lib-port.ps1 must define Test-TownReporterPort");
+  assert.match(text, /function Get-TownReporterPortOwner/, "lib-port.ps1 must define Get-TownReporterPortOwner");
+  // Both must actually filter by address, not just alias the old bare check.
+  assert.match(
+    text,
+    /function Get-TownReporterPortOwner[\s\S]{0,400}?Where-Object[\s\S]{0,120}?LocalAddress/,
+    "Get-TownReporterPortOwner must filter listeners by LocalAddress",
+  );
+});

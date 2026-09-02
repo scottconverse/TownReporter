@@ -34,8 +34,10 @@ $app = Split-Path -Parent $PSScriptRoot
 #>
 . (Join-Path $PSScriptRoot "lib-port.ps1")
 
-$owners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty OwningProcess -Unique)
+# Get-TownReporterPortOwner (lib-port.ps1): an unfiltered port check would
+# also catch some other program's IPv6-only listener on the same port
+# number, which is not this install and must not be reported or touched.
+$owners = Get-TownReporterPortOwner $port
 if ($owners.Count -eq 0) {
   Write-Host "nothing is listening on $port"
 }

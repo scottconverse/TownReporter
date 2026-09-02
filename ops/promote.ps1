@@ -158,8 +158,10 @@ if ($PSCmdlet.ShouldProcess("the app on port $port", "stop")) {
   $promoteMarker = Join-Path $app "logs\promote-in-progress"
   Set-Content -Path $promoteMarker -Value (Get-Date -Format o) -Encoding ASCII
 
-  $owners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-              Select-Object -ExpandProperty OwningProcess -Unique)
+  # Get-TownReporterPortOwner (lib-port.ps1): an unfiltered port check would
+  # also catch some other program's IPv6-only listener on the same port
+  # number and wrongly refuse to promote, or refuse to touch nothing at all.
+  $owners = Get-TownReporterPortOwner $port
   foreach ($owner in $owners) {
     $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue
     if (-not $proc) { continue }
@@ -208,7 +210,7 @@ if ($PSCmdlet.ShouldProcess("the app", "build")) {
 # --- 8. start ---------------------------------------------------------------
 if ($PSCmdlet.ShouldProcess("the app", "start")) {
   & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ops "start-townreporter.ps1")
-  for ($i = 0; $i -lt 60 -and -not (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue); $i++) {
+  for ($i = 0; $i -lt 60 -and -not (Test-TownReporterPort $port); $i++) {
     Start-Sleep -Seconds 1
   }
 }
