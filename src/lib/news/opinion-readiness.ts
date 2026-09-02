@@ -23,12 +23,6 @@ async function defaultVoiceProbe(): Promise<VoiceProbe> {
 
 /** Opinion's Claude path is the native CLI, not the separate Anthropic API path. */
 async function defaultCandidateProbe(choice: CandidateChoice): Promise<CandidateProbe> {
-  if (choice === "codex-frontier") {
-    const { probeProvider } = await import("./ai.ts");
-    const result = await probeProvider(choice);
-    return result.ok ? { ...result, choice } : result;
-  }
-
   const { resolveClaudeCode } = await import("./ai.ts");
   if (!resolveClaudeCode()) {
     return {
@@ -51,8 +45,9 @@ export async function checkOpinionReadiness(
   const voice = await (deps.findVoice ?? defaultVoiceProbe)();
   if (!voice.ok) problems.push(voice.error);
 
-  const candidates =
-    choice === "auto" ? (["codex-frontier", "claude-frontier"] as const) : ([choice] as const);
+  // Opinion is Claude-only (see OPINION_MODEL_CHOICES), so Automatic and the
+  // explicit choice probe the same single rung.
+  const candidates = ["claude-frontier"] as const;
   let selected: CandidateProbe | undefined;
   const providerProblems: string[] = [];
   const probeCandidate = deps.probeCandidate ?? defaultCandidateProbe;

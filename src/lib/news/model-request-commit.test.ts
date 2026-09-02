@@ -230,11 +230,13 @@ describe("authenticated Codex commit boundary", () => {
     let opinionEnqueueCalls = 0;
     let opinionSchemaCalls = 0;
     let opinionSqlCalls = 0;
+    // Opinion is Claude-only, so its expiry is Claude's, and its explicit
+    // choice is the one choice the picker still offers.
     const opinionExpired = await commitOpinionForAuthenticatedEditor(
       {
         context: { userId, newsroomId: editor.newsroomId },
         subject: "The city should publish water-hearing exhibits before the meeting.",
-        modelChoice: "codex-frontier",
+        modelChoice: "claude-frontier",
       },
       {
         ensureEditorialRequestSchema: async () => {
@@ -249,7 +251,7 @@ describe("authenticated Codex commit boundary", () => {
             findVoice: async () => ({ ok: true as const, voice: { path: "C:/voice.md" } }),
             probeCandidate: async (candidate) => {
               opinionCandidates.push(candidate);
-              return { ok: false as const, error: EXPIRED };
+              return { ok: false as const, error: 'Claude Code needs you to sign in again. Open Claude Code on this machine and sign in, then start this action again. Nothing was queued or spent.' };
             },
           }),
         enqueueJob: async (opts) => {
@@ -260,8 +262,8 @@ describe("authenticated Codex commit boundary", () => {
     );
     assert.equal(opinionExpired.ok, false);
     if (opinionExpired.ok) assert.fail("expired Opinion OAuth must refuse");
-    assert.match(opinionExpired.error, /Codex authentication has expired/i);
-    assert.deepEqual(opinionCandidates, ["codex-frontier"]);
+    assert.match(opinionExpired.error, /Claude Code needs you to sign in again/i);
+    assert.deepEqual(opinionCandidates, ["claude-frontier"]);
     assert.equal(opinionSchemaCalls, 0);
     assert.equal(opinionSqlCalls, 0);
     assert.equal(opinionEnqueueCalls, 0);
@@ -272,7 +274,7 @@ describe("authenticated Codex commit boundary", () => {
         context: { userId, newsroomId: editor.newsroomId },
         subject: "The city should publish water-hearing exhibits before the meeting.",
         askedFor: "Explain the public-records stakes.",
-        modelChoice: "codex-frontier",
+        modelChoice: "claude-frontier",
       },
       {
         ensureEditorialRequestSchema: async () => undefined,
@@ -281,7 +283,7 @@ describe("authenticated Codex commit boundary", () => {
             findVoice: async () => ({ ok: true as const, voice: { path: "C:/voice.md" } }),
             probeCandidate: async (candidate) => {
               opinionCandidates.push(candidate);
-              return { ok: true as const, label: "Codex Sol", choice: candidate };
+              return { ok: true as const, label: "Claude Opus", choice: candidate };
             },
           }),
         enqueueJob: async (opts) => {
@@ -291,7 +293,7 @@ describe("authenticated Codex commit boundary", () => {
       },
     );
     assert.equal(opinionReady.ok, true);
-    assert.equal(opinionReady.modelChoice, "codex-frontier");
+    assert.equal(opinionReady.modelChoice, "claude-frontier");
     assert.equal(opinionEnqueueCalls, 1);
 
     const final = await countsFor(userId);
@@ -301,13 +303,13 @@ describe("authenticated Codex commit boundary", () => {
     `;
     assert.deepEqual(persistedJobs, [
       { kind: "draft", model_choice: "codex-frontier" },
-      { kind: "editorial", model_choice: "codex-frontier" },
+      { kind: "editorial", model_choice: "claude-frontier" },
     ]);
     const [request] = await sql<{ model_choice: string; subject: string }>`
       select model_choice, subject from editorial_requests where user_id = ${userId}
     `;
     assert.deepEqual(request, {
-      model_choice: "codex-frontier",
+      model_choice: "claude-frontier",
       subject: "The city should publish water-hearing exhibits before the meeting.",
     });
   });

@@ -1077,12 +1077,12 @@ npm run dev
                 configured provider for Scan and Dark Desk.
               </p>
               <p>
-                Opinion has its own frontier picker. Automatic runs a complete Codex Sol pair, then
-                starts a fresh Claude Opus pair if the first one fails. Codex receives the
-                configured editorial voice over stdin and keeps its native full capabilities; Claude
-                Code reads it by file path and keeps its tool-free writing boundary. A refusal,
-                assistant note, implausible headline or incomplete body is marked failed and never
-                becomes a draft. Named choices never switch providers.
+                Opinion is Claude only. Automatic and Claude Opus both mean Claude Opus through
+                your signed-in Claude Code session, which reads the editorial voice by file path
+                and keeps its tool-free writing boundary. Codex is not offered for editorials:
+                its model declines to write a piece that takes a position on a local policy
+                question, so it stays on the Story picker. A refusal, assistant note, implausible
+                headline or incomplete body is marked failed and never becomes a draft.
               </p>
               <p>
                 Unset <code>DATABASE_URL</code> and you get embedded PGLite. Fine for a look.

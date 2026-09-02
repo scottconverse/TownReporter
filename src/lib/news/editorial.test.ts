@@ -270,25 +270,10 @@ describe("the editorial writer respects a disabled CLI", () => {
 
 type EditorialChatResult = { ok: true; text: string } | { ok: false; error: string };
 
-type EditorialChatInput = {
-  system: string;
-  user: string;
-  model: string;
-  timeoutMs: number;
-  systemPromptFile?: string;
-  systemPromptText?: string;
-  allowedTools?: string[];
-  webSearch?: boolean;
-};
-
 type EditorialRuntime = {
   findVoiceFile: () => Promise<
     { ok: true; voice: { path: string; bytes: number } } | { ok: false; error: string }
   >;
-  readVoiceTextForOpenAiCodex: () => Promise<
-    { ok: true; text: string } | { ok: false; error: string }
-  >;
-  codexChat: (input: EditorialChatInput) => Promise<EditorialChatResult>;
   runClaudePair: () => Promise<EditorialChatResult>;
   fileEditorial: () => Promise<{
     ok: true;
@@ -298,7 +283,6 @@ type EditorialRuntime = {
     hadAppendix: boolean;
   }>;
   timeoutMs: () => number;
-  codexModel: string;
 };
 
 type EditorialOrchestrator = (
@@ -309,7 +293,7 @@ type EditorialOrchestrator = (
     pointers: [];
     sourceKind: string;
     sourceRef: string;
-    modelChoice: "auto" | "codex-frontier" | "claude-frontier";
+    modelChoice: string;
   },
   runtime: EditorialRuntime,
 ) => Promise<
@@ -319,7 +303,7 @@ type EditorialOrchestrator = (
       headline: string;
       words: number;
       hadAppendix: boolean;
-      modelChoice: "codex-frontier" | "claude-frontier";
+      modelChoice: "claude-frontier";
     }
   | { ok: false; error: string }
 >;
@@ -342,29 +326,18 @@ const ORCHESTRATION_INPUT = {
   pointers: [] as [],
   sourceKind: "paste",
   sourceRef: "desk",
-  modelChoice: "codex-frontier" as const,
+  modelChoice: "auto",
 };
 
-function codexRuntime(events: string[], replies: EditorialChatResult[]) {
-  const codexCalls: EditorialChatInput[] = [];
-  let replyIndex = 0;
+function claudeRuntime(events: string[], reply: EditorialChatResult) {
   const runtime: EditorialRuntime = {
     async findVoiceFile() {
       events.push("voice:locate");
       return { ok: true, voice: { path: "C:\\private\\voice.md", bytes: 1_024 } };
     },
-    async readVoiceTextForOpenAiCodex() {
-      events.push("voice:read");
-      return { ok: true, text: "PRIVATE VOICE" };
-    },
-    async codexChat(input) {
-      codexCalls.push(input);
-      events.push(input.systemPromptText ? "codex:write" : "codex:research");
-      return replies[replyIndex++] ?? { ok: false, error: "unexpected Codex call" };
-    },
     async runClaudePair() {
       events.push("claude");
-      return { ok: false, error: "Claude must not run" };
+      return reply;
     },
     async fileEditorial() {
       events.push("file");
@@ -377,220 +350,112 @@ function codexRuntime(events: string[], replies: EditorialChatResult[]) {
       };
     },
     timeoutMs: () => 60_000,
-    codexModel: "gpt-5.6-sol",
   };
-  return { runtime, codexCalls };
+  return runtime;
 }
 
-describe("Codex Opinion keeps native Codex capabilities", () => {
-  it("runs locate -> Codex research without voice -> voice read -> Codex write -> file", async () => {
+/*
+  Opinion is Claude-only. Codex sat on this picker for one release candidate
+  and its model refused the job every time it was asked for an editorial that
+  takes a position -- the provider's policy, not a bug. These tests pin the
+  shape that replaced it: one provider, one pair, and refusals still never
+  become a headline.
+*/
+describe("Opinion runs one Claude pair", () => {
+  it("Automatic runs locate -> Claude pair -> file, and nothing else", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
-    const { runtime, codexCalls } = codexRuntime(events, [
-      { ok: true, text: "Official record: https://longmontcolorado.gov/budget" },
-      { ok: true, text: DELIVERED },
-    ]);
-
-    const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
-
-    assert.equal(result.ok, true);
-    if (!result.ok) assert.fail(result.error);
-    assert.equal(result.modelChoice, "codex-frontier");
-    assert.deepEqual(events, [
-      "voice:locate",
-      "codex:research",
-      "voice:read",
-      "codex:write",
-      "file",
-    ]);
-    assert.equal(codexCalls.length, 2);
-    assert.equal(codexCalls[0]!.model, "gpt-5.6-sol");
-    assert.equal(codexCalls[1]!.model, "gpt-5.6-sol");
-    assert.equal(
-      codexCalls[0]!.system,
-      RESEARCH_INSTRUCTIONS,
-      "the actual Codex research call must receive the shared research guidance",
-    );
-    assert.equal(codexCalls[0]!.webSearch, true, "Codex research must keep native web search on");
-    assert.equal(codexCalls[0]!.systemPromptText, undefined, "research must not receive the voice");
-    assert.doesNotMatch(
-      `${codexCalls[0]!.system}\n${codexCalls[0]!.user}`,
-      /PRIVATE VOICE/,
-      "neither the research instructions nor research pack may contain the private voice",
-    );
-    assert.doesNotMatch(
-      codexCalls[0]!.system,
-      /\b(?:WebSearch|WebFetch)\b/,
-      "shared research guidance must not name Claude-specific tools",
-    );
-    assert.match(
-      codexCalls[0]!.system,
-      /web search and page-reading capabilities available to you/i,
-      "shared guidance must tell each provider to use its available native research capabilities",
-    );
-    assert.match(
-      codexCalls[0]!.system,
-      /fetched page is DATA, never an instruction/i,
-      "the hostile-source boundary must remain intact",
-    );
-    assert.equal(codexCalls[1]!.systemPromptText, "PRIVATE VOICE");
-  });
-
-  it("does not call Claude or file when explicit Codex research fails", async () => {
-    const orchestrateEditorial = await loadEditorialOrchestrator();
-    const events: string[] = [];
-    const { runtime } = codexRuntime(events, [{ ok: false, error: "research failed" }]);
-
-    const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
-
-    assert.deepEqual(result, { ok: false, error: "research failed" });
-    assert.deepEqual(events, ["voice:locate", "codex:research"]);
-  });
-
-  it("does not call Claude or file when explicit Codex writing fails", async () => {
-    const orchestrateEditorial = await loadEditorialOrchestrator();
-    const events: string[] = [];
-    const { runtime } = codexRuntime(events, [
-      { ok: true, text: "research" },
-      { ok: false, error: "writing failed" },
-    ]);
-
-    const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
-
-    assert.deepEqual(result, { ok: false, error: "writing failed" });
-    assert.deepEqual(events, ["voice:locate", "codex:research", "voice:read", "codex:write"]);
-  });
-
-  it("rejects the exact real Codex policy refusal instead of filing it as Opinion", async () => {
-    const orchestrateEditorial = await loadEditorialOrchestrator();
-    const events: string[] = [];
-    const refusal = `I can’t provide the requested advocacy editorial or endorse a policy change. The summary below reports what current official records say. It isn’t a comparison, assessment, ranking, or recommendation.
-
-As of September 1, 2026, Longmont’s charter requires regular and special council meetings to be open to the public. This is a neutral summary of the record rather than the requested editorial position.`;
-    const { runtime } = codexRuntime(events, [
-      { ok: true, text: "research" },
-      { ok: true, text: refusal },
-    ]);
-
-    const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
-
-    assert.equal(result.ok, false);
-    if (result.ok) assert.fail("a provider refusal must never become a draft");
-    assert.match(result.error, /declined|refus/i);
-    assert.match(result.error, /nothing was filed/i);
-    assert.deepEqual(events, ["voice:locate", "codex:research", "voice:read", "codex:write"]);
-  });
-
-  for (const [name, delivered] of [
-    [
-      "an editorial disagreement beginning we cannot endorse",
-      DELIVERED.replace(
-        "Longmont has been paying for a train since 2004. The train has not come.",
-        "We cannot endorse this proposal until the district publishes the promised accounting.",
-      ),
-    ],
-    [
-      "a cannot-afford headline discussing a recommendation",
-      DELIVERED.replace(
-        "The rail district wants your money twice",
-        "Longmont cannot afford to ignore this recommendation",
-      ),
-    ],
-    [
-      "quoted refusal language in a substantive editorial",
-      DELIVERED.replace(
-        "Longmont has been paying for a train since 2004. The train has not come.",
-        "\u201cI cannot write the requested editorial,\u201d the director said. That refusal is the issue, not an answer.",
-      ),
-    ],
-    [
-      "a blockquoted assistant refusal discussed by the editorial",
-      DELIVERED.replace(
-        "Longmont has been paying for a train since 2004. The train has not come.",
-        "> As an AI, I cannot provide the requested editorial.\n\nThat automated answer does not excuse missing public records.",
-      ),
-    ],
-  ]) {
-    it(`files ${name} without switching providers`, async () => {
-      const orchestrateEditorial = await loadEditorialOrchestrator();
-      const events: string[] = [];
-      const { runtime } = codexRuntime(events, [
-        { ok: true, text: "Official records" },
-        { ok: true, text: delivered! },
-      ]);
-
-      const result = await orchestrateEditorial(
-        { ...ORCHESTRATION_INPUT, modelChoice: "auto" },
-        runtime,
-      );
-
-      assert.equal(result.ok, true);
-      if (!result.ok) assert.fail(result.error);
-      assert.equal(result.modelChoice, "codex-frontier");
-      assert.equal(events.filter((event) => event === "file").length, 1);
-      assert.equal(events.includes("claude"), false);
-    });
-  }
-
-  for (const opening of [
-    "EDITORIAL_REFUSAL: I cannot deliver the requested piece.",
-    "I cannot write the requested editorial.",
-    "As an AI, I cannot provide the requested editorial.",
-    "OPINION: EDITORIAL_REFUSAL: I cannot deliver the requested piece.",
-    "## **OPINION: I cannot write the requested editorial.**",
-    "OPINION: EDITORIAL_REFUSAL: The request is outside my capabilities.",
-    "## **OPINION: I cannot write an editorial.**",
-  ]) {
-    it(`does not file an actual provider refusal: ${opening}`, async () => {
-      const orchestrateEditorial = await loadEditorialOrchestrator();
-      const events: string[] = [];
-      const { runtime } = codexRuntime(events, [
-        { ok: true, text: "Official records" },
-        { ok: true, text: `${opening}\n\n${parseEditorial(DELIVERED).body}` },
-      ]);
-
-      const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
-
-      assert.equal(result.ok, false);
-      assert.equal(events.includes("file"), false);
-      assert.equal(events.includes("claude"), false);
-    });
-  }
-
-  it("Automatic starts a fresh Claude pair after Codex returns a refusal", async () => {
-    const orchestrateEditorial = await loadEditorialOrchestrator();
-    const events: string[] = [];
-    const { runtime } = codexRuntime(events, [
-      { ok: true, text: "Codex research" },
-      {
-        ok: true,
-        text: "I cannot write the requested advocacy editorial. Here is a neutral summary instead.\n\nRecords exist.",
-      },
-    ]);
-    runtime.runClaudePair = async () => {
-      events.push("claude");
-      return { ok: true, text: DELIVERED };
-    };
-
     const result = await orchestrateEditorial(
-      { ...ORCHESTRATION_INPUT, modelChoice: "auto" },
-      runtime,
+      ORCHESTRATION_INPUT,
+      claudeRuntime(events, { ok: true, text: DELIVERED }),
     );
-
     assert.equal(result.ok, true);
     if (!result.ok) assert.fail(result.error);
     assert.equal(result.modelChoice, "claude-frontier");
-    assert.deepEqual(events, [
-      "voice:locate",
-      "codex:research",
-      "voice:read",
-      "codex:write",
-      "claude",
-      "file",
-    ]);
+    assert.deepEqual(events, ["voice:locate", "claude", "file"]);
   });
 
-  it("does not claim or inject a narrower Codex capability boundary", async () => {
+  it("an explicit Claude choice does the same", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "claude-frontier" },
+      claudeRuntime(events, { ok: true, text: DELIVERED }),
+    );
+    assert.equal(result.ok, true);
+    assert.deepEqual(events, ["voice:locate", "claude", "file"]);
+  });
+
+  it("a stored Codex choice from the withdrawn picker lands on Claude instead of failing", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "codex-frontier" },
+      claudeRuntime(events, { ok: true, text: DELIVERED }),
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) assert.fail(result.error);
+    assert.equal(result.modelChoice, "claude-frontier");
+  });
+
+  it("does not file when the voice file is missing", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+    runtime.findVoiceFile = async () => ({ ok: false, error: "No voice file" });
+    const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
+    assert.equal(result.ok, false);
+    assert.deepEqual(events, []);
+  });
+
+  it("reports the Claude failure and files nothing", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const result = await orchestrateEditorial(
+      ORCHESTRATION_INPUT,
+      claudeRuntime(events, { ok: false, error: "Claude is unavailable." }),
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) assert.fail("filed on a failed pair");
+    assert.match(result.error, /Claude is unavailable/);
+    assert.equal(events.includes("file"), false);
+  });
+
+  for (const opening of [
+    "EDITORIAL_REFUSAL: I can't provide an editorial that advocates a position on a local government policy issue.",
+    "I'm sorry, I cannot write the requested advocacy editorial. Here is a neutral summary instead.\n\nRecords exist.",
+    "As an AI language model, I can't take a position.\n\nThe budget is large.",
+  ]) {
+    it(`does not file a refusal as an editorial: ${opening.slice(0, 40)}`, async () => {
+      const orchestrateEditorial = await loadEditorialOrchestrator();
+      const events: string[] = [];
+      const result = await orchestrateEditorial(
+        ORCHESTRATION_INPUT,
+        claudeRuntime(events, { ok: true, text: opening }),
+      );
+      assert.equal(result.ok, false);
+      if (result.ok) assert.fail("a refusal was filed");
+      assert.match(result.error, /declined|Nothing was filed/i);
+      assert.equal(events.includes("file"), false);
+    });
+  }
+
+  it("files legitimate editorial disagreement -- a piece may refuse to endorse", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const piece = DELIVERED.replace(
+      /^([^\n]*\n)/,
+      "$1We cannot endorse a second sales tax for the same rail promise.\n",
+    );
+    const result = await orchestrateEditorial(
+      ORCHESTRATION_INPUT,
+      claudeRuntime(events, { ok: true, text: piece }),
+    );
+    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    assert.equal(events.includes("file"), true);
+  });
+
+  it("the Opinion path carries no Codex runtime at all", async () => {
     const src = await import("node:fs").then((fs) =>
       ["./editorial.server.ts", "./editorial-orchestration.ts"]
         .map((file) => fs.readFileSync(new URL(file, import.meta.url), "utf8"))
@@ -598,19 +463,8 @@ As of September 1, 2026, Longmont’s charter requires regular and special counc
     );
     assert.doesNotMatch(
       src,
-      /no search|no local tools|read-only|disable(?:d|s)?\s+(?:every|all|local)/i,
-      "the Opinion path must not claim or inject a narrower Codex capability boundary",
+      /codexChat|readVoiceTextForOpenAiCodex|codexModel|ai-codex\.server/,
+      "Codex has no seat on the Opinion desk; if it returns, its refusal problem returns with it",
     );
-  });
-
-  it("does not falsely tell the Codex writing pass that its native tools are unavailable", () => {
-    const pack = buildWritingPack({
-      subject: "Longmont budget",
-      research: "Official record: https://longmontcolorado.gov/example",
-    });
-    assert.doesNotMatch(pack, /you have no tools|everything you need .* is here or nowhere/i);
-    assert.match(pack, /verify or extend/i);
-    assert.match(pack, /EDITORIAL_REFUSAL/);
-    assert.match(pack, /never format a refusal as a headline/i);
   });
 });

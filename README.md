@@ -211,16 +211,11 @@ For **Scan and Dark Desk**, configured-provider precedence is:
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
-**Opinion uses a smaller frontier picker.** Automatic tries Codex Sol, then
-Claude Opus as complete, independent pairs. Each path finishes its own research
-pass before loading the voice. Codex then keeps its native full capabilities
-for the voice-guided writing pass and receives the configured editorial voice
-text over stdin; Claude Code receives the voice by file path and keeps its
-tool-free writing boundary. A provider refusal, assistant note, implausible
-headline, or incomplete body fails without creating a draft. Automatic then
-starts the next provider's research and writing from scratch; an explicit
-choice never falls back. The Opinion row records the provider that actually
-finished. Local and Zen are not offered on Opinion.
+**Opinion is Claude only.** The picker offers Automatic and Claude Opus.
+Claude Code runs its own research pass, then loads the editorial voice by
+file path for the writing pass. Codex is not offered for editorials: its
+model declines to write a piece that takes a position on a local policy
+question, so it stays on the Story picker, where it drafts reporting.
 
 ### Other models — one OpenAI-compatible URL
 

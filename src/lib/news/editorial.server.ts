@@ -7,7 +7,7 @@ import {
   type WriteEditorialInput,
   type WriteEditorialResult,
 } from "./editorial-orchestration.ts";
-import { findVoiceFile, readVoiceTextForOpenAiCodex } from "./voice.server.ts";
+import { findVoiceFile } from "./voice.server.ts";
 import { opinionModelChoice } from "./model-choice.ts";
 import {
   persistEditorialCompletion,
@@ -116,11 +116,6 @@ export async function ensureEditorialSchema() {
 export async function writeEditorial(input: WriteEditorialInput): Promise<WriteEditorialResult> {
   return orchestrateEditorial(input, {
     findVoiceFile,
-    readVoiceTextForOpenAiCodex,
-    codexChat: async (request) => {
-      const { codexChat } = await import("./ai-codex.server.ts");
-      return codexChat(request);
-    },
     runClaudePair: async ({ input: editorialInput, found, researchPack }) => {
       const { resolveClaudeCode, plannerModel } = await import("./ai");
       if (!resolveClaudeCode()) {
@@ -152,7 +147,6 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
     },
     fileEditorial,
     timeoutMs: editorialTimeoutMs,
-    codexModel: process.env.TOWNREPORTER_CODEX_SOL_MODEL?.trim() || "gpt-5.6-sol",
   });
 }
 

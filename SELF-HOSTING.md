@@ -197,8 +197,7 @@ unpromoted picker shown only in development.
 | Scan and Dark Desk  | configured `LLM_*`, Anthropic/Claude Code, or Grok path                                                      | repair the configured endpoint/key or sign back into Claude Code                                              |
 | Story — Automatic   | configured `LLM_*` exclusively when present; otherwise Zen MiMo → Codex Terra → Claude Opus readiness ladder | repair the provider named on the failed job; a run stays pinned to one provider                               |
 | Story — explicit    | Local Qwen, Zen MiMo, Codex Terra, Codex Sol, or Claude Opus; no fallback                                    | load the exact local model, restore Zen/network access, or open and sign into the named CLI                   |
-| Opinion — Automatic | complete Codex Sol research/writing pair, then a fresh Claude Opus pair if needed                            | open Codex or Claude Code and renew its login; the completed row records the provider that actually delivered |
-| Opinion — explicit  | only the named Codex Sol or Claude Opus path                                                                 | retry that provider or deliberately pick another; TownReporter never switches an explicit choice              |
+| Opinion             | Claude Opus only, through the signed-in Claude Code session; Codex is not offered for editorials             | open Claude Code and renew its login; the completed row records the provider that delivered                   |
 
 Codex reuses the signed-in user's native configuration and full available
 Windows access. TownReporter does not disable search, shell/files,
@@ -209,9 +208,10 @@ the spawned PID tree. If OAuth expires, open Codex and sign in again; the app
 does not read or store the token.
 
 Opinion rejects provider refusals, assistant notes, implausible headlines, and
-incomplete bodies before draft storage. Automatic starts the next provider as
-a completely new pair. Explicit choices surface the failure and do not fall
-back. A failed request has no draft or Publish action.
+incomplete bodies before draft storage. Codex is not offered for editorials
+because its model declines to write a piece that takes a position; the
+Opinion picker is Claude only. A failed request has no draft or Publish
+action.
 
 `npm test` makes no model call and costs nothing: it runs the whole suite with
 no provider contacted. Its fail-closed launcher removes any inherited

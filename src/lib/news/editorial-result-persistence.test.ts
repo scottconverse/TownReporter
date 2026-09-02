@@ -225,7 +225,7 @@ describe("Opinion completion commit", () => {
             completion: { requestId: request.id, jobId: -999_999 },
           },
           TEST_EDITORIAL,
-          "codex-frontier",
+          "claude-frontier",
         ),
         /editorial job .* not found/i,
       );
@@ -351,7 +351,7 @@ describe("Opinion completion commit", () => {
           completion: { requestId: request.id, jobId: job.id },
         },
         TEST_EDITORIAL,
-        "codex-frontier",
+        "claude-frontier",
       );
       assert.equal(filed.ok, true);
       if (!filed.ok) assert.fail(filed.error);
@@ -370,7 +370,7 @@ describe("Opinion completion commit", () => {
       assert.deepEqual(stored, {
         draft_id: filed.draftId,
         error: null,
-        model_choice: "codex-frontier",
+        model_choice: "claude-frontier",
         finished: true,
       });
     } finally {

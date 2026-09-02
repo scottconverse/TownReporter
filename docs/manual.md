@@ -235,10 +235,10 @@ the headline and there is no byline, because an unsigned editorial is the
 paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
 
-Opinion shows Automatic, Codex Sol and Claude Opus. Automatic tries Codex Sol,
-then Claude Opus as complete, independent research-and-writing pairs; an
-explicit choice never falls back. Codex receives the configured editorial
-voice text over stdin, while Claude Code reads the voice by file path. The page
+Opinion shows Automatic and Claude Opus, and both mean Claude Opus. Codex is
+not offered here: its model declines to write an editorial that takes a
+position on a local policy question, so it stays on the Story picker. Claude
+Code reads the voice by file path for the writing pass. The page
 lists every missing voice, installation, or login prerequisite and stays
 disabled while readiness is unknown.
 
@@ -358,7 +358,7 @@ have an editor-facing, per-run picker.
 | Draft (Queue or workbench)    | configured gateway forced for Automatic when set; otherwise first ready Zen → Codex Terra → Claude Opus rung; explicit choice never falls back | Local Qwen is explicit-only; Zen MiMo, Codex Terra/Sol, or Claude Opus      |
 | Dark Desk synthesis and brief | the one you selected                                                                                                                           | the one you configured                                                      |
 | Dark Desk **planner**         | the one you selected                                                                                                                           | Haiku **only when the provider is Claude**; otherwise your configured model |
-| **Opinion (editorials)**      | Automatic runs a full signed-in Codex pair, then a fresh Claude pair if needed; explicit choices never fall back                               | Codex Sol or Claude Opus                                                    |
+| **Opinion (editorials)**      | Claude Opus, through the signed-in Claude Code session; Codex is not offered for editorials                                                    | Claude Opus                                                                |
 
 **Why Opinion has fewer choices.** Local and Zen are not offered because an
 editorial uses the paper's configured voice and frontier research. Claude Code
@@ -374,7 +374,7 @@ local endpoint for a Claude model; it uses yours.
 
 Pointing `LLM_BASE_URL` at a local model sends Scan, Dark Desk, and Story
 Automatic to that gateway. An explicit Story choice still forces its named
-provider. Opinion keeps its separate Codex/Claude frontier ladder.
+provider. Opinion is always Claude Opus.
 What that actually costs in quality was measured on this machine:
 [docs/local-models.md](local-models.md).
 
@@ -513,8 +513,7 @@ Measured over five runs each, planning on Haiku produced the same output quality
 as Opus at about a quarter of the cost. On the **Claude Dark Desk path**, Haiku
 plans and the configured Claude model synthesises. Non-Claude providers keep
 their configured model instead of receiving a Claude model name. Opinion is a
-separate two-pass path and uses the persisted editor choice: Codex Sol or
-Claude Opus. Automatic may advance only after a whole provider pair fails.
+separate two-pass path and is always Claude Opus.
 
 ## Privacy of the reader
 
@@ -705,15 +704,11 @@ flowchart LR
     end
 
     CLI["Claude Code CLI<br/>path-only voice, tool-free writing"]
-    CODEX["Codex Sol<br/>voice over stdin, native full access"]
 
     UI --> PACK
     PACK -->|"over stdin"| CLI
-    VOICE -.->|"Claude: path only"| CLI
-    VOICE -.->|"Codex: text over stdin"| CODEX
+    VOICE -.->|"path only"| CLI
     CLI --> PARSE --> DRAFTS --> UI
-    UI -->|"Codex Sol"| CODEX
-    CODEX --> PARSE
 
     style private fill:#2a2320,color:#fff
     style VOICE fill:#7a2d2d,color:#fff

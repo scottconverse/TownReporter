@@ -1,7 +1,5 @@
 import {
-  RESEARCH_INSTRUCTIONS,
   buildEditorialPack,
-  buildWritingPack,
   parseEditorial,
   type Editorial,
   type EditorialPointer,
@@ -43,26 +41,10 @@ export type WriteEditorialResult =
 
 type ChatResult = { ok: true; text: string } | { ok: false; error: string };
 
-type CommonChatInput = {
-  system: string;
-  user: string;
-  model: string;
-  timeoutMs: number;
-};
-
-type CodexChatInput = CommonChatInput & {
-  systemPromptText?: string;
-  webSearch?: boolean;
-};
-
 export type EditorialOrchestrationRuntime = {
   findVoiceFile: () => Promise<
     { ok: true; voice: { path: string; bytes: number } } | { ok: false; error: string }
   >;
-  readVoiceTextForOpenAiCodex: () => Promise<
-    { ok: true; text: string } | { ok: false; error: string }
-  >;
-  codexChat: (input: CodexChatInput) => Promise<ChatResult>;
   runClaudePair: (context: {
     input: WriteEditorialInput;
     found: { ok: true; voice: { path: string; bytes: number } };
@@ -74,7 +56,6 @@ export type EditorialOrchestrationRuntime = {
     modelChoice: EffectiveOpinionModelChoice,
   ) => Promise<FiledEditorialResult>;
   timeoutMs: () => number;
-  codexModel: string;
 };
 
 const REFUSAL_OPENING = [
@@ -144,43 +125,21 @@ export async function orchestrateEditorial(
     askedFor: input.askedFor,
   });
 
-  const runPair = async (choice: EffectiveOpinionModelChoice): Promise<ChatResult> => {
-    if (choice === "claude-frontier") {
-      return runtime.runClaudePair({ input, found, researchPack });
-    }
-
-    const research = await runtime.codexChat({
-      system: RESEARCH_INSTRUCTIONS,
-      user: researchPack,
-      model: runtime.codexModel,
-      timeoutMs: runtime.timeoutMs(),
-      webSearch: true,
-    });
-    if (!research.ok) return research;
-
-    const voice = await runtime.readVoiceTextForOpenAiCodex();
-    if (!voice.ok) return voice;
-    return runtime.codexChat({
-      system: "",
-      systemPromptText: voice.text,
-      user: buildWritingPack({
-        subject: input.subject,
-        ourStory: input.ourStory,
-        askedFor: input.askedFor,
-        research: research.text,
-      }),
-      model: runtime.codexModel,
-      timeoutMs: runtime.timeoutMs(),
-    });
-  };
+  /*
+    One provider, one pair. Opinion is Claude-only -- see OPINION_MODEL_CHOICES
+    for why Codex left this ladder. A stored request that still says
+    "codex-frontier" (none exist in production) normalises to Automatic and
+    lands here rather than failing.
+  */
+  const runPair = async (): Promise<ChatResult> =>
+    runtime.runClaudePair({ input, found, researchPack });
 
   const requested = opinionModelChoice(input.modelChoice);
-  const candidates: EffectiveOpinionModelChoice[] =
-    requested === "auto" ? ["codex-frontier", "claude-frontier"] : [requested];
+  const candidates: EffectiveOpinionModelChoice[] = ["claude-frontier"];
   const failures: string[] = [];
 
   for (const candidate of candidates) {
-    const out = await runPair(candidate);
+    const out = await runPair();
     if (!out.ok) {
       failures.push(out.error);
       continue;
@@ -203,7 +162,7 @@ export async function orchestrateEditorial(
   return {
     ok: false,
     error:
-      `Automatic could not produce an editorial with Codex Sol or Claude Opus. ${detail} Nothing was filed.`
+      `Claude Opus could not produce an editorial. ${detail} Nothing was filed.`
         .replace(/\s+/g, " ")
         .trim(),
   };

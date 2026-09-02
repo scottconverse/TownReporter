@@ -18,7 +18,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
 | **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
-| **A model**                 | Story can use a configured OpenAI-compatible gateway, an LM Studio-compatible Local Qwen, provider-hosted Zen, or signed-in Codex/Claude CLIs. Scan and Dig use the configured provider below. Opinion uses signed-in Codex or Claude. |
+| **A model**                 | Story can use a configured OpenAI-compatible gateway, an LM Studio-compatible Local Qwen, provider-hosted Zen, or signed-in Codex/Claude CLIs. Scan and Dig use the configured provider below. Opinion uses signed-in Claude only.     |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 
@@ -45,7 +45,7 @@ on an editor's action:
 
 | What               | Triggered by                                      | Where it goes                                                                                                                                                                                                                                                                                    |
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it selects OpenCode Zen, Codex Terra, or Claude Opus before enqueue. Local is explicit-only. Opinion Automatic tries Codex Sol, then Claude Opus.                             |
+| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it selects OpenCode Zen, Codex Terra, or Claude Opus before enqueue. Local is explicit-only. Opinion is always Claude Opus; Codex is not offered for editorials.              |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
 | **Searches**       | The research pass, PULL, and every Dark Desk hop  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key, and there is currently no setting to keep a search on this machine — the chain is unconditional. |
 
@@ -238,12 +238,12 @@ multi-agent capabilities remain available. TownReporter launches Codex with
 the signed-in account can reach. The newsroom prompt still travels over stdin,
 and its task remains the scope of the requested run.
 
-Opinion displays Automatic, Codex Sol and Claude Opus. Automatic tries Codex
-Sol first, then Claude Opus as full, independent research-and-writing pairs.
-If the first provider errors, declines, or returns something that is not a
-complete editorial, Automatic starts the second provider from a fresh research
-pass. Explicit choices never fall back and an invalid delivery creates no
-draft. The completed request and job store the provider that actually finished.
+Opinion displays Automatic and Claude Opus, and both mean Claude Opus. Codex
+is not offered for editorials: its model declines to write a piece that takes
+a position on a local policy question, so it stays on the Story picker. An
+invalid delivery -- a refusal, an assistant note, an incomplete piece --
+creates no draft. The completed request and job store the provider that
+finished.
 
 ### The Opinion voice
 

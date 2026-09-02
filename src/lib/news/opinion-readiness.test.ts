@@ -43,33 +43,31 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
     }
   });
 
-  it("Automatic proves a rung is ready but preserves auto for pair-level fallback", async () => {
+  it("Automatic probes Claude and only Claude -- Opinion has one provider", async () => {
     const probed: string[] = [];
     const result = await checkOpinionReadiness("auto", {
       findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
       probeCandidate: async (choice) => {
         probed.push(choice);
-        return choice === "codex-frontier"
-          ? { ok: true as const, label: "Codex Sol", choice }
-          : { ok: true as const, label: "Claude Opus", choice };
+        return { ok: true as const, label: "Claude Opus", choice };
       },
     });
     assert.equal(result.ready, true);
     assert.equal(result.effectiveChoice, "auto");
-    assert.deepEqual(probed, ["codex-frontier"]);
+    assert.deepEqual(probed, ["claude-frontier"]);
   });
 
-  it("an explicit provider auth failure never probes a fallback", async () => {
+  it("a provider auth failure is reported as-is and probes nothing else", async () => {
     const probed: string[] = [];
-    const result = await checkOpinionReadiness("codex-frontier", {
+    const result = await checkOpinionReadiness("claude-frontier", {
       findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
       probeCandidate: async (choice) => {
         probed.push(choice);
-        return { ok: false as const, error: "Codex OAuth session expired." };
+        return { ok: false as const, error: "Claude Code OAuth session expired." };
       },
     });
     assert.equal(result.ready, false);
-    assert.match(result.why, /Codex OAuth session expired/i);
-    assert.deepEqual(probed, ["codex-frontier"]);
+    assert.match(result.why, /OAuth session expired/i);
+    assert.deepEqual(probed, ["claude-frontier"]);
   });
 });

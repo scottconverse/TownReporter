@@ -133,7 +133,7 @@ Story routing and a separate Opinion frontier path:
 | Scan and Dark Desk | the configured provider (`LLM_*`, Anthropic, Claude Code, or Grok)                                                                |
 | Story — Automatic  | configured `LLM_*` gateway when present; otherwise first ready Zen MiMo → Codex Terra → Claude Opus rung                          |
 | Story — explicit   | Local Qwen, Zen MiMo, Codex Terra, Codex Sol, or Claude Opus; no fallback                                                         |
-| Opinion            | Automatic runs a complete Codex Sol pair and, if needed, a fresh Claude Opus pair; explicit Codex/Claude choices do not fall back |
+| Opinion            | Claude Opus only; Codex is not offered because its model declines to write an editorial that takes a position                    |
 
 Pointing `LLM_BASE_URL` at LM Studio therefore makes that gateway the configured
 provider for Scan and Dark Desk and the forced provider for **Story Automatic**.
