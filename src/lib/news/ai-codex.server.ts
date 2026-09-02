@@ -1,6 +1,7 @@
 import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { spawnPlan } from "./cli-spawn.server.ts";
 
 type ChatResult = { ok: true; text: string } | { ok: false; error: string };
 
@@ -116,7 +117,8 @@ function run(
     };
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(bin, args, {
+      const plan = spawnPlan(bin, args);
+      child = spawn(plan.command, plan.args, {
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
         env: childEnv,

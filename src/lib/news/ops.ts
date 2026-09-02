@@ -16,6 +16,12 @@ const HOURLY: Record<string, number> = {
   // Fifteen minutes and a few dollars each. A slip of the finger should not
   // start six of them.
   editorial: 6,
+  // Each one spawns a CLI that holds a loopback listener until it is answered
+  // or times out. A page left open on a broken machine must not be able to
+  // start a queue of them.
+  "provider-login": 10,
+  // One tiny real model call each. Cheap, but it is still spending.
+  "provider-test": 20,
 };
 
 /**

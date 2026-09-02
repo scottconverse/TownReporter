@@ -29,6 +29,43 @@ Current release: **0.5.12**.
   server stops" for that case, and "postgres" only when `DATABASE_URL` is
   actually set.
 
+## 0.6.0 — 2026-09-02
+
+- **Sign in to a writing model from inside the desk.** The paper drafts through
+  two programs installed on this machine — Claude Code and Codex — on the
+  operator's own subscriptions. When one of those logins lapsed, every draft
+  failed and the only cure was a terminal, which for a point-and-click operator
+  meant the paper stayed down. The Server page now opens with a **Writing
+  models** panel: one row per program, saying in words whether it is installed,
+  whether it is signed in (and as whom, where the program will say), and whether
+  the operator has switched it off. **Sign in** runs the program's own headless
+  sign-in and shows what it prints — an authorize link for Claude Code, a link
+  and a one-time code for Codex — with a countdown and a Cancel, and the row
+  flips to "Signed in" on its own when the sign-in completes. No credential is
+  read, stored or logged anywhere in the desk: each CLI writes its own file and
+  owns its own refresh, and the last line the CLI said is redacted before it is
+  kept.
+- **A Test button, because "signed in" is not "will work".** One tiny real call
+  — one word in, one word out — reported as "Answered in 4.2 s" or the
+  provider's own error. This is the only check that separates a login that looks
+  present from one the provider has since refused, which is exactly the live 401
+  0.5.11 was chasing.
+- **The failed draft now carries the button that fixes it.** A draft or scan
+  that failed on a lapsed login used to end at a sentence telling the editor to
+  sign in again, with nothing to press. It now shows **Sign in to Claude Code**
+  / **Sign in to Codex**, which starts the sign-in and hands over to the panel
+  with the link already waiting.
+- **No sign-out button, on purpose.** One mis-click would stop the live paper,
+  and nothing here needs it — a stale login is fixed by signing in again, not by
+  signing out first. A test asserts it stays absent.
+- **The desk can be pointed at a CLI's JavaScript entry point.** `CLAUDE_CLI_PATH`
+  and `CODEX_CLI_PATH` now accept the `.js`/`.mjs` file the npm package ships,
+  not only the platform binary beside it: Windows cannot exec a `.js`, so that
+  path used to report the CLI as missing on a machine where it was plainly
+  installed. Probe and call resolve it the same way, in one place.
+- Says plainly, under the panel, that being signed in to claude.ai in a browser
+  or in the Claude desktop app is a **separate** login that does not count here.
+
 ## 0.5.11 — 2026-09-02
 
 - **Automatic now fails over when the first provider's login lapses mid-run.**

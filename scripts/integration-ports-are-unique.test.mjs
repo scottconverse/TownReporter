@@ -29,9 +29,26 @@ function* testFiles(dir) {
   }
 }
 
+/**
+ * The browser walks under scripts/ bind ports too.
+ *
+ * They were outside this check because they took their address from an
+ * environment variable with an inline default, so there was no `PORT... =` to
+ * find. scripts/provider-signin-e2e.mjs declares one, and a walk whose port
+ * silently belonged to an integration test would be the same failure this
+ * whole file exists to stop -- one server answering two scripts against the
+ * wrong database.
+ */
+function* walkFiles(dir) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) continue;
+    if (/-e2e\.mjs$/.test(e.name)) yield join(dir, e.name);
+  }
+}
+
 test("every integration test file binds its own port", () => {
   const owners = new Map(); // port -> [file:const]
-  for (const file of testFiles(join(ROOT, "src"))) {
+  for (const file of [...testFiles(join(ROOT, "src")), ...walkFiles(join(ROOT, "scripts"))]) {
     const text = readFileSync(file, "utf8");
     for (const m of text.matchAll(/const (PORT\w*)\s*=\s*(\d{4,5})/g)) {
       const port = m[2];

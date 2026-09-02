@@ -29,6 +29,7 @@
  */
 import { spawn } from "node:child_process";
 import { assertNotAnArgument } from "./voice.server.ts";
+import { spawnPlan } from "./cli-spawn.server.ts";
 
 export type ClaudeCodeResult = { ok: true; text: string } | { ok: false; error: string };
 
@@ -100,7 +101,8 @@ export async function probeClaudeCode(label = "Claude"): Promise<
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(bin, ["auth", "status", "--json"], {
+      const plan = spawnPlan(bin, ["auth", "status", "--json"]);
+      child = spawn(plan.command, plan.args, {
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -258,7 +260,8 @@ export async function claudeCodeChat(opts: {
   return new Promise<ClaudeCodeResult>((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(bin, args, {
+      const plan = spawnPlan(bin, args);
+      child = spawn(plan.command, plan.args, {
         stdio: ["pipe", "pipe", "pipe"],
         // Run detached from any project so no stray CLAUDE.md is discovered.
         cwd: process.env.TMPDIR || process.env.TEMP || process.cwd(),

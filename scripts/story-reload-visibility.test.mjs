@@ -28,9 +28,21 @@ test("Story reload surfaces a durable failed job when no newer click message exi
     /previousJobError\s*=\s*!waiting\s*&&\s*!msg\s*&&\s*data\?\.job\?\.status\s*===\s*"failed"/,
     "a reload must derive the error from the durable failed job",
   );
+  /*
+    The Notice carries a child now (the Sign in button that appears when the
+    failure is a lapsed provider login), so this can no longer require the
+    text to be the Notice's ONLY content -- it requires it to be the FIRST
+    thing in it. That is the property that mattered: the recovered failure is
+    what the editor reads, not something tucked under a button.
+  */
   assert.match(
     story,
-    /\(msg\s*\|\|\s*previousJobError\)[\s\S]*?<Notice[\s\S]*?>\{msg\s*\|\|\s*previousJobError\}<\/Notice>/,
+    /\(msg\s*\|\|\s*previousJobError\)[\s\S]*?<Notice[\s\S]*?>\s*\{msg\s*\|\|\s*previousJobError\}/,
     "the recovered failure must be rendered as an editor-visible notice",
+  );
+  assert.match(
+    story,
+    /<Notice[\s\S]*?\{msg\s*\|\|\s*previousJobError\}[\s\S]{0,600}?<\/Notice>/,
+    "the notice must still close around the recovered failure",
   );
 });

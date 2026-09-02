@@ -238,6 +238,76 @@ jobs:
           }
           node scripts/desk-flows-e2e.mjs
 
+  # The Writing models panel: the screen an operator reaches on the worst day,
+  # when a writing-model login has lapsed and every draft is failing. All of it
+  # is screen behaviour -- the right words in the row, a link rendered as a real
+  # anchor, a row that flips to "Signed in" on its own -- so a unit test proves
+  # none of it.
+  #
+  # Two phases with two servers, because what changes between them is the
+  # server's own environment and a running server cannot be told to change its
+  # mind. Each phase starts on an empty PGLite database and claims its own desk.
+  # The CLI it drives is scripts/fakes/fake-claude-cli.mjs: nothing here spends,
+  # and nothing here touches a real credential.
+  provider-signin:
+    name: Signing in to a writing model, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: With no CLI on the machine, the panel says so
+        env:
+          BETTER_AUTH_SECRET: ci-signin-secret-not-for-production
+          PORT: "3312"
+          HOST: 127.0.0.1
+          PROVIDER_SIGNIN_BASE_URL: http://127.0.0.1:3312
+          PROVIDER_SIGNIN_PHASE: missing
+        run: |
+          npm run dev -- --port 3312 > /tmp/signin-missing.log 2>&1 &
+          DEV_PID=$!
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3312/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3312/ || {
+            echo "dev server did not come up"; tail -n 80 /tmp/signin-missing.log; exit 1;
+          }
+          node scripts/provider-signin-e2e.mjs
+          # By PID, never by name: this ends the server this step started and
+          # nothing else that happens to be a node process on the runner.
+          kill "$DEV_PID" 2>/dev/null || true
+          for i in $(seq 1 15); do
+            curl -sf -o /dev/null --max-time 1 http://127.0.0.1:3312/ || break
+            sleep 1
+          done
+      - name: With a CLI installed and signed out, Sign in shows the link and completes
+        env:
+          BETTER_AUTH_SECRET: ci-signin-secret-not-for-production
+          PORT: "3312"
+          HOST: 127.0.0.1
+          PROVIDER_SIGNIN_BASE_URL: http://127.0.0.1:3312
+          PROVIDER_SIGNIN_PHASE: fake
+          CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          FAKE_CLAUDE_STATE_FILE: /tmp/fake-claude-signed-in
+          FAKE_CLAUDE_DELAY_MS: "8000"
+        run: |
+          rm -f /tmp/fake-claude-signed-in
+          npm run dev -- --port 3312 > /tmp/signin-fake.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3312/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3312/ || {
+            echo "dev server did not come up"; tail -n 80 /tmp/signin-fake.log; exit 1;
+          }
+          node scripts/provider-signin-e2e.mjs
+
   # Delete, trash, and the public corrections feed each had a fix proven only
   # by a unit test: a deleted story's correction could outlive it and print
   # under a null headline, restoring a story from the trash could leave its

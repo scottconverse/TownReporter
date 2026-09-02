@@ -124,14 +124,31 @@ Configured-provider resolution for **Scan and Dark Desk**, first match wins:
 
 #### Claude Code — configured-provider default, no key
 
-Install the CLI and sign in once:
+Install the CLI:
 
 ```bash
 npm i -g @anthropic-ai/claude-code
-claude          # then /login
 ```
 
+Then sign in from the desk: **Server → Writing models → Sign in to Claude
+Code**. It opens the CLI's own sign-in, shows you the link, and the row turns
+to "Signed in" by itself when you finish. The same panel has a **Test** button
+that asks the model for one word, which is the only check that proves the desk
+can really write. Codex works the same way, with a one-time code as well as a
+link. See [the editor's manual](editor.md#signing-in-to-a-writing-model).
+
 That is the whole setup. Your Max or Pro subscription powers the desk.
+
+Being signed in to claude.ai in a browser, or in the Claude desktop app, is a
+separate login and does not count — the desk uses the command-line program's
+own credentials.
+
+**If the button does not work**, sign in from a terminal instead:
+
+```bash
+claude          # then /login
+codex login     # for Codex
+```
 
 ```
 # ANTHROPIC_MODEL=claude-opus-5   # the default

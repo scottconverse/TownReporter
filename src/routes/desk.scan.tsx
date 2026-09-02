@@ -6,6 +6,7 @@ import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { listScans, listSources, runScan } from "@/lib/news/desk";
 import { editorScanError, scanCountsLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context";
+import { ProviderSignInButton } from "@/components/provider-signin-button";
 
 export const Route = createFileRoute("/desk/scan")({ component: ScanPage });
 
@@ -112,7 +113,12 @@ function ScanPage() {
           </InkButton>
         </div>
       ) : null}
-      {!scanning && last?.error ? <Notice kind="err">{editorScanError(last.error)}</Notice> : null}
+      {!scanning && last?.error ? (
+        <Notice kind="err">
+          {editorScanError(last.error)}
+          <ProviderSignInButton detail={last.error} />
+        </Notice>
+      ) : null}
       {blocked ? (
         <Notice kind="err">
           <b>The desk cannot scan yet.</b>
@@ -124,6 +130,14 @@ function ScanPage() {
               <span className="meta">{blocked.detail}</span>
             </>
           ) : null}
+          {/*
+            The refusal already names the provider whose login lapsed; this is
+            the button that acts on it, rather than sending the editor to a
+            terminal. Reads the raw detail AND the guidance, because a preflight
+            refusal carries the provider's own words in one and the desk's
+            in the other.
+          */}
+          <ProviderSignInButton detail={`${blocked.guidance} ${blocked.detail}`} />
         </Notice>
       ) : null}
       {scan.error ? (
