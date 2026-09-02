@@ -196,6 +196,7 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(storyEnqueueCalls, 0);
     assert.deepEqual(await countsFor(userId), before);
 
+    const storyEnqueueSources: (string | undefined)[] = [];
     const storyReady = await commitStoryDraftForAuthenticatedEditor(
       {
         context: { userId, newsroomId: editor.newsroomId },
@@ -210,6 +211,7 @@ describe("authenticated Codex commit boundary", () => {
         }),
         enqueueJob: async (opts) => {
           storyEnqueueCalls += 1;
+          storyEnqueueSources.push(opts.modelChoiceSource);
           return enqueueJob({ ...opts, kick: false });
         },
       },
@@ -217,6 +219,9 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(storyReady.ok, true);
     assert.equal(storyReady.modelChoice, "codex-frontier");
     assert.equal(storyEnqueueCalls, 1);
+    // An editor's explicit "codex-frontier" pick is never Automatic's doing --
+    // the row must remember 'editor', so a mid-run 401 never fails over it.
+    assert.deepEqual(storyEnqueueSources, ["editor"]);
     assert.deepEqual(await countsFor(userId), {
       jobs: 1,
       requests: 0,
@@ -224,6 +229,42 @@ describe("authenticated Codex commit boundary", () => {
       rate: 1,
       audit: 0,
     });
+
+    const [autoLead] = await sql<{ id: number }>`
+      insert into leads (newsroom_id, user_id, headline, why)
+      values (${editor.newsroomId}, ${userId}, ${"Council schedules a second public hearing"},
+              ${"A second date affects the same utility customers."})
+      returning id
+    `;
+    assert.ok(autoLead);
+    const storyAuto = await commitStoryDraftForAuthenticatedEditor(
+      {
+        context: { userId, newsroomId: editor.newsroomId },
+        leadId: autoLead.id,
+        modelChoice: "auto",
+      },
+      {
+        probeProvider: async () => ({
+          ok: true as const,
+          label: "Claude Opus",
+          choice: "claude-frontier" as const,
+        }),
+        enqueueJob: async (opts) => {
+          storyEnqueueCalls += 1;
+          storyEnqueueSources.push(opts.modelChoiceSource);
+          return enqueueJob({ ...opts, kick: false });
+        },
+      },
+    );
+    assert.equal(storyAuto.ok, true);
+    // Automatic's own pick DOES get recorded as 'auto' -- that is what lets a
+    // later 401 on this job try the next rung instead of just dying.
+    assert.deepEqual(storyEnqueueSources, ["editor", "auto"]);
+    const [autoJobRow] = await sql<{ model_choice_source: string }>`
+      select model_choice_source from desk_jobs
+      where kind = 'draft' and subject_id = ${autoLead.id}
+    `;
+    assert.equal(autoJobRow?.model_choice_source, "auto");
 
     const afterStory = await countsFor(userId);
     const opinionCandidates: string[] = [];
@@ -297,13 +338,18 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(opinionEnqueueCalls, 1);
 
     const final = await countsFor(userId);
-    assert.deepEqual(final, { jobs: 2, requests: 1, drafts: 0, rate: 2, audit: 1 });
-    const persistedJobs = await sql<{ kind: string; model_choice: string }>`
-      select kind, model_choice from desk_jobs where user_id = ${userId} order by id
+    assert.deepEqual(final, { jobs: 3, requests: 1, drafts: 0, rate: 3, audit: 1 });
+    const persistedJobs = await sql<{
+      kind: string;
+      model_choice: string;
+      model_choice_source: string;
+    }>`
+      select kind, model_choice, model_choice_source from desk_jobs where user_id = ${userId} order by id
     `;
     assert.deepEqual(persistedJobs, [
-      { kind: "draft", model_choice: "codex-frontier" },
-      { kind: "editorial", model_choice: "claude-frontier" },
+      { kind: "draft", model_choice: "codex-frontier", model_choice_source: "editor" },
+      { kind: "draft", model_choice: "claude-frontier", model_choice_source: "auto" },
+      { kind: "editorial", model_choice: "claude-frontier", model_choice_source: "editor" },
     ]);
     const [request] = await sql<{ model_choice: string; subject: string }>`
       select model_choice, subject from editorial_requests where user_id = ${userId}

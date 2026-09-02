@@ -1,6 +1,24 @@
 # Changelog
 
-Current release: **0.5.10**.
+Current release: **0.5.11**.
+
+## 0.5.11 — 2026-09-02
+
+- **Automatic now fails over when the first provider's login lapses mid-run.**
+  0.5.10 made a mid-draft 401 say "sign in again" instead of "click again" —
+  but on a job left on Automatic, clicking Draft again still ran the same
+  lapsed provider, because by the time a job runs, `desk_jobs.model_choice`
+  already holds the CONCRETE choice Automatic picked ("claude-frontier"), and
+  nothing on the row remembered Automatic picked it. Live case, job 41: Claude
+  Code's OAuth token expired between the pre-draft probe and the real call
+  (`Claude Code error (401): ... OAuth access token has expired.`), and Codex
+  was never tried. The job now remembers whether Automatic queued it
+  (`desk_jobs.model_choice_source`), and when a login-lapse error lands on an
+  Automatic job, the desk tries exactly one later rung of the ladder — if it
+  is ready, the job switches to it and drafts once more; the stage says which
+  provider it moved to and why. An editor's explicit model choice never falls
+  back, and a content refusal, a timeout, or an empty response never fails
+  over either — only a login lapse does.
 
 ## 0.5.10 — 2026-09-02
 

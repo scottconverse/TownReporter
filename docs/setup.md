@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.5.10](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.10).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.5.11](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.11).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -202,8 +202,10 @@ Every active Queue row and the story workbench default to **Automatic**. A
 configured `LLM_*` gateway is forced for Automatic. Without one, TownReporter
 tries Claude Opus, then Codex Terra, and stores the first ready provider on
 the job before it is enqueued. Every pass in that Story run uses the same
-effective provider. A named choice forces only that provider; explicit
-choices never fall back.
+effective provider, unless that provider's login lapses mid-run -- Automatic
+then moves to the next ladder rung once, if it is ready. A named choice
+forces only that provider; explicit choices never fall back, at enqueue or
+mid-run.
 
 Zen MiMo and Local Qwen were removed from the picker (2026-09-02): Claude and
 Codex only, for now. See [local-models.md](local-models.md) for the

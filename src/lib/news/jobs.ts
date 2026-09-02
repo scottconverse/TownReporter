@@ -34,6 +34,7 @@ export type DeskJob = {
   kind: JobKind;
   subject_id: number;
   model_choice: string;
+  model_choice_source: "editor" | "auto";
   lane: JobLane;
   status: JobStatus;
   stage: string;
@@ -119,6 +120,12 @@ export async function ensureJobsSchema() {
   // and the original executor both write results for the same job.
   await sql.query(`alter table desk_jobs add column if not exists claim_token text`);
   await sql.query(`alter table desk_jobs add column if not exists model_choice text not null default 'auto'`);
+  // The same column as migrations/0026_model_choice_source.sql, for the same
+  // reason model_choice itself is declared twice: this covers the embedded
+  // PGLite path where migrations do not run.
+  await sql.query(
+    `alter table desk_jobs add column if not exists model_choice_source text not null default 'editor'`,
+  );
 }
 
 /**
@@ -184,7 +191,7 @@ export async function latestJob(opts: {
   await ensureJobsSchema();
   const sql = await getSql();
   const rows = await sql<DeskJob>`
-    select id, newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage, error,
+    select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error,
            created_at, updated_at, started_at, finished_at
     from desk_jobs
     where newsroom_id = ${opts.newsroomId} and kind = ${opts.kind} and subject_id = ${opts.subjectId}
@@ -204,7 +211,7 @@ export async function findOpenJob(opts: {
   const rows =
     opts.subjectId != null
       ? await sql<DeskJob>`
-          select id, newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage, error,
+          select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error,
                  created_at, updated_at, started_at, finished_at
           from desk_jobs
           where newsroom_id = ${opts.newsroomId}
@@ -215,7 +222,7 @@ export async function findOpenJob(opts: {
           limit 1
         `
       : await sql<DeskJob>`
-          select id, newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage, error,
+          select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error,
                  created_at, updated_at, started_at, finished_at
           from desk_jobs
           where newsroom_id = ${opts.newsroomId}
@@ -233,6 +240,7 @@ export async function enqueueJob(opts: {
   kind: JobKind;
   subjectId: number;
   modelChoice?: string;
+  modelChoiceSource?: "editor" | "auto";
   kick?: boolean;
 }): Promise<DeskJob> {
   await ensureJobsSchema();
@@ -262,10 +270,10 @@ export async function enqueueJob(opts: {
   */
   const lane = laneForKind(opts.kind);
   const created = await sql<DeskJob>`
-    insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage)
-    values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${lane}, ${"queued"}, ${"Queued"})
+    insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage)
+    values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${opts.modelChoiceSource ?? "editor"}, ${lane}, ${"queued"}, ${"Queued"})
     on conflict do nothing
-    returning id, newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage, error,
+    returning id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error,
               created_at, updated_at, started_at, finished_at
   `;
   const job =
@@ -284,10 +292,10 @@ export async function enqueueJob(opts: {
     // findOpenJob below finds the third caller's row and returns it. The design
     // intent is that concurrent enqueues always coalesce, never error.
     const retry = await sql<DeskJob>`
-      insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage)
-      values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${lane}, ${"queued"}, ${"Queued"})
+      insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage)
+      values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${opts.modelChoiceSource ?? "editor"}, ${lane}, ${"queued"}, ${"Queued"})
       on conflict do nothing
-      returning id, newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage, error,
+      returning id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error,
                 created_at, updated_at, started_at, finished_at
     `;
     if (retry[0]) {
@@ -329,6 +337,20 @@ export async function setJobStage(id: number, stage: string) {
 }
 
 /**
+ * Automatic failover (src/lib/news/automatic-failover.ts) rewrites the
+ * concrete choice ON the running job when the first provider's login has
+ * lapsed mid-run, so a heartbeat, a reclaim, or the editor's own screen all
+ * see the rung the retry is actually using rather than the one that just
+ * failed.
+ */
+export async function setJobModelChoice(id: number, modelChoice: string) {
+  const sql = await getSql();
+  await sql`
+    update desk_jobs set model_choice = ${modelChoice}, updated_at = now() where id = ${id}
+  `;
+}
+
+/**
  * Drain one lane. Each lane has its own `draining` flag, so a caller already
  * draining `editorial` does not block a caller trying to drain `default` --
  * that independence is the entire point of ENG-105's fix. Within a lane,
@@ -356,7 +378,7 @@ async function drainLane(lane: JobLane): Promise<{ ran: number }> {
       (async () => {
         for (let n = 0; n < 8; n++) {
           const next = await sql<DeskJob>`
-            select id, newsroom_id, user_id, kind, subject_id, model_choice, lane, status, stage, error,
+            select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error,
                    created_at, updated_at, started_at, finished_at
             from desk_jobs
             where lane = ${lane}

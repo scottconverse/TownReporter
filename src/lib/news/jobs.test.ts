@@ -56,6 +56,38 @@ describe("desk jobs", () => {
     assert.equal(latest?.model_choice, "codex-frontier");
   });
 
+  it("defaults model_choice_source to editor, and persists 'auto' when Automatic queued it", async () => {
+    const newsroomId = 91001;
+    const editorJob = await enqueueJob({
+      userId: `job-source-editor-${Date.now()}`,
+      newsroomId,
+      kind: "draft",
+      subjectId: 616161,
+      modelChoice: "claude-frontier",
+      kick: false,
+    });
+    assert.equal(editorJob.model_choice_source, "editor");
+    const editorFound = await findOpenJob({ newsroomId, kind: "draft", subjectId: 616161 });
+    assert.equal(editorFound?.model_choice_source, "editor");
+    const editorLatest = await latestJob({ newsroomId, kind: "draft", subjectId: 616161 });
+    assert.equal(editorLatest?.model_choice_source, "editor");
+
+    const autoJob = await enqueueJob({
+      userId: `job-source-auto-${Date.now()}`,
+      newsroomId,
+      kind: "draft",
+      subjectId: 616162,
+      modelChoice: "claude-frontier",
+      modelChoiceSource: "auto",
+      kick: false,
+    });
+    assert.equal(autoJob.model_choice_source, "auto");
+    const autoFound = await findOpenJob({ newsroomId, kind: "draft", subjectId: 616162 });
+    assert.equal(autoFound?.model_choice_source, "auto");
+    const autoLatest = await latestJob({ newsroomId, kind: "draft", subjectId: 616162 });
+    assert.equal(autoLatest?.model_choice_source, "auto");
+  });
+
   it("keeps completed fake model work as an unpublished draft on a cold database read", async () => {
     const sql = await getSql();
     await sql.query(`

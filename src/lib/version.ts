@@ -1,2 +1,2 @@
 /** Ship version. Keep in lockstep with package.json (enforced in paper.test.ts). */
-export const APP_VERSION = "0.5.10";
+export const APP_VERSION = "0.5.11";

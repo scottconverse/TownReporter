@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.5.10](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.10).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.5.11](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.11).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 **Candidate features:** the per-run model picker and native Codex repair below
 are unreleased; they are not on the tagged 0.5.6 live paper until promotion.
@@ -123,8 +123,10 @@ Statuses you will use:
 Every active lead has its own compact **Writing model** picker beside **Draft
 with AI** (or **Redraft with AI** after a draft exists). Automatic uses the
 operator's configured gateway when one is set; otherwise it tries Claude
-Opus, then Codex Terra. A named choice uses only that provider and never
-falls back. The result appears on the same
+Opus, then Codex Terra. If the first one's login lapses partway through the
+run, the draft moves to the next rung once, if it is ready, and the row shows
+which provider took over and why. A named choice uses only that provider and
+never falls back, at enqueue or mid-run. The result appears on the same
 row and names the provider the server actually queued. **Open** takes you to
 the workbench to watch the draft land and edit it. Nothing prints from this
 list.

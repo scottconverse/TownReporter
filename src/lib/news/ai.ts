@@ -274,6 +274,13 @@ async function probeAnthropic(
   }
 }
 
+/**
+ * The order Automatic tries providers in, both at the initial probe (below)
+ * and for the mid-run failover in src/lib/news/automatic-failover.ts, which
+ * only ever tries a rung strictly AFTER the one a job started on.
+ */
+export const AUTOMATIC_LADDER = ["claude-frontier", "codex-balanced"] as const;
+
 export async function probeProvider(
   choice?: EffectiveProviderChoice | string,
 ): Promise<ProviderProbe> {
@@ -297,7 +304,7 @@ export async function probeProvider(
       Claude, then Codex.
     */
     const failures: string[] = [];
-    for (const rung of ["claude-frontier", "codex-balanced"] as const) {
+    for (const rung of AUTOMATIC_LADDER) {
       const result = await probeProvider(rung);
       if (result.ok) return result;
       failures.push(result.error);

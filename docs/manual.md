@@ -1,6 +1,6 @@
 # TownReporter — the manual
 
-**Version 0.5.10 · 2 September 2026**
+**Version 0.5.11 · 2 September 2026**
 
 **Documentation scope:** 0.5.6 is the released baseline. Per-run model pickers
 and the restored native Codex path below describe the **unreleased candidate**,
@@ -171,7 +171,10 @@ prints until you open a lead and publish it.
 
 Each active row has its own Writing model picker and Draft/Redraft with AI
 button. Automatic resolves one ready provider before enqueue and the result is
-shown on that same row. A named provider never falls back.
+shown on that same row. If that provider's login lapses partway through the
+run, Automatic moves to the next ladder rung once, if it is ready, and the
+row shows which one took over. A named provider never falls back, at
+enqueue or mid-run.
 
 **Set up a writing model** opens help beneath every Queue, workbench and
 Opinion picker, even when drafting is unavailable. Follow the installation and
@@ -355,7 +358,7 @@ have an editor-facing, per-run picker.
 | Feature                       | Provider                                                                                                                                       | Model                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Scan                          | configured provider                                                                                                                            | configured model                                                            |
-| Draft (Queue or workbench)    | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung; explicit choice never falls back        | Codex Terra/Sol, or Claude Opus                                             |
+| Draft (Queue or workbench)    | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung, with one mid-run failover to the next rung if that login lapses; explicit choice never falls back        | Codex Terra/Sol, or Claude Opus                                             |
 | Dark Desk synthesis and brief | the one you selected                                                                                                                           | the one you configured                                                      |
 | Dark Desk **planner**         | the one you selected                                                                                                                           | Haiku **only when the provider is Claude**; otherwise your configured model |
 | **Opinion (editorials)**      | Claude Opus, through the signed-in Claude Code session; Codex is not offered for editorials                                                    | Claude Opus                                                                |
@@ -781,7 +784,9 @@ flowchart TB
     OAI --> SAVE["Persist effective provider on job"]
     READY --> SAVE
     ONE --> SAVE
-    SAVE --> RUN["Every Story pass uses the same provider"]
+    SAVE --> RUN["Story pass runs on that provider"]
+    RUN -->|login lapses mid-run, Automatic only| NEXT["Next ladder rung, if ready<br/>(once per job)"]
+    RUN -->|otherwise, or a named choice| SAME["Same provider for the rest of the run"]
 
     style SAVE fill:#1c1a17,color:#fff
 ```

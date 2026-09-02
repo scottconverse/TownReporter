@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.5.10](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.10)** — 2 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.5.11](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.11)** — 2 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 **Documentation scope:** this checkout also documents the **unreleased model-picker
 and native Codex repair candidate**. Those features are not part of the tagged
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.5.11** — Automatic fails over to the next model once, mid-run, if the first one's login has lapsed.
 - **0.5.10** — an expired Claude Code login is reported as "sign in again", never "click again".
 - **0.5.9** — Claude and Codex only: Zen MiMo and Local Qwen removed from the Story picker and the Automatic ladder.
 - **0.5.8** — Automatic drafts with your own signed-in Claude first, not a free rate-limited endpoint.
@@ -175,11 +176,13 @@ default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
 pair names a gateway, Automatic uses that gateway and no other provider.
 Otherwise it tries Claude Opus, then Codex Terra, chooses the first ready
 provider before enqueueing, and stores that effective choice on the job. Every
-reporting and writing pass in that run uses the same provider.
+reporting and writing pass in that run uses the same provider, unless that
+provider's login lapses mid-run -- Automatic then moves to the next ladder
+rung once, if it is ready.
 
 Pick Codex Terra, frontier Codex Sol, or frontier Claude Opus to force that
-provider for one run. Explicit choices never fall back. The endpoint/model
-compatibility overrides are listed in
+provider for one run. Explicit choices never fall back, at enqueue or
+mid-run. The endpoint/model compatibility overrides are listed in
 [docs/setup.md](docs/setup.md#per-run-picker).
 
 Zen MiMo and Local Qwen were removed from the picker (2026-09-02): Claude and

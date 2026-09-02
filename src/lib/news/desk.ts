@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
@@ -7,7 +7,7 @@ import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
 import { assertRate, audit } from "./ops";
-import { scanSystem, grokChat, parseJsonBlock, probeProvider } from "./ai";
+import { scanSystem, grokChat, parseJsonBlock, probeProvider, AUTOMATIC_LADDER } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
 import { stripReporterNotebook } from "./strip-draft";
 import {
@@ -45,10 +45,14 @@ import {
   kickJobs,
   latestJob,
   runLooksStalled,
+  setJobModelChoice,
+  setJobStage,
   type DeskJob,
 } from "./jobs";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
-import { effectiveStoryModelChoice, storyModelChoice } from "./model-choice.ts";
+import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
+import { planAutomaticFailover } from "./automatic-failover.ts";
+import { looksLikeProviderAuthFailure } from "./preflight.ts";
 import type { DraftRow, LeadRow, MemoryRow, ScanRow, SourceRow } from "./types";
 
 function owned(context: { newsroomId?: number }) {
@@ -639,7 +643,95 @@ export async function performScanWork(job: DeskJob) {
   await audit(context.userId, "scan", `run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`);
 }
 
-export async function performDraftWork(job: DeskJob) {
+/** Injectable seam so a job with a real Claude/Codex 401 mid-run, and the
+ * failover it triggers, can be tested without a real provider. Defaults to
+ * the real functions -- the same pattern `reportAndDraft` uses for its own
+ * `ReportDeps`. */
+export type PerformDraftWorkDeps = {
+  reportAndDraft?: typeof reportAndDraft;
+  probe?: typeof probeProvider;
+  setJobModelChoice?: typeof setJobModelChoice;
+  setJobStage?: typeof setJobStage;
+};
+
+type ReportedDraftResult = Awaited<ReturnType<typeof reportAndDraft>>;
+type DraftInput = Omit<Parameters<typeof reportAndDraft>[0], "modelChoice">;
+
+/**
+ * The first attempt failed. If the job was on Automatic and the failure
+ * reads as "the login is gone" (not a timeout, refusal, or unknown error),
+ * try exactly one later rung of the ladder and, if it is ready, run the draft
+ * again on it -- once. Anything else, including a second failure on the new
+ * rung, is returned/thrown as-is by the caller.
+ */
+async function failOverAndRetry(opts: {
+  job: DeskJob;
+  error: string;
+  draftInput: DraftInput;
+  runReport: typeof reportAndDraft;
+  probe: typeof probeProvider;
+  setModelChoice: typeof setJobModelChoice;
+  setStage: typeof setJobStage;
+}): Promise<ReportedDraftResult> {
+  const { job, error, draftInput, runReport, probe, setModelChoice, setStage } = opts;
+  const source = job.model_choice_source ?? "editor";
+  const plan = await planAutomaticFailover({
+    source,
+    current: job.model_choice,
+    error,
+    probe: (choice) => probe(choice),
+  });
+  if (!plan) {
+    // Explain WHY Automatic did not move on, when it looked close: still on
+    // Automatic, still an auth failure, and a later rung existed -- it just
+    // was not ready either. The auth wording from the first failure survives
+    // so the desk's own classifier (scanPreflight) still reads it as
+    // provider-auth, not "unknown".
+    const ladderIndex = AUTOMATIC_LADDER.indexOf(
+      job.model_choice as (typeof AUTOMATIC_LADDER)[number],
+    );
+    const hasLaterRung = ladderIndex !== -1 && ladderIndex < AUTOMATIC_LADDER.length - 1;
+    const wouldHaveTried =
+      source === "auto" &&
+      hasLaterRung &&
+      looksLikeProviderAuthFailure(error) &&
+      !/timed out|timeout/i.test(error);
+    if (wouldHaveTried) {
+      const nextRung = AUTOMATIC_LADDER[ladderIndex + 1]!;
+      const nextProbe = await probe(nextRung);
+      const label = modelChoiceLabel(nextRung);
+      const why = nextProbe.ok ? "" : nextProbe.error;
+      return { error: `${error} Automatic tried ${label} next, but it was not ready: ${why}` };
+    }
+    return { error };
+  }
+
+  const previousLabel = modelChoiceLabel(job.model_choice);
+  await setModelChoice(job.id, plan.next);
+  await setStage(job.id, `Switched to ${plan.label}: ${previousLabel} sign-in lapsed`);
+  return runReport({ ...draftInput, modelChoice: plan.next });
+}
+
+/*
+  Wrapped in createServerOnlyFn (not just a plain exported async function):
+  this file is imported both statically, by client route components (for
+  createServerFn handlers like draftLead), and dynamically, by jobs.ts's
+  background runner (`await import("./desk.ts")`). That dual reachability
+  let a build tip performDraftWork's dependency graph -- specifically its
+  reference to `probeProvider` -- into a chunk a client route also loads,
+  and the import-protection plugin then rightly refused to ship
+  ai-codex.server.ts/ai-claude-code.server.ts to the browser. Marking this
+  function server-only makes the framework strip it from every client
+  bundle by construction, not by hoping generic tree-shaking gets there.
+*/
+export const performDraftWork = createServerOnlyFn(async function performDraftWork(
+  job: DeskJob,
+  deps: PerformDraftWorkDeps = {},
+) {
+  const runReport = deps.reportAndDraft ?? reportAndDraft;
+  const probe = deps.probe ?? probeProvider;
+  const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
+  const setStage = deps.setJobStage ?? setJobStage;
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const leadId = job.subject_id;
   const sql = await getSql();
@@ -666,15 +758,29 @@ export async function performDraftWork(job: DeskJob) {
 
   const prevNotes = parseNotes(lead.notes_json);
   const moreUrls = prevNotes.opened.map((o) => o.url);
-  const reported = await reportAndDraft({
+  const draftInput = {
     userId: context.userId,
     lead,
     urls: [...urls, ...moreUrls],
     memory,
     extraEvidence: prevNotes.scratch,
     extraUrls: moreUrls,
+  };
+  let reported = await runReport({
+    ...draftInput,
     modelChoice: effectiveStoryModelChoice(job.model_choice),
   });
+  if ("error" in reported) {
+    reported = await failOverAndRetry({
+      job,
+      error: reported.error,
+      draftInput,
+      runReport,
+      probe,
+      setModelChoice,
+      setStage,
+    });
+  }
   if ("error" in reported) throw new Error(reported.error);
 
   // The watch list's own pages are how a lead was spotted, not what it is
@@ -737,7 +843,7 @@ export async function performDraftWork(job: DeskJob) {
     where id = ${leadId} and newsroom_id = ${owned(context)}
   `;
   await audit(context.userId, "draft", String(leadId));
-}
+});
 
 export const draftLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])

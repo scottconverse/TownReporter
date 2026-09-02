@@ -92,6 +92,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
     kind: "draft",
     subjectId: input.leadId,
     modelChoice: effectiveChoice,
+    modelChoiceSource: input.modelChoice === "auto" ? "auto" : "editor",
   });
   const persistedChoice = effectiveStoryModelChoice(job.model_choice);
   if (persistedChoice !== effectiveChoice) {
