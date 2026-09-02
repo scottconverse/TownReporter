@@ -30,6 +30,21 @@ Current release: **0.6.1**.
   **SEEN AGAIN ×N** with the last-seen date, and the Killed tab shows a
   one-line explainer under the filter row the first time any lead on it
   carries a stamp.
+- **Dark-desk readability fix, and a Text: Normal/Large control.** An operator
+  screenshot of the Killed tab in dark mode: small text that also wasn't
+  white, unreadable on a dark background. Root cause was two things —
+  informational text throughout the desk sat below the 14px floor (chips,
+  dates, meta lines, table labels down to 9.5px), and several pages'
+  Tailwind `text-muted`/`text-ink-2` utilities render the fixed light-mode
+  brown regardless of theme, so on the dark desk they rendered as
+  low-contrast dark-on-dark (as low as 1.4:1). Fixed without touching the
+  files other in-flight agents own: `.desk-ltr .text-muted` etc. now resolve
+  through the desk's own theme variables via a CSS selector in
+  `src/styles.css`, and every informational text token in both themes now
+  measures at least 4.5:1 (checked by the new `scripts/contrast-audit.mjs`,
+  which fails the build under that ratio). Added a **Text: Normal / Large**
+  toggle next to Light/Dark in the desk header (`src/components/desk-chrome.tsx`),
+  persisted the same way the theme is.
 
 ## 0.6.1 — 2026-09-02
 
