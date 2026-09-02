@@ -1,4 +1,5 @@
 import { grokChat, parseJsonBlock, providerBudget, type ProviderProbe } from "./ai.ts";
+import type { ProviderOverrides } from "./provider-registry.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import {
   extractReferences,
@@ -1094,6 +1095,14 @@ export async function reportAndDraft(
     extraEvidence?: string;
     extraUrls?: string[];
     modelChoice?: EffectiveProviderChoice;
+    /**
+     * The paper's stored deviations from the shipped time budgets (0.6.2).
+     * Loaded once by `performDraftWork` and threaded through the Automatic
+     * failover retry with the rest of the draft input, so a retry on a later
+     * ladder rung is sized by THAT rung's paper-adjusted budget rather than
+     * silently reverting to the shipped default.
+     */
+    providerOverrides?: ProviderOverrides | null;
   },
   deps: ReportDeps = {},
 ): Promise<ReportedDraft | { error: string }> {
@@ -1111,7 +1120,7 @@ export async function reportAndDraft(
     if (!ready.ok) return { error: ready.error };
     effectiveModelChoice = ready.choice;
   }
-  const limits = providerBudget(effectiveModelChoice);
+  const limits = providerBudget(effectiveModelChoice, opts.providerOverrides);
   const budget = deps.budgetMs ?? limits.wallMs;
   const reserve = deps.budgetMs ? DRAFT_WRITE_RESERVE_MS : limits.reserveMs;
   const timeLeft = () => budget - (Date.now() - started);

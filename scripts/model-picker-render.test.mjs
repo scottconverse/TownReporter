@@ -18,9 +18,19 @@ function moduleUrl(source, fileName, imports = {}) {
   return `data:text/javascript;base64,${Buffer.from(output).toString("base64")}`;
 }
 
+/*
+  The registry is the source of the option list as of 0.6.2, so it has to be
+  transpiled and injected too: a data: URL cannot resolve a relative import.
+*/
+const registryUrl = moduleUrl(
+  await readFile(new URL("../src/lib/news/provider-registry.ts", import.meta.url), "utf8"),
+  "provider-registry.ts",
+);
+const registry = await import(registryUrl);
 const choices = moduleUrl(
   await readFile(new URL("../src/lib/news/model-choice.ts", import.meta.url), "utf8"),
   "model-choice.ts",
+  { "./provider-registry.ts": registryUrl },
 );
 const { ModelPicker } = await import(
   moduleUrl(
@@ -57,17 +67,58 @@ test("every story picker exposes keyboard-native setup help and real operator li
   }
 });
 
-test("Story picker offers exactly Automatic, Codex Terra, Codex Sol, and Claude Opus", () => {
-  // Zen and Local Qwen were removed from the picker 2026-09-02 ("it's not
-  // working it seems" -- Claude/Codex only for now); the picker went from 6
-  // options down to these 4.
+/*
+  Read from the registry, not typed out.
+
+  Until 0.6.2 this test pinned the four labels as literals, which is a second
+  place to update when a provider is added -- and a place that can be forgotten
+  while still passing, because a hardcoded list agrees with itself. It now
+  asserts the SHAPE (Automatic first, then exactly the registry's story
+  providers in registry order) so adding a local-model entry makes this test
+  cover it with nothing here to edit.
+*/
+test("the Story picker offers Automatic plus exactly the registry's story providers", () => {
   const html = render();
-  const optionCount = (html.match(/<option[^>]*>/g) ?? []).length;
-  assert.equal(optionCount, 4);
+  const expected = [
+    "Automatic",
+    ...registry.PROVIDER_REGISTRY.filter((e) => e.offeredFor.story).map((e) => e.label),
+  ];
+  const rendered = [...html.matchAll(/<option[^>]*>([^<—]+)—/g)].map((m) => m[1].trim());
+  assert.deepEqual(rendered, expected);
+  // Zen and Local Qwen were removed from the picker 2026-09-02 ("it's not
+  // working it seems" -- Claude/Codex only for now).
   assert.doesNotMatch(html, /Local Qwen|Zen MiMo/);
-  for (const label of ["Automatic", "Codex Terra", "Codex Sol", "Claude Opus"]) {
-    assert.match(html, new RegExp(`<option[^>]*>${label} `));
-  }
+});
+
+test("the Dark Desk picker offers the registry's dark providers, and says it digs", () => {
+  // 0.6.2: Dark Desk was the one surface with no picker at all. Its label
+  // differs from Story's on purpose -- the model there digs, it does not write.
+  const html = render({ scope: "dark" });
+  const expected = [
+    "Automatic",
+    ...registry.PROVIDER_REGISTRY.filter((e) => e.offeredFor.dark).map((e) => e.label),
+  ];
+  const rendered = [...html.matchAll(/<option[^>]*>([^<—]+)—/g)].map((m) => m[1].trim());
+  assert.deepEqual(rendered, expected);
+  assert.match(html, /Digging model/);
+  assert.match(html, /the round moves to the next/);
+});
+
+test("the Opinion picker offers only the registry's opinion providers", () => {
+  const html = render({ scope: "opinion" });
+  const expected = [
+    "Automatic",
+    ...registry.PROVIDER_REGISTRY.filter((e) => e.offeredFor.opinion).map((e) => e.label),
+  ];
+  const rendered = [...html.matchAll(/<option[^>]*>([^<—]+)—/g)].map((m) => m[1].trim());
+  assert.deepEqual(rendered, expected);
+  /*
+    Codex is not an OPTION here, but it is named in the help text and in the
+    setup steps -- deliberately, because an editor who sees it on the Story
+    picker and not this one deserves to be told why rather than left to guess.
+    So this asserts the option list, not the absence of the word.
+  */
+  assert.ok(!rendered.some((label) => /codex/i.test(label)));
 });
 
 test("Opinion setup help explains its voice prerequisite without advertising Story-only models", () => {

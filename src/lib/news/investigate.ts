@@ -1,6 +1,13 @@
 import { ensureSchemaOnce, getSql } from "../db.ts";
 import { getPaperConfig } from "./paper-settings.ts";
-import { grokChat, parseJsonBlock, plannerModel, providerBudget } from "./ai.ts";
+import {
+  grokChat,
+  parseJsonBlock,
+  plannerModel,
+  providerBudget,
+  type EffectiveProviderChoice,
+} from "./ai.ts";
+import type { ProviderOverrides } from "./provider-registry.ts";
 import { isSelfReferential, labelAfterCitationCheck } from "./claim-hygiene.ts";
 import { DARK_PLANNER } from "./dark-prompt.ts";
 import {
@@ -465,6 +472,13 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
   `alter table source_monitors drop constraint if exists source_monitors_user_id_url_key`,
   `drop index if exists source_monitors_user_id_url_key`,
   `create unique index if not exists source_monitors_newsroom_url on source_monitors (newsroom_id, url)`,
+  /*
+    Which writing model this investigation last dug with (0.6.2). Mirrors
+    migrations/0030_dark_model_choice.sql. "Keep digging" defaults to it, so
+    a file that was started on Codex does not silently switch to Claude the
+    next time someone presses the button.
+  */
+  `alter table investigations add column if not exists last_model_choice text`,
   `alter table recurring_baselines drop constraint if exists recurring_baselines_user_id_key_key`,
   `drop index if exists recurring_baselines_user_id_key_key`,
   `create unique index if not exists recurring_baselines_newsroom_key on recurring_baselines (newsroom_id, key)`,
@@ -643,7 +657,11 @@ function parsePlan(raw: unknown): HopPlan {
   return plan;
 }
 
-export async function grokPlanner(pack: string): Promise<HopPlan> {
+export async function grokPlanner(
+  pack: string,
+  choice?: EffectiveProviderChoice,
+  overrides?: ProviderOverrides | null,
+): Promise<HopPlan> {
   /*
     The provider's own per-call budget, not the 45-second default.
 
@@ -654,11 +672,20 @@ export async function grokPlanner(pack: string): Promise<HopPlan> {
     its summaries read like successful digs. `providerBudget()` has said 150
     seconds for this provider the whole time; nothing passed it.
   */
-  const { callMs } = providerBudget();
-  // The cheap half of the split. See `plannerModel`.
+  const { callMs } = providerBudget(choice, overrides);
+  /*
+    The cheap half of the split, on the provider the ROUND is running.
+
+    Before 0.6.2 both of these were provider-blind: `providerBudget()` and
+    `plannerModel()` with no argument each asked `resolveProvider()` what this
+    machine happens to prefer, which is not necessarily what the editor chose
+    for this round. A round pinned to Codex would be budgeted and planned as
+    if it were Claude. See `plannerModel` for the substitution rule.
+  */
   const ai = await grokChat(DARK_PLANNER, pack.slice(0, 24000), 2200, {
     timeoutMs: callMs,
-    model: plannerModel(),
+    model: plannerModel(choice),
+    choice,
   });
   if (!ai?.ok) {
     const why = ai && "error" in ai ? ai.error : "no response";
@@ -1575,6 +1602,14 @@ export async function researchLoop(opts: {
   userId: string;
   investigationId: number;
   hops?: number;
+  /**
+   * The writing model this round is pinned to (0.6.2). Threaded to every
+   * planner call so the hop is planned by the provider the editor picked,
+   * and budgeted by that provider's own per-call ceiling.
+   */
+  choice?: EffectiveProviderChoice;
+  /** The paper's stored time-budget overrides, if any. */
+  providerOverrides?: ProviderOverrides | null;
   search?: SearchFn;
   searchAttempt?: SearchAttemptFn;
   fetch?: FetchFn;
@@ -1665,7 +1700,7 @@ export async function researchLoop(opts: {
     let plan: HopPlan;
     if (planner) plan = await planner(pack);
     else {
-      const grok = await grokPlanner(pack);
+      const grok = await grokPlanner(pack, opts.choice, opts.providerOverrides);
       const heur = heuristicPlan(graph, tried);
       plan = grok.searches.length || grok.fetch_urls.length ? grok : heur;
       if (grok.planner_error) plan.planner_error = grok.planner_error;

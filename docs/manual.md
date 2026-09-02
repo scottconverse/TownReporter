@@ -352,18 +352,24 @@ Configured-provider precedence for Dark Desk is:
 
 ### Which feature uses which provider
 
-Dark Desk uses the configured provider. Scan, Draft and Opinion have an
-editor-facing, per-run picker instead — Scan picked this up 0.6.1; before
-that it used the configured-provider chain with no picker and no mid-run
-failover, and a lapsed Claude Code login just died with no way to switch
-providers short of an operator change.
+Every feature that calls a model has an editor-facing, per-run picker. Dark
+Desk was the last one without: until 0.6.2 it used the configured-provider
+chain, so a round ran on whatever the machine happened to prefer and the
+editor could not say otherwise. Scan picked up its picker in 0.6.1, for the
+same reason.
+
+All four pickers are generated from one registry,
+`src/lib/news/provider-registry.ts`. An entry there carries the label, the
+model identifier, the environment variable that overrides it, the off switch,
+the time budgets, and which pickers offer it. Adding a provider is one entry;
+nothing else in the codebase names providers.
 
 | Feature                       | Provider                                                                                                                                       | Model                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Scan                          | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung, with one mid-run failover to the next rung if that login lapses (reusing the sources already fetched, not fetching them again); explicit choice never falls back | Codex Terra/Sol, or Claude Opus                                             |
 | Draft (Queue or workbench)    | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung, with one mid-run failover to the next rung if that login lapses; explicit choice never falls back        | Codex Terra/Sol, or Claude Opus                                             |
-| Dark Desk synthesis and brief | the one you selected                                                                                                                           | the one you configured                                                      |
-| Dark Desk **planner**         | the one you selected                                                                                                                           | Haiku **only when the provider is Claude**; otherwise your configured model |
+| Dark Desk synthesis and brief | the one you pick beside **Keep digging**; Automatic behaves as it does for Draft, with one mid-run failover at the round level                  | the one you picked                                                          |
+| Dark Desk **planner**         | the one you pick                                                                                                                               | a cheaper model from the SAME provider: Haiku on Claude, Terra on either Codex, and your own model on a gateway |
 | **Opinion (editorials)**      | Claude Opus, through the signed-in Claude Code session; Codex is not offered for editorials                                                    | Claude Opus                                                                |
 
 **Why Opinion has fewer choices.** An editorial uses the paper's configured
@@ -376,9 +382,31 @@ retain native search and the signed-in Windows user's full available machine
 capabilities. Claude's writing pass keeps its separate tool-free boundary.
 
 **The planner split.** Planning on Haiku costs about a quarter of planning on
-Opus for the same output, so the desk substitutes it — but only on a Claude
-provider. Pointing `LLM_BASE_URL` at LM Studio does not make the desk ask a
-local endpoint for a Claude model; it uses yours.
+Opus for the same output, so the desk substitutes it — but only within the
+same provider. Claude plans on Haiku; either Codex plans on Terra; a
+configured gateway is left alone. Pointing `LLM_BASE_URL` at LM Studio does
+not make the desk ask a local endpoint for a Claude model; it uses yours. As
+of 0.6.2 the substitution follows the model you picked for that round, not
+whatever the machine's own precedence would have chosen.
+
+### Time budgets
+
+Each provider ships with a per-call ceiling: 150 seconds on the Claude Code
+and Codex CLIs (they spawn a process and reload a large preamble every call),
+180 on Automatic and a configured gateway, and 600 reserved for the local
+model entry that has not landed yet.
+
+The owner can change the per-call number for any provider on the **Server**
+page, under Writing models: **Time per call**, in seconds, with the shipped
+default shown beside it and a **Reset**. Between 10 seconds and 60 minutes.
+The answer is stored per paper in `provider_settings`
+(`migrations/0029_provider_settings.sql`); Reset clears the row's number
+rather than writing today's default into it, so a paper that never made a
+decision keeps inheriting improvements to the defaults.
+
+This exists for local models. A 30B answering a 20,000-character pack on the
+same machine takes minutes, and the 150-second ceiling would report that as a
+failure every time.
 
 Pointing `LLM_BASE_URL` at a local model sends Scan, Dark Desk, and Story
 Automatic to that gateway. An explicit Story choice still forces its named

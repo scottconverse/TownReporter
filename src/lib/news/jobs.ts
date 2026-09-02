@@ -7,7 +7,15 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
  * job here. It survives that on the same heartbeat as the rest; nothing needed
  * to change except knowing it is normal.
  */
-export type JobKind = "scan" | "draft" | "dark" | "editorial";
+/**
+ * `brief` joined the list in 0.6.2. Writing an investigation's read-me-first
+ * block is a model call like any other, and it used to run inline inside the
+ * `refreshBrief` request -- which meant it could not carry a model choice,
+ * could not be watched, and held an HTTP request open for as long as the
+ * provider took. It is a job now, on the default lane, for the same reasons
+ * drafting is.
+ */
+export type JobKind = "scan" | "draft" | "dark" | "editorial" | "brief";
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
 /**
@@ -159,6 +167,9 @@ async function realWork(job: DeskJob): Promise<void> {
   } else if (job.kind === "dark") {
     const { performDarkRound } = await import("./dark.ts");
     await performDarkRound(job);
+  } else if (job.kind === "brief") {
+    const { performBriefWork } = await import("./dark.ts");
+    await performBriefWork(job);
   } else if (job.kind === "editorial") {
     const { performEditorialWork } = await import("./editorial.server.ts");
     await performEditorialWork(job);

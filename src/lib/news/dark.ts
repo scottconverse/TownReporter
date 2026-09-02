@@ -1,7 +1,21 @@
 import { createServerFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
-import { grokChat, parseJsonBlock, providerBudget, probeProvider } from "./ai.ts";
+import {
+  grokChat,
+  parseJsonBlock,
+  providerBudget,
+  probeProvider,
+  type EffectiveProviderChoice,
+} from "./ai.ts";
+import {
+  effectiveStoryModelChoice,
+  modelChoiceLabel,
+  storyModelChoice,
+} from "./model-choice.ts";
+import { planAutomaticFailover } from "./automatic-failover.ts";
+import { readProviderOverrides } from "./provider-settings.ts";
+import type { ProviderOverrides } from "./provider-registry.ts";
 import { darkSystemFor } from "./dark-prompt.ts";
 import { assertRate, audit } from "./ops.ts";
 import {
@@ -36,7 +50,15 @@ import {
   stanceFor,
   type DarkDials,
 } from "./dark-dials.ts";
-import { enqueueJob, latestJob, runLooksStalled, type DeskJob } from "./jobs.ts";
+import {
+  enqueueJob,
+  findOpenJob,
+  latestJob,
+  runLooksStalled,
+  setJobModelChoice,
+  setJobStage,
+  type DeskJob,
+} from "./jobs.ts";
 
 function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
@@ -59,7 +81,16 @@ function owned(context: { newsroomId?: number }) {
  * existing error handling (which already knows how to show a refusal) works
  * unchanged; returns null when the desk should proceed.
  */
-async function darkPreflightRefusal(): Promise<{
+/**
+ * The commit boundary for anything that spends on Dark Desk.
+ *
+ * 0.6.2: probes the model the EDITOR picked, not whatever `resolveProvider()`
+ * happens to prefer on this machine. Same shape as Story's and Scan's
+ * boundary (see model-request-commit.server.ts): refusing here means no job
+ * row, no dark_runs row and no rate spend ever exist, so there is nothing for
+ * the queue to mark completed while lying about what happened.
+ */
+async function darkPreflightRefusal(choice?: string): Promise<{
   ok: false;
   kind: string;
   error: string;
@@ -67,7 +98,7 @@ async function darkPreflightRefusal(): Promise<{
   retryable: boolean;
 } | null> {
   const { scanPreflight } = await import("./preflight.ts");
-  const ready = scanPreflight(await probeProvider());
+  const ready = scanPreflight(await probeProvider(choice));
   if (ready.ok) return null;
   return {
     ok: false as const,
@@ -107,6 +138,8 @@ export type DarkRunRow = {
   finished_at: string | null;
   summary: string | null;
   error: string | null;
+  /** Null on every round dug before 0.6.2 gave Dark Desk a picker. */
+  model_choice: string | null;
 };
 
 export type DarkPromiseRow = {
@@ -131,6 +164,11 @@ export type InvestigationRow = {
   updated_at: string;
   records?: number;
   still_open?: number;
+  /**
+   * The model that last dug this file (0.6.2). Null on every investigation
+   * opened before Dark Desk had a picker; the page falls back to Automatic.
+   */
+  last_model_choice?: string | null;
 };
 
 const HANDOFFS = new Set([
@@ -201,6 +239,13 @@ const DARK_SCHEMA_STATEMENTS: readonly string[] = [
       error text
     )`,
   `create index if not exists dark_runs_user_idx on dark_runs (user_id, started_at desc)`,
+  /*
+    Which writing model did this round (0.6.2). Mirrors
+    migrations/0030_dark_model_choice.sql. The round history says so out loud
+    -- "Claude Opus / 6 hops" -- because a round that dug badly and a round
+    that dug on a different model are different facts about the same file.
+  */
+  `alter table dark_runs add column if not exists model_choice text`,
   `create table if not exists dark_signals (
       id serial primary key,
       user_id text not null,
@@ -265,7 +310,7 @@ export const listDarkRuns = createServerFn({ method: "GET" })
     await ensureDarkSchema();
     const sql = await getSql();
     return sql<DarkRunRow>`
-      select id, started_at, finished_at, summary, error
+      select id, started_at, finished_at, summary, error, model_choice
       from dark_runs
       where newsroom_id = ${owned(context)}
       order by started_at desc
@@ -401,7 +446,8 @@ export const getInvestigation = createServerFn({ method: "GET" })
     await ensureDarkSchema();
     const sql = await getSql();
     const inv = await sql<InvestigationRow>`
-      select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at
+      select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at,
+             last_model_choice
       from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
     `;
     if (!inv[0]) return null;
@@ -574,9 +620,23 @@ export const getInvestigation = createServerFn({ method: "GET" })
     const job = await latestJob({ newsroomId: owned(context), kind: "dark", subjectId: id });
     const stalled = runLooksStalled({ runOpen: inv[0].status === "investigating", job });
 
+    /*
+      The brief is its own job now (0.6.2), so the page has something to poll
+      on rather than holding an HTTP request open for the length of a model
+      call. Only the fields the page actually renders are returned.
+    */
+    const brief_job = await latestJob({
+      newsroomId: owned(context),
+      kind: "brief",
+      subjectId: id,
+    });
+
     return {
       investigation: inv[0],
       stalled,
+      briefJob: brief_job
+        ? { id: brief_job.id, status: brief_job.status, error: brief_job.error }
+        : null,
       brief,
       frontier,
       artifacts,
@@ -621,6 +681,14 @@ async function synthesizeSignals(
   investigationId: number,
   paste: string,
   dials: DarkDials,
+  /**
+   * The model this round is pinned to (0.6.2). Before this, the synthesis
+   * called `grokChat` with no `choice` at all -- whatever `resolveProvider()`
+   * returned -- while the desk told the editor the picker controlled which
+   * model wrote. Dark Desk had no picker, so nobody could contradict it.
+   */
+  choice?: EffectiveProviderChoice,
+  overrides?: ProviderOverrides | null,
 ) {
   const sql = await getSql();
   const sources = await sql<SourceRow>`
@@ -709,7 +777,8 @@ async function synthesizeSignals(
     the dark desk failed with "Claude Code request timed out" for exactly this.
   */
   const ai = await grokChat(darkSystemFor(dials), pack.slice(0, 28000), 3200, {
-    timeoutMs: providerBudget().callMs,
+    timeoutMs: providerBudget(choice, overrides).callMs,
+    choice,
   });
   if (!ai?.ok)
     return {
@@ -794,13 +863,37 @@ async function markInvestigationPaused(userId: string, investigationId: number, 
   `;
 }
 
+/**
+ * Remember which model dug this file, so "Keep digging" defaults to it.
+ *
+ * An investigation is a continuing piece of work, and switching author
+ * halfway is a decision, not a default. `null` (a round that ran before the
+ * picker existed, or one whose choice could not be resolved) leaves the
+ * column alone rather than blanking a good answer.
+ */
+async function rememberLastModelChoice(investigationId: number, choice?: string | null) {
+  if (!choice) return;
+  const sql = await getSql();
+  await sql`
+    update investigations set last_model_choice = ${choice}, updated_at = now()
+    where id = ${investigationId}
+  `.catch(() => undefined);
+}
+
 async function executeDarkRun(
   userId: string,
-  opts: { paste: string; investigationId?: number; title?: string },
+  opts: {
+    paste: string;
+    investigationId?: number;
+    title?: string;
+    choice?: EffectiveProviderChoice;
+  },
 ) {
   const sql = await getSql();
+  const choice = opts.choice;
+  const overrides = await readProviderOverrides(DEFAULT_NEWSROOM_ID).catch(() => ({}));
   const runRows = await sql<{ id: number }>`
-    insert into dark_runs (user_id) values (${userId}) returning id
+    insert into dark_runs (user_id, model_choice) values (${userId}, ${choice ?? null}) returning id
   `;
   const runId = runRows[0]!.id;
   const paste = opts.paste.trim().slice(0, 14000);
@@ -823,9 +916,20 @@ async function executeDarkRun(
       userId,
       investigationId,
       hops: budget.hops,
+      choice,
+      providerOverrides: overrides,
     });
 
-    const synth = await synthesizeSignals(userId, runId, investigationId, paste, dials);
+    const synth = await synthesizeSignals(
+      userId,
+      runId,
+      investigationId,
+      paste,
+      dials,
+      choice,
+      overrides,
+    );
+    await rememberLastModelChoice(investigationId, choice);
     const names = (
       await sql<{ name: string }>`
         select e.name from investigation_entities ie
@@ -894,15 +998,26 @@ async function executeDarkRun(
 
 export const runDarkDesk = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { paste: string; investigationId?: number }) => input)
+  .validator(
+    (input: { paste: string; investigationId?: number; modelChoice?: string }) => input,
+  )
   .handler(async ({ context, data }) => {
-    const refusal = await darkPreflightRefusal();
+    /*
+      The editor's pick decides which provider is probed, and an unresolvable
+      one refuses BEFORE any spend -- the same commit boundary Story and Scan
+      have. `storyModelChoice` narrows anything else to Automatic rather than
+      trusting a string off the wire.
+    */
+    const asked = storyModelChoice(data.modelChoice);
+    const probe = await probeProvider(asked);
+    const refusal = await darkPreflightRefusal(asked);
     if (refusal) return refusal;
     await ensureDarkSchema();
     await assertRate(context.userId, "dark");
     return executeDarkRun(context.userId, {
       paste: data.paste,
       investigationId: data.investigationId,
+      choice: probe.ok ? probe.choice : asked,
     });
   });
 
@@ -955,16 +1070,60 @@ export const findSomethingToDigInto = createServerFn({ method: "POST" })
  * so there is nothing for the queue to mark `completed` while lying about
  * what happened.
  */
-export async function startDarkRound(context: { userId: string; newsroomId?: number }, id: number) {
-  const refusal = await darkPreflightRefusal();
+export async function startDarkRound(
+  context: { userId: string; newsroomId?: number },
+  id: number,
+  modelChoice: string = "auto",
+) {
+  const asked = storyModelChoice(modelChoice);
+  /*
+    Probe the model the editor picked BEFORE anything is written or spent,
+    exactly as `commitStoryDraftForAuthenticatedEditor` does. Automatic
+    resolves to a concrete provider here, and that concrete provider is what
+    gets pinned on the job -- so a round does not silently change author
+    between the press and the queue picking it up.
+  */
+  const probe = await probeProvider(asked);
+  const refusal = await darkPreflightRefusal(asked);
   if (refusal) return refusal;
   await ensureDarkSchema();
-  await assertRate(context.userId, "dark");
   const sql = await getSql();
   const inv = await sql<{ id: number }>`
     select id from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
   `;
   if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
+
+  const effectiveChoice = probe.ok ? probe.choice : asked;
+
+  /*
+    A round already digging this file on a different model is the same
+    situation Story reports for a lead already drafting: the run is pinned,
+    switching mid-flight is not a thing this desk does, and the honest answer
+    is to say which model is running rather than quietly queueing a second
+    one. Checked BEFORE the rate spend, like Story's.
+  */
+  const open = await findOpenJob({ newsroomId: owned(context), kind: "dark", subjectId: id });
+  if (open) {
+    const persisted = effectiveStoryModelChoice(open.model_choice);
+    if (persisted !== effectiveChoice) {
+      return {
+        ok: false as const,
+        kind: "model-conflict" as const,
+        error: `This file is already digging with ${modelChoiceLabel(persisted)}. Watch that round finish before choosing another model.`,
+        modelChoice: persisted,
+        jobId: open.id,
+      };
+    }
+    return {
+      ok: true as const,
+      pending: true as const,
+      jobId: open.id,
+      investigationId: id,
+      modelChoice: persisted,
+    };
+  }
+
+  await assertRate(context.userId, "dark");
   await sql`
     update investigations set status = ${"investigating"}, updated_at = now()
     where id = ${id} and newsroom_id = ${owned(context)}
@@ -974,14 +1133,28 @@ export async function startDarkRound(context: { userId: string; newsroomId?: num
     newsroomId: owned(context),
     kind: "dark",
     subjectId: id,
+    modelChoice: effectiveChoice,
+    // "auto" means Automatic picked it, which is the ONLY case allowed to
+    // fail over mid-round. See automatic-failover.ts.
+    modelChoiceSource: asked === "auto" ? "auto" : "editor",
   });
-  return { ok: true as const, pending: true as const, jobId: job.id, investigationId: id };
+  return {
+    ok: true as const,
+    pending: true as const,
+    jobId: job.id,
+    investigationId: id,
+    modelChoice: effectiveStoryModelChoice(job.model_choice),
+  };
 }
 
 export const continueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
-  .handler(async ({ context, data: id }) => startDarkRound(context, id));
+  .validator((input: number | { id: number; modelChoice?: string }) => input)
+  .handler(async ({ context, data }) =>
+    typeof data === "number"
+      ? startDarkRound(context, data)
+      : startDarkRound(context, data.id, data.modelChoice),
+  );
 
 export async function performDarkRound(job: DeskJob) {
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
@@ -992,8 +1165,21 @@ export async function performDarkRound(job: DeskJob) {
     select id from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
   `;
   if (!inv[0]) throw new Error("Investigation not found");
+  /*
+    The model this round is pinned to, and the paper's own time budgets.
+
+    `desk_jobs.model_choice` was written at the commit boundary by
+    `startDarkRound`, after a successful probe -- so by the time the queue
+    reaches here, Automatic has already been resolved to a concrete provider
+    and the round cannot change author on its own. `model_choice_source`
+    records whether it was Automatic that chose, which is the only case the
+    one-shot failover below is allowed to act on.
+  */
+  let choice = effectiveStoryModelChoice(job.model_choice);
+  const overrides = await readProviderOverrides(owned(context)).catch(() => ({}));
   const runRows = await sql<{ id: number }>`
-    insert into dark_runs (user_id, newsroom_id) values (${context.userId}, ${owned(context)}) returning id
+    insert into dark_runs (user_id, newsroom_id, model_choice)
+    values (${context.userId}, ${owned(context)}, ${choice}) returning id
   `;
   const runId = runRows[0]!.id;
   try {
@@ -1008,12 +1194,62 @@ export async function performDarkRound(job: DeskJob) {
     */
     const dials = await readDarkDials(owned(context));
     const budget = budgetFor(dials);
-    const loop = await researchLoop({
-      userId: context.userId,
-      investigationId: id,
-      hops: budget.hops,
-    });
-    const synth = await synthesizeSignals(context.userId, runId, id, "", dials);
+    const runOnce = async (on: EffectiveProviderChoice) => {
+      const ran = await researchLoop({
+        userId: context.userId,
+        investigationId: id,
+        hops: budget.hops,
+        choice: on,
+        providerOverrides: overrides,
+      });
+      const signals = await synthesizeSignals(
+        context.userId,
+        runId,
+        id,
+        "",
+        dials,
+        on,
+        overrides,
+      );
+      return { loop: ran, synth: signals };
+    };
+
+    let { loop, synth } = await runOnce(choice);
+
+    /*
+      One-shot Automatic failover, at the ROUND level.
+
+      Story and Scan both do this (see automatic-failover.ts and
+      scan-model-run.ts) and Dark Desk did not, because until 0.6.2 it had no
+      pinned model to fail over FROM. The trigger is deliberately narrow: only
+      a job Automatic chose for, only an error that reads as a lapsed login,
+      only a rung strictly later in the ladder, and only once. A refusal, a
+      timeout, or an empty answer is a real result and must not be papered
+      over with a second provider's opinion.
+
+      A hop's own planner failure surfaces in `loop.summary` ("Planner fell
+      back on 1 of 4 hops: ...") rather than as a thrown error, because the
+      loop keeps digging with the keyword heuristic when the model will not
+      answer. That text is checked too, so a round whose every hop was planned
+      by a signed-out provider is not recorded as a successful dig.
+    */
+    const failure = synth.error || (loop.plannerFailures > 0 ? loop.summary : "");
+    if (failure) {
+      const plan = await planAutomaticFailover({
+        source: job.model_choice_source ?? "editor",
+        current: job.model_choice,
+        error: failure,
+        probe: probeProvider,
+      });
+      if (plan) {
+        const previous = modelChoiceLabel(job.model_choice);
+        await setJobModelChoice(job.id, plan.next);
+        await setJobStage(job.id, `Switched to ${plan.label}: ${previous} sign-in lapsed`);
+        choice = plan.next;
+        ({ loop, synth } = await runOnce(choice));
+      }
+    }
+    await rememberLastModelChoice(id, choice);
     const names = (
       await sql<{ name: string }>`
         select e.name from investigation_entities ie
@@ -1038,7 +1274,8 @@ export async function performDarkRound(job: DeskJob) {
       .join("\n");
     await sql`
       update dark_runs
-      set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null}
+      set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null},
+          model_choice = ${choice}
       where id = ${runId} and newsroom_id = ${owned(context)}
     `;
     await audit(
@@ -1055,7 +1292,7 @@ export async function performDarkRound(job: DeskJob) {
       that otherwise dug successfully.
     */
     try {
-      await buildBrief(context.userId, owned(context), id);
+      await buildBrief(context.userId, owned(context), id, choice, overrides);
     } catch {
       /* the file is still readable without it */
     }
@@ -1136,7 +1373,8 @@ export const queueInvestigation = createServerFn({ method: "POST" })
     await ensureDarkSchema();
     const sql = await getSql();
     const inv = await sql<InvestigationRow>`
-      select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at
+      select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at,
+             last_model_choice
       from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
     `;
     if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
@@ -1348,7 +1586,13 @@ export const saveDarkDials = createServerFn({ method: "POST" })
  * — the four lists below it are the real content, and a missing summary must
  * never stop the file opening.
  */
-export async function buildBrief(userId: string, newsroomId: number, id: number) {
+export async function buildBrief(
+  userId: string,
+  newsroomId: number,
+  id: number,
+  choice?: EffectiveProviderChoice,
+  overrides?: ProviderOverrides | null,
+) {
   const sql = await getSql();
   const inv = await sql<{ title: string }>`
     select title from investigations where id = ${id} and newsroom_id = ${newsroomId} limit 1
@@ -1392,7 +1636,8 @@ export async function buildBrief(userId: string, newsroomId: number, id: number)
   });
 
   const ai = await grokChat(BRIEF_SYSTEM, pack.slice(0, 22000), 1200, {
-    timeoutMs: providerBudget().callMs,
+    timeoutMs: providerBudget(choice, overrides).callMs,
+    choice,
   });
   if (!ai?.ok) return { ok: false as const, error: "error" in ai ? ai.error : "no response" };
 
@@ -1408,11 +1653,81 @@ export async function buildBrief(userId: string, newsroomId: number, id: number)
   return { ok: true as const, brief };
 }
 
+/**
+ * The queued half of "write the brief". Same commit boundary as a round:
+ * probe the chosen model first, so a signed-out provider refuses before a
+ * job row or a rate entry exists.
+ */
+export async function startBriefJob(
+  context: { userId: string; newsroomId?: number },
+  id: number,
+  modelChoice: string = "auto",
+) {
+  const asked = storyModelChoice(modelChoice);
+  const probe = await probeProvider(asked);
+  const refusal = await darkPreflightRefusal(asked);
+  if (refusal) return refusal;
+  await ensureDarkSchema();
+  const effectiveChoice = probe.ok ? probe.choice : asked;
+
+  const open = await findOpenJob({ newsroomId: owned(context), kind: "brief", subjectId: id });
+  if (open) {
+    const persisted = effectiveStoryModelChoice(open.model_choice);
+    if (persisted !== effectiveChoice) {
+      return {
+        ok: false as const,
+        kind: "model-conflict" as const,
+        error: `A brief is already being written with ${modelChoiceLabel(persisted)}. Wait for it to finish before choosing another model.`,
+        modelChoice: persisted,
+        jobId: open.id,
+      };
+    }
+    return { ok: true as const, pending: true as const, jobId: open.id, modelChoice: persisted };
+  }
+
+  await assertRate(context.userId, "brief");
+  const job = await enqueueJob({
+    userId: context.userId,
+    newsroomId: owned(context),
+    kind: "brief",
+    subjectId: id,
+    modelChoice: effectiveChoice,
+    modelChoiceSource: asked === "auto" ? "auto" : "editor",
+  });
+  return {
+    ok: true as const,
+    pending: true as const,
+    jobId: job.id,
+    modelChoice: effectiveStoryModelChoice(job.model_choice),
+  };
+}
+
+/** What the queue runs for a `brief` job. */
+export async function performBriefWork(job: DeskJob) {
+  const newsroomId = job.newsroom_id;
+  const overrides = await readProviderOverrides(newsroomId).catch(() => ({}));
+  const result = await buildBrief(
+    job.user_id,
+    newsroomId,
+    job.subject_id,
+    effectiveStoryModelChoice(job.model_choice),
+    overrides,
+  );
+  /*
+    A brief that could not be written is a real failure of a job the editor
+    started and is watching, so it is thrown rather than swallowed. That is
+    the opposite of the best-effort call inside `performDarkRound`, where the
+    round's four lists are the content and a missing summary must never fail
+    a round that dug successfully.
+  */
+  if (!result.ok) throw new Error(result.error);
+}
+
 export const refreshBrief = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
-  .handler(async ({ context, data: id }) => {
-    await ensureDarkSchema();
-    await assertRate(context.userId, "brief");
-    return buildBrief(context.userId, owned(context), id);
-  });
+  .validator((input: number | { id: number; modelChoice?: string }) => input)
+  .handler(async ({ context, data }) =>
+    typeof data === "number"
+      ? startBriefJob(context, data)
+      : startBriefJob(context, data.id, data.modelChoice),
+  );

@@ -275,6 +275,26 @@ Start digging **moves** a card from To look at onto the desk. The card stays on 
 
 A research round is a short batch, then a stop. Remaining pages stay on the file. That stop is **not a failure** and not “too many leads.” Keep digging reads the next batch.
 
+### Which model digs
+
+Next to **Keep digging** there is a **Digging model** picker, the same one the
+queue and the workbench have: Automatic, Codex Terra, Codex Sol, Claude Opus.
+Automatic tries Claude Opus, then Codex Terra, and if the first one’s login has
+lapsed the round moves to the next. A model you name yourself never falls back
+— choosing one model is choosing not to run the others.
+
+The choice is checked before the round starts. If no model is ready, the desk
+says so and nothing is spent.
+
+A file remembers what it was last dug with, so Keep digging on a file that was
+started on Codex stays on Codex rather than quietly changing author halfway
+through an investigation. Change it whenever you like; the next round uses the
+new one. **What Dark Desk did** — the round history at the bottom of the page —
+names the model that dug each round.
+
+This arrived in 0.6.2. Before that, Dark Desk was the one screen with no
+picker: rounds ran on whatever the machine was configured for.
+
 ### The open file
 
 The reading list comes first.
@@ -465,6 +485,27 @@ this panel shows and what these buttons change.
 When a draft or a scan fails because a login has lapsed, the error itself now
 carries a **Sign in to Claude Code** / **Sign in to Codex** button: pressing it
 starts the sign-in and takes you straight to this panel with the link waiting.
+
+### How long a model may take
+
+Each model in this panel has a **Time per call** field: *how long the desk
+waits for one answer before giving up.* It shows a number of seconds and, next
+to it, the number this desk ships with, so a changed value reads as a decision
+rather than as the way it has always been. **Save** stores it; **Reset** — which
+only appears once you have stored something — puts the shipped number back.
+
+Owner only, like everything else on this page.
+
+Most people never touch it. The reason it exists: a model running on this same
+machine can take four minutes to read a long document pack, and the shipped
+ceiling of two and a half minutes would report that as a failure every time.
+If a provider keeps timing out on long reads and you know it is working, this
+is the number to raise. Anything between 10 seconds and 60 minutes; type
+something outside that and the field tells you the range rather than quietly
+picking a different number for you.
+
+Raising it does not make a model slower or faster. It only changes how long
+the desk is willing to wait.
 
 ---
 

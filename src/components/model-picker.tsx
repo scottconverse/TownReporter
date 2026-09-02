@@ -1,7 +1,9 @@
 import {
+  DARK_MODEL_CHOICES,
   OPINION_MODEL_CHOICES,
   STORY_MODEL_CHOICES,
   modelChoiceHelp,
+  type DarkModelChoice,
   type OpinionModelChoice,
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
@@ -21,18 +23,36 @@ type Props =
       onChange: (value: OpinionModelChoice) => void;
       disabled?: boolean;
       compact?: boolean;
+    }
+  | {
+      /**
+       * Dark Desk (0.6.2). The same component, because "which model does
+       * this" should look and behave identically wherever the desk spends --
+       * and because a fourth hand-written picker is a fourth place to forget
+       * a provider.
+       */
+      scope: "dark";
+      value: DarkModelChoice;
+      onChange: (value: DarkModelChoice) => void;
+      disabled?: boolean;
+      compact?: boolean;
     };
 
 export function ModelPicker(props: Props) {
-  const options = props.scope === "opinion" ? OPINION_MODEL_CHOICES : STORY_MODEL_CHOICES;
+  const options =
+    props.scope === "opinion"
+      ? OPINION_MODEL_CHOICES
+      : props.scope === "dark"
+        ? DARK_MODEL_CHOICES
+        : STORY_MODEL_CHOICES;
   const selected = options.find((option) => option.value === props.value) ?? options[0];
   const helpId = useId();
   const selectId = useId();
-  const help = modelChoiceHelp(selected.value, props.scope === "opinion" ? "opinion" : "story");
+  const help = modelChoiceHelp(selected.value, props.scope ?? "story");
   return (
     <div className={props.compact ? "model-picker compact" : "model-picker"}>
       <label htmlFor={selectId} className="model-picker-label">
-        Writing model
+        {props.scope === "dark" ? "Digging model" : "Writing model"}
       </label>
       <select
         id={selectId}
