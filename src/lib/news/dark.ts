@@ -653,8 +653,15 @@ async function synthesizeSignals(
     select kind, summary from anomalies
     where investigation_id = ${investigationId} order by id desc limit 10
   `;
-  const leads = await sql<{ headline: string; why: string; topic: string; status: string }>`
-    select headline, why, topic, status from leads where newsroom_id = ${DEFAULT_NEWSROOM_ID} order by created_at desc limit 8
+  const leads = await sql<{
+    headline: string;
+    why: string;
+    topic: string;
+    status: string;
+    resurfaced_count: number;
+  }>`
+    select headline, why, topic, status, resurfaced_count from leads
+    where newsroom_id = ${DEFAULT_NEWSROOM_ID} order by created_at desc limit 8
   `;
   const articles = await sql<Pick<ArticleRow, "headline" | "topic" | "published_at">>`
     select headline, topic, published_at from articles
@@ -677,7 +684,12 @@ async function synthesizeSignals(
     `HYPOTHESES:\n${hyps.map((h) => `[${h.status}] ${h.body}`).join("\n") || "(none)"}`,
     `ANOMALIES:\n${anoms.map((a) => `${a.kind}: ${a.summary}`).join("\n") || "(none)"}`,
     `ARTIFACTS:\n${arts.map((s) => `### ${s.title}\n${s.url}\n${s.full_text.slice(0, 1600)}`).join("\n\n") || "(none)"}`,
-    `OPEN LEADS:\n${leads.map((l) => `${l.status} ${l.topic}: ${l.headline}`).join("\n") || "(none)"}`,
+    `OPEN LEADS:\n${leads
+      .map((l) => {
+        const resurfaced = l.status === "killed" && l.resurfaced_count > 0 ? ` (killed, resurfaced ×${l.resurfaced_count})` : "";
+        return `${l.status} ${l.topic}: ${l.headline}${resurfaced}`;
+      })
+      .join("\n") || "(none)"}`,
     `PUBLISHED:\n${articles.map((a) => `${a.topic}: ${a.headline}`).join("\n") || "(none)"}`,
     `BEAT MEMORY:\n${memory.map((m) => `${m.entity}: ${m.last_angle}`).join("\n") || "(none)"}`,
     paste ? `EDITOR PASTE:\n${paste.slice(0, 8000)}` : "EDITOR PASTE: (none)",

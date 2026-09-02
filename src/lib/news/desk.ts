@@ -38,7 +38,9 @@ import {
   toggleTodo,
 } from "./notes";
 import { provenanceFromUrls } from "./findings";
-import { buildScanUserMessage, composeZeroLeadSummary, kindFromSourceUrl } from "./desk-copy";
+import { buildScanUserMessage, composeZeroLeadSummary, kindFromSourceUrl, resurfacedSummarySentence } from "./desk-copy";
+import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
+import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
 import {
   enqueueJob,
   findOpenJob,
@@ -189,7 +191,8 @@ export const listLeads = createServerFn({ method: "GET" })
     const sql = await getSql();
     return sql<LeadRow & { article_slug: string | null; investigation_id: number | null }>`
       select l.id, l.headline, l.why, l.topic, l.status, l.source_urls, l.evidence,
-             l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug
+             l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
+             l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id
       from leads l
       left join articles a on a.lead_id = l.id and a.status = 'published'
       where l.newsroom_id = ${owned(context)}
@@ -586,24 +589,33 @@ export async function performScanWork(job: DeskJob) {
     }
   }
 
-  let leadsCreated = 0;
-  for (const lead of data.leads) {
-    if (!lead.headline?.trim()) continue;
-    const urls = JSON.stringify(sanitizePublicUrls(lead.source_urls));
-    await sql`
-        insert into leads (user_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, status)
-        values (
-          ${context.userId}, ${runId}, ${lead.headline.slice(0, 180)},
-          ${String(lead.why ?? "").slice(0, 800)},
-          ${String(lead.topic ?? "council").slice(0, 40)},
-          ${urls},
-          ${String(lead.evidence ?? "").slice(0, 2000)},
-          ${Number(lead.newsworthiness) || 0},
-          'new'
-        )
-      `;
-    leadsCreated += 1;
-  }
+  // Loaded once, not fed to the AI: matching happens in code (findMatchingLead)
+  // so a killed lead that resurfaces gets stamped instead of refiled without
+  // spending a single extra token. Never 'published' -- a fresh development
+  // on a published story is real news and should file as a new lead.
+  const existingLeadsRaw = await sql<{ id: number; status: string; headline: string; source_urls: string; created_at: string }>`
+      select id, status, headline, source_urls, created_at
+      from leads
+      where newsroom_id = ${owned(context)}
+        and status <> 'published'
+        and created_at >= now() - (${MATCH_LOOKBACK_DAYS} || ' days')::interval
+    `;
+  const existingLeads: MatchCandidateLead[] = existingLeadsRaw.map((l) => ({
+    id: l.id,
+    status: l.status,
+    headline: l.headline,
+    source_urls: parseLeadSourceUrls(l.source_urls),
+    created_at: l.created_at,
+  }));
+
+  const { leadsCreated, resurfacedKilled, resurfacedOpen } = await fileScanLeads(
+    sql,
+    context,
+    owned(context),
+    runId,
+    data.leads,
+    existingLeads,
+  );
 
   let proposed = 0;
   for (const p of data.proposed_sources) {
@@ -629,6 +641,10 @@ export async function performScanWork(job: DeskJob) {
       fetched: fetchedCount,
       changed: pendingHashes.filter((p) => p.changed).length,
     });
+  }
+  const resurfacedSentence = resurfacedSummarySentence({ resurfacedKilled, resurfacedOpen });
+  if (resurfacedSentence) {
+    summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;
   }
   await sql`
       update scan_runs

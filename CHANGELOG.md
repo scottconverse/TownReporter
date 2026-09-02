@@ -2,6 +2,28 @@
 
 Current release: **0.6.0**.
 
+## 0.6.1 — 2026-09-02
+
+- **A killed lead the scanner finds again is stamped "seen again", not
+  refiled.** Every lead the scan AI returned used to be inserted as a brand
+  new row with no check against what was already on the desk, so a lead you
+  killed came back every scan and you killed it again, and again. A
+  deterministic code-side matcher — no AI call, no extra token cost — now
+  checks each AI-returned lead against everything on the desk from the last
+  60 days (matching on a shared source URL plus headline overlap, or on very
+  close headlines alone when the source differs) before filing it. A match
+  against a killed lead stamps that row's resurfaced count and date instead
+  of inserting a duplicate; the Killed tab shows a plain **seen again ×N**
+  badge and sorts what keeps coming back to the top. A match against an open
+  lead (New, Held, Drafted) stamps the same way instead of duplicating it. A
+  story that already printed is never matched — a genuinely new development
+  on a published story still files as news. Nothing is ever hidden or
+  deleted: a killed lead keeps every field it had, **Back** still returns it
+  to New, and Dark Desk's context pack now marks a resurfaced killed lead
+  `(killed, resurfaced ×N)` so it stays visible there too. The Scan page's
+  result summary now says when this happened ("N leads matched stories you
+  already killed and were stamped, not refiled").
+
 ## 0.6.0 — 2026-09-02
 
 - **Sign in to a writing model from inside the desk.** The paper drafts through
