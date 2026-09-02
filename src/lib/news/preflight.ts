@@ -61,15 +61,34 @@ const PROVIDER_AUTH_GUIDANCE = {
     "Claude rejected ANTHROPIC_API_KEY. Update that key, or open Claude Code on this machine and sign in, then start this action again. Nothing was queued or spent.",
 } as const;
 
+/**
+ * The provider said the login is gone. Shared with the desk copy so a 401
+ * that arrives MID-RUN (the preflight passed, the token expired between the
+ * login check and the call) gets the same "sign in again" answer, not "click
+ * again". 2026-09-02: a live draft failed with "OAuth access token has
+ * expired" and the desk told the editor to retry.
+ */
+const PROVIDER_AUTH_RE =
+  /signed out|not logged|unauthorized|sign in|rejected.*credentials|credentials.*rejected|invalid.*(?:credential|api key)|oauth.*expired|(?:login|auth(?:entication)?|session).*expired|expired.*(?:oauth|login|auth(?:entication)?|session)|failed to authenticate|re-?authenticate|\b401\b/i;
+
+export function looksLikeProviderAuthFailure(detail: string | null | undefined): boolean {
+  return Boolean(detail) && PROVIDER_AUTH_RE.test(detail!);
+}
+
+/** Which login is the one that lapsed. */
+export type ProviderAuthTarget = "codex" | "anthropicKey" | "claude" | "unknown";
+
+export function providerAuthTarget(detail: string): ProviderAuthTarget {
+  if (/\bcodex\b/i.test(detail)) return "codex";
+  if (/ANTHROPIC_API_KEY|rejected.*credentials/i.test(detail)) return "anthropicKey";
+  if (/\bclaude(?:\s+code)?\b|\banthropic\b|oauth/i.test(detail)) return "claude";
+  return "unknown";
+}
+
 function providerAuthGuidance(detail: string): string {
-  if (/\bcodex\b/i.test(detail)) return PROVIDER_AUTH_GUIDANCE.codex;
-  if (/ANTHROPIC_API_KEY|rejected.*credentials/i.test(detail)) {
-    return PROVIDER_AUTH_GUIDANCE.anthropicKey;
-  }
-  if (/\bclaude(?:\s+code)?\b|\banthropic\b/i.test(detail)) {
-    return PROVIDER_AUTH_GUIDANCE.claude;
-  }
-  return GUIDANCE["provider-auth"];
+  const target = providerAuthTarget(detail);
+  if (target === "unknown") return GUIDANCE["provider-auth"];
+  return PROVIDER_AUTH_GUIDANCE[target];
 }
 
 /**
@@ -91,9 +110,7 @@ export function scanPreflight(probe: ProbeResult): Preflight {
       ? "codex-missing"
       : /CLI not found|claude-code|CLAUDE_CLI_PATH/i.test(detail)
         ? "cli-missing"
-        : /signed out|not logged|unauthorized|sign in|rejected.*credentials|credentials.*rejected|invalid.*(?:credential|api key)|oauth.*expired|(?:login|auth(?:entication)?|session).*expired|expired.*(?:oauth|login|auth(?:entication)?|session)/i.test(
-              detail,
-            )
+        : looksLikeProviderAuthFailure(detail)
           ? "provider-auth"
           : /not available|ANTHROPIC_API_KEY|LLM_BASE_URL|XAI_API_KEY/i.test(detail)
             ? "unconfigured"

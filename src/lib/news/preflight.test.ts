@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { scanPreflight } from "./preflight.ts";
+import { looksLikeProviderAuthFailure, providerAuthTarget, scanPreflight } from "./preflight.ts";
 
 /**
  * What a new editor meets when nothing is configured yet.
@@ -163,5 +163,28 @@ describe("scan preflight", () => {
     if (p.ok) return;
     assert.equal(p.kind, "unknown");
     assert.equal(p.retryable, false, "unknown is not assumed retryable");
+  });
+});
+
+describe("provider auth detection is shared with the desk copy", () => {
+  it("recognises the live 2026-09-02 expired-token error and names Claude", () => {
+    const live =
+      "Claude Code error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
+    assert.equal(looksLikeProviderAuthFailure(live), true);
+    assert.equal(providerAuthTarget(live), "claude");
+    const p = scanPreflight({ ok: false, error: live });
+    assert.equal(p.ok, false);
+    if (!p.ok) {
+      assert.equal(p.kind, "provider-auth");
+      assert.equal(p.retryable, false);
+      assert.match(p.guidance, /Claude Code needs you to sign in again/);
+    }
+  });
+
+  it("does not call an ordinary failure an auth failure", () => {
+    assert.equal(looksLikeProviderAuthFailure("Claude Code request timed out after 150s"), false);
+    assert.equal(looksLikeProviderAuthFailure("empty model response"), false);
+    assert.equal(looksLikeProviderAuthFailure(""), false);
+    assert.equal(looksLikeProviderAuthFailure(null), false);
   });
 });

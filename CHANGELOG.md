@@ -1,6 +1,19 @@
 # Changelog
 
-Current release: **0.5.9**.
+Current release: **0.5.10**.
+
+## 0.5.10 — 2026-09-02
+
+- **A lapsed login now says "sign in again", not "click again".** The desk
+  checks that Claude Code is signed in before it starts a draft, but that check
+  reads the saved login; the token can expire between the check and the real
+  call. On the live desk that produced a 401 mid-draft and the screen said
+  "The writing model did not finish this draft. Click Draft with AI again." No
+  click fixes an expired login. Draft and Scan failures that carry a provider
+  auth error now say which login lapsed (Claude Code, Codex, or the API key),
+  that clicking again will fail the same way until it is renewed, and that a
+  claude.ai login in the browser is a separate login. The detection is shared
+  with the preflight so the two cannot drift.
 
 ## 0.5.9 — 2026-09-02
 

@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.5.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.9)** — 2 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.5.10](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.10)** — 2 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 **Documentation scope:** this checkout also documents the **unreleased model-picker
 and native Codex repair candidate**. Those features are not part of the tagged
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.5.10** — an expired Claude Code login is reported as "sign in again", never "click again".
 - **0.5.9** — Claude and Codex only: Zen MiMo and Local Qwen removed from the Story picker and the Automatic ladder.
 - **0.5.8** — Automatic drafts with your own signed-in Claude first, not a free rate-limited endpoint.
 - **0.5.7** — the editor picks the writing model per run, Codex drafts stories natively, Opinion is Claude only; the AI is finally told which city it works in.

@@ -484,3 +484,39 @@ describe("Worth a Look presentation", () => {
   });
 });
 
+
+describe("a lapsed provider login is a sign-in problem, not a retry", () => {
+  // 2026-09-02, live desk, job 41: preflight passed, the saved Claude token
+  // expired before the call, and the editor was told to click again.
+  const live =
+    "Claude Code error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
+
+  it("tells the editor to sign in to Claude Code, and names the browser login as separate", () => {
+    const msg = editorDraftError(live);
+    assert.ok(msg);
+    assert.match(msg!, /Claude Code on this machine needs you to sign in again/);
+    assert.match(msg!, /claude\.ai login in the browser is a separate login/);
+    assert.match(msg!, /Clicking again before that will fail the same way/);
+    assert.doesNotMatch(msg!, /did not finish/i);
+    assert.doesNotMatch(msg!, /Draft with AI again/);
+  });
+
+  it("does the same for a scan, in scan words", () => {
+    const msg = editorScanError(live);
+    assert.ok(msg);
+    assert.match(msg!, /sign in again/);
+    assert.match(msg!, /run the scan again/);
+    assert.doesNotMatch(msg!, /did not finish/i);
+  });
+
+  it("points at Codex when Codex is the one signed out", () => {
+    const msg = editorDraftError("Codex CLI: not logged in. Run codex login.");
+    assert.match(msg!, /Codex on this machine needs you to sign in again/);
+    assert.doesNotMatch(msg!, /claude\.ai/);
+  });
+
+  it("still calls a timeout a timeout even when the text mentions auth", () => {
+    const msg = editorDraftError("Claude Code request timed out after 150s, 0 bytes out — waiting for auth");
+    assert.match(msg!, /did not finish in time/i);
+  });
+});

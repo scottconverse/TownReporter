@@ -1,5 +1,7 @@
 /** Editor-facing copy. Does not change investigative behavior. */
 
+import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
+
 export function organizationFromUrl(url: string): string {
   try {
     const host = new URL(url).hostname.replace(/^www\./i, "").replace(/^assets\./i, "");
@@ -339,10 +341,37 @@ export function openLeads<T extends { status: string }>(leads: T[]): T[] {
   return leads.filter((l) => l.status !== "killed" && l.status !== "published");
 }
 
+/**
+ * The provider's login lapsed mid-run. Say which login, and say plainly that
+ * clicking again will not help until it is renewed.
+ *
+ * The desk checks "signed in?" before it starts, but that check reads the
+ * saved login; the token can be expired by the time the real call goes out.
+ * On 2026-09-02 that produced a 401 on a live draft and the editor was told
+ * "click Draft with AI again" -- the exact loop the preflight was built to
+ * prevent. The editor was also signed in to claude.ai in a browser and could
+ * not see why the desk disagreed; the copy names that difference.
+ */
+function providerSignInCopy(raw: string, again: string): string {
+  switch (providerAuthTarget(raw)) {
+    case "codex":
+      return `Codex on this machine needs you to sign in again — its saved login expired. Open Codex, sign in, then ${again}. Clicking again before that will fail the same way.`;
+    case "anthropicKey":
+      return `Claude rejected ANTHROPIC_API_KEY. Update that key (or sign in to Claude Code on this machine), then ${again}.`;
+    default:
+      return `Claude Code on this machine needs you to sign in again — its saved login expired. Open Claude Code, sign in, then ${again}. Clicking again before that will fail the same way. Your claude.ai login in the browser is a separate login and does not count here.`;
+  }
+}
+
 /** Workbench draft errors. Not scan copy, not Dark Desk “Keep digging”. */
 export function editorDraftError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  // Login first: a 401 also contains "API Error" and "Claude Code", and the
+  // generic branch below would turn it into "click again".
+  if (looksLikeProviderAuthFailure(t) && !/timed out|timeout/i.test(t)) {
+    return providerSignInCopy(t, "click Draft with AI");
+  }
   if (
     /timeout|timed out|aborted|network|failed to fetch|504|503|502|econnreset|socket hang up|unexpected server error/i.test(
       t,
@@ -392,6 +421,9 @@ export function editorDraftError(raw: string | null | undefined): string | null 
 export function editorScanError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  if (looksLikeProviderAuthFailure(t) && !/timed out|timeout/i.test(t)) {
+    return providerSignInCopy(t, "run the scan again");
+  }
   if (/timeout|timed out|network/i.test(t)) {
     return "The writing pass timed out after the sources were fetched. No new leads were filed. Run the scan again.";
   }
