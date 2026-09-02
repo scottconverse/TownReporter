@@ -2,6 +2,10 @@
 
 Current release: **0.6.0**.
 
+## 0.6.1 — 2026-09-02
+
+- Server page logs are readable in dark mode.
+
 ## 0.6.0 — 2026-09-02
 
 - **Sign in to a writing model from inside the desk.** The paper drafts through

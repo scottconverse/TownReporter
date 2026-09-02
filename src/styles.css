@@ -436,6 +436,7 @@
 /* Letterpress desk redesign (scoped) */
 
 .desk-ltr {
+  color-scheme: light;
   --bg: var(--color-paper);
   --bg2: var(--color-paper-2);
   --fg: var(--color-ink);
@@ -470,6 +471,7 @@
   outline-color: var(--fg);
 }
 .desk-ltr.night, .desk-ltr .nightpanel {
+  color-scheme: dark;
   --bg: var(--n-bg);
   --bg2: var(--n-bg2);
   --fg: var(--n-fg);

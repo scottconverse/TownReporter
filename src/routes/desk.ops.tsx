@@ -257,8 +257,10 @@ function OpsPage() {
               </h3>
               {l.error ? (
                 <p className="mt-1 text-sm text-muted">{l.error}</p>
+              ) : l.lines.length === 0 ? (
+                <p className="mt-1 text-sm text-muted">Nothing logged.</p>
               ) : (
-                <pre className="mt-1 max-h-56 overflow-auto border border-rule bg-paper-2 p-3 text-xs whitespace-pre-wrap">
+                <pre className="mt-1 max-h-56 overflow-auto border border-[var(--line)] bg-[var(--bg2)] p-3 text-xs whitespace-pre-wrap text-[var(--fg)]">
                   {l.lines.join("\n")}
                 </pre>
               )}
