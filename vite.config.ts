@@ -273,12 +273,16 @@ function stubServerOnlyOnClient(): Plugin {
   };
 }
 
-// `0.0.0.0:8080` is the live-preview contract — don't change host/port.
+// Port 8080 is the live-preview contract — don't change it.
+// Host defaults to 127.0.0.1 (this PC only); `npm run dev:lan` passes
+// --host 0.0.0.0 for phone/LAN testing. Keep this in sync with the
+// `dev`/`dev:lan` scripts in package.json — the CLI --host flag overrides
+// this value, but they should always agree.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
 export default defineConfig(({ command, isPreview }) => ({
   server: {
-    host: "0.0.0.0",
+    host: "127.0.0.1",
     port: 8080,
     strictPort: true,
     allowedHosts: true,

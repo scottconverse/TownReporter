@@ -2,6 +2,11 @@
 
 Current release: **0.5.12**.
 
+## 0.6.0 — 2026-09-02
+
+- `npm run dev` listens on this PC only by default; `npm run dev:lan` opens it
+  to your network.
+
 ## 0.5.12 — 2026-09-02
 
 - **Docs no longer name a fixed version in the "unreleased features" notice.**

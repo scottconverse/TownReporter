@@ -20,9 +20,11 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 
 Windows, macOS, and Linux all work.
 
-`npm run dev` always serves on `0.0.0.0:8080` — that port is hard-coded in
-`vite.config.ts` (`strictPort: true`) as the live-preview contract for the
-build tooling this repo was scaffolded with, and it does **not** read `PORT`.
+`npm run dev` serves on `127.0.0.1:8080` by default (this PC only) — that
+port is hard-coded in `vite.config.ts` (`strictPort: true`) as the
+live-preview contract for the build tooling this repo was scaffolded with,
+and it does **not** read `PORT`. Run `npm run dev:lan` to open it to your
+network (`0.0.0.0:8080`) for phone/LAN testing.
 The **built** server (`npm start`, `.output/server/index.mjs`) is the one that
 honours `PORT` (default `3000`) and `HOST` (default every interface — set
 `HOST=127.0.0.1` when a tunnel or reverse proxy fronts it).
