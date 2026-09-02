@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { runScanChatWithFailover } from "./scan-model-run.ts";
+import { runScanChatWithFailover, scanCallTimeoutMs } from "./scan-model-run.ts";
 
 const LIVE_401 =
   "Claude Code error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
@@ -26,7 +26,7 @@ describe("runScanChatWithFailover", () => {
       system: "SYSTEM PROMPT",
       user: "USER PAYLOAD",
       maxTokens: 3500,
-      timeoutMs: 90_000,
+      timeoutMs: () => 90_000,
       grokChat: async (system, user, _maxTokens, opts) => {
         grokCalls.push({ system, user, choice: opts?.choice });
         if (grokCalls.length === 1) return { ok: false as const, error: LIVE_401 };
@@ -75,7 +75,7 @@ describe("runScanChatWithFailover", () => {
       system: "S",
       user: "U",
       maxTokens: 3500,
-      timeoutMs: 90_000,
+      timeoutMs: () => 90_000,
       grokChat: async (_s, _u, _m, opts) => {
         grokCalls.push(opts?.choice);
         return { ok: false as const, error: LIVE_401 };
@@ -106,7 +106,7 @@ describe("runScanChatWithFailover", () => {
       system: "S",
       user: "U",
       maxTokens: 3500,
-      timeoutMs: 90_000,
+      timeoutMs: () => 90_000,
       grokChat: async (_s, _u, _m, opts) => {
         grokCalls.push(opts?.choice);
         return { ok: false as const, error: "The model refused: content policy." };
@@ -138,7 +138,7 @@ describe("runScanChatWithFailover", () => {
       system: "S",
       user: "U",
       maxTokens: 3500,
-      timeoutMs: 90_000,
+      timeoutMs: () => 90_000,
       grokChat: async (_s, _u, _m, opts) => {
         grokCalls.push(opts?.choice);
         return { ok: false as const, error: LIVE_401 };
@@ -154,5 +154,55 @@ describe("runScanChatWithFailover", () => {
 
     assert.equal(result.ok, false);
     assert.deepEqual(grokCalls, ["claude-frontier"], "must not retry when there is nowhere ready to retry on");
+  });
+});
+
+/*
+  2026-09-02 production timeout (desk_jobs 46 / scan_runs 5): 31 sources
+  fetched clean in ~35s, then the single AI read died at a flat 90s ceiling
+  even though the CLI providers -- the ones Story drafts budget 150s of
+  callMs for via providerBudget() -- routinely need more than 90s for a
+  full-payload read. scanCallTimeoutMs gives the scan the same per-provider
+  budget, floored at the old 90s so the configured-gateway path never gets
+  worse.
+*/
+describe("scanCallTimeoutMs", () => {
+  it("gives the CLI providers at least the 150s a draft call gets", () => {
+    assert.ok(scanCallTimeoutMs("claude-frontier") >= 150_000);
+    assert.ok(scanCallTimeoutMs("codex-balanced") >= 150_000);
+  });
+
+  it("floors the configured gateway at the old 90s flat timeout", () => {
+    assert.ok(scanCallTimeoutMs("configured") >= 90_000);
+  });
+});
+
+describe("runScanChatWithFailover per-attempt timeout", () => {
+  it("recomputes the timeout for the rung a mid-run failover actually lands on", async () => {
+    const seenTimeouts: number[] = [];
+
+    const result = await runScanChatWithFailover({
+      job: { id: 99, model_choice: "claude-frontier", model_choice_source: "auto" },
+      system: "S",
+      user: "U",
+      maxTokens: 3500,
+      timeoutMs: scanCallTimeoutMs,
+      grokChat: async (_s, _u, _m, opts) => {
+        seenTimeouts.push(opts!.timeoutMs!);
+        if (seenTimeouts.length === 1) return { ok: false as const, error: LIVE_401 };
+        return { ok: true as const, text: '{"leads":[]}' };
+      },
+      probe: async () => ({ ok: true as const, label: "Codex Terra", choice: "codex-balanced" as const }),
+      setModelChoice: async () => undefined,
+      setStage: async () => undefined,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(seenTimeouts.length, 2);
+    // Both rungs here are CLI providers, so both attempts should get the
+    // same >=150s budget -- computed fresh per attempt, on the rung that
+    // attempt actually runs on, not carried over from the first.
+    assert.ok(seenTimeouts[0]! >= 150_000);
+    assert.ok(seenTimeouts[1]! >= 150_000);
   });
 });

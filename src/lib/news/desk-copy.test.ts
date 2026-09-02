@@ -281,6 +281,23 @@ describe("Worth a Look presentation", () => {
     assert.doesNotMatch(msg, /Keep digging/);
   });
 
+  it("names how long the desk actually waited when the provider reports it", () => {
+    const msg = editorScanError("Claude Code request timed out after 150s, 0 bytes out");
+    assert.ok(msg);
+    assert.match(msg, /writing pass timed out after 150s/i);
+    assert.match(msg, /no new leads/i);
+    assert.doesNotMatch(msg, /Claude Code/);
+  });
+
+  it("falls back to the sourceless sentence when no duration is reported", () => {
+    const msg = editorScanError("xAI request timed out");
+    assert.ok(msg);
+    assert.equal(
+      msg,
+      "The writing pass timed out after the sources were fetched. No new leads were filed. Run the scan again.",
+    );
+  });
+
   it("translates a draft timeout into editor English, not Dark Desk copy", () => {
     const msg = editorDraftError("xAI request timed out");
     assert.ok(msg);

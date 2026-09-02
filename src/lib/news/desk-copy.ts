@@ -425,7 +425,15 @@ export function editorScanError(raw: string | null | undefined): string | null {
     return providerSignInCopy(t, "run the scan again");
   }
   if (/timeout|timed out|network/i.test(t)) {
-    return "The writing pass timed out after the sources were fetched. No new leads were filed. Run the scan again.";
+    // Providers report their own wait in the error text, e.g. "Claude Code
+    // request timed out after 90s, 0 bytes out" -- surface that number so
+    // the editor sees how long the desk actually waited, not just that it
+    // gave up. Falls back to the old sourceless sentence when a provider
+    // (or the network layer) doesn't report a duration.
+    const seconds = t.match(/after (\d+)\s*s\b/i)?.[1];
+    return seconds
+      ? `The writing pass timed out after ${seconds}s, after the sources were fetched. No new leads were filed. Run the scan again.`
+      : "The writing pass timed out after the sources were fetched. No new leads were filed. Run the scan again.";
   }
   if (
     /403/.test(t) ||
