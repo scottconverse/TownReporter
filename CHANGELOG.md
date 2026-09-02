@@ -4,6 +4,13 @@ Current release: **0.6.0**.
 
 ## 0.6.1 — 2026-09-02
 
+- **Dark Desk and Opinion now say "sign in again" when a login lapses.** A
+  mid-round 401 on Dark Desk used to fall into the generic "the writing model
+  did not finish this round" copy and tell the editor to click Keep digging —
+  a retry that cannot succeed until the login is renewed. Opinion showed the
+  provider's raw error text with no guidance at all. Both now recognize a
+  lapsed provider login and show the same "sign in again" sentence, with the
+  Sign in button next to it, instead of "Keep digging" or a raw error.
 - **Scan gets the same per-run writing-model picker Story has.** Scan used to
   call the model with no choice at all, so it always rode the configured-provider
   chain (gateway → API key → Claude Code) with no picker and no way to switch

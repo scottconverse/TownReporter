@@ -14,7 +14,8 @@ test("Opinion mutation feedback keeps separate always-mounted error and status r
   assert.match(route, /role="status"[\s\S]{0,120}aria-live="polite"/);
   assert.match(route, /notice\?\.kind === "error" \? notice\.text : ""/);
   assert.match(route, /notice && notice\.kind !== "error" \? notice\.text : ""/);
-  assert.match(route, /setError\(res\?\.error \?\? "That did not start\."\)/);
+  assert.match(route, /const raw = res\?\.error \?\? "That did not start\."/);
+  assert.match(route, /setError\(editorDraftError\(raw\) \?\? raw, raw\)/);
   assert.match(route, /setSuccess\("On the paper\./);
 });
 

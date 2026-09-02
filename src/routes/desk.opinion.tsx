@@ -20,11 +20,13 @@ import {
   publishEditorial,
   startEditorial,
 } from "@/lib/news/opinion";
-import { stalledRunCopy } from "@/lib/news/desk-copy";
+import { editorDraftError, stalledRunCopy } from "@/lib/news/desk-copy";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { ModelPicker } from "@/components/model-picker";
 import type { OpinionModelChoice } from "@/lib/news/model-choice";
+import { ProviderSignInButton } from "@/components/provider-signin-button";
+import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 import {
   editorialAttribution,
   editorialRemovalCopy,
@@ -68,8 +70,11 @@ function OpinionPage() {
   const [notice, setNotice] = useState<{
     text: string;
     kind: "info" | "success" | "error";
+    /** The provider's raw error, kept only so the sign-in button can read it. */
+    authDetail?: string | null;
   } | null>(null);
-  const setError = (text: string) => setNotice({ text, kind: "error" });
+  const setError = (text: string, authDetail?: string | null) =>
+    setNotice({ text, kind: "error", authDetail });
   const setSuccess = (text: string) => setNotice({ text, kind: "success" });
   const setInfo = (text: string) => setNotice({ text, kind: "info" });
   /*
@@ -160,7 +165,8 @@ function OpinionPage() {
     mutationFn: () => startEditorial({ data: { subject, askedFor, modelChoice } }),
     onSuccess: (res) => {
       if (!res?.ok) {
-        setError(res?.error ?? "That did not start.");
+        const raw = res?.error ?? "That did not start.";
+        setError(editorDraftError(raw) ?? raw, raw);
         return;
       }
       setSubject("");
@@ -168,7 +174,10 @@ function OpinionPage() {
       setInfo("Writing. It fetches its own records first, so give it 10–40 minutes.");
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
-    onError: (err) => setError(err instanceof Error ? err.message : "That did not start."),
+    onError: (err) => {
+      const raw = err instanceof Error ? err.message : "That did not start.";
+      setError(editorDraftError(raw) ?? raw, raw);
+    },
   });
 
   /*
@@ -326,6 +335,9 @@ function OpinionPage() {
               className="text-sm text-rust"
             >
               {notice?.kind === "error" ? notice.text : ""}
+              {notice?.kind === "error" && looksLikeProviderAuthFailure(notice.authDetail) ? (
+                <ProviderSignInButton detail={notice.authDetail} />
+              ) : null}
             </span>
             <span
               role="status"
@@ -511,7 +523,14 @@ function OpinionPage() {
                     <Busy label="Reading the records before it writes a word" />
                   </div>
                 ) : null}
-                {r.error ? <p className="mt-1 text-sm text-rust">{r.error}</p> : null}
+                {r.error ? (
+                  <p className="mt-1 text-sm text-rust">
+                    {editorDraftError(r.error) ?? r.error}
+                    {looksLikeProviderAuthFailure(r.error) ? (
+                      <ProviderSignInButton detail={r.error} />
+                    ) : null}
+                  </p>
+                ) : null}
                 {confirmId === r.id ? (
                   <p className="mt-1 text-sm text-rust">
                     {editorialRemovalCopy(Boolean(r.draft_id), Boolean(r.published_slug))}
