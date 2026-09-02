@@ -122,6 +122,13 @@ export function editorStatus(status: string): string {
 export function editorError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  // Login first: a mid-round 401 also matches the "writing model did not
+  // finish" branch below (it contains "Claude Code" and "API Error"), which
+  // used to send the editor back into "Click Keep digging to continue" — the
+  // exact retry loop that cannot succeed until the login is renewed.
+  if (looksLikeProviderAuthFailure(t) && !/timed out|timeout/i.test(t)) {
+    return providerSignInCopy(t, "click Keep digging");
+  }
   if (/setCookie|Cannot destructure/i.test(t)) {
     return "Sign-in hiccup on that click — you are still signed in. Click Start digging again.";
   }

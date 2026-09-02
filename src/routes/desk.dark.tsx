@@ -45,6 +45,8 @@ import {
 } from "@/components/investigation-brief";
 import { readableCapture } from "@/lib/news/html-text";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
+import { ProviderSignInButton } from "@/components/provider-signin-button";
+import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 
 export const Route = createFileRoute("/desk/dark")({
   component: DarkPage,
@@ -618,7 +620,14 @@ function DarkPage() {
               {(runs.data ?? []).map((r) => (
                 <div key={r.id} className="run-row">
                   <p className="meta">{formatDateTime(r.started_at)}</p>
-                  {r.error ? <p className="side-item">{editorError(r.error)}</p> : null}
+                  {r.error ? (
+                    <p className="side-item">
+                      {editorError(r.error)}
+                      {looksLikeProviderAuthFailure(r.error) ? (
+                        <ProviderSignInButton detail={r.error} />
+                      ) : null}
+                    </p>
+                  ) : null}
                   {r.summary ? (
                     <p className="side-item">{plainEditorText(r.summary)}</p>
                   ) : null}
@@ -858,6 +867,9 @@ function InvestigationWorkspace({
       {inv?.status === "paused" && pauseText && !digging ? (
         <p className="of-stop">
           <b>Why it stopped:</b> {pauseText}
+          {looksLikeProviderAuthFailure(inv?.pause_reason) ? (
+            <ProviderSignInButton detail={inv?.pause_reason} />
+          ) : null}
         </p>
       ) : null}
 

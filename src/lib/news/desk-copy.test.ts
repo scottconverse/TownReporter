@@ -519,4 +519,18 @@ describe("a lapsed provider login is a sign-in problem, not a retry", () => {
     const msg = editorDraftError("Claude Code request timed out after 150s, 0 bytes out — waiting for auth");
     assert.match(msg!, /did not finish in time/i);
   });
+
+  it("does the same for a mid-round Dark Desk failure, not 'Keep digging'", () => {
+    const msg = editorError(live);
+    assert.ok(msg);
+    assert.match(msg!, /sign in again/);
+    assert.doesNotMatch(msg!, /Keep digging to continue/);
+  });
+
+  it("still calls a Dark Desk timeout a timeout even when the text mentions auth", () => {
+    const msg = editorError("Claude Code request timed out after 150s, 0 bytes out — waiting for auth");
+    assert.ok(msg);
+    assert.match(msg!, /timed out|timeout/i);
+    assert.doesNotMatch(msg!, /sign in again/);
+  });
 });
