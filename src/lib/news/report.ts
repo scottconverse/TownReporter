@@ -1028,13 +1028,17 @@ function buildLaneQueries(
   return allocateLaneQueries(candidates, budget);
 }
 
-export function briefChallengeQuery(lead: LeadRow, research: ResearchJson | null): string {
+export function briefChallengeQuery(
+  lead: LeadRow,
+  research: ResearchJson | null,
+  city: string = PAPER.city,
+): string {
   const contradiction = stringsFrom(research?.lanes?.contradiction)[0];
   if (contradiction) return contradiction;
   const context = stringsFrom(research?.lanes?.context)[0];
   if (context) return context;
   const news = research?.news || research?.angle || lead.headline;
-  return `${news} prior delay cost contract Longmont`;
+  return `${news} prior delay cost contract ${city}`;
 }
 
 /** Cheap check that a brief candidate is actually a bigger story. False negatives stay briefs. */
@@ -1234,7 +1238,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
   await take(sanitizePublicUrls(research?.fetch_urls), 4);
 
   if (form === "brief" && canFollow()) {
-    const challengeQ = briefChallengeQuery(opts.lead, research);
+    const challengeQ = briefChallengeQuery(opts.lead, research, paper.city);
     try {
       const hits = await search(challengeQ);
       const challengeUrls = hits

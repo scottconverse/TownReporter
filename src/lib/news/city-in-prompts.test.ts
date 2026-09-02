@@ -3,9 +3,11 @@ import { describe, it } from "node:test";
 import {
   REPORT_RESEARCH_SYSTEM,
   REPORT_WRITE_SYSTEM,
+  briefChallengeQuery,
   reportResearchSystem,
   reportWriteSystem,
 } from "./report.ts";
+import { SCAN_SYSTEM, scanSystem } from "./ai.ts";
 import { NEWSROOM_NOTE, buildEditorialPack, buildWritingPack, newsroomNote } from "./editorial.ts";
 
 /*
@@ -24,6 +26,20 @@ describe("the writing prompts name the configured paper, not Longmont", () => {
       assert.doesNotMatch(prompt, /Longmont/, "a configured city must not be told it is Longmont");
       assert.doesNotMatch(prompt, /Times-Call|Daily Camera|Longmont Leader/);
     }
+  });
+
+  it("the scan prompt names the configured paper too -- the confirmation walk caught it one pipeline over", () => {
+    const prompt = scanSystem(ASHGROVE);
+    assert.match(prompt, /Ashgrove Gazette, a Ashgrove, Oregon newspaper/);
+    assert.doesNotMatch(prompt, /Longmont/);
+    assert.match(SCAN_SYSTEM, /TownReporter, a Longmont, Colorado newspaper/);
+  });
+
+  it("the brief challenge query falls back to the configured city, not Longmont", () => {
+    const lead = { headline: "Water plant contract" } as Parameters<typeof briefChallengeQuery>[0];
+    assert.match(briefChallengeQuery(lead, null, "Ashgrove"), /Ashgrove$/);
+    assert.doesNotMatch(briefChallengeQuery(lead, null, "Ashgrove"), /Longmont/);
+    assert.match(briefChallengeQuery(lead, null), /Longmont$/);
   });
 
   it("the shipped defaults are still the Longmont prompts, unchanged in meaning", () => {

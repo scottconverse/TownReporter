@@ -7,7 +7,7 @@ import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
 import { assertRate, audit } from "./ops";
-import { SCAN_SYSTEM, grokChat, parseJsonBlock, probeProvider } from "./ai";
+import { scanSystem, grokChat, parseJsonBlock, probeProvider } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
 import { stripReporterNotebook } from "./strip-draft";
 import {
@@ -542,7 +542,12 @@ export async function performScanWork(job: DeskJob) {
     payload,
   });
 
-  const ai = await grokChat(SCAN_SYSTEM, userMsg, 3500, { timeoutMs: 90_000 });
+  const ai = await grokChat(
+    scanSystem({ name: paperConfig.name, city: paperConfig.city, state: paperConfig.state }),
+    userMsg,
+    3500,
+    { timeoutMs: 90_000 },
+  );
   if (!ai.ok) {
     await sql`
         update scan_runs
