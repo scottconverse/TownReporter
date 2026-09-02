@@ -6,6 +6,12 @@ node_modules/
 !.env.example
 logs/
 .output/
+
+# ops/stage.ps1 run state -- machine-local, never the deliverable.
+ops/.stage.pid
+ops/.stage.json
+ops/stage.out.log
+ops/stage.err.log
 .vercel/
 .tanstack/
 .node_modules.lock

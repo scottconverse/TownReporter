@@ -318,3 +318,32 @@ test("a non-owner install refuses the tunnel restart server-side, not just in th
   );
 });
 
+/**
+ * ops/stage.ps1 is the pre-promote check: it restores a real production
+ * backup into townreporter_dev and serves the new build locally so the
+ * changed screens get walked before anything is promoted. It is covered by
+ * the generic ASCII/parse/Stop-Process/CIM checks above (they iterate every
+ * ops/*.ps1 file), but its existence and its never-touch-port-3000 /
+ * never-touch-townreporter guarantees are load-bearing enough to name
+ * directly rather than rely only on the generic loop.
+ */
+test("ops/stage.ps1 exists, stays ASCII, and never names port 3000 or the townreporter database", () => {
+  const path = join(OPS, "stage.ps1");
+  assert.ok(existsSync(path), "ops/stage.ps1 is missing");
+  const text = readFileSync(path, "utf8");
+  const bad = [...text].filter((c) => c.charCodeAt(0) > 127);
+  assert.equal(
+    bad.length,
+    0,
+    `ops/stage.ps1 has ${bad.length} non-ASCII character(s) (e.g. ${JSON.stringify(bad.slice(0, 3).join(""))}) -- PS 5.1 will mangle them`,
+  );
+  assert.match(text, /townreporter_dev/, "ops/stage.ps1 must name townreporter_dev as its target database");
+  assert.doesNotMatch(
+    text,
+    /-d\s+townreporter\b(?!_dev)/,
+    "ops/stage.ps1 must never pass -d townreporter (the live paper's database) to psql",
+  );
+  assert.match(text, /Port -eq 3000/, "ops/stage.ps1 must refuse -Port 3000, the live paper's port");
+  assert.doesNotMatch(text, /Stop-Process\s+-Name/i, "ops/stage.ps1 must not stop a process by image name");
+});
+

@@ -269,6 +269,10 @@ nothing — deliberate, so an unconfigured box cannot be poked into working.
 the page answering 200 while its scripts and editor controls fail. This applies
 even when no database migration is needed.
 
+**Stage first:** `ops\stage.ps1` in the dev checkout runs the new build
+against a copy of real production data and serves it locally so the changed
+screens can be walked before anything is promoted. See `docs/staging.md`.
+
 1. Make and verify changes in
    `C:\Users\scott\Desktop\Code\townreporter-dev`, with the development or a
    disposable database. Before building there, confirm no process is serving
