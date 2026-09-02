@@ -610,7 +610,7 @@
         >
         <div class="nav-links">
           <a href="#shots">Screenshots</a>
-          <a href="#new">New in 0.5.6</a>
+          <a href="#new">New in 0.5.7</a>
           <a href="#idea">The idea</a>
           <a href="#rooms">Two rooms</a>
           <a href="#how">How it works</a>
@@ -622,7 +622,7 @@
           <summary aria-label="Menu">Menu</summary>
           <div class="menu-panel">
             <a href="#shots">Screenshots</a>
-            <a href="#new">New in 0.5.6</a>
+            <a href="#new">New in 0.5.7</a>
             <a href="#idea">The idea</a>
             <a href="#rooms">Two rooms</a>
             <a href="#how">How it works</a>
@@ -646,9 +646,8 @@
               or doesn’t add up. A human still decides what prints.
             </p>
             <p class="cap">
-              Released baseline: <b>0.5.6</b>. The model picker and restored native Codex path
-              described here are in the <b>unreleased candidate</b>, not on the live paper until an
-              approved promotion.
+              Current release: <b>0.5.7</b>, the build the live paper runs. Everything described
+              here is on it.
             </p>
             <div class="cta-row">
               <a class="btn" href="#start">Run it yourself</a>
@@ -784,70 +783,37 @@
       </section>
 
       <section id="new" class="wrap">
-        <p class="eyebrow">New in 0.5.6</p>
-        <h2>A real first run for any city, with the newsroom&rsquo;s edges tested</h2>
+        <p class="eyebrow">New in 0.5.7</p>
+        <h2>The editor picks the writing model, and the AI knows which city it works in</h2>
         <div class="grid-3">
           <div class="panel">
-            <h3>Set up your own paper</h3>
-            <p class="cap" style="margin: 0 0 10px">No file edits, no rebuild</p>
+            <h3>Pick the model per run</h3>
+            <p class="cap" style="margin: 0 0 10px">Queue and workbench</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              The first owner names the paper and city, chooses its timezone, contact links, watch
-              list, meeting-video channels and title keywords in one screen. The same controls
-              remain on the Server page for later changes.
+              Every Story draft offers Automatic, Local Qwen, Zen MiMo, Codex Terra, Codex Sol or
+              Claude Opus. An explicit choice never switches provider behind your back, and the
+              provider that wrote the draft is recorded on the job.
             </p>
           </div>
           <div class="panel">
-            <h3>Nobody before setup</h3>
-            <p class="cap" style="margin: 0 0 10px">No other town&rsquo;s masthead</p>
+            <h3>Codex drafts stories natively</h3>
+            <p class="cap" style="margin: 0 0 10px">Opinion stays Claude</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              A fresh public site says only that it is not yet set up and shows no articles. Blank
-              optional fields stay blank. A new installation never leaks Longmont&rsquo;s name,
-              council link, contact, sources or video channels into another city.
+              Codex runs as the signed-in user with its full native capabilities. It is not offered
+              for editorials: its model declines to write a piece that takes a position, so the
+              Opinion picker is Claude only and says why.
             </p>
           </div>
           <div class="panel">
-            <h3>Meeting discovery follows you</h3>
-            <p class="cap" style="margin: 0 0 10px">Your channels, your vocabulary</p>
+            <h3>The AI knows its city</h3>
+            <p class="cap" style="margin: 0 0 10px">Caught by the release audit</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              YouTube cataloging and sister-tape transcript recovery now use the channels and
-              meeting phrases saved for this paper. A title like &ldquo;Zoning Appeals&rdquo; can
-              count even when it never says &ldquo;council.&rdquo;
-            </p>
-          </div>
-          <div class="panel">
-            <h3>Invite a second editor</h3>
-            <p class="cap" style="margin: 0 0 10px">Do not share the owner login</p>
-            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              The owner creates a one-time link on the Server page for one email address. It expires
-              in seven days, burns on use and opens an editor seat without handing over owner-only
-              controls.
-            </p>
-          </div>
-          <div class="panel">
-            <h3>Two-editor races are tested</h3>
-            <p class="cap" style="margin: 0 0 10px">One story, two real browsers</p>
-            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              Delete-under-edit, double-save and simultaneous publish all run in CI against real
-              Postgres. Saves remain whole, and two editors pressing Publish produce one printed
-              article.
-            </p>
-          </div>
-          <div class="panel">
-            <h3>Safer updates</h3>
-            <p class="cap" style="margin: 0 0 10px">The live server is never the build bench</p>
-            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              Verify the candidate in a separate development checkout first. Production promotion
-              takes a database backup, holds off the watchdog, stops the target server, then builds
-              and restarts it. It checks a served script as well as the page. A stale browser tab
-              recognizes a new version and heals itself.
+              Every writing and scanning prompt used to say &ldquo;Longmont, Colorado&rdquo; no
+              matter which paper ran it. Story, Scan, the follow-up searches and the Opinion desk
+              note now name the configured paper, city and state.
             </p>
           </div>
         </div>
-        <p class="cap" style="margin-top: 14px">
-          <a href="https://github.com/scottconverse/TownReporter/blob/main/CHANGELOG.md"
-            ><b>Full changelog</b></a
-          >
-        </p>
       </section>
 
       <section id="idea" class="wrap">

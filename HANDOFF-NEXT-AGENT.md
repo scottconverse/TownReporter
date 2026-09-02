@@ -1,6 +1,6 @@
 # TownReporter — complete handoff for a new agent
 
-Written 2026-08-31, end of the v0.5.6 release session. You are assumed to know
+Written 2026-08-31, refreshed 2026-09-02 after the v0.5.7 release. You are assumed to know
 nothing. Read this whole file before touching anything.
 
 ## What this project is
@@ -64,7 +64,7 @@ with full raw file paths.
 
 ## Current state (all verified tonight)
 
-- **v0.5.6 is LIVE.** townreporter.org serves it; the built version constant
+- **v0.5.7 is LIVE.** townreporter.org serves it; the built version constant
   and the served entry script were checked from the actual bytes, and 13
   published stories survived the promote.
 - Both checkouts are on the same commit, pushed, working trees clean (the
@@ -75,12 +75,24 @@ with full raw file paths.
 - Test suite: 664 tests, 0 failures (browser/integration tests need
   `TEST_POSTGRES_ADMIN_URL=postgres://postgres@127.0.0.1:5433/postgres`;
   without it they skip and the suite is ~633 running).
-- Tags/releases through v0.5.6 exist on GitHub with release notes.
+- Tags/releases through v0.5.7 exist on GitHub with release notes.
 - Watchdog re-enabled. Tunnel owned by production via `TOWNREPORTER_TUNNEL=1`
   in `townreporter-web\.env`.
 - Tonight's backup: `townreporter-backups\townreporter_2026-08-31_1521.sql`.
 
-## What v0.5.6 is (the session's work)
+## What v0.5.7 is (2026-09-02)
+
+The editor picks the writing model per run (Story: Automatic, Local Qwen, Zen
+MiMo, Codex Terra, Codex Sol, Claude Opus). Codex drafts stories natively as
+the signed-in user. Opinion is Claude only, because Codex's model refuses
+editorials that take a position -- provider policy, not a bug. Every writing
+and scanning prompt names the configured paper and city (two audits each
+caught a Longmont leak; both fixed, pinned by src/lib/news/city-in-prompts.test.ts).
+First-run setup no longer bounces back to a blank form. The dev checkout's
+`origin` remote that pointed at PRODUCTION is gone -- `github` is the only
+remote; never add one pointing at townreporter-web.
+
+## What v0.5.6 is
 
 CITY-SETUP: the paper's identity (name, city, state, timezone, tagline, watch
 list, video channels, meeting keywords, council link, editor email) moved from
@@ -128,8 +140,8 @@ blocking:
 
 ## Verification ledger
 
-VERIFIED: the app version constant reads 0.5.6 | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/version.ts:2
-VERIFIED: the changelog's current release line reads 0.5.6 | C:/Users/scott/Desktop/Code/townreporter-web/CHANGELOG.md:3
+VERIFIED: the app version constant reads 0.5.7 | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/version.ts:2
+VERIFIED: the changelog's current release line reads 0.5.7 | C:/Users/scott/Desktop/Code/townreporter-web/CHANGELOG.md:3
 VERIFIED: the shipped Longmont defaults live in the PAPER constant | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/paper.ts:1
 VERIFIED: nothing is seeded into a newsroom before setup completes | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/desk.ts:78
 VERIFIED: the tunnel is claimed per-install via TOWNREPORTER_TUNNEL | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/ops/health.server.ts:196
