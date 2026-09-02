@@ -54,6 +54,13 @@ export function LeadRowView({
         <p className="lead-why">{lead.why}</p>
         <p className="meta">
           {lead.topic} · {formatAge(lead.created_at)} · {leadOrigin(lead)}
+          {lead.resurfaced_count && lead.resurfaced_count > 0 ? (
+            <span className="chip seen-again">
+              {" "}
+              seen again ×{lead.resurfaced_count}
+              {lead.last_resurfaced_at ? ` · ${formatShortDate(lead.last_resurfaced_at)}` : ""}
+            </span>
+          ) : null}
           <span className="row-acts">
             <Link
               to="/desk/story/$leadId"

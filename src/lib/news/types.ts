@@ -23,6 +23,9 @@ export type LeadRow = {
   article_slug?: string | null;
   investigation_id?: number | null;
   notes_json?: string | null;
+  resurfaced_count?: number;
+  last_resurfaced_at?: string | null;
+  last_resurfaced_scan_run_id?: number | null;
 };
 
 export type DraftRow = {

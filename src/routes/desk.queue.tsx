@@ -129,9 +129,23 @@ function QueuePage() {
     killed: leads.filter((l) => l.status === "killed").length,
   };
   const printed = published.data ?? [];
-  const shown = (filter === "all" ? working : leads.filter((l) => l.status === filter)).sort(
-    (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0),
-  );
+  const shown =
+    filter === "killed"
+      ? // What keeps coming back belongs on top of the Killed tab -- that is
+        // the whole point of stamping a resurfaced lead instead of quietly
+        // hiding it. Leads never resurfaced (last_resurfaced_at null) sort
+        // after ones that have, oldest kill first within that group.
+        leads
+          .filter((l) => l.status === "killed")
+          .sort((a, b) => {
+            const at = a.last_resurfaced_at ? Date.parse(a.last_resurfaced_at) : -1;
+            const bt = b.last_resurfaced_at ? Date.parse(b.last_resurfaced_at) : -1;
+            if (at !== bt) return bt - at;
+            return b.id - a.id;
+          })
+      : (filter === "all" ? working : leads.filter((l) => l.status === filter)).sort(
+          (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0),
+        );
 
   return (
     <DeskShell title="The queue" kicker="Leads">

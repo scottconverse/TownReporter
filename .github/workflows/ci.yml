@@ -196,6 +196,8 @@ jobs:
         run: node scripts/search-index-proof.mjs
       - name: ensureDarkSchema survives a database rebuilt underneath the running process (ENG-104)
         run: node --experimental-strip-types --test src/lib/news/dark-schema-rebuild.test.ts
+      - name: A killed lead the scanner rediscovers is stamped, not refiled
+        run: node --experimental-strip-types --test src/lib/news/lead-resurface.e2e.test.ts
 
   # These two walks each need an UNCLAIMED desk: they create their own owner
   # at /login, and the first account in owns the newsroom.

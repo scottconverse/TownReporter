@@ -146,6 +146,24 @@ you to reload before retrying. Opinion also explains its required voice file.
 
 A meeting on the calendar is not automatically a story. A five-hour council tape is not automatically a story. Those are records. You decide if there is news.
 
+### Killed — "seen again"
+
+Killing a lead never deletes it and never hides it. If the scanner comes back
+across the same story — the same source with a reworded headline, or a
+different portal notice about the same thing — it does not refile a
+duplicate for you to kill twice. It stamps the existing killed row instead:
+a small **seen again ×N** badge appears on it, with the date it last came
+back, and the Killed tab sorts what keeps resurfacing to the top. This
+matching runs entirely in code against leads already on the desk — it never
+sends the AI a list of what you killed, so it costs nothing extra to scan.
+An open lead (New, Held, Drafted) that the scanner rematches gets the same
+badge instead of a duplicate row. A story that already **printed** is never
+matched this way — a fresh development on a published story is real news and
+always files as a new lead.
+
+Nothing about "seen again" changes what Kill does: the lead stays under
+Killed, and **Back** still returns it to New at any time, resurfaced or not.
+
 ---
 
 ## The workbench (`/desk/story/…`)

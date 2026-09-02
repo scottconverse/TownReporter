@@ -605,6 +605,27 @@ export function scanZeroWhy(input: {
   return "No sources were fetched.";
 }
 
+/**
+ * The one sentence appended to a scan run's editor summary when the code
+ * matcher (see `findMatchingLead` in `./lead-match.ts`) stamped leads
+ * instead of refiling them, so the Scan page's result block says so without
+ * a JSON/summary column dedicated to the counts (scan_runs has none).
+ */
+export function resurfacedSummarySentence(input: { resurfacedKilled: number; resurfacedOpen: number }): string {
+  const bits: string[] = [];
+  if (input.resurfacedKilled > 0) {
+    bits.push(
+      `${input.resurfacedKilled} lead${input.resurfacedKilled === 1 ? "" : "s"} matched ` +
+        `${input.resurfacedKilled === 1 ? "a story" : "stories"} you already killed and ` +
+        `${input.resurfacedKilled === 1 ? "was" : "were"} stamped, not refiled`,
+    );
+  }
+  if (input.resurfacedOpen > 0) {
+    bits.push(`${input.resurfacedOpen} matched ${input.resurfacedOpen === 1 ? "an open lead" : "open leads"}`);
+  }
+  return bits.length ? `${bits.join("; ")}.` : "";
+}
+
 export function composeZeroLeadSummary(input: { fetched: number; changed: number }): string {
   if (input.fetched <= 0) return "No sources were fetched.";
   const same = Math.max(0, input.fetched - input.changed);
