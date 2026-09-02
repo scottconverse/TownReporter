@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.5.6](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.6).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.5.7](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.7).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 **Candidate features:** the per-run model picker and native Codex repair below
 are unreleased; they are not on the tagged 0.5.6 live paper until promotion.

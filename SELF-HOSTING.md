@@ -4,14 +4,8 @@ Live at **https://townreporter.org**, served from a Node process on this
 machine through a Cloudflare Tunnel. No hosting bill, no ports open on the
 router.
 
-The live-deployment notes below record the established setup. Candidate-only
-behavior is called out separately; it is not a claim about the running release.
-
-**Deployment boundary (2026-09-01):** the production checkout is still the
-tagged **v0.5.6** build. The per-run model picker and restored native Codex path
-described as “after promotion” below are in the untagged development candidate;
-they are not live until that exact candidate is tagged and promoted. Keep this
-distinction when diagnosing the current paper.
+The live-deployment notes below record the established setup as of the
+tagged **v0.5.7** build, which is what the production checkout runs.
 
 ---
 
@@ -24,10 +18,9 @@ visitor -> Cloudflare edge -> tunnel -> 127.0.0.1:3000 (this box)
                                             +-- Claude Code CLI (your login)
 ```
 
-After the candidate is tagged and promoted, the same Node process can also use
-the signed-in Codex CLI, OpenCode Zen, explicit Local Qwen, or a configured
-OpenAI-compatible gateway according to the editor's per-run choice. No new
-listener or public port is added.
+The same Node process can also use the signed-in Codex CLI, OpenCode Zen,
+explicit Local Qwen, or a configured OpenAI-compatible gateway according to
+the editor's per-run choice. No new listener or public port is added.
 
 Nothing listens on a port the internet can reach. The machine dials **out** to
 Cloudflare and holds that connection open, so the home IP never appears in DNS
@@ -169,7 +162,7 @@ trusted automatically.
 
 ## The AI
 
-### Currently live: v0.5.6
+### The default: Claude Code, no key
 
 No API key. The desk shells out to your local **Claude Code** login, so the
 subscription powers it.
@@ -186,11 +179,10 @@ prompts. Without it your developer instructions get prepended to every story.
 # TOWNREPORTER_CLAUDE_CODE=0        # take the CLI out of the chain entirely
 ```
 
-If quota bites on the currently live build, restore the Claude login/quota or
-use the existing configured `LLM_*` path. Do not diagnose v0.5.6 from an
-unpromoted picker shown only in development.
+If quota bites, restore the Claude login/quota, or pick another provider for
+the run.
 
-### After the model-picker candidate is tagged and promoted
+### Provider rules, per desk action (v0.5.7)
 
 | Desk work           | Provider rule                                                                                                | Recovery                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |

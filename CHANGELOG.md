@@ -1,8 +1,25 @@
 # Changelog
 
-Current release: **0.5.6**.
+Current release: **0.5.7**.
 
-## Unreleased
+## 0.5.7 — 2026-09-02
+
+- **The AI is told which city it works in.** Every Story draft, on every
+  provider, ran under a system prompt that said "TownReporter in Longmont,
+  Colorado", and the follow-up searches had "Longmont" appended -- so a paper
+  set up as another city got stories about Longmont. The release walkthrough
+  caught it with a real draft. The research and write prompts, the search
+  queries and the Opinion desk note now name the configured paper, city and
+  state.
+- **Opinion is Claude only.** Codex's model declines to write an editorial
+  that takes a position on a local policy question; that is the provider's
+  policy, not a bug, so Codex is not offered for editorials. The Opinion
+  picker shows Automatic and Claude Opus, both meaning Claude, and says why.
+- **Saving first-run setup lands on the desk and stays there.** It could
+  bounce straight back to a blank setup form; the browser gate now asserts
+  the desk holds.
+- The "AI is not available" message names the providers the picker actually
+  offers instead of a Grok key and six gateways.
 
 - **Setup help is in the editor.** Queue, workbench and Opinion pickers include
   installation, same-server-account sign-in and retry guidance, with Opinion's
@@ -22,7 +39,7 @@ Current release: **0.5.6**.
 - **Codex now runs as the native signed-in Windows user, without a hidden
   capability policy.** TownReporter no longer injects feature-disable flags,
   a read-only sandbox, ignored user configuration/rules, or a skipped-repository
-  check. Every Codex Story and Opinion call keeps native search plus the user's
+  check. Every Codex Story call keeps native search plus the user's
   available shell/file, browser/computer, app, plugin, hook, skill and
   multi-agent capabilities. Prompts still travel over stdin, model names are
   validated, and timeout cleanup still targets only the child process tree the
@@ -40,16 +57,6 @@ Current release: **0.5.6**.
   full reporting pipeline during the release gate. A failed job's actionable
   provider detail now survives a page reload instead of disappearing with the
   click; the release gate also completed and filed a full Story through Zen.
-- **Opinion has a working frontier ladder.** Automatic tries Codex Sol, then
-  Claude Opus as complete, independent research-and-writing pairs; explicit
-  choices never fall back. Codex uses a web-search research pass that never
-  sees the voice, then receives the configured voice over stdin for a native
-  full-capability writing pass. Claude keeps its path-only, tool-free writing
-  handoff. Neither provider puts the voice in argv. A provider refusal,
-  assistant note, implausible headline, or incomplete body is now a failed run,
-  never a publishable draft. Automatic starts the next pair from scratch; a
-  named choice reports the failure and stays on that provider. The provider
-  that actually completes Automatic is stored on both the request and job.
 - **The default test command is database-safe.** `npm test` now enters through
   a fail-closed launcher that removes inherited `DATABASE_URL` and hosted
   runtime flags before either test lane starts. It also clears an inherited
