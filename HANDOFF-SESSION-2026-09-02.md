@@ -1,5 +1,112 @@
 # TownReporter — full-context handoff for a new session (2026-09-02)
 
+## STATE AS OF 16:10 2026-09-02 (read this first)
+
+**Production is on v0.6.1 (3a81055)**, live at https://townreporter.org, served
+from `C:\Users\scott\Desktop\Code\townreporter-web`. Development happens in
+`C:\Users\scott\Desktop\Code\townreporter-dev`. GitHub `github` is the only
+remote (`https://github.com/scottconverse/TownReporter.git`). Tags v0.5.5
+through v0.6.1 and their GitHub releases all exist. Today shipped six
+releases in sequence:
+
+- **0.5.9** — the Zen/Local-model removal swept in (Automatic ladder down to
+  Claude → Codex; picker down to Automatic, Codex Terra, Codex Sol, Claude
+  Opus).
+- **0.5.10** — a provider auth error mid-draft now says "sign in again," and
+  names the claude.ai browser login as separate from Claude Code's CLI login.
+- **0.5.11** — Automatic fails over to the next ladder rung on a login lapse
+  only, once per job, recorded on `desk_jobs.model_choice_source`.
+- **0.5.12** — docs no longer hardcode a version number in the "unreleased
+  features" notice.
+- **0.6.0** — a Server-page **Writing models** panel: sign in to Claude Code
+  or Codex from inside the desk (no terminal), a one-call **Test** button,
+  and a Sign-in button surfaced directly on a failed draft/scan.
+- **0.6.1** — Scan gets the same per-run writing-model picker and fail-over
+  Story has; Scan's AI read gets the same provider-sized time budget as a
+  draft (was a flat 90s, now 150s on the CLI providers); a killed lead the
+  scanner re-finds is stamped "seen again ×N" instead of being refiled;
+  Server-page buttons say what they do; Dark Desk and Opinion say "sign in
+  again" on a lapsed login; staging is now mandatory pre-promote via
+  `ops\stage.ps1`. See `CHANGELOG.md` for the full text of each entry — the
+  lines above are summaries, not the record.
+
+**Release path now (binding).** Suite + build + lint locally, push, wait for
+CI green (10 jobs, including a provider-signin job) on GitHub, then in the
+**dev** checkout run `ops\stage.ps1`: it restores the newest backup from
+`C:\Users\scott\Desktop\Code\townreporter-backups` into the `townreporter_dev`
+database, builds, and serves the candidate on `127.0.0.1:3100`
+(`scripts/stage-editor.mjs` creates a `staging@townreporter.test` /
+`staging-walk-2026` editor login for the walk — see `docs/staging.md`).
+Walk every changed screen on that staged copy. Only then tag, `gh release
+create`, and run `ops\promote.ps1` from the **production** checkout
+(`townreporter-web`), with the watchdog scheduled task disabled before and
+re-enabled after. Verify the promote by reading the served version bytes
+(the page's version constant / entry script name), not by trusting the
+script's own "Promoted" line. **Known quirk:** `promote.ps1`'s outer pwsh
+wrapper hangs after printing "Promoted" — stop only that one PID, nothing
+else.
+
+**Operator rules recorded today** (apply going forward): Fable coordinates
+only and writes zero product code; Sonnet/Opus do the building (there is an
+open GitHub issue, `anthropics/claude-code#91549`, about Fable being routed
+code-writing work it shouldn't get). Any decision that needs Scott's call
+comes as its own labelled block: plain-language statement of the choice, at
+most two options, a recommended pick, and why — never buried in prose.
+Anywhere an AI model acts in the product there must be a model picker in the
+UI (no silent single-provider paths). Local LLMs (llama.cpp / LM Studio) are
+the next provider tier to add, so every picker should read from one shared
+model registry rather than being hand-wired per feature. Any operation with
+a timeout must have that timeout editable from the UI, not just in code. A
+killed lead must never be silently hidden from Dark Desk's context — it
+stays visible there, marked as killed/resurfaced.
+
+**In flight right now: 0.6.2, split across two worktrees**, both under
+`.claude/worktrees/`:
+- `registry` (Opus) — the shared provider/model registry, per-paper time
+  budgets surfaced on the Server page, a Dark Desk model picker, and turning
+  Brief into a job like Story/Scan/Opinion already are.
+- `proofs` (Sonnet) — fail-over browser end-to-end coverage added to CI, plus
+  a nightly scheduled task that runs the live drafting pipeline for real and
+  proves it still works.
+
+The coordinator (this session's lineage) owns merging both worktrees, gating
+on CI, staging, bumping the version, tagging, and promoting — the worktree
+agents do not promote.
+
+**Known facts, so you don't relitigate them.** Claude Code's login on this
+box lives in the CLI's own file, `~/.claude/.credentials.json` — separate
+from the Cowork desktop app's own auth; the two do not share state. A
+headless `claude -p` call will silently refresh an expired access token if
+the stored refresh token is still valid. On 2026-09-02 the refresh token
+itself was rejected by the server (401) and the CLI cleared its local login
+entirely; Codex was found signed out at the same time. Scott re-signed in to
+both by hand. The Server page's **Writing models** panel (shipped in 0.6.0)
+is the in-app fix for exactly this failure mode going forward. Separately,
+the Scan AI read timed out at 90s twice under 0.6.0 in production; 0.6.1
+raises that to 150s on the CLI providers, but that fix has not yet been
+confirmed against a real 0.6.1 production scan — Scott is running one as
+this is being written. Story count on the live paper is 19.
+
+**Evidence paths**, in case a claim above needs re-checking:
+`artifacts/clean-install-0512` (walkthrough at
+`C:\Users\scott\Desktop\Code\clean-install-0512\WALKTHROUGH.md`),
+`artifacts/signin-spike-2026-09-02`, `artifacts/logs-contrast-0.6.1`, the
+`server-copy-0.6.1` artifact inside the `registry` worktree
+(`.claude/worktrees/agent-ae1088488784e61c3/artifacts/server-copy-0.6.1`),
+and DB backups in `C:\Users\scott\Desktop\Code\townreporter-backups\`
+(newest as of writing: `townreporter_2026-09-02_1556.sql`).
+
+### Verification ledger
+
+VERIFIED: the app version constant reads 0.6.1 | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/version.ts:2
+VERIFIED: the changelog names 0.6.1 as current | C:/Users/scott/Desktop/Code/townreporter-dev/CHANGELOG.md:3
+VERIFIED: ops/stage.ps1 stages the dev checkout against a copy of real production data before any promote | C:/Users/scott/Desktop/Code/townreporter-dev/ops/stage.ps1:1
+VERIFIED: scripts/stage-editor.mjs creates a staging sign-in for the walk | C:/Users/scott/Desktop/Code/townreporter-dev/scripts/stage-editor.mjs:1
+VERIFIED: docs/staging.md documents ops\stage.ps1 as the one pre-promote staging command | C:/Users/scott/Desktop/Code/townreporter-dev/docs/staging.md:1
+
+UNVERIFIED: a live scan under 0.6.1 completes within the new 150s budget - not checked; Scott is running one as this is written
+UNVERIFIED: the fail-over path has been exercised on a live login lapse - not checked; needs a lapsed login on the live desk
+
 Read this first. Then `HANDOFF-NEXT-AGENT.md` (locations, the ten hard rules,
 health-check recipe). This file is the story of the last 48 hours and the
 exact state you inherit.
