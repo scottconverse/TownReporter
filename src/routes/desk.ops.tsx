@@ -26,7 +26,7 @@ import {
   type ProviderLogin,
   type ProviderStatus,
 } from "@/lib/news/provider-login";
-import { editorDraftError } from "@/lib/news/desk-copy";
+import { editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -744,17 +744,70 @@ function PaperSetup() {
         title="Paper setup"
         sub="The paper's name, city, state, timezone, tagline and starting watch list. Saving also rewrites the welcome article on the front page to match."
       />
+      <p className="mt-2 max-w-2xl text-sm text-muted">
+        What Save does: it writes every field below; rewrites the front-page
+        kicker and deck from the paper's name and city; and rewrites the
+        welcome article. Published stories are not touched. There is no
+        undo, but you can edit again and save over it. The starting watch
+        list is added as real rows on the Sources page, not just stored as
+        a default — each editor gets them added once, the first time they
+        visit.
+      </p>
       {current.isPending ? null : <PaperSetupForm initial={current.data} submitLabel="Save" />}
     </section>
   );
 }
 
+/**
+ * Copy `text` to the clipboard. Tries the async Clipboard API first; if it
+ * is unavailable (older browser, insecure context) or throws (permission
+ * denied), falls back to a hidden, selected textarea and the legacy
+ * `execCommand("copy")` so the button still does something instead of
+ * silently failing on a click.
+ */
+async function copyToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // fall through to the selection-based fallback below
+    }
+  }
+  if (typeof document !== "undefined") {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.left = "0";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      return document.execCommand("copy");
+    } catch {
+      return false;
+    } finally {
+      document.body.removeChild(ta);
+    }
+  }
+  return false;
+}
+
 function InviteAnEditor() {
   const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const paper = useQuery({
+    queryKey: ["paper-config-for-invite"],
+    queryFn: () => getPaperConfigForEditor(),
+    enabled: me.data?.role === "owner",
+  });
   const [email, setEmail] = useState("");
   const [link, setLink] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedMessage, setCopiedMessage] = useState(false);
   const mint = useMutation({
     mutationFn: () => inviteEditor({ data: email }),
     onSuccess: (r) => {
@@ -763,18 +816,32 @@ function InviteAnEditor() {
         return;
       }
       setErr(null);
-      setCopied(false);
+      setCopiedLink(false);
+      setCopiedMessage(false);
       setLink(`${window.location.origin}/login?invite=${r.token}`);
     },
     onError: (e) => setErr(e instanceof Error ? e.message : "That did not mint."),
   });
   if (me.data?.role !== "owner") return null;
+  const message =
+    link && paper.data
+      ? inviteMessage({
+          paperName: paper.data.name,
+          email,
+          link,
+          ownerEmail: paper.data.editorEmail,
+        })
+      : null;
   return (
     <section className="mt-16 border-t border-rule pt-8">
       <SecHead
         title="Invite an editor"
         sub="A one-time link for one email address. It expires in seven days, and the person sets their own password. Editors can do everything but invite others or give up the desk."
       />
+      <p className="mt-2 max-w-2xl text-sm text-muted">
+        You will get a link to send yourself. TownReporter does not send
+        email.
+      </p>
       <div className="mt-4 max-w-2xl space-y-3">
         <div className="flex flex-wrap items-end gap-2">
           <label className="block text-sm">
@@ -806,13 +873,35 @@ function InviteAnEditor() {
               tone="quiet"
               small
               onClick={() => {
-                void navigator.clipboard.writeText(link).then(() => setCopied(true));
+                void copyToClipboard(link).then((ok) => ok && setCopiedLink(true));
               }}
             >
-              {copied ? "Copied" : "Copy link"}
+              {copiedLink ? "Copied" : "Copy link"}
             </InkButton>
+            {message ? (
+              <div className="mt-3 border-t border-rule pt-3">
+                <p className="text-xs tracking-[0.14em] text-muted uppercase">
+                  Ready-to-send message
+                </p>
+                <p className="mt-1 whitespace-pre-wrap text-sm">{message}</p>
+                <InkButton
+                  tone="quiet"
+                  small
+                  onClick={() => {
+                    void copyToClipboard(message).then((ok) => ok && setCopiedMessage(true));
+                  }}
+                >
+                  {copiedMessage ? "Copied" : "Copy message"}
+                </InkButton>
+              </div>
+            ) : null}
           </div>
         ) : null}
+        <p className="text-sm text-muted">
+          What happens next: they click the link, set a password, and appear
+          on this page as an editor. They cannot invite others or give up
+          the desk.
+        </p>
       </div>
     </section>
   );
@@ -825,7 +914,7 @@ function GiveUpTheDesk() {
     <section className="mt-16 border-t border-rule pt-8">
       <SecHead
         title="Give up the desk"
-        sub="Hands the newsroom to the next person who signs in. There is no way back."
+        sub="Hands the newsroom to the next person who signs in: the archive, Dark Desk files, notes and Server controls. There is no way back. You will be asked to type your email address to confirm."
       />
       <div className="mt-4 max-w-2xl">
         {isPending ? (

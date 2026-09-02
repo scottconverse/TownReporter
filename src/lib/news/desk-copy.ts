@@ -657,6 +657,32 @@ export function createEditorCopy() {
   };
 }
 
+/**
+ * The Invite an editor section (Server page) mints a link but sends nothing --
+ * this product does not send email (see InviteAnEditor in desk.ops.tsx). The
+ * owner is left to compose their own message, and an operator who has never
+ * seen this flow before does not know the link is one-time, whose address it
+ * is locked to, that it opens account CREATION rather than a password box, or
+ * who to ask when it has expired. This builds the message for them, filled
+ * with the real paper name, the invited address, and the actual link, so
+ * there is nothing left to get wrong by retyping it by hand.
+ */
+export function inviteMessage(input: {
+  paperName: string;
+  email: string;
+  link: string;
+  ownerEmail?: string | null;
+}): string {
+  const owner = input.ownerEmail?.trim() ? input.ownerEmail.trim() : "the owner";
+  return (
+    `You're invited to edit ${input.paperName}. Open this link on the computer ` +
+    `you'll write from: ${input.link}. It works once, only for ${input.email}, ` +
+    `and expires in seven days. It opens the sign-in page in "create account" ` +
+    `mode: choose a password and you're in. There is no code to type anywhere ` +
+    `— the link is the key. If it has expired, ask ${owner} for a new one.`
+  );
+}
+
 export type PrintedDup = { slug: string; publishedAt: string; note: string };
 
 export function nearDuplicate(

@@ -2,6 +2,23 @@
 
 Current release: **0.6.0**.
 
+## 0.6.1 — 2026-09-02
+
+- **The Server page now says what its buttons do.** Operator feedback: no
+  clue from the screen what Paper setup Save, Invite an editor, or Give up
+  the desk actually do, whether they warn you, or where an invited person
+  puts "the code." Paper setup now spells out what Save writes (every
+  field, the front-page kicker and deck, the welcome article — published
+  stories untouched, no undo) and says plainly that the starting watch list
+  becomes real rows on the Sources page, not just a stored default. Invite
+  an editor now says up front that TownReporter sends nothing — the owner
+  sends the link themselves — and mints a ready-to-send message (with
+  **Copy message**, alongside **Copy link**) spelling out the one-time,
+  seven-day, no-code-needed mechanics for the person receiving it. Give up
+  the desk now names the consequence — the archive, Dark Desk files, notes
+  and Server controls, no way back — in the sub line itself, before the
+  first click, not just in the confirm dialog.
+
 ## 0.6.0 — 2026-09-02
 
 - **Sign in to a writing model from inside the desk.** The paper drafts through

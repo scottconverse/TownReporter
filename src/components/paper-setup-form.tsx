@@ -285,7 +285,12 @@ export function PaperSetupForm({
       </div>
 
       {error ? <p className="text-sm text-rust">{error}</p> : null}
-      {savedAt && !onDone ? <p className="text-sm text-ink-2">Saved.</p> : null}
+      {savedAt && !onDone ? (
+        <p className="text-sm text-ink-2">
+          Saved. The front page now shows the new name, city, kicker and
+          welcome article.
+        </p>
+      ) : null}
 
       <InkButton type="submit" disabled={save.isPending}>
         {save.isPending ? "Saving…" : submitLabel}

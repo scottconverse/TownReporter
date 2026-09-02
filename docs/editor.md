@@ -391,7 +391,15 @@ Owners also have:
   from the database; no rebuild is needed.
 - **Invite an editor** — enter the person's email, then copy the one-time link.
   It is valid for that address only, expires after seven days and disappears
-  after use.
+  after use. TownReporter does not send it for you: you send the link
+  yourself, however you'd normally reach that person. Next to the link is a
+  ready-to-send message with the same explanation spelled out (one-time
+  link, seven-day expiry, opens "create account" mode, no code to type) --
+  **Copy message** puts it on the clipboard so you don't have to compose it.
+  What the invited person sees: they open the link, land on the sign-in page
+  already in create-account mode with their email filled in, choose a
+  password, and they're an editor. There is no code to type anywhere -- the
+  link itself is the credential, and it only works once.
 
 ---
 
