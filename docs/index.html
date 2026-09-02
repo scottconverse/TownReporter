@@ -610,7 +610,7 @@
         >
         <div class="nav-links">
           <a href="#shots">Screenshots</a>
-          <a href="#new">New in 0.5.12</a>
+          <a href="#new">New in 0.6.0</a>
           <a href="#idea">The idea</a>
           <a href="#rooms">Two rooms</a>
           <a href="#how">How it works</a>
@@ -622,7 +622,7 @@
           <summary aria-label="Menu">Menu</summary>
           <div class="menu-panel">
             <a href="#shots">Screenshots</a>
-            <a href="#new">New in 0.5.12</a>
+            <a href="#new">New in 0.6.0</a>
             <a href="#idea">The idea</a>
             <a href="#rooms">Two rooms</a>
             <a href="#how">How it works</a>
@@ -646,7 +646,7 @@
               or doesn’t add up. A human still decides what prints.
             </p>
             <p class="cap">
-              Current release: <b>0.5.12</b>, the build the live paper runs. Everything described
+              Current release: <b>0.6.0</b>, the build the live paper runs. Everything described
               here is on it.
             </p>
             <div class="cta-row">
@@ -783,34 +783,34 @@
       </section>
 
       <section id="new" class="wrap">
-        <p class="eyebrow">New in 0.5.12</p>
-        <h2>The editor picks the writing model, and the AI knows which city it works in</h2>
+        <p class="eyebrow">New in 0.6.0</p>
+        <h2>Sign in to Claude Code and Codex without leaving the desk</h2>
         <div class="grid-3">
           <div class="panel">
-            <h3>Pick the model per run</h3>
-            <p class="cap" style="margin: 0 0 10px">Queue and workbench</p>
+            <h3>Sign in from the desk</h3>
+            <p class="cap" style="margin: 0 0 10px">Server page</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              Every Story draft offers Automatic, Codex Terra, Codex Sol or Claude Opus. An explicit
-              choice never switches provider behind your back, and the provider that wrote the draft
-              is recorded on the job.
+              The Server page shows, for Claude Code and Codex, whether each is installed and
+              signed in. A Sign in button runs the program&rsquo;s own sign-in and shows the link
+              &mdash; and Codex&rsquo;s one-time code &mdash; right there in the page.
             </p>
           </div>
           <div class="panel">
-            <h3>Codex drafts stories natively</h3>
-            <p class="cap" style="margin: 0 0 10px">Opinion stays Claude</p>
+            <h3>Test before you draft</h3>
+            <p class="cap" style="margin: 0 0 10px">One real call</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              Codex runs as the signed-in user with its full native capabilities. It is not offered
-              for editorials: its model declines to write a piece that takes a position, so the
-              Opinion picker is Claude only and says why.
+              A Test button makes one tiny real call to prove a model will actually answer, not
+              just that a login file exists. A failed draft&rsquo;s error carries that same Sign
+              in button, ready right where you need it.
             </p>
           </div>
           <div class="panel">
-            <h3>The AI knows its city</h3>
-            <p class="cap" style="margin: 0 0 10px">Caught by the release audit</p>
+            <h3>Claude and Codex only, Automatic first</h3>
+            <p class="cap" style="margin: 0 0 10px">The Automatic ladder</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              Every writing and scanning prompt used to say &ldquo;Longmont, Colorado&rdquo; no
-              matter which paper ran it. Story, Scan, the follow-up searches and the Opinion desk
-              note now name the configured paper, city and state.
+              Automatic tries Claude Opus, then Codex Terra, moving on once if the first
+              login has lapsed. A named choice &mdash; Opus, Terra, Sol &mdash; never switches
+              provider behind your back.
             </p>
           </div>
         </div>

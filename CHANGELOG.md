@@ -1,33 +1,6 @@
 # Changelog
 
-Current release: **0.5.12**.
-
-## 0.6.0 — 2026-09-02
-
-- `npm run dev` listens on this PC only by default; `npm run dev:lan` opens it
-  to your network.
-
-## 0.5.12 — 2026-09-02
-
-- **Docs no longer name a fixed version in the "unreleased features" notice.**
-  The model picker and the native Codex path shipped in 0.5.7-0.5.9 and are
-  what production runs; the README, editor manual and full manual still said
-  those features were candidate work held back from a "0.5.6" tag. The stale
-  disclaimer is gone from README.md and docs/editor.md.
-- **Quickstart says what a stranger actually needs.** README.md and
-  docs/setup.md now check `node -v` before cloning, and the `.env` step notes
-  that without `DATABASE_URL` the paper runs on an embedded database that is
-  lost when `npm run dev` stops. The Codex/Claude "no API key" line in
-  README.md now says that relies on a signed-in subscription, not a bare
-  login. `.env.example` notes that 5433 is one production box's port
-  workaround (5432 is standard) and that PORT/HOST only apply to the built
-  server.
-- **Server page no longer calls the embedded database "postgres".** PGLite
-  answers `current_database()` with "postgres" too, so the Database health
-  tile printed that word even with no `DATABASE_URL` set and no real Postgres
-  in reach. The tile now reads "embedded (PGLite) -- data is lost when the
-  server stops" for that case, and "postgres" only when `DATABASE_URL` is
-  actually set.
+Current release: **0.6.0**.
 
 ## 0.6.0 — 2026-09-02
 
@@ -65,6 +38,30 @@ Current release: **0.5.12**.
   installed. Probe and call resolve it the same way, in one place.
 - Says plainly, under the panel, that being signed in to claude.ai in a browser
   or in the Claude desktop app is a **separate** login that does not count here.
+- `npm run dev` listens on this PC only by default; `npm run dev:lan` opens it
+  to your network.
+
+## 0.5.12 — 2026-09-02
+
+- **Docs no longer name a fixed version in the "unreleased features" notice.**
+  The model picker and the native Codex path shipped in 0.5.7-0.5.9 and are
+  what production runs; the README, editor manual and full manual still said
+  those features were candidate work held back from a "0.5.6" tag. The stale
+  disclaimer is gone from README.md and docs/editor.md.
+- **Quickstart says what a stranger actually needs.** README.md and
+  docs/setup.md now check `node -v` before cloning, and the `.env` step notes
+  that without `DATABASE_URL` the paper runs on an embedded database that is
+  lost when `npm run dev` stops. The Codex/Claude "no API key" line in
+  README.md now says that relies on a signed-in subscription, not a bare
+  login. `.env.example` notes that 5433 is one production box's port
+  workaround (5432 is standard) and that PORT/HOST only apply to the built
+  server.
+- **Server page no longer calls the embedded database "postgres".** PGLite
+  answers `current_database()` with "postgres" too, so the Database health
+  tile printed that word even with no `DATABASE_URL` set and no real Postgres
+  in reach. The tile now reads "embedded (PGLite) -- data is lost when the
+  server stops" for that case, and "postgres" only when `DATABASE_URL` is
+  actually set.
 
 ## 0.5.11 — 2026-09-02
 
