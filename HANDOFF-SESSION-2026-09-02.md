@@ -134,3 +134,25 @@ model_choice "zen" (`psql`).
 
 UNVERIFIED: the Zen/Local removal sweep is complete and green - not checked; it was still running when this was written
 UNVERIFIED: a fresh Automatic draft on the live desk goes to Claude under 0.5.8 - not checked; no live draft has been clicked since the promote
+
+## Postscript, later on 2026-09-02: item 5 is done
+
+v0.5.9 is LIVE. The Zen/Local removal sweep was popped from both stashes,
+reviewed line by line, swept for leftovers (four stale doc lines fixed:
+manual env table, local-models.md picker claims), suite 986/0 fail with
+Postgres, typecheck and lint clean, desk-flows browser walk 20/20 on a
+throwaway desk on port 3199 (Codex hidden via APPDATA/PATH to match CI),
+pushed as 7596aaf + ad4d91d, CI 9/9 green, tagged v0.5.9, released, promoted
+with ops\promote.ps1 (backup townreporter_2026-09-02_0233.sql, 17 stories
+before and after). Watchdog re-enabled. Only the forensic stash remains.
+
+One CI red on the way: scripts/editorial-delivery-docs.test.mjs pinned the
+literal v0.5.8; it now reads the version from package.json. Lesson: rerun the
+suite AFTER the version bump, not before.
+
+Still UNVERIFIED: a fresh Automatic draft on the live desk goes to Claude under
+0.5.9 - not checked; that needs Scott's signed-in desk.
+
+VERIFIED: the app version constant reads 0.5.9 | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/version.ts:2
+VERIFIED: the changelog names 0.5.9 as current | C:/Users/scott/Desktop/Code/townreporter-dev/CHANGELOG.md:3
+VERIFIED: the docs test derives the tag from package.json | C:/Users/scott/Desktop/Code/townreporter-dev/scripts/editorial-delivery-docs.test.mjs:48
