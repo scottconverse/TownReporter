@@ -1,16 +1,9 @@
 # Changelog
 
-Current release: **0.6.0**.
+Current release: **0.6.1**.
 
 ## 0.6.1 — 2026-09-02
 
-- **Dark Desk and Opinion now say "sign in again" when a login lapses.** A
-  mid-round 401 on Dark Desk used to fall into the generic "the writing model
-  did not finish this round" copy and tell the editor to click Keep digging —
-  a retry that cannot succeed until the login is renewed. Opinion showed the
-  provider's raw error text with no guidance at all. Both now recognize a
-  lapsed provider login and show the same "sign in again" sentence, with the
-  Sign in button next to it, instead of "Keep digging" or a raw error.
 - **Scan gets the same per-run writing-model picker Story has.** Scan used to
   call the model with no choice at all, so it always rode the configured-provider
   chain (gateway → API key → Claude Code) with no picker and no way to switch
@@ -26,7 +19,15 @@ Current release: **0.6.0**.
   why. An explicit choice never falls back. A scan already open on a
   different model reports the same conflict guidance a lead already drafting
   does.
-- Server page logs are readable in dark mode.
+- **Scan's AI read gets the same time budget as a draft.** It used to hardcode
+  a flat 90s regardless of provider while Story drafts size every call with
+  `providerBudget(choice).callMs` (150s on the Claude Code / Codex CLIs). A
+  full 31-source read on Claude Opus timed out in production at exactly that
+  flat ceiling after fetching cleanly in 35s. The scan's read now gets 150s on
+  the CLI providers, floored at the old 90s for the configured-gateway path;
+  a mid-run Automatic failover recomputes the budget for whichever rung it
+  actually lands on. The timeout message now names how long the desk waited
+  when the provider reports it.
 - **A killed lead the scanner finds again is stamped "seen again", not
   refiled.** Every lead the scan AI returned used to be inserted as a brand
   new row with no check against what was already on the desk, so a lead you
@@ -60,15 +61,18 @@ Current release: **0.6.0**.
   the desk now names the consequence — the archive, Dark Desk files, notes
   and Server controls, no way back — in the sub line itself, before the
   first click, not just in the confirm dialog.
-- **Scan's AI read gets the same time budget as a draft.** It used to hardcode
-  a flat 90s regardless of provider while Story drafts size every call with
-  `providerBudget(choice).callMs` (150s on the Claude Code / Codex CLIs). A
-  full 31-source read on Claude Opus timed out in production at exactly that
-  flat ceiling after fetching cleanly in 35s. The scan's read now gets 150s on
-  the CLI providers, floored at the old 90s for the configured-gateway path;
-  a mid-run Automatic failover recomputes the budget for whichever rung it
-  actually lands on. The timeout message now names how long the desk waited
-  when the provider reports it.
+- **Dark Desk and Opinion now say "sign in again" when a login lapses.** A
+  mid-round 401 on Dark Desk used to fall into the generic "the writing model
+  did not finish this round" copy and tell the editor to click Keep digging —
+  a retry that cannot succeed until the login is renewed. Opinion showed the
+  provider's raw error text with no guidance at all. Both now recognize a
+  lapsed provider login and show the same "sign in again" sentence, with the
+  Sign in button next to it, instead of "Keep digging" or a raw error.
+- Server page logs are readable in dark mode.
+- Before every promote the release is now staged on a copy of the live data:
+  `ops\stage.ps1` in the dev checkout restores the newest backup into
+  `townreporter_dev`, builds, and serves on `127.0.0.1:3100` for a
+  walk-through; see [docs/staging.md](docs/staging.md).
 
 ## 0.6.0 — 2026-09-02
 

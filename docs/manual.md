@@ -1,6 +1,6 @@
 # TownReporter — the manual
 
-**Version 0.6.0 · 2 September 2026**
+**Version 0.6.1 · 2 September 2026**
 
 **Documentation scope:** 0.5.6 is the released baseline. Per-run model pickers
 and the restored native Codex path below describe the **unreleased candidate**,
