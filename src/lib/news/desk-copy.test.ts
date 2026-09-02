@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   composeZeroLeadSummary,
   editorError,
@@ -37,6 +38,7 @@ import {
   excerptForEditor,
   deskTakenLoginCopy,
   createEditorCopy,
+  inviteMessage,
 } from "./desk-copy.ts";
 import { presentWorthItem, rankWorthItems } from "./worth-a-look.ts";
 
@@ -518,5 +520,107 @@ describe("a lapsed provider login is a sign-in problem, not a retry", () => {
   it("still calls a timeout a timeout even when the text mentions auth", () => {
     const msg = editorDraftError("Claude Code request timed out after 150s, 0 bytes out — waiting for auth");
     assert.match(msg!, /did not finish in time/i);
+  });
+});
+
+describe("the Server page tells a point-and-click operator what its buttons do", () => {
+  /*
+   * 2026-09-02 operator feedback: "No clue at all from the screen what
+   * Paper setup Save, Invite an editor, or Give up the desk actually do.
+   * Does it warn you? Where does the invited person put this code?" These
+   * are source-shape checks -- there is no request whose response is "the
+   * words on the Server page" -- reading desk.ops.tsx directly is the
+   * check. No database needed, so it always runs.
+   */
+  const ops = readFileSync(new URL("../../routes/desk.ops.tsx", import.meta.url), "utf8");
+  // JSX text wraps across source lines the way the paragraphs above are
+  // written; the browser collapses that whitespace when it renders, so the
+  // check does the same rather than requiring every phrase to fall on one
+  // physical line.
+  const flatten = (s: string) => s.replace(/\s+/g, " ");
+
+  it("Paper setup explains what Save writes, and answers the watch-list question truthfully", () => {
+    const block = flatten(
+      ops.slice(ops.indexOf("function PaperSetup("), ops.indexOf("function InviteAnEditor(")),
+    );
+    for (const phrase of [
+      "writes every field",
+      "kicker",
+      "welcome article",
+      "Published stories are not touched",
+      "no undo",
+      "Sources page",
+    ]) {
+      assert.ok(block.includes(phrase), `Paper setup no longer says "${phrase}"`);
+    }
+  });
+
+  it("Invite an editor says up front that nothing gets emailed", () => {
+    const block = flatten(
+      ops.slice(ops.indexOf("function InviteAnEditor("), ops.indexOf("function GiveUpTheDesk(")),
+    );
+    assert.ok(
+      block.includes("does not send email"),
+      "the invite form no longer warns that TownReporter sends nothing",
+    );
+  });
+
+  it("Invite an editor says what happens once the person has the link", () => {
+    const block = flatten(
+      ops.slice(ops.indexOf("function InviteAnEditor("), ops.indexOf("function GiveUpTheDesk(")),
+    );
+    assert.ok(
+      block.includes("What happens next"),
+      "the post-mint copy no longer says what happens once they click the link",
+    );
+    assert.ok(
+      block.includes("Copy message") && block.includes("Copy link"),
+      "the minted-link panel lost one of its copy buttons",
+    );
+  });
+
+  it("Give up the desk shows the consequence in the sub line, before the first click", () => {
+    const block = flatten(ops.slice(ops.indexOf("function GiveUpTheDesk(")));
+    for (const phrase of ["Dark Desk files", "no way back", "type your email address"]) {
+      assert.ok(block.includes(phrase), `Give up the desk sub line no longer says "${phrase}"`);
+    }
+  });
+});
+
+describe("inviteMessage() builds the message the owner sends themselves", () => {
+  it("fills in the paper name, the invited address and the real link", () => {
+    const msg = inviteMessage({
+      paperName: "Testerville Ledger",
+      email: "someone@example.org",
+      link: "https://paper.example/login?invite=abc123",
+      ownerEmail: "owner@example.org",
+    });
+    assert.match(msg, /Testerville Ledger/);
+    assert.match(msg, /someone@example\.org/);
+    assert.match(msg, /https:\/\/paper\.example\/login\?invite=abc123/);
+    assert.match(msg, /works once/);
+    assert.match(msg, /expires in seven days/);
+    assert.match(msg, /create account/i);
+    assert.match(msg, /no code to type/i);
+    assert.match(msg, /owner@example\.org/);
+  });
+
+  it("falls back to 'the owner' when there is no owner email on file", () => {
+    const msg = inviteMessage({
+      paperName: "Testerville Ledger",
+      email: "someone@example.org",
+      link: "https://paper.example/login?invite=abc123",
+      ownerEmail: "",
+    });
+    assert.match(msg, /ask the owner for a new one/);
+  });
+
+  it("falls back to 'the owner' when ownerEmail is missing entirely", () => {
+    const msg = inviteMessage({
+      paperName: "Testerville Ledger",
+      email: "someone@example.org",
+      link: "https://paper.example/login?invite=abc123",
+    });
+    assert.match(msg, /ask the owner for a new one/);
   });
 });
