@@ -46,8 +46,9 @@ him commands; give him plain labels and full file paths.
    later." A Sonnet agent is sweeping Zen MiMo and Local Qwen OUT of the Story
    picker and the Automatic ladder (target: Automatic, Codex Terra, Codex Sol,
    Claude Opus; Automatic = Claude then Codex; the env-only `LLM_*` gateway
-   path stays). **Uncommitted edits in `townreporter-dev` are that sweep.**
-   Review every line, run the suite, then: commit, push, CI green, bump to
+   path stays). **That partial sweep is parked in `git stash` as
+   "in-flight: remove Zen/Local from Story picker (agent sweep, unreviewed)";
+   the working tree is clean.** `git stash pop` it, review every line, run the suite, then: commit, push, CI green, bump to
    0.5.9, tag, release, promote. Do not promote anything that has not passed
    a real walkthrough or, for a change this mechanical, the full suite plus a
    browser walk of the picker.
@@ -57,8 +58,8 @@ him commands; give him plain labels and full file paths.
 - Production: v0.5.8, healthy (verified from served bytes: version constant,
   entry script the page names, feed). Watchdog enabled. Tunnel owned by
   production via `TOWNREPORTER_TUNNEL=1` in `townreporter-web\.env`.
-- Dev: `main` at `3e9fbc7`, pushed; **3 files modified by the in-flight
-  removal sweep** (see item 5). CI on `3e9fbc7`: 9 jobs green.
+- Dev: `main` pushed, working tree clean; the in-flight removal sweep is in
+  `stash@{0}` (see item 5). CI on `3e9fbc7`: 9 jobs green.
 - Tags/releases v0.5.5 … v0.5.8 exist on GitHub.
 - Suite at 3e9fbc7: 983 tests, 0 failures, 31 skipped (browser/Postgres tests
   skip without `TEST_POSTGRES_ADMIN_URL=postgres://postgres@127.0.0.1:5433/postgres`).
