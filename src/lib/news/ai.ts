@@ -21,7 +21,7 @@ export type ProviderProbe =
 // Worded to stay clear of preflight's auth classifier: "sign in" in this
 // sentence made "no model configured" read as "provider signed out".
 export const GROK_UNAVAILABLE =
-  "AI is not available. No model is set up yet: open Claude Code or Codex on this machine and log in, choose Local Qwen or Zen MiMo from the picker, or set LLM_BASE_URL for an OpenAI-compatible gateway.";
+  "AI is not available. No model is set up yet: open Claude Code or Codex on this machine and log in, or set LLM_BASE_URL for an OpenAI-compatible gateway.";
 
 function env(key: string): string | undefined {
   const value = process.env[key];
@@ -155,24 +155,6 @@ export function resolveClaudeCode(): ClaudeCodeConfig | null {
  * for an existing XAI_API_KEY.
  */
 function explicitProvider(choice: StoryModelChoice): Provider | null {
-  if (choice === "local") {
-    return {
-      kind: "openai",
-      apiKey: "not-needed",
-      baseUrl: trimSlash(env("TOWNREPORTER_LOCAL_BASE_URL") || "http://127.0.0.1:1234/v1"),
-      model: env("TOWNREPORTER_LOCAL_MODEL") || "qwen/qwen3.6-35b-a3b",
-      label: "Local Qwen",
-    };
-  }
-  if (choice === "zen") {
-    return {
-      kind: "openai",
-      apiKey: "not-needed",
-      baseUrl: trimSlash(env("TOWNREPORTER_ZEN_BASE_URL") || "https://opencode.ai/zen/v1"),
-      model: env("TOWNREPORTER_ZEN_MODEL") || "mimo-v2.5-free",
-      label: "Zen MiMo",
-    };
-  }
   // TOWNREPORTER_CODEX=0 takes Codex out of the chain entirely, the same way
   // TOWNREPORTER_CLAUDE_CODE=0 does for Claude. Without it there was no way
   // to run a machine that has Codex installed as if it did not.
@@ -302,16 +284,20 @@ export async function probeProvider(
       return result.ok ? { ...result, choice: "configured" } : result;
     }
     /*
-      The operator's own providers first, the free public endpoint last.
+      The operator's own providers first.
 
       v0.5.7 shipped this ladder as Zen -> Codex -> Claude. On the live paper,
       whose operator has Claude Code signed in, Automatic therefore pinned every
       draft to OpenCode's free MiMo endpoint, which answered 429 -- two failed
       drafts in the first hours, on a desk that had drafted fine the day
       before. A run stays pinned to one provider, so the order IS the policy.
+
+      2026-09-02: Zen and Local Qwen removed from the picker entirely ("it's
+      not working it seems" -- Claude/Codex only for now). The ladder is just
+      Claude, then Codex.
     */
     const failures: string[] = [];
-    for (const rung of ["claude-frontier", "codex-balanced", "zen"] as const) {
+    for (const rung of ["claude-frontier", "codex-balanced"] as const) {
       const result = await probeProvider(rung);
       if (result.ok) return result;
       failures.push(result.error);
@@ -590,8 +576,6 @@ export function providerBudget(choice?: StoryModelChoice | string): ProviderBudg
   if (provider?.kind === "claude-code" || provider?.kind === "codex") {
     return { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 };
   }
-  if (choice === "local") return { wallMs: 540_000, callMs: 180_000, reserveMs: 180_000 };
-  if (choice === "zen") return { wallMs: 420_000, callMs: 120_000, reserveMs: 150_000 };
   return { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 };
 }
 

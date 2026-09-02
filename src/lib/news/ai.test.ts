@@ -155,30 +155,15 @@ describe("resolveProvider", () => {
   it("honours deployment overrides for every picker-backed provider", () => {
     withEnv(
       {
-        TOWNREPORTER_LOCAL_BASE_URL: "http://local.test/v1",
-        TOWNREPORTER_LOCAL_MODEL: "local-model",
-        TOWNREPORTER_ZEN_BASE_URL: "https://zen.test/v1",
-        TOWNREPORTER_ZEN_MODEL: "zen-model",
         TOWNREPORTER_CODEX_TERRA_MODEL: "balanced-model",
         TOWNREPORTER_CODEX_SOL_MODEL: "frontier-model",
       },
       () => {
-        const overrideKeys = [
-          "TOWNREPORTER_LOCAL_BASE_URL",
-          "TOWNREPORTER_LOCAL_MODEL",
-          "TOWNREPORTER_ZEN_BASE_URL",
-          "TOWNREPORTER_ZEN_MODEL",
-          "TOWNREPORTER_CODEX_TERRA_MODEL",
-          "TOWNREPORTER_CODEX_SOL_MODEL",
-        ];
+        const overrideKeys = ["TOWNREPORTER_CODEX_TERRA_MODEL", "TOWNREPORTER_CODEX_SOL_MODEL"];
         try {
           const choose = resolveProvider as unknown as (
             choice: string,
           ) => ReturnType<typeof resolveProvider>;
-          assert.equal(choose("local")?.baseUrl, "http://local.test/v1");
-          assert.equal(choose("local")?.model, "local-model");
-          assert.equal(choose("zen")?.baseUrl, "https://zen.test/v1");
-          assert.equal(choose("zen")?.model, "zen-model");
           assert.equal(choose("codex-balanced")?.model, "balanced-model");
           assert.equal(choose("codex-frontier")?.model, "frontier-model");
         } finally {
@@ -193,26 +178,16 @@ describe("resolveProvider", () => {
       const choose = resolveProvider as unknown as (
         choice: string,
       ) => ReturnType<typeof resolveProvider>;
-      assert.deepEqual(choose("local"), {
-        kind: "openai",
-        apiKey: "not-needed",
-        baseUrl: "http://127.0.0.1:1234/v1",
-        model: "qwen/qwen3.6-35b-a3b",
-        label: "Local Qwen",
-      });
-      assert.equal(choose("zen")?.model, "mimo-v2.5-free");
       assert.equal(choose("codex-balanced")?.model, "gpt-5.6-terra");
       assert.equal(choose("codex-frontier")?.model, "gpt-5.6-sol");
       assert.equal(choose("claude-frontier")?.model, "claude-opus-5");
     });
   });
 
-  it("gives local, free-cloud, and CLI work enough wall clock", () => {
+  it("gives Codex and CLI work enough wall clock", () => {
     const budget = providerBudget as unknown as (
       choice: string,
     ) => ReturnType<typeof providerBudget>;
-    assert.ok(budget("local").callMs >= 180_000);
-    assert.ok(budget("zen").callMs >= 120_000);
     assert.ok(budget("codex-frontier").wallMs >= 420_000);
   });
 
@@ -325,8 +300,6 @@ describe("grokChat", () => {
 
   it("uses only the explicitly selected Story picker adapter", async () => {
     const cases = [
-      { choice: "local", kind: "openai", label: "Local Qwen", vars: BARE },
-      { choice: "zen", kind: "openai", label: "Zen MiMo", vars: BARE },
       { choice: "codex-balanced", kind: "codex", label: "Codex Terra", vars: BARE },
       { choice: "codex-frontier", kind: "codex", label: "Codex Sol", vars: BARE },
       {
@@ -404,29 +377,37 @@ describe("model-picker provider readiness", () => {
     }
   });
 
-  it("proves the selected local model is actually loaded", async () => {
+  it("proves the selected configured gateway model is actually loaded", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
-      new Response(JSON.stringify({ data: [{ id: "qwen/qwen3.6-35b-a3b" }] }), { status: 200 });
+      new Response(JSON.stringify({ data: [{ id: "desk-model" }] }), { status: 200 });
     try {
-      await withEnvAsync(BARE, async () => {
-        const result = await probeProvider("local");
-        assert.equal(result.ok, true);
-        if (result.ok) assert.equal(result.choice, "local");
-      });
+      await withEnvAsync(
+        { ...BARE, LLM_BASE_URL: "http://gateway.test/v1", LLM_MODEL: "desk-model" },
+        async () => {
+          const result = await probeProvider("configured");
+          assert.equal(result.ok, true);
+          if (result.ok) assert.equal(result.choice, "configured");
+        },
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it("refuses a running local server when the named model is not loaded", async () => {
+  it("refuses a running configured gateway when the named model is not loaded", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
       new Response(JSON.stringify({ data: [{ id: "some-other-model" }] }), { status: 200 });
     try {
-      const result = await probeProvider("local");
-      assert.equal(result.ok, false);
-      if (!result.ok) assert.match(result.error, /not loaded/i);
+      await withEnvAsync(
+        { ...BARE, LLM_BASE_URL: "http://gateway.test/v1", LLM_MODEL: "desk-model" },
+        async () => {
+          const result = await probeProvider("configured");
+          assert.equal(result.ok, false);
+          if (!result.ok) assert.match(result.error, /not loaded/i);
+        },
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -464,25 +445,38 @@ describe("model-picker provider readiness", () => {
     });
   });
 
-  it("Automatic reaches hosted Zen only after the operator's own providers are out", async () => {
-    // Claude off (BARE) and Codex off: the operator's own rungs are out, and
-    // the free endpoint is the one left standing.
+  it("Automatic's ladder reaches Claude before Codex", async () => {
+    // Zen and Local Qwen were removed from Automatic 2026-09-02; the ladder is
+    // now exactly ["claude-frontier", "codex-balanced"], Claude first.
     const originalFetch = globalThis.fetch;
     const urls: string[] = [];
     globalThis.fetch = async (input) => {
       urls.push(String(input));
-      return new Response(JSON.stringify({ data: [{ id: "mimo-v2.5-free" }] }), { status: 200 });
+      return new Response(JSON.stringify({}), { status: 200 });
     };
     try {
-      await withEnvAsync({ ...BARE, TOWNREPORTER_CODEX: "0" }, async () => {
+      await withEnvAsync({ ANTHROPIC_API_KEY: "sk-ant-test", TOWNREPORTER_CODEX: "0" }, async () => {
         const result = await probeProvider("auto");
         assert.equal(result.ok, true);
-        if (result.ok) assert.equal(result.choice, "zen");
+        if (result.ok) assert.equal(result.choice, "claude-frontier");
       });
-      assert.deepEqual(urls, ["https://opencode.ai/zen/v1/models"]);
+      // Only Claude was probed -- Codex is disabled here, and neither Zen nor
+      // Local Qwen exist as rungs to fall through to.
+      assert.deepEqual(urls, ["https://api.anthropic.com/v1/models?limit=1"]);
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it("Automatic reports failure once the operator's own providers are all out", async () => {
+    // Claude off (BARE) and Codex off: nothing is left in the ladder. Zen and
+    // Local Qwen were removed from Automatic 2026-09-02 ("Claude/Codex only
+    // for now"), so there is no free-cloud rung left to fall through to.
+    await withEnvAsync({ ...BARE, TOWNREPORTER_CODEX: "0" }, async () => {
+      const result = await probeProvider("auto");
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.match(result.error, /No model in the Automatic ladder is ready/);
+    });
   });
 
   it("distinguishes an unreachable provider from a timeout", async () => {
@@ -491,12 +485,14 @@ describe("model-picker provider readiness", () => {
       throw new TypeError("connection refused");
     };
     try {
-      const result = await probeProvider("local");
-      assert.equal(result.ok, false);
-      if (!result.ok) {
-        assert.match(result.error, /unreachable/i);
-        assert.doesNotMatch(result.error, /timed out/i);
-      }
+      await withEnvAsync({ LLM_BASE_URL: "http://gateway.test/v1", LLM_MODEL: "desk-model" }, async () => {
+        const result = await probeProvider("configured");
+        assert.equal(result.ok, false);
+        if (!result.ok) {
+          assert.match(result.error, /unreachable/i);
+          assert.doesNotMatch(result.error, /timed out/i);
+        }
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }

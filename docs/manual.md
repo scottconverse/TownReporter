@@ -1,6 +1,6 @@
 # TownReporter — the manual
 
-**Version 0.5.8 · 2 September 2026**
+**Version 0.5.9 · 2 September 2026**
 
 **Documentation scope:** 0.5.6 is the released baseline. Per-run model pickers
 and the restored native Codex path below describe the **unreleased candidate**,
@@ -298,7 +298,7 @@ settings or invite another editor.
 
 ## Five minutes, on your own machine
 
-You need **Node 22+**. API keys are optional: Story can use Local, Zen, or an
+You need **Node 22+**. API keys are optional: Story can use an
 existing Codex/Claude login. Signed-in Codex and
 [Claude Code](https://code.claude.com) CLIs supply the frontier Story and
 Opinion choices.
@@ -355,13 +355,15 @@ have an editor-facing, per-run picker.
 | Feature                       | Provider                                                                                                                                       | Model                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Scan                          | configured provider                                                                                                                            | configured model                                                            |
-| Draft (Queue or workbench)    | configured gateway forced for Automatic when set; otherwise first ready Zen → Codex Terra → Claude Opus rung; explicit choice never falls back | Local Qwen is explicit-only; Zen MiMo, Codex Terra/Sol, or Claude Opus      |
+| Draft (Queue or workbench)    | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung; explicit choice never falls back        | Codex Terra/Sol, or Claude Opus                                             |
 | Dark Desk synthesis and brief | the one you selected                                                                                                                           | the one you configured                                                      |
 | Dark Desk **planner**         | the one you selected                                                                                                                           | Haiku **only when the provider is Claude**; otherwise your configured model |
 | **Opinion (editorials)**      | Claude Opus, through the signed-in Claude Code session; Codex is not offered for editorials                                                    | Claude Opus                                                                |
 
-**Why Opinion has fewer choices.** Local and Zen are not offered because an
-editorial uses the paper's configured voice and frontier research. Claude Code
+**Why Opinion has fewer choices.** An editorial uses the paper's configured
+voice and frontier research, so Opinion's picker offers Automatic and Claude
+Opus only. (Zen MiMo and Local Qwen were removed from every picker
+2026-09-02, so they were never a factor here either way.) Claude Code
 receives the voice by file path. Codex receives the validated voice text over
 stdin, never argv, after its separate research pass finishes. Both Codex passes
 retain native search and the signed-in Windows user's full available machine
@@ -464,7 +466,7 @@ fields remain blank; they do not inherit Longmont's values.
 | Fetching  | `undici`, with a connect-time SSRF guard                                     | The address approved is the address connected to                                                        |
 | Rendering | Playwright Chromium                                                          | JS-heavy civic portals and YouTube "Show transcript"                                                    |
 | PDFs      | `unpdf`                                                                      | Text extraction; image-only PDFs are honestly reported as unread                                        |
-| Model     | Codex/Claude CLIs, Anthropic SDK, OpenCode Zen, or any OpenAI-compatible URL | Provider is resolved before enqueue and stored on each Story job                                        |
+| Model     | Codex/Claude CLIs, Anthropic SDK, or any OpenAI-compatible URL              | Provider is resolved before enqueue and stored on each Story job                                        |
 
 ## Server functions and the desk boundary
 
@@ -528,7 +530,7 @@ separate two-pass path and is always Claude Opus.
 This is scoped to the reader's pages. **Working the desk is not trackerless** —
 Scan and Dark Desk send model calls to the configured provider. Story sends
 each run to its persisted effective provider: the configured gateway, or the
-selected/ready Zen, Codex, Claude, or explicit Local choice. Every search (the
+selected/ready Codex or Claude choice. Every search (the
 research pass, PULL, and every Dark Desk hop) goes to a
 third-party chain: Exa's hosted endpoint first, then DuckDuckGo, Bing, Brave
 and Wikipedia (`src/lib/news/search-web.ts`), unconditionally and with no key.
@@ -588,7 +590,6 @@ flowchart TB
     subgraph models["Whichever model you point it at"]
         CC["Claude Code CLI<br/>(no API key)"]
         CX["Codex CLI<br/>(OAuth, native full access)"]
-        ZEN["OpenCode Zen<br/>(provider-hosted)"]
         API["Anthropic API"]
         OAI["Any OpenAI-compatible URL<br/>incl. a local model"]
     end
@@ -775,7 +776,7 @@ flowchart TB
     KIND -->|no: Scan / Dark| CFG["Configured precedence<br/>LLM gateway → Anthropic key → Claude CLI → Grok"]
     KIND -->|yes: Automatic| Q1{"LLM_* configured?"}
     Q1 -->|yes| OAI["Use that gateway only"]
-    Q1 -->|no| READY["First ready<br/>Zen → Codex Terra → Claude Opus"]
+    Q1 -->|no| READY["First ready<br/>Claude Opus → Codex Terra"]
     KIND -->|yes: named choice| ONE["Use only that provider<br/>no fallback"]
     OAI --> SAVE["Persist effective provider on job"]
     READY --> SAVE
@@ -827,8 +828,6 @@ comment on each, is [`.env.example`](../.env.example).
 | `TOWNREPORTER_EDITORIAL_MODEL`                                    | Override the Claude Opinion writing model (default Opus)                                                               |
 | `ANTHROPIC_API_KEY`                                               | Bill Claude to a key instead of using the CLI login                                                                    |
 | `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL`                      | Configured provider for Scan/Dark; forced Story Automatic provider                                                     |
-| `TOWNREPORTER_LOCAL_BASE_URL` · `TOWNREPORTER_LOCAL_MODEL`        | Local picker identity; defaults `127.0.0.1:1234/v1` and `qwen/qwen3.6-35b-a3b`                                         |
-| `TOWNREPORTER_ZEN_BASE_URL` · `TOWNREPORTER_ZEN_MODEL`            | Zen picker identity; defaults OpenCode Zen and `mimo-v2.5-free`                                                        |
 | `TOWNREPORTER_CODEX_TERRA_MODEL` · `TOWNREPORTER_CODEX_SOL_MODEL` | Codex picker model ids; defaults `gpt-5.6-terra` / `gpt-5.6-sol`                                                       |
 | `CODEX_CLI_PATH` · `CODEX_HOME`                                   | Unusual Codex binary or OAuth-state locations; normal discovery needs neither                                          |
 | `CLAUDE_CLI_PATH`                                                 | Unusual Claude Code binary location                                                                                    |

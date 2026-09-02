@@ -11,14 +11,7 @@ import {
   storyModelChoice,
 } from "./model-choice.ts";
 
-const STORY_VALUES = [
-  "auto",
-  "local",
-  "zen",
-  "codex-balanced",
-  "codex-frontier",
-  "claude-frontier",
-] as const;
+const STORY_VALUES = ["auto", "codex-balanced", "codex-frontier", "claude-frontier"] as const;
 
 describe("model choice contract", () => {
   it("keeps unique Story values in the intended order with Automatic first", () => {
@@ -44,6 +37,14 @@ describe("model choice contract", () => {
     for (const invalid of [undefined, null, "", "codex", "local; rm", 0, {}, []]) {
       assert.equal(storyModelChoice(invalid), "auto");
     }
+  });
+
+  it("normalises stored 'local' and 'zen' choices (from old jobs) to Automatic", () => {
+    // Zen and Local Qwen were removed from the picker 2026-09-02. A job queued
+    // before the removal can still have "local" or "zen" persisted for it; that
+    // must fall back to Automatic exactly like any other unrecognized value.
+    assert.equal(storyModelChoice("local"), "auto");
+    assert.equal(storyModelChoice("zen"), "auto");
   });
 
   it("preserves Automatic's configured-gateway selection for the whole queued run", () => {
@@ -73,7 +74,7 @@ describe("model choice contract", () => {
   it("explains each automatic order and makes explicit choices no-fallback", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries Claude Opus, Codex Terra, then Zen MiMo. Local Qwen is available by explicit choice.",
+      "Uses your configured gateway when set; otherwise tries Claude Opus, then Codex Terra.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),

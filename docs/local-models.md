@@ -131,8 +131,8 @@ Story routing and a separate Opinion frontier path:
 | Work               | Current provider rule                                                                                                             |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | Scan and Dark Desk | the configured provider (`LLM_*`, Anthropic, Claude Code, or Grok)                                                                |
-| Story — Automatic  | configured `LLM_*` gateway when present; otherwise first ready Claude Opus → Codex Terra → Zen MiMo rung                          |
-| Story — explicit   | Local Qwen, Zen MiMo, Codex Terra, Codex Sol, or Claude Opus; no fallback                                                         |
+| Story — Automatic  | configured `LLM_*` gateway when present; otherwise first ready Claude Opus → Codex Terra rung                                     |
+| Story — explicit   | Codex Terra, Codex Sol, or Claude Opus; no fallback (Zen MiMo and Local Qwen were removed 2026-09-02)                            |
 | Opinion            | Claude Opus only; Codex is not offered because its model declines to write an editorial that takes a position                    |
 
 Pointing `LLM_BASE_URL` at LM Studio therefore makes that gateway the configured
@@ -157,8 +157,8 @@ Still open, in rough order of merit:
    room for context. Whether it reaches Haiku on this task is unknown.
 3. **Re-test the full Story lane after a model/runtime change.** The release
    gate tried the loaded `qwen/qwen3.6-35b-a3b` through the real multi-pass
-   Story product and it did not complete. Local remains available by explicit
-   choice, but that readiness check proves only that the model is loaded.
+   Story product and it did not complete. The Local Qwen picker choice was
+   removed 2026-09-02; a local model is reachable only through `LLM_BASE_URL`.
 
 What would change the answer: a local model that proposes eight or ten URLs per
 hop instead of three. Nothing smaller than that is worth the wiring.

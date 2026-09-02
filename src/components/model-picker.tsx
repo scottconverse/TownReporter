@@ -101,13 +101,7 @@ export function ModelPicker(props: Props) {
                 </a>{" "}
                 explains the file and configuration.
               </li>
-            ) : (
-              <li>
-                For Local Qwen, start LM Studio&apos;s server with the intended model loaded. Zen
-                MiMo and other gateways need the endpoint and any required credentials described in
-                the operator guide below.
-              </li>
-            )}
+            ) : null}
             <li>
               Return here, reload this page to check readiness again, choose the model, then start
               your draft. An explicit choice never switches to another provider.

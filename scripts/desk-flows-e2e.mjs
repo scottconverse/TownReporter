@@ -150,26 +150,32 @@ async function main() {
   step("a lead can be filed by hand");
 
   const storyModel = page.getByLabel("Writing model");
-  if ((await storyModel.locator("option").count()) !== 6 || (await storyModel.inputValue()) !== "auto") {
+  if ((await storyModel.locator("option").count()) !== 4 || (await storyModel.inputValue()) !== "auto") {
     throw new Error("Story model picker choices/default do not match the product contract");
   }
-  step("Story exposes the full model ladder with Automatic selected");
+  step("Story exposes the Claude/Codex model ladder with Automatic selected");
 
   await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
   const row = page.locator(".lead-row", { hasText: leadHeadline }).first();
   await row.waitFor();
 
   const queueModel = row.getByLabel("Writing model");
-  if ((await queueModel.locator("option").count()) !== 6 || (await queueModel.inputValue()) !== "auto") {
+  if ((await queueModel.locator("option").count()) !== 4 || (await queueModel.inputValue()) !== "auto") {
     throw new Error("Queue row model picker choices/default do not match the product contract");
   }
-  await queueModel.selectOption("local");
-  await row.getByRole("button", { name: `Draft ${leadHeadline} with Local Qwen` }).click();
-  await row.getByText(/Local Qwen is unreachable|model .* is not loaded/i).waitFor({ timeout: 20_000 });
+  // CI has neither Codex nor Claude configured, so an explicit Codex choice
+  // must surface preflight's codex-missing guidance rather than enqueueing.
+  await queueModel.selectOption("codex-balanced");
+  await row.getByRole("button", { name: `Draft ${leadHeadline} with Codex Terra` }).click();
+  await row
+    .getByText(
+      "Codex is not installed on this machine. Install the Codex CLI, open Codex and sign in, then choose Codex again. Nothing was queued or spent.",
+    )
+    .waitFor({ timeout: 20_000 });
   if ((await row.locator("[aria-describedby]").getAttribute("aria-describedby")) === "model-picker-help") {
     throw new Error("Queue model picker still uses the old shared description id");
   }
-  step("Queue row sends its own explicit model and refuses unavailable Local before enqueue");
+  step("Queue row sends its own explicit model and refuses missing Codex before enqueue");
 
   // The actions must be visible without hovering.
   const acts = row.locator(".row-acts");

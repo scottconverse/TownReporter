@@ -57,6 +57,19 @@ test("every story picker exposes keyboard-native setup help and real operator li
   }
 });
 
+test("Story picker offers exactly Automatic, Codex Terra, Codex Sol, and Claude Opus", () => {
+  // Zen and Local Qwen were removed from the picker 2026-09-02 ("it's not
+  // working it seems" -- Claude/Codex only for now); the picker went from 6
+  // options down to these 4.
+  const html = render();
+  const optionCount = (html.match(/<option[^>]*>/g) ?? []).length;
+  assert.equal(optionCount, 4);
+  assert.doesNotMatch(html, /Local Qwen|Zen MiMo/);
+  for (const label of ["Automatic", "Codex Terra", "Codex Sol", "Claude Opus"]) {
+    assert.match(html, new RegExp(`<option[^>]*>${label} `));
+  }
+});
+
 test("Opinion setup help explains its voice prerequisite without advertising Story-only models", () => {
   const html = render({ scope: "opinion" });
   assert.match(html, /TOWNREPORTER_VOICE_FILE/);

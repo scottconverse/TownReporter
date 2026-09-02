@@ -123,7 +123,7 @@ describe("desk jobs", () => {
       newsroomId,
       kind: "draft",
       subjectId: lead.id,
-      modelChoice: "local",
+      modelChoice: "claude-frontier",
       kick: false,
     });
 
@@ -209,7 +209,7 @@ describe("desk jobs", () => {
       newsroomId,
       kind: "draft",
       subjectId,
-      modelChoice: "local",
+      modelChoice: "claude-frontier",
       kick: false,
     });
     const second = await enqueueJob({
@@ -223,7 +223,7 @@ describe("desk jobs", () => {
     assert.equal(second.id, first.id);
     assert.equal(
       second.model_choice,
-      "local",
+      "claude-frontier",
       "a coalesced caller must receive the real persisted choice",
     );
   });

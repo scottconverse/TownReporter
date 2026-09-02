@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.5.8](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.8).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.5.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.9).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
 | **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
-| **A model**                 | Story can use a configured OpenAI-compatible gateway, an LM Studio-compatible Local Qwen, provider-hosted Zen, or signed-in Codex/Claude CLIs. Scan and Dig use the configured provider below. Opinion uses signed-in Claude only.     |
+| **A model**                 | Story can use a configured OpenAI-compatible gateway or signed-in Codex/Claude CLIs. Scan and Dig use the configured provider below. Opinion uses signed-in Claude only.     |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 
@@ -41,7 +41,7 @@ on an editor's action:
 
 | What               | Triggered by                                      | Where it goes                                                                                                                                                                                                                                                                                    |
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it selects Claude Opus, Codex Terra, or OpenCode Zen before enqueue. Local is explicit-only. Opinion is always Claude Opus; Codex is not offered for editorials.              |
+| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it tries Claude Opus, then Codex Terra, before enqueue. Opinion is always Claude Opus; Codex is not offered for editorials.              |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
 | **Searches**       | The research pass, PULL, and every Dark Desk hop  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key, and there is currently no setting to keep a search on this machine — the chain is unconditional. |
 
@@ -65,7 +65,7 @@ cp .env.example .env
 
 Edit `.env`. **The minimum that produces every enabled desk feature is a
 signed-in [Claude Code](https://code.claude.com) CLI**; Story alone can also run
-through Local, Zen, Codex, or a configured gateway. Check Claude with:
+through Codex or a configured gateway. Check Claude with:
 
 ```bash
 claude --version
@@ -194,34 +194,31 @@ Resolution lives in `src/lib/news/ai.ts` (`resolveProvider()`); the Claude Code 
 
 Each picker includes a **Set up a writing model** disclosure with official
 Codex and Claude installation links, same-server-account sign-in guidance and
-reload/retry instructions. Queue and workbench help also points local/Zen
-operators here; Opinion explains the voice-file prerequisite. The disclosure
-stays usable when drafting is disabled and does not install or sign in for you.
+reload/retry instructions. Opinion explains the voice-file prerequisite. The
+disclosure stays usable when drafting is disabled and does not install or
+sign in for you.
 
 Every active Queue row and the story workbench default to **Automatic**. A
 configured `LLM_*` gateway is forced for Automatic. Without one, TownReporter
-checks Claude Opus, Codex Terra, then provider-hosted Zen MiMo and
-stores the first ready provider on the job before it is enqueued. Every pass in
-that Story run uses the same effective provider. A named choice forces only
-that provider; explicit choices never fall back. Local Qwen remains explicit
-instead of Automatic: `/models` can prove it is loaded, but not that the loaded
-model will finish TownReporter's full multi-pass reporting job.
+tries Claude Opus, then Codex Terra, and stores the first ready provider on
+the job before it is enqueued. Every pass in that Story run uses the same
+effective provider. A named choice forces only that provider; explicit
+choices never fall back.
 
-| Choice      | Default identity                                   | Prerequisite / boundary                                                                                                                     |
-| ----------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local Qwen  | `http://127.0.0.1:1234/v1`, `qwen/qwen3.6-35b-a3b` | Run an LM Studio-compatible `/v1` server and load the exact model id. The readiness check calls `/models`.                                  |
-| Zen MiMo    | `https://opencode.ai/zen/v1`, `mimo-v2.5-free`     | Provider-hosted. Draft prompts leave this machine and go to OpenCode. Network/provider availability and pricing are controlled by OpenCode. |
-| Codex Terra | `gpt-5.6-terra`                                    | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token.                                              |
-| Codex Sol   | `gpt-5.6-sol`                                      | Same Codex login; frontier Story override.                                                                                                  |
-| Claude Opus | `claude-opus-5`                                    | Signed-in Claude Code, or `ANTHROPIC_API_KEY`.                                                                                              |
+Zen MiMo and Local Qwen were removed from the picker (2026-09-02): Claude and
+Codex only, for now. See [local-models.md](local-models.md) for the
+surviving `LLM_BASE_URL` gateway path if you want to point Story at a model on
+your own hardware.
+
+| Choice      | Default identity | Prerequisite / boundary                                                                        |
+| ----------- | ----------------- | ------------------------------------------------------------------------------------------------ |
+| Codex Terra | `gpt-5.6-terra`   | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token.   |
+| Codex Sol   | `gpt-5.6-sol`     | Same Codex login; frontier Story override.                                                       |
+| Claude Opus | `claude-opus-5`   | Signed-in Claude Code, or `ANTHROPIC_API_KEY`.                                                   |
 
 Compatibility overrides:
 
 ```env
-TOWNREPORTER_LOCAL_BASE_URL=http://127.0.0.1:1234/v1
-TOWNREPORTER_LOCAL_MODEL=qwen/qwen3.6-35b-a3b
-TOWNREPORTER_ZEN_BASE_URL=https://opencode.ai/zen/v1
-TOWNREPORTER_ZEN_MODEL=mimo-v2.5-free
 TOWNREPORTER_CODEX_TERRA_MODEL=gpt-5.6-terra
 TOWNREPORTER_CODEX_SOL_MODEL=gpt-5.6-sol
 ```

@@ -1,7 +1,5 @@
 export const STORY_MODEL_CHOICES = [
   { value: "auto", label: "Automatic", detail: "Recommended ladder" },
-  { value: "local", label: "Local Qwen", detail: "This machine" },
-  { value: "zen", label: "Zen MiMo", detail: "Provider-hosted" },
   { value: "codex-balanced", label: "Codex Terra", detail: "More depth" },
   { value: "codex-frontier", label: "Codex Sol", detail: "Frontier" },
   { value: "claude-frontier", label: "Claude Opus", detail: "Frontier" },
@@ -60,7 +58,7 @@ export function modelChoiceHelp(value: unknown, scope: "story" | "opinion" = "st
   }
   return scope === "opinion"
     ? "Claude Opus writes the whole editorial. Codex is offered for Story drafts only: its model declines to write an editorial that takes a position."
-    : "Uses your configured gateway when set; otherwise tries Claude Opus, Codex Terra, then Zen MiMo. Local Qwen is available by explicit choice.";
+    : "Uses your configured gateway when set; otherwise tries Claude Opus, then Codex Terra.";
 }
 
 export function opinionProviderProblem(error: string): string {

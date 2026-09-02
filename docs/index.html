@@ -610,7 +610,7 @@
         >
         <div class="nav-links">
           <a href="#shots">Screenshots</a>
-          <a href="#new">New in 0.5.8</a>
+          <a href="#new">New in 0.5.9</a>
           <a href="#idea">The idea</a>
           <a href="#rooms">Two rooms</a>
           <a href="#how">How it works</a>
@@ -646,7 +646,7 @@
               or doesn’t add up. A human still decides what prints.
             </p>
             <p class="cap">
-              Current release: <b>0.5.8</b>, the build the live paper runs. Everything described
+              Current release: <b>0.5.9</b>, the build the live paper runs. Everything described
               here is on it.
             </p>
             <div class="cta-row">
@@ -695,7 +695,7 @@
         <div class="wrap strip-in">
           <span class="fact"><b>MIT</b> licensed</span>
           <span class="fact"><b>Node 22</b></span>
-          <span class="fact"><b>Local, Zen, Codex or Claude</b> · API keys optional</span>
+          <span class="fact"><b>Codex or Claude</b> · API keys optional</span>
           <span class="fact">Self-host <b>email + password</b></span>
           <span class="fact"
             ><b>Zero</b> trackers on the reader's page · zero outside requests</span
@@ -783,16 +783,16 @@
       </section>
 
       <section id="new" class="wrap">
-        <p class="eyebrow">New in 0.5.8</p>
+        <p class="eyebrow">New in 0.5.9</p>
         <h2>The editor picks the writing model, and the AI knows which city it works in</h2>
         <div class="grid-3">
           <div class="panel">
             <h3>Pick the model per run</h3>
             <p class="cap" style="margin: 0 0 10px">Queue and workbench</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              Every Story draft offers Automatic, Local Qwen, Zen MiMo, Codex Terra, Codex Sol or
-              Claude Opus. An explicit choice never switches provider behind your back, and the
-              provider that wrote the draft is recorded on the job.
+              Every Story draft offers Automatic, Codex Terra, Codex Sol or Claude Opus. An explicit
+              choice never switches provider behind your back, and the provider that wrote the draft
+              is recorded on the job.
             </p>
           </div>
           <div class="panel">
@@ -1013,9 +1013,8 @@ npm run dev
               <p>
                 <strong>Pick per story.</strong> Every Queue row and the story workbench put a model
                 picker beside <b>Draft with AI</b>. Automatic uses your configured gateway when set;
-                otherwise it chooses the first ready Claude Opus, Codex Terra or provider-hosted Zen
-                MiMo before the job starts, then keeps that provider for every pass. Local Qwen
-                remains available by explicit choice. Named choices never fall back.
+                otherwise it tries Claude Opus, then Codex Terra, before the job starts, then keeps
+                that provider for every pass. Named choices never fall back.
               </p>
               <p>
                 <b>Set up a writing model</b> opens help under every Queue, workbench and Opinion
@@ -1031,10 +1030,9 @@ npm run dev
                 sandbox.
               </p>
               <p>
-                Local expects an LM Studio-compatible server on <code>127.0.0.1:1234</code> with the
-                named Qwen model loaded. Zen is hosted by OpenCode, so that choice sends the prompt
-                there. Codex and Claude reuse their signed-in CLI sessions and check readiness
-                before enqueue.
+                Zen MiMo and Local Qwen were removed from the picker (2026-09-02): Claude and Codex
+                only, for now. Codex and Claude reuse their signed-in CLI sessions and check
+                readiness before enqueue.
               </p>
               <p>
                 Prefer a gateway? Any OpenAI-compatible <code>/v1/chat/completions</code> endpoint

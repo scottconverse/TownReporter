@@ -423,7 +423,7 @@ describe("authenticated Codex commit boundary", () => {
       newsroomId: 1,
       kind: "draft",
       subjectId: lead.id,
-      modelChoice: "local",
+      modelChoice: "claude-frontier",
       kick: false,
     });
     let rateCalls = 0;

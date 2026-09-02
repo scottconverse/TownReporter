@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.5.8](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.8).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.5.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.9).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 **Candidate features:** the per-run model picker and native Codex repair below
 are unreleased; they are not on the tagged 0.5.6 live paper until promotion.
@@ -122,9 +122,9 @@ Statuses you will use:
 
 Every active lead has its own compact **Writing model** picker beside **Draft
 with AI** (or **Redraft with AI** after a draft exists). Automatic uses the
-operator's configured gateway when one is set; otherwise it chooses the first
-ready Claude Opus, Codex Terra, or Zen MiMo provider. Local Qwen remains a
-named choice. A named choice uses only that provider and never falls back. The result appears on the same
+operator's configured gateway when one is set; otherwise it tries Claude
+Opus, then Codex Terra. A named choice uses only that provider and never
+falls back. The result appears on the same
 row and names the provider the server actually queued. **Open** takes you to
 the workbench to watch the draft land and edit it. Nothing prints from this
 list.
@@ -151,12 +151,14 @@ The lead and the notes are on the left and never print. The draft is on the righ
 **Draft with AI** runs a research pass first: the company’s or agency’s own press release and records, then stakeholders, history, and competing accounts. It writes a story into the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
 
 The picker beside it controls this run. **Automatic** uses a configured
-`LLM_*` gateway exclusively when present; otherwise it checks Zen MiMo, Codex
-Terra and Claude Opus in that order, chooses the first ready one
-before enqueueing, and keeps it for every reporting and writing pass. Choose a
-named model to force only Local, provider-hosted Zen, Codex Terra, frontier
-Codex Sol, or frontier Claude Opus. Explicit choices never fall back. Redraft
-has the same picker.
+`LLM_*` gateway exclusively when present; otherwise it tries Claude Opus,
+then Codex Terra, chooses the first ready one before enqueueing, and keeps it
+for every reporting and writing pass. Choose a named model to force only
+Codex Terra, frontier Codex Sol, or frontier Claude Opus. Explicit choices
+never fall back. Redraft has the same picker.
+
+Zen MiMo and Local Qwen were removed from the picker (2026-09-02): Claude and
+Codex only, for now.
 
 Stay on the page. If the click dies before the reply comes back, the workbench
 keeps looking until the draft is on the lead, then fills the form. You should
@@ -476,10 +478,7 @@ How we report, in public: `/how-we-report`.
 
 | You see                                     | Likely                                                                                  | What to do                                                                                                                                                               |
 | ------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Automatic says no model is ready            | Configured gateway failed, or every Automatic provider failed readiness                 | Fix the configured gateway; otherwise restore access to Zen, sign in to Codex, or sign in/configure Claude. Local is explicit-only ([setup.md](setup.md#per-run-picker)) |
-| Local Qwen is unreachable                   | LM Studio-compatible server is stopped or not on `127.0.0.1:1234`                       | Start it, or set `TOWNREPORTER_LOCAL_BASE_URL`                                                                                                                           |
-| Local Qwen says the model is not loaded     | The exact configured model is absent                                                    | Load `qwen/qwen3.6-35b-a3b`, or set `TOWNREPORTER_LOCAL_MODEL` to the loaded id                                                                                          |
-| Zen MiMo is unreachable                     | This machine is offline or OpenCode Zen is unavailable                                  | Restore network access or choose another provider; Zen is provider-hosted                                                                                                |
+| Automatic says no model is ready            | Configured gateway failed, or every Automatic provider failed readiness                 | Fix the configured gateway; otherwise sign in to Codex, or sign in/configure Claude ([setup.md](setup.md#per-run-picker))                                                |
 | Codex is missing or signed out              | Codex CLI/OAuth is unavailable on the server machine                                    | Install/open Codex, sign in, and try again; check `CODEX_CLI_PATH` / `CODEX_HOME` only for unusual layouts                                                               |
 | Claude is missing or signed out             | Claude Code CLI login is unavailable                                                    | Install/open Claude Code and sign in, or configure the Claude API path                                                                                                   |
 | An Opinion row says Failed with no draft    | The provider errored, declined, or returned something that was not a complete editorial | Read the error on the row. Retry Automatic for its full ladder, or deliberately choose another provider; nothing was filed or published                                  |

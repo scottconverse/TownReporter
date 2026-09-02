@@ -5,7 +5,7 @@ machine through a Cloudflare Tunnel. No hosting bill, no ports open on the
 router.
 
 The live-deployment notes below record the established setup as of the
-tagged **v0.5.8** build, which is what the production checkout runs.
+tagged **v0.5.9** build, which is what the production checkout runs.
 
 ---
 
@@ -18,9 +18,9 @@ visitor -> Cloudflare edge -> tunnel -> 127.0.0.1:3000 (this box)
                                             +-- Claude Code CLI (your login)
 ```
 
-The same Node process can also use the signed-in Codex CLI, OpenCode Zen,
-explicit Local Qwen, or a configured OpenAI-compatible gateway according to
-the editor's per-run choice. No new listener or public port is added.
+The same Node process can also use the signed-in Codex CLI, or a configured
+OpenAI-compatible gateway, according to the editor's per-run choice. No new
+listener or public port is added.
 
 Nothing listens on a port the internet can reach. The machine dials **out** to
 Cloudflare and holds that connection open, so the home IP never appears in DNS
@@ -187,8 +187,8 @@ the run.
 | Desk work           | Provider rule                                                                                                | Recovery                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
 | Scan and Dark Desk  | configured `LLM_*`, Anthropic/Claude Code, or Grok path                                                      | repair the configured endpoint/key or sign back into Claude Code                                              |
-| Story — Automatic   | configured `LLM_*` exclusively when present; otherwise Claude Opus → Codex Terra → Zen MiMo readiness ladder | repair the provider named on the failed job; a run stays pinned to one provider                               |
-| Story — explicit    | Local Qwen, Zen MiMo, Codex Terra, Codex Sol, or Claude Opus; no fallback                                    | load the exact local model, restore Zen/network access, or open and sign into the named CLI                   |
+| Story — Automatic   | configured `LLM_*` exclusively when present; otherwise Claude Opus → Codex Terra readiness ladder            | repair the provider named on the failed job; a run stays pinned to one provider                               |
+| Story — explicit    | Codex Terra, Codex Sol, or Claude Opus; no fallback                                                          | open and sign into the named CLI                                                                               |
 | Opinion             | Claude Opus only, through the signed-in Claude Code session; Codex is not offered for editorials             | open Claude Code and renew its login; the completed row records the provider that delivered                   |
 
 Codex reuses the signed-in user's native configuration and full available

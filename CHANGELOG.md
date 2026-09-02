@@ -1,6 +1,20 @@
 # Changelog
 
-Current release: **0.5.8**.
+Current release: **0.5.9**.
+
+## 0.5.9 — 2026-09-02
+
+- **Claude and Codex only, for now.** Zen MiMo and Local Qwen are gone from
+  the Story picker and from the Automatic ladder. The picker offers Automatic,
+  Codex Terra, Codex Sol, and Claude Opus; Automatic tries Claude Opus, then
+  Codex Terra. The free Zen endpoint kept answering 429 and the local lane never
+  completed a real Story run, so neither is offered until it earns its place.
+  A job queued before this release with `local` or `zen` stored on it is
+  treated as Automatic. The env-only `LLM_BASE_URL` gateway path is unchanged;
+  see docs/local-models.md for pointing Story at your own hardware that way.
+- Documentation swept for the removed options; the environment table in the
+  manual no longer lists the dead `TOWNREPORTER_LOCAL_*` / `TOWNREPORTER_ZEN_*`
+  overrides.
 
 ## 0.5.8 — 2026-09-02
 

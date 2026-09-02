@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.5.8](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.8)** — 2 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.5.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.9)** — 2 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 **Documentation scope:** this checkout also documents the **unreleased model-picker
 and native Codex repair candidate**. Those features are not part of the tagged
@@ -50,8 +50,8 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Run it (about five minutes)
 
-You need **Node 22+**. Story drafting can use a local model, the provider-hosted
-Zen endpoint, or an existing Codex or Claude login; API keys are optional. Scan
+You need **Node 22+**. Story drafting uses an existing Codex or Claude login,
+or a configured `LLM_BASE_URL` gateway; API keys are optional. Scan
 and Dark Desk still use the configured provider. See [Model](#model--automatic-ladder-with-an-editor-override) below.
 
 ```bash
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.5.9** — Claude and Codex only: Zen MiMo and Local Qwen removed from the Story picker and the Automatic ladder.
 - **0.5.8** — Automatic drafts with your own signed-in Claude first, not a free rate-limited endpoint.
 - **0.5.7** — the editor picks the writing model per run, Codex drafts stories natively, Opinion is Claude only; the AI is finally told which city it works in.
 - **0.5.6** — set up a paper for any city with zero file edits; before setup, a fresh install claims to be nobody instead of Longmont.
@@ -171,19 +172,19 @@ Every active Queue row has its own **Writing model** picker beside **Draft with
 AI**; the story workbench has the same control beside Draft or Redraft. The
 default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
 pair names a gateway, Automatic uses that gateway and no other provider.
-Otherwise it checks Claude Opus, Codex Terra, then provider-hosted Zen MiMo,
-chooses the first ready provider before enqueueing, and stores that effective
-choice on the job. Every reporting and writing pass in that run uses the same
-provider. Local Qwen stays available as an explicit choice, but is not in
-Automatic because a loaded local model does not prove it can finish the full
-reporting pipeline.
+Otherwise it tries Claude Opus, then Codex Terra, chooses the first ready
+provider before enqueueing, and stores that effective choice on the job. Every
+reporting and writing pass in that run uses the same provider.
 
-Pick Local, Zen, Codex Terra, frontier Codex Sol, or frontier Claude Opus to
-force that provider for one run. Explicit choices never fall back. Local expects
-an LM Studio-compatible server at `127.0.0.1:1234` with
-`qwen/qwen3.6-35b-a3b` loaded. Zen is hosted by OpenCode, so selecting it sends
-the draft prompt there. The endpoint/model compatibility overrides are listed
-in [docs/setup.md](docs/setup.md#per-run-picker).
+Pick Codex Terra, frontier Codex Sol, or frontier Claude Opus to force that
+provider for one run. Explicit choices never fall back. The endpoint/model
+compatibility overrides are listed in
+[docs/setup.md](docs/setup.md#per-run-picker).
+
+Zen MiMo and Local Qwen were removed from the picker (2026-09-02): Claude and
+Codex only, for now. See [docs/local-models.md](docs/local-models.md) for the
+surviving `LLM_BASE_URL` gateway path if you want to point Story at a model
+running on your own hardware.
 
 Codex and Claude use the operator's existing signed-in CLI/OAuth sessions; no
 API key is required. Readiness is checked before enqueueing. If a login expires,
@@ -316,8 +317,8 @@ No. Scan files leads. Draft writes a story into the workbench. Publish is a pers
 Yes. The first owner completes **Set up the paper**, and can revise the same database-backed settings later on the Server page. No source edit or rebuild is required. See [docs/setup.md](docs/setup.md#point-it-at-another-city).
 
 **Do I have to pay for an AI key?**
-No. Story drafting can use the local picker rung, provider-hosted Zen, or a
-signed-in Codex/Claude CLI. Set `ANTHROPIC_API_KEY` if you would rather bill a
+No. Story drafting can use a signed-in Codex/Claude CLI, or a configured
+`LLM_BASE_URL` gateway to a model on your own hardware. Set `ANTHROPIC_API_KEY` if you would rather bill a
 Claude key, or point `LLM_BASE_URL` at an OpenAI-compatible endpoint. That
 configured gateway becomes the forced Story Automatic provider and remains the
 configured provider for Scan and Dark Desk. `XAI_API_KEY` still runs Grok for
@@ -343,7 +344,7 @@ anywhere — that is the claim above, and it only covers the reader. Working the
 desk is different: pages you watch and documents you pull are fetched from the
 sites that host them; Scan and Dark Desk model calls go to the configured
 provider; Story calls go to the effective provider stored for that run (which
-may be provider-hosted Zen, Codex, or Claude); and searches — the research pass,
+may be Codex, Claude, or a configured gateway); and searches — the research pass,
 PULL, and every Dark Desk hop — go to a third-party search chain, tried in
 order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing,
 Brave and Wikipedia. None needs an API key, and there is no setting to keep a
