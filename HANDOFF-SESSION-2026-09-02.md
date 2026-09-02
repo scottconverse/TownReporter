@@ -1,13 +1,14 @@
 # TownReporter — full-context handoff for a new session (2026-09-02)
 
-## STATE AS OF 16:10 2026-09-02 (read this first)
+## STATE AS OF 18:20 2026-09-02 (read this first)
 
-**Production is on v0.6.1 (3a81055)**, live at https://townreporter.org, served
-from `C:\Users\scott\Desktop\Code\townreporter-web`. Development happens in
+**Production is on v0.6.2 (eaef0d7)**, promoted 17:43, live at
+https://townreporter.org, served from
+`C:\Users\scott\Desktop\Code\townreporter-web`. Development happens in
 `C:\Users\scott\Desktop\Code\townreporter-dev`. GitHub `github` is the only
 remote (`https://github.com/scottconverse/TownReporter.git`). Tags v0.5.5
-through v0.6.1 and their GitHub releases all exist. Today shipped six
-releases in sequence:
+through v0.6.2 and their GitHub releases all exist. Today shipped seven
+releases in sequence, 0.5.9 through 0.6.2:
 
 - **0.5.9** — the Zen/Local-model removal swept in (Automatic ladder down to
   Claude → Codex; picker down to Automatic, Codex Terra, Codex Sol, Claude
@@ -27,8 +28,21 @@ releases in sequence:
   scanner re-finds is stamped "seen again ×N" instead of being refiled;
   Server-page buttons say what they do; Dark Desk and Opinion say "sign in
   again" on a lapsed login; staging is now mandatory pre-promote via
-  `ops\stage.ps1`. See `CHANGELOG.md` for the full text of each entry — the
-  lines above are summaries, not the record.
+  `ops\stage.ps1`.
+- **0.6.2** — one shared provider registry (`src/lib/news/provider-registry.ts`)
+  that every picker, the Automatic ladder, and every timeout floor now read
+  from instead of four hand-synced spots; a per-paper **Time per call**
+  control per model on the Server page (`provider_settings`, migration 0029);
+  a Dark Desk **Digging model** picker and the Brief turned into a queued job
+  like Story/Scan/Opinion (migration 0030); an anchor-based duplicate-lead
+  matcher (fixes a PRINTED-status bug) that stamps a killed lead the scanner
+  re-finds as "seen again ×N" instead of refiling it; WCAG AA color contrast
+  plus a Text Normal/Large control; Automatic's fail-over path now proven by
+  a real browser end-to-end run in CI, not just a unit test; and a nightly
+  scheduled task (Windows Task Scheduler, "TownReporter Nightly Proof", 03:30
+  daily) that runs the live scan-then-draft pipeline for real and writes
+  proof to `artifacts/nightly/`. See `CHANGELOG.md` for the full text of each
+  entry — the lines above are summaries, not the record.
 
 **Release path now (binding).** Suite + build + lint locally, push, wait for
 CI green (10 jobs, including a provider-signin job) on GitHub, then in the
@@ -60,18 +74,45 @@ a timeout must have that timeout editable from the UI, not just in code. A
 killed lead must never be silently hidden from Dark Desk's context — it
 stays visible there, marked as killed/resurfaced.
 
-**In flight right now: 0.6.2, split across two worktrees**, both under
-`.claude/worktrees/`:
-- `registry` (Opus) — the shared provider/model registry, per-paper time
-  budgets surfaced on the Server page, a Dark Desk model picker, and turning
-  Brief into a job like Story/Scan/Opinion already are.
-- `proofs` (Sonnet) — fail-over browser end-to-end coverage added to CI, plus
-  a nightly scheduled task that runs the live drafting pipeline for real and
-  proves it still works.
+**0.6.2 shipped**, merged from the two worktrees (`registry`, Opus; `proofs`,
+Sonnet) described in earlier state above. CI needed two pushes to go green:
+`package-lock.json` had lost nitro's `lru-cache` entry (a Windows `npm
+install` drops it; Linux `npm ci` on the runner requires it) — restored from
+the previous lockfile. Separately, "The 0.5.1 desk flows" browser walk
+stalled once on the setup page and passed clean on rerun; 3 local
+reproduction attempts did not reproduce the stall — treated as CI flake, not
+a code defect, pending a repeat. Staged, walked, tagged, released, and
+promoted at 17:43.
 
-The coordinator (this session's lineage) owns merging both worktrees, gating
-on CI, staging, bumping the version, tagging, and promoting — the worktree
-agents do not promote.
+**INCIDENT, 17:43–~18:10.** The promote stopped the running app as designed,
+but the app did not come back up: `ops/start-townreporter.ps1`'s
+`Test-Port` check (`Get-NetTCPConnection -LocalPort 3000`, no address
+filter) found an unrelated dev server — `vinext dev` for
+`halo-research-gateway/website`, PID 39124, owner unknown, neither live peer
+Claude session claimed it — listening on `[::1]:3000` (IPv6 only), concluded
+TownReporter was already up, and never started it. TownReporter binds
+`127.0.0.1:3000` so there was no actual port collision, only a false-positive
+liveness check. `promote.ps1` reported `[FAIL]` and townreporter.org served
+502 for roughly 27 minutes. Recovery: the coordinator started the built
+server directly with the start script's exact command (`node
+scripts/with-app-env.mjs node .output/server/index.mjs` from
+`townreporter-web`, logging to `logs/app.*.log`). The foreign PID 39124 was
+NOT killed — ownership unconfirmed, left alone. Fix in flight as **0.6.3**:
+an address-aware `Test-TownReporterPort` in `ops/lib-port.ps1`, shared by
+start/watchdog/restart/promote/status/stage, probing `127.0.0.1` explicitly
+instead of `localhost`.
+
+**Operator notes.** Scott flagged the desk as "clunky and disjointed" and a
+redesign is pending — this is a design decision for Scott, **do not act on
+it**. Scott has been away for a few hours as of ~16:40; the coordinator has
+the helm and is continuing release/hardening work solo.
+
+**Open items:** 0.6.3 hotfix (address-aware port checks) is in flight; Phase
+4 GauntletGate full-lane pass is still pending; the Server-page header wraps
+to two lines at 1280px since the Text Normal/Large control was added in
+0.6.2 (cosmetic, noted for the pending redesign rather than fixed now); a
+live scan under 0.6.1 was confirmed complete within the new 150s budget with
+3 killed leads correctly stamped "seen again ×N" — verified.
 
 **Known facts, so you don't relitigate them.** Claude Code's login on this
 box lives in the CLI's own file, `~/.claude/.credentials.json` — separate
@@ -98,14 +139,16 @@ and DB backups in `C:\Users\scott\Desktop\Code\townreporter-backups\`
 
 ### Verification ledger
 
-VERIFIED: the app version constant reads 0.6.1 | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/version.ts:2
-VERIFIED: the changelog names 0.6.1 as current | C:/Users/scott/Desktop/Code/townreporter-dev/CHANGELOG.md:3
+VERIFIED: the app version constant reads 0.6.2 | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/version.ts:2
+VERIFIED: the changelog names 0.6.2 as current | C:/Users/scott/Desktop/Code/townreporter-dev/CHANGELOG.md:3
 VERIFIED: ops/stage.ps1 stages the dev checkout against a copy of real production data before any promote | C:/Users/scott/Desktop/Code/townreporter-dev/ops/stage.ps1:1
 VERIFIED: scripts/stage-editor.mjs creates a staging sign-in for the walk | C:/Users/scott/Desktop/Code/townreporter-dev/scripts/stage-editor.mjs:1
 VERIFIED: docs/staging.md documents ops\stage.ps1 as the one pre-promote staging command | C:/Users/scott/Desktop/Code/townreporter-dev/docs/staging.md:1
+VERIFIED: ops/nightly-proof.ps1 runs the real scan-then-draft pipeline for the nightly proof task | C:/Users/scott/Desktop/Code/townreporter-dev/ops/nightly-proof.ps1:1
+VERIFIED: src/lib/news/provider-registry.ts is the single provider/model registry every picker and ladder now reads from | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/provider-registry.ts:1
 
-UNVERIFIED: a live scan under 0.6.1 completes within the new 150s budget - not checked; Scott is running one as this is written
 UNVERIFIED: the fail-over path has been exercised on a live login lapse - not checked; needs a lapsed login on the live desk
+UNVERIFIED: the nightly proof task's first scheduled run (03:30) has not happened yet - not checked; task is registered but has not fired since being added
 
 Read this first. Then `HANDOFF-NEXT-AGENT.md` (locations, the ten hard rules,
 health-check recipe). This file is the story of the last 48 hours and the
