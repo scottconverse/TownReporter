@@ -2,6 +2,35 @@
 
 Current release: **0.6.1**.
 
+## 0.6.2 — 2026-09-02
+
+- **Duplicate-lead matcher catches a same-source rewrite with almost no
+  shared words.** A killed/drafted lead's headline and the scanner's reworded
+  version of the same story could share a source URL but too few words to
+  clear the existing Jaccard/containment thresholds (real case: "Longmont
+  council has two closed-door executive sessions on the books for late
+  September" vs. the scanner's later "Council books two executive sessions
+  in eight days — Sept. 22 and Sept. 29 — with packets already posted").
+  `findMatchingLead` now also matches when a source URL is shared and the two
+  headlines share 2 or more "anchors" — specific dates, dollar amounts,
+  multi-digit numbers, or proper nouns that aren't the paper's own furniture
+  (city/paper name, "Council", months, weekdays). A single shared date, or a
+  shared URL with unrelated anchors, still does not match.
+- **"≈ PRINTED" no longer flags unrelated killed leads on city/month
+  furniture alone.** `nearDuplicate()`'s proper-noun path used to count
+  "Longmont" + "Sept" (or "City", "Council", "Wednesday") as 2 shared proper
+  nouns, wrongly tagging unrelated leads as covering an already-printed
+  story. It now excludes the same furniture stoplist the matcher uses, and
+  additionally requires the two leads' `topic` to agree (unless the existing
+  title-overlap check already says yes on its own).
+- **The "seen again" stamp is now a real badge, not muted meta text.** It
+  used to render inline with the age/origin text in the small grey meta line,
+  where a live screenshot showed an editor scroll right past it. It's now a
+  bordered pill in the same family as KILLED and ≈ PRINTED, reading
+  **SEEN AGAIN ×N** with the last-seen date, and the Killed tab shows a
+  one-line explainer under the filter row the first time any lead on it
+  carries a stamp.
+
 ## 0.6.1 — 2026-09-02
 
 - **Scan gets the same per-run writing-model picker Story has.** Scan used to

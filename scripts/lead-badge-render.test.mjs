@@ -122,7 +122,7 @@ function baseLead(overrides = {}) {
   };
 }
 
-test("a lead with resurfaced_count > 0 shows the seen-again badge with its count and date", () => {
+test("a lead with resurfaced_count > 0 shows the seen-again badge with its count and date, in the lead-flags badge rail (not the muted meta line)", () => {
   const html = renderToStaticMarkup(
     createElement(LeadRowView, {
       lead: baseLead({ resurfaced_count: 3, last_resurfaced_at: "2026-09-03T12:00:00.000Z" }),
@@ -131,6 +131,17 @@ test("a lead with resurfaced_count > 0 shows the seen-again badge with its count
   assert.match(html, /seen again ×3/);
   assert.match(html, /Sep 3/);
   assert.match(html, /class="chip seen-again"/);
+  // The badge lives in the same "lead-flags" rail as the KILLED/PRINTED
+  // chips, not the muted "meta" line -- it must be a real bordered pill an
+  // editor notices, not bookkeeping text scrolled past. Assert ordering:
+  // the status chip (lead-flags opens with it) comes before seen-again,
+  // and the meta line's "seen again" text is gone from that <p>.
+  const flagsIdx = html.indexOf('class="lead-flags"');
+  const statusChipIdx = html.indexOf('class="chip st-killed"');
+  const seenAgainIdx = html.indexOf('class="chip seen-again"');
+  assert.ok(flagsIdx >= 0 && flagsIdx < statusChipIdx && statusChipIdx < seenAgainIdx);
+  const metaIdx = html.indexOf('class="meta"');
+  assert.ok(metaIdx >= 0 && metaIdx < flagsIdx, "meta line should render before the lead-flags rail");
 });
 
 test("a lead with resurfaced_count of 0 shows no seen-again badge", () => {
@@ -140,7 +151,7 @@ test("a lead with resurfaced_count of 0 shows no seen-again badge", () => {
   assert.doesNotMatch(html, /seen again/);
 });
 
-test("an open (non-killed) lead with a resurfaced stamp still shows the badge in its meta line", () => {
+test("an open (non-killed) lead with a resurfaced stamp still shows the badge", () => {
   const html = renderToStaticMarkup(
     createElement(LeadRowView, {
       lead: baseLead({

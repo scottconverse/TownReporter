@@ -1,6 +1,7 @@
 /** Editor-facing copy. Does not change investigative behavior. */
 
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
+import { nonStoplistedProperNouns } from "./lead-match.ts";
 
 export function organizationFromUrl(url: string): string {
   try {
@@ -721,12 +722,30 @@ export function inviteMessage(input: {
 
 export type PrintedDup = { slug: string; publishedAt: string; note: string };
 
+/**
+ * "≈ PRINTED" false positives (real case, 2026-09-02): properNounOverlap
+ * used to count ANY two capitalised words shared between a lead and a
+ * published headline, so "Longmont" + "Sept" (or "City", "Council",
+ * "Wednesday") alone were enough -- two leads about unrelated topics both
+ * got tagged as covering "Longmont's permit counter goes dark Wednesday
+ * mornings starting Sept. 2" for no reason but sharing the paper's own city
+ * name and a weekday/month. Two fixes, both required for the proper-noun
+ * path: proper nouns now exclude the same PROPER_NOUN_STOPLIST that
+ * lead-match.ts's anchor matcher uses (paper/city furniture, months,
+ * weekdays), and a proper-noun match alone is no longer enough -- it also
+ * needs the two leads' `topic` to agree, unless titlesOverlap already says
+ * yes on its own.
+ */
 export function nearDuplicate(
   lead: { headline: string; topic?: string },
   published: { slug: string; headline: string; topic?: string; published_at: string }[],
 ): PrintedDup | null {
   for (const p of published) {
-    if (titlesOverlap(lead.headline, p.headline) || properNounOverlap(lead.headline, p.headline)) {
+    const sameTopic = lead.topic != null && p.topic != null && lead.topic === p.topic;
+    if (
+      titlesOverlap(lead.headline, p.headline) ||
+      (properNounOverlap(lead.headline, p.headline) && sameTopic)
+    ) {
       return { slug: p.slug, publishedAt: p.published_at, note: p.headline };
     }
   }
@@ -734,10 +753,11 @@ export function nearDuplicate(
 }
 
 function properNounOverlap(a: string, b: string): boolean {
-  const props = (s: string) => (s.match(/\b[A-Z][A-Za-z]{2,}\b/g) ?? []).map((w) => w.toLowerCase());
-  const pa = props(a);
-  const pb = new Set(props(b));
-  return pa.filter((w) => pb.has(w)).length >= 2;
+  const pa = nonStoplistedProperNouns(a);
+  const pb = nonStoplistedProperNouns(b);
+  let shared = 0;
+  for (const w of pa) if (pb.has(w)) shared += 1;
+  return shared >= 2;
 }
 
 export function kindFromSourceUrl(url: string): "youtube" | "official" | "news" | "social" {

@@ -9,6 +9,20 @@ import { ModelPicker } from "@/components/model-picker";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { Notice } from "@/components/states";
 
+/**
+ * Live screenshot, 0.6.1 (2026-09-02): the "seen again ×N" stamp rendered in
+ * the muted meta line next to the age and origin text, and the editor
+ * scrolled right past it -- it read as bookkeeping, not as something that
+ * changed what the lead meant. It is exactly that: the scanner found this
+ * story again after a kill, and it did NOT get refiled as a new lead
+ * because of it (see findMatchingLead in lib/news/lead-match.ts). That is
+ * worth a real badge in the KILLED/PRINTED family on the right side of the
+ * row, and a one-line explanation the first time the Killed tab shows one
+ * (wired in desk.queue.tsx using this same copy).
+ */
+export const SEEN_AGAIN_EXPLAINER =
+  "Seen again: the scanner found this story again after you killed it. It was not refiled. Back returns it to New.";
+
 export function LeadRowView({
   lead,
   dup,
@@ -54,13 +68,6 @@ export function LeadRowView({
         <p className="lead-why">{lead.why}</p>
         <p className="meta">
           {lead.topic} · {formatAge(lead.created_at)} · {leadOrigin(lead)}
-          {lead.resurfaced_count && lead.resurfaced_count > 0 ? (
-            <span className="chip seen-again">
-              {" "}
-              seen again ×{lead.resurfaced_count}
-              {lead.last_resurfaced_at ? ` · ${formatShortDate(lead.last_resurfaced_at)}` : ""}
-            </span>
-          ) : null}
           <span className="row-acts">
             <Link
               to="/desk/story/$leadId"
@@ -157,6 +164,12 @@ export function LeadRowView({
         {dup ? (
           <span className="chip dup" title={"Covers ground published " + formatShortDate(dup.publishedAt)}>
             ≈ printed
+          </span>
+        ) : null}
+        {lead.resurfaced_count && lead.resurfaced_count > 0 ? (
+          <span className="chip seen-again">
+            seen again ×{lead.resurfaced_count}
+            {lead.last_resurfaced_at ? ` · ${formatShortDate(lead.last_resurfaced_at)}` : ""}
           </span>
         ) : null}
       </div>

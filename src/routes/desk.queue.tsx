@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
-import { LeadRowView } from "@/components/desk-leads";
+import { LeadRowView, SEEN_AGAIN_EXPLAINER } from "@/components/desk-leads";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteLead, draftLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
 import { restoreTrashItem } from "@/lib/news/trash";
@@ -216,6 +216,10 @@ function QueuePage() {
           </button>
         ))}
       </div>
+
+      {filter === "killed" && shown.some((l) => (l.resurfaced_count ?? 0) > 0) ? (
+        <p className="meta seen-again-note">{SEEN_AGAIN_EXPLAINER}</p>
+      ) : null}
 
       {deleteError ? <Notice kind="err">{deleteError}</Notice> : null}
       {undo != null ? (

@@ -373,6 +373,52 @@ describe("Worth a Look presentation", () => {
     assert.equal(dup!.slug, "bohn-farm-rezoning");
   });
 
+  it("does not flag a killed lead as covering an unrelated printed piece on city/month furniture alone (real case 2026-09-02)", () => {
+    const printed = [
+      {
+        slug: "permit-counter-dark-wednesdays",
+        headline: "Longmont's permit counter goes dark Wednesday mornings starting Sept. 2",
+        topic: "civic",
+        published_at: "2026-08-30T12:00:00Z",
+      },
+    ];
+    assert.equal(
+      nearDuplicate(
+        { headline: "Deadline: Longmont's 2026 Community Satisfaction Survey closes Sept. 7", topic: "civic-survey" },
+        printed,
+      ),
+      null,
+    );
+    assert.equal(
+      nearDuplicate(
+        {
+          headline:
+            "Council books two executive sessions in eight days — Sept. 22 and Sept. 29 — with packets already posted",
+          topic: "council",
+        },
+        printed,
+      ),
+      null,
+    );
+  });
+
+  it("still flags a killed lead that really is the printed story reworded, same topic and real proper nouns", () => {
+    const printed = [
+      {
+        slug: "svvsd-bond-vote",
+        headline: "SVVSD board approves Boulder bond measure for November ballot",
+        topic: "schools",
+        published_at: "2026-08-28T12:00:00Z",
+      },
+    ];
+    const dup = nearDuplicate(
+      { headline: "Boulder bond measure headed to voters after SVVSD board approval", topic: "schools" },
+      printed,
+    );
+    assert.ok(dup);
+    assert.equal(dup!.slug, "svvsd-bond-vote");
+  });
+
   it("marks a YouTube watch URL as youtube kind", () => {
     assert.equal(kindFromSourceUrl("https://www.youtube.com/user/cityoflongmont"), "youtube");
     assert.equal(kindFromSourceUrl("https://www.longmontcolorado.gov/council"), "official");

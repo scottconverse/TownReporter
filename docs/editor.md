@@ -149,13 +149,20 @@ A meeting on the calendar is not automatically a story. A five-hour council tape
 ### Killed — "seen again"
 
 Killing a lead never deletes it and never hides it. If the scanner comes back
-across the same story — the same source with a reworded headline, or a
-different portal notice about the same thing — it does not refile a
-duplicate for you to kill twice. It stamps the existing killed row instead:
-a small **seen again ×N** badge appears on it, with the date it last came
-back, and the Killed tab sorts what keeps resurfacing to the top. This
-matching runs entirely in code against leads already on the desk — it never
-sends the AI a list of what you killed, so it costs nothing extra to scan.
+across the same story — the same source with a reworded headline, the same
+source page pinned down with a specific date or dollar figure the first
+version only gestured at, or a different portal notice about the same thing
+— it does not refile a duplicate for you to kill twice. It stamps the
+existing killed row instead: a **SEEN AGAIN ×N** badge appears on the row,
+in the same bordered-pill family as KILLED and ≈ PRINTED (not the muted meta
+text below the headline), with the date it last came back, and the Killed
+tab sorts what keeps resurfacing to the top. This matching runs entirely in
+code against leads already on the desk — it never sends the AI a list of
+what you killed, so it costs nothing extra to scan. The first time any lead
+on the Killed tab carries a stamp, a one-line note appears under the filter
+row: "Seen again: the scanner found this story again after you killed it.
+It was not refiled. Back returns it to New."
+
 An open lead (New, Held, Drafted) that the scanner rematches gets the same
 badge instead of a duplicate row. A story that already **printed** is never
 matched this way — a fresh development on a published story is real news and
