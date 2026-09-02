@@ -156,3 +156,29 @@ Still UNVERIFIED: a fresh Automatic draft on the live desk goes to Claude under
 VERIFIED: the app version constant reads 0.5.9 | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/version.ts:2
 VERIFIED: the changelog names 0.5.9 as current | C:/Users/scott/Desktop/Code/townreporter-dev/CHANGELOG.md:3
 VERIFIED: the docs test derives the tag from package.json | C:/Users/scott/Desktop/Code/townreporter-dev/scripts/editorial-delivery-docs.test.mjs:48
+
+## Postscript, later still on 2026-09-02: v0.5.10 and v0.5.11 shipped
+
+v0.5.10 (6e11c04): a provider auth error mid-draft now says "sign in again,"
+not "click again," and names the claude.ai browser login as separate from
+Claude Code's. Detection shared via looksLikeProviderAuthFailure in
+preflight.ts so the classifier and desk copy cannot drift.
+
+v0.5.11 (737d982): Automatic fails over to the next ladder rung on a login
+lapse only, once per job, recorded via desk_jobs.model_choice_source
+(migration 0026) and decided by planAutomaticFailover in
+automatic-failover.ts. performDraftWork got wrapped in createServerOnlyFn:
+its new imports leaked server modules into a client chunk; that was the fix.
+
+Both promoted. Live DB has 0026 applied; 17 stories intact. Backups:
+townreporter_2026-09-02_1023.sql and _1118.sql. Root cause of the live 401
+on job 41: Claude Code's saved OAuth token (8h) expired and the headless run
+did not refresh it, while an interactive `claude -p` five minutes later did
+-- why the headless run didn't is still unknown.
+
+Known quirk: promote.ps1's outer pwsh wrapper hangs after "Promoted" -- stop
+only that PID.
+
+VERIFIED: version constant reads 0.5.11 | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/version.ts:2
+VERIFIED: planAutomaticFailover requires source auto | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/automatic-failover.ts:54
+UNVERIFIED: a live Automatic draft has exercised the fail-over path - not checked; needs a lapsed login on the live desk
