@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { OPS_ACTIONS, findOpsAction, isOpsActionId } from "./actions.ts";
 import {
+  databaseValue,
   diskState,
   formatAgo,
   formatBytes,
@@ -140,6 +141,20 @@ describe("health readings", () => {
     assert.equal(jobsState(1, 0, 5 * 60_000), "ok");
     assert.equal(jobsState(1, 0, 90 * 60_000), "warn");
     assert.equal(jobsState(0, 2, 0), "warn");
+  });
+
+  /**
+   * PGLite answers `current_database()` with "postgres" too, so the tile
+   * cannot tell a real Postgres apart from the embedded fallback just by
+   * echoing that name back — it has to say which backend actually answered.
+   */
+  it("names the embedded fallback instead of echoing PGLite's borrowed name", () => {
+    assert.equal(
+      databaseValue(true, "postgres", "3.2 MB", 4),
+      "embedded (PGLite) — data is lost when the server stops · answered in 4ms",
+    );
+    assert.equal(databaseValue(false, "townreporter", "9.8 MB", 12), "townreporter · 9.8 MB · answered in 12ms");
+    assert.equal(databaseValue(false, undefined, undefined, 1), "? · ? · answered in 1ms");
   });
 });
 

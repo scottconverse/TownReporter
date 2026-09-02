@@ -115,6 +115,24 @@ export function publicState(status: number, error: string): HealthState {
   return "down";
 }
 
+/**
+ * The Database tile's reading.
+ *
+ * PGLite answers `current_database()` with "postgres" too, so reading the
+ * query result alone cannot tell an operator apart from the embedded
+ * fallback whose data dies when the server stops. The caller must say which
+ * backend is actually active; this only decides the words.
+ */
+export function databaseValue(
+  embedded: boolean,
+  name: string | undefined,
+  size: string | undefined,
+  ms: number,
+): string {
+  if (embedded) return `embedded (PGLite) — data is lost when the server stops · answered in ${ms}ms`;
+  return `${name ?? "?"} · ${size ?? "?"} · answered in ${ms}ms`;
+}
+
 /** Queue health. A job stuck running for an hour is not running. */
 export function jobsState(running: number, failed: number, oldestRunningMs: number): HealthState {
   if (running > 0 && oldestRunningMs > 60 * 60_000) return "warn";

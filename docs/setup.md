@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.5.11](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.11).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.5.12](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.12).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -56,11 +56,13 @@ pages, not the desk.
 ## First run
 
 ```bash
+node -v                           # must print v22 or newer
 git clone https://github.com/scottconverse/TownReporter.git
 cd TownReporter
 npm install
 npx playwright install chromium
 cp .env.example .env
+                                   # no DATABASE_URL: runs on an embedded database, lost when npm run dev stops; set DATABASE_URL to keep it
 ```
 
 Edit `.env`. **The minimum that produces every enabled desk feature is a

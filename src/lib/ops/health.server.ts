@@ -3,10 +3,11 @@ import { promisify } from "node:util";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import os from "node:os";
-import { getSql } from "@/lib/db";
+import { getDbSource, getSql } from "@/lib/db";
 import { APP_VERSION } from "@/lib/version";
 import { DEFAULT_NEWSROOM_ID } from "@/lib/news/membership";
 import {
+  databaseValue,
   diskState,
   formatAgo,
   formatBytes,
@@ -100,7 +101,7 @@ async function checkDatabase(): Promise<HealthCheck[]> {
         id: "db",
         label: "Database",
         state: ms > 250 ? "warn" : "ok",
-        value: `${size[0]?.name ?? "?"} · ${size[0]?.size ?? "?"} · answered in ${ms}ms`,
+        value: databaseValue(getDbSource() === "pglite", size[0]?.name, size[0]?.size, ms),
       },
       {
         id: "db-rows",
