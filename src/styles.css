@@ -556,6 +556,8 @@
 .desk-ltr .chip.st-killed {color:var(--warn);border-color:var(--warn)}
 .desk-ltr .chip.dup {border-style:dashed;border-color:var(--adeep);color:var(--adeep)}
 .desk-ltr .lead-flags .chip.dup {margin:0}
+.desk-ltr .chip.seen-again {border-color:var(--adeep);color:var(--adeep)}
+.desk-ltr .lead-flags .chip.seen-again {margin:0}
 .desk-ltr .score {display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;border:1px solid var(--line);font-family:var(--fd);font-weight:600;font-size:13px;font-variant-numeric:tabular-nums;color:var(--mut)}
 .desk-ltr .score.warm {border-color:var(--fg);color:var(--fg)}
 .desk-ltr .score.hot {background:var(--a);border-color:var(--a);color:#fff}
