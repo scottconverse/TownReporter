@@ -174,7 +174,11 @@ function discoverServerFnsInFile(relPath, rawSrc) {
     const rest = src.slice(afterStart);
     const nextExportOffset = rest.search(/^export /m);
     const end = nextExportOffset === -1 ? src.length : afterStart + nextExportOffset;
-    results.push({ file: relPath, name, middleware: extractMiddlewareNames(src.slice(match.index, end)) });
+    results.push({
+      file: relPath,
+      name,
+      middleware: extractMiddlewareNames(src.slice(match.index, end)),
+    });
   }
   return results;
 }
@@ -242,13 +246,21 @@ test("sanitizePublicUrls is the journalism URL gate, not an origin allowlist", a
 test("every desk and dark mutation is gated by deskMiddleware", () => {
   const desk = readFileSync(join(ROOT, "src/lib/news/desk.ts"), "utf8");
   const dark = readFileSync(join(ROOT, "src/lib/news/dark.ts"), "utf8");
+  const modelCommit = readFileSync(
+    join(ROOT, "src/lib/news/model-request-commit.server.ts"),
+    "utf8",
+  );
   assert.deepEqual(everyServerFnHasMiddleware(desk, "deskMiddleware"), []);
   assert.deepEqual(everyServerFnHasMiddleware(dark, "deskMiddleware"), []);
   assert.match(desk, /export const publishLead[\s\S]*?\.middleware\(\[deskMiddleware\]\)/);
   assert.match(desk, /sanitizePublicUrls/);
   assert.doesNotMatch(desk, /originAllowlist\(/);
   assert.match(desk, /assertRate\(context\.userId, "scan"\)/);
-  assert.match(desk, /assertRate\(context\.userId, "draft"\)/);
+  assert.match(
+    desk,
+    /export const draftLead[\s\S]*?\.middleware\(\[deskMiddleware\]\)[\s\S]*?commitStoryDraftForAuthenticatedEditor/,
+  );
+  assert.match(modelCommit, /assertRate\)\(input\.context\.userId, "draft"\)/);
   assert.match(desk, /withTransaction/);
   assert.match(dark, /assertRate\(context\.userId, "dark"\)/);
   assert.match(dark, /audit\(\s*(?:context\.)?userId,\s*"dark"/);
@@ -303,7 +315,10 @@ test("every server function in src/ is gated, or is named on the public allowlis
   const GATES = new Set(["deskMiddleware", "authMiddleware"]);
 
   const found = discoverAllServerFns(join(ROOT, "src"));
-  assert.ok(found.length >= 60, `expected dozens of server functions, found ${found.length} -- the walk may be broken`);
+  assert.ok(
+    found.length >= 60,
+    `expected dozens of server functions, found ${found.length} -- the walk may be broken`,
+  );
 
   const ungated = found
     .filter((fn) => !PUBLIC_SERVER_FNS.has(`${fn.file}::${fn.name}`))
@@ -317,7 +332,11 @@ test("every server function in src/ is gated, or is named on the public allowlis
 
   const foundKeys = new Set(found.map((fn) => `${fn.file}::${fn.name}`));
   const stale = [...PUBLIC_SERVER_FNS].filter((k) => !foundKeys.has(k));
-  assert.deepEqual(stale, [], `the public allowlist names a server function that no longer exists on disk: ${stale.join(", ")}`);
+  assert.deepEqual(
+    stale,
+    [],
+    `the public allowlist names a server function that no longer exists on disk: ${stale.join(", ")}`,
+  );
 });
 
 test("membership rejects a second identity (unauthorized publish path)", () => {
@@ -354,7 +373,11 @@ test("the public module keeps Node-only imports out of the browser bundle", () =
   const pub = readFileSync(join(ROOT, "src/lib/news/public.ts"), "utf8");
   const code = pub.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   for (const mod of ["node:crypto", "node:fs", "node:child_process", "node:os", "node:path"]) {
-    assert.doesNotMatch(code, new RegExp(`from ["']${mod}["']`), `${mod} must not reach the client`);
+    assert.doesNotMatch(
+      code,
+      new RegExp(`from ["']${mod}["']`),
+      `${mod} must not reach the client`,
+    );
   }
 });
 
@@ -363,7 +386,11 @@ test("the newsletter RPC that handed out its own confirmation token stays gone",
   const code = pub.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   assert.doesNotMatch(code, /confirm_token/);
   assert.doesNotMatch(code, /subscribeNewsletter|confirmNewsletter/);
-  assert.doesNotMatch(code, /create table if not exists|alter table/i, "schema belongs in migrations/");
+  assert.doesNotMatch(
+    code,
+    /create table if not exists|alter table/i,
+    "schema belongs in migrations/",
+  );
 });
 
 test("SSRF: fetch follows redirects manually and re-asserts each hop", () => {
@@ -412,14 +439,12 @@ test("scan does not stamp last_hash until the writing pass succeeds", async () =
 
   const schema = await import(pathToFileURL(join(ROOT, "src/lib/news/schema.ts")).href);
   const evalGuard = (parseError) =>
-     
     // condition text is the point: it is the exact expression the running
     // code branches on, not a paraphrase of it.
-    new Function(
-      "shouldCommitFetchHashes",
-      "data",
-      `return (${condition});`,
-    )(schema.shouldCommitFetchHashes, { parseError });
+    new Function("shouldCommitFetchHashes", "data", `return (${condition});`)(
+      schema.shouldCommitFetchHashes,
+      { parseError },
+    );
 
   // A clean pass (no parse error): the guard must be false, i.e. must NOT
   // take the abort path, so pendingHashes get committed.
@@ -427,13 +452,23 @@ test("scan does not stamp last_hash until the writing pass succeeds", async () =
   // A failed writing pass: the guard must be true, i.e. MUST abort before
   // any hash gets stamped. `false && ...` fails exactly this line, because
   // it can never be true no matter what parseError says.
-  assert.equal(evalGuard("Writing pass returned no usable JSON."), true, "a failed writing pass must trip the guard");
+  assert.equal(
+    evalGuard("Writing pass returned no usable JSON."),
+    true,
+    "a failed writing pass must trip the guard",
+  );
 
   // The commit loop must textually follow the whole guarded block, not sit
   // ahead of it where the throw could no longer prevent it from running.
   const commitLoopIdx = desk.indexOf("for (const p of pendingHashes)");
-  assert.ok(commitLoopIdx > blockEnd, "the pendingHashes commit loop must come after the guard, not before it");
-  assert.ok(ifIdx > desk.indexOf("const data = parseScanResult(raw)"), "the guard must run after parsing, not before");
+  assert.ok(
+    commitLoopIdx > blockEnd,
+    "the pendingHashes commit loop must come after the guard, not before it",
+  );
+  assert.ok(
+    ifIdx > desk.indexOf("const data = parseScanResult(raw)"),
+    "the guard must run after parsing, not before",
+  );
 });
 
 test("scan never auto-promotes model URLs to official or Tier A", () => {
@@ -518,13 +553,15 @@ test("no test in the default suite can reach a live model unasked", () => {
 test("every test file on disk is discovered by npm test", () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
   const cmd = pkg.scripts.test;
+  assert.equal(cmd, "node scripts/run-tests-safe.mjs", "npm test must use the safe launcher");
+  const launcher = readFileSync(join(ROOT, "scripts/run-tests-safe.mjs"), "utf8");
   assert.doesNotMatch(
-    cmd,
+    launcher,
     /\.test\.ts(?!")/,
     "npm test must not name individual test files — use a glob",
   );
-  assert.match(cmd, /src\/\*\*\/\*\.test\.ts/, "the src glob must be present");
-  assert.match(cmd, /scripts\/\*\*\/\*\.test\.mjs/, "the scripts glob must be present");
+  assert.match(launcher, /src\/\*\*\/\*\.test\.ts/, "the src glob must be present");
+  assert.match(launcher, /scripts\/\*\*\/\*\.test\.mjs/, "the scripts glob must be present");
 });
 
 /*
@@ -563,7 +600,10 @@ test("CI builds, boots and smoke-tests in a browser", () => {
   const ci = readFileSync(join(ROOT, ".github", "workflows", "ci.yml"), "utf8");
 
   const builtSteps = jobRunLines(ci, "smoke-built");
-  assert.ok(builtSteps.includes("npm run build"), "smoke-built must have a step that runs exactly `npm run build`");
+  assert.ok(
+    builtSteps.includes("npm run build"),
+    "smoke-built must have a step that runs exactly `npm run build`",
+  );
   assert.ok(
     builtSteps.some((l) => l === "npm start" || l.startsWith("npm start ")),
     "smoke-built must boot the built server with npm start",
@@ -644,7 +684,11 @@ test(".env.example lists every setting the code reads", () => {
   walk(srcDir);
 
   const missing = [...read].filter((k) => !OS_PROVIDED.has(k) && !declared.has(k)).sort();
-  assert.deepEqual(missing, [], `these are read by the code but absent from .env.example: ${missing.join(", ")}`);
+  assert.deepEqual(
+    missing,
+    [],
+    `these are read by the code but absent from .env.example: ${missing.join(", ")}`,
+  );
 });
 
 /**
@@ -704,9 +748,13 @@ test("no live doc tells the operator to set the removed setup token", () => {
  * and it is exactly the kind of sentence people trust without checking.
  */
 test("no live doc claims the ordinary test suite spends money", () => {
-  const files = ["README.md", "SELF-HOSTING.md", ...readdirSync(join(ROOT, "docs"))
-    .filter((f) => f.endsWith(".md"))
-    .map((f) => join("docs", f))];
+  const files = [
+    "README.md",
+    "SELF-HOSTING.md",
+    ...readdirSync(join(ROOT, "docs"))
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => join("docs", f)),
+  ];
   const offenders = [];
   for (const rel of files) {
     let text;

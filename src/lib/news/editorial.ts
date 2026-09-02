@@ -56,7 +56,9 @@ function cut(text: string, re: RegExp): [string, string] {
  * acceptable is silently losing the body.
  */
 export function parseEditorial(raw: string): Editorial {
-  const text = String(raw ?? "").replace(/\r\n/g, "\n").trim();
+  const text = String(raw ?? "")
+    .replace(/\r\n/g, "\n")
+    .trim();
   if (!text) return { headline: "", body: "", appendix: "", factSheet: "", imagePrompt: "" };
 
   const [beforeImage, imagePrompt] = cut(text, HEAD.image);
@@ -129,7 +131,10 @@ export function stripPreamble(text: string): string {
   const limit = Math.min(lines.length, 8);
   for (let i = 0; i < limit; i++) {
     if (!/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i]!)) continue;
-    const rest = lines.slice(i + 1).join("\n").trim();
+    const rest = lines
+      .slice(i + 1)
+      .join("\n")
+      .trim();
     // Never trade the whole piece for the rule.
     if (rest) return rest;
   }
@@ -159,7 +164,9 @@ const DELIVERY_PREAMBLE =
  * century-old convention, and the honest one for a paper run by one person.
  */
 export function opinionHeadline(headline: string): string {
-  const clean = String(headline ?? "").replace(/^\s*OPINION\s*[:—-]\s*/i, "").trim();
+  const clean = String(headline ?? "")
+    .replace(/^\s*OPINION\s*[:—-]\s*/i, "")
+    .trim();
   return clean ? `OPINION: ${clean}` : "OPINION";
 }
 
@@ -218,7 +225,10 @@ export function buildEditorialPack(input: {
     parts.push("", `WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`);
   }
 
-  parts.push("", "Write the piece.");
+  parts.push(
+    "",
+    "Research the subject and document pointers above. Return sourced findings for the writing pass.",
+  );
   return parts.join("\n");
 }
 
@@ -238,10 +248,9 @@ export const EDITORIAL_TOOLS = ["WebSearch", "WebFetch"];
  *
  * The fix is two calls. This one has the tools and never sees the voice; it
  * runs on the cheap planner model, because it is retrieval, not writing. Its
- * output is plain text handed to the writing pass below, which has the voice
- * and no tools at all — so even a page that successfully plants an
- * instruction in this pass has no egress channel left to use against the
- * voice, because the call that holds the voice cannot act on anything.
+ * output is plain text handed to the writing pass below. Claude's writing
+ * call has no explicitly allowed research tools. Codex, when selected, keeps
+ * its native signed-in capabilities; TownReporter does not narrow them.
  *
  * What this does NOT close: the gathered text can still try to steer what
  * the writing pass *writes* — a prompt-injection attempt embedded in a
@@ -253,11 +262,11 @@ export const EDITORIAL_TOOLS = ["WebSearch", "WebFetch"];
  * is — so this is a mitigation, not a closure, for that residual risk.
  */
 export const RESEARCH_INSTRUCTIONS = `You are the research pass for a TownReporter editorial. A separate pass, with
-its own voice and no tools, will write the piece from what you return here.
+its own voice, will write the piece from what you return here.
 You never see that voice and you are not writing the editorial.
 
-Use WebSearch and WebFetch to look into the subject and the document
-pointers below. Then return PLAIN TEXT findings: what you found, where
+Use the web search and page-reading capabilities available to you to look
+into the subject and the document pointers below. Then return PLAIN TEXT findings: what you found, where
 (cite the URL inline for each claim), and anything you looked for but could
 not confirm. Do not write an editorial, a headline, or anything in any
 particular voice — that is the next pass's job, not yours. Do not quote
@@ -275,7 +284,7 @@ export const RESEARCH_TEXT_CAP = 40_000;
 
 /**
  * The writing pass's material: the desk's notes, the subject, and what the
- * gathering pass found — never a raw fetched page, and never a tool.
+ * gathering pass found — never a raw fetched page.
  *
  * The gathered text is capped and clearly labelled as another model's
  * unverified summary of outside pages, for the same reason `buildEditorialPack`
@@ -308,9 +317,9 @@ export function buildWritingPack(input: {
 
   parts.push(
     "",
-    "RESEARCH GATHERED FOR THIS PIECE, by a separate pass that ran WebSearch and",
-    "WebFetch before you (you have no tools this call — everything you need to",
-    "know from the open web is here or nowhere):",
+    "RESEARCH GATHERED FOR THIS PIECE, by a separate pass that searched and",
+    "opened public sources before you. Treat this as a starting record; verify or extend",
+    "it with any native capabilities available to you when that improves the piece:",
     capped || "(the gathering pass found nothing usable — write from the subject line alone)",
     "",
     "The text above is another model's summary of outside pages, not the desk's",
@@ -324,6 +333,13 @@ export function buildWritingPack(input: {
     parts.push("", `WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`);
   }
 
-  parts.push("", "Write the piece.");
+  parts.push(
+    "",
+    "Write the complete editorial now. Begin with its real headline, not a note to the editor.",
+    "If you cannot deliver the complete editorial, return exactly",
+    "EDITORIAL_REFUSAL: <reason>",
+    "and nothing else. Never format a refusal as a headline or article. The same rule applies",
+    "to a limitation, policy disclaimer, neutral-summary substitute, or other assistant message.",
+  );
   return parts.join("\n");
 }

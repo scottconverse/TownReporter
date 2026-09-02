@@ -39,16 +39,17 @@ import {
 } from "./notes";
 import { provenanceFromUrls } from "./findings";
 import { buildScanUserMessage, composeZeroLeadSummary, kindFromSourceUrl } from "./desk-copy";
-import { enqueueJob, findOpenJob, kickJobs, latestJob, runLooksStalled, type DeskJob } from "./jobs";
+import {
+  enqueueJob,
+  findOpenJob,
+  kickJobs,
+  latestJob,
+  runLooksStalled,
+  type DeskJob,
+} from "./jobs";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
-import { modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
-import type {
-  DraftRow,
-  LeadRow,
-  MemoryRow,
-  ScanRow,
-  SourceRow,
-} from "./types";
+import { effectiveStoryModelChoice, storyModelChoice } from "./model-choice.ts";
+import type { DraftRow, LeadRow, MemoryRow, ScanRow, SourceRow } from "./types";
 
 function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
@@ -135,13 +136,7 @@ export const addSource = createServerFn({ method: "POST" })
     if (!parsed.ok) return { ok: false as const, error: parsed.error };
     const title = data.title.trim() || parsed.host;
     const kind = data.kind || kindFromSourceUrl(parsed.url);
-    const source = await upsertSource(
-      context.userId,
-      parsed.url,
-      title,
-      kind,
-      data.tier || "A",
-    );
+    const source = await upsertSource(context.userId, parsed.url, title, kind, data.tier || "A");
     if (!source) return { ok: false as const, error: "Could not save that source." };
     return { ok: true as const, source };
   });
@@ -161,13 +156,7 @@ export const addSourcesBulk = createServerFn({ method: "POST" })
     let added = 0;
     const byTier = { A: 0, B: 0, C: 0 };
     for (const row of rows) {
-      const source = await upsertSource(
-        context.userId,
-        row.url,
-        row.title,
-        row.kind,
-        row.tier,
-      );
+      const source = await upsertSource(context.userId, row.url, row.title, row.kind, row.tier);
       if (source) {
         added += 1;
         if (row.tier === "A" || row.tier === "B" || row.tier === "C") {
@@ -372,7 +361,11 @@ export const listScans = createServerFn({ method: "GET" })
     */
     const newest = rows[0];
     if (newest && !newest.finished_at && !newest.error) {
-      const job = await latestJob({ newsroomId: owned(context), kind: "scan", subjectId: newest.id });
+      const job = await latestJob({
+        newsroomId: owned(context),
+        kind: "scan",
+        subjectId: newest.id,
+      });
       newest.stalled = runLooksStalled({ runOpen: true, job });
     }
     return rows;
@@ -445,67 +438,66 @@ export async function performScanWork(job: DeskJob) {
     runId = runRows[0]!.id;
   }
 
-    const sources = await sql<SourceRow>`
+  const sources = await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
       from sources
       where newsroom_id = ${owned(context)} and status = 'accepted'
       order by case tier when 'A' then 0 when 'B' then 1 else 2 end, id asc
     `;
 
-    const fetched: { title: string; url: string; text: string; changed: boolean }[] = [];
-    const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
-    let fetchedCount = 0;
-    const SCAN_WATCH_CAP = 200;
-    const watchSlice = sources.slice(0, SCAN_WATCH_CAP);
+  const fetched: { title: string; url: string; text: string; changed: boolean }[] = [];
+  const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
+  let fetchedCount = 0;
+  const SCAN_WATCH_CAP = 200;
+  const watchSlice = sources.slice(0, SCAN_WATCH_CAP);
 
-    const prevRuns = await sql<Pick<ScanRow, "leads_created" | "sources_fetched">>`
+  const prevRuns = await sql<Pick<ScanRow, "leads_created" | "sources_fetched">>`
       select leads_created, sources_fetched
       from scan_runs
       where newsroom_id = ${owned(context)} and id <> ${runId}
       order by started_at desc
       limit 1
     `;
-    const reread = previousScanNeedsReread(prevRuns[0] ?? null);
+  const reread = previousScanNeedsReread(prevRuns[0] ?? null);
 
-    await mapLimit(watchSlice, 6, async (src) => {
-      try {
-        const bundle = await withRetry(() => ingestUrl(src.url));
-        const extras: { url: string; text: string }[] = [];
-        for (const extra of bundle.extras.slice(0, 4)) {
-          try {
-            const doc = await withRetry(() => ingestUrl(extra));
-            extras.push({ url: extra, text: doc.text });
-          } catch {
-            /* skip a bad packet */
-          }
+  await mapLimit(watchSlice, 6, async (src) => {
+    try {
+      const bundle = await withRetry(() => ingestUrl(src.url));
+      const extras: { url: string; text: string }[] = [];
+      for (const extra of bundle.extras.slice(0, 4)) {
+        try {
+          const doc = await withRetry(() => ingestUrl(extra));
+          extras.push({ url: extra, text: doc.text });
+        } catch {
+          /* skip a bad packet */
         }
-        const extraBits = extras.map((e) => `DOCUMENT ${e.url}\n${e.text.slice(0, 2500)}`);
-        const text = extraBits.length
-          ? `${bundle.text}\n\n${extraBits.join("\n\n")}`
-          : bundle.text;
-        const hash = await sha256(text);
-        const changed = hash !== src.last_hash;
-        await sql`
+      }
+      const extraBits = extras.map((e) => `DOCUMENT ${e.url}\n${e.text.slice(0, 2500)}`);
+      const text = extraBits.length ? `${bundle.text}\n\n${extraBits.join("\n\n")}` : bundle.text;
+      const hash = await sha256(text);
+      const changed = hash !== src.last_hash;
+      await sql`
           update sources
           set last_fetched_at = now(), last_error = null
           where id = ${src.id} and newsroom_id = ${owned(context)}
         `;
-        pendingHashes.push({ id: src.id, hash, text, changed });
-        fetchedCount += 1;
-        fetched.push({
-          title: src.tier === "C" ? `[discovery] ${src.title}` : src.title,
-          url: src.url,
-          text: text.slice(0, 4500),
-          changed,
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "fetch failed";
-        await sql`
+      pendingHashes.push({ id: src.id, hash, text, changed });
+      fetchedCount += 1;
+      fetched.push({
+        title: src.tier === "C" ? `[discovery] ${src.title}` : src.title,
+        url: src.url,
+        text: text.slice(0, 4500),
+        changed,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "fetch failed";
+      await sql`
           update sources set last_error = ${msg}, last_fetched_at = now()
           where id = ${src.id} and newsroom_id = ${owned(context)}
         `;
-        if (src.last_hash && /404|410|not found|had almost no/i.test(msg)) {
-          await sql.query(
+      if (src.last_hash && /404|410|not found|had almost no/i.test(msg)) {
+        await sql
+          .query(
             `insert into anomalies (user_id, kind, summary, url, details)
              values ($1, $2, $3, $4, $5)`,
             [
@@ -515,80 +507,81 @@ export async function performScanWork(job: DeskJob) {
               src.url,
               msg,
             ],
-          ).catch(() => undefined);
-        }
+          )
+          .catch(() => undefined);
       }
-    });
+    }
+  });
 
-    const memory = await sql<MemoryRow>`
+  const memory = await sql<MemoryRow>`
       select id, entity, last_angle, updated_at from beat_memory
       where newsroom_id = ${owned(context)} order by updated_at desc limit 24
     `;
 
-    const ranked = [...fetched].sort((a, b) => Number(b.changed) - Number(a.changed));
-    const PAYLOAD_BUDGET = 48000;
-    let payload = "";
-    for (const f of ranked) {
-      const excerpt = f.text.slice(0, reread || f.changed ? 2800 : 800);
-      const changedLine = reread
-        ? "re-read (previous scan fetched this but filed no leads)"
-        : f.changed
-          ? "yes"
-          : "no (still include if newly newsworthy)";
-      const block = `SOURCE: ${f.title}\nURL: ${f.url}\nCHANGED: ${changedLine}\nTEXT:\n${excerpt}`;
-      const next = payload ? `${payload}\n\n---\n\n${block}` : block;
-      if (next.length > PAYLOAD_BUDGET) break;
-      payload = next;
-    }
+  const ranked = [...fetched].sort((a, b) => Number(b.changed) - Number(a.changed));
+  const PAYLOAD_BUDGET = 48000;
+  let payload = "";
+  for (const f of ranked) {
+    const excerpt = f.text.slice(0, reread || f.changed ? 2800 : 800);
+    const changedLine = reread
+      ? "re-read (previous scan fetched this but filed no leads)"
+      : f.changed
+        ? "yes"
+        : "no (still include if newly newsworthy)";
+    const block = `SOURCE: ${f.title}\nURL: ${f.url}\nCHANGED: ${changedLine}\nTEXT:\n${excerpt}`;
+    const next = payload ? `${payload}\n\n---\n\n${block}` : block;
+    if (next.length > PAYLOAD_BUDGET) break;
+    payload = next;
+  }
 
-    const userMsg = buildScanUserMessage({
-      city: paperConfig.city,
-      state: paperConfig.state,
-      reread,
-      memory,
-      payload,
-    });
+  const userMsg = buildScanUserMessage({
+    city: paperConfig.city,
+    state: paperConfig.state,
+    reread,
+    memory,
+    payload,
+  });
 
-    const ai = await grokChat(SCAN_SYSTEM, userMsg, 3500, { timeoutMs: 90_000 });
-    if (!ai.ok) {
-      await sql`
+  const ai = await grokChat(SCAN_SYSTEM, userMsg, 3500, { timeoutMs: 90_000 });
+  if (!ai.ok) {
+    await sql`
         update scan_runs
         set finished_at = now(), sources_fetched = ${fetchedCount}, error = ${ai.error}
         where id = ${runId} and newsroom_id = ${owned(context)}
       `;
-      throw new Error(ai.error);
-    }
+    throw new Error(ai.error);
+  }
 
-    const raw = parseJsonBlock<unknown>(ai.text);
-    const data = parseScanResult(raw);
-    if (!shouldCommitFetchHashes({ aiOk: true, parseError: data.parseError })) {
-      await sql`
+  const raw = parseJsonBlock<unknown>(ai.text);
+  const data = parseScanResult(raw);
+  if (!shouldCommitFetchHashes({ aiOk: true, parseError: data.parseError })) {
+    await sql`
         update scan_runs
         set finished_at = now(), sources_fetched = ${fetchedCount}, error = ${data.parseError}
         where id = ${runId} and newsroom_id = ${owned(context)}
       `;
-      throw new Error(data.parseError ?? "Writing pass returned no usable JSON.");
-    }
+    throw new Error(data.parseError ?? "Writing pass returned no usable JSON.");
+  }
 
-    for (const p of pendingHashes) {
-      await sql`
+  for (const p of pendingHashes) {
+    await sql`
         update sources
         set last_hash = ${p.hash}
         where id = ${p.id} and newsroom_id = ${owned(context)}
       `;
-      if (p.changed) {
-        await sql`
+    if (p.changed) {
+      await sql`
           insert into snapshots (user_id, source_id, content_hash, excerpt)
           values (${context.userId}, ${p.id}, ${p.hash}, ${p.text.slice(0, 32000)})
         `;
-      }
     }
+  }
 
-    let leadsCreated = 0;
-    for (const lead of data.leads) {
-      if (!lead.headline?.trim()) continue;
-      const urls = JSON.stringify(sanitizePublicUrls(lead.source_urls));
-      await sql`
+  let leadsCreated = 0;
+  for (const lead of data.leads) {
+    if (!lead.headline?.trim()) continue;
+    const urls = JSON.stringify(sanitizePublicUrls(lead.source_urls));
+    await sql`
         insert into leads (user_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, status)
         values (
           ${context.userId}, ${runId}, ${lead.headline.slice(0, 180)},
@@ -600,35 +593,35 @@ export async function performScanWork(job: DeskJob) {
           'new'
         )
       `;
-      leadsCreated += 1;
-    }
+    leadsCreated += 1;
+  }
 
-    let proposed = 0;
-    for (const p of data.proposed_sources) {
-      if (!p.url) continue;
-      let url: URL;
-      try {
-        url = assertHttpUrl(p.url);
-      } catch {
-        continue;
-      }
-      await sql`
+  let proposed = 0;
+  for (const p of data.proposed_sources) {
+    if (!p.url) continue;
+    let url: URL;
+    try {
+      url = assertHttpUrl(p.url);
+    } catch {
+      continue;
+    }
+    await sql`
         insert into sources (user_id, url, title, kind, tier, status)
         values (${context.userId}, ${url.toString()}, ${p.title || url.hostname}, 'discovered', 'unclassified', 'proposed')
 
         on conflict (user_id, url) do nothing
       `;
-      proposed += 1;
-    }
+    proposed += 1;
+  }
 
-    let summary = String(data.editor_summary ?? "").slice(0, 1200);
-    if (leadsCreated === 0 && !summary) {
-      summary = composeZeroLeadSummary({
-        fetched: fetchedCount,
-        changed: pendingHashes.filter((p) => p.changed).length,
-      });
-    }
-    await sql`
+  let summary = String(data.editor_summary ?? "").slice(0, 1200);
+  if (leadsCreated === 0 && !summary) {
+    summary = composeZeroLeadSummary({
+      fetched: fetchedCount,
+      changed: pendingHashes.filter((p) => p.changed).length,
+    });
+  }
+  await sql`
       update scan_runs
       set finished_at = now(),
           sources_fetched = ${fetchedCount},
@@ -638,7 +631,7 @@ export async function performScanWork(job: DeskJob) {
       where id = ${runId} and newsroom_id = ${owned(context)}
     `;
 
-    await audit(context.userId, "scan", `run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`);
+  await audit(context.userId, "scan", `run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`);
 }
 
 export async function performDraftWork(job: DeskJob) {
@@ -675,7 +668,7 @@ export async function performDraftWork(job: DeskJob) {
     memory,
     extraEvidence: prevNotes.scratch,
     extraUrls: moreUrls,
-    modelChoice: storyModelChoice(job.model_choice),
+    modelChoice: effectiveStoryModelChoice(job.model_choice),
   });
   if ("error" in reported) throw new Error(reported.error);
 
@@ -686,7 +679,10 @@ export async function performDraftWork(job: DeskJob) {
   `;
   const cited = reported.source_urls.length ? reported.source_urls : urls;
   const sourceUrls = JSON.stringify(
-    dropListingUrls(cited, watched.map((w) => w.url)),
+    dropListingUrls(
+      cited,
+      watched.map((w) => w.url),
+    ),
   );
   const notes = reported.integrity_notes;
   const provenanceJson = JSON.stringify(reported.provenance).slice(0, 8000);
@@ -744,78 +740,26 @@ export const draftLead = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const leadId = typeof data === "number" ? data : data.leadId;
     const modelChoice = storyModelChoice(typeof data === "number" ? "auto" : data.modelChoice);
-    const sql = await getSql();
-    const leads = await sql<{ id: number; status: string }>`
-      select id, status from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
-    `;
-    if (!leads[0]) return { ok: false as const, error: "Lead not found" };
-    if (leads[0].status === "killed") {
-      return { ok: false as const, error: "Restore this lead before drafting." };
-    }
-
-    /*
-      Check the model BEFORE spending the draft, exactly as runScan does.
-
-      This enqueued unconditionally. An audit clicked "Draft with AI" on a
-      first-run paper with no provider, watched it say "Reporting first --
-      following the trail, then drafting. Stay on this page." for THIRTY-SIX
-      SECONDS, and then be told the writing model is not set up and that
-      fixing it "is an operator job". The operator is the person reading the
-      sentence: this product is for one journalist running it herself.
-
-      The desk already knew. The Scan page had said so on the same visit,
-      from the same probe, before anything was clicked. Spending half a
-      minute of someone's attention to tell them a thing you knew before they
-      asked is the part that makes a product feel opaque.
-
-      Refusing here costs nothing and says what to do.
-    */
-    const { scanPreflight } = await import("./preflight");
-    const providerProbe = await probeProvider(modelChoice);
-    const ready = scanPreflight(providerProbe);
-    if (!ready.ok) {
-      return {
-        ok: false as const,
-        kind: ready.kind,
-        error: ready.guidance,
-        detail: ready.detail,
-        retryable: ready.retryable,
-      };
-    }
-
-    const effectiveChoice = providerProbe.ok && providerProbe.choice !== "configured"
-      ? providerProbe.choice
-      : modelChoice;
-
-    await assertRate(context.userId, "draft");
-    const job = await enqueueJob({
-      userId: context.userId,
-      newsroomId: owned(context),
-      kind: "draft",
-      subjectId: leadId,
-      modelChoice: effectiveChoice,
+    const { commitStoryDraftForAuthenticatedEditor } =
+      await import("./model-request-commit.server.ts");
+    return commitStoryDraftForAuthenticatedEditor({
+      context: { userId: context.userId, newsroomId: owned(context) },
+      leadId,
+      modelChoice,
     });
-    const persistedChoice = storyModelChoice(job.model_choice);
-    if (persistedChoice !== effectiveChoice) {
-      return {
-        ok: false as const,
-        kind: "model-conflict" as const,
-        error: `This lead is already drafting with ${modelChoiceLabel(persistedChoice)}. Open it to watch that run finish before choosing another model.`,
-        modelChoice: persistedChoice,
-        jobId: job.id,
-      };
-    }
-    return {
-      ok: true as const,
-      pending: true as const,
-      jobId: job.id,
-      modelChoice: persistedChoice,
-    };
   });
 
 export const saveReportingNotes = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { leadId: number; add?: string; toggle?: number; scratch?: string; todos?: { t: string; done: boolean; src: "you" | "machine" }[] }) => input)
+  .validator(
+    (input: {
+      leadId: number;
+      add?: string;
+      toggle?: number;
+      scratch?: string;
+      todos?: { t: string; done: boolean; src: "you" | "machine" }[];
+    }) => input,
+  )
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     await ensureDraftMemoColumn();
@@ -851,7 +795,8 @@ export const pullTodo = createServerFn({ method: "POST" })
       `;
       if (!rows[0]) return { ok: false as const, error: "Lead not found" };
       const query = data.query.trim().slice(0, 240);
-      if (query.length < 4) return { ok: false as const, error: "That line is too thin to search." };
+      if (query.length < 4)
+        return { ok: false as const, error: "That line is too thin to search." };
       /*
         Subjects come from the whole memo, not the headline alone. A headline
         written for readers — "Longmont is inside the rail district that just
@@ -969,17 +914,18 @@ export const pullTodo = createServerFn({ method: "POST" })
       const dump = formatPullDump(query, docs);
       let notes = memo;
       notes = appendScratch(notes, dump);
-      if (typeof data.index === "number" && notes.todo[data.index] && !notes.todo[data.index].done) {
+      if (
+        typeof data.index === "number" &&
+        notes.todo[data.index] &&
+        !notes.todo[data.index].done
+      ) {
         notes = toggleTodo(notes, data.index);
       }
       /*
         Newest first. The cap used to drop from the end, so once a lead had
         collected 16 pages every later pull added nothing and said so nowhere.
       */
-      const opened = [
-        ...docs.map((d) => ({ url: d.url, title: d.title })),
-        ...notes.opened,
-      ]
+      const opened = [...docs.map((d) => ({ url: d.url, title: d.title })), ...notes.opened]
         .filter((o, i, arr) => arr.findIndex((x) => x.url === o.url) === i)
         .slice(0, 24);
       notes = { ...notes, opened };
@@ -998,13 +944,8 @@ export const pullTodo = createServerFn({ method: "POST" })
 export const saveDraft = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(
-    (input: {
-      leadId: number;
-      headline: string;
-      dek: string;
-      body: string;
-      topic: string;
-    }) => input,
+    (input: { leadId: number; headline: string; dek: string; body: string; topic: string }) =>
+      input,
   )
   .handler(async ({ context, data }) => {
     const sql = await getSql();
@@ -1053,8 +994,9 @@ export async function performPublish(
   context: { userId: string; newsroomId?: number },
   leadId: number,
 ): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
-  const already = await getSql().then((sql) =>
-    sql<{ slug: string }>`
+  const already = await getSql().then(
+    (sql) =>
+      sql<{ slug: string }>`
       select slug from articles
       where lead_id = ${leadId} and newsroom_id = ${owned(context)} and status = 'published'
       limit 1
@@ -1062,8 +1004,9 @@ export async function performPublish(
   );
   if (already[0]) return { ok: true as const, slug: already[0].slug };
 
-  const leads = await getSql().then((sql) =>
-    sql<LeadRow>`
+  const leads = await getSql().then(
+    (sql) =>
+      sql<LeadRow>`
       select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at
       from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
     `,
@@ -1074,11 +1017,15 @@ export async function performPublish(
     return { ok: false as const, error: "Killed leads cannot print." };
   }
   if (lead.status === "held") {
-    return { ok: false as const, error: "Un-hold this lead before publishing. Working notes stay private until then." };
+    return {
+      ok: false as const,
+      error: "Un-hold this lead before publishing. Working notes stay private until then.",
+    };
   }
 
-  const drafts = await getSql().then((sql) =>
-    sql<DraftRow>`
+  const drafts = await getSql().then(
+    (sql) =>
+      sql<DraftRow>`
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
              provenance_json, form, found_note, unanswered
       from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
@@ -1099,8 +1046,9 @@ export async function performPublish(
     one of them would print an article with no sources and no warning.
   */
   if (parseUrlList(draft.source_urls).length === 0) {
-    const fromLead = await getSql().then((sql) =>
-      sql<{ source_urls: string }>`
+    const fromLead = await getSql().then(
+      (sql) =>
+        sql<{ source_urls: string }>`
         select source_urls from leads
         where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
       `,
@@ -1108,7 +1056,8 @@ export async function performPublish(
     const inherited = sanitizePublicUrls(parseUrlList(fromLead[0]?.source_urls ?? "[]"));
     if (inherited.length > 0) draft.source_urls = JSON.stringify(inherited);
   }
-  let provenanceJson = row.provenance_json && row.provenance_json !== "[]" ? row.provenance_json : "";
+  let provenanceJson =
+    row.provenance_json && row.provenance_json !== "[]" ? row.provenance_json : "";
   if (!provenanceJson) {
     provenanceJson = JSON.stringify(provenanceFromUrls(parseUrlList(draft.source_urls)));
   }

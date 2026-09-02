@@ -1,17 +1,28 @@
-import { getSql } from "@/lib/db";
-import { claudeCodeChat } from "./ai-claude-code.server";
-import { findVoiceFile, readVoiceTextForOpenAiCodex } from "./voice.server";
-import { opinionModelChoice, type OpinionModelChoice } from "./model-choice.ts";
+import { getSql, withTransaction } from "../db.ts";
+import { claudeCodeChat } from "./ai-claude-code.server.ts";
+import {
+  orchestrateEditorial,
+  type EffectiveOpinionModelChoice,
+  type FiledEditorialResult,
+  type WriteEditorialInput,
+  type WriteEditorialResult,
+} from "./editorial-orchestration.ts";
+import { findVoiceFile } from "./voice.server.ts";
+import { opinionModelChoice } from "./model-choice.ts";
+import {
+  persistEditorialCompletion,
+  persistEditorialSuccess,
+} from "./editorial-result-persistence.ts";
 import {
   EDITORIAL_TOOLS,
   RESEARCH_INSTRUCTIONS,
-  buildEditorialPack,
   buildWritingPack,
   opinionHeadline,
-  parseEditorial,
   type Editorial,
   type EditorialPointer,
-} from "./editorial";
+} from "./editorial.ts";
+
+export type { WriteEditorialInput, WriteEditorialResult } from "./editorial-orchestration.ts";
 
 /**
  * Writing an editorial, and filing it as a draft.
@@ -22,15 +33,16 @@ import {
  * editor — or the piece's own subject — pointed it at, while it held a tool
  * that could send data back out. Now: a gathering pass has the tools and
  * never sees the voice, on the cheap planner model; its plain-text output
- * feeds a writing pass that has the voice and no tools at all, on the
- * expensive model. `claudeCodeChat` in ai-claude-code.server.ts refuses to
- * run a call that combines `systemPromptFile` with any `allowedTools` — that
- * is the structural half of this fix; this file is the shape half.
+ * feeds a writing pass on the expensive model. On the Claude path,
+ * `claudeCodeChat` in ai-claude-code.server.ts refuses to combine
+ * `systemPromptFile` with Claude's explicitly allowed research tools.
  *
  * Claude receives only the voice path. The operator has separately authorized
  * OpenAI Codex Opinion, so that path reads the validated voice text and sends
- * it through stdin to a Codex call with every local tool disabled. The voice
- * is never placed in argv, logs, or a tool-enabled call.
+ * it through stdin. Codex keeps the signed-in Windows user's native config,
+ * rules, search, skills, plugins, and local-machine capabilities in both
+ * passes; TownReporter does not impose a second capability policy. The voice
+ * is never placed in argv or TownReporter logs.
  */
 
 /**
@@ -52,8 +64,8 @@ import {
  *
  * ENG-107 split research and writing into two calls (see `writeEditorial`),
  * so this ceiling now applies PER PASS, not once. The gathering pass is the
- * one these measurements describe; the writing pass has no tools and is
- * expected to be faster, but reuses the same generous ceiling rather than a
+ * one these measurements describe; the Claude writing pass has no research
+ * tools and is expected to be faster, but reuses the same generous ceiling rather than a
  * separately tuned one — one knob for the operator, and the two runs above
  * were the whole spread this ceiling was set from in the first place. Worst
  * case, a piece now takes up to roughly double the wall-clock time this
@@ -101,66 +113,16 @@ export async function ensureEditorialSchema() {
   `);
 }
 
-export type WriteEditorialInput = {
-  userId: string;
-  newsroomId: number;
-  subject: string;
-  pointers: EditorialPointer[];
-  ourStory?: { headline: string; url: string; dek?: string };
-  askedFor?: string;
-  /** For the record on the draft: what this was written from. */
-  sourceKind: string;
-  sourceRef: string;
-  leadId?: number | null;
-  modelChoice?: OpinionModelChoice;
-};
-
-export type WriteEditorialResult =
-  | { ok: true; draftId: number; headline: string; words: number; hadAppendix: boolean }
-  | { ok: false; error: string };
-
 export async function writeEditorial(input: WriteEditorialInput): Promise<WriteEditorialResult> {
-  /*
-    Opinion is the one feature that genuinely needs the Claude Code CLI. The
-    voice is passed as --system-prompt-file so the file never becomes a
-    command-line argument, and the piece is written with WebSearch and
-    WebFetch; no OpenAI-compatible endpoint offers either.
-
-    That exception is legitimate. Ignoring the operator is not. This module
-    called claudeCodeChat directly, so somebody who had explicitly set
-    TOWNREPORTER_CLAUDE_CODE=0 still got the CLI used behind their back —
-    audit finding TW-001. Refuse, and say why.
-
-    Checked before the voice file is read: no point looking up a file we
-    cannot use.
-  */
-  const found = await findVoiceFile();
-  if (!found.ok) return { ok: false, error: found.error };
-
-  /*
-    Pass one: gathering. Tools on, voice absent — this call never receives
-    `systemPromptFile`, so it cannot see the voice at all. It runs on the
-    cheap planner model, because it is retrieval, not the product.
-
-    `plannerModel()` returns "" when the app's *general* provider is not
-    Claude (an OpenAI-compatible gateway, say) — that means "no opinion,
-    keep the caller's model" for callers that pass a provider-native model
-    id. This call always goes straight to the `claude` CLI regardless of
-    what `resolveProvider()` picked elsewhere, so an empty answer has to
-    fall back to a real Claude model id here rather than an empty string.
-  */
-  const researchPack = buildEditorialPack({
-    subject: input.subject,
-    pointers: input.pointers,
-    ourStory: input.ourStory,
-    askedFor: input.askedFor,
-  });
-
-  const runPair = async (choice: "claude-frontier" | "codex-frontier") => {
-    if (choice === "claude-frontier") {
+  return orchestrateEditorial(input, {
+    findVoiceFile,
+    runClaudePair: async ({ input: editorialInput, found, researchPack }) => {
       const { resolveClaudeCode, plannerModel } = await import("./ai");
       if (!resolveClaudeCode()) {
-        return { ok: false as const, error: "Claude is unavailable. Open Claude Code, sign in, then try again." };
+        return {
+          ok: false,
+          error: "Claude is unavailable. Open Claude Code, sign in, then try again.",
+        };
       }
       const research = await claudeCodeChat({
         system: RESEARCH_INSTRUCTIONS,
@@ -174,54 +136,18 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
         system: "",
         systemPromptFile: found.voice.path,
         user: buildWritingPack({
-          subject: input.subject,
-          ourStory: input.ourStory,
-          askedFor: input.askedFor,
+          subject: editorialInput.subject,
+          ourStory: editorialInput.ourStory,
+          askedFor: editorialInput.askedFor,
           research: research.text,
         }),
         model: process.env.TOWNREPORTER_EDITORIAL_MODEL?.trim() || "claude-opus-5",
         timeoutMs: editorialTimeoutMs(),
       });
-    }
-
-    const { codexChat } = await import("./ai-codex.server.ts");
-    const model = process.env.TOWNREPORTER_CODEX_SOL_MODEL?.trim() || "gpt-5.6-sol";
-    const research = await codexChat({
-      system: RESEARCH_INSTRUCTIONS,
-      user: researchPack,
-      model,
-      timeoutMs: editorialTimeoutMs(),
-      webSearch: true,
-    });
-    if (!research.ok) return research;
-
-    // Research has web search but never the voice. Writing has the voice but
-    // no search or local tools. Both prompts travel over stdin.
-    const voice = await readVoiceTextForOpenAiCodex();
-    if (!voice.ok) return voice;
-    return codexChat({
-      system: "",
-      systemPromptText: voice.text,
-      user: buildWritingPack({
-        subject: input.subject,
-        ourStory: input.ourStory,
-        askedFor: input.askedFor,
-        research: research.text,
-      }),
-      model,
-      timeoutMs: editorialTimeoutMs(),
-    });
-  };
-
-  const choice = opinionModelChoice(input.modelChoice);
-  let out = await runPair(choice === "auto" ? "codex-frontier" : choice);
-  if (!out.ok && choice === "auto") out = await runPair("claude-frontier");
-  if (!out.ok) return { ok: false, error: out.error };
-
-  const ed = parseEditorial(out.text);
-  if (!ed.body.trim()) return { ok: false, error: "The voice returned nothing usable." };
-
-  return fileEditorial(input, ed);
+    },
+    fileEditorial,
+    timeoutMs: editorialTimeoutMs,
+  });
 }
 
 /**
@@ -233,43 +159,92 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
 export async function fileEditorial(
   input: WriteEditorialInput,
   ed: Editorial,
-): Promise<WriteEditorialResult> {
+  modelChoice?: EffectiveOpinionModelChoice,
+): Promise<FiledEditorialResult> {
   await ensureEditorialSchema();
-  const sql = await getSql();
+  if (input.completion && !modelChoice) {
+    throw new Error("A queued editorial completion requires the provider that produced it.");
+  }
 
   // Receipts at the end of the piece, where the reader can reach them.
-  const body = ed.appendix
-    ? `${ed.body}\n\n---\n\nCLAIMS AND SOURCES\n\n${ed.appendix}`
-    : ed.body;
+  const body = ed.appendix ? `${ed.body}\n\n---\n\nCLAIMS AND SOURCES\n\n${ed.appendix}` : ed.body;
 
   const headline = opinionHeadline(ed.headline);
+  return withTransaction(async (sql) => {
+    if (input.completion) {
+      const [request] = await sql<{ draft_id: number | null; model_choice: string }>`
+        select draft_id, model_choice from editorial_requests
+        where id = ${input.completion.requestId} and newsroom_id = ${input.newsroomId}
+        for update
+      `;
+      if (!request) {
+        throw new Error(
+          `Editorial request ${input.completion.requestId} was not found during filing.`,
+        );
+      }
 
-  const rows = await sql<{ id: number }>`
-    insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, form)
-    values (
-      ${input.userId}, ${input.newsroomId}, ${input.leadId ?? null},
-      ${headline}, ${""}, ${body}, ${"opinion"}, ${"[]"}, ${"editorial"}
-    )
-    returning id
-  `;
-  const draftId = rows[0]!.id;
+      if (request.draft_id !== null) {
+        const [existing] = await sql<{ id: number; headline: string; body: string }>`
+          select id, headline, body from drafts
+          where id = ${request.draft_id} and newsroom_id = ${input.newsroomId}
+          limit 1
+        `;
+        if (existing) {
+          const storedChoice = opinionModelChoice(request.model_choice);
+          await persistEditorialCompletion(sql, {
+            requestId: input.completion.requestId,
+            jobId: input.completion.jobId,
+            newsroomId: input.newsroomId,
+            draftId: existing.id,
+            modelChoice: storedChoice === "auto" ? modelChoice! : storedChoice,
+          });
+          return {
+            ok: true,
+            draftId: existing.id,
+            headline: existing.headline,
+            words: existing.body.split(/\s+/).filter(Boolean).length,
+            hadAppendix: existing.body.includes("\nCLAIMS AND SOURCES\n"),
+          };
+        }
+      }
+    }
 
-  await sql`
-    insert into editorial_extras (draft_id, newsroom_id, fact_sheet, image_prompt, source_kind, source_ref)
-    values (${draftId}, ${input.newsroomId}, ${ed.factSheet.slice(0, 8000)},
-            ${ed.imagePrompt.slice(0, 4000)}, ${input.sourceKind}, ${input.sourceRef})
-    on conflict (draft_id) do update
-      set fact_sheet = excluded.fact_sheet, image_prompt = excluded.image_prompt,
-          generated_at = now()
-  `;
+    const rows = await sql<{ id: number }>`
+      insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, form)
+      values (
+        ${input.userId}, ${input.newsroomId}, ${input.leadId ?? null},
+        ${headline}, ${""}, ${body}, ${"opinion"}, ${"[]"}, ${"editorial"}
+      )
+      returning id
+    `;
+    const draftId = rows[0]!.id;
 
-  return {
-    ok: true,
-    draftId,
-    headline,
-    words: ed.body.split(/\s+/).filter(Boolean).length,
-    hadAppendix: Boolean(ed.appendix),
-  };
+    await sql`
+      insert into editorial_extras (draft_id, newsroom_id, fact_sheet, image_prompt, source_kind, source_ref)
+      values (${draftId}, ${input.newsroomId}, ${ed.factSheet.slice(0, 8000)},
+              ${ed.imagePrompt.slice(0, 4000)}, ${input.sourceKind}, ${input.sourceRef})
+      on conflict (draft_id) do update
+        set fact_sheet = excluded.fact_sheet, image_prompt = excluded.image_prompt,
+            generated_at = now()
+    `;
+
+    const filed = {
+      ok: true as const,
+      draftId,
+      headline,
+      words: ed.body.split(/\s+/).filter(Boolean).length,
+      hadAppendix: Boolean(ed.appendix),
+    };
+    if (input.completion) {
+      await persistEditorialSuccess(sql, {
+        requestId: input.completion.requestId,
+        jobId: input.completion.jobId,
+        newsroomId: input.newsroomId,
+        result: { ...filed, modelChoice: modelChoice! },
+      });
+    }
+    return filed;
+  });
 }
 
 /**
@@ -300,15 +275,24 @@ export async function ensureEditorialRequestSchema() {
       finished_at timestamptz
     )
   `);
-  await sql.query(`alter table editorial_requests add column if not exists model_choice text not null default 'auto'`);
+  await sql.query(
+    `alter table editorial_requests add column if not exists model_choice text not null default 'auto'`,
+  );
 }
 
-export async function performEditorialWork(job: {
-  id: number;
-  user_id: string;
-  newsroom_id: number;
-  subject_id: number;
-}) {
+type EditorialWorkDeps = {
+  writeEditorial?: (input: WriteEditorialInput) => Promise<WriteEditorialResult>;
+};
+
+export async function performEditorialWork(
+  job: {
+    id: number;
+    user_id: string;
+    newsroom_id: number;
+    subject_id: number;
+  },
+  deps: EditorialWorkDeps = {},
+) {
   await ensureEditorialRequestSchema();
   const sql = await getSql();
   const rows = await sql<{
@@ -320,13 +304,41 @@ export async function performEditorialWork(job: {
     pointers_json: string;
     our_story_json: string | null;
     model_choice: string;
+    draft_id: number | null;
   }>`
-    select id, subject, source_kind, source_ref, asked_for, pointers_json, our_story_json, model_choice
+    select id, subject, source_kind, source_ref, asked_for, pointers_json, our_story_json,
+           model_choice, draft_id
     from editorial_requests
     where id = ${job.subject_id} and newsroom_id = ${job.newsroom_id} limit 1
   `;
   const req = rows[0];
   if (!req) throw new Error("Editorial request not found");
+
+  if (req.draft_id !== null) {
+    const reused = await withTransaction(async (tx) => {
+      const [current] = await tx<{ draft_id: number | null; model_choice: string }>`
+        select draft_id, model_choice from editorial_requests
+        where id = ${req.id} and newsroom_id = ${job.newsroom_id}
+        for update
+      `;
+      if (!current || current.draft_id === null) return false;
+      const [draft] = await tx<{ id: number }>`
+        select id from drafts
+        where id = ${current.draft_id} and newsroom_id = ${job.newsroom_id}
+        limit 1
+      `;
+      if (!draft) return false;
+      await persistEditorialCompletion(tx, {
+        requestId: req.id,
+        jobId: job.id,
+        newsroomId: job.newsroom_id,
+        draftId: draft.id,
+        modelChoice: opinionModelChoice(current.model_choice),
+      });
+      return true;
+    });
+    if (reused) return;
+  }
 
   let pointers: EditorialPointer[] = [];
   let ourStory: { headline: string; url: string; dek?: string } | undefined;
@@ -341,7 +353,7 @@ export async function performEditorialWork(job: {
     ourStory = undefined;
   }
 
-  const result = await writeEditorial({
+  const result = await (deps.writeEditorial ?? writeEditorial)({
     userId: job.user_id,
     newsroomId: job.newsroom_id,
     subject: req.subject,
@@ -351,18 +363,17 @@ export async function performEditorialWork(job: {
     sourceKind: req.source_kind,
     sourceRef: req.source_ref,
     modelChoice: opinionModelChoice(req.model_choice),
+    completion: { requestId: req.id, jobId: job.id },
   });
 
   if (!result.ok) {
+    // A reclaimed job can finish while its old provider call is still alive.
+    // That old call's failure must not turn the successfully filed piece
+    // back into a failed request; executeJob separately guards the job claim.
     await sql`
       update editorial_requests set error = ${result.error.slice(0, 800)}, finished_at = now()
-      where id = ${req.id}
+      where id = ${req.id} and newsroom_id = ${job.newsroom_id} and draft_id is null
     `;
     throw new Error(result.error);
   }
-
-  await sql`
-    update editorial_requests set draft_id = ${result.draftId}, error = null, finished_at = now()
-    where id = ${req.id}
-  `;
 }

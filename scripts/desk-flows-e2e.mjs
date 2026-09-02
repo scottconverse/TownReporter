@@ -96,11 +96,13 @@ async function main() {
   await page.getByRole("heading", { name: "Opinion", exact: true }).waitFor();
   step("Opinion desk renders");
 
+  // Opinion is Claude only: Automatic and Claude Opus. Codex's model refuses
+  // editorials that take a position, so it is offered for Story drafts only.
   const opinionModel = page.getByLabel("Writing model");
-  if ((await opinionModel.locator("option").count()) !== 3 || (await opinionModel.inputValue()) !== "auto") {
+  if ((await opinionModel.locator("option").count()) !== 2 || (await opinionModel.inputValue()) !== "auto") {
     throw new Error("Opinion model picker choices/default do not match the product contract");
   }
-  step("Opinion exposes Automatic and two frontier overrides");
+  step("Opinion exposes Automatic and Claude Opus, nothing else");
 
   // UIUX-03: a live region has to exist before its content changes, or the
   // announcement is frequently never made.

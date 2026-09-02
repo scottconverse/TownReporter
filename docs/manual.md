@@ -2,6 +2,13 @@
 
 **Version 0.5.6 · 31 August 2026**
 
+**Documentation scope:** 0.5.6 is the released baseline. Per-run model pickers
+and the restored native Codex path below describe the **unreleased candidate**,
+not the live paper until promotion. Queue, workbench, Opinion and Paper setup
+images are development examples; the other screens are historical Longmont
+captures from 29 August. Their old **Leave as editor** header link now lives as
+**Give up the desk** on the Server page.
+
 TownReporter is a civic newsroom you run yourself. A public paper on the front,
 a signed-in editor's desk behind it. It watches a city's meetings, packets,
 minutes, money and contracts, notices when something changes or fails to appear,
@@ -29,10 +36,10 @@ at your own city.
 
 ## Two rooms
 
-| | What it is | Who sees it |
-|---|---|---|
-| **The paper** (`/`) | Stories and editorials a human published, with the sources shown | Anyone |
-| **The desk** (`/desk`) | Watch list, scan, queue, drafts, Dark Desk, Opinion, Server | Signed-in editors |
+|                        | What it is                                                       | Who sees it       |
+| ---------------------- | ---------------------------------------------------------------- | ----------------- |
+| **The paper** (`/`)    | Stories and editorials a human published, with the sources shown | Anyone            |
+| **The desk** (`/desk`) | Watch list, scan, queue, drafts, Dark Desk, Opinion, Server      | Signed-in editors |
 
 There is no automated path to the masthead. A machine can find a lead, fetch the
 document, write a draft and tell you what it thinks. It cannot publish.
@@ -74,8 +81,8 @@ Killed. Delete removes the thing. Each one confirms in place and says what it
 costs; taking a story off the paper says plainly that its URL becomes a 404 and
 that a correction is what the paper normally does instead.
 
-**Nothing deleted is gone straight away.** A copy waits 30 days under *Recently
-deleted* on the Server page, and an **Undo** appears where the delete happened.
+**Nothing deleted is gone straight away.** A copy waits 30 days under _Recently
+deleted_ on the Server page, and an **Undo** appears where the delete happened.
 Restoring puts the row back with its original id, so an article's corrections
 and an editorial's fact sheet come back attached rather than orphaned.
 
@@ -97,8 +104,8 @@ You are responsible for everything that appears on the paper.
 ## What the reader gets
 
 - No tracker, no analytics script, no third-party font. A cold load of the paper
-  makes **zero requests to any outside host**. The Server page checks this and
-  will tell you when it stops being true.
+  makes **zero requests to any outside host**. The browser-based `npm run smoke`
+  check enforces this; there is no Server-page reader-privacy monitor.
 - Every story has its own title, description, canonical URL, published time and
   social card.
 - An RSS feed at `/feed`, a `sitemap.xml`, and a `robots.txt` that points at it.
@@ -138,9 +145,9 @@ required.
 ![The desk](images/04-desk.png)
 
 Three columns: the queue on the left, Dark Desk in the middle, the wire on the
-right. The line under the heading is the whole point of the page — *2 drafts
+right. The line under the heading is the whole point of the page — _2 drafts
 ready to publish, 14 proposed sources await review, 1 Dark Desk file ready for
-another round*. If that line is empty there is nothing for you to do.
+another round_. If that line is empty there is nothing for you to do.
 
 ## Scan
 
@@ -165,6 +172,12 @@ prints until you open a lead and publish it.
 Each active row has its own Writing model picker and Draft/Redraft with AI
 button. Automatic resolves one ready provider before enqueue and the result is
 shown on that same row. A named provider never falls back.
+
+**Set up a writing model** opens help beneath every Queue, workbench and
+Opinion picker, even when drafting is unavailable. Follow the installation and
+sign-in steps on the computer/account running TownReporter, then reload and
+retry. Opinion's help also covers the required editorial voice file. This is
+guidance, not an automatic installer or sign-in button.
 
 ## The story workbench
 
@@ -222,20 +235,31 @@ the headline and there is no byline, because an unsigned editorial is the
 paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
 
-Opinion shows Automatic, Codex Sol and Claude Opus. Automatic tries Codex Sol,
-then Claude Opus; an explicit choice never falls back. Codex sends the
-configured editorial voice text to OpenAI over stdin, while Claude Code reads
-the voice by file path. The page lists every missing voice, installation, or
-login prerequisite and stays disabled while readiness is unknown.
+Opinion shows Automatic and Claude Opus, and both mean Claude Opus. Codex is
+not offered here: its model declines to write an editorial that takes a
+position on a local policy question, so it stays on the Story picker. Claude
+Code reads the voice by file path for the writing pass. The page
+lists every missing voice, installation, or login prerequisite and stays
+disabled while readiness is unknown.
+
+A successful process exit is not enough to file a piece. TownReporter rejects
+provider refusals, assistant notes, implausible headlines, and incomplete
+bodies before draft storage. Automatic starts the next provider from a fresh
+research pass. An explicit choice reports the failure without switching. A
+failed row has no Read, Edit, or Publish action; a finished row shows the
+provider that actually delivered it.
 
 **Edit**, on the row, opens the piece in its own workbench at
 `/desk/story/draft/:id`: headline, dek, topic and the piece itself, plus the two
 boxes that never print. Save, publish, or delete it from there.
 
-It fetches its own records before it writes a word, so it takes **ten to forty
-minutes** — three measured runs came in at 9m53s, 24m06s, and one still going at
-30. The page shows a running clock rather than a frozen word, and checks every
-twenty seconds. Editorials are drafts until you publish one.
+It fetches records before it writes. Historical runs took **ten to forty
+minutes** — two finished at 9m53s and 24m06s, and one was still going at 30.
+Those are observations, not a deadline: `EDITORIAL_TIMEOUT_MS` now applies to
+each research or writing pass, with a default of 45 minutes per pass. A pair
+can take about 90 minutes; Automatic can try two pairs. The page shows a
+running clock and checks every twenty seconds. Editorials remain drafts until
+you publish one.
 
 It is also the most expensive thing the newsroom does. Those same two finished
 runs cost **$2.66 and $23.76**; the second decided to dispatch research agents
@@ -247,9 +271,12 @@ of its own. Budget for a piece, not for a paragraph.
 
 ![Server](images/11-server.png)
 
+Historical 0.5.1 screen: the **Reader privacy** row pictured here no longer
+exists. The browser smoke test is the privacy check.
+
 Version, uptime, memory, the public URL as answered from this machine, tunnel
 processes, database size, what the paper holds, queue depth, the last watchdog
-run, free disk, and whether the reader made any outside request.
+run, and free disk.
 
 The buttons are few and each says what it will do before it does it. The two
 that interrupt the paper ask twice.
@@ -272,8 +299,9 @@ settings or invite another editor.
 ## Five minutes, on your own machine
 
 You need **Node 22+**. API keys are optional: Story can use Local, Zen, or an
-existing Codex/Claude login. A signed-in [Claude Code](https://code.claude.com)
-CLI supplies every currently enabled model-backed desk feature, including Opinion.
+existing Codex/Claude login. Signed-in Codex and
+[Claude Code](https://code.claude.com) CLIs supply the frontier Story and
+Opinion choices.
 
 ```bash
 git clone https://github.com/scottconverse/TownReporter.git
@@ -283,6 +311,7 @@ npx playwright install chromium
 cp .env.example .env
 npm run dev
 ```
+
 Open `http://localhost:8080/login` and create an editor account. The first
 account becomes the newsroom owner. There is no setup token: it was removed in
 0.5.1, because a one-person newsroom that could not re-issue the token had a
@@ -311,31 +340,32 @@ db:migrate`.
 
 Configured-provider precedence for Scan and Dark Desk is:
 
-| Set this | What runs |
-|---|---|
+| Set this                                        | What runs                                                         |
+| ----------------------------------------------- | ----------------------------------------------------------------- |
 | `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; also forces Story Automatic to it |
-| `ANTHROPIC_API_KEY` | Claude, billed to that key |
-| *nothing* | **Claude, through your Claude Code login** |
-| `XAI_API_KEY` | Grok |
+| `ANTHROPIC_API_KEY`                             | Claude, billed to that key                                        |
+| _nothing_                                       | **Claude, through your Claude Code login**                        |
+| `XAI_API_KEY`                                   | Grok                                                              |
 
 ### Which feature uses which provider
 
 Scan and Dark Desk use the configured provider. Draft and Opinion additionally
 have an editor-facing, per-run picker.
 
-| Feature | Provider | Model |
-|---|---|---|
-| Scan | configured provider | configured model |
-| Draft (Queue or workbench) | configured gateway forced for Automatic when set; otherwise first ready Zen → Codex Terra → Claude Opus rung; explicit choice never falls back | Local Qwen is explicit-only; Zen MiMo, Codex Terra/Sol, or Claude Opus |
-| Dark Desk synthesis and brief | the one you selected | the one you configured |
-| Dark Desk **planner** | the one you selected | Haiku **only when the provider is Claude**; otherwise your configured model |
-| **Opinion (editorials)** | Automatic tries signed-in Codex, then Claude; explicit choices never fall back | Codex Sol or Claude Opus |
+| Feature                       | Provider                                                                                                                                       | Model                                                                       |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Scan                          | configured provider                                                                                                                            | configured model                                                            |
+| Draft (Queue or workbench)    | configured gateway forced for Automatic when set; otherwise first ready Zen → Codex Terra → Claude Opus rung; explicit choice never falls back | Local Qwen is explicit-only; Zen MiMo, Codex Terra/Sol, or Claude Opus      |
+| Dark Desk synthesis and brief | the one you selected                                                                                                                           | the one you configured                                                      |
+| Dark Desk **planner**         | the one you selected                                                                                                                           | Haiku **only when the provider is Claude**; otherwise your configured model |
+| **Opinion (editorials)**      | Claude Opus, through the signed-in Claude Code session; Codex is not offered for editorials                                                    | Claude Opus                                                                |
 
 **Why Opinion has fewer choices.** Local and Zen are not offered because an
 editorial uses the paper's configured voice and frontier research. Claude Code
 receives the voice by file path. Codex receives the validated voice text over
-stdin, never argv, for a tool-free writing pass. Its separate research pass has
-web search but never sees the voice.
+stdin, never argv, after its separate research pass finishes. Both Codex passes
+retain native search and the signed-in Windows user's full available machine
+capabilities. Claude's writing pass keeps its separate tool-free boundary.
 
 **The planner split.** Planning on Haiku costs about a quarter of planning on
 Opus for the same output, so the desk substitutes it — but only on a Claude
@@ -344,7 +374,7 @@ local endpoint for a Claude model; it uses yours.
 
 Pointing `LLM_BASE_URL` at a local model sends Scan, Dark Desk, and Story
 Automatic to that gateway. An explicit Story choice still forces its named
-provider. Opinion keeps its separate Codex/Claude frontier ladder.
+provider. Opinion is always Claude Opus.
 What that actually costs in quality was measured on this machine:
 [docs/local-models.md](local-models.md).
 
@@ -353,8 +383,11 @@ it reloads a fixed preamble on every call, so a draft takes minutes rather than
 seconds; the time budgets adjust on their own.
 
 Your own `CLAUDE.md`, skills and plugins are **not** loaded into news prompts.
-Claude strips settings with `--setting-sources ""`. Codex Story runs
-ephemerally with user rules and every local/tool capability disabled.
+Claude strips settings with `--setting-sources ""`. Codex is deliberately the
+opposite: it loads the user's native configuration, rules, repository
+instructions, skills and plugins, keeps search and local tools available, and
+runs with `danger-full-access` rather than a TownReporter-imposed read-only
+sandbox. It has the same available access to `C:\` as the signed-in account.
 
 ## The Opinion voice
 
@@ -366,8 +399,9 @@ TOWNREPORTER_VOICE_FILE=C:/Users/you/.townreporter/voice/your-voice.md
 
 The file is deliberately outside the repository, and the app refuses a path
 inside it. On Claude, only the **path** reaches the CLI. On Codex, TownReporter
-reads the validated file and sends its text to OpenAI over stdin for the
-tool-free writing pass. It never becomes a command-line argument or log entry.
+reads the validated file and sends its text to OpenAI over stdin for the native
+full-capability writing pass. It never becomes a command-line argument or log
+entry.
 Without the file, the Opinion desk says so and spends nothing.
 
 ## Serving it publicly
@@ -375,17 +409,17 @@ Without the file, the Opinion desk says so and spends nothing.
 The working edition runs on one Windows machine behind a Cloudflare Tunnel. The
 `ops/` directory holds the scripts that keep it up:
 
-| Script | What it does |
-|---|---|
-| `ops/watchdog.ps1` | Every five minutes: check the app, the tunnel and the public URL; restart what is down; write what it did |
-| `ops/run-tunnel.ps1` | Start `cloudflared` for this hostname |
-| `ops/restart-app.ps1` | Stop and start the paper |
-| `ops/restart-tunnel.ps1` | Stop and start the tunnel |
-| `ops/rotate-logs.ps1` | Keep `logs/` from growing without bound |
-| `ops/status.ps1` | Is it up? Read-only, and it answers when the paper is down and `/desk/ops` cannot |
-| `ops/TownReporter Control.cmd` | The same, for someone who does not want a terminal. Double-click, pick a number. |
-| `ops/run-hidden.vbs` | Runs the five-minute tasks with no console window |
-| `ops/install-tasks.ps1` | Registers all six scheduled tasks. Idempotent, `-WhatIf` supported, and refuses to repoint another install's tasks. |
+| Script                         | What it does                                                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `ops/watchdog.ps1`             | Every five minutes: check the app, the tunnel and the public URL; restart what is down; write what it did           |
+| `ops/run-tunnel.ps1`           | Start `cloudflared` for this hostname                                                                               |
+| `ops/restart-app.ps1`          | Stop and start the paper                                                                                            |
+| `ops/restart-tunnel.ps1`       | Stop and start the tunnel                                                                                           |
+| `ops/rotate-logs.ps1`          | Keep `logs/` from growing without bound                                                                             |
+| `ops/status.ps1`               | Is it up? Read-only, and it answers when the paper is down and `/desk/ops` cannot                                   |
+| `ops/TownReporter Control.cmd` | The same, for someone who does not want a terminal. Double-click, pick a number.                                    |
+| `ops/run-hidden.vbs`           | Runs the five-minute tasks with no console window                                                                   |
+| `ops/install-tasks.ps1`        | Registers all six scheduled tasks. Idempotent, `-WhatIf` supported, and refuses to repoint another install's tasks. |
 
 Restart and tunnel-restart run as Windows scheduled tasks rather than as child
 processes of the app — a restart cannot be performed by the process being
@@ -394,6 +428,10 @@ killed.
 
 Deployment notes for other hosts, and the remaining limits of a city setup, are in
 [docs/setup.md](setup.md).
+
+For this machine's release procedure, use
+[Updating this installation](../SELF-HOSTING.md#updating-this-installation).
+Never rebuild a checkout while a server is serving its `.output`.
 
 ## Point it at another city
 
@@ -416,17 +454,17 @@ fields remain blank; they do not inherit Longmont's values.
 
 ## The stack
 
-| Layer | What | Why |
-|---|---|---|
-| Framework | [TanStack Start](https://tanstack.com/start) on Vite, React 19 | File-based routes, typed server functions, SSR without a separate API |
-| Server | Nitro, `node-server` preset | A long-lived process: Chromium stays warm and background jobs are not chopped into request-sized pieces |
-| Database | PostgreSQL (PGLite for a throwaway look) | Plain SQL through `pg`; migrations are numbered `.sql` files |
-| Auth | [better-auth](https://better-auth.com) | Email/password, with a bearer path for partitioned-cookie previews |
-| Styling | Tailwind 4 | |
-| Fetching | `undici`, with a connect-time SSRF guard | The address approved is the address connected to |
-| Rendering | Playwright Chromium | JS-heavy civic portals and YouTube "Show transcript" |
-| PDFs | `unpdf` | Text extraction; image-only PDFs are honestly reported as unread |
-| Model | Codex/Claude CLIs, Anthropic SDK, OpenCode Zen, or any OpenAI-compatible URL | Provider is resolved before enqueue and stored on each Story job |
+| Layer     | What                                                                         | Why                                                                                                     |
+| --------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Framework | [TanStack Start](https://tanstack.com/start) on Vite, React 19               | File-based routes, typed server functions, SSR without a separate API                                   |
+| Server    | Nitro, `node-server` preset                                                  | A long-lived process: Chromium stays warm and background jobs are not chopped into request-sized pieces |
+| Database  | PostgreSQL (PGLite for a throwaway look)                                     | Plain SQL through `pg`; migrations are numbered `.sql` files                                            |
+| Auth      | [better-auth](https://better-auth.com)                                       | Email/password, with a bearer path for partitioned-cookie previews                                      |
+| Styling   | Tailwind 4                                                                   |                                                                                                         |
+| Fetching  | `undici`, with a connect-time SSRF guard                                     | The address approved is the address connected to                                                        |
+| Rendering | Playwright Chromium                                                          | JS-heavy civic portals and YouTube "Show transcript"                                                    |
+| PDFs      | `unpdf`                                                                      | Text extraction; image-only PDFs are honestly reported as unread                                        |
+| Model     | Codex/Claude CLIs, Anthropic SDK, OpenCode Zen, or any OpenAI-compatible URL | Provider is resolved before enqueue and stored on each Story job                                        |
 
 ## Server functions and the desk boundary
 
@@ -455,14 +493,14 @@ alongside the original.
 Everything Dark Desk writes down carries a label, and the label caps the
 confidence **in code** — not by asking a prompt nicely:
 
-| Label | Ceiling |
-|---|---|
-| FACT | 1.0 |
-| OBSERVATION | 0.9 |
-| INFERENCE | 0.7 |
-| ALLEGATION | 0.6 |
-| HYPOTHESIS | 0.5 |
-| UNKNOWN | 0.3 |
+| Label       | Ceiling |
+| ----------- | ------- |
+| FACT        | 1.0     |
+| OBSERVATION | 0.9     |
+| INFERENCE   | 0.7     |
+| ALLEGATION  | 0.6     |
+| HYPOTHESIS  | 0.5     |
+| UNKNOWN     | 0.3     |
 
 A claim labelled FACT with no citation is downgraded rather than trusted. Claims
 about the desk's own digging — "twelve hops found no contract" — are dropped
@@ -472,9 +510,10 @@ instead of filed as findings about the world.
 
 Planning and synthesis are separate calls and can use different models.
 Measured over five runs each, planning on Haiku produced the same output quality
-as Opus at about a quarter of the cost, so **Haiku plans and Opus synthesises**.
-The editorial writer is Opus deliberately: it is the one call where the writing
-*is* the product.
+as Opus at about a quarter of the cost. On the **Claude Dark Desk path**, Haiku
+plans and the configured Claude model synthesises. Non-Claude providers keep
+their configured model instead of receiving a Claude model name. Opinion is a
+separate two-pass path and is always Claude Opus.
 
 ## Privacy of the reader
 
@@ -548,7 +587,7 @@ flowchart TB
 
     subgraph models["Whichever model you point it at"]
         CC["Claude Code CLI<br/>(no API key)"]
-        CX["Codex CLI<br/>(OAuth, Story tool-free)"]
+        CX["Codex CLI<br/>(OAuth, native full access)"]
         ZEN["OpenCode Zen<br/>(provider-hosted)"]
         API["Anthropic API"]
         OAI["Any OpenAI-compatible URL<br/>incl. a local model"]
@@ -649,7 +688,7 @@ Note what is missing from that diagram: any edge to the paper. The only way out
 of Dark Desk is **Send to the queue**, which files a lead a human then has to
 work.
 
-## The Opinion desk, and the private-voice boundary
+## The Opinion desk and its voice handoff
 
 ```mermaid
 flowchart LR
@@ -664,15 +703,12 @@ flowchart LR
         VOICE["The voice file<br/>~/.townreporter/voice/*.md"]
     end
 
-    CLI["Claude Code CLI<br/>enabled"]
-    CODEX["Codex Sol<br/>fails closed before spend"]
+    CLI["Claude Code CLI<br/>path-only voice, tool-free writing"]
 
     UI --> PACK
     PACK -->|"over stdin"| CLI
-    VOICE -.->|"Claude: path only"| CLI
-    VOICE -.->|"Codex: text over stdin"| CODEX
+    VOICE -.->|"path only"| CLI
     CLI --> PARSE --> DRAFTS --> UI
-    UI -->|"Codex Sol"| CODEX
 
     style private fill:#2a2320,color:#fff
     style VOICE fill:#7a2d2d,color:#fff
@@ -680,8 +716,9 @@ flowchart LR
 
 On Claude, the voice file is never read into the app's memory and never becomes
 inline prompt text. On Codex, the app reads the validated voice and sends it to
-OpenAI over stdin. Neither path places it in argv. A relative path, or any path
-inside the public repository, is rejected.
+OpenAI over stdin while retaining native full machine capabilities. Neither
+path places it in argv. A relative path, or any path inside the public
+repository, is rejected.
 
 ## Keeping it online
 
@@ -754,58 +791,60 @@ flowchart TB
 
 ## Routes
 
-| Path | What |
-|---|---|
-| `/` | The paper |
-| `/?topic=opinion` | Editorials — the Opinion link in the masthead. Same route as the paper, filtered by topic. |
-| `/articles/:slug` | A story |
-| `/about` · `/how-we-report` · `/corrections` | Masthead pages |
-| `/feed` · `/sitemap.xml` · `/robots.txt` | Machines |
-| `/evidence/:versionId` | The captured copy of a source a printed story cited |
-| `/evidence/compare` | Two captures of the same URL, side by side |
-| `/get-the-code` · `/TownReporter.zip` | Download this newsroom's own source |
-| `/login` | Create an editor account, or sign in |
-| `/desk/setup` | First-run paper setup; redirects away after setup is complete |
-| `/desk` | The desk — what needs you |
-| `/desk/sources` | Watch list, and bulk paste |
-| `/desk/scan` | Fetch and file leads. The expensive button. |
-| `/desk/queue` | Leads: draft, hold, kill |
-| `/desk/story/:id` | The workbench, opened by lead |
-| `/desk/story/draft/:id` | The editorial workbench, opened by draft — an editorial has no lead |
-| `/desk/published` | Live stories and corrections |
-| `/desk/dark` | Dark Desk. Investigates, never prints. |
-| `/desk/opinion` | Opinion. Unsigned editorials. |
-| `/desk/ops` | Server. Health, Paper setup, editor invites and the few operational buttons worth having. |
+| Path                                         | What                                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `/`                                          | The paper                                                                                  |
+| `/?topic=opinion`                            | Editorials — the Opinion link in the masthead. Same route as the paper, filtered by topic. |
+| `/articles/:slug`                            | A story                                                                                    |
+| `/about` · `/how-we-report` · `/corrections` | Masthead pages                                                                             |
+| `/feed` · `/sitemap.xml` · `/robots.txt`     | Machines                                                                                   |
+| `/evidence/:versionId`                       | The captured copy of a source a printed story cited                                        |
+| `/evidence/compare`                          | Two captures of the same URL, side by side                                                 |
+| `/get-the-code` · `/TownReporter.zip`        | Download this newsroom's own source                                                        |
+| `/login`                                     | Create an editor account, or sign in                                                       |
+| `/desk/setup`                                | First-run paper setup; redirects away after setup is complete                              |
+| `/desk`                                      | The desk — what needs you                                                                  |
+| `/desk/sources`                              | Watch list, and bulk paste                                                                 |
+| `/desk/scan`                                 | Fetch and file leads. The expensive button.                                                |
+| `/desk/queue`                                | Leads: draft, hold, kill                                                                   |
+| `/desk/story/:id`                            | The workbench, opened by lead                                                              |
+| `/desk/story/draft/:id`                      | The editorial workbench, opened by draft — an editorial has no lead                        |
+| `/desk/published`                            | Live stories and corrections                                                               |
+| `/desk/dark`                                 | Dark Desk. Investigates, never prints.                                                     |
+| `/desk/opinion`                              | Opinion. Unsigned editorials.                                                              |
+| `/desk/ops`                                  | Server. Health, Paper setup, editor invites and the few operational buttons worth having.  |
 
 ## Environment
 
 The variables an operator most often touches. The complete inventory, with a
 comment on each, is [`.env.example`](../.env.example).
 
-| Variable | Effect |
-|---|---|
-| `DATABASE_URL` | Postgres. Unset means throwaway PGLite. |
-| `BETTER_AUTH_TRUSTED_ORIGINS` | Extra origins allowed to sign in, comma-separated |
-| `TOWNREPORTER_VOICE_FILE` | Absolute path to the Opinion voice, outside the repo |
-| `TOWNREPORTER_EDITORIAL_MODEL` | Override the Claude Opinion writing model (default Opus) |
-| `ANTHROPIC_API_KEY` | Bill Claude to a key instead of using the CLI login |
-| `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL` | Configured provider for Scan/Dark; forced Story Automatic provider |
-| `TOWNREPORTER_LOCAL_BASE_URL` · `TOWNREPORTER_LOCAL_MODEL` | Local picker identity; defaults `127.0.0.1:1234/v1` and `qwen/qwen3.6-35b-a3b` |
-| `TOWNREPORTER_ZEN_BASE_URL` · `TOWNREPORTER_ZEN_MODEL` | Zen picker identity; defaults OpenCode Zen and `mimo-v2.5-free` |
-| `TOWNREPORTER_CODEX_TERRA_MODEL` · `TOWNREPORTER_CODEX_SOL_MODEL` | Codex picker model ids; defaults `gpt-5.6-terra` / `gpt-5.6-sol` |
-| `XAI_API_KEY` | Grok |
-| `CRON_SECRET` | Lets an external monitor ping the job runner |
-| `HOST` | What the server binds to. Unset means every interface, LAN included. Set `127.0.0.1` when a tunnel or proxy fronts it. |
-| `VITE_AUTH_ENABLED=false` | No login at all. Local only. Never on a public host. |
+| Variable                                                          | Effect                                                                                                                 |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                    | Postgres. Unset means throwaway PGLite.                                                                                |
+| `BETTER_AUTH_TRUSTED_ORIGINS`                                     | Extra origins allowed to sign in, comma-separated                                                                      |
+| `TOWNREPORTER_VOICE_FILE`                                         | Absolute path to the Opinion voice, outside the repo                                                                   |
+| `TOWNREPORTER_EDITORIAL_MODEL`                                    | Override the Claude Opinion writing model (default Opus)                                                               |
+| `ANTHROPIC_API_KEY`                                               | Bill Claude to a key instead of using the CLI login                                                                    |
+| `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL`                      | Configured provider for Scan/Dark; forced Story Automatic provider                                                     |
+| `TOWNREPORTER_LOCAL_BASE_URL` · `TOWNREPORTER_LOCAL_MODEL`        | Local picker identity; defaults `127.0.0.1:1234/v1` and `qwen/qwen3.6-35b-a3b`                                         |
+| `TOWNREPORTER_ZEN_BASE_URL` · `TOWNREPORTER_ZEN_MODEL`            | Zen picker identity; defaults OpenCode Zen and `mimo-v2.5-free`                                                        |
+| `TOWNREPORTER_CODEX_TERRA_MODEL` · `TOWNREPORTER_CODEX_SOL_MODEL` | Codex picker model ids; defaults `gpt-5.6-terra` / `gpt-5.6-sol`                                                       |
+| `CODEX_CLI_PATH` · `CODEX_HOME`                                   | Unusual Codex binary or OAuth-state locations; normal discovery needs neither                                          |
+| `CLAUDE_CLI_PATH`                                                 | Unusual Claude Code binary location                                                                                    |
+| `XAI_API_KEY`                                                     | Grok                                                                                                                   |
+| `CRON_SECRET`                                                     | Lets an external monitor ping the job runner                                                                           |
+| `HOST`                                                            | What the server binds to. Unset means every interface, LAN included. Set `127.0.0.1` when a tunnel or proxy fronts it. |
+| `VITE_AUTH_ENABLED=false`                                         | No login at all. Local only. Never on a public host.                                                                   |
 
 ## Job kinds
 
-| Kind | Started by | Typical length |
-|---|---|---|
-| `scan` | Scan page | minutes |
-| `draft` | Queue or workbench | minutes |
-| `dark` | Dark Desk — start, or Keep digging | minutes per round |
-| `editorial` | Opinion desk | 10–40 minutes |
+| Kind        | Started by                         | Typical length                                                       |
+| ----------- | ---------------------------------- | -------------------------------------------------------------------- |
+| `scan`      | Scan page                          | minutes                                                              |
+| `draft`     | Queue or workbench                 | minutes                                                              |
+| `dark`      | Dark Desk — start, or Keep digging | minutes per round                                                    |
+| `editorial` | Opinion desk                       | Historical runs: 10–40 minutes; up to 45 minutes per pass by default |
 
 ## Commands
 
@@ -822,14 +861,14 @@ npx playwright install chromium
 
 ## Documents
 
-| Audience | Document |
-|---|---|
-| Editors, with screenshots and no code | [docs/editor.md](editor.md) |
-| Operators — clone, env, Postgres, models, city swap | [docs/setup.md](setup.md) |
-| Dark Desk UI contract | [docs/dark-desk-editor.md](dark-desk-editor.md) |
-| Local models — what was measured, and why mostly no | [docs/local-models.md](local-models.md) |
-| Self-hosting this exact deployment | [SELF-HOSTING.md](../SELF-HOSTING.md) |
-| What changed, release by release | [CHANGELOG.md](../CHANGELOG.md) |
+| Audience                                            | Document                                        |
+| --------------------------------------------------- | ----------------------------------------------- |
+| Editors, with screenshots and no code               | [docs/editor.md](editor.md)                     |
+| Operators — clone, env, Postgres, models, city swap | [docs/setup.md](setup.md)                       |
+| Dark Desk UI contract                               | [docs/dark-desk-editor.md](dark-desk-editor.md) |
+| Local models — what was measured, and why mostly no | [docs/local-models.md](local-models.md)         |
+| Self-hosting this exact deployment                  | [SELF-HOSTING.md](../SELF-HOSTING.md)           |
+| What changed, release by release                    | [CHANGELOG.md](../CHANGELOG.md)                 |
 
 ---
 

@@ -15,7 +15,21 @@ import {
 
 function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   const prev: Record<string, string | undefined> = {};
-  const keys = ["XAI_API_KEY", "GROK_API_KEY", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "OPENAI_API_KEY", "XAI_MODEL", "XAI_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_EFFORT", "TOWNREPORTER_CLAUDE_CODE", "CLAUDE_CLI_PATH"];
+  const keys = [
+    "XAI_API_KEY",
+    "GROK_API_KEY",
+    "LLM_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_MODEL",
+    "OPENAI_API_KEY",
+    "XAI_MODEL",
+    "XAI_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_EFFORT",
+    "TOWNREPORTER_CLAUDE_CODE",
+    "CLAUDE_CLI_PATH",
+  ];
   for (const k of keys) prev[k] = process.env[k];
   for (const k of keys) delete process.env[k];
   for (const [k, v] of Object.entries(vars)) {
@@ -34,7 +48,21 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
 
 async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () => Promise<T>) {
   const prev: Record<string, string | undefined> = {};
-  const keys = ["XAI_API_KEY", "GROK_API_KEY", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "OPENAI_API_KEY", "XAI_MODEL", "XAI_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_EFFORT", "TOWNREPORTER_CLAUDE_CODE", "CLAUDE_CLI_PATH"];
+  const keys = [
+    "XAI_API_KEY",
+    "GROK_API_KEY",
+    "LLM_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_MODEL",
+    "OPENAI_API_KEY",
+    "XAI_MODEL",
+    "XAI_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_EFFORT",
+    "TOWNREPORTER_CLAUDE_CODE",
+    "CLAUDE_CLI_PATH",
+  ];
   for (const k of keys) prev[k] = process.env[k];
   for (const k of keys) delete process.env[k];
   for (const [k, v] of Object.entries(vars)) {
@@ -142,7 +170,9 @@ describe("resolveProvider", () => {
           "TOWNREPORTER_CODEX_SOL_MODEL",
         ];
         try {
-          const choose = resolveProvider as unknown as (choice: string) => ReturnType<typeof resolveProvider>;
+          const choose = resolveProvider as unknown as (
+            choice: string,
+          ) => ReturnType<typeof resolveProvider>;
           assert.equal(choose("local")?.baseUrl, "http://local.test/v1");
           assert.equal(choose("local")?.model, "local-model");
           assert.equal(choose("zen")?.baseUrl, "https://zen.test/v1");
@@ -158,17 +188,16 @@ describe("resolveProvider", () => {
 
   it("resolves the editor's explicit free and frontier choices independently of env precedence", () => {
     withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () => {
-      const choose = resolveProvider as unknown as (choice: string) => ReturnType<typeof resolveProvider>;
-      assert.deepEqual(
-        choose("local"),
-        {
-          kind: "openai",
-          apiKey: "not-needed",
-          baseUrl: "http://127.0.0.1:1234/v1",
-          model: "qwen/qwen3.6-35b-a3b",
-          label: "Local Qwen",
-        },
-      );
+      const choose = resolveProvider as unknown as (
+        choice: string,
+      ) => ReturnType<typeof resolveProvider>;
+      assert.deepEqual(choose("local"), {
+        kind: "openai",
+        apiKey: "not-needed",
+        baseUrl: "http://127.0.0.1:1234/v1",
+        model: "qwen/qwen3.6-35b-a3b",
+        label: "Local Qwen",
+      });
       assert.equal(choose("zen")?.model, "mimo-v2.5-free");
       assert.equal(choose("codex-balanced")?.model, "gpt-5.6-terra");
       assert.equal(choose("codex-frontier")?.model, "gpt-5.6-sol");
@@ -177,10 +206,28 @@ describe("resolveProvider", () => {
   });
 
   it("gives local, free-cloud, and CLI work enough wall clock", () => {
-    const budget = providerBudget as unknown as (choice: string) => ReturnType<typeof providerBudget>;
+    const budget = providerBudget as unknown as (
+      choice: string,
+    ) => ReturnType<typeof providerBudget>;
     assert.ok(budget("local").callMs >= 180_000);
     assert.ok(budget("zen").callMs >= 120_000);
     assert.ok(budget("codex-frontier").wallMs >= 420_000);
+  });
+
+  it("keeps Automatic's configured gateway on the conservative pipeline budget", () => {
+    withEnv(
+      {
+        LLM_BASE_URL: "http://127.0.0.1:1234/v1",
+        LLM_MODEL: "local-capable-model",
+      },
+      () => {
+        assert.deepEqual(providerBudget("configured"), {
+          wallMs: 660_000,
+          callMs: 180_000,
+          reserveMs: 180_000,
+        });
+      },
+    );
   });
 
   it("is null when nothing is configured and the CLI is ruled out", () => {
@@ -244,7 +291,15 @@ describe("resolveProvider", () => {
 describe("grokChat", () => {
   it("returns the desk-facing unavailable error when the key is missing", async () => {
     const prev: Record<string, string | undefined> = {};
-    for (const k of ["XAI_API_KEY", "LLM_API_KEY", "LLM_BASE_URL", "GROK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "TOWNREPORTER_CLAUDE_CODE"]) {
+    for (const k of [
+      "XAI_API_KEY",
+      "LLM_API_KEY",
+      "LLM_BASE_URL",
+      "GROK_API_KEY",
+      "OPENAI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "TOWNREPORTER_CLAUDE_CODE",
+    ]) {
       prev[k] = process.env[k];
       delete process.env[k];
     }
@@ -265,12 +320,92 @@ describe("grokChat", () => {
       }
     }
   });
+
+  it("uses only the explicitly selected Story picker adapter", async () => {
+    const cases = [
+      { choice: "local", kind: "openai", label: "Local Qwen", vars: BARE },
+      { choice: "zen", kind: "openai", label: "Zen MiMo", vars: BARE },
+      { choice: "codex-balanced", kind: "codex", label: "Codex Terra", vars: BARE },
+      { choice: "codex-frontier", kind: "codex", label: "Codex Sol", vars: BARE },
+      {
+        choice: "claude-frontier",
+        kind: "anthropic",
+        label: "Claude Opus",
+        vars: { ...BARE, ANTHROPIC_API_KEY: "sk-ant-test" },
+      },
+      { choice: "claude-frontier", kind: "claude-code", label: "Claude Opus", vars: {} },
+    ] as const;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("an explicit picker choice must not probe or call another provider");
+    };
+    try {
+      for (const selected of cases) {
+        await withEnvAsync(selected.vars, async () => {
+          const calls: string[] = [];
+          const sentinel = {
+            ok: false as const,
+            error: `sentinel:${selected.kind}:${selected.label}`,
+          };
+          const adapter = (kind: string) => async (provider: { kind: string; label: string }) => {
+            calls.push(`${kind}:${provider.kind}:${provider.label}`);
+            return kind === selected.kind
+              ? sentinel
+              : { ok: false as const, error: `wrong-adapter:${kind}` };
+          };
+          const result = await grokChat(
+            "system",
+            "user",
+            8,
+            { choice: selected.choice },
+            {
+              probe: async () => {
+                calls.push("probe");
+                return { ok: false as const, error: "unexpected-probe" };
+              },
+              openai: adapter("openai"),
+              codex: adapter("codex"),
+              anthropic: adapter("anthropic"),
+              "claude-code": adapter("claude-code"),
+            },
+          );
+
+          assert.equal(result, sentinel);
+          assert.deepEqual(calls, [`${selected.kind}:${selected.kind}:${selected.label}`]);
+        });
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe("model-picker provider readiness", () => {
+  it("validates an Anthropic key before a Claude job can be enqueued", async () => {
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = async (input) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ error: { message: "invalid x-api-key" } }), {
+        status: 401,
+      });
+    };
+    try {
+      await withEnvAsync({ ...BARE, ANTHROPIC_API_KEY: "invalid-test-key" }, async () => {
+        const result = await probeProvider("claude-frontier");
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.match(result.error, /Claude.*credential|ANTHROPIC_API_KEY/i);
+      });
+      assert.deepEqual(urls, ["https://api.anthropic.com/v1/models?limit=1"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("proves the selected local model is actually loaded", async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => new Response(JSON.stringify({ data: [{ id: "qwen/qwen3.6-35b-a3b" }] }), { status: 200 });
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ data: [{ id: "qwen/qwen3.6-35b-a3b" }] }), { status: 200 });
     try {
       await withEnvAsync(BARE, async () => {
         const result = await probeProvider("local");
@@ -284,7 +419,8 @@ describe("model-picker provider readiness", () => {
 
   it("refuses a running local server when the named model is not loaded", async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => new Response(JSON.stringify({ data: [{ id: "some-other-model" }] }), { status: 200 });
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ data: [{ id: "some-other-model" }] }), { status: 200 });
     try {
       const result = await probeProvider("local");
       assert.equal(result.ok, false);
@@ -302,11 +438,14 @@ describe("model-picker provider readiness", () => {
       return new Response(JSON.stringify({ data: [{ id: "desk-model" }] }), { status: 200 });
     };
     try {
-      await withEnvAsync({ ...BARE, LLM_BASE_URL: "http://gateway.test/v1", LLM_MODEL: "desk-model" }, async () => {
-        const result = await probeProvider("auto");
-        assert.equal(result.ok, true);
-        if (result.ok) assert.equal(result.choice, "configured");
-      });
+      await withEnvAsync(
+        { ...BARE, LLM_BASE_URL: "http://gateway.test/v1", LLM_MODEL: "desk-model" },
+        async () => {
+          const result = await probeProvider("auto");
+          assert.equal(result.ok, true);
+          if (result.ok) assert.equal(result.choice, "configured");
+        },
+      );
       assert.deepEqual(urls, ["http://gateway.test/v1/models"]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -334,7 +473,9 @@ describe("model-picker provider readiness", () => {
 
   it("distinguishes an unreachable provider from a timeout", async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => { throw new TypeError("connection refused"); };
+    globalThis.fetch = async () => {
+      throw new TypeError("connection refused");
+    };
     try {
       const result = await probeProvider("local");
       assert.equal(result.ok, false);
@@ -429,8 +570,11 @@ describe("the planner model respects the provider", () => {
 
   /** An explicit override is the operator's business, whatever the provider. */
   it("always honours an explicit override", () => {
-    withEnv({ LLM_BASE_URL: "http://127.0.0.1:1234/v1", TOWNREPORTER_PLANNER_MODEL: "qwen3.6-35b" }, () => {
-      assert.equal(plannerModel(), "qwen3.6-35b");
-    });
+    withEnv(
+      { LLM_BASE_URL: "http://127.0.0.1:1234/v1", TOWNREPORTER_PLANNER_MODEL: "qwen3.6-35b" },
+      () => {
+        assert.equal(plannerModel(), "qwen3.6-35b");
+      },
+    );
   });
 });

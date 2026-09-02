@@ -4,6 +4,11 @@
 
 **Current release: [0.5.6](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.6)** — 31 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
+**Documentation scope:** this checkout also documents the **unreleased model-picker
+and native Codex repair candidate**. Those features are not part of the tagged
+0.5.6 release and are not live on townreporter.org until an approved promotion.
+See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
+
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
 MIT licensed. Clone it. Point it at your city.
@@ -16,9 +21,9 @@ MIT licensed. Clone it. Point it at your city.
 
 TownReporter is two rooms:
 
-| | What it is | Who sees it |
-|---|---|---|
-| **The paper** (`/`) | Stories and editorials a human published, with sources shown | Anyone |
+|                        | What it is                                                         | Who sees it       |
+| ---------------------- | ------------------------------------------------------------------ | ----------------- |
+| **The paper** (`/`)    | Stories and editorials a human published, with sources shown       | Anyone            |
 | **The desk** (`/desk`) | Watch list, scan, queue, drafts, notes, Dark Desk, Opinion, Server | Signed-in editors |
 
 There is no fully automated path to the masthead.
@@ -29,15 +34,15 @@ It is not the Longmont Times-Call, not the city, and not a replacement for eithe
 
 ## Manuals
 
-| Audience | Document |
-|---|---|
-| **Everyone — the full manual**, with architecture drawings | [docs/manual.md](docs/manual.md) |
-| Editors, with screenshots and no code | [docs/editor.md](docs/editor.md) |
-| Operators (clone, env, Postgres, models, city swap) | [docs/setup.md](docs/setup.md) |
-| Dark Desk UI contract | [docs/dark-desk-editor.md](docs/dark-desk-editor.md) |
-| Local models, measured on real prompts | [docs/local-models.md](docs/local-models.md) |
-| Marketing / GitHub Pages landing | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
-| Contributing changes | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Audience                                                   | Document                                                                                        |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Everyone — the full manual**, with architecture drawings | [docs/manual.md](docs/manual.md)                                                                |
+| Editors, with screenshots and no code                      | [docs/editor.md](docs/editor.md)                                                                |
+| Operators (clone, env, Postgres, models, city swap)        | [docs/setup.md](docs/setup.md)                                                                  |
+| Dark Desk UI contract                                      | [docs/dark-desk-editor.md](docs/dark-desk-editor.md)                                            |
+| Local models, measured on real prompts                     | [docs/local-models.md](docs/local-models.md)                                                    |
+| Marketing / GitHub Pages landing                           | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
+| Contributing changes                                       | [CONTRIBUTING.md](CONTRIBUTING.md)                                                              |
 
 GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings → Pages → Deploy from a branch → `main` / `/docs`**. The token that pushes this repo cannot flip that switch.
 
@@ -96,7 +101,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 - **The reader is nobody's product.** Fonts are served from this machine, a third-party script was removed from every page, and a cold load of the paper makes zero outside requests.
 - **Stories are shareable.** Per-story titles, descriptions, canonical URLs and social cards — they all used to share one blurb. Plus a sitemap.
 - **An Opinion desk.** A subject, a sentence or a URL becomes an unsigned editorial: OPINION in the headline, no byline, receipts in an appendix at the end. The writer fetches its own records first, so it takes ten to forty minutes.
-- **Dark Desk has two dials.** *Dig* — how far it chases. *Nerve* — how speculative it may be. The panel says in plain words what the current setting will do.
+- **Dark Desk has two dials.** _Dig_ — how far it chases. _Nerve_ — how speculative it may be. The panel says in plain words what the current setting will do.
 - **Dark Desk's planner had never run.** Its budget was 45 seconds against a call that needs 150, and every failure fell back to keyword matching in silence. The database held zero entities, claims or hypotheses.
 - **Confidence is capped by the label in code**, not requested in a prompt, and a FACT with no citation is downgraded.
 - **r/longmont is a tip line** — scored, paced, and filed as unverified tips that can never be mistaken for reporting.
@@ -155,6 +160,11 @@ Details and the honest limits of a city swap are in [docs/setup.md](docs/setup.m
 
 ## Model — automatic ladder, with an editor override
 
+**Set up a writing model**, beneath each Queue, workbench and Opinion picker,
+opens installation, sign-in and retry guidance. Setup belongs on the computer
+and Windows account running TownReporter; Opinion also explains its voice-file
+prerequisite. The desk does not install software or sign you in automatically.
+
 Every active Queue row has its own **Writing model** picker beside **Draft with
 AI**; the story workbench has the same control beside Draft or Redraft. The
 default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
@@ -178,41 +188,48 @@ API key is required. Readiness is checked before enqueueing. If a login expires,
 the desk refuses and tells the editor which app to open and sign in to.
 `CODEX_CLI_PATH`, `CODEX_HOME`, and `CLAUDE_CLI_PATH` are available when normal
 discovery cannot find the binary or Codex state directory.
-Personal coding rules, skills and project instructions are not loaded into
-news prompts on either CLI path.
+Codex runs with the signed-in Windows user's native configuration and full
+available machine capabilities. TownReporter does not disable its search,
+shell/file access, browser/computer tools, apps, plugins, hooks, skills,
+multi-agent features, user rules, or repository instructions, and it does not
+replace them with a read-only sandbox. That includes every path on `C:\` the
+signed-in account can access. The requested newsroom job still comes from the
+prompt; available capability is not permission to perform an unrelated action.
 
-Your own `CLAUDE.md`, skills and plugins are **not** loaded into news prompts — the harness is stripped on every call.
+Claude Code remains the separate CLI path: its own `CLAUDE.md`, skills and
+plugins are not loaded into news prompts because that adapter passes
+`--setting-sources ""`.
 
 For **Scan and Dark Desk**, configured-provider precedence is:
 
-| Set this | What runs |
-|---|---|
+| Set this                                        | What runs                                                                   |
+| ----------------------------------------------- | --------------------------------------------------------------------------- |
 | `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; also forces Story Automatic to this gateway |
-| `ANTHROPIC_API_KEY` | Claude, billed to that key |
-| *nothing* | **Claude, through your Claude Code login** |
-| `XAI_API_KEY` | Grok |
+| `ANTHROPIC_API_KEY`                             | Claude, billed to that key                                                  |
+| _nothing_                                       | **Claude, through your Claude Code login**                                  |
+| `XAI_API_KEY`                                   | Grok                                                                        |
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
-**Opinion uses a smaller frontier picker.** Automatic tries Codex Sol, then
-Claude Opus. Both paths keep tool-enabled research separate from the
-voice-guided, tool-free writing pass. Codex sends the configured editorial
-voice text to OpenAI over stdin; Claude Code receives the voice by file path.
-An explicit choice never falls back. Local and Zen are not offered on Opinion.
+**Opinion is Claude only.** The picker offers Automatic and Claude Opus.
+Claude Code runs its own research pass, then loads the editorial voice by
+file path for the writing pass. Codex is not offered for editorials: its
+model declines to write a piece that takes a position on a local policy
+question, so it stays on the Story picker, where it drafts reporting.
 
 ### Other models — one OpenAI-compatible URL
 
 TownReporter talks `/v1/chat/completions`. Any of these work by changing three env vars. **No extra npm package.**
 
-| Gateway | Example `LLM_BASE_URL` |
-|---|---|
-| [LiteLLM](https://github.com/BerriAI/litellm) | `http://127.0.0.1:4000/v1` |
-| [Bifrost](https://github.com/maximhq/bifrost) | `http://127.0.0.1:4000/v1` (do **not** bind Bifrost to 8080 — that’s TownReporter) |
-| [Helicone](https://github.com/Helicone/helicone) | `https://oai.helicone.ai/v1` or your self-hosted worker |
-| [MLflow AI Gateway](https://mlflow.org/docs/latest/llms/deployments/index.html) | `http://127.0.0.1:5000/v1` |
-| [Kong AI Gateway](https://docs.konghq.com/gateway/latest/ai-gateway/) | `http://127.0.0.1:8000/v1` |
-| Ollama | `http://127.0.0.1:11434/v1` |
-| OpenAI / OpenRouter | their `/v1` |
+| Gateway                                                                         | Example `LLM_BASE_URL`                                                             |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| [LiteLLM](https://github.com/BerriAI/litellm)                                   | `http://127.0.0.1:4000/v1`                                                         |
+| [Bifrost](https://github.com/maximhq/bifrost)                                   | `http://127.0.0.1:4000/v1` (do **not** bind Bifrost to 8080 — that’s TownReporter) |
+| [Helicone](https://github.com/Helicone/helicone)                                | `https://oai.helicone.ai/v1` or your self-hosted worker                            |
+| [MLflow AI Gateway](https://mlflow.org/docs/latest/llms/deployments/index.html) | `http://127.0.0.1:5000/v1`                                                         |
+| [Kong AI Gateway](https://docs.konghq.com/gateway/latest/ai-gateway/)           | `http://127.0.0.1:8000/v1`                                                         |
+| Ollama                                                                          | `http://127.0.0.1:11434/v1`                                                        |
+| OpenAI / OpenRouter                                                             | their `/v1`                                                                        |
 
 ```
 LLM_BASE_URL=http://127.0.0.1:4000/v1
@@ -254,26 +271,26 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 
 ## Layout
 
-| Path | What |
-|---|---|
-| `/` | Public paper |
-| `/?topic=opinion` | Editorials — unsigned, the paper's own position. The Opinion link in the masthead; the same route as the paper, filtered. |
-| `/about` · `/how-we-report` · `/corrections` | Masthead pages |
-| `/sitemap.xml` · `/robots.txt` | For search engines |
-| `/evidence/:versionId` | The captured copy of a source a printed story cited |
-| `/evidence/compare` | Two captures of the same URL, side by side |
-| `/get-the-code` · `/TownReporter.zip` | Download this newsroom's own source |
-| `/desk` | Editor home (sign-in) |
-| `/desk/sources` | Watch list + bulk paste |
-| `/desk/scan` | Fetch + leads. The expensive button. Not a loop. |
-| `/desk/queue` | Draft / hold / publish |
-| `/desk/story/:id` | Workbench: draft, reporting notes, research memo, publish |
-| `/desk/published` | Live stories + public corrections |
-| `/desk/dark` | Dark Desk. Investigates. Never prints. Two dials. |
-| `/desk/opinion` | Opinion. Writes an unsigned editorial. |
-| `/desk/ops` | Server. Health, and the few buttons worth having. |
-| `/feed` | RSS |
-| `/login` | Create account / sign in |
+| Path                                         | What                                                                                                                      |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `/`                                          | Public paper                                                                                                              |
+| `/?topic=opinion`                            | Editorials — unsigned, the paper's own position. The Opinion link in the masthead; the same route as the paper, filtered. |
+| `/about` · `/how-we-report` · `/corrections` | Masthead pages                                                                                                            |
+| `/sitemap.xml` · `/robots.txt`               | For search engines                                                                                                        |
+| `/evidence/:versionId`                       | The captured copy of a source a printed story cited                                                                       |
+| `/evidence/compare`                          | Two captures of the same URL, side by side                                                                                |
+| `/get-the-code` · `/TownReporter.zip`        | Download this newsroom's own source                                                                                       |
+| `/desk`                                      | Editor home (sign-in)                                                                                                     |
+| `/desk/sources`                              | Watch list + bulk paste                                                                                                   |
+| `/desk/scan`                                 | Fetch + leads. The expensive button. Not a loop.                                                                          |
+| `/desk/queue`                                | Draft / hold / publish                                                                                                    |
+| `/desk/story/:id`                            | Workbench: draft, reporting notes, research memo, publish                                                                 |
+| `/desk/published`                            | Live stories + public corrections                                                                                         |
+| `/desk/dark`                                 | Dark Desk. Investigates. Never prints. Two dials.                                                                         |
+| `/desk/opinion`                              | Opinion. Writes an unsigned editorial.                                                                                    |
+| `/desk/ops`                                  | Server. Health, and the few buttons worth having.                                                                         |
+| `/feed`                                      | RSS                                                                                                                       |
+| `/login`                                     | Create account / sign in                                                                                                  |
 
 `AGENTS.md`, `AGENTS.project.md`, and `.grok/` at the repo root are not
 TownReporter documentation — they are the build-tool contract and personal
@@ -311,10 +328,12 @@ No. Captions are a map of the tape. Minutes and the packet are the official reco
 The investigative lane. An editor points it at a person, document, URL, rumor, or gap. It searches, fetches, captures copies, and follows names and attachments. Remaining pages stay on the file. It has no publish button. Editor UI: [docs/dark-desk-editor.md](docs/dark-desk-editor.md) and [docs/editor.md](docs/editor.md#dark-desk).
 
 **What's the Opinion desk?**
-Give it a subject, a sentence, or a URL and it writes an unsigned editorial — OPINION in the headline, no byline, because an unsigned editorial is the paper's own position. Claims and sources run in an appendix at the end. It is a draft until you publish it. The writing voice is a file on disk that you point at with `TOWNREPORTER_VOICE_FILE`; it is not in this repository, and only its path ever reaches a command line.
+Give it a subject, a sentence, or a URL and it asks the selected provider for an unsigned editorial — OPINION in the headline, no byline, because an unsigned editorial is the paper's own position. Claims and sources run in an appendix at the end. It is a draft until you publish it. If a provider declines or returns an assistant message instead of a real piece, the run is marked Failed and no draft, Read/Edit action, or Publish button is created. The writing voice is a file on disk that you point at with `TOWNREPORTER_VOICE_FILE`; it is not in this repository, and only its path ever reaches a command line.
 
 **Does the paper track readers?**
-No. Fonts are served from this machine, there is no analytics script, and a cold load makes zero requests to any outside host. The Server page checks that and will tell you if it stops being true.
+No. Fonts are served from this machine, there is no analytics script, and a cold
+load makes zero requests to any outside host. The browser-based `npm run smoke`
+check enforces this; the Server page does not have a reader-privacy monitor.
 
 **Does anything leave my machine when I use the desk?**
 Yes, and it is worth knowing which things. Reading the paper sends nothing
@@ -331,7 +350,7 @@ search on this machine — the chain runs unconditionally
 you type into Dark Desk is seen by whichever provider answers it.
 
 **What are the Dark Desk dials?**
-*Dig* is how far it chases — hops, searches, whether it leaves the watch list. *Nerve* is how speculative it may be — how sure it has to be before it writes a signal down, and whether it may propose a theory or only ask a question. Three floors never move at any setting: no invented claims of paid influence, everything is labelled, and every theory carries what would kill it.
+_Dig_ is how far it chases — hops, searches, whether it leaves the watch list. _Nerve_ is how speculative it may be — how sure it has to be before it writes a signal down, and whether it may propose a theory or only ask a question. Three floors never move at any setting: no invented claims of paid influence, everything is labelled, and every theory carries what would kill it.
 
 **Can two people edit?**
 The first signed-in user is owner. Under **Server → Invite an editor**, the owner enters an email and copies a one-time link. It expires in seven days, works only for that address, and creates an editor seat without sharing the owner login. See [docs/setup.md](docs/setup.md#a-second-editor).
@@ -350,7 +369,7 @@ No. [docs/index.html](docs/index.html) is a static landing page. The app is Node
 npm test
 ```
 
-Deterministic, offline and free by default — no provider is contacted and nothing is billed. The live model evaluation is separate and opt-in (`RUN_LIVE_MODEL_TESTS=1 npm run test:live-model`), because a default suite that calls a paid API is neither reproducible nor free. Meeting ingest, retrieval, draft stripping, configured-timezone dates, printed-headline collapse, version lock, auth, paper setup, and Dark Desk loop coverage live in `src/lib/news/*.test.ts`.
+Deterministic, offline and free by default — no provider is contacted and nothing is billed. The test launcher removes any inherited `DATABASE_URL` and `RUN_LIVE_MODEL_TESTS` before the suite starts, so destructive fixture cleanup can only reach embedded PGLite or a disposable database a test creates itself, and a stale shell flag cannot turn an ordinary run into a paid evaluation. The live model evaluation is separate and opt-in (`RUN_LIVE_MODEL_TESTS=1 npm run test:live-model`), because a default suite that calls a paid API is neither reproducible nor free. Meeting ingest, retrieval, draft stripping, configured-timezone dates, printed-headline collapse, version lock, auth, paper setup, and Dark Desk loop coverage live in `src/lib/news/*.test.ts`.
 
 ---
 

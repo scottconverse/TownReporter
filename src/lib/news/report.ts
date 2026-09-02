@@ -1,6 +1,14 @@
-import { grokChat, parseJsonBlock, providerBudget } from "./ai.ts";
+import { grokChat, parseJsonBlock, providerBudget, type ProviderProbe } from "./ai.ts";
 import { coerceDraft } from "./coerce-draft.ts";
-import { extractReferences, queriesForRef, looksLikeSectionFront, namedSubjects, primarySourceQueries, preferPrimaryUrls, primarySourceScore } from "./extract.ts";
+import {
+  extractReferences,
+  queriesForRef,
+  looksLikeSectionFront,
+  namedSubjects,
+  primarySourceQueries,
+  preferPrimaryUrls,
+  primarySourceScore,
+} from "./extract.ts";
 import { sha256 } from "./fetch-url.ts";
 import { ingestDocument, mapLimit, type PdfPage } from "./ingest.ts";
 import { rememberCapture } from "./investigate.ts";
@@ -9,7 +17,6 @@ import { webSearch } from "./search-web.ts";
 import { getSql } from "../db.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import type { LeadRow, MemoryRow } from "./types.ts";
-import type { StoryModelChoice } from "./model-choice.ts";
 import type { EffectiveProviderChoice } from "./ai.ts";
 import { stripReporterNotebook } from "./strip-draft.ts";
 import { titlesOverlap } from "./desk-copy.ts";
@@ -91,12 +98,15 @@ export type ReportChat = (
   system: string,
   user: string,
   maxTokens?: number,
+  modelChoice?: EffectiveProviderChoice,
 ) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
 
 export type ReportDeps = {
   ingest?: (url: string) => Promise<FetchedDoc>;
   search?: (query: string) => Promise<ReportSearchHit[]>;
   chat?: ReportChat;
+  /** Test seam for proving that Automatic resolves once before any model call. */
+  probe?: (choice: "auto") => Promise<ProviderProbe>;
   capture?: (
     userId: string,
     doc: FetchedDoc,
@@ -342,7 +352,10 @@ export function outletNamesForHost(url: string): string[] {
  * succeed on whole words: " the leadership " does not contain " the leader ".
  */
 function spacedWords(text: string): string {
-  return ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+  return ` ${text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()} `;
 }
 
 export function uncreditedOutlets(body: string, sourceUrls: string[]): string[] {
@@ -398,7 +411,9 @@ export function linkOutletInBody(body: string, urls: string[]): string {
 }
 
 export function asStoryForm(raw: unknown): StoryForm {
-  const s = String(raw ?? "").trim().toLowerCase();
+  const s = String(raw ?? "")
+    .trim()
+    .toLowerCase();
   if (s === "brief" || s === "civic-brief" || s === "civic_brief") return "brief";
   if (s === "explainer") return "explainer";
   if (s === "investigation") return "investigation";
@@ -583,7 +598,7 @@ export function mergeProvenanceItem(
     version_id: extra.version_id != null ? extra.version_id : base.version_id,
     version_count: extra.version_count != null ? extra.version_count : base.version_count,
     capture_event_id:
-      extra.capture_event_id != null ? extra.capture_event_id : base.capture_event_id ?? null,
+      extra.capture_event_id != null ? extra.capture_event_id : (base.capture_event_id ?? null),
     disappeared: extra.disappeared !== undefined ? Boolean(extra.disappeared) : base.disappeared,
   };
 }
@@ -614,7 +629,10 @@ function blankProvenance(url: string): ProvenanceItem {
  * which is usually the article slug and usually the headline.
  */
 function titleIsJustTheHost(title: string, url: string): boolean {
-  const t = title.trim().toLowerCase().replace(/^www\./, "");
+  const t = title
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, "");
   if (!t) return true;
   try {
     return t === new URL(url).hostname.toLowerCase().replace(/^www\./, "");
@@ -900,7 +918,11 @@ export type ResearchJson = {
 
 function stringsFrom(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
-  return raw.map(String).map((s) => s.trim()).filter((s) => s.length > 3).slice(0, 6);
+  return raw
+    .map(String)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 3)
+    .slice(0, 6);
 }
 
 export const REPORT_LANES = ["context", "stakeholders", "contradiction", "gaps"] as const;
@@ -1038,15 +1060,20 @@ export async function reportAndDraft(
     memory: Pick<MemoryRow, "entity" | "last_angle">[];
     extraEvidence?: string;
     extraUrls?: string[];
-    modelChoice?: StoryModelChoice;
+    modelChoice?: EffectiveProviderChoice;
   },
   deps: ReportDeps = {},
 ): Promise<ReportedDraft | { error: string }> {
   const started = Date.now();
   let effectiveModelChoice: EffectiveProviderChoice | undefined = opts.modelChoice;
   if (effectiveModelChoice === "auto") {
-    const { probeProvider } = await import("./ai.ts");
-    const ready = await probeProvider("auto");
+    const probe =
+      deps.probe ??
+      (async () => {
+        const { probeProvider } = await import("./ai.ts");
+        return probeProvider("auto");
+      });
+    const ready = await probe("auto");
     if (!ready.ok) return { error: ready.error };
     effectiveModelChoice = ready.choice;
   }
@@ -1059,7 +1086,7 @@ export async function reportAndDraft(
   const search = deps.search ?? (async (q: string) => webSearch(q));
   const capture = deps.capture ?? defaultCapture;
   const hydrate = deps.hydrate ?? hydrateCaptures;
-  const chat: ReportChat =
+  const providerChat: ReportChat =
     deps.chat ??
     (async (system, user, maxTokens) => {
       const ms = Math.min(limits.callMs, Math.max(6_000, timeLeft() - 2_000));
@@ -1068,6 +1095,8 @@ export async function reportAndDraft(
       }
       return grokChat(system, user, maxTokens, { timeoutMs: ms, choice: effectiveModelChoice });
     });
+  const chat: ReportChat = (system, user, maxTokens) =>
+    providerChat(system, user, maxTokens, effectiveModelChoice);
 
   const seedUrls = sanitizePublicUrls([...opts.urls, ...(opts.extraUrls ?? [])]).slice(0, 6);
   const docs: FetchedDoc[] = [];
@@ -1136,7 +1165,10 @@ export async function reportAndDraft(
     .map((u) => ({ u, s: primarySourceScore(u, subjects) }))
     .sort((a, b) => b.s - a.s);
   await take(
-    scoredPrimary.filter((x) => x.s >= 3).map((x) => x.u).slice(0, 2),
+    scoredPrimary
+      .filter((x) => x.s >= 3)
+      .map((x) => x.u)
+      .slice(0, 2),
     2,
     true,
   );
@@ -1175,7 +1207,10 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     const challengeQ = briefChallengeQuery(opts.lead, research);
     try {
       const hits = await search(challengeQ);
-      const challengeUrls = hits.map((h) => h.url).filter((u) => !seen.has(u)).slice(0, 2);
+      const challengeUrls = hits
+        .map((h) => h.url)
+        .filter((u) => !seen.has(u))
+        .slice(0, 2);
       await take(challengeUrls, 2);
       const snippets = hits.map((h) => `${h.title} ${h.snippet ?? ""}`).join("\n");
       const challengeEvidence = formatRetrievedEvidence(
@@ -1282,7 +1317,10 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
         found: parsed.found,
         unanswered: parsed.unanswered,
         reporting_trail: parsed.reporting_trail,
-      }).slice(0, 12000)}\n\nAnnouncing source excerpt:\n${announcing.slice(0, 3000)}\n\nRetrieved evidence excerpt:\n${writeEvidence.slice(0, 4000)}`,
+      }).slice(
+        0,
+        12000,
+      )}\n\nAnnouncing source excerpt:\n${announcing.slice(0, 3000)}\n\nRetrieved evidence excerpt:\n${writeEvidence.slice(0, 4000)}`,
       1800,
     );
     if (editAi.ok) {
@@ -1337,14 +1375,9 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     ? parsed.unanswered.map(String).slice(0, 12)
     : stringsFrom(research?.unknowns);
   if (used.length && used.every(isIndexUrl)) {
-    unanswered.unshift(
-      `Full URL of the originating story — not the listing page ${used[0]}`,
-    );
+    unanswered.unshift(`Full URL of the originating story — not the listing page ${used[0]}`);
   }
-  if (
-    subjects[0] &&
-    !docs.some((d) => d.text && primarySourceScore(d.url, subjects) >= 3)
-  ) {
+  if (subjects[0] && !docs.some((d) => d.text && primarySourceScore(d.url, subjects) >= 3)) {
     unanswered.unshift(
       `${subjects[0]} press release or newsroom page — the company's or agency's own announcement, not a rewrite of local coverage`,
     );
@@ -1367,9 +1400,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     }
     const provHits = provenance.filter((p) => f.source_urls.includes(p.url));
     const provV = provHits.map((p) => p.version_id).filter((id): id is number => id != null);
-    const provC = provHits
-      .map((p) => p.capture_event_id)
-      .filter((id): id is number => id != null);
+    const provC = provHits.map((p) => p.capture_event_id).filter((id): id is number => id != null);
     if (provV.length) {
       const keep = f.artifact_version_ids.filter((id) => provV.includes(id));
       f.artifact_version_ids = keep.length ? keep : provV;

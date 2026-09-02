@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  effectiveStoryModelChoice,
   modelChoiceLabel,
   modelChoiceHelp,
   OPINION_MODEL_CHOICES,
@@ -11,7 +12,12 @@ import {
 } from "./model-choice.ts";
 
 const STORY_VALUES = [
-  "auto", "local", "zen", "codex-balanced", "codex-frontier", "claude-frontier",
+  "auto",
+  "local",
+  "zen",
+  "codex-balanced",
+  "codex-frontier",
+  "claude-frontier",
 ] as const;
 
 describe("model choice contract", () => {
@@ -23,10 +29,12 @@ describe("model choice contract", () => {
     assert.match(STORY_MODEL_CHOICES[0].detail, /recommended/i);
   });
 
-  it("limits Opinion to Automatic and the two frontier choices", () => {
+  it("limits Opinion to Automatic and Claude -- Codex is a Story-only provider", () => {
+    // Codex's model refuses editorials that take a position; see the note on
+    // OPINION_MODEL_CHOICES. Offering it here would offer a button that fails.
     assert.deepEqual(
       OPINION_MODEL_CHOICES.map((choice) => choice.value),
-      ["auto", "codex-frontier", "claude-frontier"],
+      ["auto", "claude-frontier"],
     );
     assert.ok(OPINION_MODEL_CHOICES.every((choice) => STORY_MODEL_CHOICES.includes(choice)));
   });
@@ -38,11 +46,18 @@ describe("model choice contract", () => {
     }
   });
 
+  it("preserves Automatic's configured-gateway selection for the whole queued run", () => {
+    assert.equal(effectiveStoryModelChoice("configured"), "configured");
+    assert.equal(effectiveStoryModelChoice("codex-balanced"), "codex-balanced");
+    assert.equal(effectiveStoryModelChoice("not-a-provider"), "auto");
+    assert.equal(modelChoiceLabel("configured"), "Configured gateway");
+  });
+
   it("round-trips Opinion choices and narrows Story-only or invalid input to Automatic", () => {
-    for (const value of ["auto", "codex-frontier", "claude-frontier"] as const) {
+    for (const value of ["auto", "claude-frontier"] as const) {
       assert.equal(opinionModelChoice(value), value);
     }
-    for (const invalid of ["local", "zen", "codex-balanced", "codex", undefined, null, {}]) {
+    for (const invalid of ["local", "zen", "codex-balanced", "codex-frontier", "codex", undefined, null, {}]) {
       assert.equal(opinionModelChoice(invalid), "auto");
     }
   });
@@ -62,7 +77,7 @@ describe("model choice contract", () => {
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
-      "Tries Codex Sol, then Claude Opus. The selected provider writes the whole editorial; explicit choices never fall back.",
+      "Claude Opus writes the whole editorial. Codex is offered for Story drafts only: its model declines to write an editorial that takes a position.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),
@@ -70,13 +85,13 @@ describe("model choice contract", () => {
     );
   });
 
-  it("gives Opinion setup steps for both authorized frontier providers", () => {
+  it("gives Opinion setup steps for its one provider, and does not send anyone to Codex", () => {
     const guidance = opinionProviderProblem(
       "AI is not available. Set ANTHROPIC_API_KEY, XAI_API_KEY, or LLM_BASE_URL.",
     );
-    assert.match(guidance, /Codex/);
+    assert.doesNotMatch(guidance, /Codex/);
     assert.match(guidance, /Claude Code/);
-    assert.match(guidance, /ANTHROPIC_API_KEY/);
+    assert.doesNotMatch(guidance, /ANTHROPIC_API_KEY/);
     assert.doesNotMatch(guidance, /set .*XAI_API_KEY|set .*LLM_BASE_URL/i);
   });
 });

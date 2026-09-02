@@ -64,9 +64,16 @@ function SetupPage() {
         initial={current.data}
         firstRun
         submitLabel="Save and open the desk"
-        onDone={() => {
-          void qc.invalidateQueries({ queryKey: ["first-run-setup"] });
-          void navigate({ to: "/desk" });
+        onDone={async () => {
+          /*
+            Settle the cache BEFORE leaving. The old version fired the
+            invalidation and navigated in the same tick, so desk.index could
+            read the stale `needsSetup: true` and bounce the owner straight
+            back to a blank setup form (found by the recovery QA).
+          */
+          qc.setQueryData(["first-run-setup"], { needsSetup: false });
+          await qc.invalidateQueries({ queryKey: ["first-run-setup"] });
+          await navigate({ to: "/desk" });
         }}
       />
     </DeskShell>

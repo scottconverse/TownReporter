@@ -29,12 +29,12 @@ const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
 
 test("the src test group runs with concurrency 1", () => {
   const script = pkg.scripts?.test ?? "";
+  assert.equal(script, "node scripts/run-tests-safe.mjs", "npm test must enter the safe launcher");
+  const launcher = readFileSync(join(ROOT, "scripts/run-tests-safe.mjs"), "utf8");
   // The command that runs the strip-types src group, isolated from the scripts
-  // group so a flag on the wrong half cannot pass this by accident.
-  const srcCommand = script
-    .split("&&")
-    .map((s) => s.trim())
-    .find((s) => s.includes("experimental-strip-types") && s.includes("src/"));
+  // group so a flag on the wrong half cannot pass this by accident. The safe
+  // launcher holds the argv as an array instead of a shell command.
+  const srcCommand = launcher.split("\n").find((line) => line.includes("experimental-strip-types"));
   assert.ok(
     srcCommand,
     `the 'test' script no longer runs the src group with strip-types; got: ${script}`,

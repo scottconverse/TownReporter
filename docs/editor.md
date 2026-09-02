@@ -2,6 +2,12 @@
 
 **Current release: [0.5.6](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.6).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
+**Candidate features:** the per-run model picker and native Codex repair below
+are unreleased; they are not on the tagged 0.5.6 live paper until promotion.
+Queue, workbench, Opinion and Paper setup images show development examples.
+Other images are historical Longmont screens from 29 August; their old
+**Leave as editor** header link is now **Give up the desk** on the Server page.
+
 Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). The whole system, including how it is built, is [manual.md](manual.md). This page is the newsroom, in the order you use it.
 
 ---
@@ -106,12 +112,12 @@ Everything that might be news, scored and sorted. The scanner files here. Dark D
 
 Statuses you will use:
 
-| Status | Meaning |
-|---|---|
-| **New** | Not opened yet |
-| **Drafted** | Workbench has a story in it |
-| **Held** | Not now. Still on the desk. |
-| **Killed** | No. Still listed under Killed if you need to undo. |
+| Status        | Meaning                                                          |
+| ------------- | ---------------------------------------------------------------- |
+| **New**       | Not opened yet                                                   |
+| **Drafted**   | Workbench has a story in it                                      |
+| **Held**      | Not now. Still on the desk.                                      |
+| **Killed**    | No. Still listed under Killed if you need to undo.               |
 | **Published** | Live on the paper. Lives under Published, not the working queue. |
 
 Every active lead has its own compact **Writing model** picker beside **Draft
@@ -122,6 +128,11 @@ named choice. A named choice uses only that provider and never falls back. The r
 row and names the provider the server actually queued. **Open** takes you to
 the workbench to watch the draft land and edit it. Nothing prints from this
 list.
+
+Need to connect a provider? Open **Set up a writing model** under the picker.
+The same help is on the workbench and Opinion form. It links installation and
+operator instructions, explains signing in on the server's account, and tells
+you to reload before retrying. Opinion also explains its required voice file.
 
 A meeting on the calendar is not automatically a story. A five-hour council tape is not automatically a story. Those are records. You decide if there is news.
 
@@ -193,11 +204,11 @@ Hold or kill from the queue if it is not ready. There is no shame in a held lead
 
 Longmont’s desk watches three kinds of meeting record. They are not interchangeable.
 
-| Record | What it is | Treat as |
-|---|---|---|
-| **Packet / agenda PDF** (PrimeGov) | What staff put in front of the body | Official, still read it |
-| **Minutes** (PrimeGov, when posted) | The official action | Official |
-| **YouTube tape + captions** | What was said, including asides and “skip it all” | A map of the meeting, **not minutes** |
+| Record                              | What it is                                        | Treat as                              |
+| ----------------------------------- | ------------------------------------------------- | ------------------------------------- |
+| **Packet / agenda PDF** (PrimeGov)  | What staff put in front of the body               | Official, still read it               |
+| **Minutes** (PrimeGov, when posted) | The official action                               | Official                              |
+| **YouTube tape + captions**         | What was said, including asides and “skip it all” | A map of the meeting, **not minutes** |
 
 How they join: a council video titled like `08/25/2026` joins that day’s packet. A planning video about 206 S. Main joins the Avis notice in that packet. Month must match — June’s museum board is not August’s.
 
@@ -224,11 +235,11 @@ An editor points it at a person, document, URL, rumor, or gap. It searches, fetc
 
 ### Three piles
 
-| Pile | Meaning | What you do |
-|---|---|---|
-| **To look at** | New. Nobody has opened it. | Start digging |
+| Pile            | Meaning                                                             | What you do                          |
+| --------------- | ------------------------------------------------------------------- | ------------------------------------ |
+| **To look at**  | New. Nobody has opened it.                                          | Start digging                        |
 | **On the desk** | Started. Includes files that stopped because there is more to read. | Open file / Keep digging / Set aside |
-| **Set aside** | Parked or finished. Nothing is deleted. | Pull back / Read |
+| **Set aside**   | Parked or finished. Nothing is deleted.                             | Pull back / Read                     |
 
 Start digging **moves** a card from To look at onto the desk. The card stays on To look at, with a status line, until the file actually opens. A failed click says so — it does not vanish. Close file leaves it on the desk. Set aside files it. Pull back restores it.
 
@@ -258,17 +269,17 @@ Full UI contract: [dark-desk-editor.md](dark-desk-editor.md).
 Under the piles there is a panel called **How hard to dig**. Press **Change** to
 open it.
 
-| Dial | What it moves |
-|---|---|
+| Dial                        | What it moves                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | **Dig — how far it chases** | Hops, searches, whether it may leave the watch list, how far it follows a name into a company, a parcel, a contract |
-| **Nerve — how speculative** | How sure it has to be before it writes something down, and whether it may propose a theory or only ask a question |
-| **Map** | City · county · region · adjacent — how far out it is allowed to look |
+| **Nerve — how speculative** | How sure it has to be before it writes something down, and whether it may propose a theory or only ask a question   |
+| **Map**                     | City · county · region · adjacent — how far out it is allowed to look                                               |
 
 The paragraph above the sliders is not decoration. It is written from the same
-rules the run itself uses, in plain words: *"Up to 3 hops, following any public
+rules the run itself uses, in plain words: _"Up to 3 hops, following any public
 record it finds, including archived copies. One account is enough to open a
 file. No confidence floor at all — it writes the hunch down and labels it a
-hunch."* If the paragraph says it, the run does it.
+hunch."_ If the paragraph says it, the run does it.
 
 **Presets** are there for the two ends. A low, careful setting for a file you
 intend to publish from. **Black Sky** for the night you want it to go as far as
@@ -295,13 +306,19 @@ Where the paper says what it thinks.
 Type a subject, a sentence, or paste a URL, and press **Write an editorial**. A
 pasted link gets opened and read before anything is written.
 
-Choose **Automatic**, **Codex Sol**, or **Claude Opus** first. Claude Opus
-through the signed-in Claude Code CLI is the enabled Opinion path today. Codex Sol is shown but refuses before enqueue
-or spend: TownReporter will not send the private editorial voice to OpenAI
-without explicit operator authorization. Automatic therefore requires ready
-Claude Opus today. Readiness lists every missing prerequisite — voice file,
-installation, or login — before the button is enabled, and the server checks
-again when you click.
+Choose **Automatic** or **Claude Opus** first; both mean Claude Opus through
+your signed-in Claude Code session. Codex is not offered for editorials --
+its model declines to write a piece that takes a position -- so it stays on
+the Story picker.
+Readiness lists every missing prerequisite — voice file, installation, or
+login — before the button is enabled, and the server checks again when you
+click. If OAuth expires, open the named provider on this machine and sign in;
+nothing is queued or spent until the next readiness check succeeds.
+
+The Codex path uses the same native configuration and full machine capabilities
+as the signed-in Windows user, including search and every accessible `C:\`
+path; TownReporter does not replace them with a read-only or tool-disabled
+mode. Claude keeps its separate research-tools/voice-writing boundary.
 
 What comes back:
 
@@ -315,13 +332,24 @@ What comes back:
 - An editor's fact sheet and an image prompt that **do not print** — they are
   for you.
 
+The desk checks that the delivery is actually an editorial before it files
+anything. A provider refusal, limitation note, neutral-summary substitute,
+implausible headline, or incomplete body makes the row **Failed** and creates no
+draft. There is then no Read, Edit, or Publish action to mistake for success.
+With Automatic, the second provider starts its own fresh research-and-writing
+pair; with a named choice, the visible error stays with that provider. A
+finished row names the provider that actually delivered the piece.
+
 **Edit** opens the piece in its own editor. That is where you change the
 headline, fix a line, print it, or throw it away. The fact sheet and the image
-prompt sit under the piece there, marked *does not print*.
+prompt sit under the piece there, marked _does not print_.
 
-It takes **ten to forty minutes**, because it goes and reads the records before
-it writes a word. The row shows a clock counting up and a moving rule; at 3:40
-that is normal, not stuck. The page rechecks every twenty seconds.
+Earlier measured runs took **ten to forty minutes**; that is an observation,
+not a deadline. The current research and writing passes each have a default
+45-minute ceiling. One provider pair can therefore take about 90 minutes, and
+Automatic can take longer if it starts the second provider's pair. The row
+shows a clock counting up and a moving rule; at 3:40 that is normal, not stuck.
+The page rechecks every twenty seconds.
 
 An editorial is a **draft**. Read it, edit it in the story workbench, and
 publish it like any other piece — or don't. It will happily conclude that your
@@ -334,18 +362,22 @@ sent to attack had never been missing at all.
 
 ![Server](images/11-server.png)
 
+Historical 0.5.1 screen: the **Reader privacy** row shown here was removed.
+The current health rows are described below; privacy is checked by the
+operator's browser smoke test, not this page.
+
 Everything this machine is doing to keep the paper online, and the few buttons
 worth having.
 
 The **Health** list is read from this machine, so it can tell you the tunnel is
 routing — not that a reader in another town can reach you. Rows worth knowing:
 
-| Row | What a bad reading means |
-|---|---|
-| **Public site** | The paper is not answering. Try Restart the tunnel. |
+| Row                   | What a bad reading means                                             |
+| --------------------- | -------------------------------------------------------------------- |
+| **Public site**       | The paper is not answering. Try Restart the tunnel.                  |
 | **Cloudflare tunnel** | No tunnel process. The watchdog should fix this within five minutes. |
-| **Work queue** | Something failed, or one job has been running a long time. |
-| **Watchdog** | If it has not run recently, the scheduled task is off. |
+| **Work queue**        | Something failed, or one job has been running a long time.           |
+| **Watchdog**          | If it has not run recently, the scheduled task is off.               |
 
 Every button says what it will do before it does it. The two that interrupt the
 paper ask twice.
@@ -369,10 +401,10 @@ and stories under Published. It asks once, in the row, and says what it costs.
 **Kill is not delete.** Kill parks a lead under Killed and you can bring it
 back. Delete removes it.
 
-| Delete this | And this happens |
-|---|---|
-| A lead | It goes, and any draft on it goes. A story already printed from it **stays on the paper** — that is a separate button. |
-| An editorial | The draft goes. If it was printed, the printed piece stays; remove that under Published. |
+| Delete this       | And this happens                                                                                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| A lead            | It goes, and any draft on it goes. A story already printed from it **stays on the paper** — that is a separate button.                      |
+| An editorial      | The draft goes. If it was printed, the printed piece stays; remove that under Published.                                                    |
 | A published story | It comes off the paper. Its URL becomes a 404, the feed and sitemap drop it, its corrections go, and anyone holding a link has a dead link. |
 
 That last one is the loud one. The paper's normal answer to being wrong is a
@@ -392,7 +424,7 @@ Nothing you delete disappears immediately.
 - **Delete for good** on that list is the one with nothing behind it. It says so.
 - After 30 days it goes on its own.
 
-So the only truly final button in the newsroom is *Delete for good*.
+So the only truly final button in the newsroom is _Delete for good_.
 
 ---
 
@@ -442,31 +474,31 @@ How we report, in public: `/how-we-report`.
 
 ## Common trouble
 
-| You see | Likely | What to do |
-|---|---|---|
-| Automatic says no model is ready | Configured gateway failed, or every Automatic provider failed readiness | Fix the configured gateway; otherwise restore access to Zen, sign in to Codex, or sign in/configure Claude. Local is explicit-only ([setup.md](setup.md#per-run-picker)) |
-| Local Qwen is unreachable | LM Studio-compatible server is stopped or not on `127.0.0.1:1234` | Start it, or set `TOWNREPORTER_LOCAL_BASE_URL` |
-| Local Qwen says the model is not loaded | The exact configured model is absent | Load `qwen/qwen3.6-35b-a3b`, or set `TOWNREPORTER_LOCAL_MODEL` to the loaded id |
-| Zen MiMo is unreachable | This machine is offline or OpenCode Zen is unavailable | Restore network access or choose another provider; Zen is provider-hosted |
-| Codex is missing or signed out | Codex CLI/OAuth is unavailable on the server machine | Install/open Codex, sign in, and try again; check `CODEX_CLI_PATH` / `CODEX_HOME` only for unusual layouts |
-| Claude is missing or signed out | Claude Code CLI login is unavailable | Install/open Claude Code and sign in, or configure the Claude API path |
-| Codex Opinion cannot start | Codex is missing, signed out, or unavailable | Open Codex and sign in, then try again; choose Claude Opus if you want that provider instead |
-| Scan fetched, filed nothing | Nothing new, or the model declined | Read the summary. Not automatically a bug. |
-| Draft with AI ran, form still empty | The click died; the writing pass may still be finishing | Stay on the page. It fills when the draft lands. Reload only if you left. |
-| Redraft shows a sign-in / setCookie error | Cookie helper threw even though you are signed in | Click Redraft again. Fixed in 0.3.7. |
-| Start digging does nothing | The card was hidden after a failed open (fixed in 0.3.8) | Reload. The card should be back. Click again — it stays until the file exists. |
-| Draft is a rewrite of the Leader | The pass never opened the company page | Pull the still-to-pull line for their press release, then redraft. |
-| Meeting has no transcript | Livestream hasn’t ended, or Playwright missing | Wait for the 6-hour recheck, or operator installs Chromium |
-| Names in a draft are wrong | Auto-captions | Check the packet. Fix the draft. Do not publish the caption. |
-| Dates look a day ahead | Paper timezone is wrong or missing | Owner: open Server → Paper setup and save the correct IANA timezone. |
-| Two nearly identical headlines on the paper | Same news, two drafts published | The paper collapses overlapping headlines and keeps the longer body. |
-| Second person gets 403 | They signed up without a valid invite, or used the wrong email | Owner: create a fresh link under Server → Invite an editor and have them use the exact invited address. |
-| Editorial says Failed with a timeout | The piece ran past the writer's limit | Ask again. If it repeats, the operator can raise `EDITORIAL_TIMEOUT_MS`. Nothing is lost but the run. |
-| Editorial never starts, says no voice | `TOWNREPORTER_VOICE_FILE` is unset or points nowhere | Operator: set it to an absolute path outside the repo |
-| The paper is down and the desk still works | The tunnel, not the app | Server page → Restart the tunnel. The watchdog also does this within five minutes. |
-| An editorial has no Edit button | It has not finished, or it failed | Only a finished piece can be edited. A failed row can still be deleted. |
-| Desk wants sign-in again | Session expired | `/login` |
-| Notebook language on the paper | Strip failed or you pasted it | Edit the story. Kill if needed. Tell the operator. |
+| You see                                     | Likely                                                                                  | What to do                                                                                                                                                               |
+| ------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Automatic says no model is ready            | Configured gateway failed, or every Automatic provider failed readiness                 | Fix the configured gateway; otherwise restore access to Zen, sign in to Codex, or sign in/configure Claude. Local is explicit-only ([setup.md](setup.md#per-run-picker)) |
+| Local Qwen is unreachable                   | LM Studio-compatible server is stopped or not on `127.0.0.1:1234`                       | Start it, or set `TOWNREPORTER_LOCAL_BASE_URL`                                                                                                                           |
+| Local Qwen says the model is not loaded     | The exact configured model is absent                                                    | Load `qwen/qwen3.6-35b-a3b`, or set `TOWNREPORTER_LOCAL_MODEL` to the loaded id                                                                                          |
+| Zen MiMo is unreachable                     | This machine is offline or OpenCode Zen is unavailable                                  | Restore network access or choose another provider; Zen is provider-hosted                                                                                                |
+| Codex is missing or signed out              | Codex CLI/OAuth is unavailable on the server machine                                    | Install/open Codex, sign in, and try again; check `CODEX_CLI_PATH` / `CODEX_HOME` only for unusual layouts                                                               |
+| Claude is missing or signed out             | Claude Code CLI login is unavailable                                                    | Install/open Claude Code and sign in, or configure the Claude API path                                                                                                   |
+| An Opinion row says Failed with no draft    | The provider errored, declined, or returned something that was not a complete editorial | Read the error on the row. Retry Automatic for its full ladder, or deliberately choose another provider; nothing was filed or published                                  |
+| Scan fetched, filed nothing                 | Nothing new, or the model declined                                                      | Read the summary. Not automatically a bug.                                                                                                                               |
+| Draft with AI ran, form still empty         | The click died; the writing pass may still be finishing                                 | Stay on the page. It fills when the draft lands. Reload only if you left.                                                                                                |
+| Redraft shows a sign-in / setCookie error   | Cookie helper threw even though you are signed in                                       | Click Redraft again. Fixed in 0.3.7.                                                                                                                                     |
+| Start digging does nothing                  | The card was hidden after a failed open (fixed in 0.3.8)                                | Reload. The card should be back. Click again — it stays until the file exists.                                                                                           |
+| Draft is a rewrite of the Leader            | The pass never opened the company page                                                  | Pull the still-to-pull line for their press release, then redraft.                                                                                                       |
+| Meeting has no transcript                   | Livestream hasn’t ended, or Playwright missing                                          | Wait for the 6-hour recheck, or operator installs Chromium                                                                                                               |
+| Names in a draft are wrong                  | Auto-captions                                                                           | Check the packet. Fix the draft. Do not publish the caption.                                                                                                             |
+| Dates look a day ahead                      | Paper timezone is wrong or missing                                                      | Owner: open Server → Paper setup and save the correct IANA timezone.                                                                                                     |
+| Two nearly identical headlines on the paper | Same news, two drafts published                                                         | The paper collapses overlapping headlines and keeps the longer body.                                                                                                     |
+| Second person gets 403                      | They signed up without a valid invite, or used the wrong email                          | Owner: create a fresh link under Server → Invite an editor and have them use the exact invited address.                                                                  |
+| Editorial says Failed with a timeout        | The piece ran past the writer's limit                                                   | Ask again. If it repeats, the operator can raise `EDITORIAL_TIMEOUT_MS`. Nothing is lost but the run.                                                                    |
+| Editorial never starts, says no voice       | `TOWNREPORTER_VOICE_FILE` is unset or points nowhere                                    | Operator: set it to an absolute path outside the repo                                                                                                                    |
+| The paper is down and the desk still works  | The tunnel, not the app                                                                 | Server page → Restart the tunnel. The watchdog also does this within five minutes.                                                                                       |
+| An editorial has no Edit button             | It has not finished, or it failed                                                       | Only a finished piece can be edited. A failed row can still be deleted.                                                                                                  |
+| Desk wants sign-in again                    | Session expired                                                                         | `/login`                                                                                                                                                                 |
+| Notebook language on the paper              | Strip failed or you pasted it                                                           | Edit the story. Kill if needed. Tell the operator.                                                                                                                       |
 
 ---
 

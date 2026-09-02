@@ -2,7 +2,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   NEWSROOM_NOTE,
+  RESEARCH_INSTRUCTIONS,
   buildEditorialPack,
+  buildWritingPack,
   opinionHeadline,
   parseEditorial,
 } from "./editorial.ts";
@@ -13,6 +15,8 @@ const DELIVERED = `The rail district wants your money twice
 Longmont has been paying for a train since 2004. The train has not come.
 
 Now a second district wants a second tax for the same tracks.
+
+That is not a technical footnote. It is the central question the district owes Longmont before it asks for another dollar. Voters can support regional rail and still insist that public agencies account for the promises already financed in their name. The new district should publish a plain-language ledger of the old tax, the work completed, the work deferred, and the exact service this second levy would buy. Until that record is public, the honest answer is no. Longmont should not write a second blank check to the same tracks while the first train remains a promise on a map.
 
 CLAIMS AND SOURCES
 
@@ -186,7 +190,10 @@ describe("the pack hands over leads, not conclusions", () => {
       dek: "A second tax for the same tracks.",
     },
     pointers: [
-      { what: "SB21-238, the statute that created the district", url: "https://leg.colorado.gov/bills/SB21-238" },
+      {
+        what: "SB21-238, the statute that created the district",
+        url: "https://leg.colorado.gov/bills/SB21-238",
+      },
       { what: "The board's referral resolution — not published anywhere we could find" },
     ],
   });
@@ -230,7 +237,8 @@ describe("the pack hands over leads, not conclusions", () => {
    * write is not.
    */
   it("adds newsroom facts without restyling the piece", () => {
-    const styling = /\b(tone|sentence length|paragraph|word count|be more|write shorter|use fewer|adopt a)\b/i;
+    const styling =
+      /\b(tone|sentence length|paragraph|word count|be more|write shorter|use fewer|adopt a)\b/i;
     assert.doesNotMatch(NEWSROOM_NOTE, styling);
     assert.match(NEWSROOM_NOTE, /stands unchanged/, "must say the rest of the file is untouched");
   });
@@ -253,36 +261,210 @@ describe("the editorial writer respects a disabled CLI", () => {
     const src = await import("node:fs").then((fs) =>
       fs.readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8"),
     );
-    const claudeBranch = src.indexOf('choice === "claude-frontier"');
+    const claudeBranch = src.indexOf("runClaudePair:");
     const cliCheck = src.indexOf("resolveClaudeCode()", claudeBranch);
     const researchCall = src.indexOf("const research = await claudeCodeChat", claudeBranch);
     assert.ok(claudeBranch > -1 && cliCheck > claudeBranch && researchCall > cliCheck);
   });
 });
 
-describe("Codex Opinion uses the authorized split boundary", () => {
-  it("researches with web search before loading the voice, then writes without web search", async () => {
-    const src = await import("node:fs").then((fs) =>
-      fs.readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8"),
+type EditorialChatResult = { ok: true; text: string } | { ok: false; error: string };
+
+type EditorialRuntime = {
+  findVoiceFile: () => Promise<
+    { ok: true; voice: { path: string; bytes: number } } | { ok: false; error: string }
+  >;
+  runClaudePair: () => Promise<EditorialChatResult>;
+  fileEditorial: () => Promise<{
+    ok: true;
+    draftId: number;
+    headline: string;
+    words: number;
+    hadAppendix: boolean;
+  }>;
+  timeoutMs: () => number;
+};
+
+type EditorialOrchestrator = (
+  input: {
+    userId: string;
+    newsroomId: number;
+    subject: string;
+    pointers: [];
+    sourceKind: string;
+    sourceRef: string;
+    modelChoice: string;
+  },
+  runtime: EditorialRuntime,
+) => Promise<
+  | {
+      ok: true;
+      draftId: number;
+      headline: string;
+      words: number;
+      hadAppendix: boolean;
+      modelChoice: "claude-frontier";
+    }
+  | { ok: false; error: string }
+>;
+
+async function loadEditorialOrchestrator(): Promise<EditorialOrchestrator> {
+  const loaded = await import("./editorial-orchestration.ts").catch(() => ({}));
+  const candidate = (loaded as Record<string, unknown>).orchestrateEditorial;
+  assert.equal(
+    typeof candidate,
+    "function",
+    "Opinion needs a runtime orchestration seam used by writeEditorial",
+  );
+  return candidate as EditorialOrchestrator;
+}
+
+const ORCHESTRATION_INPUT = {
+  userId: "editor-1",
+  newsroomId: 1,
+  subject: "Longmont budget",
+  pointers: [] as [],
+  sourceKind: "paste",
+  sourceRef: "desk",
+  modelChoice: "auto",
+};
+
+function claudeRuntime(events: string[], reply: EditorialChatResult) {
+  const runtime: EditorialRuntime = {
+    async findVoiceFile() {
+      events.push("voice:locate");
+      return { ok: true, voice: { path: "C:\\private\\voice.md", bytes: 1_024 } };
+    },
+    async runClaudePair() {
+      events.push("claude");
+      return reply;
+    },
+    async fileEditorial() {
+      events.push("file");
+      return {
+        ok: true,
+        draftId: 41,
+        headline: "OPINION: A budget headline",
+        words: 4,
+        hadAppendix: false,
+      };
+    },
+    timeoutMs: () => 60_000,
+  };
+  return runtime;
+}
+
+/*
+  Opinion is Claude-only. Codex sat on this picker for one release candidate
+  and its model refused the job every time it was asked for an editorial that
+  takes a position -- the provider's policy, not a bug. These tests pin the
+  shape that replaced it: one provider, one pair, and refusals still never
+  become a headline.
+*/
+describe("Opinion runs one Claude pair", () => {
+  it("Automatic runs locate -> Claude pair -> file, and nothing else", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const result = await orchestrateEditorial(
+      ORCHESTRATION_INPUT,
+      claudeRuntime(events, { ok: true, text: DELIVERED }),
     );
-    const codexStart = src.indexOf('const { codexChat }');
-    const researchStart = src.indexOf("const research = await codexChat", codexStart);
-    const voiceRead = src.indexOf("readVoiceTextForOpenAiCodex", researchStart);
-    const writingStart = src.indexOf("return codexChat", voiceRead);
-    assert.ok(codexStart > -1 && researchStart > codexStart && voiceRead > researchStart);
-    assert.ok(writingStart > voiceRead, "the voice must be loaded only after tool-enabled research ends");
-    assert.match(src.slice(researchStart, voiceRead), /webSearch:\s*true/);
-    assert.doesNotMatch(src.slice(writingStart, src.indexOf("});", writingStart)), /webSearch/);
-    assert.match(src.slice(writingStart, src.indexOf("});", writingStart)), /systemPromptText:\s*voice\.text/);
+    assert.equal(result.ok, true);
+    if (!result.ok) assert.fail(result.error);
+    assert.equal(result.modelChoice, "claude-frontier");
+    assert.deepEqual(events, ["voice:locate", "claude", "file"]);
   });
 
-  it("Automatic tries Codex Sol before Claude Opus", async () => {
-    const src = await import("node:fs").then((fs) =>
-      fs.readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8"),
+  it("an explicit Claude choice does the same", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "claude-frontier" },
+      claudeRuntime(events, { ok: true, text: DELIVERED }),
     );
-    assert.match(
+    assert.equal(result.ok, true);
+    assert.deepEqual(events, ["voice:locate", "claude", "file"]);
+  });
+
+  it("a stored Codex choice from the withdrawn picker lands on Claude instead of failing", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "codex-frontier" },
+      claudeRuntime(events, { ok: true, text: DELIVERED }),
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) assert.fail(result.error);
+    assert.equal(result.modelChoice, "claude-frontier");
+  });
+
+  it("does not file when the voice file is missing", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+    runtime.findVoiceFile = async () => ({ ok: false, error: "No voice file" });
+    const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
+    assert.equal(result.ok, false);
+    assert.deepEqual(events, []);
+  });
+
+  it("reports the Claude failure and files nothing", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const result = await orchestrateEditorial(
+      ORCHESTRATION_INPUT,
+      claudeRuntime(events, { ok: false, error: "Claude is unavailable." }),
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) assert.fail("filed on a failed pair");
+    assert.match(result.error, /Claude is unavailable/);
+    assert.equal(events.includes("file"), false);
+  });
+
+  for (const opening of [
+    "EDITORIAL_REFUSAL: I can't provide an editorial that advocates a position on a local government policy issue.",
+    "I'm sorry, I cannot write the requested advocacy editorial. Here is a neutral summary instead.\n\nRecords exist.",
+    "As an AI language model, I can't take a position.\n\nThe budget is large.",
+  ]) {
+    it(`does not file a refusal as an editorial: ${opening.slice(0, 40)}`, async () => {
+      const orchestrateEditorial = await loadEditorialOrchestrator();
+      const events: string[] = [];
+      const result = await orchestrateEditorial(
+        ORCHESTRATION_INPUT,
+        claudeRuntime(events, { ok: true, text: opening }),
+      );
+      assert.equal(result.ok, false);
+      if (result.ok) assert.fail("a refusal was filed");
+      assert.match(result.error, /declined|Nothing was filed/i);
+      assert.equal(events.includes("file"), false);
+    });
+  }
+
+  it("files legitimate editorial disagreement -- a piece may refuse to endorse", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const piece = DELIVERED.replace(
+      /^([^\n]*\n)/,
+      "$1We cannot endorse a second sales tax for the same rail promise.\n",
+    );
+    const result = await orchestrateEditorial(
+      ORCHESTRATION_INPUT,
+      claudeRuntime(events, { ok: true, text: piece }),
+    );
+    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    assert.equal(events.includes("file"), true);
+  });
+
+  it("the Opinion path carries no Codex runtime at all", async () => {
+    const src = await import("node:fs").then((fs) =>
+      ["./editorial.server.ts", "./editorial-orchestration.ts"]
+        .map((file) => fs.readFileSync(new URL(file, import.meta.url), "utf8"))
+        .join("\n"),
+    );
+    assert.doesNotMatch(
       src,
-      /choice === "auto" \? "codex-frontier"[\s\S]{0,160}choice === "auto"[\s\S]{0,120}"claude-frontier"/,
+      /codexChat|readVoiceTextForOpenAiCodex|codexModel|ai-codex\.server/,
+      "Codex has no seat on the Opinion desk; if it returns, its refusal problem returns with it",
     );
   });
 });

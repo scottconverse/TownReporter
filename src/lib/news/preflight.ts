@@ -15,12 +15,7 @@ export type ProbeResult = { ok: true; label: string } | { ok: false; error: stri
 
 /** Which kind of not-ready this is. They need different words and different buttons. */
 export type PreflightKind =
-  | "unconfigured"
-  | "cli-missing"
-  | "codex-missing"
-  | "provider-auth"
-  | "timeout"
-  | "unknown";
+  "unconfigured" | "cli-missing" | "codex-missing" | "provider-auth" | "timeout" | "unknown";
 
 export type Preflight =
   | { ok: true }
@@ -57,6 +52,26 @@ const GUIDANCE: Record<PreflightKind, string> = {
     "The model did not answer, and the reason is not one the desk recognises. The provider's own message is below; docs/setup.md covers how the desk picks a provider.",
 };
 
+const PROVIDER_AUTH_GUIDANCE = {
+  codex:
+    "Codex needs you to sign in again. Open Codex on this machine and sign in, then start this action again. Nothing was queued or spent.",
+  claude:
+    "Claude Code needs you to sign in again. Open Claude Code on this machine and sign in, then start this action again. Nothing was queued or spent.",
+  anthropicKey:
+    "Claude rejected ANTHROPIC_API_KEY. Update that key, or open Claude Code on this machine and sign in, then start this action again. Nothing was queued or spent.",
+} as const;
+
+function providerAuthGuidance(detail: string): string {
+  if (/\bcodex\b/i.test(detail)) return PROVIDER_AUTH_GUIDANCE.codex;
+  if (/ANTHROPIC_API_KEY|rejected.*credentials/i.test(detail)) {
+    return PROVIDER_AUTH_GUIDANCE.anthropicKey;
+  }
+  if (/\bclaude(?:\s+code)?\b|\banthropic\b/i.test(detail)) {
+    return PROVIDER_AUTH_GUIDANCE.claude;
+  }
+  return GUIDANCE["provider-auth"];
+}
+
 /**
  * Classify by the provider's message.
  *
@@ -76,7 +91,9 @@ export function scanPreflight(probe: ProbeResult): Preflight {
       ? "codex-missing"
       : /CLI not found|claude-code|CLAUDE_CLI_PATH/i.test(detail)
         ? "cli-missing"
-        : /signed out|not logged|unauthorized|sign in/i.test(detail)
+        : /signed out|not logged|unauthorized|sign in|rejected.*credentials|credentials.*rejected|invalid.*(?:credential|api key)|oauth.*expired|(?:login|auth(?:entication)?|session).*expired|expired.*(?:oauth|login|auth(?:entication)?|session)/i.test(
+              detail,
+            )
           ? "provider-auth"
           : /not available|ANTHROPIC_API_KEY|LLM_BASE_URL|XAI_API_KEY/i.test(detail)
             ? "unconfigured"
@@ -85,7 +102,7 @@ export function scanPreflight(probe: ProbeResult): Preflight {
   return {
     ok: false,
     kind,
-    guidance: GUIDANCE[kind],
+    guidance: kind === "provider-auth" ? providerAuthGuidance(detail) : GUIDANCE[kind],
     detail,
     retryable: kind === "timeout",
   };

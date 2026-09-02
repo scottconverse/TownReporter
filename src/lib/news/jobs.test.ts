@@ -52,9 +52,130 @@ describe("desk jobs", () => {
     });
     assert.equal(job.model_choice, "codex-frontier");
     const latest = (await latestJob({ newsroomId, kind: "draft", subjectId: 515151 })) as
-      | (DeskJob & { model_choice: string })
-      | null;
+      (DeskJob & { model_choice: string }) | null;
     assert.equal(latest?.model_choice, "codex-frontier");
+  });
+
+  it("keeps completed fake model work as an unpublished draft on a cold database read", async () => {
+    const sql = await getSql();
+    await sql.query(`
+      create table if not exists leads (
+        id serial primary key,
+        user_id text not null,
+        headline text not null,
+        why text not null,
+        topic text not null default 'council',
+        status text not null default 'new',
+        source_urls text not null default '[]',
+        created_at timestamptz not null default now()
+      )
+    `);
+    await sql.query(`
+      create table if not exists drafts (
+        id serial primary key,
+        user_id text not null,
+        lead_id integer not null references leads(id) on delete cascade,
+        headline text not null,
+        dek text not null default '',
+        body text not null,
+        topic text not null,
+        source_urls text not null default '[]',
+        integrity_notes text,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `);
+    await sql.query(`
+      create table if not exists articles (
+        id serial primary key,
+        user_id text not null,
+        lead_id integer references leads(id) on delete set null,
+        slug text not null unique,
+        headline text not null,
+        dek text not null default '',
+        body text not null,
+        topic text not null,
+        source_urls text not null default '[]',
+        status text not null default 'published',
+        published_at timestamptz not null default now()
+      )
+    `);
+
+    const userId = `persisted-model-${Date.now()}-${Math.random()}`;
+    const newsroomId = 92000 + Math.floor(Math.random() * 1000);
+    const [lead] = await sql<{ id: number }>`
+      insert into leads (user_id, headline, why, topic, source_urls)
+      values (${userId}, ${"Council adopts the water plan"}, ${"A recorded public vote"},
+              ${"council"}, ${'["https://example.gov/packet"]'})
+      returning id
+    `;
+    assert.ok(lead);
+    const modelResult = {
+      headline: "Council adopts the water plan",
+      dek: "The unanimous vote follows a public hearing.",
+      body: "The council voted 7-0 after reviewing the staff packet and hearing public comment.",
+      topic: "council",
+      source_urls: '["https://example.gov/packet","https://example.gov/minutes"]',
+      integrity_notes: "Vote and date checked against the official minutes.",
+    };
+    const job = await enqueueJob({
+      userId,
+      newsroomId,
+      kind: "draft",
+      subjectId: lead.id,
+      modelChoice: "local",
+      kick: false,
+    });
+
+    try {
+      __setJobWorkForTest(async (claimedJob) => {
+        assert.equal(claimedJob.id, job.id);
+        const workerSql = await getSql();
+        await workerSql`
+          insert into drafts
+            (user_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes)
+          values
+            (${userId}, ${lead.id}, ${modelResult.headline}, ${modelResult.dek},
+             ${modelResult.body}, ${modelResult.topic}, ${modelResult.source_urls},
+             ${modelResult.integrity_notes})
+        `;
+        await workerSql`update leads set status = 'drafted' where id = ${lead.id}`;
+      });
+
+      assert.equal(await executeJob(job), true);
+      __setJobWorkForTest();
+
+      // The worker seam and its local SQL variable are gone. Read the durable
+      // result back through a new query, as a later request would after work
+      // completed, instead of asserting on anything returned by the fake.
+      const coldSql = await getSql();
+      const drafts = await coldSql<typeof modelResult>`
+        select headline, dek, body, topic, source_urls, integrity_notes
+        from drafts where lead_id = ${lead.id}
+      `;
+      assert.deepEqual(drafts, [modelResult]);
+
+      const [storedLead] = await coldSql<{ status: string }>`
+        select status from leads where id = ${lead.id}
+      `;
+      assert.equal(storedLead?.status, "drafted");
+      assert.equal(
+        (await latestJob({ newsroomId, kind: "draft", subjectId: lead.id }))?.status,
+        "completed",
+      );
+
+      const [published] = await coldSql<{ count: number }>`
+        select count(*) as count from articles
+        where lead_id = ${lead.id} and status = 'published'
+      `;
+      assert.equal(Number(published?.count), 0, "model work must stop at an editor-visible draft");
+    } finally {
+      __setJobWorkForTest();
+      await sql`delete from articles where lead_id = ${lead.id}`;
+      await sql`delete from drafts where lead_id = ${lead.id}`;
+      await sql`delete from desk_jobs where id = ${job.id}`;
+      await sql`delete from leads where id = ${lead.id}`;
+    }
   });
 
   it("reuses a queued/running job for the same subject", async () => {
@@ -100,7 +221,11 @@ describe("desk jobs", () => {
       kick: false,
     });
     assert.equal(second.id, first.id);
-    assert.equal(second.model_choice, "local", "a coalesced caller must receive the real persisted choice");
+    assert.equal(
+      second.model_choice,
+      "local",
+      "a coalesced caller must receive the real persisted choice",
+    );
   });
 
   it("finds an open scan without knowing the run id", async () => {
@@ -382,7 +507,11 @@ describe("job lanes (ENG-105)", () => {
       // enqueue's kickJobs() firing mid-run.
       await drainQueuedJobs();
 
-      assert.equal(startCount, 1, "the running job must not have been claimed and started a second time");
+      assert.equal(
+        startCount,
+        1,
+        "the running job must not have been claimed and started a second time",
+      );
       const stillClaimed = (
         await (await getSql())<{ status: string; claim_token: string | null }>`
           select status, claim_token from desk_jobs where id = ${midRun!.id}
@@ -643,8 +772,7 @@ describe("the one-open-job index is declared the same in both places", () => {
       "utf8",
     );
     const code = fs.readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
-    const norm = (t: string) =>
-      t.toLowerCase().replace(/--.*$/gm, "").replace(/\s+/g, " ");
+    const norm = (t: string) => t.toLowerCase().replace(/--.*$/gm, "").replace(/\s+/g, " ");
     for (const part of [
       "desk_jobs_one_open_per_subject",
       "on desk_jobs (newsroom_id, kind, subject_id)",

@@ -2,6 +2,10 @@
 
 **Current release: [0.5.6](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.6).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
+**Candidate scope:** the model-picker and native Codex sections describe the
+unreleased development candidate. They are not features of the tagged 0.5.6
+live deployment until it is approved and promoted.
+
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
 To publish the landing: GitHub repo **Settings → Pages → Deploy from a branch → `main` / `/docs`**. That is a one-time click. It does not run the desk.
@@ -10,13 +14,13 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 
 ## What you need
 
-| | |
-|---|---|
-| **Node** | 22 or newer (`node -v`). Types in this repo are Node 22. |
-| **npm** | Comes with Node. `npm install` is enough. |
-| **A model** | Story can use a configured OpenAI-compatible gateway, an LM Studio-compatible Local Qwen, provider-hosted Zen, or signed-in Codex/Claude CLIs. Scan and Dig use the configured provider below. Opinion uses signed-in Codex or Claude. |
-| **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it. |
-| **A database** | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres). |
+|                             |                                                                                                                                                                                                                                        |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
+| **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
+| **A model**                 | Story can use a configured OpenAI-compatible gateway, an LM Studio-compatible Local Qwen, provider-hosted Zen, or signed-in Codex/Claude CLIs. Scan and Dig use the configured provider below. Opinion uses signed-in Claude only.     |
+| **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
+| **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 
 Windows, macOS, and Linux all work.
 
@@ -39,11 +43,11 @@ a real browser and fails the build if any request leaves the machine.
 **Working the desk is different.** Three kinds of traffic leave this machine
 on an editor's action:
 
-| What | Triggered by | Where it goes |
-|---|---|---|
-| **Model calls** | Scan, Draft, Dark Desk, Opinion | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it selects OpenCode Zen, Codex Terra, or Claude Opus before enqueue. Local is explicit-only. Opinion Automatic tries Codex Sol, then Claude Opus. |
-| **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard). |
-| **Searches** | The research pass, PULL, and every Dark Desk hop | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key, and there is currently no setting to keep a search on this machine — the chain is unconditional. |
+| What               | Triggered by                                      | Where it goes                                                                                                                                                                                                                                                                                    |
+| ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it selects OpenCode Zen, Codex Terra, or Claude Opus before enqueue. Local is explicit-only. Opinion is always Claude Opus; Codex is not offered for editorials.              |
+| **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
+| **Searches**       | The research pass, PULL, and every Dark Desk hop  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key, and there is currently no setting to keep a search on this machine — the chain is unconditional. |
 
 The third row is the one to know before you use it: a name, an LLC, a
 contract number, or an unpublished rumour typed into Dark Desk is seen by
@@ -111,12 +115,12 @@ All of these are documented in [`.env.example`](../.env.example).
 
 Configured-provider resolution for **Scan and Dark Desk**, first match wins:
 
-| # | Set this | What runs |
-|---|---|---|
-| 1 | `LLM_BASE_URL` or `LLM_API_KEY` + `LLM_MODEL` | any OpenAI-compatible endpoint; also forces Story Automatic to this gateway |
-| 2 | `ANTHROPIC_API_KEY` | Claude, billed to that key |
-| 3 | *nothing* | **Claude, through your local Claude Code login** |
-| 4 | `XAI_API_KEY` | Grok |
+| #   | Set this                                      | What runs                                                                   |
+| --- | --------------------------------------------- | --------------------------------------------------------------------------- |
+| 1   | `LLM_BASE_URL` or `LLM_API_KEY` + `LLM_MODEL` | any OpenAI-compatible endpoint; also forces Story Automatic to this gateway |
+| 2   | `ANTHROPIC_API_KEY`                           | Claude, billed to that key                                                  |
+| 3   | _nothing_                                     | **Claude, through your local Claude Code login**                            |
+| 4   | `XAI_API_KEY`                                 | Grok                                                                        |
 
 #### Claude Code — configured-provider default, no key
 
@@ -174,22 +178,28 @@ LLM_API_KEY=sk-...
 LLM_MODEL=claude-sonnet-4-5
 ```
 
-| Gateway | Example `LLM_BASE_URL` | Notes |
-|---|---|---|
-| [LiteLLM](https://github.com/BerriAI/litellm) | `http://127.0.0.1:4000/v1` | One proxy, many providers |
-| [Bifrost](https://github.com/maximhq/bifrost) | `http://127.0.0.1:4000/v1` | Bifrost’s own default port is **8080**. That is TownReporter. Map it: `docker run -p 4000:8080 maximhq/bifrost` |
-| [Helicone](https://github.com/Helicone/helicone) | `https://oai.helicone.ai/v1` | Or your self-hosted worker |
-| [MLflow AI Gateway](https://mlflow.org/docs/latest/llms/deployments/index.html) | `http://127.0.0.1:5000/v1` | |
-| [Kong AI Gateway](https://docs.konghq.com/gateway/latest/ai-gateway/) | `http://127.0.0.1:8000/v1` | |
-| Ollama | `http://127.0.0.1:11434/v1` | `LLM_API_KEY=ollama` · `LLM_MODEL=llama3.1` |
-| OpenAI | `https://api.openai.com/v1` | |
-| OpenRouter | `https://openrouter.ai/api/v1` | |
+| Gateway                                                                         | Example `LLM_BASE_URL`         | Notes                                                                                                           |
+| ------------------------------------------------------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| [LiteLLM](https://github.com/BerriAI/litellm)                                   | `http://127.0.0.1:4000/v1`     | One proxy, many providers                                                                                       |
+| [Bifrost](https://github.com/maximhq/bifrost)                                   | `http://127.0.0.1:4000/v1`     | Bifrost’s own default port is **8080**. That is TownReporter. Map it: `docker run -p 4000:8080 maximhq/bifrost` |
+| [Helicone](https://github.com/Helicone/helicone)                                | `https://oai.helicone.ai/v1`   | Or your self-hosted worker                                                                                      |
+| [MLflow AI Gateway](https://mlflow.org/docs/latest/llms/deployments/index.html) | `http://127.0.0.1:5000/v1`     |                                                                                                                 |
+| [Kong AI Gateway](https://docs.konghq.com/gateway/latest/ai-gateway/)           | `http://127.0.0.1:8000/v1`     |                                                                                                                 |
+| Ollama                                                                          | `http://127.0.0.1:11434/v1`    | `LLM_API_KEY=ollama` · `LLM_MODEL=llama3.1`                                                                     |
+| OpenAI                                                                          | `https://api.openai.com/v1`    |                                                                                                                 |
+| OpenRouter                                                                      | `https://openrouter.ai/api/v1` |                                                                                                                 |
 
 `OPENAI_API_KEY` is accepted as an alias for `LLM_API_KEY`. You do **not** install LiteLLM, Bifrost, Helicone, MLflow, or Kong as npm dependencies of this repo. Run the gateway next to TownReporter and point the three vars at it.
 
 Resolution lives in `src/lib/news/ai.ts` (`resolveProvider()`); the Claude Code path is `ai-claude-code.server.ts`.
 
 #### Per-run picker
+
+Each picker includes a **Set up a writing model** disclosure with official
+Codex and Claude installation links, same-server-account sign-in guidance and
+reload/retry instructions. Queue and workbench help also points local/Zen
+operators here; Opinion explains the voice-file prerequisite. The disclosure
+stays usable when drafting is disabled and does not install or sign in for you.
 
 Every active Queue row and the story workbench default to **Automatic**. A
 configured `LLM_*` gateway is forced for Automatic. Without one, TownReporter
@@ -200,13 +210,13 @@ that provider; explicit choices never fall back. Local Qwen remains explicit
 instead of Automatic: `/models` can prove it is loaded, but not that the loaded
 model will finish TownReporter's full multi-pass reporting job.
 
-| Choice | Default identity | Prerequisite / boundary |
-|---|---|---|
-| Local Qwen | `http://127.0.0.1:1234/v1`, `qwen/qwen3.6-35b-a3b` | Run an LM Studio-compatible `/v1` server and load the exact model id. The readiness check calls `/models`. |
-| Zen MiMo | `https://opencode.ai/zen/v1`, `mimo-v2.5-free` | Provider-hosted. Draft prompts leave this machine and go to OpenCode. Network/provider availability and pricing are controlled by OpenCode. |
-| Codex Terra | `gpt-5.6-terra` | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token. |
-| Codex Sol | `gpt-5.6-sol` | Same Codex login; frontier Story override. |
-| Claude Opus | `claude-opus-5` | Signed-in Claude Code, or `ANTHROPIC_API_KEY`. |
+| Choice      | Default identity                                   | Prerequisite / boundary                                                                                                                     |
+| ----------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local Qwen  | `http://127.0.0.1:1234/v1`, `qwen/qwen3.6-35b-a3b` | Run an LM Studio-compatible `/v1` server and load the exact model id. The readiness check calls `/models`.                                  |
+| Zen MiMo    | `https://opencode.ai/zen/v1`, `mimo-v2.5-free`     | Provider-hosted. Draft prompts leave this machine and go to OpenCode. Network/provider availability and pricing are controlled by OpenCode. |
+| Codex Terra | `gpt-5.6-terra`                                    | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token.                                              |
+| Codex Sol   | `gpt-5.6-sol`                                      | Same Codex login; frontier Story override.                                                                                                  |
+| Claude Opus | `claude-opus-5`                                    | Signed-in Claude Code, or `ANTHROPIC_API_KEY`.                                                                                              |
 
 Compatibility overrides:
 
@@ -220,13 +230,20 @@ TOWNREPORTER_CODEX_SOL_MODEL=gpt-5.6-sol
 ```
 
 Set `CODEX_CLI_PATH` or `CODEX_HOME` only if normal discovery cannot find the
-binary or OAuth state. Codex Story calls run ephemerally with user configuration,
-repository rules, local shell/file tools, browser/computer tools, apps, plugins,
-hooks, skills, and multi-agent capabilities disabled. The Story call is
-tool-free; only the prompt sent over stdin reaches the provider.
+binary or OAuth state. Codex calls run ephemerally but otherwise use the native
+signed-in Windows configuration: user and repository rules, search, local
+shell/file access, browser/computer tools, apps, plugins, hooks, skills and
+multi-agent capabilities remain available. TownReporter launches Codex with
+`danger-full-access`, not a read-only sandbox, so it can reach every `C:\` path
+the signed-in account can reach. The newsroom prompt still travels over stdin,
+and its task remains the scope of the requested run.
 
-Opinion displays Automatic, Codex Sol and Claude Opus. Automatic tries Codex
-Sol first, then Claude Opus. Explicit choices never fall back.
+Opinion displays Automatic and Claude Opus, and both mean Claude Opus. Codex
+is not offered for editorials: its model declines to write a piece that takes
+a position on a local policy question, so it stays on the Story picker. An
+invalid delivery -- a refusal, an assistant note, an incomplete piece --
+creates no draft. The completed request and job store the provider that
+finished.
 
 ### The Opinion voice
 
@@ -243,7 +260,8 @@ Rules the app enforces, not conventions:
   of version control.
 - On Claude, only the path reaches the CLI; Claude Code reads the file.
 - On Codex, TownReporter reads the validated file and sends its text to OpenAI
-  over stdin for the tool-free writing pass. It never enters argv or logs.
+  over stdin for the native full-capability writing pass. It never enters argv
+  or logs.
 - A path long enough to look like an inlined prompt is refused outright.
 
 Without the variable, the Opinion desk says so and spends nothing. Everything
@@ -251,21 +269,24 @@ else on the desk works.
 
 `TOWNREPORTER_EDITORIAL_MODEL` overrides the **Claude Opinion writing model**.
 It defaults to Opus deliberately: it is the only call in the newsroom where
-the writing *is* the product. It does not change Story choices or Codex models.
+the writing _is_ the product. It does not change Story choices or Codex models.
 
 Note the length, and the cost. A piece takes ten to forty minutes, because the
 voice researches before it writes. Three measured runs:
 
-| Wall clock | Cost | Notes |
-|---|---|---|
-| 9m53s | $2.66 | one document pointer, 32 turns |
-| 24m06s | $23.76 | one pointer; it dispatched research agents of its own |
-| >30m | — | same subject again, killed at the old cap |
+| Wall clock | Cost   | Notes                                                 |
+| ---------- | ------ | ----------------------------------------------------- |
+| 9m53s      | $2.66  | one document pointer, 32 turns                        |
+| 24m06s     | $23.76 | one pointer; it dispatched research agents of its own |
+| >30m       | —      | same subject again, killed at the old cap             |
 
-The writer's ceiling is 45 minutes, set above the slowest run seen rather than
-just above the fastest. The desk enqueues a job and returns at once; nothing
-waits on the model. This is the most expensive call the newsroom makes — set a
-spending limit at the provider.
+`EDITORIAL_TIMEOUT_MS` sets a ceiling **per research or writing pass**, not per
+editorial, and defaults to 45 minutes. A complete provider pair can therefore
+take about 90 minutes. Automatic may run two pairs, for up to roughly three
+hours plus orchestration overhead if every pass approaches its ceiling. The
+historical timings above are not a current maximum. The desk enqueues a job and
+returns at once; the page does not wait on the model. This is the most expensive
+workflow the newsroom makes — set a spending limit at the provider.
 
 ---
 
@@ -273,13 +294,13 @@ spending limit at the provider.
 
 The `ops/` directory holds the scripts the working edition runs on Windows:
 
-| Script | What it does |
-|---|---|
-| `ops/watchdog.ps1` | Every five minutes: check the app, the tunnel and the public URL; restart what is down; append to `logs/watchdog.log` |
-| `ops/run-tunnel.ps1` | Start `cloudflared` for this hostname |
-| `ops/restart-app.ps1` | Stop and start the paper |
-| `ops/restart-tunnel.ps1` | Stop and start the tunnel |
-| `ops/rotate-logs.ps1` | Keep `logs/` bounded |
+| Script                   | What it does                                                                                                          |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `ops/watchdog.ps1`       | Every five minutes: check the app, the tunnel and the public URL; restart what is down; append to `logs/watchdog.log` |
+| `ops/run-tunnel.ps1`     | Start `cloudflared` for this hostname                                                                                 |
+| `ops/restart-app.ps1`    | Stop and start the paper                                                                                              |
+| `ops/restart-tunnel.ps1` | Stop and start the tunnel                                                                                             |
+| `ops/rotate-logs.ps1`    | Keep `logs/` bounded                                                                                                  |
 
 Register the watchdog and the two restarts as **scheduled tasks**, not as child
 processes of the app. Two reasons learned the hard way: a process cannot restart
@@ -291,9 +312,9 @@ log.
 
 ### Database
 
-| `DATABASE_URL` | What you get |
-|---|---|
-| unset | Embedded PGLite. Fast to demo. **Wiped when the process stops.** |
+| `DATABASE_URL` | What you get                                                              |
+| -------------- | ------------------------------------------------------------------------- |
+| unset          | Embedded PGLite. Fast to demo. **Wiped when the process stops.**          |
 | `postgres://…` | Real Postgres. Survives restarts. Use this if you care about the archive. |
 
 Schema is applied by `npm run db:migrate`, which both `npm run dev` and `npm run build` run for you. SQL lives in `migrations/`.
@@ -359,6 +380,13 @@ If Chromium is missing, those fetches skip the browser path. Packets still inges
 
 ## Production build
 
+These commands are for a checkout whose `.output` is **not being served**.
+Never build under a running server, even if no migration is needed. For the
+existing Windows production installation, follow
+[Updating this installation](../SELF-HOSTING.md#updating-this-installation)
+instead: verify in development, approve the exact candidate, then use the
+production promotion script with the watchdog held off.
+
 ```bash
 npm run build
 npm run preview    # serves the built app (this repo’s preview script)
@@ -391,10 +419,11 @@ Two things stop working there, both by design:
 - **Chromium does not run.** Playwright needs a real browser on the machine; a serverless function cannot open one. Transcripts and JavaScript-heavy civic sites (Municode) will not be read.
 - **Background jobs get chopped up.** A serverless invocation may freeze once the click returns, so Scan / Draft / Keep digging only finish when the monitors ping arrives.
 
-Also note there is no Claude Code CLI on a serverless host — set
-`ANTHROPIC_API_KEY` or the `LLM_*` trio for Scan, Dark Desk, and Story instead.
-Opinion is unavailable on that host because its enabled private-voice path
-requires the local Claude Code CLI.
+Also note there is normally no Codex or Claude Code CLI on a serverless host —
+set `ANTHROPIC_API_KEY` or the `LLM_*` trio for Scan, Dark Desk, and Story
+instead. Opinion is unavailable unless that host actually provides a signed-in
+Codex or Claude Code CLI, because its frontier voice paths use those native
+clients.
 
 Scan, Draft, and Dark Keep digging persist a job and return. This long-lived process drains waiting jobs. A Vercel serverless invocation may freeze after the click returns — those jobs finish when the monitors ping (`GET /api/cron/monitors` with `CRON_SECRET`) hits. The paper and a typed draft still deploy without that ping; Scan / Draft / Keep digging need it on a host that sleeps.
 

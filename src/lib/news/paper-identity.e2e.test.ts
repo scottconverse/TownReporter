@@ -161,6 +161,10 @@ if (dbProbe.ok) {
 
     // Setup redirects to /desk on success.
     await page.waitForURL(`${BASE_URL}/desk`, { timeout: 45_000 });
+    // ...and stay there. A stale needsSetup once bounced the owner straight
+    // back to a blank setup form a beat after landing.
+    await page.waitForTimeout(2_000);
+    assert.equal(new URL(page.url()).pathname, "/desk", "the desk bounced back to setup after saving");
   }, 300_000);
 
   after(async () => {
