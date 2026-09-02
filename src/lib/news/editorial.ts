@@ -180,13 +180,19 @@ export function opinionHeadline(headline: string): string {
  * Both exist because this newsroom is a specific case the file could not know:
  * its own reporting is a citable source, and its own machine output is not.
  */
-export const NEWSROOM_NOTE = `NOTES FROM THE DESK, for this piece only.
+export type NewsroomIdentity = { name: string; city: string };
 
-This piece runs in TownReporter, the Longmont paper whose stories are cited below. TownReporter's own published reporting IS a citable source in the claims appendix — link it like any other outlet, and still go to the primary document underneath it. Everything else in the voice file stands unchanged.
+/** The note names the paper it runs in; the constant is the Longmont default, kept for tests. */
+export function newsroomNote(paper: NewsroomIdentity): string {
+  return `NOTES FROM THE DESK, for this piece only.
+
+This piece runs in ${paper.name}, the ${paper.city} paper whose stories are cited below. ${paper.name}'s own published reporting IS a citable source in the claims appendix — link it like any other outlet, and still go to the primary document underneath it. Everything else in the voice file stands unchanged.
 
 The desk material below is a LEAD in the sense your machine-assisted leads rule means. It is pointers, not findings. Nothing in it has been verified for this piece. Take the document pointers, open the originals yourself, and delete anything you cannot stand behind.
 
 The piece runs unsigned, as the paper's own editorial position. Write no byline and no first-person reference to the paper's staff.`;
+}
+export const NEWSROOM_NOTE = newsroomNote({ name: "TownReporter", city: "Longmont" });
 
 /**
  * The raw material, as pointers.
@@ -200,8 +206,13 @@ export function buildEditorialPack(input: {
   pointers: EditorialPointer[];
   ourStory?: { headline: string; url: string; dek?: string };
   askedFor?: string;
+  paper?: NewsroomIdentity;
 }): string {
-  const parts: string[] = [NEWSROOM_NOTE, "", `SUBJECT: ${input.subject}`];
+  const parts: string[] = [
+    input.paper ? newsroomNote(input.paper) : NEWSROOM_NOTE,
+    "",
+    `SUBJECT: ${input.subject}`,
+  ];
 
   if (input.ourStory) {
     parts.push(
@@ -297,8 +308,13 @@ export function buildWritingPack(input: {
   ourStory?: { headline: string; url: string; dek?: string };
   askedFor?: string;
   research: string;
+  paper?: NewsroomIdentity;
 }): string {
-  const parts: string[] = [NEWSROOM_NOTE, "", `SUBJECT: ${input.subject}`];
+  const parts: string[] = [
+    input.paper ? newsroomNote(input.paper) : NEWSROOM_NOTE,
+    "",
+    `SUBJECT: ${input.subject}`,
+  ];
 
   if (input.ourStory) {
     parts.push(

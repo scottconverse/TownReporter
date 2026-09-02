@@ -8,6 +8,7 @@ import {
   type WriteEditorialResult,
 } from "./editorial-orchestration.ts";
 import { findVoiceFile } from "./voice.server.ts";
+import { getPaperConfig } from "./paper-settings.ts";
 import { opinionModelChoice } from "./model-choice.ts";
 import {
   persistEditorialCompletion,
@@ -114,6 +115,8 @@ export async function ensureEditorialSchema() {
 }
 
 export async function writeEditorial(input: WriteEditorialInput): Promise<WriteEditorialResult> {
+  const cfg = await getPaperConfig();
+  input = { ...input, paper: { name: cfg.name, city: cfg.city } };
   return orchestrateEditorial(input, {
     findVoiceFile,
     runClaudePair: async ({ input: editorialInput, found, researchPack }) => {
@@ -136,6 +139,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
         system: "",
         systemPromptFile: found.voice.path,
         user: buildWritingPack({
+          paper: editorialInput.paper,
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,

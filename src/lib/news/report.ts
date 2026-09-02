@@ -15,6 +15,8 @@ import { rememberCapture } from "./investigate.ts";
 import { formatRetrievedEvidence, retrieveRelevantChunks } from "./retrieve.ts";
 import { webSearch } from "./search-web.ts";
 import { getSql } from "../db.ts";
+import { PAPER } from "../paper.ts";
+import { getPaperConfig } from "./paper-settings.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import type { LeadRow, MemoryRow } from "./types.ts";
 import type { EffectiveProviderChoice } from "./ai.ts";
@@ -102,6 +104,8 @@ export type ReportChat = (
 ) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
 
 export type ReportDeps = {
+  /** The paper's identity for the prompts; defaults to the configured paper_settings row. */
+  paper?: () => Promise<PaperIdentityForPrompts>;
   ingest?: (url: string) => Promise<FetchedDoc>;
   search?: (query: string) => Promise<ReportSearchHit[]>;
   chat?: ReportChat;
@@ -128,7 +132,20 @@ export const DRAFT_WRITE_RESERVE_MS = 12_000;
 const FILLER =
   /^(this development marks|the announcement comes as|residents are encouraged to|this initiative underscores|in a move that|it remains to be seen)\b/i;
 
-export const REPORT_RESEARCH_SYSTEM = `You are a civic reporter for TownReporter in Longmont, Colorado, doing the RESEARCH pass — not writing the story yet.
+/*
+  The prompts name the paper's own city.
+
+  They used to say "TownReporter in Longmont, Colorado" for every install and
+  every provider. The v0.5.7 walkthrough set up the Ashgrove Gazette, filed
+  a lead, and got back a story headlined around what "Longmont council" had
+  not done -- the model was told it worked in Longmont, so it did. Everything
+  the configured city can reach goes through these builders now; the
+  constants below are the Longmont defaults, kept for tests.
+*/
+export type PaperIdentityForPrompts = { name: string; city: string; state: string };
+
+export function reportResearchSystem(p: PaperIdentityForPrompts): string {
+  return `You are a civic reporter for ${p.name} in ${p.city}, ${p.state}, doing the RESEARCH pass — not writing the story yet.
 A press release, agenda item, city webpage, or another newsroom’s article is the beginning of reporting, not the finished story.
 Do not invent facts, votes, dollars, names or dates. If it is not in the evidence, it is unknown.
 Source quality affects confidence and attribution, never whether you may look. Unknown means keep investigating.
@@ -141,7 +158,7 @@ Research in this order (stop a lane only when it is honestly empty):
 5. GAPS — what a reader still cannot check. Search once more for those, then list them as unknowns.
 
 SOURCE HIERARCHY for fetch_urls (put the best first):
-1. The named company’s or public agency’s own announcement (ursamajor.com/media/press-release/…, city .gov news). A rewrite of the Longmont Leader is not a substitute for that page.
+1. The named company’s or public agency’s own announcement (ursamajor.com/media/press-release/…, city .gov news). A rewrite of a local news story is not a substitute for that page.
 2. Official records: agenda, packet, minutes, permit, contract, filing.
 3. Named-official statements on the record.
 4. Local news story URLs — the exact article, never a homepage or /local-news index.
@@ -151,7 +168,7 @@ If a company or agency is named, your first fetch_url should be their own announ
 Return ONLY JSON:
 {
   "news": "the actual newest significant fact in one sentence",
-  "why_it_matters": "why a Longmont resident should care, from the evidence",
+  "why_it_matters": "why a ${p.city} resident should care, from the evidence",
   "angle": "the story angle, not the document title",
   "form": "brief|reported|explainer",
   "questions": ["reporter questions still open"],
@@ -165,22 +182,26 @@ Return ONLY JSON:
     "gaps": ["queries that would fill an important unknown"]
   }
 }`;
+}
+/** The shipped default, for tests and for any caller that has no config in hand. */
+export const REPORT_RESEARCH_SYSTEM = reportResearchSystem(PAPER);
 
-export const REPORT_WRITE_SYSTEM = `You are writing a civic news story for TownReporter (Longmont, Colorado) AFTER a research pass.
-This is a newspaper story for a smart, busy Longmont resident — not a rewrite of the announcing source, and not a paraphrase of another paper.
+export function reportWriteSystem(p: PaperIdentityForPrompts): string {
+  return `You are writing a civic news story for ${p.name} (${p.city}, ${p.state}) AFTER a research pass.
+This is a newspaper story for a smart, busy ${p.city} resident — not a rewrite of the announcing source, and not a paraphrase of another paper.
 
 Write original sentences from the FACTS. Do not copy another outlet’s structure, lede, or unique phrasing. Factual vocabulary that appears in a document is not plagiarism; lifting their article is.
 
 SOURCE HIERARCHY in the story:
 1. Primary documents (company or agency press release, packet, minutes, permit, filing) — attribute to that document and use its URL.
 2. Named people on the record.
-3. Local news — credit the outlet, link the exact story URL, do not present their reporting as TownReporter’s discovery.
+3. Local news — credit the outlet, link the exact story URL, do not present their reporting as ${p.name}’s discovery.
 
-If the named company issued a press release and it is in the evidence, their jobs / square footage / quotes / dollar figures come from THAT page, not from a rewrite of the Longmont Leader. Credit the Leader (or Times-Call, Daily Camera) for leading you to the story, then report from the primary document.
+If the named company issued a press release and it is in the evidence, their jobs / square footage / quotes / dollar figures come from THAT page, not from a rewrite of another newsroom’s article. Credit that newsroom for leading you to the story, then report from the primary document.
 
 Headline: the actual news. Specific nouns, active verbs, a number/location/deadline when useful. No agency-speak.
 Lede: the most important new fact immediately. A reader who stops after paragraph one knows what happened and why it matters.
-Nut graf: within the first few paragraphs, why someone in Longmont should care.
+Nut graf: within the first few paragraphs, why someone in ${p.city} should care.
 Body: details, impact, money, people affected, history, disagreement or uncertainty, what happens next. Order of reader value, not the order of the press release.
 Each load-bearing number, name, date, and quote is attributed, with the source URL in source_urls. If you cannot point to a URL, put the claim in unanswered instead of the body.
 Do not write a "Next checks are…" closer. Do not write "What is solid / What is not solid yet". Those belong in reporting notes, never in the story.
@@ -212,6 +233,9 @@ claims (array of {fact, url, kind} — every load-bearing number, name, date, qu
 reporting_trail (array of {title, organization, document_date, url, role}).
 topic must be one of: council, budget, housing, utilities, schools, planning, infrastructure, elections, about.
 Body: markdown paragraphs, no h1, not JSON. Do not print the claims list in the body.`;
+}
+/** The shipped default, for tests and for any caller that has no config in hand. */
+export const REPORT_WRITE_SYSTEM = reportWriteSystem(PAPER);
 
 export const REPORT_EDIT_SYSTEM = `You are the newsroom editor for TownReporter. Rewrite the draft. Do not add facts that are not in the evidence or the draft.
 Checklist:
@@ -972,10 +996,10 @@ function buildLaneQueries(
   form: StoryForm,
   lead: LeadRow,
   research: ResearchJson | null,
+  city: string,
 ): { lane: ReportLane; query: string }[] {
   if (form === "brief") return [];
   const news = research?.angle || research?.news || lead.headline;
-  const city = "Longmont";
   const lanes = research?.lanes ?? {};
   const candidates: Record<string, string[]> = {
     context: [
@@ -1052,6 +1076,11 @@ export function chooseStoryForm(input: {
   return form;
 }
 
+async function configuredPaper(): Promise<PaperIdentityForPrompts> {
+  const cfg = await getPaperConfig();
+  return { name: cfg.name, city: cfg.city, state: cfg.state };
+}
+
 export async function reportAndDraft(
   opts: {
     userId: string;
@@ -1065,6 +1094,7 @@ export async function reportAndDraft(
   deps: ReportDeps = {},
 ): Promise<ReportedDraft | { error: string }> {
   const started = Date.now();
+  const paper = await (deps.paper ?? configuredPaper)();
   let effectiveModelChoice: EffectiveProviderChoice | undefined = opts.modelChoice;
   if (effectiveModelChoice === "auto") {
     const probe =
@@ -1195,7 +1225,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
 
   let research: ResearchJson | null = null;
   if (timeLeft() > 8_000) {
-    const researchAi = await chat(REPORT_RESEARCH_SYSTEM, researchUser, 900);
+    const researchAi = await chat(reportResearchSystem(paper), researchUser, 900);
     research = researchAi.ok ? parseJsonBlock<ResearchJson>(researchAi.text) : null;
   }
   let form = asStoryForm(research?.form);
@@ -1228,7 +1258,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
 
   const searchUrls: string[] = [];
   if (canFollow()) {
-    const laneQueries = buildLaneQueries(form, opts.lead, research);
+    const laneQueries = buildLaneQueries(form, opts.lead, research, paper.city);
     for (const lane of laneQueries) {
       if (!canFollow()) break;
       try {
@@ -1290,7 +1320,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     .join("\n\n");
 
   if (timeLeft() < 4_000) return { error: "The draft ran out of time before writing." };
-  const writeAi = await chat(REPORT_WRITE_SYSTEM, packet, 2200);
+  const writeAi = await chat(reportWriteSystem(paper), packet, 2200);
   if (!writeAi.ok) return { error: writeAi.error };
   const coerced = coerceDraft(writeAi.text, {
     headline: opts.lead.headline,

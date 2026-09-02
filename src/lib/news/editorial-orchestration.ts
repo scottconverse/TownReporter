@@ -3,6 +3,7 @@ import {
   parseEditorial,
   type Editorial,
   type EditorialPointer,
+  type NewsroomIdentity,
 } from "./editorial.ts";
 import { opinionModelChoice, type OpinionModelChoice } from "./model-choice.ts";
 
@@ -17,6 +18,8 @@ export type WriteEditorialInput = {
   sourceKind: string;
   sourceRef: string;
   leadId?: number | null;
+  /** The paper this runs in, for the desk note; the Longmont default when absent. */
+  paper?: NewsroomIdentity;
   modelChoice?: OpinionModelChoice;
   /** Present only for a queued Opinion job whose filing must complete atomically. */
   completion?: { requestId: number; jobId: number };
@@ -119,6 +122,7 @@ export async function orchestrateEditorial(
   if (!found.ok) return { ok: false, error: found.error };
 
   const researchPack = buildEditorialPack({
+    paper: input.paper,
     subject: input.subject,
     pointers: input.pointers,
     ourStory: input.ourStory,

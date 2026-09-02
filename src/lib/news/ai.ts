@@ -11,9 +11,16 @@ export type EffectiveProviderChoice = EffectiveStoryModelChoice;
 export type ProviderProbe =
   { ok: true; label: string; choice: EffectiveProviderChoice } | { ok: false; error: string };
 
-/** Same copy the working v1–v4 desks used when the platform key is absent. */
+/*
+  What the desk says when no provider can answer. This used to be the v1-v4
+  copy about XAI_API_KEY and a list of gateways, which named things the
+  picker does not offer and skipped the ones it does; the v0.5.7 walkthrough
+  saw it appended under the correct guidance and called it out.
+*/
+// Worded to stay clear of preflight's auth classifier: "sign in" in this
+// sentence made "no model configured" read as "provider signed out".
 export const GROK_UNAVAILABLE =
-  "AI is not available. Set ANTHROPIC_API_KEY for Claude (default), or XAI_API_KEY for Grok, or LLM_BASE_URL for any OpenAI-compatible gateway (LiteLLM, Bifrost, Helicone, MLflow, Kong, Ollama).";
+  "AI is not available. No model is set up yet: open Claude Code or Codex on this machine and log in, choose Local Qwen or Zen MiMo from the picker, or set LLM_BASE_URL for an OpenAI-compatible gateway.";
 
 function env(key: string): string | undefined {
   const value = process.env[key];
