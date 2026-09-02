@@ -397,6 +397,43 @@ Owners also have:
 
 ---
 
+## Signing in to a writing model
+
+The desk writes through one of two programs installed on this machine —
+**Claude Code** or **Codex** — using the subscription you already pay for.
+When one of those logins runs out, every draft fails with "sign in again". The
+**Writing models** panel at the top of the Server page is where you fix that,
+without opening a terminal.
+
+Each row tells you three things in words: whether the program is installed,
+whether it is signed in (and as whom, where the program will say), and whether
+you have turned it off yourself.
+
+- **Sign in** starts the program's own sign-in and shows you what it prints. For
+  Claude Code that is a link: open it, finish signing in there, and the row
+  turns to "Signed in" by itself within a few seconds. For Codex it is a link
+  **and** a one-time code — open the link, type the code, and the row flips the
+  same way. There is a countdown, and a **Cancel** if you change your mind.
+- **Test** asks the model for one word and tells you how long it took. This is
+  the only button that proves the desk can actually write: a login can look
+  present and still be refused by the provider, and nothing but a real question
+  tells the difference.
+
+There is no **Sign out**, on purpose. Signing out is one mis-click away from
+stopping the paper, and nothing here needs it — a stale login is fixed by
+signing in again, not by signing out first.
+
+**Being signed in to claude.ai in your browser, or in the Claude desktop app,
+is a different login and does not count here.** Those keep their own
+credentials. The desk only sees the command-line program's login, which is what
+this panel shows and what these buttons change.
+
+When a draft or a scan fails because a login has lapsed, the error itself now
+carries a **Sign in to Claude Code** / **Sign in to Codex** button: pressing it
+starts the sign-in and takes you straight to this panel with the link waiting.
+
+---
+
 ## Delete
 
 Every list has a **Delete** button: leads in the queue, editorials on Opinion,

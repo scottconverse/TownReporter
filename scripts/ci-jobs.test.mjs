@@ -28,6 +28,7 @@ const CLAIMERS = [
   "scripts/desk-flows-e2e.mjs",
   "scripts/sources-reach-the-reader.mjs",
   "scripts/delete-corrections-e2e.mjs",
+  "scripts/provider-signin-e2e.mjs",
 ];
 
 test("each desk-claiming walk exists and is referenced by CI", () => {

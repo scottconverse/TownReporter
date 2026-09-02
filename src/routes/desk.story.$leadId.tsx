@@ -16,6 +16,7 @@ import {
 import { editorDraftError, draftHasLanded, stalledRunCopy } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { ModelPicker } from "@/components/model-picker";
+import { ProviderSignInButton } from "@/components/provider-signin-button";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
@@ -503,7 +504,16 @@ function StoryPage() {
           ) : null}
           {publish.isPending ? <Busy label="Sending this to the paper…" /> : null}
           {(msg || previousJobError) && !onPaper ? (
-            <Notice kind={msg === "Saved." ? "ok" : "err"}>{msg || previousJobError}</Notice>
+            <Notice kind={msg === "Saved." ? "ok" : "err"}>
+              {msg || previousJobError}
+              {/*
+                The one error the desk could describe but never act on. A
+                lapsed CLI login used to end at "sign in again", which meant a
+                terminal; this starts the sign-in and hands over to the Server
+                page. It renders only when the error really is that.
+              */}
+              <ProviderSignInButton detail={msg || previousJobError} />
+            </Notice>
           ) : null}
 
           {data.draft || body ? (
