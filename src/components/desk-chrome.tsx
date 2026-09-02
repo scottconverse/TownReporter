@@ -19,6 +19,7 @@ const LINKS = [
 ] as const;
 
 const MODE_KEY = "townreporter.desk.mode";
+const TEXT_SIZE_KEY = "townreporter.desk.textsize";
 
 export const inkSolid =
   "pressable inline-flex min-h-11 items-center justify-center bg-ink px-4 text-sm font-medium text-paper hover:bg-ink-2 disabled:cursor-not-allowed disabled:opacity-50";
@@ -46,6 +47,55 @@ function useDeskMode() {
   return { mode, choose };
 }
 
+/**
+ * Text: Normal / Large — mirrors useDeskMode's storage pattern exactly (same
+ * key shape, same read-on-mount effect, same swallow-and-default-on-failure
+ * behavior), so the two controls behave identically to an editor even though
+ * one flips a class the theme owns and the other flips `.large`, which scales
+ * every font-size this pass raised to the 14px/13px floor (see the `--ts`
+ * custom property in styles.css). Defaults to Normal.
+ */
+function useDeskTextSize() {
+  const [size, setSize] = useState<"normal" | "large">("normal");
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(TEXT_SIZE_KEY);
+      if (raw === "large" || raw === "normal") setSize(raw);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  function choose(next: "normal" | "large") {
+    setSize(next);
+    try {
+      localStorage.setItem(TEXT_SIZE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
+  return { size, choose };
+}
+
+/**
+ * Pure, exported for scripts/desk-text-size-render.test.mjs: the "light"
+ * class the theme has always applied plus the "large" class this pass adds,
+ * computed the same way DeskShell computes it. Kept as a named function
+ * rather than inlined so a render test can assert the class list without
+ * mounting a real DOM (no jsdom in this repo's test toolchain).
+ */
+export function deskShellClassName({
+  night,
+  mode,
+  size,
+}: {
+  night?: boolean;
+  mode: "light" | "dark";
+  size: "normal" | "large";
+}) {
+  const nightPage = Boolean(night) || mode === "dark";
+  return "desk-ltr" + (nightPage ? " night" : "") + (size === "large" ? " large" : "");
+}
+
 export function DeskShell({
   children,
   title,
@@ -65,14 +115,14 @@ export function DeskShell({
   const { formatDate } = usePaperDateFormatters();
   const { user, isPending } = useCurrentUserState();
   const { mode, choose } = useDeskMode();
-  const nightPage = night || mode === "dark";
+  const { size, choose: chooseSize } = useDeskTextSize();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname]);
 
   return (
-    <div className={"desk-ltr" + (nightPage ? " night" : "")}>
+    <div className={deskShellClassName({ night, mode, size })}>
       <a href="#desk" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-20 focus:bg-paper focus:px-3 focus:py-2 focus:text-sm focus:text-ink">
         Skip to desk
       </a>
@@ -111,6 +161,31 @@ export function DeskShell({
               </button>
             </div>
             )}
+            {/*
+              Text: Normal / Large. Shown even on the Dark Desk (which forces
+              `night` and hides the Light/Dark seg above) -- readability is
+              not the same axis as theme, and an editor on the Dark Desk at
+              2am has the same eyes. See useDeskTextSize and the `.large`
+              class / `--ts` custom property in styles.css.
+            */}
+            <div className="seg" role="group" aria-label="Text size">
+              <button
+                type="button"
+                className={"seg-opt" + (size === "normal" ? " on" : "")}
+                aria-pressed={size === "normal"}
+                onClick={() => chooseSize("normal")}
+              >
+                Text: Normal
+              </button>
+              <button
+                type="button"
+                className={"seg-opt" + (size === "large" ? " on" : "")}
+                aria-pressed={size === "large"}
+                onClick={() => chooseSize("large")}
+              >
+                Large
+              </button>
+            </div>
             {isPending ? <span className="mast-user" aria-hidden /> : user ? <span className="mast-account"><UserButton /></span> : null}
           </div>
         </div>

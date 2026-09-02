@@ -24,6 +24,14 @@ A draft, a reporting note, a research memo, a Dark Desk file — none of that is
 
 ---
 
+## Reading the desk: Light/Dark and Text size
+
+Top right of every desk page, next to **View paper**: a **Light / Dark** toggle and a **Text: Normal / Large** toggle. Both remember your choice (browser local storage) and default to Light and Normal for a new browser. Dark Desk is always dark and does not offer the Light/Dark toggle, but Text size still applies there.
+
+Large bumps the desk's body, meta-line, chip and label text; headings are unchanged. Every chip, date, "from the scanner" note and Server-page table label meets WCAG AA contrast (4.5:1, or 3:1 for large/bold text) in both themes, and nothing informational renders below 14px (13px for the small uppercase letter-spaced labels, which stay at full contrast). `scripts/contrast-audit.mjs` checks this and fails the build if a token drops below it.
+
+---
+
 ## Sign in
 
 1. On a new paper, top right: **Create editor**. That opens `/login`. Email + password. You own the desk. The button is gone after that.
