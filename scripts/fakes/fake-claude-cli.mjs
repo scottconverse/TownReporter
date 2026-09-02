@@ -21,6 +21,16 @@
  *                           writes it, so a walk can watch the flip happen)
  *   FAKE_CLAUDE_MODE        exit-ok | exit-fail | hang   (default exit-ok)
  *   FAKE_CLAUDE_NO_URL      "1" to print nothing at all
+ *   FAKE_CLAUDE_FAIL_PROMPTS
+ *                           "1" to make every `-p` chat call (not the auth
+ *                           commands) answer with the real 401 envelope a
+ *                           live Claude Code CLI printed on 2026-09-02 when
+ *                           its OAuth token expired mid-run:
+ *                           `auth status --json` still reports loggedIn:true
+ *                           (the CLI itself has not noticed yet) — this is
+ *                           what a lapsed login mid-draft actually looks
+ *                           like, and it is what src/lib/news/automatic-failover.ts
+ *                           exists to catch.
  */
 import { existsSync, writeFileSync } from "node:fs";
 
@@ -73,6 +83,20 @@ if (argv[0] === "auth" && argv[1] === "login") {
     if (delay > 0) setTimeout(finish, delay);
     else finish();
   }
+} else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_FAIL_PROMPTS === "1") {
+  // The exact envelope a real 401 mid-run produced. Exit 0: the CLI's own
+  // process succeeded, it is the *call* that failed -- parseCliEnvelope in
+  // src/lib/news/ai-claude-code.server.ts reads `is_error` off stdout
+  // regardless of exit code, same as the real CLI does.
+  process.stdout.write(
+    JSON.stringify({
+      is_error: true,
+      api_error_status: 401,
+      result:
+        "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.",
+    }) + "\n",
+  );
+  process.exit(0);
 } else {
   // Any other invocation is a chat call; answer the one word the Test asks for.
   process.stdout.write(JSON.stringify({ is_error: false, result: "ok" }) + "\n");

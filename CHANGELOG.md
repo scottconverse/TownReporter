@@ -2,6 +2,27 @@
 
 Current release: **0.6.1**.
 
+## 0.6.2 — 2026-09-02
+
+- **Automatic's one-shot fail-over is now proven in a browser, not just by
+  unit test.** `scripts/failover-e2e.mjs` drives a real desk end to end on
+  Automatic while Claude Code's login lapses mid-draft, and asserts the desk
+  actually moves to Codex Terra and lands the draft — including the stage
+  text an editor would see ("Switched to Codex Terra: Claude Opus sign-in
+  lapsed"), read straight off the wire the same way the desk's own polling
+  does. Runs in CI as the `failover` job, model-free (`scripts/fakes/`
+  extended: the fake Claude now answers `-p` with the real 401 envelope a
+  lapsed OAuth token produced live on 2026-09-02; the fake Codex now answers
+  `exec` with a plausible draft for either research or write pass).
+- **The full scan-then-draft path now runs nightly against a real model,
+  unattended.** `scripts/live-pipeline-proof.mjs` + `ops\nightly-proof.ps1`
+  drive a disposable copy of production data (`townreporter_dev`) through
+  one real Scan and one real Draft on Automatic, every night at 03:30, using
+  the operator's own Claude Code / Codex logins — the one path in this repo
+  CI cannot prove, because CI must never spend real money or depend on a
+  real login. Writes `artifacts/nightly/<date>.json`; see
+  `docs/nightly-proof.md`.
+
 ## 0.6.1 — 2026-09-02
 
 - **Scan gets the same per-run writing-model picker Story has.** Scan used to
