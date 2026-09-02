@@ -332,6 +332,63 @@ jobs:
           }
           node scripts/provider-signin-e2e.mjs
 
+  # 0.5.11 added one-shot Automatic fail-over: if the first provider's login
+  # lapses mid-draft, the desk moves to the next rung of the ladder itself
+  # and finishes the job on it. It shipped with unit tests only -- never
+  # driven through the desk. Model-free, same trick as provider-signin:
+  # scripts/fakes/fake-claude-cli.mjs answers `auth status --json` signed in
+  # (so Automatic picks it first) but every `-p` chat call with the real 401
+  # envelope a live token expiring mid-run produced on 2026-09-02; fake-codex
+  # answers `exec` with a plausible JSON draft. Nothing here spends or
+  # touches a real credential. See the walk under scripts/, named for what
+  # it proves.
+  failover:
+    name: Automatic fails over to Codex when Claude's login lapses, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: A lapsed Claude Code login fails the draft over to Codex Terra
+        env:
+          BETTER_AUTH_SECRET: ci-failover-secret-not-for-production
+          PORT: "3317"
+          HOST: 127.0.0.1
+          FAILOVER_BASE_URL: http://127.0.0.1:3317
+          CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          CODEX_CLI_PATH: scripts/fakes/fake-codex-cli.mjs
+          FAKE_CLAUDE_SIGNED_IN: "1"
+          FAKE_CLAUDE_FAIL_PROMPTS: "1"
+          FAKE_CODEX_SIGNED_IN: "1"
+        run: |
+          npm run dev -- --port 3317 > /tmp/failover.log 2>&1 &
+          DEV_PID=$!
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3317/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3317/ || {
+            echo "dev server did not come up"; tail -n 80 /tmp/failover.log; exit 1;
+          }
+          node scripts/failover-e2e.mjs
+          # By PID, never by name -- see the same comment in the
+          # provider-signin job above for why a bare `kill "$DEV_PID"` is not
+          # enough (npm/with-app-env.mjs/vite are all separate descendants).
+          kill_tree() {
+            local pid="$1"
+            local child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          kill_tree "$DEV_PID"
+
   # Delete, trash, and the public corrections feed each had a fix proven only
   # by a unit test: a deleted story's correction could outlive it and print
   # under a null headline, restoring a story from the trash could leave its
