@@ -16,6 +16,12 @@ attachments/
 Thumbs.db
 *.local
 
+# Native model/browser research scratch. Preserve gate evidence outside the
+# checkout; never let a broad `git add` publish downloaded records or Chromium
+# diagnostics as source.
+.tmp-editorial-*/
+debug.log
+
 # Transient capture and build output. An audit found 150 screenshots (11 MB)
 # and 25 browser captures plus five duplicate source archives (3.9 MB) tracked
 # here (ENG-010). Clones pay for those forever, and a committed source archive

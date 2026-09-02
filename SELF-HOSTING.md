@@ -6,6 +6,12 @@ router.
 
 Everything below is running and was verified end to end.
 
+**Deployment boundary (2026-09-01):** the production checkout is still the
+tagged **v0.5.6** build. The per-run model picker and restored native Codex path
+described as “after promotion” below are in the untagged development candidate;
+they are not live until that exact candidate is tagged and promoted. Keep this
+distinction when diagnosing the current paper.
+
 ---
 
 ## The shape of it
@@ -16,6 +22,11 @@ visitor -> Cloudflare edge -> tunnel -> 127.0.0.1:3000 (this box)
                                             +-- Postgres on 127.0.0.1:5433
                                             +-- Claude Code CLI (your login)
 ```
+
+After the candidate is tagged and promoted, the same Node process can also use
+the signed-in Codex CLI, OpenCode Zen, explicit Local Qwen, or a configured
+OpenAI-compatible gateway according to the editor's per-run choice. No new
+listener or public port is added.
 
 Nothing listens on a port the internet can reach. The machine dials **out** to
 Cloudflare and holds that connection open, so the home IP never appears in DNS
@@ -36,15 +47,15 @@ restart.
 
 ## Six scheduled tasks
 
-| Task | When | Does |
-|---|---|---|
-| `TownReporter` | at logon | starts Postgres, applies migrations, serves the app |
-| `TownReporter Tunnel` | at logon | connects the Cloudflare Tunnel |
-| `TownReporter Monitors` | every 5 min | rechecks watched sources, drains desk jobs |
-| `TownReporter Watchdog` | every 5 min | checks the app, the tunnel and the public URL; restarts what is down; appends to `logs/watchdog.log` when there is something to say |
-| `TownReporter Restart` | on demand | stops and starts the paper |
-| `TownReporter Tunnel Restart` | on demand | stops and starts the tunnel |
-| (Postgres) | — | started by the first task, not separately registered |
+| Task                          | When        | Does                                                                                                                                |
+| ----------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `TownReporter`                | at logon    | starts Postgres, applies migrations, serves the app                                                                                 |
+| `TownReporter Tunnel`         | at logon    | connects the Cloudflare Tunnel                                                                                                      |
+| `TownReporter Monitors`       | every 5 min | rechecks watched sources, drains desk jobs                                                                                          |
+| `TownReporter Watchdog`       | every 5 min | checks the app, the tunnel and the public URL; restarts what is down; appends to `logs/watchdog.log` when there is something to say |
+| `TownReporter Restart`        | on demand   | stops and starts the paper                                                                                                          |
+| `TownReporter Tunnel Restart` | on demand   | stops and starts the tunnel                                                                                                         |
+| (Postgres)                    | —           | started by the first task, not separately registered                                                                                |
 
 ### Registering them
 
@@ -66,7 +77,7 @@ before the script's own window style applies, so twice every five minutes a
 window appeared, took focus, and interrupted whatever was being typed.
 `wscript.exe` has no console of its own and starts the child hidden from the
 first instant. The security context is unchanged, which matters because the
-desk reads the operator's Claude Code login out of their own profile.
+desk reads the operator's Claude Code and Codex logins out of their own profile.
 
 The last two are tasks rather than child processes of the app for two reasons
 learned the hard way: a process cannot restart itself, and a tunnel restart
@@ -74,15 +85,15 @@ cannot deliver its own result over the tunnel it has just killed. The Server
 page at `/desk/ops` triggers them and reads the watchdog log.
 
 **After a reboot it comes back when you log in, not before.** Both start
-triggers are *at logon* for HALO\scott, and the two five-minute tasks are
+triggers are _at logon_ for HALO\scott, and the two five-minute tasks are
 interactive as well, so a machine sitting at the lock screen runs nothing. Log
 in and everything starts on its own. Tested by stopping the lot and letting the
 tasks restart it.
 
 If the paper ever needs to survive a reboot with nobody logging in, the tasks
 have to run as S4U ("whether user is logged on or not") — which is a real
-change, not a checkbox, because the desk shells out to the Claude Code CLI and
-that reads the operator's login out of their profile.
+change, not a checkbox, because the desk shells out to the Claude Code and
+Codex CLIs and those read the operator's login out of their profile.
 
 ### Without a terminal
 
@@ -157,6 +168,8 @@ trusted automatically.
 
 ## The AI
 
+### Currently live: v0.5.6
+
 No API key. The desk shells out to your local **Claude Code** login, so the
 subscription powers it.
 
@@ -172,14 +185,41 @@ prompts. Without it your developer instructions get prepended to every story.
 # TOWNREPORTER_CLAUDE_CODE=0        # take the CLI out of the chain entirely
 ```
 
-If quota ever bites, point `LLM_BASE_URL` at a local model on this box instead.
+If quota bites on the currently live build, restore the Claude login/quota or
+use the existing configured `LLM_*` path. Do not diagnose v0.5.6 from an
+unpromoted picker shown only in development.
+
+### After the model-picker candidate is tagged and promoted
+
+| Desk work           | Provider rule                                                                                                | Recovery                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Scan and Dark Desk  | configured `LLM_*`, Anthropic/Claude Code, or Grok path                                                      | repair the configured endpoint/key or sign back into Claude Code                                              |
+| Story — Automatic   | configured `LLM_*` exclusively when present; otherwise Zen MiMo → Codex Terra → Claude Opus readiness ladder | repair the provider named on the failed job; a run stays pinned to one provider                               |
+| Story — explicit    | Local Qwen, Zen MiMo, Codex Terra, Codex Sol, or Claude Opus; no fallback                                    | load the exact local model, restore Zen/network access, or open and sign into the named CLI                   |
+| Opinion — Automatic | complete Codex Sol research/writing pair, then a fresh Claude Opus pair if needed                            | open Codex or Claude Code and renew its login; the completed row records the provider that actually delivered |
+| Opinion — explicit  | only the named Codex Sol or Claude Opus path                                                                 | retry that provider or deliberately pick another; TownReporter never switches an explicit choice              |
+
+Codex reuses the signed-in user's native configuration and full available
+Windows access. TownReporter does not disable search, shell/files,
+browser/computer tools, apps, plugins, hooks, skills, user rules, repository
+instructions, or multi-agent capability, and it launches with
+`danger-full-access`. Prompts travel over stdin and timeout cleanup targets only
+the spawned PID tree. If OAuth expires, open Codex and sign in again; the app
+does not read or store the token.
+
+Opinion rejects provider refusals, assistant notes, implausible headlines, and
+incomplete bodies before draft storage. Automatic starts the next provider as
+a completely new pair. Explicit choices surface the failure and do not fall
+back. A failed request has no draft or Publish action.
 
 `npm test` makes no model call and costs nothing: it runs the whole suite with
-no provider contacted. It used to make one real Claude call, and this page went
-on saying so long after that stopped being true. The src group runs one file at
-a time on purpose — several tests each stand up an embedded database, and
-running them at once exhausts memory on a smaller machine — so it is thorough
-rather than fast.
+no provider contacted. Its fail-closed launcher removes any inherited
+`DATABASE_URL`, `VERCEL`, and `VERCEL_ENV` before startup so table-wide fixture
+cleanup cannot reach the live database. Tests that require Postgres create and
+opt into their own disposable database after that guard. The src group runs one
+file at a time on purpose — several tests each stand up an embedded database,
+and running them at once exhausts memory on a smaller machine — so it is
+thorough rather than fast.
 
 The live model path has its own opt-in script, so nobody spends quota by
 running the ordinary suite:
@@ -208,7 +248,7 @@ duplicate as a permanent error and stop checking. Enforcement comes from DMARC
 **No catch-all.** Only `tips@` exists; anything else bounces. Add more
 addresses as routing rules.
 
-If you ever want to *send* from `tips@`, the SPF record must be widened to
+If you ever want to _send_ from `tips@`, the SPF record must be widened to
 permit the sending provider, or your own mail will be rejected.
 
 ---

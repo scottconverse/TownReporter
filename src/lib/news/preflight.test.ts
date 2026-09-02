@@ -45,10 +45,11 @@ describe("scan preflight", () => {
     assert.equal(p.retryable, false);
   });
 
-  it("keeps Codex installation and provider login failures actionable", () => {
+  it("keeps Codex installation failures actionable", () => {
     const missing = scanPreflight({
       ok: false,
-      error: "Codex is not installed. Install the Codex CLI, then sign in from Codex and try again.",
+      error:
+        "Codex is not installed. Install the Codex CLI, then sign in from Codex and try again.",
     });
     assert.equal(missing.ok, false);
     if (!missing.ok) {
@@ -56,16 +57,60 @@ describe("scan preflight", () => {
       assert.match(missing.guidance, /install the Codex CLI/i);
       assert.equal(missing.retryable, false);
     }
+  });
 
+  it("gives Codex-specific recovery without losing its signed-out diagnostic", () => {
+    const detail = "Codex is signed out. Open Codex, sign in, then try again.";
     const signedOut = scanPreflight({
       ok: false,
-      error: "Codex is signed out. Open Codex, sign in, then try again.",
+      error: detail,
     });
     assert.equal(signedOut.ok, false);
     if (!signedOut.ok) {
       assert.equal(signedOut.kind, "provider-auth");
+      assert.match(signedOut.guidance, /open Codex/i);
       assert.match(signedOut.guidance, /sign in/i);
+      assert.match(signedOut.guidance, /nothing was queued or spent/i);
+      assert.equal(signedOut.detail, detail);
       assert.equal(signedOut.retryable, false);
+    }
+  });
+
+  it("gives Claude Code-specific recovery without losing its expired-OAuth diagnostic", () => {
+    const detail = "Claude Code OAuth session expired.";
+    const expired = scanPreflight({ ok: false, error: detail });
+    assert.equal(expired.ok, false);
+    if (!expired.ok) {
+      assert.equal(expired.kind, "provider-auth");
+      assert.match(expired.guidance, /open Claude Code/i);
+      assert.match(expired.guidance, /sign in/i);
+      assert.match(expired.guidance, /nothing was queued or spent/i);
+      assert.equal(expired.detail, detail);
+      assert.equal(expired.retryable, false);
+    }
+  });
+
+  it("classifies rejected Anthropic credentials as provider auth, not missing configuration", () => {
+    const detail =
+      "Claude rejected its credentials. Update ANTHROPIC_API_KEY or use a signed-in Claude Code session.";
+    const rejected = scanPreflight({ ok: false, error: detail });
+    assert.equal(rejected.ok, false);
+    if (!rejected.ok) {
+      assert.equal(rejected.kind, "provider-auth");
+      assert.equal(rejected.retryable, false);
+      assert.equal(rejected.detail, detail);
+      assert.match(rejected.guidance, /ANTHROPIC_API_KEY|Claude Code/i);
+      assert.doesNotMatch(rejected.guidance, /no model is set up|no model configured/i);
+    }
+  });
+
+  it("becomes ready on a fresh probe after either provider signs in", () => {
+    for (const [detail, label] of [
+      ["Codex is signed out. Open Codex, sign in, then try again.", "Codex Sol"],
+      ["Claude Code OAuth session expired.", "Claude Opus"],
+    ] as const) {
+      assert.equal(scanPreflight({ ok: false, error: detail }).ok, false);
+      assert.deepEqual(scanPreflight({ ok: true, label }), { ok: true });
     }
   });
 

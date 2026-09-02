@@ -1,12 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
-import { assertRate, audit } from "./ops";
-import { enqueueJob, latestJob, runLooksStalled } from "./jobs";
+import { audit } from "./ops";
+import { latestJob, runLooksStalled } from "./jobs";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
-import { assertHttpUrl } from "./url-guard";
-import { siteUrl } from "@/lib/paper";
-import { opinionModelChoice, opinionProviderProblem, type OpinionModelChoice } from "./model-choice.ts";
+import { opinionModelChoice } from "./model-choice.ts";
+import { checkOpinionReadiness } from "./opinion-readiness.ts";
 
 /**
  * The Opinion desk.
@@ -28,6 +27,7 @@ export type EditorialRow = {
   subject: string;
   source_kind: string;
   source_ref: string;
+  model_choice: string;
   draft_id: number | null;
   error: string | null;
   created_at: string;
@@ -45,43 +45,6 @@ export type EditorialRow = {
   stalled?: boolean;
 };
 
-/**
- * Can the Opinion desk write at all, asked before anything is typed.
- *
- * The desk only revealed a missing voice file or a disabled CLI AFTER the
- * editor had written a subject and pressed the button — an audit called that
- * out (UIUX-05). A dependency you cannot satisfy should be visible while you
- * are deciding whether to start, not after you have.
- *
- * Cheap: a stat and an env read. No model call, nothing spent.
- */
-async function checkOpinionReadiness(choice: OpinionModelChoice) {
-  const problems: string[] = [];
-  const { findVoiceFile } = await import("./voice.server");
-  const voice = await findVoiceFile();
-  if (!voice.ok) problems.push(voice.error);
-
-  const { probeProvider } = await import("./ai");
-  const candidates = choice === "auto"
-    ? (["codex-frontier", "claude-frontier"] as const)
-    : ([choice] as const);
-  let selected: Awaited<ReturnType<typeof probeProvider>> | undefined;
-  const providerProblems: string[] = [];
-  for (const candidate of candidates) {
-    const probe = await probeProvider(candidate);
-    if (probe.ok) {
-      selected = probe;
-      break;
-    }
-    providerProblems.push(opinionProviderProblem(probe.error));
-  }
-  if (!selected) problems.push(...providerProblems);
-  const effectiveChoice = selected?.ok && selected.choice !== "configured"
-    ? opinionModelChoice(selected.choice)
-    : choice;
-  return { ready: problems.length === 0, why: problems.join(" "), problems, effectiveChoice };
-}
-
 export const opinionReadiness = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .validator((choice?: string) => opinionModelChoice(choice))
@@ -92,14 +55,14 @@ export const opinionReadiness = createServerFn({ method: "GET" })
 export const listEditorials = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }): Promise<EditorialRow[]> => {
-    const { ensureEditorialRequestSchema, ensureEditorialSchema } = await import(
-      "./editorial.server"
-    );
+    const { ensureEditorialRequestSchema, ensureEditorialSchema } =
+      await import("./editorial.server");
     await ensureEditorialRequestSchema();
     await ensureEditorialSchema();
     const sql = await getSql();
     const rows = await sql<EditorialRow>`
-      select r.id, r.subject, r.source_kind, r.source_ref, r.draft_id, r.error,
+      select r.id, r.subject, r.source_kind, r.source_ref, r.model_choice,
+             r.draft_id, r.error,
              r.created_at, r.finished_at,
              d.headline,
              case when d.body is null then null
@@ -123,7 +86,11 @@ export const listEditorials = createServerFn({ method: "GET" })
     */
     for (const row of rows) {
       if (row.finished_at) continue;
-      const job = await latestJob({ newsroomId: owned(context), kind: "editorial", subjectId: row.id });
+      const job = await latestJob({
+        newsroomId: owned(context),
+        kind: "editorial",
+        subjectId: row.id,
+      });
       row.stalled = runLooksStalled({ runOpen: true, job });
     }
     return rows;
@@ -165,84 +132,21 @@ export const getEditorial = createServerFn({ method: "GET" })
  */
 export const startEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string }) => input)
+  .validator(
+    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string }) =>
+      input,
+  )
   .handler(async ({ context, data }) => {
-    const { ensureEditorialRequestSchema } = await import("./editorial.server");
-    const subject = String(data.subject ?? "").trim().slice(0, 400);
     const modelChoice = opinionModelChoice(data.modelChoice);
-    if (subject.length < 6) {
-      return { ok: false as const, error: "Give it a subject, a URL, or a sentence to work from." };
-    }
-
-    await ensureEditorialRequestSchema();
-    const sql = await getSql();
-
-    const pointers: { what: string; url?: string }[] = [];
-    let ourStory: { headline: string; url: string; dek?: string } | undefined;
-    let sourceKind = "paste";
-    let sourceRef = subject;
-
-    // A pasted URL is a lead to open, not just a subject line.
-    for (const m of subject.matchAll(/https?:\/\/\S+/g)) {
-      try {
-        pointers.push({ what: "pasted by the editor", url: assertHttpUrl(m[0]).toString() });
-      } catch {
-        /* not a usable URL */
-      }
-    }
-
-    if (data.articleSlug) {
-      const art = await sql<{ headline: string; dek: string; source_urls: string }>`
-        select headline, dek, source_urls from articles
-        where slug = ${data.articleSlug} and newsroom_id = ${owned(context)}
-          and status = 'published' limit 1
-      `;
-      if (art[0]) {
-        sourceKind = "article";
-        sourceRef = data.articleSlug;
-        ourStory = {
-          headline: art[0].headline,
-          dek: art[0].dek,
-          url: siteUrl(`/articles/${data.articleSlug}`),
-        };
-        try {
-          for (const u of JSON.parse(art[0].source_urls) as string[]) {
-            pointers.push({ what: "cited by our story", url: u });
-          }
-        } catch {
-          /* no usable source list */
-        }
-      }
-    }
-
-    // Repeat the UI's cheap readiness check at the commit boundary. The
-    // browser check can be stale, fail, or be bypassed; no request or job is
-    // created unless both the voice and selected provider are ready now.
-    const readiness = await checkOpinionReadiness(modelChoice);
-    if (!readiness.ready) return { ok: false as const, error: readiness.why };
-    const effectiveChoice = readiness.effectiveChoice;
-    await assertRate(context.userId, "editorial");
-
-    const rows = await sql<{ id: number }>`
-      insert into editorial_requests
-        (user_id, newsroom_id, subject, source_kind, source_ref, asked_for, pointers_json, our_story_json, model_choice)
-      values (${context.userId}, ${owned(context)}, ${subject}, ${sourceKind}, ${sourceRef},
-              ${String(data.askedFor ?? "").slice(0, 600)},
-              ${JSON.stringify(pointers).slice(0, 8000)},
-              ${ourStory ? JSON.stringify(ourStory) : null}, ${effectiveChoice})
-      returning id
-    `;
-    const requestId = rows[0]!.id;
-
-    const job = await enqueueJob({
-      userId: context.userId,
-      newsroomId: owned(context),
-      kind: "editorial",
-      subjectId: requestId,
-      modelChoice: effectiveChoice,
+    const { commitOpinionForAuthenticatedEditor } =
+      await import("./model-request-commit.server.ts");
+    return commitOpinionForAuthenticatedEditor({
+      context: { userId: context.userId, newsroomId: owned(context) },
+      subject: data.subject,
+      askedFor: data.askedFor,
+      articleSlug: data.articleSlug,
+      modelChoice,
     });
-    await audit(context.userId, "editorial", `request ${requestId} from ${sourceKind}`);
-    return { ok: true as const, requestId, jobId: job.id, modelChoice: effectiveChoice };
   });
 
 /**
@@ -293,7 +197,10 @@ export const getEditorialDraft = createServerFn({ method: "GET" })
 
 export const saveEditorialDraft = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { draftId: number; headline: string; dek: string; body: string; topic: string }) => input)
+  .validator(
+    (input: { draftId: number; headline: string; dek: string; body: string; topic: string }) =>
+      input,
+  )
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const done = await sql<{ id: number }>`
@@ -357,7 +264,9 @@ export const publishEditorial = createServerFn({ method: "POST" })
     const slug = await withTransaction(async (tx) => {
       let candidate = baseSlug;
       for (let n = 0; n < 50; n += 1) {
-        const clash = await tx<{ slug: string }>`select slug from articles where slug = ${candidate} limit 1`;
+        const clash = await tx<{
+          slug: string;
+        }>`select slug from articles where slug = ${candidate} limit 1`;
         if (!clash[0]) break;
         candidate = n === 0 ? `${baseSlug}-${draftId}` : `${baseSlug}-${draftId}-${n + 1}`;
       }
@@ -455,7 +364,10 @@ export const fileWrittenEditorial = createServerFn({ method: "POST" })
     // A whole column is tens of kilobytes; a megabyte is a mistake or an
     // attack, and either way the honest answer is to refuse before parsing.
     if (body.length > 400_000) {
-      return { ok: false as const, error: "That is too long to be a column. Trim it and try again." };
+      return {
+        ok: false as const,
+        error: "That is too long to be a column. Trim it and try again.",
+      };
     }
 
     const { parseEditorial } = await import("./editorial");

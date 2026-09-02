@@ -4,6 +4,16 @@ Current release: **0.5.6**.
 
 ## Unreleased
 
+- **Codex now runs as the native signed-in Windows user, without a hidden
+  capability policy.** TownReporter no longer injects feature-disable flags,
+  a read-only sandbox, ignored user configuration/rules, or a skipped-repository
+  check. Every Codex Story and Opinion call keeps native search plus the user's
+  available shell/file, browser/computer, app, plugin, hook, skill and
+  multi-agent capabilities. Prompts still travel over stdin, model names are
+  validated, and timeout cleanup still targets only the child process tree the
+  call owns. Expired Codex or Claude OAuth now produces provider-specific
+  sign-in guidance before a job is queued; invalid Anthropic API credentials
+  are also rejected by a no-generation readiness check.
 - **The editor chooses the writing model per run.** Queue and story workbench
   drafts now offer Automatic plus direct Local, Zen, Codex Terra, Codex Sol and
   Claude Opus choices. Automatic uses a configured `LLM_*` gateway exclusively
@@ -16,10 +26,21 @@ Current release: **0.5.6**.
   provider detail now survives a page reload instead of disappearing with the
   click; the release gate also completed and filed a full Story through Zen.
 - **Opinion has a working frontier ladder.** Automatic tries Codex Sol, then
-  Claude Opus; explicit choices never fall back. Codex uses a web-search
-  research pass that never sees the voice, then receives the configured voice
-  over stdin for a tool-free writing pass. Claude keeps its path-only voice
-  handoff. Neither provider puts the voice in argv.
+  Claude Opus as complete, independent research-and-writing pairs; explicit
+  choices never fall back. Codex uses a web-search research pass that never
+  sees the voice, then receives the configured voice over stdin for a native
+  full-capability writing pass. Claude keeps its path-only, tool-free writing
+  handoff. Neither provider puts the voice in argv. A provider refusal,
+  assistant note, implausible headline, or incomplete body is now a failed run,
+  never a publishable draft. Automatic starts the next pair from scratch; a
+  named choice reports the failure and stays on that provider. The provider
+  that actually completes Automatic is stored on both the request and job.
+- **The default test command is database-safe.** `npm test` now enters through
+  a fail-closed launcher that removes inherited `DATABASE_URL` and hosted
+  runtime flags before either test lane starts. It also clears an inherited
+  `RUN_LIVE_MODEL_TESTS`, so an ordinary run cannot accidentally contact or
+  bill a provider. Tests that need Postgres create and opt into their own
+  disposable database after the startup guard runs.
 - **Model choice has a real migration.** Migration 0025 adds the durable choice
   to Story jobs and Opinion requests. Its fresh-install path now creates the
   historically lazy Opinion request table before altering it, with a PGlite
@@ -211,7 +232,7 @@ against the finished candidate, and what it found went in before the tag:
 - **Two console windows stopped stealing focus every five minutes.** Both
   five-minute tasks put a window on the operator's screen, which took focus and
   interrupted whatever was being typed — twelve times an hour. `-WindowStyle
-  Hidden` does not fix it: Task Scheduler creates the console host and shows it
+Hidden` does not fix it: Task Scheduler creates the console host and shows it
   before the script's own window style applies. They now run through
   `ops/run-hidden.vbs`, which has no console of its own.
 - `ops/status.ps1` answers "is it up" in plain words, and works when the paper
@@ -219,7 +240,7 @@ against the finished candidate, and what it found went in before the tag:
   the paper. `ops/TownReporter Control.cmd` is the same for someone who does
   not want a terminal: double-click, pick a number. It cannot publish or delete
   anything.
-- Documented plainly: both start triggers are *at logon*, so a machine sitting
+- Documented plainly: both start triggers are _at logon_, so a machine sitting
   at a lock screen after a reboot runs nothing until someone signs in. Verified
   by stopping the database, the app and the tunnel, then firing only the logon
   tasks: fully up in 45 seconds.
@@ -285,7 +306,7 @@ against the finished candidate, and what it found went in before the tag:
   plainly that its URL becomes a 404 and that a correction is what the paper
   normally does instead.
 - **Nothing deleted is gone straight away.** A copy of anything removed waits
-  30 days under *Recently deleted* on the Server page, and an Undo appears
+  30 days under _Recently deleted_ on the Server page, and an Undo appears
   where the delete happened. Restoring puts the row back with its original id,
   so a story keeps its URL and its corrections, and an editorial keeps its fact
   sheet, rather than coming back orphaned. It is a snapshot table rather than a
@@ -569,7 +590,6 @@ Evidence hardening on the path from capture → reporting → story → proof. D
 - First signed-in user remains owner. A second identity is not auto-granted editor.
 
 ## 0.2.0 — 2026-08-26
-
 
 The public record is only the beginning. Stories are researched before they are written. Dark Desk opens on things worth examining.
 

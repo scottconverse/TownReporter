@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  effectiveStoryModelChoice,
   modelChoiceLabel,
   modelChoiceHelp,
   OPINION_MODEL_CHOICES,
@@ -11,7 +12,12 @@ import {
 } from "./model-choice.ts";
 
 const STORY_VALUES = [
-  "auto", "local", "zen", "codex-balanced", "codex-frontier", "claude-frontier",
+  "auto",
+  "local",
+  "zen",
+  "codex-balanced",
+  "codex-frontier",
+  "claude-frontier",
 ] as const;
 
 describe("model choice contract", () => {
@@ -36,6 +42,13 @@ describe("model choice contract", () => {
     for (const invalid of [undefined, null, "", "codex", "local; rm", 0, {}, []]) {
       assert.equal(storyModelChoice(invalid), "auto");
     }
+  });
+
+  it("preserves Automatic's configured-gateway selection for the whole queued run", () => {
+    assert.equal(effectiveStoryModelChoice("configured"), "configured");
+    assert.equal(effectiveStoryModelChoice("codex-balanced"), "codex-balanced");
+    assert.equal(effectiveStoryModelChoice("not-a-provider"), "auto");
+    assert.equal(modelChoiceLabel("configured"), "Configured gateway");
   });
 
   it("round-trips Opinion choices and narrows Story-only or invalid input to Automatic", () => {
@@ -70,13 +83,13 @@ describe("model choice contract", () => {
     );
   });
 
-  it("gives Opinion setup steps for both authorized frontier providers", () => {
+  it("gives Opinion setup steps for its two native CLI providers", () => {
     const guidance = opinionProviderProblem(
       "AI is not available. Set ANTHROPIC_API_KEY, XAI_API_KEY, or LLM_BASE_URL.",
     );
     assert.match(guidance, /Codex/);
     assert.match(guidance, /Claude Code/);
-    assert.match(guidance, /ANTHROPIC_API_KEY/);
+    assert.doesNotMatch(guidance, /ANTHROPIC_API_KEY/);
     assert.doesNotMatch(guidance, /set .*XAI_API_KEY|set .*LLM_BASE_URL/i);
   });
 });

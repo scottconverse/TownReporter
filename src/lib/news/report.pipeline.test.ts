@@ -97,8 +97,10 @@ const lead: LeadRow = {
 describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
   it("follows the trail, retrieves deep packet facts, and does not treat grounding as a rewrite", async () => {
     const writePackets: string[] = [];
+    const modelChoices: string[] = [];
     let versions = 10;
-    const chat: ReportChat = async (system, user) => {
+    const chat: ReportChat = async (system, user, _maxTokens, modelChoice) => {
+      modelChoices.push(String(modelChoice));
       if (system === REPORT_RESEARCH_SYSTEM) {
         return {
           ok: true,
@@ -125,7 +127,8 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
         return {
           ok: true,
           text: JSON.stringify({
-            headline: "Group 2 waterline work starts Aug. 31 after June delay, packet shows $2.4 million",
+            headline:
+              "Group 2 waterline work starts Aug. 31 after June delay, packet shows $2.4 million",
             dek: "Hover Street crossings close for six weeks. A valve shortage pushed the job from June.",
             body: [
               "Longmont will shut parts of Hover Street at 9th and 17th starting August 31 as crews replace Group 2 water lines, a phase the August 25 packet describes as the stretch between those crossings.",
@@ -166,15 +169,22 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
       return { ok: true, text: "{}" };
     };
 
+    let probeCalls = 0;
     const result = await reportAndDraft(
-      { userId: "pipeline-test", lead, urls: [ANNOUNCE], memory: [] },
+      { userId: "pipeline-test", lead, urls: [ANNOUNCE], memory: [], modelChoice: "auto" },
       {
+        probe: async () => {
+          probeCalls += 1;
+          return { ok: true, label: "Desk gateway", choice: "configured" };
+        },
         ingest: async (url) => DOCS[url] ?? { url, title: url, text: "", extras: [] },
         search: async (q) => {
           const hits = [];
-          if (/prior|previous|schedule|2025|context/i.test(q)) hits.push({ title: "minutes", url: MINUTES });
+          if (/prior|previous|schedule|2025|context/i.test(q))
+            hits.push({ title: "minutes", url: MINUTES });
           if (/contract|amount|cost|gap/i.test(q)) hits.push({ title: "award", url: CONTRACT });
-          if (/delay|valve|shortage|contradiction/i.test(q)) hits.push({ title: "delay", url: DELAY });
+          if (/delay|valve|shortage|contradiction/i.test(q))
+            hits.push({ title: "delay", url: DELAY });
           if (/Hover|stakeholder|resident/i.test(q)) hits.push({ title: "crossings", url: ATTACH });
           return hits;
         },
@@ -205,7 +215,10 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
     assert.equal(result.form, "reported");
     assert.ok(result.source_urls.includes(PACKET));
     assert.ok(result.source_urls.every((u) => u.startsWith("https://")));
-    assert.doesNotMatch(result.body, /construction begins August 31[\s\S]*construction begins August 31[\s\S]*construction begins August 31/);
+    assert.doesNotMatch(
+      result.body,
+      /construction begins August 31[\s\S]*construction begins August 31[\s\S]*construction begins August 31/,
+    );
 
     const packetWrite = writePackets.join("\n");
     assert.match(packetWrite, /\$2\.4 million/);
@@ -229,6 +242,14 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
     assert.ok(published.length >= 1);
     assert.match(published[0]!.text, /\$2\.4 million/);
     assert.ok(result.unanswered.some((q) => /hydrant/i.test(q)));
+    assert.ok(modelChoices.length >= 2, "the pipeline must make more than one model call");
+    assert.deepEqual(
+      [...new Set(modelChoices)],
+      ["configured"],
+      "Automatic must select once and pin every model call to the same provider",
+    );
+
+    assert.equal(probeCalls, 1, "Automatic resolves its provider once for the whole Story run");
   });
 
   it("runs one search per reporting lane even when research proposes four context queries", async () => {
@@ -482,64 +503,68 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
     assert.equal(searches.length, 1);
   });
 
-  it("still writes when extra fetches would hang past the draft budget", { timeout: 5000 }, async () => {
-    let extraCalls = 0;
-    const chat: ReportChat = async (system) => {
-      if (system === REPORT_RESEARCH_SYSTEM) {
+  it(
+    "still writes when extra fetches would hang past the draft budget",
+    { timeout: 5000 },
+    async () => {
+      let extraCalls = 0;
+      const chat: ReportChat = async (system) => {
+        if (system === REPORT_RESEARCH_SYSTEM) {
+          return {
+            ok: true,
+            text: JSON.stringify({
+              news: "Airport noise rules are voluntary abatement only.",
+              why_it_matters: "Vance Brand neighbors cannot get a ban.",
+              angle: "no ban on noisy planes",
+              form: "explainer",
+              questions: [],
+              fetch_urls: [PACKET],
+              unknowns: [],
+              follow: "",
+              lanes: { context: ["hang forever"] },
+            }),
+          };
+        }
         return {
           ok: true,
           text: JSON.stringify({
-            news: "Airport noise rules are voluntary abatement only.",
-            why_it_matters: "Vance Brand neighbors cannot get a ban.",
-            angle: "no ban on noisy planes",
+            headline: "Longmont cannot simply ban noisy planes at Vance Brand Airport",
+            dek: "Noise abatement is voluntary.",
+            body: "The city cannot impose a simple ban on noisy aircraft at Vance Brand Airport. The current path is voluntary noise abatement, not a prohibition.\n\nNeighbors have asked for a ban. The records in front of the desk do not show one.",
+            topic: "infrastructure",
+            source_urls: [ANNOUNCE],
             form: "explainer",
-            questions: [],
-            fetch_urls: [PACKET],
-            unknowns: [],
-            follow: "",
-            lanes: { context: ["hang forever"] },
+            found: [],
+            unanswered: [],
           }),
         };
-      }
-      return {
-        ok: true,
-        text: JSON.stringify({
-          headline: "Longmont cannot simply ban noisy planes at Vance Brand Airport",
-          dek: "Noise abatement is voluntary.",
-          body: "The city cannot impose a simple ban on noisy aircraft at Vance Brand Airport. The current path is voluntary noise abatement, not a prohibition.\n\nNeighbors have asked for a ban. The records in front of the desk do not show one.",
-          topic: "infrastructure",
-          source_urls: [ANNOUNCE],
-          form: "explainer",
-          found: [],
-          unanswered: [],
-        }),
       };
-    };
-    const result = await reportAndDraft(
-      { userId: "budget", lead, urls: [ANNOUNCE], memory: [] },
-      {
-        budgetMs: 10_000,
-        ingest: async (url) => {
-          if (url === ANNOUNCE) return DOCS[ANNOUNCE]!;
-          extraCalls += 1;
-          await new Promise(() => {});
-          return { url, title: url, text: "", extras: [] };
+      const result = await reportAndDraft(
+        { userId: "budget", lead, urls: [ANNOUNCE], memory: [] },
+        {
+          budgetMs: 10_000,
+          ingest: async (url) => {
+            if (url === ANNOUNCE) return DOCS[ANNOUNCE]!;
+            extraCalls += 1;
+            await new Promise(() => {});
+            return { url, title: url, text: "", extras: [] };
+          },
+          search: async () => {
+            extraCalls += 1;
+            await new Promise(() => {});
+            return [];
+          },
+          chat,
+          capture: async () => ({ version_id: 1, capture_event_id: 2 }),
+          hydrate: async () => [],
         },
-        search: async () => {
-          extraCalls += 1;
-          await new Promise(() => {});
-          return [];
-        },
-        chat,
-        capture: async () => ({ version_id: 1, capture_event_id: 2 }),
-        hydrate: async () => [],
-      },
-    );
-    assert.equal(extraCalls, 0);
-    assert.ok(!("error" in result), "error" in result ? result.error : "");
-    if ("error" in result) return;
-    assert.match(result.body, /voluntary noise/i);
-  });
+      );
+      assert.equal(extraCalls, 0);
+      assert.ok(!("error" in result), "error" in result ? result.error : "");
+      if ("error" in result) return;
+      assert.match(result.body, /voluntary noise/i);
+    },
+  );
 
   it("credits the originating Leader story URL, not the homepage listing", async () => {
     const HOME = "https://www.longmontleader.com/";
@@ -676,7 +701,9 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
                 kind: "primary",
               },
             ],
-            reporting_trail: [{ title: "press release", organization: "Ursa Major", url: PR, role: "primary" }],
+            reporting_trail: [
+              { title: "press release", organization: "Ursa Major", url: PR, role: "primary" },
+            ],
           }),
         };
       }
@@ -705,7 +732,9 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
         search: async (q) => {
           searches.push(q);
           if (/press release|ursa major/i.test(q)) {
-            return [{ title: "Ursa Major press release", url: PR, snippet: "company announcement" }];
+            return [
+              { title: "Ursa Major press release", url: PR, snippet: "company announcement" },
+            ];
           }
           return [];
         },
@@ -716,9 +745,15 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
       },
     );
     if ("error" in result) throw new Error(result.error);
-    assert.ok(searches.some((q) => /press release/i.test(q)), "should search for a press release");
+    assert.ok(
+      searches.some((q) => /press release/i.test(q)),
+      "should search for a press release",
+    );
     assert.ok(ingested.includes(PR), `should fetch the company PR, got ${ingested.join(", ")}`);
-    assert.ok(writePackets.some((p) => p.includes(PR)), "write pass should see the PR URL");
+    assert.ok(
+      writePackets.some((p) => p.includes(PR)),
+      "write pass should see the PR URL",
+    );
     assert.ok(result.claims.some((c) => c.kind === "primary" && c.url === PR));
   });
 });

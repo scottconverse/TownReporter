@@ -1,12 +1,15 @@
 type GrokOk = { ok: true; text: string };
 type GrokErr = { ok: false; error: string };
 
-import { storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
+import {
+  storyModelChoice,
+  type EffectiveStoryModelChoice,
+  type StoryModelChoice,
+} from "./model-choice.ts";
 
-export type EffectiveProviderChoice = StoryModelChoice | "configured";
+export type EffectiveProviderChoice = EffectiveStoryModelChoice;
 export type ProviderProbe =
-  | { ok: true; label: string; choice: EffectiveProviderChoice }
-  | { ok: false; error: string };
+  { ok: true; label: string; choice: EffectiveProviderChoice } | { ok: false; error: string };
 
 /** Same copy the working v1–v4 desks used when the platform key is absent. */
 export const GROK_UNAVAILABLE =
@@ -51,6 +54,16 @@ export type Provider =
   | ({ kind: "claude-code" } & ClaudeCodeConfig)
   | ({ kind: "codex" } & CodexConfig)
   | ({ kind: "openai" } & LlmConfig);
+
+type GrokChatAdapter = (
+  provider: Provider,
+  request: { system: string; user: string; maxTokens: number; model: string; timeoutMs: number },
+) => Promise<GrokOk | GrokErr>;
+
+/** Injectable runtime boundary for hermetic provider-dispatch tests. */
+export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>> & {
+  probe?: (choice?: EffectiveProviderChoice | string) => Promise<ProviderProbe>;
+};
 
 function trimSlash(url: string): string {
   return url.replace(/\/+$/, "");
@@ -99,9 +112,7 @@ export function resolveAnthropic(): AnthropicConfig | null {
   const apiKey = env("ANTHROPIC_API_KEY");
   if (!apiKey) return null;
   const raw = env("ANTHROPIC_EFFORT")?.toLowerCase();
-  const effort = (EFFORTS as readonly string[]).includes(raw ?? "")
-    ? (raw as Effort)
-    : "high";
+  const effort = (EFFORTS as readonly string[]).includes(raw ?? "") ? (raw as Effort) : "high";
   return {
     apiKey,
     model: env("ANTHROPIC_MODEL") || "claude-opus-5",
@@ -172,7 +183,9 @@ function explicitProvider(choice: StoryModelChoice): Provider | null {
     const api = resolveAnthropic();
     if (api) return { kind: "anthropic", ...api, model: "claude-opus-5", label: "Claude Opus" };
     const cli = resolveClaudeCode();
-    return cli ? { kind: "claude-code", ...cli, model: "claude-opus-5", label: "Claude Opus" } : null;
+    return cli
+      ? { kind: "claude-code", ...cli, model: "claude-opus-5", label: "Claude Opus" }
+      : null;
   }
   return null;
 }
@@ -206,7 +219,9 @@ function connectionError(label: string, err: unknown): string {
     : `${label} is unreachable. Check that it is running and that this machine is online.`;
 }
 
-async function probeOpenAi(provider: Extract<Provider, { kind: "openai" }>): Promise<ProviderProbe> {
+async function probeOpenAi(
+  provider: Extract<Provider, { kind: "openai" }>,
+): Promise<ProviderProbe> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (provider.apiKey && provider.apiKey !== "not-needed") {
     headers.Authorization = `Bearer ${provider.apiKey}`;
@@ -217,12 +232,19 @@ async function probeOpenAi(provider: Extract<Provider, { kind: "openai" }>): Pro
       signal: AbortSignal.timeout(4_000),
     });
     if (res.status === 401 || res.status === 403) {
-      return { ok: false, error: `${provider.label} rejected its credentials. Sign in or update its key.` };
+      return {
+        ok: false,
+        error: `${provider.label} rejected its credentials. Sign in or update its key.`,
+      };
     }
-    if (!res.ok) return { ok: false, error: `${provider.label} readiness check failed (${res.status}).` };
+    if (!res.ok)
+      return { ok: false, error: `${provider.label} readiness check failed (${res.status}).` };
     const body = (await res.json().catch(() => null)) as { data?: { id?: string }[] } | null;
     if (Array.isArray(body?.data) && !body.data.some((entry) => entry.id === provider.model)) {
-      return { ok: false, error: `${provider.label} is running but model ${provider.model} is not loaded.` };
+      return {
+        ok: false,
+        error: `${provider.label} is running but model ${provider.model} is not loaded.`,
+      };
     }
     return { ok: true, label: provider.label, choice: "configured" };
   } catch (err) {
@@ -230,7 +252,36 @@ async function probeOpenAi(provider: Extract<Provider, { kind: "openai" }>): Pro
   }
 }
 
-export async function probeProvider(choice?: EffectiveProviderChoice | string): Promise<ProviderProbe> {
+/** Validate a configured Anthropic key without generating or spending a completion. */
+async function probeAnthropic(
+  provider: Extract<Provider, { kind: "anthropic" }>,
+): Promise<ProviderProbe> {
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/models?limit=1", {
+      headers: {
+        Accept: "application/json",
+        "anthropic-version": "2023-06-01",
+        "x-api-key": provider.apiKey,
+      },
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (res.status === 401 || res.status === 403) {
+      return {
+        ok: false,
+        error:
+          "Claude rejected its credentials. Update ANTHROPIC_API_KEY or use a signed-in Claude Code session.",
+      };
+    }
+    if (!res.ok) return { ok: false, error: `Claude readiness check failed (${res.status}).` };
+    return { ok: true, label: provider.label, choice: "claude-frontier" };
+  } catch (err) {
+    return { ok: false, error: connectionError(provider.label, err) };
+  }
+}
+
+export async function probeProvider(
+  choice?: EffectiveProviderChoice | string,
+): Promise<ProviderProbe> {
   if (choice === "auto") {
     const configured = customGateway();
     if (configured) {
@@ -250,9 +301,7 @@ export async function probeProvider(choice?: EffectiveProviderChoice | string): 
   if (provider.kind === "codex") {
     const { probeCodex } = await import("./ai-codex.server.ts");
     const result = await probeCodex(provider.label);
-    return result.ok
-      ? { ...result, choice: storyModelChoice(choice) }
-      : result;
+    return result.ok ? { ...result, choice: storyModelChoice(choice) } : result;
   }
   if (provider.kind === "openai") {
     const result = await probeOpenAi(provider);
@@ -260,14 +309,12 @@ export async function probeProvider(choice?: EffectiveProviderChoice | string): 
       ? { ...result, choice: choice === "configured" ? "configured" : storyModelChoice(choice) }
       : result;
   }
-  if (provider.kind !== "claude-code") {
-    return { ok: true, label: provider.label, choice: storyModelChoice(choice) };
+  if (provider.kind === "anthropic") {
+    return probeAnthropic(provider);
   }
   const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
   const result = await probeClaudeCode(provider.label);
-  return result.ok
-    ? { ...result, choice: storyModelChoice(choice || "claude-frontier") }
-    : result;
+  return result.ok ? { ...result, choice: storyModelChoice(choice || "claude-frontier") } : result;
 }
 
 /**
@@ -341,14 +388,15 @@ export async function grokChat(
   user: string,
   maxTokens = 1400,
   opts?: { timeoutMs?: number; model?: string; choice?: EffectiveProviderChoice },
+  adapters?: GrokChatAdapters,
 ): Promise<GrokOk | GrokErr> {
   if (opts?.choice === "auto") {
     // Pick once before the call. Multi-pass pipelines resolve this once more at
     // their boundary and pass the effective choice to every pass, so a story
     // never silently changes author midway through.
-    const ready = await probeProvider("auto");
+    const ready = await (adapters?.probe ?? probeProvider)("auto");
     if (!ready.ok) return ready;
-    return grokChat(system, user, maxTokens, { ...opts, choice: ready.choice });
+    return grokChat(system, user, maxTokens, { ...opts, choice: ready.choice }, adapters);
   }
   const provider = resolveProvider(opts?.choice);
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
@@ -358,6 +406,10 @@ export async function grokChat(
   // PLANNER_MODEL: planning and judging are different jobs with different
   // prices, and one provider setting for both overpays for one of them.
   const model = opts?.model?.trim() || provider.model;
+  const selectedAdapter = adapters?.[provider.kind];
+  if (selectedAdapter) {
+    return selectedAdapter(provider, { system, user, maxTokens, model, timeoutMs });
+  }
   if (provider.kind === "anthropic") {
     return anthropicChat({ ...provider, model }, system, user, maxTokens, timeoutMs);
   }
@@ -510,7 +562,7 @@ export function plannerModel(): string {
 
 export function providerBudget(choice?: StoryModelChoice | string): ProviderBudget {
   const provider = resolveProvider(choice);
-  if (choice === "auto") {
+  if (choice === "auto" || choice === "configured") {
     return { wallMs: 660_000, callMs: 180_000, reserveMs: 180_000 };
   }
   if (provider?.kind === "claude-code" || provider?.kind === "codex") {

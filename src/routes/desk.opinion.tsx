@@ -1,14 +1,30 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Busy, DeskShell, InkButton, SecHead, areaClass, inputClass } from "@/components/desk-chrome";
+import {
+  Busy,
+  DeskShell,
+  InkButton,
+  SecHead,
+  areaClass,
+  inputClass,
+} from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
-import { deleteEditorial, discardEditorialRequest, fileWrittenEditorial, getEditorial, listEditorials, opinionReadiness, publishEditorial, startEditorial } from "@/lib/news/opinion";
+import {
+  deleteEditorial,
+  discardEditorialRequest,
+  fileWrittenEditorial,
+  getEditorial,
+  listEditorials,
+  opinionReadiness,
+  publishEditorial,
+  startEditorial,
+} from "@/lib/news/opinion";
 import { stalledRunCopy } from "@/lib/news/desk-copy";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { ModelPicker } from "@/components/model-picker";
-import type { OpinionModelChoice } from "@/lib/news/model-choice";
+import { modelChoiceLabel, type OpinionModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/opinion")({
   head: () => ({ meta: [{ title: "Opinion — TownReporter" }] }),
@@ -43,7 +59,13 @@ function OpinionPage() {
     which is indistinguishable from broken and considerably more annoying.
   */
   const pieceRef = useRef<HTMLElement | null>(null);
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{
+    text: string;
+    kind: "info" | "success" | "error";
+  } | null>(null);
+  const setError = (text: string) => setNotice({ text, kind: "error" });
+  const setSuccess = (text: string) => setNotice({ text, kind: "success" });
+  const setInfo = (text: string) => setNotice({ text, kind: "info" });
   /*
     A piece the editor wrote somewhere else.
 
@@ -104,43 +126,43 @@ function OpinionPage() {
     onSuccess: (r) => {
       setConfirmId(null);
       if (!r.ok) {
-        setNotice(r.error);
+        setError(r.error);
         return;
       }
-      setNotice("Cleared off the desk. Nothing was written, so there was nothing to keep.");
+      setSuccess("Cleared off the desk. Nothing was written, so there was nothing to keep.");
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
-    onError: () => setNotice("That would not clear. Nothing was changed."),
+    onError: () => setError("That would not clear. Nothing was changed."),
   });
 
   const fileWritten = useMutation({
     mutationFn: (text: string) => fileWrittenEditorial({ data: text }),
     onSuccess: (r) => {
       if (!r.ok) {
-        setNotice(r.error);
+        setError(r.error);
         return;
       }
       setWritten("");
       setShowWritten(false);
-      setNotice("Filed as a draft. Read it below, then publish when you are ready.");
+      setSuccess("Filed as a draft. Read it below, then publish when you are ready.");
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
-    onError: () => setNotice("That would not file. Nothing was changed."),
+    onError: () => setError("That would not file. Nothing was changed."),
   });
 
   const start = useMutation({
     mutationFn: () => startEditorial({ data: { subject, askedFor, modelChoice } }),
     onSuccess: (res) => {
       if (!res?.ok) {
-        setNotice(res?.error ?? "That did not start.");
+        setError(res?.error ?? "That did not start.");
         return;
       }
       setSubject("");
       setAskedFor("");
-      setNotice("Writing. It fetches its own records first, so give it 10–40 minutes.");
+      setInfo("Writing. It fetches its own records first, so give it 10–40 minutes.");
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
-    onError: (err) => setNotice(err instanceof Error ? err.message : "That did not start."),
+    onError: (err) => setError(err instanceof Error ? err.message : "That did not start."),
   });
 
   /*
@@ -154,13 +176,13 @@ function OpinionPage() {
     mutationFn: (draftId: number) => publishEditorial({ data: draftId }),
     onSuccess: (r) => {
       if (!r?.ok) {
-        setNotice(r?.error ?? "That did not print.");
+        setError(r?.error ?? "That did not print.");
         return;
       }
-      setNotice("On the paper. See it under Published, or read it on the paper.");
+      setSuccess("On the paper. See it under Published, or read it on the paper.");
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
-    onError: (err) => setNotice(err instanceof Error ? err.message : "That did not print."),
+    onError: (err) => setError(err instanceof Error ? err.message : "That did not print."),
   });
 
   const remove = useMutation({
@@ -168,26 +190,27 @@ function OpinionPage() {
     onSuccess: (res, draftId) => {
       setConfirmId(null);
       if (!res?.ok) {
-        setNotice(res?.error ?? "That did not delete.");
+        setError(res?.error ?? "That did not delete.");
         return;
       }
       if (openId === draftId) setOpenId(null);
-      setNotice("");
+      setSuccess("Deleted, and kept for 30 days. Undo is available below.");
       setUndo(res.trashId);
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
-    onError: (err) => setNotice(err instanceof Error ? err.message : "That did not delete."),
+    onError: (err) => setError(err instanceof Error ? err.message : "That did not delete."),
   });
 
   const undoDelete = useMutation({
     mutationFn: (id: number) => restoreTrashItem({ data: id }),
     onSuccess: (res) => {
       setUndo(null);
-      if (!res?.ok) setNotice(res?.error ?? "That would not go back.");
+      if (!res?.ok) setError(res?.error ?? "That would not go back.");
+      else setSuccess("Put back on the Opinion desk.");
       void qc.invalidateQueries({ queryKey: ["editorials"] });
       void qc.invalidateQueries({ queryKey: ["trash"] });
     },
-    onError: (err) => setNotice(err instanceof Error ? err.message : "That would not go back."),
+    onError: (err) => setError(err instanceof Error ? err.message : "That would not go back."),
   });
 
   const rows = list.data ?? [];
@@ -199,10 +222,9 @@ function OpinionPage() {
       kicker="Editor desk"
       lede={
         <>
-          Editorials run unsigned, as the paper's own position, with OPINION in
-          the headline and the receipts at the end. They are drafts until you
-          publish one, and a published piece is never edited — a correction runs
-          as a dated note above it.
+          Editorials run unsigned, as the paper's own position, with OPINION in the headline and the
+          receipts at the end. They are drafts until you publish one, and a published piece is never
+          edited — a correction runs as a dated note above it.
         </>
       }
     >
@@ -212,21 +234,33 @@ function OpinionPage() {
           sub="A subject, a URL, or a sentence. A pasted link gets opened and read before anything is written."
         />
         {ready.isPending || ready.isFetching ? (
-          <p role="status" className="mt-4 max-w-2xl border border-rule bg-paper-2 px-3 py-2.5 text-sm text-muted">
+          <p
+            role="status"
+            className="mt-4 max-w-2xl border border-rule bg-paper-2 px-3 py-2.5 text-sm text-muted"
+          >
             Checking the editorial voice and writing model…
           </p>
         ) : ready.isError ? (
-          <div role="alert" className="mt-4 max-w-2xl border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust">
-            <b>The desk could not check the writing model.</b> Nothing can be queued until the check succeeds.{" "}
+          <div
+            role="alert"
+            className="mt-4 max-w-2xl border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust"
+          >
+            <b>The desk could not check the writing model.</b> Nothing can be queued until the check
+            succeeds.{" "}
             <button type="button" className="inline-link" onClick={() => void ready.refetch()}>
               Check again
             </button>
           </div>
         ) : ready.data && !ready.data.ready ? (
-          <div role="alert" className="mt-4 max-w-2xl border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust">
+          <div
+            role="alert"
+            className="mt-4 max-w-2xl border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust"
+          >
             <b>This desk cannot write yet.</b>
             <ul className="mt-1 list-disc pl-5">
-              {ready.data.problems.map((problem, index) => <li key={`${index}-${problem}`}>{problem}</li>)}
+              {ready.data.problems.map((problem, index) => (
+                <li key={`${index}-${problem}`}>{problem}</li>
+              ))}
             </ul>
           </div>
         ) : null}
@@ -273,9 +307,28 @@ function OpinionPage() {
                 !ready.data?.ready
               }
             >
-              {start.isPending ? "Starting…" : ready.isPending || ready.isFetching ? "Checking…" : "Write an editorial"}
+              {start.isPending
+                ? "Starting…"
+                : ready.isPending || ready.isFetching
+                  ? "Checking…"
+                  : "Write an editorial"}
             </InkButton>
-            {notice ? <span className="text-sm text-muted">{notice}</span> : null}
+            <span
+              role="alert"
+              aria-live="assertive"
+              aria-atomic="true"
+              className="text-sm text-rust"
+            >
+              {notice?.kind === "error" ? notice.text : ""}
+            </span>
+            <span
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="text-sm text-muted"
+            >
+              {notice && notice.kind !== "error" ? notice.text : ""}
+            </span>
           </div>
         </div>
       </section>
@@ -288,9 +341,7 @@ function OpinionPage() {
         {showWritten ? (
           <div className="mt-4 max-w-2xl space-y-3">
             <label className="block">
-              <span className="text-[11px] tracking-[0.14em] text-muted uppercase">
-                The piece
-              </span>
+              <span className="text-[11px] tracking-[0.14em] text-muted uppercase">The piece</span>
               <textarea
                 className={areaClass + " mt-1 w-full"}
                 rows={14}
@@ -347,7 +398,9 @@ function OpinionPage() {
         />
         {list.isError && rows.length === 0 ? (
           <ScreenError
-            message={list.error instanceof Error ? list.error.message : "Could not load editorials."}
+            message={
+              list.error instanceof Error ? list.error.message : "Could not load editorials."
+            }
             onRetry={() => void list.refetch()}
             retrying={list.isRefetching}
           />
@@ -367,6 +420,7 @@ function OpinionPage() {
                     <span className="ml-2 text-sm text-muted">
                       {r.source_kind === "article" ? "from our story" : "from a note"}
                       {r.words ? ` · ${r.words} words` : ""}
+                      {` · ${modelChoiceLabel(r.model_choice)}`}
                     </span>
                   </span>
                   {!r.finished_at && r.stalled ? (

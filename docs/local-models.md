@@ -14,12 +14,12 @@ again in a month.
 
 ## The machine
 
-| | |
-|---|---|
-| System RAM | 63.8 GB (44.7 free at the time of the test) |
-| GPU | AMD Radeon 8060S, **64 GB** of the 128 GB unified pool |
-| Local models | 24 on this box, up to `gpt-oss-120b` (63 GB) |
-| Server | LM Studio, OpenAI-compatible, `http://127.0.0.1:1234/v1` |
+|              |                                                          |
+| ------------ | -------------------------------------------------------- |
+| System RAM   | 63.8 GB (44.7 free at the time of the test)              |
+| GPU          | AMD Radeon 8060S, **64 GB** of the 128 GB unified pool   |
+| Local models | 24 on this box, up to `gpt-oss-120b` (63 GB)             |
+| Server       | LM Studio, OpenAI-compatible, `http://127.0.0.1:1234/v1` |
 
 `gpt-oss-120b` is 63.39 GB against a 64 GB pool. It loads and then has no room
 left for context, so it was not tested.
@@ -30,16 +30,16 @@ left for context, so it was not tested.
 
 Eight distinct jobs, one entry point (`grokChat`) for seven of them.
 
-| Job | Output cap | Fires | Local? |
-|---|---|---|---|
-| Scan → leads | 3,500 tok | once per scan | maybe |
-| Draft: research pass | 900 tok | once per draft | **yes, fair candidate** |
-| Draft: write | 2,200 tok | once per draft | no — readers see this |
-| Draft: edit | — | once per draft | no |
-| **Dark planner** | 2,200 tok | **up to 25× per round** | **the whole question** |
-| Dark synthesis | 3,200 tok | once per round | no — this is the judgment |
-| Dark brief | 1,200 tok | once per round | no |
-| Editorial | — | on request | no — needs web tools and the private voice |
+| Job                  | Output cap | Fires                   | Local?                                     |
+| -------------------- | ---------- | ----------------------- | ------------------------------------------ |
+| Scan → leads         | 3,500 tok  | once per scan           | maybe                                      |
+| Draft: research pass | 900 tok    | once per draft          | **yes, fair candidate**                    |
+| Draft: write         | 2,200 tok  | once per draft          | no — readers see this                      |
+| Draft: edit          | —          | once per draft          | no                                         |
+| **Dark planner**     | 2,200 tok  | **up to 25× per round** | **the whole question**                     |
+| Dark synthesis       | 3,200 tok  | once per round          | no — this is the judgment                  |
+| Dark brief           | 1,200 tok  | once per round          | no                                         |
+| Editorial            | —          | on request              | no — needs web tools and the private voice |
 
 The planner is the only job with the volume to be worth moving. Everything else
 fires once or twice.
@@ -55,11 +55,11 @@ counting the items the desk actually consumes — searches, URLs to fetch,
 entities, relationships, hypotheses, claims, frontier items, anomalies, dead
 ends, questions — and parsed with the app's own `parseJsonBlock`.
 
-| | median items | median wall | cost | runs |
-|---|---|---|---|---|
-| `gemma-4-12b-it-qat` (local) | 22 | 31 s | $0 | 1 |
-| `qwen3.6-35b-a3b` (local) | **26** | 37 s | $0 | 4 |
-| `claude-haiku-4-5` | **50** | 63 s | ~$0.08/hop | 3 |
+|                              | median items | median wall | cost       | runs |
+| ---------------------------- | ------------ | ----------- | ---------- | ---- |
+| `gemma-4-12b-it-qat` (local) | 22           | 31 s        | $0         | 1    |
+| `qwen3.6-35b-a3b` (local)    | **26**       | 37 s        | $0         | 4    |
+| `claude-haiku-4-5`           | **50**       | 63 s        | ~$0.08/hop | 3    |
 
 Every successful local run: 26, 24, 30. Every successful Haiku run: 53, 50.
 The gap is consistent, not sampling noise. **Local finds about 52% of what
@@ -76,14 +76,14 @@ fewer threads to pull.
 
 ### Speed is not the problem
 
-| | |
-|---|---|
-| 12B decode | 61.5 tok/s |
-| 35B decode | ~60 tok/s |
+|                            |                                             |
+| -------------------------- | ------------------------------------------- |
+| 12B decode                 | 61.5 tok/s                                  |
+| 35B decode                 | ~60 tok/s                                   |
 | Full 24,000-character pack | 7,033 prompt + 1,200 completion in **25 s** |
-| 35B load time | 19 s, 20.55 GiB resident |
+| 35B load time              | 19 s, 20.55 GiB resident                    |
 
-Local is *faster* than the Claude Code CLI (37 s against 63 s), because the CLI
+Local is _faster_ than the Claude Code CLI (37 s against 63 s), because the CLI
 reloads a ~25,000-token preamble on every call. Speed is an argument for local.
 It just is not the argument that decides this.
 
@@ -116,24 +116,29 @@ to the heuristic. The planner is deliberately called with no tools, and it
 sometimes objects rather than working without them.
 
 Since 0.5.1 this is at least recorded: a round that fell back appends
-*"Planner fell back on N of M hops: …"* to its summary. Before that it was
+_"Planner fell back on N of M hops: …"_ to its summary. Before that it was
 silent, which is how a completely dead planner went unnoticed until the database
 was found to contain zero entities, claims and hypotheses.
 
 ---
 
-## The thing that would have to be built first
+## What changed after these measurements
 
-There is **no per-call provider routing**. `resolveProvider()` picks one
-provider for the whole application. `grokChat`'s `model` option chooses a model
-*within* that provider, which is how the Haiku/Opus split works.
+The measurements above are still the dated evidence for the Dark Desk planner,
+but the application is no longer all-or-nothing. TownReporter now has per-run
+Story routing and a separate Opinion frontier path:
 
-So `LLM_BASE_URL` pointed at LM Studio today sends **everything** local —
-including the story writing and the editorials. It is all or nothing.
+| Work               | Current provider rule                                                                                                             |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Scan and Dark Desk | the configured provider (`LLM_*`, Anthropic, Claude Code, or Grok)                                                                |
+| Story — Automatic  | configured `LLM_*` gateway when present; otherwise first ready Zen MiMo → Codex Terra → Claude Opus rung                          |
+| Story — explicit   | Local Qwen, Zen MiMo, Codex Terra, Codex Sol, or Claude Opus; no fallback                                                         |
+| Opinion            | Automatic runs a complete Codex Sol pair and, if needed, a fresh Claude Opus pair; explicit Codex/Claude choices do not fall back |
 
-Mixing would mean giving `grokChat` a per-call provider alongside its per-call
-model. Contained, roughly 30 lines and tests, and worth doing only if some job
-actually earns it.
+Pointing `LLM_BASE_URL` at LM Studio therefore makes that gateway the configured
+provider for Scan and Dark Desk and the forced provider for **Story Automatic**.
+It does not capture an explicit Story choice, and it does not route Opinion.
+The model picker stores the selected/effective provider on each durable run.
 
 ---
 
@@ -146,12 +151,14 @@ the currency is rate-limit headroom rather than dollars.
 
 Still open, in rough order of merit:
 
-1. **The draft research pass.** 900 tokens, structured, nobody reads it, fires
-   once per draft. The best remaining candidate and untested.
-2. **Scan.** Big input, structured output; the local 262K context is a genuine
+1. **Scan.** Big input, structured output; the local 262K context is a genuine
    advantage and the prefill numbers say it would keep up. Untested.
-3. **A stronger local model.** `gpt-oss-120b` needs a smaller quant to leave
+2. **A stronger local model.** `gpt-oss-120b` needs a smaller quant to leave
    room for context. Whether it reaches Haiku on this task is unknown.
+3. **Re-test the full Story lane after a model/runtime change.** The release
+   gate tried the loaded `qwen/qwen3.6-35b-a3b` through the real multi-pass
+   Story product and it did not complete. Local remains available by explicit
+   choice, but that readiness check proves only that the model is loaded.
 
 What would change the answer: a local model that proposes eight or ten URLs per
 hop instead of three. Nothing smaller than that is worth the wiring.

@@ -42,7 +42,10 @@ const ENV_KEYS = [
 /** No keys AND no local CLI — the exact first-run state the audit walked. */
 const BARE = { TOWNREPORTER_CLAUDE_CODE: "0" };
 
-async function withEnv<T>(vars: Record<string, string | undefined>, fn: () => Promise<T>): Promise<T> {
+async function withEnv<T>(
+  vars: Record<string, string | undefined>,
+  fn: () => Promise<T>,
+): Promise<T> {
   const prev: Record<string, string | undefined> = {};
   for (const k of ENV_KEYS) prev[k] = process.env[k];
   for (const k of ENV_KEYS) delete process.env[k];
@@ -96,7 +99,11 @@ describe("dark desk preflight (QA-002)", { timeout: 60000 }, () => {
       const jobs = await sql<{ id: number; status: string }>`
         select id, status from desk_jobs where kind = 'dark' and subject_id = ${investigationId}
       `;
-      assert.equal(jobs.length, 0, "no dark job should ever be enqueued when no model is configured");
+      assert.equal(
+        jobs.length,
+        0,
+        "no dark job should ever be enqueued when no model is configured",
+      );
     });
   });
 
@@ -109,17 +116,23 @@ describe("dark desk preflight (QA-002)", { timeout: 60000 }, () => {
       — the function reaches the ordinary "Investigation not found" answer
       instead of a preflight refusal — without ever starting that job.
     */
-    await withEnv({ ANTHROPIC_API_KEY: "test-key-not-used-for-network" }, async () => {
-      const userId = `dark-preflight-ok-${Date.now()}`;
-      const result = await startDarkRound({ userId }, 999_999_999);
-      assert.equal(result.ok, false);
-      if (result.ok) return;
-      assert.equal((result as { error?: string }).error, "Investigation not found");
-      assert.notEqual(
-        (result as { kind?: string }).kind,
-        "unconfigured",
-        "a configured provider must not be reported as unconfigured",
-      );
-    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response("{}", { status: 200 });
+    try {
+      await withEnv({ ANTHROPIC_API_KEY: "test-key-validated-by-stub" }, async () => {
+        const userId = `dark-preflight-ok-${Date.now()}`;
+        const result = await startDarkRound({ userId }, 999_999_999);
+        assert.equal(result.ok, false);
+        if (result.ok) return;
+        assert.equal((result as { error?: string }).error, "Investigation not found");
+        assert.notEqual(
+          (result as { kind?: string }).kind,
+          "unconfigured",
+          "a provider that answered its readiness probe must not be reported as unconfigured",
+        );
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
