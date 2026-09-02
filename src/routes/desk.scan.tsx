@@ -7,6 +7,8 @@ import { listScans, listSources, runScan } from "@/lib/news/desk";
 import { editorScanError, scanCountsLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
+import { ModelPicker } from "@/components/model-picker";
+import type { StoryModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/scan")({ component: ScanPage });
 
@@ -37,9 +39,11 @@ function ScanPage() {
     detail: string;
     retryable: boolean;
   } | null>(null);
+  // Per click, not persisted -- same as Story's picker (see model-choice.ts).
+  const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
 
   const scan = useMutation({
-    mutationFn: () => runScan(),
+    mutationFn: () => runScan({ data: { modelChoice } }),
     onSuccess: (res) => {
       if (res && "ok" in res && res.ok === false) {
         setBlocked({
@@ -75,6 +79,7 @@ function ScanPage() {
         proposed sources. It runs only when you click — this is the expensive button, not a loop.
       </p>
       <div className="scan-bar">
+        <ModelPicker value={modelChoice} onChange={setModelChoice} disabled={scanning} compact />
         <InkButton disabled={scanning} onClick={() => scan.mutate()}>
           {scanning ? "Scanning sources…" : "Run scan"}
         </InkButton>

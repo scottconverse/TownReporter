@@ -116,6 +116,10 @@ test("auth and readiness refuse model work before adapters, rate, or persistence
       "commitOpinionForAuthenticatedEditor",
       serverFunctions(opinionSrc, "opinion.ts").find((f) => f.name === "startEditorial"),
     ],
+    [
+      "commitScanForAuthenticatedEditor",
+      serverFunctions(src, "desk.ts").find((f) => f.name === "runScan"),
+    ],
   ]);
 
   const violations = [];

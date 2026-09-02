@@ -3,7 +3,7 @@ import { siteUrl } from "../paper.ts";
 import { probeProvider } from "./ai.ts";
 import { assertHttpUrl } from "./url-guard.ts";
 import { assertRate, audit } from "./ops.ts";
-import { enqueueJob, findOpenJob } from "./jobs.ts";
+import { enqueueJob, findOpenJob, kickJobs } from "./jobs.ts";
 import { scanPreflight } from "./preflight.ts";
 import { checkOpinionReadiness } from "./opinion-readiness.ts";
 import {
@@ -100,6 +100,98 @@ export async function commitStoryDraftForAuthenticatedEditor(
       ok: false as const,
       kind: "model-conflict" as const,
       error: `This lead is already drafting with ${modelChoiceLabel(persistedChoice)}. Open it to watch that run finish before choosing another model.`,
+      modelChoice: persistedChoice,
+      jobId: job.id,
+    };
+  }
+  return {
+    ok: true as const,
+    pending: true as const,
+    jobId: job.id,
+    modelChoice: persistedChoice,
+  };
+}
+
+export type ScanCommitDeps = {
+  probeProvider?: typeof probeProvider;
+  getSql?: typeof getSql;
+  assertRate?: typeof assertRate;
+  enqueueJob?: typeof enqueueJob;
+  findOpenJob?: typeof findOpenJob;
+  kickJobs?: typeof kickJobs;
+};
+
+/**
+ * The Scan commit boundary after deskMiddleware has authenticated the caller.
+ * Same shape as `commitStoryDraftForAuthenticatedEditor`: readiness is
+ * checked before a scan_runs row, rate accounting, or a job exist. A scan
+ * already open for this newsroom on a different model reports the same
+ * `model-conflict` guidance Story gives for a lead already drafting.
+ */
+export async function commitScanForAuthenticatedEditor(
+  input: {
+    context: AuthenticatedEditorContext;
+    modelChoice: StoryModelChoice;
+  },
+  deps: ScanCommitDeps = {},
+) {
+  const providerProbe = await (deps.probeProvider ?? probeProvider)(input.modelChoice);
+  const ready = scanPreflight(providerProbe);
+  if (!ready.ok) {
+    return {
+      ok: false as const,
+      kind: ready.kind,
+      error: ready.guidance,
+      detail: ready.detail,
+      retryable: ready.retryable,
+    };
+  }
+
+  const effectiveChoice = providerProbe.ok ? providerProbe.choice : input.modelChoice;
+  const open = await (deps.findOpenJob ?? findOpenJob)({
+    newsroomId: input.context.newsroomId,
+    kind: "scan",
+  });
+  if (open) {
+    const persistedChoice = effectiveStoryModelChoice(open.model_choice);
+    if (persistedChoice !== effectiveChoice) {
+      return {
+        ok: false as const,
+        kind: "model-conflict" as const,
+        error: `A scan is already running with ${modelChoiceLabel(persistedChoice)}. Open the scan page to watch that run finish before choosing another model.`,
+        modelChoice: persistedChoice,
+        jobId: open.id,
+      };
+    }
+    (deps.kickJobs ?? kickJobs)();
+    return {
+      ok: true as const,
+      pending: true as const,
+      jobId: open.id,
+      modelChoice: persistedChoice,
+    };
+  }
+
+  await (deps.assertRate ?? assertRate)(input.context.userId, "scan");
+  const sql = await (deps.getSql ?? getSql)();
+  const runRows = await sql<{ id: number }>`
+    insert into scan_runs (user_id, newsroom_id) values (${input.context.userId}, ${input.context.newsroomId}) returning id
+  `;
+  const runId = runRows[0]!.id;
+  const job = await (deps.enqueueJob ?? enqueueJob)({
+    userId: input.context.userId,
+    newsroomId: input.context.newsroomId,
+    kind: "scan",
+    subjectId: runId,
+    modelChoice: effectiveChoice,
+    modelChoiceSource: input.modelChoice === "auto" ? "auto" : "editor",
+  });
+  const persistedChoice = effectiveStoryModelChoice(job.model_choice);
+  if (persistedChoice !== effectiveChoice) {
+    return {
+      ok: false as const,
+      kind: "model-conflict" as const,
+      error: `A scan is already running with ${modelChoiceLabel(persistedChoice)}. Open the scan page to watch that run finish before choosing another model.`,
       modelChoice: persistedChoice,
       jobId: job.id,
     };

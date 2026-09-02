@@ -40,8 +40,6 @@ import {
 import { provenanceFromUrls } from "./findings";
 import { buildScanUserMessage, composeZeroLeadSummary, kindFromSourceUrl } from "./desk-copy";
 import {
-  enqueueJob,
-  findOpenJob,
   kickJobs,
   latestJob,
   runLooksStalled,
@@ -52,6 +50,7 @@ import {
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import { planAutomaticFailover } from "./automatic-failover.ts";
+import { runScanChatWithFailover } from "./scan-model-run.ts";
 import { looksLikeProviderAuthFailure } from "./preflight.ts";
 import type { DraftRow, LeadRow, MemoryRow, ScanRow, SourceRow } from "./types";
 
@@ -377,7 +376,8 @@ export const listScans = createServerFn({ method: "GET" })
 
 export const runScan = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
+  .validator((input: { modelChoice?: string } | undefined) => input ?? {})
+  .handler(async ({ context, data }) => {
     /*
       Check the model BEFORE spending the scan.
 
@@ -387,43 +387,49 @@ export const runScan = createServerFn({ method: "POST" })
       retry could satisfy. An outside audit walked a first-run paper with no
       provider and called it a Blocker, correctly — the core action dead-ends.
 
-      Refusing here costs nothing and says what to do. See `scanPreflight`.
+      Refusing here costs nothing and says what to do -- and it now goes
+      through the same commit boundary Story uses, so a scan run pins to a
+      concrete provider the same way a draft does. See `scanPreflight` and
+      `commitScanForAuthenticatedEditor`.
     */
-    const { scanPreflight } = await import("./preflight");
-    const ready = scanPreflight(await probeProvider());
-    if (!ready.ok) {
-      return {
-        ok: false as const,
-        kind: ready.kind,
-        error: ready.guidance,
-        detail: ready.detail,
-        retryable: ready.retryable,
-      };
-    }
-
     await ensureSeeds(context.userId);
-    await assertRate(context.userId, "scan");
-    const newsroomId = owned(context);
-    const existing = await findOpenJob({ newsroomId, kind: "scan" });
-    if (existing) {
-      kickJobs();
-      return { ok: true as const, pending: true as const, jobId: existing.id };
-    }
-    const sql = await getSql();
-    const runRows = await sql<{ id: number }>`
-      insert into scan_runs (user_id, newsroom_id) values (${context.userId}, ${newsroomId}) returning id
-    `;
-    const runId = runRows[0]!.id;
-    const job = await enqueueJob({
-      userId: context.userId,
-      newsroomId,
-      kind: "scan",
-      subjectId: runId,
+    const modelChoice = storyModelChoice(data.modelChoice);
+    const { commitScanForAuthenticatedEditor } = await import("./model-request-commit.server.ts");
+    return commitScanForAuthenticatedEditor({
+      context: { userId: context.userId, newsroomId: owned(context) },
+      modelChoice,
     });
-    return { ok: true as const, pending: true as const, jobId: job.id };
   });
 
-export async function performScanWork(job: DeskJob) {
+/** Injectable seam so a scan job with a real Claude/Codex 401 mid-run, and
+ * the failover it triggers, can be tested without a real provider. Same
+ * pattern as `PerformDraftWorkDeps`. */
+export type PerformScanWorkDeps = {
+  grokChat?: typeof grokChat;
+  probe?: typeof probeProvider;
+  setJobModelChoice?: typeof setJobModelChoice;
+  setJobStage?: typeof setJobStage;
+};
+
+/*
+  Wrapped in createServerOnlyFn for the same reason performDraftWork is (see
+  the comment above it): this file is reachable both statically, from client
+  route components, and dynamically, from jobs.ts's background runner. Once
+  this function's own body called `probeProvider` directly (for the
+  Automatic failover probe, mirroring `failOverAndRetry`), the bundler's
+  import-protection plugin started pulling ai-claude-code.server.ts and
+  ai-codex.server.ts into the client bundle via that reference -- the exact
+  build failure `performDraftWork`'s comment describes. Marking this
+  server-only strips it from every client bundle by construction.
+*/
+export const performScanWork = createServerOnlyFn(async function performScanWork(
+  job: DeskJob,
+  deps: PerformScanWorkDeps = {},
+) {
+  const runChat = deps.grokChat ?? grokChat;
+  const probe = deps.probe ?? probeProvider;
+  const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
+  const setStage = deps.setJobStage ?? setJobStage;
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const paperConfig = await getPaperConfig(owned(context));
   await ensureSeeds(context.userId);
@@ -546,12 +552,25 @@ export async function performScanWork(job: DeskJob) {
     payload,
   });
 
-  const ai = await grokChat(
-    scanSystem({ name: paperConfig.name, city: paperConfig.city, state: paperConfig.state }),
-    userMsg,
-    3500,
-    { timeoutMs: 90_000 },
-  );
+  /*
+    Automatic only: the same one-shot failover Draft uses (see
+    `failOverAndRetry`), except the fetched source text is never re-fetched
+    -- `userMsg`/`payload` above are reused verbatim for the retry, by
+    `runScanChatWithFailover`. An editor's explicit model choice never fails
+    over. Pulled into its own module so the retry decision is unit-testable
+    without desk.ts's `@/lib/db` alias import.
+  */
+  const ai = await runScanChatWithFailover({
+    job,
+    system: scanSystem({ name: paperConfig.name, city: paperConfig.city, state: paperConfig.state }),
+    user: userMsg,
+    maxTokens: 3500,
+    timeoutMs: 90_000,
+    grokChat: runChat,
+    probe,
+    setModelChoice,
+    setStage,
+  });
   if (!ai.ok) {
     await sql`
         update scan_runs
@@ -641,7 +660,7 @@ export async function performScanWork(job: DeskJob) {
     `;
 
   await audit(context.userId, "scan", `run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`);
-}
+});
 
 /** Injectable seam so a job with a real Claude/Codex 401 mid-run, and the
  * failover it triggers, can be tested without a real provider. Defaults to

@@ -2,6 +2,24 @@
 
 Current release: **0.6.0**.
 
+## 0.6.1 — 2026-09-02
+
+- **Scan gets the same per-run writing-model picker Story has.** Scan used to
+  call the model with no choice at all, so it always rode the configured-provider
+  chain (gateway → API key → Claude Code) with no picker and no way to switch
+  providers short of an operator change — a lapsed Claude Code login just
+  killed every scan. Scan now shows a **Writing model** picker next to **Run
+  scan**: Automatic (the default), Codex Terra, Codex Sol, or Claude Opus,
+  identical to Story's. The choice is checked before anything is fetched — a
+  scan with no ready model refuses immediately with setup guidance, spending
+  nothing — and the concrete provider is pinned on the job the same way a
+  draft is. If a scan on Automatic loses its login mid-run, it fails over to
+  the next rung exactly once, reusing the sources it already fetched rather
+  than fetching them again, and the run records which provider took over and
+  why. An explicit choice never falls back. A scan already open on a
+  different model reports the same conflict guidance a lead already drafting
+  does.
+
 ## 0.6.0 — 2026-09-02
 
 - **Sign in to a writing model from inside the desk.** The paper drafts through

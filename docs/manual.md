@@ -341,23 +341,26 @@ db:migrate`.
 
 ## The model
 
-Configured-provider precedence for Scan and Dark Desk is:
+Configured-provider precedence for Dark Desk is:
 
 | Set this                                        | What runs                                                         |
 | ----------------------------------------------- | ----------------------------------------------------------------- |
-| `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; also forces Story Automatic to it |
+| `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; also forces Story/Scan Automatic to it |
 | `ANTHROPIC_API_KEY`                             | Claude, billed to that key                                        |
 | _nothing_                                       | **Claude, through your Claude Code login**                        |
 | `XAI_API_KEY`                                   | Grok                                                              |
 
 ### Which feature uses which provider
 
-Scan and Dark Desk use the configured provider. Draft and Opinion additionally
-have an editor-facing, per-run picker.
+Dark Desk uses the configured provider. Scan, Draft and Opinion have an
+editor-facing, per-run picker instead — Scan picked this up 0.6.1; before
+that it used the configured-provider chain with no picker and no mid-run
+failover, and a lapsed Claude Code login just died with no way to switch
+providers short of an operator change.
 
 | Feature                       | Provider                                                                                                                                       | Model                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Scan                          | configured provider                                                                                                                            | configured model                                                            |
+| Scan                          | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung, with one mid-run failover to the next rung if that login lapses (reusing the sources already fetched, not fetching them again); explicit choice never falls back | Codex Terra/Sol, or Claude Opus                                             |
 | Draft (Queue or workbench)    | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung, with one mid-run failover to the next rung if that login lapses; explicit choice never falls back        | Codex Terra/Sol, or Claude Opus                                             |
 | Dark Desk synthesis and brief | the one you selected                                                                                                                           | the one you configured                                                      |
 | Dark Desk **planner**         | the one you selected                                                                                                                           | Haiku **only when the provider is Claude**; otherwise your configured model |
@@ -531,9 +534,9 @@ separate two-pass path and is always Claude Opus.
   server on every push.
 
 This is scoped to the reader's pages. **Working the desk is not trackerless** —
-Scan and Dark Desk send model calls to the configured provider. Story sends
-each run to its persisted effective provider: the configured gateway, or the
-selected/ready Codex or Claude choice. Every search (the
+Dark Desk sends model calls to the configured provider. Scan and Story each
+send their run to its persisted effective provider: the configured gateway,
+or the selected/ready Codex or Claude choice. Every search (the
 research pass, PULL, and every Dark Desk hop) goes to a
 third-party chain: Exa's hosted endpoint first, then DuckDuckGo, Bing, Brave
 and Wikipedia (`src/lib/news/search-web.ts`), unconditionally and with no key.
@@ -775,8 +778,8 @@ erDiagram
 
 ```mermaid
 flowchart TB
-    CALL["A model-backed desk action"] --> KIND{"Story picker?"}
-    KIND -->|no: Scan / Dark| CFG["Configured precedence<br/>LLM gateway → Anthropic key → Claude CLI → Grok"]
+    CALL["A model-backed desk action"] --> KIND{"Story/Scan picker?"}
+    KIND -->|no: Dark| CFG["Configured precedence<br/>LLM gateway → Anthropic key → Claude CLI → Grok"]
     KIND -->|yes: Automatic| Q1{"LLM_* configured?"}
     Q1 -->|yes| OAI["Use that gateway only"]
     Q1 -->|no| READY["First ready<br/>Claude Opus → Codex Terra"]
@@ -784,7 +787,7 @@ flowchart TB
     OAI --> SAVE["Persist effective provider on job"]
     READY --> SAVE
     ONE --> SAVE
-    SAVE --> RUN["Story pass runs on that provider"]
+    SAVE --> RUN["Story/Scan pass runs on that provider"]
     RUN -->|login lapses mid-run, Automatic only| NEXT["Next ladder rung, if ready<br/>(once per job)"]
     RUN -->|otherwise, or a named choice| SAME["Same provider for the rest of the run"]
 

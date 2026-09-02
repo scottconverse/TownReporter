@@ -6,6 +6,7 @@ import { ensureNewsroomSchema, requireEditor } from "./membership.ts";
 import { checkOpinionReadiness } from "./opinion-readiness.ts";
 import {
   commitOpinionForAuthenticatedEditor,
+  commitScanForAuthenticatedEditor,
   commitStoryDraftForAuthenticatedEditor,
 } from "./model-request-commit.server.ts";
 
@@ -80,6 +81,24 @@ async function ensureCommitBoundarySchema() {
       evidence text not null default '',
       newsworthiness integer not null default 0,
       created_at timestamptz not null default now()
+    )
+  `);
+  // Node unit tests skip the Vite-only migrations/*.sql glob (see db.ts's
+  // `migrate`, which catches that and no-ops), so scan_runs -- otherwise
+  // applied by migrations/0002_newsroom.sql -- needs its own minimal shape
+  // here, same as editorial_requests and leads above.
+  await sql.query(`
+    create table if not exists scan_runs (
+      id serial primary key,
+      user_id text not null,
+      newsroom_id integer not null default 1,
+      started_at timestamptz not null default now(),
+      finished_at timestamptz,
+      sources_fetched integer not null default 0,
+      leads_created integer not null default 0,
+      sources_proposed integer not null default 0,
+      summary text not null default '',
+      error text
     )
   `);
   return sql;
@@ -498,5 +517,134 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(rateCalls, 0);
     await sql`delete from desk_jobs where id = ${open.id}`;
     await sql`delete from leads where id = ${lead.id}`;
+  });
+
+  it("commits a Scan run with the concrete model choice and records source 'auto' vs 'editor', then reports the same model-conflict Story does", async () => {
+    const sql = await ensureCommitBoundarySchema();
+    const userId = `scan-commit-${Date.now()}-${Math.random()}`;
+
+    let editorEnqueueCalls = 0;
+    const editorPick = await commitScanForAuthenticatedEditor(
+      {
+        context: { userId, newsroomId: 1 },
+        modelChoice: "codex-frontier",
+      },
+      {
+        probeProvider: async (choice) => {
+          assert.equal(choice, "codex-frontier");
+          return { ok: true as const, label: "Codex Sol", choice: "codex-frontier" as const };
+        },
+        assertRate: async () => undefined,
+        enqueueJob: async (opts) => {
+          editorEnqueueCalls += 1;
+          return enqueueJob({ ...opts, kick: false });
+        },
+      },
+    );
+    assert.equal(editorPick.ok, true);
+    if (!editorPick.ok) assert.fail(editorPick.error);
+    assert.equal(editorPick.modelChoice, "codex-frontier");
+    assert.equal(editorEnqueueCalls, 1);
+    const [editorJob] = await sql<{ model_choice: string; model_choice_source: string }>`
+      select model_choice, model_choice_source from desk_jobs where id = ${editorPick.jobId}
+    `;
+    // An editor's explicit pick is never Automatic's doing.
+    assert.deepEqual(editorJob, {
+      model_choice: "codex-frontier",
+      model_choice_source: "editor",
+    });
+
+    // The same newsroom, same job still open, on a DIFFERENT model: mirrors
+    // Story's model-conflict behaviour exactly, and spends no rate on it.
+    let conflictRateCalls = 0;
+    const conflict = await commitScanForAuthenticatedEditor(
+      {
+        context: { userId, newsroomId: 1 },
+        modelChoice: "claude-frontier",
+      },
+      {
+        probeProvider: async () => ({
+          ok: true as const,
+          label: "Claude Opus",
+          choice: "claude-frontier" as const,
+        }),
+        assertRate: async () => {
+          conflictRateCalls += 1;
+        },
+      },
+    );
+    assert.equal(conflict.ok, false);
+    if (conflict.ok) assert.fail("a different open scan model must conflict");
+    assert.equal(conflict.kind, "model-conflict");
+    assert.equal(conflict.jobId, editorPick.jobId);
+    assert.equal(conflictRateCalls, 0);
+
+    await sql`update desk_jobs set status = 'completed' where id = ${editorPick.jobId}`;
+
+    // Now Automatic, with nothing else open: the effective concrete choice
+    // the probe resolved to is what gets persisted, tagged 'auto'.
+    let autoEnqueueCalls = 0;
+    const autoPick = await commitScanForAuthenticatedEditor(
+      {
+        context: { userId, newsroomId: 1 },
+        modelChoice: "auto",
+      },
+      {
+        probeProvider: async (choice) => {
+          assert.equal(choice, "auto");
+          return { ok: true as const, label: "Claude Opus", choice: "claude-frontier" as const };
+        },
+        assertRate: async () => undefined,
+        enqueueJob: async (opts) => {
+          autoEnqueueCalls += 1;
+          return enqueueJob({ ...opts, kick: false });
+        },
+      },
+    );
+    assert.equal(autoPick.ok, true);
+    if (!autoPick.ok) assert.fail(autoPick.error);
+    assert.equal(autoPick.modelChoice, "claude-frontier");
+    assert.equal(autoEnqueueCalls, 1);
+    const [autoJob] = await sql<{ model_choice: string; model_choice_source: string }>`
+      select model_choice, model_choice_source from desk_jobs where id = ${autoPick.jobId}
+    `;
+    assert.deepEqual(autoJob, {
+      model_choice: "claude-frontier",
+      model_choice_source: "auto",
+    });
+
+    await sql`delete from desk_jobs where user_id = ${userId}`;
+    await sql`delete from scan_runs where user_id = ${userId}`;
+  });
+
+  it("refuses a Scan run before spending anything when no provider is ready", async () => {
+    const userId = `scan-commit-refuse-${Date.now()}-${Math.random()}`;
+    let assertRateCalls = 0;
+    let enqueueCalls = 0;
+    const result = await commitScanForAuthenticatedEditor(
+      {
+        context: { userId, newsroomId: 1 },
+        modelChoice: "auto",
+      },
+      {
+        probeProvider: async () => ({
+          ok: false as const,
+          error:
+            "AI is not available. No model is set up yet: open Claude Code or Codex on this machine and log in, or set LLM_BASE_URL for an OpenAI-compatible gateway.",
+        }),
+        assertRate: async () => {
+          assertRateCalls += 1;
+        },
+        enqueueJob: async (opts) => {
+          enqueueCalls += 1;
+          return enqueueJob({ ...opts, kick: false });
+        },
+      },
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) assert.fail("an unready provider must refuse");
+    assert.equal(result.kind, "unconfigured");
+    assert.equal(assertRateCalls, 0);
+    assert.equal(enqueueCalls, 0);
   });
 });
