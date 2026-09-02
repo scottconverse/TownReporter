@@ -18,7 +18,9 @@ test("Opinion mutation feedback keeps separate always-mounted error and status r
   assert.match(route, /setSuccess\("On the paper\./);
 });
 
-test("Opinion rows expose the provider that actually completed the run", () => {
+test("Opinion rows use the tested attribution helper for the provider or human author", () => {
   assert.match(opinion, /r\.model_choice/);
-  assert.match(route, /modelChoiceLabel\(r\.model_choice\)/);
+  // Behavior, including human-authored rows, is covered in opinion-view.test.ts.
+  // This is only the route-to-helper wiring check.
+  assert.match(route, /editorialAttribution\(r\)/);
 });
