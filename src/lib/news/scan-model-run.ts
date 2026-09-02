@@ -11,6 +11,7 @@
  */
 import type { EffectiveProviderChoice, ProviderProbe, grokChat } from "./ai.ts";
 import { providerBudget } from "./ai.ts";
+import type { ProviderOverrides } from "./provider-registry.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel } from "./model-choice.ts";
 import { planAutomaticFailover } from "./automatic-failover.ts";
 
@@ -25,8 +26,22 @@ import { planAutomaticFailover } from "./automatic-failover.ts";
  * 90s so the configured-gateway path (150s wall budget, smaller callMs) is
  * never made worse than it already was.
  */
-export function scanCallTimeoutMs(choice: string): number {
-  return Math.max(90_000, providerBudget(choice).callMs);
+export function scanCallTimeoutMs(
+  choice: string,
+  overrides?: ProviderOverrides | null,
+): number {
+  return Math.max(90_000, providerBudget(choice, overrides).callMs);
+}
+
+/**
+ * The same function, bound to one paper's stored overrides, in the shape
+ * `runScanChatWithFailover` wants: `(choice) => ms`, re-evaluated per attempt
+ * so a mid-run failover is sized by the rung it actually moved to.
+ */
+export function scanCallTimeoutFor(
+  overrides?: ProviderOverrides | null,
+): (choice: string) => number {
+  return (choice: string) => scanCallTimeoutMs(choice, overrides);
 }
 
 type GrokResult = Awaited<ReturnType<typeof grokChat>>;

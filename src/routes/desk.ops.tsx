@@ -26,6 +26,18 @@ import {
   type ProviderLogin,
   type ProviderStatus,
 } from "@/lib/news/provider-login";
+import {
+  getProviderTimeSettings,
+  saveProviderTimeFn,
+  type ProviderTimeSetting,
+} from "@/lib/news/provider-settings";
+/*
+  The two bounds come from the PURE registry module, not from
+  provider-settings.ts: this is a client component, and the registry is the
+  half with no database handle, no `node:` imports and nothing to leak into
+  the browser bundle.
+*/
+import { ProviderTimeField } from "@/components/provider-time-field";
 import { editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
 
 export const Route = createFileRoute("/desk/ops")({
@@ -313,6 +325,31 @@ function WritingModels() {
   });
 
   /*
+    How long this paper lets each writing model take (0.6.2).
+
+    A separate query from the sign-in statuses on purpose: the statuses poll
+    every minute because a login can lapse at any moment, and re-reading a
+    stored number that only changes when someone types in this panel on the
+    same schedule would be noise. Owner-only on the server as well as here.
+  */
+  const times = useQuery({
+    queryKey: ["provider-times"],
+    queryFn: () => getProviderTimeSettings(),
+    enabled: isOwner,
+  });
+
+  /**
+   * Which time fields belong under which sign-in row. Both Codex models are
+   * the one Codex login; Claude Opus is the one Claude login.
+   */
+  const timesFor = (provider: string) =>
+    (times.data ?? []).filter((row) =>
+      provider === "codex"
+        ? row.kind === "codex"
+        : row.kind === "claude-code" || row.kind === "anthropic",
+    );
+
+  /*
     Arriving from a failed draft, the panel is the whole reason for the trip —
     and on a long Server page it is easy to land above it and not know. Scroll
     to it once, and say so in the live region for anyone not looking.
@@ -357,10 +394,40 @@ function WritingModels() {
       ) : (
         <ul className="mt-4 space-y-3">
           {(statuses.data ?? []).map((s) => (
-            <ProviderRow key={s.provider} status={s} onNote={setNote} />
+            <ProviderRow
+              key={s.provider}
+              status={s}
+              onNote={setNote}
+              times={timesFor(s.provider)}
+            />
           ))}
         </ul>
       )}
+      {/*
+        Providers with no sign-in row of their own.
+
+        A configured gateway (LLM_BASE_URL) has no login to manage here -- it
+        is an endpoint the operator pointed at -- but it is the door a local
+        model comes through today, and a local model is the exact case that
+        needs a longer per-call ceiling. Without this block the one provider
+        that most needs its timeout raised would be the one provider with no
+        field. Shown only when the machine actually has it.
+      */}
+      {(times.data ?? [])
+        .filter(
+          (row) =>
+            !["claude-code", "anthropic", "codex"].includes(row.kind) &&
+            row.availableOnThisMachine,
+        )
+        .map((row) => (
+          <div key={row.providerId} className="mt-3 border border-rule p-4">
+            <h3 className="font-display text-lg font-semibold">{row.label}</h3>
+            <p className="mt-1 text-sm text-ink-2">
+              {row.detail}. No sign-in to manage here: this one is configured by the operator.
+            </p>
+            <ProviderTimeField row={row} onNote={setNote} />
+          </div>
+        ))}
       <p className="mt-4 max-w-2xl text-sm text-muted">
         These are the command-line tools TownReporter drafts with. Being signed
         in to claude.ai in your browser or the Claude desktop app is a separate
@@ -374,9 +441,11 @@ function WritingModels() {
 function ProviderRow({
   status,
   onNote,
+  times,
 }: {
   status: ProviderStatus;
   onNote: (text: string) => void;
+  times: ProviderTimeSetting[];
 }) {
   const qc = useQueryClient();
   const [err, setErr] = useState("");
@@ -593,6 +662,10 @@ function ProviderRow({
       ) : null}
 
       {err ? <p className="mt-2 text-sm text-rust">{err}</p> : null}
+
+      {times.map((row) => (
+        <ProviderTimeField key={row.providerId} row={row} onNote={onNote} />
+      ))}
     </li>
   );
 }

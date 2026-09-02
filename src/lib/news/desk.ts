@@ -52,7 +52,8 @@ import {
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import { planAutomaticFailover } from "./automatic-failover.ts";
-import { runScanChatWithFailover, scanCallTimeoutMs } from "./scan-model-run.ts";
+import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
+import { readProviderOverrides } from "./provider-settings.ts";
 import { looksLikeProviderAuthFailure } from "./preflight.ts";
 import type { DraftRow, LeadRow, MemoryRow, ScanRow, SourceRow } from "./types";
 
@@ -573,7 +574,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     // made worse. See scanCallTimeoutMs's comment for the production timeout
     // this fixes: a clean 31-source fetch whose single AI read then died at
     // a flat 90s ceiling the CLI providers routinely need more of.
-    timeoutMs: scanCallTimeoutMs,
+    timeoutMs: scanCallTimeoutFor(await readProviderOverrides(job.newsroom_id).catch(() => ({}))),
     grokChat: runChat,
     probe,
     setModelChoice,
@@ -805,6 +806,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     memory,
     extraEvidence: prevNotes.scratch,
     extraUrls: moreUrls,
+    /*
+      The paper's own time budgets (0.6.2). Read once, here, and carried in
+      `draftInput` so the Automatic failover retry below is sized by the same
+      paper-adjusted numbers rather than reverting to the shipped defaults.
+      A failed read is not a reason to refuse to draft -- an empty object
+      means "no overrides", which is what every paper had before this.
+    */
+    providerOverrides: await readProviderOverrides(owned(context)).catch(() => ({})),
   };
   let reported = await runReport({
     ...draftInput,

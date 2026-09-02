@@ -36,11 +36,22 @@ const ENV_KEYS = [
   "ANTHROPIC_MODEL",
   "ANTHROPIC_EFFORT",
   "TOWNREPORTER_CLAUDE_CODE",
+  "TOWNREPORTER_CODEX",
   "CLAUDE_CLI_PATH",
 ] as const;
 
-/** No keys AND no local CLI — the exact first-run state the audit walked. */
-const BARE = { TOWNREPORTER_CLAUDE_CODE: "0" };
+/*
+  No keys AND neither local CLI — the exact first-run state the audit walked.
+
+  `TOWNREPORTER_CODEX: "0"` joined this in 0.6.2. Dark Desk's preflight used
+  to probe with no argument at all, which walked `resolveProvider()`'s default
+  chain and never reached Codex; now it probes the editor's actual choice, and
+  Automatic's ladder includes Codex. On a developer machine with the Codex CLI
+  installed and signed in, "no model is configured" was no longer true with
+  only Claude Code switched off — the test was describing a machine that no
+  longer existed, not a defect in the refusal.
+*/
+const BARE = { TOWNREPORTER_CLAUDE_CODE: "0", TOWNREPORTER_CODEX: "0" };
 
 async function withEnv<T>(
   vars: Record<string, string | undefined>,

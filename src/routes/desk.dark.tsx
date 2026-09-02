@@ -47,6 +47,8 @@ import { readableCapture } from "@/lib/news/html-text";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
+import { ModelPicker } from "@/components/model-picker";
+import { darkModelChoice, modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/dark")({
   component: DarkPage,
@@ -122,6 +124,19 @@ function DarkPage() {
     queryFn: () => listInvestigations(),
   });
   const runs = useQuery({ queryKey: ["dark-runs"], queryFn: () => listDarkRuns() });
+
+  /*
+    Which model digs (0.6.2).
+
+    Dark Desk is the one surface that had no picker: every round ran on
+    whatever `resolveProvider()` preferred on the machine. The choice is
+    carried on the job (`desk_jobs.model_choice`) exactly as a draft's is, and
+    remembered on the investigation, so "Keep digging" on a file that was
+    started on Codex stays on Codex rather than quietly changing author.
+  */
+  const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
+  const pickedFor = useRef<number | null>(null);
+  const [briefWaiting, setBriefWaiting] = useState(false);
   const detail = useQuery({
     queryKey: ["investigation", openId],
     queryFn: () => getInvestigation({ data: openId! }),
@@ -129,9 +144,41 @@ function DarkPage() {
     refetchInterval: (q) => {
       const st = q.state.data?.investigation.status;
       if (st === "investigating") return 2000;
+      // The brief is its own job (0.6.2); poll while one is in flight.
+      const bj = q.state.data?.briefJob;
+      if (bj && (bj.status === "queued" || bj.status === "running")) return 2000;
       return false;
     },
   });
+
+  /*
+    Open a file, and the picker shows what that file was last dug with.
+
+    Only once per file (`pickedFor`), so an editor who changes the model and
+    then watches the round finish does not have their choice overwritten by
+    the poll that lands a second later.
+  */
+  useEffect(() => {
+    const last = detail.data?.investigation.last_model_choice;
+    if (openId == null || pickedFor.current === openId) return;
+    if (!detail.data) return;
+    pickedFor.current = openId;
+    setModelChoice(darkModelChoice(last));
+  }, [openId, detail.data]);
+
+  /** A queued brief has landed (or failed); say so once and stop polling. */
+  useEffect(() => {
+    const bj = detail.data?.briefJob;
+    if (!briefWaiting || !bj) return;
+    if (bj.status === "queued" || bj.status === "running") return;
+    setBriefWaiting(false);
+    showWorkNotice(
+      bj.status === "completed"
+        ? "The brief is written."
+        : `No brief: ${editorError(bj.error ?? "") || bj.error || "it did not finish."}`,
+      bj.status === "completed",
+    );
+  }, [detail.data?.briefJob, briefWaiting]);
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["worth-a-look"] });
@@ -141,7 +188,7 @@ function DarkPage() {
   };
 
   const advance = useMutation({
-    mutationFn: (id: number) => continueInvestigation({ data: id }),
+    mutationFn: (id: number) => continueInvestigation({ data: { id, modelChoice } }),
     onSuccess: (res) => {
       if (!res || res.ok !== true) {
         const raw = res && "error" in res ? String(res.error ?? "") : "Research failed";
@@ -350,9 +397,16 @@ function DarkPage() {
   });
 
   const writeBrief = useMutation({
-    mutationFn: (id: number) => refreshBrief({ data: id }),
+    mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice } }),
     onSuccess: (res) => {
-      if (!res?.ok) showWorkNotice(res?.error ? `No brief: ${res.error}` : "No brief written.");
+      if (!res?.ok) {
+        showWorkNotice(res?.error ? `No brief: ${res.error}` : "No brief written.");
+        return;
+      }
+      // Queued, not written: the brief is a job now, and the file view below
+      // polls until it lands. See `startBriefJob` in src/lib/news/dark.ts.
+      setBriefWaiting(true);
+      showWorkNotice("Writing the brief…", true);
       invalidate();
     },
     onError: (err) =>
@@ -439,7 +493,20 @@ function DarkPage() {
           placeholder="https://…  ·  Costco rebate cap  ·  Front Range Civic Partners LLC"
           aria-label="Tip, URL, or subject to investigate"
         />
-        <div className="row-acts static">
+        <div className="row-acts static" id="dark-start-actions">
+          {/*
+            The same picker the open file has, and the same state behind it:
+            the first round of a new file is a round like any other, and an
+            editor who has decided which model digs should not have to open
+            the file first to say so.
+          */}
+          <ModelPicker
+            scope="dark"
+            value={modelChoice}
+            onChange={setModelChoice}
+            disabled={busyStart || digging}
+            compact
+          />
           <InkButton
             small
             type="submit"
@@ -485,7 +552,9 @@ function DarkPage() {
           onPark={() => park.mutate(openId)}
           onFollow={(seed) => followLead.mutate(seed)}
           onWriteBrief={() => writeBrief.mutate(openId)}
-          briefPending={writeBrief.isPending}
+          briefPending={writeBrief.isPending || briefWaiting}
+          modelChoice={modelChoice}
+          onModelChoice={setModelChoice}
         />
       ) : null}
 
@@ -619,7 +688,17 @@ function DarkPage() {
               <summary>What Dark Desk did — {(runs.data ?? []).length} recent runs</summary>
               {(runs.data ?? []).map((r) => (
                 <div key={r.id} className="run-row">
-                  <p className="meta">{formatDateTime(r.started_at)}</p>
+                  <p className="meta">
+                    {formatDateTime(r.started_at)}
+                    {/*
+                      Which model dug this round. A round that dug badly and a
+                      round that dug on a different model are different facts
+                      about the same file, and the history could not tell them
+                      apart before 0.6.2. Rounds dug before the picker existed
+                      have no answer, and say nothing rather than guessing.
+                    */}
+                    {r.model_choice ? ` · ${modelChoiceLabel(r.model_choice)}` : ""}
+                  </p>
                   {r.error ? (
                     <p className="side-item">
                       {editorError(r.error)}
@@ -747,6 +826,8 @@ function InvestigationWorkspace({
   onFollow,
   onWriteBrief,
   briefPending,
+  modelChoice,
+  onModelChoice,
 }: {
   openId: number;
   detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
@@ -766,6 +847,8 @@ function InvestigationWorkspace({
   onFollow: (seed: { paste: string; title: string }) => void;
   onWriteBrief: () => void;
   briefPending: boolean;
+  modelChoice: StoryModelChoice;
+  onModelChoice: (value: StoryModelChoice) => void;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   const [frN, setFrN] = useState(6);
@@ -829,6 +912,19 @@ function InvestigationWorkspace({
           <p className="meta">{statusLine}</p>
         </div>
         <div className="row-acts static">
+          {/*
+            The picker sits next to the button that spends, not in a settings
+            page: the editor decides which model digs at the moment they press
+            Keep digging, the same way they do on a Story draft. An explicit
+            choice never falls back to another provider.
+          */}
+          <ModelPicker
+            scope="dark"
+            value={modelChoice}
+            onChange={onModelChoice}
+            disabled={keepDisabled}
+            compact
+          />
           <InkButton disabled={keepDisabled} onClick={onKeepDigging}>
             {digging ? "Reading…" : "Keep digging"}
           </InkButton>

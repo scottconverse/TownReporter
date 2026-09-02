@@ -173,3 +173,68 @@ mid-investigation pack as the user message. Score by counting array items in the
 parsed JSON. Run each model at least three times — the first single-run
 comparison of 12B against 35B looked like a 4-item difference and was inside the
 noise; only the Haiku gap survived repetition.
+
+---
+
+## Adding a local model to the pickers
+
+As of 0.6.2 this is config plus one registry entry, not a code change spread
+across four files. Everything the desk knows about a writing model lives in
+`PROVIDER_REGISTRY`, in `src/lib/news/provider-registry.ts`.
+
+**Today, with no new entry at all:** point `LLM_BASE_URL` at the endpoint (plus
+`LLM_MODEL`, and `LLM_API_KEY` if it wants one). That is the `configured`
+registry entry. Automatic pins it for Story, Scan and Dark Desk whenever it is
+set. It does not appear in the picker by name, because it is "whatever the
+operator configured", not a model an editor chose.
+
+**To give it its own line in every picker**, add an entry:
+
+```ts
+{
+  id: "local-qwen",                     // also add it to PICKER_PROVIDER_IDS
+  label: "Local Qwen",                  // what the picker shows
+  detail: "On this machine",            // the half-line under the label
+  kind: "local",                        // inherits KIND_BUDGETS.local: 600s a call
+  model: "qwen/qwen3.6-35b-a3b",
+  baseUrl: "http://127.0.0.1:1234/v1",
+  envOverrides: { model: "LOCAL_MODEL", baseUrl: "LOCAL_BASE_URL" },
+  budget: KIND_BUDGETS.local,
+  enabled: () => Boolean(env("LOCAL_BASE_URL")) ,
+  offSwitchEnv: "TOWNREPORTER_LOCAL",
+  offeredFor: { story: true, scan: true, opinion: false, dark: true },
+  // no ladderRank: Automatic should not reach for it on its own
+  // no plannerModel: it serves one model and has never heard of anyone else's
+}
+```
+
+That one object is enough for: the Story, Scan and Dark Desk pickers; the
+Automatic ladder (if you give it a `ladderRank`); the time budgets on the
+Server page, including the editable per-call field; the help sentence under
+each picker; and the round history's "which model dug this". Every one of
+those is derived from the registry, and `provider-registry.test.ts` fails if a
+new entry is missing a field any of them read.
+
+Two things it deliberately does NOT get for free:
+
+- **A transport.** `kind: "local"` speaks the OpenAI-compatible protocol, and
+  `explicitProvider` in `ai.ts` routes `local` down the same path as `openai`.
+  A model server that is not OpenAI-compatible needs a new `kind` and a new
+  adapter.
+- **A planner model.** Leave `plannerModel` unset. Substituting a cheaper
+  model only makes sense inside one provider's own family — asking a local
+  endpoint for `claude-haiku-4-5` is audit finding TW-001, and the failure is
+  silent: the planner falls back to keyword matching without a word.
+
+**On time budgets.** `KIND_BUDGETS.local` allows ten minutes for one call
+against the CLIs' two and a half, because that is the measured shape of a 30B
+reading a 20,000-character pack on this machine. The owner can still change
+the per-call number for any provider on the Server page (Writing models →
+Time per call), between 10 seconds and 60 minutes, stored per paper. Neither
+of those makes the model faster; they change how long the desk waits before
+calling it a failure.
+
+**The quality question is still the one above.** None of this changes the
+measurement at the top of this page: on the Dark planner prompt, the local 35B
+found about half of what Haiku found. The wiring being easy is not an argument
+for using it.

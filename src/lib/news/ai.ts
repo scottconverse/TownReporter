@@ -6,6 +6,16 @@ import {
   type EffectiveStoryModelChoice,
   type StoryModelChoice,
 } from "./model-choice.ts";
+import {
+  KIND_BUDGETS,
+  automaticLadder,
+  effectiveBudget,
+  plannerModelFor,
+  providerEntry,
+  providerModel,
+  type ProviderBudget,
+  type ProviderOverrides,
+} from "./provider-registry.ts";
 import { PAPER } from "../paper.ts";
 
 export type EffectiveProviderChoice = EffectiveStoryModelChoice;
@@ -155,34 +165,50 @@ export function resolveClaudeCode(): ClaudeCodeConfig | null {
  * for an existing XAI_API_KEY.
  */
 function explicitProvider(choice: StoryModelChoice): Provider | null {
-  // TOWNREPORTER_CODEX=0 takes Codex out of the chain entirely, the same way
-  // TOWNREPORTER_CLAUDE_CODE=0 does for Claude. Without it there was no way
-  // to run a machine that has Codex installed as if it did not.
-  if (choice === "codex-balanced") {
-    if (env("TOWNREPORTER_CODEX") === "0") return null;
-    return {
-      kind: "codex",
-      model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra",
-      label: "Codex Terra",
-    };
-  }
-  if (choice === "codex-frontier") {
-    if (env("TOWNREPORTER_CODEX") === "0") return null;
-    return {
-      kind: "codex",
-      model: env("TOWNREPORTER_CODEX_SOL_MODEL") || "gpt-5.6-sol",
-      label: "Codex Sol",
-    };
-  }
-  if (choice === "claude-frontier") {
+  /*
+    Every field below now comes from PROVIDER_REGISTRY: the label the desk
+    shows, the model identifier, the environment variable that overrides it,
+    and the `TOWNREPORTER_CODEX=0` / `TOWNREPORTER_CLAUDE_CODE=0` off switch
+    an operator uses to run a machine as if it did not have that provider
+    installed. Adding a provider does not touch this function.
+  */
+  const entry = providerEntry(choice);
+  if (!entry) return null;
+  const model = providerModel(entry);
+
+  if (entry.kind === "claude-code") {
+    /*
+      Claude has two transports for one menu entry, and the registry names the
+      one this desk actually runs on. An install that keeps an API key gets
+      the native Messages API; everyone else gets the operator's local Claude
+      Code login, which is the whole point of `resolveClaudeCode`. Both answer
+      to the same label, and to the same registry budget.
+
+      `entry.enabled()` is NOT consulted here, and that is deliberate:
+      TOWNREPORTER_CLAUDE_CODE=0 means "this machine has no Claude Code CLI",
+      not "this machine may not talk to Claude at all". An install with an API
+      key and the CLI switched off has always been able to choose Claude Opus,
+      and `resolveClaudeCode` applies the switch to the transport it actually
+      governs.
+    */
     const api = resolveAnthropic();
-    if (api) return { kind: "anthropic", ...api, model: "claude-opus-5", label: "Claude Opus" };
+    if (api) return { kind: "anthropic", ...api, model, label: entry.label };
     const cli = resolveClaudeCode();
-    return cli
-      ? { kind: "claude-code", ...cli, model: "claude-opus-5", label: "Claude Opus" }
-      : null;
+    return cli ? { kind: "claude-code", ...cli, model, label: entry.label } : null;
   }
-  return null;
+
+  // Every other entry's off switch governs its only transport, so it decides.
+  if (!entry.enabled()) return null;
+
+  if (entry.kind === "codex") return { kind: "codex", model, label: entry.label };
+
+  if (entry.kind === "openai" || entry.kind === "local") {
+    const llm = customGateway();
+    return llm ? { kind: "openai", ...llm } : null;
+  }
+
+  const api = resolveAnthropic();
+  return api ? { kind: "anthropic", ...api, model, label: entry.label } : null;
 }
 
 export function resolveProvider(choice?: StoryModelChoice | string): Provider | null {
@@ -279,7 +305,7 @@ async function probeAnthropic(
  * and for the mid-run failover in src/lib/news/automatic-failover.ts, which
  * only ever tries a rung strictly AFTER the one a job started on.
  */
-export const AUTOMATIC_LADDER = ["claude-frontier", "codex-balanced"] as const;
+export const AUTOMATIC_LADDER = automaticLadder();
 
 export async function probeProvider(
   choice?: EffectiveProviderChoice | string,
@@ -515,14 +541,7 @@ export function isGrokAvailable(): boolean {
   return Boolean(resolveProvider());
 }
 
-export type ProviderBudget = {
-  /** Wall clock for a whole multi-call pipeline, e.g. one draft. */
-  wallMs: number;
-  /** Ceiling for a single model call. */
-  callMs: number;
-  /** Time to hold back for the final write so it is never the pass that dies. */
-  reserveMs: number;
-};
+export type { ProviderBudget };
 
 /**
  * How long the active provider actually needs.
@@ -533,7 +552,38 @@ export type ProviderBudget = {
  * The original 38s draft budget was sized for the fast path, so on the CLI
  * every draft failed with "did not finish in time" before the writing pass
  * ever ran. Budgets have to come from the provider, not a constant.
+ *
+ * 0.6.2: the numbers moved into PROVIDER_REGISTRY, and `overrides` lets one
+ * paper stretch or shrink them from the Server page — the operator rule is
+ * "timeouts are likely too short for local models; give the editor the option
+ * to make them longer or shorter in the interface". Pass the paper's stored
+ * overrides (see ./provider-settings.ts) and this returns the merged, clamped
+ * budget; pass nothing and it returns the shipped defaults, exactly as before.
  */
+export function providerBudget(
+  choice?: StoryModelChoice | string,
+  overrides?: ProviderOverrides | null,
+): ProviderBudget {
+  /*
+    Automatic and the configured gateway share the most generous budget:
+    Automatic does not know which rung it will land on until it probes, and a
+    gateway may be pointing at anything from a hosted mini model to a local
+    70B. Both are the `configured` registry entry's PIPELINE_BUDGET.
+  */
+  if (choice === "auto" || choice === "configured") {
+    return effectiveBudget("configured", overrides);
+  }
+  const entry = providerEntry(choice);
+  if (entry) return effectiveBudget(entry.id, overrides);
+  /*
+    No explicit choice: size from whatever `resolveProvider()` picks on this
+    machine. This is the path Dark Desk used before it had a picker, and the
+    path a bare `providerBudget()` still takes.
+  */
+  const kind = resolveProvider(choice)?.kind;
+  return { ...(kind ? KIND_BUDGETS[kind] : KIND_BUDGETS.openai) };
+}
+
 /**
  * The model that plans a hop, when the provider allows a choice.
  *
@@ -541,49 +591,51 @@ export type ProviderBudget = {
  * searches and extracts entities; the synthesis decides what the evidence
  * actually shows. Measured on one real pack from a live investigation, Haiku
  * produced the same search volume as Opus (15 vs 14) and more claims (9 vs 6),
- * with the same single overconfident claim — which the confidence clamp pulls
- * to its ceiling either way — at a quarter of the cost:
+ * with the same single overconfident claim -- which the confidence clamp pulls
+ * to its ceiling either way -- at a quarter of the cost:
  *
  *   Opus  $0.2836 per hop   Haiku $0.0710 per hop
  *
  * Over a 25-hop round that is $7.09 against $1.77. Synthesis and the brief stay
- * on the default model, because that is where the judgment concentrates.
+ * on the chosen model, because that is where the judgment concentrates.
  *
  * Override with TOWNREPORTER_PLANNER_MODEL; set it to the same value as
  * ANTHROPIC_MODEL to turn the split off.
  */
-export function plannerModel(): string {
+export function plannerModel(choice?: EffectiveProviderChoice | string): string {
   const explicit = env("TOWNREPORTER_PLANNER_MODEL")?.trim();
   if (explicit) return explicit;
 
   /*
-    Only substitute a Claude model when the provider is actually Claude.
+    Only substitute a model the CHOSEN provider actually serves.
 
     This used to return the Haiku identifier unconditionally. Point
     LLM_BASE_URL at LM Studio, Ollama or any gateway and every Dark Desk hop
     then asked that endpoint for "claude-haiku-4-5-20251001", which it has
     never heard of. The call failed and the planner fell back to keyword
-    matching without a word — the same silent failure that once left the whole
+    matching without a word -- the same silent failure that once left the whole
     database with zero entities, claims and hypotheses, reached by a different
     door.
 
     An empty string means "no opinion": grokChat keeps the provider's own
     configured model. Audit finding TW-001.
-  */
-  const provider = resolveProvider();
-  const isClaude = provider?.kind === "anthropic" || provider?.kind === "claude-code";
-  return isClaude ? "claude-haiku-4-5-20251001" : "";
-}
 
-export function providerBudget(choice?: StoryModelChoice | string): ProviderBudget {
-  const provider = resolveProvider(choice);
-  if (choice === "auto" || choice === "configured") {
-    return { wallMs: 660_000, callMs: 180_000, reserveMs: 180_000 };
+    0.6.2: the substitution table is `plannerModel` on each registry entry
+    (Claude to Haiku, either Codex to Terra, gateway to nothing), and Dark Desk
+    now passes the round's actual `choice`, so a round pinned to Codex plans on
+    Codex rather than on whatever `resolveProvider()` happens to return.
+  */
+  if (choice && choice !== "auto") {
+    const entry = providerEntry(choice);
+    if (entry) return plannerModelFor(entry.id);
   }
-  if (provider?.kind === "claude-code" || provider?.kind === "codex") {
-    return { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 };
+
+  const provider = resolveProvider();
+  if (provider?.kind === "anthropic" || provider?.kind === "claude-code") {
+    return plannerModelFor("claude-frontier");
   }
-  return { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 };
+  if (provider?.kind === "codex") return plannerModelFor("codex-balanced");
+  return "";
 }
 
 export function parseJsonBlock<T>(raw: string): T | null {
