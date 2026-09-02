@@ -1,6 +1,14 @@
 # Changelog
 
-Current release: **0.5.7**.
+Current release: **0.5.8**.
+
+## 0.5.8 — 2026-09-02
+
+- **Automatic drafts with your own providers first.** 0.5.7's Automatic
+  ladder tried the free OpenCode Zen endpoint before the operator's signed-in
+  Claude, and on the live paper that pinned every draft to a rate-limited
+  endpoint answering 429. The order is now Claude Opus, then Codex Terra, then
+  Zen. A run still stays pinned to the provider it started with.
 
 ## 0.5.7 — 2026-09-02
 
@@ -49,8 +57,8 @@ Current release: **0.5.7**.
 - **The editor chooses the writing model per run.** Queue and story workbench
   drafts now offer Automatic plus direct Local, Zen, Codex Terra, Codex Sol and
   Claude Opus choices. Automatic uses a configured `LLM_*` gateway exclusively
-  when present; otherwise it resolves the first ready Zen → Codex Terra →
-  Claude Opus rung before enqueueing. That effective choice is stored on the
+  when present; otherwise it resolved the first ready Zen → Codex Terra →
+  Claude Opus rung before enqueueing (reordered in 0.5.8). That effective choice is stored on the
   durable job and used for every pass. Explicit choices never fall back. Queue
   puts the picker and result beside each lead's Draft/Redraft action. Local
   remains an explicit choice after a loaded local model failed to complete the

@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.5.7](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.7)** — 2 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.5.8](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.8)** — 2 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 **Documentation scope:** this checkout also documents the **unreleased model-picker
 and native Codex repair candidate**. Those features are not part of the tagged
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.5.8** — Automatic drafts with your own signed-in Claude first, not a free rate-limited endpoint.
 - **0.5.7** — the editor picks the writing model per run, Codex drafts stories natively, Opinion is Claude only; the AI is finally told which city it works in.
 - **0.5.6** — set up a paper for any city with zero file edits; before setup, a fresh install claims to be nobody instead of Longmont.
 - **0.5.5** — a deploy can no longer be interrupted by the watchdog mid-build; stale tabs heal themselves; keyboard focus is visible in both themes.
@@ -170,7 +171,7 @@ Every active Queue row has its own **Writing model** picker beside **Draft with
 AI**; the story workbench has the same control beside Draft or Redraft. The
 default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
 pair names a gateway, Automatic uses that gateway and no other provider.
-Otherwise it checks provider-hosted Zen MiMo, Codex Terra, then Claude Opus,
+Otherwise it checks Claude Opus, Codex Terra, then provider-hosted Zen MiMo,
 chooses the first ready provider before enqueueing, and stores that effective
 choice on the job. Every reporting and writing pass in that run uses the same
 provider. Local Qwen stays available as an explicit choice, but is not in

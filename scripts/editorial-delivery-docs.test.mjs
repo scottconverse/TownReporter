@@ -43,6 +43,6 @@ test("current local-model guidance cannot revert to the removed all-or-nothing r
 
 test("self-hosting names the tagged build production runs, with no stale candidate framing", () => {
   const text = read("SELF-HOSTING.md");
-  assert.match(text, /tagged \*\*v0\.5\.7\*\* build, which is what the production checkout runs/i);
+  assert.match(text, /tagged \*\*v0\.5\.8\*\* build, which is what the production checkout runs/i);
   assert.doesNotMatch(text, /untagged development candidate|not live until[\s\S]{0,100}tagged and promoted/i);
 });

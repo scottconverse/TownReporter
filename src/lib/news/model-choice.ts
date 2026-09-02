@@ -60,7 +60,7 @@ export function modelChoiceHelp(value: unknown, scope: "story" | "opinion" = "st
   }
   return scope === "opinion"
     ? "Claude Opus writes the whole editorial. Codex is offered for Story drafts only: its model declines to write an editorial that takes a position."
-    : "Uses your configured gateway when set; otherwise tries Zen MiMo, Codex Terra, then Claude Opus. Local Qwen is available by explicit choice.";
+    : "Uses your configured gateway when set; otherwise tries Claude Opus, Codex Terra, then Zen MiMo. Local Qwen is available by explicit choice.";
 }
 
 export function opinionProviderProblem(error: string): string {

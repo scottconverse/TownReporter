@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.5.7](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.7).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.5.8](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.8).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -41,7 +41,7 @@ on an editor's action:
 
 | What               | Triggered by                                      | Where it goes                                                                                                                                                                                                                                                                                    |
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it selects OpenCode Zen, Codex Terra, or Claude Opus before enqueue. Local is explicit-only. Opinion is always Claude Opus; Codex is not offered for editorials.              |
+| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it selects Claude Opus, Codex Terra, or OpenCode Zen before enqueue. Local is explicit-only. Opinion is always Claude Opus; Codex is not offered for editorials.              |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
 | **Searches**       | The research pass, PULL, and every Dark Desk hop  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key, and there is currently no setting to keep a search on this machine — the chain is unconditional. |
 
@@ -133,6 +133,7 @@ That is the whole setup. Your Max or Pro subscription powers the desk.
 # ANTHROPIC_MODEL=claude-opus-5   # the default
 # CLAUDE_CLI_PATH=...             # only if the binary is somewhere unusual
 # TOWNREPORTER_CLAUDE_CODE=0      # take the CLI out of the chain entirely
+# TOWNREPORTER_CODEX=0            # same switch for the Codex CLI
 ```
 
 Two things worth knowing:
@@ -199,7 +200,7 @@ stays usable when drafting is disabled and does not install or sign in for you.
 
 Every active Queue row and the story workbench default to **Automatic**. A
 configured `LLM_*` gateway is forced for Automatic. Without one, TownReporter
-checks provider-hosted Zen MiMo, Codex Terra, then Claude Opus and
+checks Claude Opus, Codex Terra, then provider-hosted Zen MiMo and
 stores the first ready provider on the job before it is enqueued. Every pass in
 that Story run uses the same effective provider. A named choice forces only
 that provider; explicit choices never fall back. Local Qwen remains explicit

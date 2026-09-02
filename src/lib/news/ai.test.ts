@@ -28,6 +28,7 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
     "ANTHROPIC_MODEL",
     "ANTHROPIC_EFFORT",
     "TOWNREPORTER_CLAUDE_CODE",
+    "TOWNREPORTER_CODEX",
     "CLAUDE_CLI_PATH",
   ];
   for (const k of keys) prev[k] = process.env[k];
@@ -61,6 +62,7 @@ async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () 
     "ANTHROPIC_MODEL",
     "ANTHROPIC_EFFORT",
     "TOWNREPORTER_CLAUDE_CODE",
+    "TOWNREPORTER_CODEX",
     "CLAUDE_CLI_PATH",
   ];
   for (const k of keys) prev[k] = process.env[k];
@@ -452,7 +454,19 @@ describe("model-picker provider readiness", () => {
     }
   });
 
-  it("keeps Local available explicitly but starts Automatic at proven hosted providers", async () => {
+  it("TOWNREPORTER_CODEX=0 takes both Codex choices out of the chain", () => {
+    withEnv({ ...BARE, TOWNREPORTER_CODEX: "0" }, () => {
+      assert.equal(resolveProvider("codex-balanced"), null);
+      assert.equal(resolveProvider("codex-frontier"), null);
+    });
+    withEnv(BARE, () => {
+      assert.equal(resolveProvider("codex-balanced")?.kind, "codex");
+    });
+  });
+
+  it("Automatic reaches hosted Zen only after the operator's own providers are out", async () => {
+    // Claude off (BARE) and Codex off: the operator's own rungs are out, and
+    // the free endpoint is the one left standing.
     const originalFetch = globalThis.fetch;
     const urls: string[] = [];
     globalThis.fetch = async (input) => {
@@ -460,7 +474,7 @@ describe("model-picker provider readiness", () => {
       return new Response(JSON.stringify({ data: [{ id: "mimo-v2.5-free" }] }), { status: 200 });
     };
     try {
-      await withEnvAsync(BARE, async () => {
+      await withEnvAsync({ ...BARE, TOWNREPORTER_CODEX: "0" }, async () => {
         const result = await probeProvider("auto");
         assert.equal(result.ok, true);
         if (result.ok) assert.equal(result.choice, "zen");

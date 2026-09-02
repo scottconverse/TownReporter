@@ -73,7 +73,7 @@ describe("model choice contract", () => {
   it("explains each automatic order and makes explicit choices no-fallback", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries Zen MiMo, Codex Terra, then Claude Opus. Local Qwen is available by explicit choice.",
+      "Uses your configured gateway when set; otherwise tries Claude Opus, Codex Terra, then Zen MiMo. Local Qwen is available by explicit choice.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),

@@ -173,7 +173,11 @@ function explicitProvider(choice: StoryModelChoice): Provider | null {
       label: "Zen MiMo",
     };
   }
+  // TOWNREPORTER_CODEX=0 takes Codex out of the chain entirely, the same way
+  // TOWNREPORTER_CLAUDE_CODE=0 does for Claude. Without it there was no way
+  // to run a machine that has Codex installed as if it did not.
   if (choice === "codex-balanced") {
+    if (env("TOWNREPORTER_CODEX") === "0") return null;
     return {
       kind: "codex",
       model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra",
@@ -181,6 +185,7 @@ function explicitProvider(choice: StoryModelChoice): Provider | null {
     };
   }
   if (choice === "codex-frontier") {
+    if (env("TOWNREPORTER_CODEX") === "0") return null;
     return {
       kind: "codex",
       model: env("TOWNREPORTER_CODEX_SOL_MODEL") || "gpt-5.6-sol",
@@ -296,8 +301,17 @@ export async function probeProvider(
       const result = await probeOpenAi({ kind: "openai", ...configured });
       return result.ok ? { ...result, choice: "configured" } : result;
     }
+    /*
+      The operator's own providers first, the free public endpoint last.
+
+      v0.5.7 shipped this ladder as Zen -> Codex -> Claude. On the live paper,
+      whose operator has Claude Code signed in, Automatic therefore pinned every
+      draft to OpenCode's free MiMo endpoint, which answered 429 -- two failed
+      drafts in the first hours, on a desk that had drafted fine the day
+      before. A run stays pinned to one provider, so the order IS the policy.
+    */
     const failures: string[] = [];
-    for (const rung of ["zen", "codex-balanced", "claude-frontier"] as const) {
+    for (const rung of ["claude-frontier", "codex-balanced", "zen"] as const) {
       const result = await probeProvider(rung);
       if (result.ok) return result;
       failures.push(result.error);
