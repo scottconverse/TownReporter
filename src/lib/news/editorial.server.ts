@@ -373,9 +373,12 @@ export async function performEditorialWork(
   });
 
   if (!result.ok) {
+    // A reclaimed job can finish while its old provider call is still alive.
+    // That old call's failure must not turn the successfully filed piece
+    // back into a failed request; executeJob separately guards the job claim.
     await sql`
       update editorial_requests set error = ${result.error.slice(0, 800)}, finished_at = now()
-      where id = ${req.id}
+      where id = ${req.id} and newsroom_id = ${job.newsroom_id} and draft_id is null
     `;
     throw new Error(result.error);
   }

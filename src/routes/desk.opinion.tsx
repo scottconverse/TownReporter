@@ -24,7 +24,13 @@ import { stalledRunCopy } from "@/lib/news/desk-copy";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { ModelPicker } from "@/components/model-picker";
-import { modelChoiceLabel, type OpinionModelChoice } from "@/lib/news/model-choice";
+import type { OpinionModelChoice } from "@/lib/news/model-choice";
+import {
+  editorialAttribution,
+  editorialRemovalCopy,
+  openedEditorial,
+  toggleEditorialReader,
+} from "@/lib/news/opinion-view";
 
 export const Route = createFileRoute("/desk/opinion")({
   head: () => ({ meta: [{ title: "Opinion — TownReporter" }] }),
@@ -420,7 +426,7 @@ function OpinionPage() {
                     <span className="ml-2 text-sm text-muted">
                       {r.source_kind === "article" ? "from our story" : "from a note"}
                       {r.words ? ` · ${r.words} words` : ""}
-                      {` · ${modelChoiceLabel(r.model_choice)}`}
+                      {` · ${editorialAttribution(r)}`}
                     </span>
                   </span>
                   {!r.finished_at && r.stalled ? (
@@ -449,7 +455,13 @@ function OpinionPage() {
                   <span className="row-acts static">
                     {r.draft_id ? (
                       <>
-                        <InkButton tone="quiet" small onClick={() => setOpenId(r.draft_id)}>
+                        <InkButton
+                          tone="quiet"
+                          small
+                          onClick={() =>
+                            setOpenId((current) => toggleEditorialReader(current, r.draft_id!))
+                          }
+                        >
                           {openId === r.draft_id ? "Close" : "Read it"}
                         </InkButton>
                         <Link
@@ -502,10 +514,7 @@ function OpinionPage() {
                 {r.error ? <p className="mt-1 text-sm text-rust">{r.error}</p> : null}
                 {confirmId === r.id ? (
                   <p className="mt-1 text-sm text-rust">
-                    This deletes the draft for good.
-                    {r.published_slug
-                      ? " The published piece stays on the paper — remove that under Published."
-                      : " Nothing else has a copy."}
+                    {editorialRemovalCopy(Boolean(r.draft_id), Boolean(r.published_slug))}
                   </p>
                 ) : null}
               </li>
@@ -521,7 +530,7 @@ function OpinionPage() {
             aside={
               <span className="flex items-center gap-2">
                 {(() => {
-                  const row = rows.find((r) => r.id === openId);
+                  const row = openedEditorial(rows, openId);
                   if (row?.published_slug) {
                     return (
                       <Link

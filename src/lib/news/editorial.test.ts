@@ -481,6 +481,82 @@ As of September 1, 2026, Longmont’s charter requires regular and special counc
     assert.deepEqual(events, ["voice:locate", "codex:research", "voice:read", "codex:write"]);
   });
 
+  for (const [name, delivered] of [
+    [
+      "an editorial disagreement beginning we cannot endorse",
+      DELIVERED.replace(
+        "Longmont has been paying for a train since 2004. The train has not come.",
+        "We cannot endorse this proposal until the district publishes the promised accounting.",
+      ),
+    ],
+    [
+      "a cannot-afford headline discussing a recommendation",
+      DELIVERED.replace(
+        "The rail district wants your money twice",
+        "Longmont cannot afford to ignore this recommendation",
+      ),
+    ],
+    [
+      "quoted refusal language in a substantive editorial",
+      DELIVERED.replace(
+        "Longmont has been paying for a train since 2004. The train has not come.",
+        "\u201cI cannot write the requested editorial,\u201d the director said. That refusal is the issue, not an answer.",
+      ),
+    ],
+    [
+      "a blockquoted assistant refusal discussed by the editorial",
+      DELIVERED.replace(
+        "Longmont has been paying for a train since 2004. The train has not come.",
+        "> As an AI, I cannot provide the requested editorial.\n\nThat automated answer does not excuse missing public records.",
+      ),
+    ],
+  ]) {
+    it(`files ${name} without switching providers`, async () => {
+      const orchestrateEditorial = await loadEditorialOrchestrator();
+      const events: string[] = [];
+      const { runtime } = codexRuntime(events, [
+        { ok: true, text: "Official records" },
+        { ok: true, text: delivered! },
+      ]);
+
+      const result = await orchestrateEditorial(
+        { ...ORCHESTRATION_INPUT, modelChoice: "auto" },
+        runtime,
+      );
+
+      assert.equal(result.ok, true);
+      if (!result.ok) assert.fail(result.error);
+      assert.equal(result.modelChoice, "codex-frontier");
+      assert.equal(events.filter((event) => event === "file").length, 1);
+      assert.equal(events.includes("claude"), false);
+    });
+  }
+
+  for (const opening of [
+    "EDITORIAL_REFUSAL: I cannot deliver the requested piece.",
+    "I cannot write the requested editorial.",
+    "As an AI, I cannot provide the requested editorial.",
+    "OPINION: EDITORIAL_REFUSAL: I cannot deliver the requested piece.",
+    "## **OPINION: I cannot write the requested editorial.**",
+    "OPINION: EDITORIAL_REFUSAL: The request is outside my capabilities.",
+    "## **OPINION: I cannot write an editorial.**",
+  ]) {
+    it(`does not file an actual provider refusal: ${opening}`, async () => {
+      const orchestrateEditorial = await loadEditorialOrchestrator();
+      const events: string[] = [];
+      const { runtime } = codexRuntime(events, [
+        { ok: true, text: "Official records" },
+        { ok: true, text: `${opening}\n\n${parseEditorial(DELIVERED).body}` },
+      ]);
+
+      const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
+
+      assert.equal(result.ok, false);
+      assert.equal(events.includes("file"), false);
+      assert.equal(events.includes("claude"), false);
+    });
+  }
+
   it("Automatic starts a fresh Claude pair after Codex returns a refusal", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];

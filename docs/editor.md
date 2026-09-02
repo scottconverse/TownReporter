@@ -2,6 +2,12 @@
 
 **Current release: [0.5.6](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.6).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
+**Candidate features:** the per-run model picker and native Codex repair below
+are unreleased; they are not on the tagged 0.5.6 live paper until promotion.
+Queue, workbench, Opinion and Paper setup images show development examples.
+Other images are historical Longmont screens from 29 August; their old
+**Leave as editor** header link is now **Give up the desk** on the Server page.
+
 Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). The whole system, including how it is built, is [manual.md](manual.md). This page is the newsroom, in the order you use it.
 
 ---
@@ -122,6 +128,11 @@ named choice. A named choice uses only that provider and never falls back. The r
 row and names the provider the server actually queued. **Open** takes you to
 the workbench to watch the draft land and edit it. Nothing prints from this
 list.
+
+Need to connect a provider? Open **Set up a writing model** under the picker.
+The same help is on the workbench and Opinion form. It links installation and
+operator instructions, explains signing in on the server's account, and tells
+you to reload before retrying. Opinion also explains its required voice file.
 
 A meeting on the calendar is not automatically a story. A five-hour council tape is not automatically a story. Those are records. You decide if there is news.
 
@@ -333,9 +344,12 @@ finished row names the provider that actually delivered the piece.
 headline, fix a line, print it, or throw it away. The fact sheet and the image
 prompt sit under the piece there, marked _does not print_.
 
-It takes **ten to forty minutes**, because it goes and reads the records before
-it writes a word. The row shows a clock counting up and a moving rule; at 3:40
-that is normal, not stuck. The page rechecks every twenty seconds.
+Earlier measured runs took **ten to forty minutes**; that is an observation,
+not a deadline. The current research and writing passes each have a default
+45-minute ceiling. One provider pair can therefore take about 90 minutes, and
+Automatic can take longer if it starts the second provider's pair. The row
+shows a clock counting up and a moving rule; at 3:40 that is normal, not stuck.
+The page rechecks every twenty seconds.
 
 An editorial is a **draft**. Read it, edit it in the story workbench, and
 publish it like any other piece — or don't. It will happily conclude that your
@@ -347,6 +361,10 @@ sent to attack had never been missing at all.
 ## Server (`/desk/ops`)
 
 ![Server](images/11-server.png)
+
+Historical 0.5.1 screen: the **Reader privacy** row shown here was removed.
+The current health rows are described below; privacy is checked by the
+operator's browser smoke test, not this page.
 
 Everything this machine is doing to keep the paper online, and the few buttons
 worth having.

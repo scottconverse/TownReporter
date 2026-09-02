@@ -311,4 +311,72 @@ describe("Opinion completion commit", () => {
       await cleanCompletionFixture(sql, userId);
     }
   });
+
+  it("does not let a late failing worker overwrite a successfully filed request", async () => {
+    const sql = await getSql();
+    await ensureCompletionSchema();
+    const userId = uniqueUser("opinion-late-failure");
+    const request = await insertRequest(sql, { userId });
+    const job = await enqueueJob({
+      userId,
+      newsroomId: 1,
+      kind: "editorial",
+      subjectId: request.id,
+      modelChoice: "auto",
+      kick: false,
+    });
+    let releaseFailure!: () => void;
+    let signalStarted!: () => void;
+    const failureMayFinish = new Promise<void>((resolve) => (releaseFailure = resolve));
+    const workerStarted = new Promise<void>((resolve) => (signalStarted = resolve));
+    const delayedWork = performEditorialWork(job, {
+      writeEditorial: async () => {
+        signalStarted();
+        await failureMayFinish;
+        return { ok: false as const, error: "the stale provider eventually failed" };
+      },
+    });
+    const delayedFailure = assert.rejects(delayedWork, /stale provider eventually failed/);
+
+    try {
+      await workerStarted;
+      const filed = await fileEditorial(
+        {
+          userId,
+          newsroomId: 1,
+          subject: "Keep local history public",
+          pointers: [],
+          sourceKind: "paste",
+          sourceRef: "desk",
+          completion: { requestId: request.id, jobId: job.id },
+        },
+        TEST_EDITORIAL,
+        "codex-frontier",
+      );
+      assert.equal(filed.ok, true);
+      if (!filed.ok) assert.fail(filed.error);
+      releaseFailure();
+      await delayedFailure;
+
+      const [stored] = await sql<{
+        draft_id: number;
+        error: string | null;
+        model_choice: string;
+        finished: boolean;
+      }>`
+        select draft_id, error, model_choice, (finished_at is not null) as finished
+        from editorial_requests where id = ${request.id}
+      `;
+      assert.deepEqual(stored, {
+        draft_id: filed.draftId,
+        error: null,
+        model_choice: "codex-frontier",
+        finished: true,
+      });
+    } finally {
+      releaseFailure();
+      await delayedFailure;
+      await cleanCompletionFixture(sql, userId);
+    }
+  });
 });

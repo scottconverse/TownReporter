@@ -2,6 +2,13 @@
 
 **Version 0.5.6 · 31 August 2026**
 
+**Documentation scope:** 0.5.6 is the released baseline. Per-run model pickers
+and the restored native Codex path below describe the **unreleased candidate**,
+not the live paper until promotion. Queue, workbench, Opinion and Paper setup
+images are development examples; the other screens are historical Longmont
+captures from 29 August. Their old **Leave as editor** header link now lives as
+**Give up the desk** on the Server page.
+
 TownReporter is a civic newsroom you run yourself. A public paper on the front,
 a signed-in editor's desk behind it. It watches a city's meetings, packets,
 minutes, money and contracts, notices when something changes or fails to appear,
@@ -97,8 +104,8 @@ You are responsible for everything that appears on the paper.
 ## What the reader gets
 
 - No tracker, no analytics script, no third-party font. A cold load of the paper
-  makes **zero requests to any outside host**. The Server page checks this and
-  will tell you when it stops being true.
+  makes **zero requests to any outside host**. The browser-based `npm run smoke`
+  check enforces this; there is no Server-page reader-privacy monitor.
 - Every story has its own title, description, canonical URL, published time and
   social card.
 - An RSS feed at `/feed`, a `sitemap.xml`, and a `robots.txt` that points at it.
@@ -165,6 +172,12 @@ prints until you open a lead and publish it.
 Each active row has its own Writing model picker and Draft/Redraft with AI
 button. Automatic resolves one ready provider before enqueue and the result is
 shown on that same row. A named provider never falls back.
+
+**Set up a writing model** opens help beneath every Queue, workbench and
+Opinion picker, even when drafting is unavailable. Follow the installation and
+sign-in steps on the computer/account running TownReporter, then reload and
+retry. Opinion's help also covers the required editorial voice file. This is
+guidance, not an automatic installer or sign-in button.
 
 ## The story workbench
 
@@ -240,9 +253,13 @@ provider that actually delivered it.
 `/desk/story/draft/:id`: headline, dek, topic and the piece itself, plus the two
 boxes that never print. Save, publish, or delete it from there.
 
-It fetches its own records before it writes a word, so it takes **ten to forty
-minutes** — three measured runs came in at 9m53s, 24m06s, and one still going at 30. The page shows a running clock rather than a frozen word, and checks every
-twenty seconds. Editorials are drafts until you publish one.
+It fetches records before it writes. Historical runs took **ten to forty
+minutes** — two finished at 9m53s and 24m06s, and one was still going at 30.
+Those are observations, not a deadline: `EDITORIAL_TIMEOUT_MS` now applies to
+each research or writing pass, with a default of 45 minutes per pass. A pair
+can take about 90 minutes; Automatic can try two pairs. The page shows a
+running clock and checks every twenty seconds. Editorials remain drafts until
+you publish one.
 
 It is also the most expensive thing the newsroom does. Those same two finished
 runs cost **$2.66 and $23.76**; the second decided to dispatch research agents
@@ -254,9 +271,12 @@ of its own. Budget for a piece, not for a paragraph.
 
 ![Server](images/11-server.png)
 
+Historical 0.5.1 screen: the **Reader privacy** row pictured here no longer
+exists. The browser smoke test is the privacy check.
+
 Version, uptime, memory, the public URL as answered from this machine, tunnel
 processes, database size, what the paper holds, queue depth, the last watchdog
-run, free disk, and whether the reader made any outside request.
+run, and free disk.
 
 The buttons are few and each says what it will do before it does it. The two
 that interrupt the paper ask twice.
@@ -408,6 +428,10 @@ killed.
 
 Deployment notes for other hosts, and the remaining limits of a city setup, are in
 [docs/setup.md](setup.md).
+
+For this machine's release procedure, use
+[Updating this installation](../SELF-HOSTING.md#updating-this-installation).
+Never rebuild a checkout while a server is serving its `.output`.
 
 ## Point it at another city
 
@@ -820,12 +844,12 @@ comment on each, is [`.env.example`](../.env.example).
 
 ## Job kinds
 
-| Kind        | Started by                         | Typical length    |
-| ----------- | ---------------------------------- | ----------------- |
-| `scan`      | Scan page                          | minutes           |
-| `draft`     | Queue or workbench                 | minutes           |
-| `dark`      | Dark Desk — start, or Keep digging | minutes per round |
-| `editorial` | Opinion desk                       | 10–40 minutes     |
+| Kind        | Started by                         | Typical length                                                       |
+| ----------- | ---------------------------------- | -------------------------------------------------------------------- |
+| `scan`      | Scan page                          | minutes                                                              |
+| `draft`     | Queue or workbench                 | minutes                                                              |
+| `dark`      | Dark Desk — start, or Keep digging | minutes per round                                                    |
+| `editorial` | Opinion desk                       | Historical runs: 10–40 minutes; up to 45 minutes per pass by default |
 
 ## Commands
 

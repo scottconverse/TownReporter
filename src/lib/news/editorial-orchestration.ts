@@ -79,9 +79,8 @@ export type EditorialOrchestrationRuntime = {
 
 const REFUSAL_OPENING = [
   /^\s*EDITORIAL_REFUSAL\s*:/i,
-  /\b(?:i|we)\s+(?:can(?:not|'t)|won't|will not|am unable to|are unable to)\s+(?:provide|write|produce|draft|create|deliver|endorse|advocate|adopt|take)\b/i,
-  /\bas an (?:ai|artificial intelligence|language model)\b/i,
-  /\b(?:cannot|can't|won't|will not|unable to)\b.{0,180}\b(?:editorial|op-?ed|advocacy|policy position|recommendation)\b/is,
+  /^(?:(?:i am|i'm) sorry[,.]?\s*)?(?:i|we)\s+(?:can(?:not|'t)|won't|will not|am unable to|are unable to)\s+(?:provide|write|produce|draft|create|deliver)\s+(?:(?:the|a|an|your|that|this|requested|complete|full|advocacy|political|persuasive)\s+)*(?:editorial|op-?ed|article|piece|column)\b/i,
+  /^as an (?:ai|artificial intelligence|language model)\b/i,
 ];
 
 /**
@@ -90,15 +89,26 @@ const REFUSAL_OPENING = [
  * normalized into the newspaper's headline and offered for publication.
  */
 export function validateEditorialDelivery(raw: string, editorial: Editorial): string | null {
-  const normalized = String(raw ?? "")
-    .replace(/[\u2018\u2019]/g, "'")
-    .trim();
-  const opening = normalized.slice(0, 1_200);
-  const summarySubstitute =
-    /\b(?:summary|overview)\s+(?:below|that follows)\b/i.test(opening) &&
-    /\b(?:instead|rather than|not (?:an?|the))\b/i.test(opening);
+  // Refusing to generate the requested article is not the same as the
+  // article refusing to endorse a proposal. Inspect delivery starts only;
+  // quoted speech and ordinary disagreement inside the piece are content.
+  const starts = [raw, editorial.headline, editorial.body].map((text) =>
+    String(text ?? "")
+      .replace(/[\u2018\u2019]/g, "'")
+      .trim()
+      .replace(/^(?:#{1,6}\s+|\*{1,2}|_)+/, "")
+      .replace(/^OPINION\s*[:\u2014-]\s*/i, "")
+      .slice(0, 1_200),
+  );
+  const refused = starts.some((opening) => {
+    const summarySubstitute =
+      /^(?:(?:the )?(?:summary|overview)\s+(?:below|that follows)|here(?:'s| is)\s+(?:a|the)\s+neutral (?:summary|overview))\b/i.test(
+        opening,
+      ) && /\b(?:instead|rather than|not (?:an?|the))\b/i.test(opening);
+    return REFUSAL_OPENING.some((pattern) => pattern.test(opening)) || summarySubstitute;
+  });
 
-  if (REFUSAL_OPENING.some((pattern) => pattern.test(opening)) || summarySubstitute) {
+  if (refused) {
     return "The selected model declined to produce the requested editorial. Nothing was filed.";
   }
   const headline = editorial.headline.trim();

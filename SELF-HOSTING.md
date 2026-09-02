@@ -4,7 +4,8 @@ Live at **https://townreporter.org**, served from a Node process on this
 machine through a Cloudflare Tunnel. No hosting bill, no ports open on the
 router.
 
-Everything below is running and was verified end to end.
+The live-deployment notes below record the established setup. Candidate-only
+behavior is called out separately; it is not a claim about the running release.
 
 **Deployment boundary (2026-09-01):** the production checkout is still the
 tagged **v0.5.6** build. The per-run model picker and restored native Codex path
@@ -225,8 +226,12 @@ The live model path has its own opt-in script, so nobody spends quota by
 running the ordinary suite:
 
 ```bash
-npm run test:live-model
+RUN_LIVE_MODEL_TESTS=1 npm run test:live-model
 ```
+
+That opt-in example is for a POSIX shell. In PowerShell, set
+`$env:RUN_LIVE_MODEL_TESTS = '1'` before running `npm run test:live-model`.
+Without the flag, the live evaluation is skipped.
 
 ---
 
@@ -266,19 +271,43 @@ nothing — deliberate, so an unconfigured box cannot be poked into working.
 
 ---
 
-## Rebuilding after a change
+## Updating this installation
 
-```bash
-npm run build
-```
+**Never build beneath a running server.** Replacing a served `.output` can leave
+the page answering 200 while its scripts and editor controls fail. This applies
+even when no database migration is needed.
 
-```bash
-powershell -Command "Start-ScheduledTask -TaskName 'TownReporter'"
-```
+1. Make and verify changes in
+   `C:\Users\scott\Desktop\Code\townreporter-dev`, with the development or a
+   disposable database. Before building there, confirm no process is serving
+   that checkout's `.output`. Do not build in the running production checkout.
+2. Obtain approval for the exact release candidate and its tag/promotion. A
+   push or merge is not a production deployment. The promotion script follows
+   `origin/main`, not a tag, so verify that `origin/main` is the exact approved
+   commit before starting it.
+3. In Task Scheduler, disable **TownReporter Watchdog** for the promotion. Use
+   `C:\Users\scott\Desktop\Code\townreporter-web\ops\promote.ps1` from the
+   production installation, not a sequence of hand-typed build/restart steps.
+   The script refuses tracked uncommitted changes and checks fast-forward
+   conflicts before stopping the app.
+4. The script backs up the database, stops only this installation's server,
+   updates its checkout, builds while that server is down, and starts it again.
+   It leaves the shared Postgres cluster running. Its promotion marker also
+   tells the watchdog to stand down; it does not build in the development
+   checkout on your behalf.
+5. Require the local page, public page, a script named by the served HTML, and
+   the published-story count to pass the script's checks. Verify the served
+   version matches the approved release. A homepage 200 alone is not proof.
+6. Re-enable **TownReporter Watchdog** after the promotion has finished, or a
+   failed promotion has been deliberately stopped and no build is still
+   running. Keep the named backup and inspect the reported failure before
+   deciding how to recover. The script does not automatically roll back a
+   potentially applied migration.
 
-Stop the app first if the build needs to run migrations against a database this
-box is serving from — the build fails closed if Postgres is down, which is
-correct but surprising.
+If promotion hangs, inspect the app and
+`C:\Users\scott\Desktop\Code\townreporter-web\logs` first. Stop only a
+confirmed hung promotion's own PID if needed; never stop processes by image
+name or touch unrelated servers, the tunnel, or the shared database.
 
 ---
 

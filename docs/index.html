@@ -645,6 +645,11 @@
               contracts and public records — then keeps digging when something changes, disappears
               or doesn’t add up. A human still decides what prints.
             </p>
+            <p class="cap">
+              Released baseline: <b>0.5.6</b>. The model picker and restored native Codex path
+              described here are in the <b>unreleased candidate</b>, not on the live paper until an
+              approved promotion.
+            </p>
             <div class="cta-row">
               <a class="btn" href="#start">Run it yourself</a>
               <a class="btn-2" href="https://github.com/scottconverse/TownReporter"
@@ -705,8 +710,9 @@
         <h2>A paper on the front, a working desk behind it</h2>
         <div class="prose">
           <p>
-            These are screenshots of the release-candidate desk using throwaway Longmont reporting
-            content, not mockups.
+            These are real product screenshots, not mockups. The workbench and Paper setup show
+            development examples; the other images are historical Longmont screens from 29 August.
+            Their old Leave as editor header link now lives as Give up the desk on the Server page.
           </p>
         </div>
         <figure style="margin: 26px 0 0">
@@ -759,8 +765,9 @@
             style="width: 100%; border: 1px solid var(--rule); display: block"
           />
           <figcaption class="cap" style="margin-top: 8px">
-            The Server page. The paper watches itself, restarts what falls over, and reports whether
-            a reader made any outside request.
+            Historical Server page (0.5.1). The Reader privacy row shown here was removed; a browser
+            smoke test checks reader requests instead. The current page reports app, tunnel,
+            database, queue, watchdog and disk health.
           </figcaption>
         </figure>
         <figure style="margin: 26px 0 0">
@@ -829,9 +836,10 @@
             <h3>Safer updates</h3>
             <p class="cap" style="margin: 0 0 10px">The live server is never the build bench</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              Promotion builds in a separate checkout, takes a database backup, pauses the watchdog,
-              verifies the candidate, then changes the live process. A stale browser tab recognizes
-              a new version and heals itself.
+              Verify the candidate in a separate development checkout first. Production promotion
+              takes a database backup, holds off the watchdog, stops the target server, then builds
+              and restarts it. It checks a served script as well as the page. A stale browser tab
+              recognizes a new version and heals itself.
             </p>
           </div>
         </div>
@@ -1042,6 +1050,12 @@ npm run dev
                 otherwise it chooses the first ready provider-hosted Zen MiMo, Codex Terra or Claude
                 Opus before the job starts, then keeps that provider for every pass. Local Qwen
                 remains available by explicit choice. Named choices never fall back.
+              </p>
+              <p>
+                <b>Set up a writing model</b> opens help under every Queue, workbench and Opinion
+                picker: installation links, sign-in on the server's account, and reload/retry steps.
+                Opinion also explains its required voice file. Nothing installs or signs you in
+                automatically.
               </p>
               <p>
                 Claude Code strips its coding settings for news calls. Codex deliberately keeps the

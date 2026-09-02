@@ -2,6 +2,10 @@
 
 **Current release: [0.5.6](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.6).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
+**Candidate scope:** the model-picker and native Codex sections describe the
+unreleased development candidate. They are not features of the tagged 0.5.6
+live deployment until it is approved and promoted.
+
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
 To publish the landing: GitHub repo **Settings → Pages → Deploy from a branch → `main` / `/docs`**. That is a one-time click. It does not run the desk.
@@ -191,6 +195,12 @@ Resolution lives in `src/lib/news/ai.ts` (`resolveProvider()`); the Claude Code 
 
 #### Per-run picker
 
+Each picker includes a **Set up a writing model** disclosure with official
+Codex and Claude installation links, same-server-account sign-in guidance and
+reload/retry instructions. Queue and workbench help also points local/Zen
+operators here; Opinion explains the voice-file prerequisite. The disclosure
+stays usable when drafting is disabled and does not install or sign in for you.
+
 Every active Queue row and the story workbench default to **Automatic**. A
 configured `LLM_*` gateway is forced for Automatic. Without one, TownReporter
 checks provider-hosted Zen MiMo, Codex Terra, then Claude Opus and
@@ -270,10 +280,13 @@ voice researches before it writes. Three measured runs:
 | 24m06s     | $23.76 | one pointer; it dispatched research agents of its own |
 | >30m       | —      | same subject again, killed at the old cap             |
 
-The writer's ceiling is 45 minutes, set above the slowest run seen rather than
-just above the fastest. The desk enqueues a job and returns at once; nothing
-waits on the model. This is the most expensive call the newsroom makes — set a
-spending limit at the provider.
+`EDITORIAL_TIMEOUT_MS` sets a ceiling **per research or writing pass**, not per
+editorial, and defaults to 45 minutes. A complete provider pair can therefore
+take about 90 minutes. Automatic may run two pairs, for up to roughly three
+hours plus orchestration overhead if every pass approaches its ceiling. The
+historical timings above are not a current maximum. The desk enqueues a job and
+returns at once; the page does not wait on the model. This is the most expensive
+workflow the newsroom makes — set a spending limit at the provider.
 
 ---
 
@@ -366,6 +379,13 @@ If Chromium is missing, those fetches skip the browser path. Packets still inges
 ---
 
 ## Production build
+
+These commands are for a checkout whose `.output` is **not being served**.
+Never build under a running server, even if no migration is needed. For the
+existing Windows production installation, follow
+[Updating this installation](../SELF-HOSTING.md#updating-this-installation)
+instead: verify in development, approve the exact candidate, then use the
+production promotion script with the watchdog held off.
 
 ```bash
 npm run build

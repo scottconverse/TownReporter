@@ -4,6 +4,11 @@
 
 **Current release: [0.5.6](https://github.com/scottconverse/TownReporter/releases/tag/v0.5.6)** — 31 August 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
+**Documentation scope:** this checkout also documents the **unreleased model-picker
+and native Codex repair candidate**. Those features are not part of the tagged
+0.5.6 release and are not live on townreporter.org until an approved promotion.
+See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
+
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
 
 MIT licensed. Clone it. Point it at your city.
@@ -154,6 +159,11 @@ Details and the honest limits of a city swap are in [docs/setup.md](docs/setup.m
 ---
 
 ## Model — automatic ladder, with an editor override
+
+**Set up a writing model**, beneath each Queue, workbench and Opinion picker,
+opens installation, sign-in and retry guidance. Setup belongs on the computer
+and Windows account running TownReporter; Opinion also explains its voice-file
+prerequisite. The desk does not install software or sign you in automatically.
 
 Every active Queue row has its own **Writing model** picker beside **Draft with
 AI**; the story workbench has the same control beside Draft or Redraft. The
@@ -326,7 +336,9 @@ The investigative lane. An editor points it at a person, document, URL, rumor, o
 Give it a subject, a sentence, or a URL and it asks the selected provider for an unsigned editorial — OPINION in the headline, no byline, because an unsigned editorial is the paper's own position. Claims and sources run in an appendix at the end. It is a draft until you publish it. If a provider declines or returns an assistant message instead of a real piece, the run is marked Failed and no draft, Read/Edit action, or Publish button is created. The writing voice is a file on disk that you point at with `TOWNREPORTER_VOICE_FILE`; it is not in this repository, and only its path ever reaches a command line.
 
 **Does the paper track readers?**
-No. Fonts are served from this machine, there is no analytics script, and a cold load makes zero requests to any outside host. The Server page checks that and will tell you if it stops being true.
+No. Fonts are served from this machine, there is no analytics script, and a cold
+load makes zero requests to any outside host. The browser-based `npm run smoke`
+check enforces this; the Server page does not have a reader-privacy monitor.
 
 **Does anything leave my machine when I use the desk?**
 Yes, and it is worth knowing which things. Reading the paper sends nothing

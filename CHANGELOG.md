@@ -4,6 +4,21 @@ Current release: **0.5.6**.
 
 ## Unreleased
 
+- **Setup help is in the editor.** Queue, workbench and Opinion pickers include
+  installation, same-server-account sign-in and retry guidance, with Opinion's
+  voice-file prerequisite. Opinion's Close control now closes the editor, draft
+  actions use the correct draft identity, and deletion copy explains the
+  existing 30-day Undo window.
+
+- **Opinion keeps legitimate disagreement.** Phrases such as "we cannot endorse
+  this proposal" and quoted refusals no longer get mistaken for an AI declining
+  to write. Actual provider refusals still fail visibly without filing a draft.
+  A late failure from an old worker also cannot overwrite an Opinion that has
+  already been filed successfully.
+- **Operator instructions match the release boundary.** Rebuild guidance now
+  requires a stopped target server and the production promotion script. Manuals
+  distinguish the unreleased candidate, label historical screens, and explain
+  Opinion's per-pass timeout and the live-test opt-in accurately.
 - **Codex now runs as the native signed-in Windows user, without a hidden
   capability policy.** TownReporter no longer injects feature-disable flags,
   a read-only sandbox, ignored user configuration/rules, or a skipped-repository
