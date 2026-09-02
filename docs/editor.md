@@ -95,10 +95,20 @@ One pass: fetch every **accepted** source, then one model read for leads and pro
 - Stay on the page while it runs.
 - When it files leads, open the queue. When it files nothing, that can be “nothing moved,” not a crash. The page will say which.
 
-If AI is unavailable you will get a straight error. Scan uses the operator's
-configured provider, so the fix may be a gateway/key change or restoring the
-Claude Code login on the machine running the desk. That is an operator problem
-([setup.md](setup.md)).
+Scan has the same **Writing model** picker Story and the queue have, next to
+**Run scan**: Automatic (the default), Codex Terra, Codex Sol, or Claude
+Opus. Automatic uses the operator's configured gateway when one is set;
+otherwise it tries Claude Opus, then Codex Terra. If the first one's login
+lapses partway through the run, the scan moves to the next rung once, if it
+is ready, reusing the same fetched sources rather than fetching them again.
+A named choice uses only that provider and never falls back. The choice is
+per click, not remembered between runs.
+
+If no model is ready you get a straight refusal before anything is fetched —
+nothing is spent trying. Need to connect a provider? Open **Set up a writing
+model** under the picker, or see [setup.md](setup.md). If a scan is already
+running on a different model, the desk tells you and points you at that run
+instead of starting a second one.
 
 ---
 

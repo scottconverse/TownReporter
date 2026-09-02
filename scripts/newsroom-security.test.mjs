@@ -255,12 +255,19 @@ test("every desk and dark mutation is gated by deskMiddleware", () => {
   assert.match(desk, /export const publishLead[\s\S]*?\.middleware\(\[deskMiddleware\]\)/);
   assert.match(desk, /sanitizePublicUrls/);
   assert.doesNotMatch(desk, /originAllowlist\(/);
-  assert.match(desk, /assertRate\(context\.userId, "scan"\)/);
+  // Scan's rate charge moved into its own commit boundary (0.6.1, the same
+  // shape Draft already had): runScan now delegates to
+  // commitScanForAuthenticatedEditor, which is where "scan" rate is charged.
+  assert.match(
+    desk,
+    /export const runScan[\s\S]*?\.middleware\(\[deskMiddleware\]\)[\s\S]*?commitScanForAuthenticatedEditor/,
+  );
   assert.match(
     desk,
     /export const draftLead[\s\S]*?\.middleware\(\[deskMiddleware\]\)[\s\S]*?commitStoryDraftForAuthenticatedEditor/,
   );
   assert.match(modelCommit, /assertRate\)\(input\.context\.userId, "draft"\)/);
+  assert.match(modelCommit, /assertRate\)\(input\.context\.userId, "scan"\)/);
   assert.match(desk, /withTransaction/);
   assert.match(dark, /assertRate\(context\.userId, "dark"\)/);
   assert.match(dark, /audit\(\s*(?:context\.)?userId,\s*"dark"/);
