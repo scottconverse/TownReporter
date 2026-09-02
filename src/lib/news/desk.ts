@@ -52,7 +52,7 @@ import {
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import { planAutomaticFailover } from "./automatic-failover.ts";
-import { runScanChatWithFailover } from "./scan-model-run.ts";
+import { runScanChatWithFailover, scanCallTimeoutMs } from "./scan-model-run.ts";
 import { looksLikeProviderAuthFailure } from "./preflight.ts";
 import type { DraftRow, LeadRow, MemoryRow, ScanRow, SourceRow } from "./types";
 
@@ -568,7 +568,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     system: scanSystem({ name: paperConfig.name, city: paperConfig.city, state: paperConfig.state }),
     user: userMsg,
     maxTokens: 3500,
-    timeoutMs: 90_000,
+    // Same per-provider budget a Story draft uses (providerBudget().callMs),
+    // floored at the old flat 90s so the configured-gateway path is never
+    // made worse. See scanCallTimeoutMs's comment for the production timeout
+    // this fixes: a clean 31-source fetch whose single AI read then died at
+    // a flat 90s ceiling the CLI providers routinely need more of.
+    timeoutMs: scanCallTimeoutMs,
     grokChat: runChat,
     probe,
     setModelChoice,

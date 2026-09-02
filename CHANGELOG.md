@@ -60,6 +60,15 @@ Current release: **0.6.0**.
   the desk now names the consequence — the archive, Dark Desk files, notes
   and Server controls, no way back — in the sub line itself, before the
   first click, not just in the confirm dialog.
+- **Scan's AI read gets the same time budget as a draft.** It used to hardcode
+  a flat 90s regardless of provider while Story drafts size every call with
+  `providerBudget(choice).callMs` (150s on the Claude Code / Codex CLIs). A
+  full 31-source read on Claude Opus timed out in production at exactly that
+  flat ceiling after fetching cleanly in 35s. The scan's read now gets 150s on
+  the CLI providers, floored at the old 90s for the configured-gateway path;
+  a mid-run Automatic failover recomputes the budget for whichever rung it
+  actually lands on. The timeout message now names how long the desk waited
+  when the provider reports it.
 
 ## 0.6.0 — 2026-09-02
 

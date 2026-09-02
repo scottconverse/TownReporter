@@ -10,8 +10,24 @@
  * reason about in isolation.
  */
 import type { EffectiveProviderChoice, ProviderProbe, grokChat } from "./ai.ts";
+import { providerBudget } from "./ai.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel } from "./model-choice.ts";
 import { planAutomaticFailover } from "./automatic-failover.ts";
+
+/**
+ * The scan's one AI read used to hardcode 90s regardless of provider, while
+ * Story drafts size every call with `providerBudget(choice).callMs` (150s on
+ * the Claude Code / Codex CLIs, which reload a ~25k-token preamble per call
+ * and routinely land in the 60-90s range on a full 31-source read). 2026-09-02
+ * production timeout (desk_jobs 46 / scan_runs 5): 31 sources fetched clean in
+ * ~35s, then the single AI read died at "timed out after 90s, 0 bytes out"
+ * even though past successful scans took 1:43-2:29 end to end. Floor stays at
+ * 90s so the configured-gateway path (150s wall budget, smaller callMs) is
+ * never made worse than it already was.
+ */
+export function scanCallTimeoutMs(choice: string): number {
+  return Math.max(90_000, providerBudget(choice).callMs);
+}
 
 type GrokResult = Awaited<ReturnType<typeof grokChat>>;
 type GrokChatFn = (
@@ -32,7 +48,13 @@ export type RunScanChatWithFailoverInput = {
   system: string;
   user: string;
   maxTokens: number;
-  timeoutMs: number;
+  /**
+   * Sized per attempt, not once up front: when Automatic fails over mid-run
+   * to a later ladder rung, the retry runs on THAT rung's own budget (a CLI
+   * rung gets far longer than the configured-gateway path). Callers that
+   * really do want one fixed number for every attempt can pass `() => ms`.
+   */
+  timeoutMs: (choice: string) => number;
   grokChat: GrokChatFn;
   probe: (choice: string) => Promise<ProviderProbe>;
   setModelChoice: (id: number, choice: string) => Promise<void>;
@@ -51,9 +73,10 @@ export async function runScanChatWithFailover(
 ): Promise<GrokResult> {
   const { job, system, user, maxTokens, timeoutMs, grokChat: chat, probe, setModelChoice, setStage } =
     input;
+  const firstChoice = effectiveStoryModelChoice(job.model_choice);
   const ai = await chat(system, user, maxTokens, {
-    timeoutMs,
-    choice: effectiveStoryModelChoice(job.model_choice),
+    timeoutMs: timeoutMs(firstChoice),
+    choice: firstChoice,
   });
   if (ai.ok) return ai;
 
@@ -68,5 +91,5 @@ export async function runScanChatWithFailover(
   const previousLabel = modelChoiceLabel(job.model_choice);
   await setModelChoice(job.id, plan.next);
   await setStage(job.id, `Switched to ${plan.label}: ${previousLabel} sign-in lapsed`);
-  return chat(system, user, maxTokens, { timeoutMs, choice: plan.next });
+  return chat(system, user, maxTokens, { timeoutMs: timeoutMs(plan.next), choice: plan.next });
 }
