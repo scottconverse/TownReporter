@@ -281,11 +281,33 @@ jobs:
           node scripts/provider-signin-e2e.mjs
           # By PID, never by name: this ends the server this step started and
           # nothing else that happens to be a node process on the runner.
-          kill "$DEV_PID" 2>/dev/null || true
+          #
+          # `npm run dev` is `npm run db:migrate && node scripts/with-app-env.mjs
+          # vite dev`, so $! is only the top of a process tree -- npm's own
+          # child shell, with-app-env.mjs, and the vite dev server it spawns are
+          # all descendants with their own PIDs. `kill "$DEV_PID"` alone left
+          # that vite process running, still bound to :3312 and still holding
+          # phase one's in-memory PGlite desk -- so phase two's fresh server
+          # never started, its e2e script (or a truly fresh one) landed on the
+          # OLD server, and "Create the desk" showed "This desk already has an
+          # editor" instead of the sign-up form. Walk the whole tree by PID.
+          kill_tree() {
+            local pid="$1"
+            local child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          kill_tree "$DEV_PID"
           for i in $(seq 1 15); do
             curl -sf -o /dev/null --max-time 1 http://127.0.0.1:3312/ || break
             sleep 1
           done
+          curl -sf -o /dev/null --max-time 1 http://127.0.0.1:3312/ && {
+            echo "phase one's server is still answering on :3312 after kill_tree -- phase two would reuse its already-claimed desk"; exit 1;
+          }
+          true
       - name: With a CLI installed and signed out, Sign in shows the link and completes
         env:
           BETTER_AUTH_SECRET: ci-signin-secret-not-for-production
