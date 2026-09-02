@@ -1,9 +1,70 @@
 # Changelog
 
-Current release: **0.6.1**.
+Current release: **0.6.2**.
 
 ## 0.6.2 — 2026-09-02
 
+- **One provider registry.** What a writing model IS — its label, its model
+  identifier, the environment variable that overrides it, its off switch, how
+  long it may take, which pickers offer it — lived in four files that had to
+  agree with each other by hand: the picker list, `explicitProvider` and
+  `providerBudget` in `ai.ts`, the Automatic ladder, and the scan's own
+  timeout floor. Adding a provider meant editing all of them, and Dark Desk,
+  which never got a picker at all, is what happens when one gets missed. All
+  of it now comes from `PROVIDER_REGISTRY`
+  (`src/lib/news/provider-registry.ts`); every list in the desk is derived
+  from it. Nothing an editor sees changed: the same four choices, in the same
+  order, with the same budgets and the same Automatic ladder.
+- **Editors can change how long a model may take.** The Server page's Writing
+  models panel gains **Time per call** for each model: a number of seconds,
+  the shipped default beside it, and a Reset. Saved per paper. The shipped
+  numbers are unchanged; this exists because a model running on the operator's
+  own machine can take four minutes to read a long pack, and the 150-second
+  ceiling would call that a failure every time. Between 10 seconds and 60
+  minutes, refused rather than silently clamped.
+- **Dark Desk gets a model picker.** It was the one place an AI did something
+  here with no choice at all — the planner, the synthesis and the brief each
+  called the model with no provider named, so a round ran on whatever the
+  machine happened to prefer while the desk's documentation said the editor
+  decides. Dark Desk now shows a **Digging model** picker next to **Keep
+  digging**: Automatic, Codex Terra, Codex Sol or Claude Opus. The choice is
+  checked before any spend, pinned on the job the way a draft's is, and
+  remembered on the file so Keep digging stays on the model that file was
+  started with. A round on Automatic whose login lapses fails over once to the
+  next rung and digs again; an explicit choice never falls back. The round
+  history now names the model that dug each round.
+- **The brief is a queued job.** Writing an investigation's read-me-first
+  block is a model call, and it ran inline inside the request — so it could
+  not carry a model choice and held an HTTP connection open for as long as the
+  provider took. It is a job now, on the ordinary lane, and the page polls.
+- **The planner substitution now follows the model you picked.** Dark Desk
+  plans hops on a cheaper model from the SAME provider — Claude plans on
+  Haiku, either Codex plans on Terra, a gateway is left alone. It used to ask
+  `resolveProvider()` what the machine preferred, so a round pinned to Codex
+  was planned and budgeted as if it were Claude.
+- **Groundwork for local models.** A llama.cpp / LM Studio entry is now a
+  registry entry plus environment variables, not a code change: the `local`
+  kind already carries its own generous default budget, and every picker,
+  ladder, budget and help sentence reads from the registry. See
+  [docs/local-models.md](docs/local-models.md).
+- **Automatic's one-shot fail-over is now proven in a browser, not just by
+  unit test.** `scripts/failover-e2e.mjs` drives a real desk end to end on
+  Automatic while Claude Code's login lapses mid-draft, and asserts the desk
+  actually moves to Codex Terra and lands the draft — including the stage
+  text an editor would see ("Switched to Codex Terra: Claude Opus sign-in
+  lapsed"), read straight off the wire the same way the desk's own polling
+  does. Runs in CI as the `failover` job, model-free (`scripts/fakes/`
+  extended: the fake Claude now answers `-p` with the real 401 envelope a
+  lapsed OAuth token produced live on 2026-09-02; the fake Codex now answers
+  `exec` with a plausible draft for either research or write pass).
+- **The full scan-then-draft path now runs nightly against a real model,
+  unattended.** `scripts/live-pipeline-proof.mjs` + `ops\nightly-proof.ps1`
+  drive a disposable copy of production data (`townreporter_dev`) through
+  one real Scan and one real Draft on Automatic, every night at 03:30, using
+  the operator's own Claude Code / Codex logins — the one path in this repo
+  CI cannot prove, because CI must never spend real money or depend on a
+  real login. Writes `artifacts/nightly/<date>.json`; see
+  `docs/nightly-proof.md`.
 - **Duplicate-lead matcher catches a same-source rewrite with almost no
   shared words.** A killed/drafted lead's headline and the scanner's reworded
   version of the same story could share a source URL but too few words to
@@ -45,67 +106,6 @@ Current release: **0.6.1**.
   which fails the build under that ratio). Added a **Text: Normal / Large**
   toggle next to Light/Dark in the desk header (`src/components/desk-chrome.tsx`),
   persisted the same way the theme is.
-- **Automatic's one-shot fail-over is now proven in a browser, not just by
-  unit test.** `scripts/failover-e2e.mjs` drives a real desk end to end on
-  Automatic while Claude Code's login lapses mid-draft, and asserts the desk
-  actually moves to Codex Terra and lands the draft — including the stage
-  text an editor would see ("Switched to Codex Terra: Claude Opus sign-in
-  lapsed"), read straight off the wire the same way the desk's own polling
-  does. Runs in CI as the `failover` job, model-free (`scripts/fakes/`
-  extended: the fake Claude now answers `-p` with the real 401 envelope a
-  lapsed OAuth token produced live on 2026-09-02; the fake Codex now answers
-  `exec` with a plausible draft for either research or write pass).
-- **The full scan-then-draft path now runs nightly against a real model,
-  unattended.** `scripts/live-pipeline-proof.mjs` + `ops\nightly-proof.ps1`
-  drive a disposable copy of production data (`townreporter_dev`) through
-  one real Scan and one real Draft on Automatic, every night at 03:30, using
-  the operator's own Claude Code / Codex logins — the one path in this repo
-  CI cannot prove, because CI must never spend real money or depend on a
-  real login. Writes `artifacts/nightly/<date>.json`; see
-  `docs/nightly-proof.md`.
-- **One provider registry.** What a writing model IS — its label, its model
-  identifier, the environment variable that overrides it, its off switch, how
-  long it may take, which pickers offer it — lived in four files that had to
-  agree with each other by hand: the picker list, `explicitProvider` and
-  `providerBudget` in `ai.ts`, the Automatic ladder, and the scan's own
-  timeout floor. Adding a provider meant editing all of them, and Dark Desk,
-  which never got a picker at all, is what happens when one gets missed. All
-  of it now comes from `PROVIDER_REGISTRY`
-  (`src/lib/news/provider-registry.ts`); every list in the desk is derived
-  from it. Nothing an editor sees changed: the same four choices, in the same
-  order, with the same budgets and the same Automatic ladder.
-- **Dark Desk gets a model picker.** It was the one place an AI did something
-  here with no choice at all — the planner, the synthesis and the brief each
-  called the model with no provider named, so a round ran on whatever the
-  machine happened to prefer while the desk's documentation said the editor
-  decides. Dark Desk now shows a **Digging model** picker next to **Keep
-  digging**: Automatic, Codex Terra, Codex Sol or Claude Opus. The choice is
-  checked before any spend, pinned on the job the way a draft's is, and
-  remembered on the file so Keep digging stays on the model that file was
-  started with. A round on Automatic whose login lapses fails over once to the
-  next rung and digs again; an explicit choice never falls back. The round
-  history now names the model that dug each round.
-- **The planner substitution now follows the model you picked.** Dark Desk
-  plans hops on a cheaper model from the SAME provider — Claude plans on
-  Haiku, either Codex plans on Terra, a gateway is left alone. It used to ask
-  `resolveProvider()` what the machine preferred, so a round pinned to Codex
-  was planned and budgeted as if it were Claude.
-- **The brief is a queued job.** Writing an investigation's read-me-first
-  block is a model call, and it ran inline inside the request — so it could
-  not carry a model choice and held an HTTP connection open for as long as the
-  provider took. It is a job now, on the ordinary lane, and the page polls.
-- **Editors can change how long a model may take.** The Server page's Writing
-  models panel gains **Time per call** for each model: a number of seconds,
-  the shipped default beside it, and a Reset. Saved per paper. The shipped
-  numbers are unchanged; this exists because a model running on the operator's
-  own machine can take four minutes to read a long pack, and the 150-second
-  ceiling would call that a failure every time. Between 10 seconds and 60
-  minutes, refused rather than silently clamped.
-- **Groundwork for local models.** A llama.cpp / LM Studio entry is now a
-  registry entry plus environment variables, not a code change: the `local`
-  kind already carries its own generous default budget, and every picker,
-  ladder, budget and help sentence reads from the registry. See
-  [docs/local-models.md](docs/local-models.md).
 
 ## 0.6.1 — 2026-09-02
 

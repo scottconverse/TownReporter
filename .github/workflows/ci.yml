@@ -389,6 +389,56 @@ jobs:
           }
           kill_tree "$DEV_PID"
 
+  # Dark Desk was the one screen where an AI did something with no model
+  # choice at all, and the Server page's per-provider time budgets are pure
+  # screen behaviour -- neither is provable from a unit test. Model-free,
+  # same trick as provider-signin and failover: the fake Claude CLI answers
+  # signed in and no round is ever started, so nothing here spends money or
+  # calls a real provider. See the walk under scripts/, named for what it
+  # proves.
+  dark-picker:
+    name: The Dark Desk model picker and the time-per-call field, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: The Dark Desk picker shows the same four models, and Time per call round-trips
+        env:
+          BETTER_AUTH_SECRET: ci-dark-picker-secret-not-for-production
+          PORT: "3316"
+          HOST: 127.0.0.1
+          DARK_PICKER_BASE_URL: http://127.0.0.1:3316
+          CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+        run: |
+          npm run dev -- --port 3316 > /tmp/dark-picker.log 2>&1 &
+          DEV_PID=$!
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3316/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3316/ || {
+            echo "dev server did not come up"; tail -n 80 /tmp/dark-picker.log; exit 1;
+          }
+          node scripts/dark-picker-e2e.mjs
+          # By PID, never by name -- see the same comment in the
+          # provider-signin job above for why a bare `kill "$DEV_PID"` is not
+          # enough (npm/with-app-env.mjs/vite are all separate descendants).
+          kill_tree() {
+            local pid="$1"
+            local child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          kill_tree "$DEV_PID"
+
   # Delete, trash, and the public corrections feed each had a fix proven only
   # by a unit test: a deleted story's correction could outlive it and print
   # under a null headline, restoring a story from the trash could leave its

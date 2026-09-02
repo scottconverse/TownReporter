@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.1](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.1)** — 2 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.2](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.2)** — 2 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.2** — one provider registry with editable time budgets; Dark Desk picks its model; the desk is readable in dark mode with a Text size control; killed leads match reworded repeats; nightly live proof.
 - **0.6.1** — Scan gets the model picker and a real time budget; killed leads are stamped "seen again" instead of refiled; the Server page explains itself; staging before every promote.
 - **0.6.0** — sign in to Claude Code and Codex from the Server page; dev server local-only by default.
 - **0.5.12** — doc and health-tile polish from the first public read: no more hardcoded version in the unreleased-features notice, an honest note on what "no API key" relies on, and the Server page no longer calls the embedded database "postgres".

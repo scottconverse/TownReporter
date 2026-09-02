@@ -610,7 +610,7 @@
         >
         <div class="nav-links">
           <a href="#shots">Screenshots</a>
-          <a href="#new">New in 0.6.1</a>
+          <a href="#new">New in 0.6.2</a>
           <a href="#idea">The idea</a>
           <a href="#rooms">Two rooms</a>
           <a href="#how">How it works</a>
@@ -622,7 +622,7 @@
           <summary aria-label="Menu">Menu</summary>
           <div class="menu-panel">
             <a href="#shots">Screenshots</a>
-            <a href="#new">New in 0.6.1</a>
+            <a href="#new">New in 0.6.2</a>
             <a href="#idea">The idea</a>
             <a href="#rooms">Two rooms</a>
             <a href="#how">How it works</a>
@@ -646,7 +646,7 @@
               or doesn’t add up. A human still decides what prints.
             </p>
             <p class="cap">
-              Current release: <b>0.6.1</b>, the build the live paper runs. Everything described
+              Current release: <b>0.6.2</b>, the build the live paper runs. Everything described
               here is on it.
             </p>
             <div class="cta-row">
@@ -783,34 +783,35 @@
       </section>
 
       <section id="new" class="wrap">
-        <p class="eyebrow">New in 0.6.1</p>
-        <h2>Sign in to Claude Code and Codex without leaving the desk</h2>
+        <p class="eyebrow">New in 0.6.2</p>
+        <h2>Pick the model everywhere, and the desk stays readable</h2>
         <div class="grid-3">
           <div class="panel">
-            <h3>Sign in from the desk</h3>
+            <h3>Pick the model everywhere</h3>
+            <p class="cap" style="margin: 0 0 10px">One registry</p>
+            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
+              Story, Scan and Dark Desk now all show the same Writing model picker
+              &mdash; Automatic, Codex Terra, Codex Sol or Claude Opus &mdash; each one reading
+              from a single provider registry instead of four files that had to agree by hand.
+              Local models are next.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Readable for real eyes</h3>
+            <p class="cap" style="margin: 0 0 10px">Dark mode, fixed</p>
+            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
+              Every informational text token in both themes now meets WCAG AA contrast, and
+              nothing on the desk renders below a 14px floor. A new Text: Normal / Large toggle
+              sits next to Light/Dark in the header for anyone who wants it bigger still.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Set how long a model may take</h3>
             <p class="cap" style="margin: 0 0 10px">Server page</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              The Server page shows, for Claude Code and Codex, whether each is installed and
-              signed in. A Sign in button runs the program&rsquo;s own sign-in and shows the link
-              &mdash; and Codex&rsquo;s one-time code &mdash; right there in the page.
-            </p>
-          </div>
-          <div class="panel">
-            <h3>Test before you draft</h3>
-            <p class="cap" style="margin: 0 0 10px">One real call</p>
-            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              A Test button makes one tiny real call to prove a model will actually answer, not
-              just that a login file exists. A failed draft&rsquo;s error carries that same Sign
-              in button, ready right where you need it.
-            </p>
-          </div>
-          <div class="panel">
-            <h3>Claude and Codex only, Automatic first</h3>
-            <p class="cap" style="margin: 0 0 10px">The Automatic ladder</p>
-            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              Automatic tries Claude Opus, then Codex Terra, moving on once if the first
-              login has lapsed. A named choice &mdash; Opus, Terra, Sol &mdash; never switches
-              provider behind your back.
+              Each writing model on the Server page now has its own Time per call, editable
+              between 10 seconds and 60 minutes with the shipped default shown beside it and a
+              Reset &mdash; so a slow local model finally gets the room it needs.
             </p>
           </div>
         </div>
