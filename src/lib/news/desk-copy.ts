@@ -626,8 +626,20 @@ export function scanZeroWhy(input: {
  * matcher (see `findMatchingLead` in `./lead-match.ts`) stamped leads
  * instead of refiling them, so the Scan page's result block says so without
  * a JSON/summary column dedicated to the counts (scan_runs has none).
+ *
+ * QA-1 (2026-09-02): a match discards the AI-returned candidate's own
+ * headline entirely -- only the existing row gets a resurfaced stamp. That
+ * is invisible-by-design when the match is right (a genuine repeat), but
+ * indistinguishable from a wrong merge when it isn't. `firstDiscardedHeadline`
+ * -- the headline of the first candidate this run discarded as a match --
+ * gets named in the sentence so a false merge is at worst reviewable, never
+ * silent, without adding a new column to record every one.
  */
-export function resurfacedSummarySentence(input: { resurfacedKilled: number; resurfacedOpen: number }): string {
+export function resurfacedSummarySentence(input: {
+  resurfacedKilled: number;
+  resurfacedOpen: number;
+  firstDiscardedHeadline?: string;
+}): string {
   const bits: string[] = [];
   if (input.resurfacedKilled > 0) {
     bits.push(
@@ -639,7 +651,12 @@ export function resurfacedSummarySentence(input: { resurfacedKilled: number; res
   if (input.resurfacedOpen > 0) {
     bits.push(`${input.resurfacedOpen} matched ${input.resurfacedOpen === 1 ? "an open lead" : "open leads"}`);
   }
-  return bits.length ? `${bits.join("; ")}.` : "";
+  if (!bits.length) return "";
+  const headline = input.firstDiscardedHeadline?.trim();
+  if (headline) {
+    return `${bits.join("; ")} — e.g. '${headline.slice(0, 120)}'.`;
+  }
+  return `${bits.join("; ")}.`;
 }
 
 export function composeZeroLeadSummary(input: { fetched: number; changed: number }): string {

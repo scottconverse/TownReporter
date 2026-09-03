@@ -176,6 +176,19 @@ badge instead of a duplicate row. A story that already **printed** is never
 matched this way — a fresh development on a published story is real news and
 always files as a new lead.
 
+The match itself weighs two things together: the same source link, and
+either close wording or a set of shared concrete details (a date, a dollar
+figure, a proper noun) — but a shared date or dollar figure alone is never
+enough. Two different agenda items from the same meeting page that happen to
+name the same figure and date still need at least one real shared subject
+word before they are treated as the same story, so a genuinely different
+story on the same page is never silently folded into an old one. When a
+scan run does stamp a lead instead of filing a new one, the scan's own
+result summary names the headline that got merged (for example: "1 lead
+matched a story you already killed and was stamped, not refiled — e.g.
+'…'"), so a merge is something you can glance at and check, never something
+that happens with no trace at all.
+
 Nothing about "seen again" changes what Kill does: the lead stays under
 Killed, and **Back** still returns it to New at any time, resurfaced or not.
 

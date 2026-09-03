@@ -190,6 +190,14 @@ describe("fileScanLeads stamps a resurfaced lead instead of refiling it", () => 
       assert.equal(result.leadsCreated, 1, "exactly one genuinely new lead should have been inserted");
       assert.equal(result.resurfacedKilled, 1, "the killed lead should count as one resurfaced-killed match");
       assert.equal(result.resurfacedOpen, 1, "the open lead should count as one resurfaced-open match");
+      // QA-1: the first discarded candidate's own headline must be surfaced,
+      // not lost -- it is the reworded closed-sessions AI lead (the FIRST of
+      // the two matches), never the killed row's original headline.
+      assert.equal(
+        result.firstDiscardedHeadline,
+        "Two closed executive sessions are on the books for Longmont city council in late September",
+        "the caller needs the discarded CANDIDATE's headline, not the existing row's, to name a merge",
+      );
 
       const killedAfter = await sql<{
         status: string;

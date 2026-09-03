@@ -167,15 +167,30 @@ export type SaveProviderTimeInput = {
    * the default reaches a paper that never made a decision.
    */
   callSeconds: number | null;
+  /**
+   * QA-2 (2026-09-02): true when `raw.callSeconds` was present but is not a
+   * finite number (NaN, +/-Infinity, a string, an object...). Before this
+   * field existed, `cleanProviderTimeInput` collapsed every such value to
+   * `null` -- the exact same shape the Reset button sends -- so a malformed
+   * request silently wiped a stored override back to the shipped default
+   * instead of being refused. `saveProviderTime` checks this BEFORE treating
+   * `callSeconds === null` as a reset, so "field omitted / explicitly null"
+   * and "field present but garbage" are no longer the same code path.
+   */
+  invalid: boolean;
 };
 
 export function cleanProviderTimeInput(raw: unknown): SaveProviderTimeInput {
   const v = (raw ?? {}) as Partial<SaveProviderTimeInput>;
   const seconds = v.callSeconds;
+  const isFiniteNumber = typeof seconds === "number" && Number.isFinite(seconds);
   return {
     providerId: String(v.providerId ?? ""),
-    callSeconds:
-      typeof seconds === "number" && Number.isFinite(seconds) ? Math.round(seconds) : null,
+    callSeconds: isFiniteNumber ? Math.round(seconds) : null,
+    // `undefined` and `null` are the Reset button's own shape, not garbage --
+    // only a PRESENT-but-not-finite value (NaN, Infinity, a string, ...) is
+    // invalid input.
+    invalid: seconds !== undefined && seconds !== null && !isFiniteNumber,
   };
 }
 
@@ -202,6 +217,11 @@ export async function saveProviderTime(
   }
   const entry = providerEntry(input.providerId);
   if (!entry) return { ok: false, error: "There is no such writing model." };
+
+  // QA-2: a present-but-not-finite callSeconds (NaN, Infinity, a non-numeric
+  // value) must be refused with the same shape as an out-of-range number --
+  // never silently treated as the Reset button's `null`.
+  if (input.invalid) return { ok: false, error: "Give it a number of seconds." };
 
   await ensureProviderSettingsSchema();
   const sql = await getSql();

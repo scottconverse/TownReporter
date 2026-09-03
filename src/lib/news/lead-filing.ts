@@ -52,10 +52,19 @@ export async function fileScanLeads(
   runId: number,
   aiLeads: ScanAiLead[],
   existing: MatchCandidateLead[],
-): Promise<{ leadsCreated: number; resurfacedKilled: number; resurfacedOpen: number }> {
+): Promise<{
+  leadsCreated: number;
+  resurfacedKilled: number;
+  resurfacedOpen: number;
+  /** QA-1: the headline of the first AI-returned candidate this call
+   * discarded as a match, so the caller can name it in the scan summary
+   * rather than let a merge -- right or wrong -- pass with no trace. */
+  firstDiscardedHeadline?: string;
+}> {
   let leadsCreated = 0;
   let resurfacedKilled = 0;
   let resurfacedOpen = 0;
+  let firstDiscardedHeadline: string | undefined;
 
   for (const lead of aiLeads) {
     if (!lead.headline?.trim()) continue;
@@ -72,6 +81,7 @@ export async function fileScanLeads(
         `;
       if (matched.status === "killed") resurfacedKilled += 1;
       else resurfacedOpen += 1;
+      firstDiscardedHeadline ??= lead.headline;
       continue;
     }
     const urls = JSON.stringify(candidateUrls);
@@ -98,7 +108,7 @@ export async function fileScanLeads(
     });
   }
 
-  return { leadsCreated, resurfacedKilled, resurfacedOpen };
+  return { leadsCreated, resurfacedKilled, resurfacedOpen, firstDiscardedHeadline };
 }
 
 export { parseLeadSourceUrls };

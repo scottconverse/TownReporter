@@ -12,9 +12,8 @@
  * never sees `node:child_process`.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { deskMiddleware } from "./desk-auth.ts";
+import { assertOwner, deskMiddleware } from "./desk-auth.ts";
 import { assertRate, audit } from "./ops.ts";
-import { ForbiddenError } from "./membership.ts";
 import type {
   ProviderId,
   ProviderLogin,
@@ -30,14 +29,11 @@ export function isProviderId(value: unknown): value is ProviderId {
 }
 
 /**
- * Exported so a test can prove the refusal without standing up the framework.
- * Every handler below calls it as its first act.
+ * Re-exported so this file's own tests and any other importer keep working.
+ * The guard itself now lives in desk-auth.ts (src/lib/ops/dashboard.ts uses
+ * it too, and the two owner-only surfaces should share one implementation).
  */
-export function assertOwner(role: string) {
-  if (role !== "owner") {
-    throw new ForbiddenError("Only the owner can sign the paper in to a writing model.");
-  }
-}
+export { assertOwner };
 
 export const getProviderStatuses = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])

@@ -633,7 +633,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     created_at: l.created_at,
   }));
 
-  const { leadsCreated, resurfacedKilled, resurfacedOpen } = await fileScanLeads(
+  const { leadsCreated, resurfacedKilled, resurfacedOpen, firstDiscardedHeadline } = await fileScanLeads(
     sql,
     context,
     owned(context),
@@ -667,7 +667,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       changed: pendingHashes.filter((p) => p.changed).length,
     });
   }
-  const resurfacedSentence = resurfacedSummarySentence({ resurfacedKilled, resurfacedOpen });
+  const resurfacedSentence = resurfacedSummarySentence({
+    resurfacedKilled,
+    resurfacedOpen,
+    firstDiscardedHeadline,
+  });
   if (resurfacedSentence) {
     summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;
   }

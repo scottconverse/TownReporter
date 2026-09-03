@@ -271,4 +271,35 @@ describe("two editors on one story", () => {
     );
     assert.equal(arts.rows[0].c, 1, "two simultaneous publishes must print exactly one article");
   });
+
+  it("an invited editor's own session is refused by the ops server fns, not just hidden from them (ENG-01)", { skip, timeout: 60_000 }, async () => {
+    if (!editorPage) throw new Error("no session");
+
+    /*
+      Before the ENG-01 fix, `getOpsHealth` and `runOpsAction` carried only
+      `deskMiddleware` (signed-in + newsroom member), and the owner check lived
+      solely in this page's React (`isOwner` hiding the panel). This proves the
+      refusal now happens on the SERVER, for a real editor session with a real
+      cookie -- not merely that the UI declines to render the button.
+    */
+    await editorPage.goto(`${BASE_URL}/desk/ops`, { waitUntil: "domcontentloaded" });
+
+    // getOpsHealth: the Health section's own query has no role gate in the
+    // React tree (it fires for every desk member), so an editor session must
+    // see the query itself fail, not silently render an owner's data.
+    await editorPage
+      .getByText(/Could not read the server\..*Only the owner/i)
+      .waitFor({ timeout: 20_000 });
+
+    // runOpsAction: click a non-interrupting action's Run button. If the
+    // server-side guard were missing, this would actually rotate the log
+    // files on the operator's machine; because `assertOwner` is the first
+    // line of the handler, it refuses before the allowlist -- let alone the
+    // action -- is ever reached.
+    const row = editorPage.locator("li", { hasText: "Rotate the logs" });
+    await row.getByRole("button", { name: "Run" }).click();
+    await editorPage
+      .getByText(/Only the owner/i)
+      .waitFor({ timeout: 20_000 });
+  });
 });

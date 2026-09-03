@@ -9,6 +9,38 @@ import {
   withDatabase,
 } from "../test-support/pg-admin.ts";
 import { KIND_BUDGETS, effectiveBudget } from "./provider-registry.ts";
+import { cleanProviderTimeInput as pureCleanProviderTimeInput } from "./provider-settings.ts";
+
+/**
+ * QA-2 (2026-09-02): a pure unit test on `cleanProviderTimeInput`'s
+ * `invalid` field -- no database needed, so it runs even without
+ * TEST_POSTGRES_ADMIN_URL set. The DB-backed refusal (saveProviderTime
+ * actually rejecting the request rather than resetting the row) is proven
+ * below, next to the existing 9s/3601s/-5s range tests.
+ */
+describe("cleanProviderTimeInput distinguishes Reset from garbage", () => {
+  it("marks omitted or explicit null as NOT invalid -- that is what Reset sends", () => {
+    assert.equal(pureCleanProviderTimeInput({ providerId: "x" }).invalid, false);
+    assert.equal(pureCleanProviderTimeInput({ providerId: "x", callSeconds: null }).invalid, false);
+    assert.equal(pureCleanProviderTimeInput({ providerId: "x", callSeconds: null }).callSeconds, null);
+  });
+
+  it("marks a present-but-non-finite callSeconds as invalid, still surfacing null so a caller cannot mistake it for a real number", () => {
+    for (const bad of [NaN, Infinity, -Infinity, "not-a-number", {}, [], true]) {
+      const cleaned = pureCleanProviderTimeInput({ providerId: "x", callSeconds: bad as never });
+      assert.equal(cleaned.invalid, true, `${String(bad)} must be marked invalid`);
+      assert.equal(cleaned.callSeconds, null);
+    }
+  });
+
+  it("leaves a real finite number alone, rounded, and not invalid", () => {
+    assert.deepEqual(pureCleanProviderTimeInput({ providerId: "x", callSeconds: 90.4 }), {
+      providerId: "x",
+      callSeconds: 90,
+      invalid: false,
+    });
+  });
+});
 
 /**
  * The per-paper time budgets, on a real Postgres (0.6.2).
@@ -50,10 +82,14 @@ const repoRoot = new URL("../../../", import.meta.url).pathname.replace(/^\/([A-
 
 let readProviderOverrides: typeof import("./provider-settings.ts").readProviderOverrides;
 let providerTimeSettings: typeof import("./provider-settings.ts").providerTimeSettings;
+let saveProviderTime: typeof import("./provider-settings.ts").saveProviderTime;
+let cleanProviderTimeInput: typeof import("./provider-settings.ts").cleanProviderTimeInput;
+let ensureNewsroomSchema: typeof import("./membership.ts").ensureNewsroomSchema;
 let getSql: typeof import("../db.ts").getSql;
 let closePoolForTests: typeof import("../db.ts").closePoolForTests;
 
 const NEWSROOM_ID = 1;
+const OWNER_ID = "provider-settings-owner";
 
 if (dbProbe.ok) {
   before(async () => {
@@ -76,10 +112,22 @@ if (dbProbe.ok) {
 
     const mod = await import("./provider-settings.ts");
     const db = await import("../db.ts");
+    const membership = await import("./membership.ts");
     readProviderOverrides = mod.readProviderOverrides;
     providerTimeSettings = mod.providerTimeSettings;
+    saveProviderTime = mod.saveProviderTime;
+    cleanProviderTimeInput = mod.cleanProviderTimeInput;
+    ensureNewsroomSchema = membership.ensureNewsroomSchema;
     getSql = db.getSql;
     closePoolForTests = db.closePoolForTests;
+
+    await ensureNewsroomSchema();
+    const sql = await getSql();
+    await sql`
+      insert into newsroom_members (user_id, role, newsroom_id)
+      values (${OWNER_ID}, 'owner', ${NEWSROOM_ID})
+      on conflict (user_id) do update set role = 'owner', newsroom_id = ${NEWSROOM_ID}
+    `;
   }, 60_000);
 
   after(async () => {
@@ -195,5 +243,52 @@ describe("provider_settings round-trips on a real Postgres", { skip }, () => {
     assert.ok(!mine["codex-balanced"]?.callMs);
     const theirs = await readProviderOverrides(2);
     assert.equal(theirs["codex-balanced"]?.callMs, 600_000);
+  });
+});
+
+describe("saveProviderTime input validation (QA-2, 2026-09-02)", { skip }, () => {
+  const PROVIDER_ID = "claude-frontier";
+
+  async function currentCallMs(): Promise<number | null> {
+    const overrides = await readProviderOverrides(NEWSROOM_ID);
+    return overrides[PROVIDER_ID]?.callMs ?? null;
+  }
+
+  it("refuses 9 seconds, 3601 seconds, and -5 seconds -- out of range, not silently clamped", async () => {
+    for (const bad of [9, 3601, -5]) {
+      const result = await saveProviderTime(OWNER_ID, cleanProviderTimeInput({ providerId: PROVIDER_ID, callSeconds: bad }));
+      assert.equal(result.ok, false, `${bad}s must be refused`);
+      if (!result.ok) assert.match(result.error, /between 10 seconds and 3600 seconds/);
+    }
+  });
+
+  it("refuses NaN, Infinity, and a non-numeric value with the SAME shape as an out-of-range number -- not a silent reset", async () => {
+    // First, give the row a real override so a silent reset would be visible.
+    const seeded = await saveProviderTime(
+      OWNER_ID,
+      cleanProviderTimeInput({ providerId: PROVIDER_ID, callSeconds: 600 }),
+    );
+    assert.equal(seeded.ok, true);
+    assert.equal(await currentCallMs(), 600_000);
+
+    for (const bad of [NaN, Infinity, -Infinity, "not-a-number", {}, [], true]) {
+      const result = await saveProviderTime(
+        OWNER_ID,
+        cleanProviderTimeInput({ providerId: PROVIDER_ID, callSeconds: bad }),
+      );
+      assert.equal(result.ok, false, `${String(bad)} must be refused, not accepted as a reset`);
+      if (!result.ok) assert.match(result.error, /number of seconds/);
+      // The malformed request must not have touched the stored override.
+      assert.equal(await currentCallMs(), 600_000, `${String(bad)} must not silently reset the stored override`);
+    }
+  });
+
+  it("still treats an explicitly-omitted or null callSeconds as Reset, not as invalid", async () => {
+    assert.equal(cleanProviderTimeInput({ providerId: PROVIDER_ID }).invalid, false);
+    assert.equal(cleanProviderTimeInput({ providerId: PROVIDER_ID, callSeconds: null }).invalid, false);
+
+    const result = await saveProviderTime(OWNER_ID, cleanProviderTimeInput({ providerId: PROVIDER_ID, callSeconds: null }));
+    assert.equal(result.ok, true);
+    assert.equal(await currentCallMs(), null, "an actual Reset must still clear the stored override");
   });
 });

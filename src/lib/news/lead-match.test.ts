@@ -176,6 +176,26 @@ describe("findMatchingLead: anchor path (real case 2026-09-02)", () => {
     };
     assert.equal(findMatchingLead(candidate, [parksMeeting]), null);
   });
+
+  it("QA-1 (2026-09-02): does not match two different agenda items that share a URL, a date, and a dollar figure", () => {
+    // Real collision risk on a PrimeGov-style portal: two unrelated agenda
+    // items on the same night's meeting, published under one page URL,
+    // naming the same round dollar figure and the same meeting date. Before
+    // the CONTENT_STOPLIST fix this cleared the anchor bar (shared URL +
+    // shared date + shared amount = 2 anchors) and silently discarded the
+    // library-roof-repair candidate as a "resurfaced" park-irrigation lead.
+    const parkIrrigation: MatchCandidateLead = {
+      id: 901,
+      status: "held",
+      headline: "Council approves $250,000 park irrigation contract at Sept. 10 meeting",
+      source_urls: ["https://primegov.example.com/longmont/agenda/2026-09-10"],
+    };
+    const candidate = {
+      headline: "Council votes on $250,000 library roof repair contract at Sept. 10 meeting",
+      source_urls: ["https://primegov.example.com/longmont/agenda/2026-09-10"],
+    };
+    assert.equal(findMatchingLead(candidate, [parkIrrigation]), null);
+  });
 });
 
 describe("extractAnchors / sharedAnchorCount", () => {

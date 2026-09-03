@@ -2,6 +2,55 @@
 
 Current release: **0.6.3**.
 
+## 0.6.4 — 2026-09-02
+
+- **The ops dashboard's owner gate is now enforced on the server, not just
+  hidden in React (ENG-01, Critical).** `getOpsHealth` and `runOpsAction`
+  (`src/lib/ops/dashboard.ts`) carried only `deskMiddleware` — signed-in and a
+  newsroom member, owner OR editor — with the owner check living solely in
+  `src/routes/desk.ops.tsx`'s `isOwner` hiding the panel. An invited editor
+  could call either server function directly and reach host disk/port/service
+  reporting and the six-command ops allowlist (including restarting the app
+  and the tunnel). `assertOwner` — lifted out of `provider-login.ts` into
+  `src/lib/news/desk-auth.ts`, which `provider-login.ts` now re-exports so its
+  own imports and tests are unchanged — is the first line of both handlers.
+  `getOpsHealth` is owner-only (it reports host state); editors keep the rest
+  of the Server page. Proven with a real invited-editor session against a
+  live built server in `two-editors.e2e.test.ts`, plus unit/static coverage
+  in `src/lib/ops/dashboard.test.ts`.
+- **The scan lead-matcher no longer merges two different agenda items that
+  happen to share a date and a dollar figure (QA-1, Critical).** The anchor
+  match path (`src/lib/news/lead-match.ts`) fired on a shared source URL plus
+  two shared anchors alone, which let "Council votes on $250,000 library roof
+  repair contract at Sept. 10 meeting" silently merge into an unrelated
+  "Council approves $250,000 park irrigation contract at Sept. 10 meeting" —
+  a realistic collision on any PrimeGov-style portal page listing several
+  agenda items. The anchor path now also requires at least one shared content
+  word (>= 4 letters, not generic civic furniture like "council"/"meeting"/
+  "contract" — see `CONTENT_STOPLIST`); the real same-story match this path
+  exists for ("executive"/"sessions" reworded across a shared URL) still
+  fires. When a scan run does stamp a lead instead of filing a new one, the
+  run's summary sentence now names the discarded candidate's headline (`—
+  e.g. '…'`), so a merge — right or wrong — is reviewable, never silent
+  (`src/lib/news/lead-filing.ts`, `desk-copy.ts`'s `resurfacedSummarySentence`).
+  Documented in `docs/editor.md`'s "Killed — seen again" section.
+- **A malformed provider time-budget request is now refused, not treated as a
+  Reset (QA-2, Major).** `saveProviderTimeFn` (`src/lib/news/provider-settings.ts`)
+  collapsed `NaN`, `Infinity`, and non-numeric `callSeconds` values into the
+  same `null` the Reset button sends, silently wiping an owner's stored
+  override back to the shipped default with a response that read like
+  success. `cleanProviderTimeInput` now distinguishes an explicitly-omitted/
+  `null` field (a real Reset) from a present-but-not-finite one (`invalid`),
+  and `saveProviderTime` refuses the latter with the same error shape as an
+  out-of-range number.
+- **Doc fixes.** `.env.example`'s Opinion comment described a Codex-first
+  ladder that was decided against on 2026-09-02 and does not exist in code;
+  it now says "Opinion is Claude only (Codex declines editorials)", matching
+  README/setup/editor/manual/SELF-HOSTING (TEC-01). `docs/manual.md`'s
+  opening "Documentation scope" note called the per-run model picker and the
+  native Codex path an "unreleased candidate" four minor releases after both
+  shipped and were promoted to production; the paragraph is removed (TEC-02).
+
 ## 0.6.3 — 2026-09-02
 
 - **Ops port checks now know the difference between IPv4 and IPv6.** During

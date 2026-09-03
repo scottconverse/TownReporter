@@ -39,11 +39,49 @@ import {
   deskTakenLoginCopy,
   createEditorCopy,
   inviteMessage,
+  resurfacedSummarySentence,
 } from "./desk-copy.ts";
 import { presentWorthItem, rankWorthItems } from "./worth-a-look.ts";
 
 const PDF =
   "https://assets.bouldercounty.gov/wp-content/uploads/2025/02/2022-048-rst-td3-transportation-extension-o.100pct.pdf";
+
+describe("resurfacedSummarySentence (QA-1: a merge is never invisible)", () => {
+  it("names the first discarded candidate's headline so a merge is reviewable", () => {
+    const sentence = resurfacedSummarySentence({
+      resurfacedKilled: 1,
+      resurfacedOpen: 0,
+      firstDiscardedHeadline: "Council votes on $250,000 library roof repair contract at Sept. 10 meeting",
+    });
+    assert.match(sentence, /^1 lead matched a story you already killed/);
+    assert.match(sentence, /— e\.g\. 'Council votes on \$250,000 library roof repair contract at Sept\. 10 meeting'\.$/);
+  });
+
+  it("says nothing extra with no headline (back-compat: the field is optional)", () => {
+    const sentence = resurfacedSummarySentence({ resurfacedKilled: 2, resurfacedOpen: 1 });
+    assert.equal(
+      sentence,
+      "2 leads matched stories you already killed and were stamped, not refiled; 1 matched an open lead.",
+    );
+  });
+
+  it("returns empty when nothing resurfaced, even with a headline present", () => {
+    assert.equal(
+      resurfacedSummarySentence({ resurfacedKilled: 0, resurfacedOpen: 0, firstDiscardedHeadline: "x" }),
+      "",
+    );
+  });
+
+  it("truncates a very long discarded headline rather than blowing out the summary", () => {
+    const long = "A".repeat(400);
+    const sentence = resurfacedSummarySentence({
+      resurfacedKilled: 0,
+      resurfacedOpen: 1,
+      firstDiscardedHeadline: long,
+    });
+    assert.ok(sentence.length < 200);
+  });
+});
 
 describe("editor copy", () => {
   it("turns a raw PDF URL into a human headline", () => {

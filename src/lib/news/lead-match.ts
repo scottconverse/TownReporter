@@ -184,6 +184,35 @@ export function sharedAnchorCount(a: Set<string>, b: Set<string>): number {
   return shared;
 }
 
+/**
+ * QA-1 (2026-09-02): the anchor path above was built for a same-story
+ * rewrite that shares a source URL plus >= 2 concrete anchors (a date, a
+ * dollar amount, a proper noun...) but almost no prose. It did not guard
+ * against two DIFFERENT stories on the same portal page that happen to share
+ * a meeting date and a round dollar figure -- "Council votes on $250,000
+ * library roof repair contract at Sept. 10 meeting" vs "Council approves
+ * $250,000 park irrigation contract at Sept. 10 meeting" cleared the anchor
+ * bar (shared URL, shared date, shared amount) despite naming two unrelated
+ * subjects, and the matched candidate's content was silently discarded (see
+ * lead-filing.ts).
+ *
+ * These are words a civic-agenda headline reaches for regardless of subject
+ * -- true of every item on every meeting's agenda, so sharing one proves
+ * nothing about whether two headlines are the SAME item. Combined with
+ * PROPER_NOUN_STOPLIST and STOP_WORDS below to build the anchor path's
+ * required content-word overlap (see sharesContentWord): the anchor path
+ * now also requires at least one shared word that survives all three lists,
+ * so "executive"/"sessions" (a real same-story match, kept) still clears the
+ * bar while "roof"/"repair" vs "irrigation" (two different subjects, fixed)
+ * does not.
+ */
+const CONTENT_STOPLIST = new Set([
+  "council", "board", "boards", "meeting", "meetings", "vote", "votes", "voted",
+  "approve", "approves", "approved", "contract", "contracts", "agenda", "agendas",
+  "item", "items", "session", "sessions", "hearing", "hearings", "notice", "notices",
+  "public", "sept", "city",
+]);
+
 const STOP_WORDS = new Set([
   "the", "and", "for", "with", "from", "that", "this", "have", "has", "will",
   "are", "was", "were", "been", "being", "into", "over", "after", "before",
@@ -256,6 +285,36 @@ function headlinesAloneMatch(a: string, b: string): boolean {
   return jaccard(ta, tb) >= HEADLINE_ONLY_THRESHOLD;
 }
 
+/** Words at least 4 letters long, present in the headline, and NOT on
+ * STOP_WORDS, PROPER_NOUN_STOPLIST, or CONTENT_STOPLIST -- see
+ * CONTENT_STOPLIST's doc comment. This is deliberately a lower bar than
+ * headlineTokens' full-overlap scoring: the anchor path only needs proof
+ * the two headlines are about the same SUBJECT, not that they are a close
+ * paraphrase of each other. */
+function contentTokens(headline: string): Set<string> {
+  const words = headline
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .split(/\s+/)
+    .filter(
+      (w) =>
+        w.length >= 4 &&
+        !STOP_WORDS.has(w) &&
+        !PROPER_NOUN_STOPLIST.has(w) &&
+        !CONTENT_STOPLIST.has(w),
+    );
+  return new Set(words);
+}
+
+/** QA-1: required alongside the anchor count for match path 2 -- see
+ * findMatchingLead and CONTENT_STOPLIST's doc comment. */
+function sharesContentWord(a: string, b: string): boolean {
+  const ta = contentTokens(a);
+  const tb = contentTokens(b);
+  for (const w of ta) if (tb.has(w)) return true;
+  return false;
+}
+
 export type MatchCandidateLead = {
   id: number;
   status: string;
@@ -276,9 +335,12 @@ export type MatchCandidateLead = {
  *      is >= 0.6 Jaccard OR >= 0.7 containment of the shorter headline.
  *   2. Shares at least one normalised source URL AND the two headlines
  *      share >= ANCHOR_MATCH_MIN_SHARED anchors (concrete dates, dollar
- *      amounts, multi-digit numbers, or non-generic proper nouns) -- see
- *      extractAnchors and ANCHOR_MATCH_MIN_SHARED for why this catches a
- *      same-source rewrite that shares almost no words.
+ *      amounts, multi-digit numbers, or non-generic proper nouns) AND share
+ *      at least one content word (>= 4 letters, not generic civic
+ *      furniture -- see CONTENT_STOPLIST) -- see extractAnchors and
+ *      ANCHOR_MATCH_MIN_SHARED for why this catches a same-source rewrite
+ *      that shares almost no words, and CONTENT_STOPLIST for why anchors
+ *      alone are not enough to tell two different agenda items apart (QA-1).
  *   3. No shared URL, but headline token overlap is >= 0.85 Jaccard alone
  *      (a portal notice re-posted under a different deep link).
  *
@@ -306,7 +368,8 @@ export function findMatchingLead(
     }
     if (
       shareUrl &&
-      sharedAnchorCount(extractAnchors(headline), extractAnchors(lead.headline)) >= ANCHOR_MATCH_MIN_SHARED
+      sharedAnchorCount(extractAnchors(headline), extractAnchors(lead.headline)) >= ANCHOR_MATCH_MIN_SHARED &&
+      sharesContentWord(headline, lead.headline)
     ) {
       return lead.id;
     }

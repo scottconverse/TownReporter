@@ -2,12 +2,10 @@
 
 **Version 0.6.3 · 2 September 2026**
 
-**Documentation scope:** 0.5.6 is the released baseline. Per-run model pickers
-and the restored native Codex path below describe the **unreleased candidate**,
-not the live paper until promotion. Queue, workbench, Opinion and Paper setup
-images are development examples; the other screens are historical Longmont
-captures from 29 August. Their old **Leave as editor** header link now lives as
-**Give up the desk** on the Server page.
+**Documentation scope:** Queue, workbench, Opinion and Paper setup images are
+development examples; the other screens are historical Longmont captures from
+29 August. Their old **Leave as editor** header link now lives as **Give up
+the desk** on the Server page.
 
 TownReporter is a civic newsroom you run yourself. A public paper on the front,
 a signed-in editor's desk behind it. It watches a city's meetings, packets,

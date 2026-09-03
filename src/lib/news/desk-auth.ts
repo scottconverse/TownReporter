@@ -1,4 +1,5 @@
 import { createMiddleware } from "@tanstack/react-start";
+import { ForbiddenError } from "./membership.ts";
 
 /**
  * Authenticated AND a newsroom member (owner/editor).
@@ -18,3 +19,15 @@ export const deskMiddleware = createMiddleware({ type: "function" })
     const editor = await requireEditor(userId);
     return next({ context: { userId, newsroomId: editor.newsroomId, role: editor.role } });
   });
+
+/**
+ * Exported so a test can prove the refusal without standing up the framework.
+ * Every owner-only server fn calls it as the first line of its `.handler`.
+ * Lifted out of provider-login.ts (which still re-exports it, so its imports
+ * and tests keep working) so every owner-gated surface shares one guard.
+ */
+export function assertOwner(role: string) {
+  if (role !== "owner") {
+    throw new ForbiddenError("Only the owner can do that.");
+  }
+}
