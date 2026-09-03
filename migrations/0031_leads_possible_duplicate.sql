@@ -1,0 +1,16 @@
+-- GauntletGate QA-1, round 3 (2026-09-02): the matcher stops making a
+-- binary discard-or-not decision -- see src/lib/news/lead-match.ts's
+-- matchStrength(). A "strong" match still stamps the existing row exactly
+-- as before (resurfaced_count / last_resurfaced_at, migration 0028). A
+-- "possible" match -- lexical overlap real enough to flag, not close enough
+-- to silently fold two different agenda items into one -- now FILES the
+-- candidate as its own lead instead of discarding it, and records which
+-- existing lead it looks like a possible duplicate of, so the editor
+-- decides instead of the matcher guessing wrong in either direction.
+--
+-- No PGLite ensure-function counterpart is needed here either -- same
+-- investigation as 0028's own comment: leads has no ensure* function
+-- guarding it, and the PGLite fallback in src/lib/db.ts applies every file
+-- under migrations/*.sql itself at startup (import.meta.glob("/migrations/*.sql")).
+-- This migration file is the single schema source for both paths.
+alter table leads add column if not exists possible_duplicate_of integer;

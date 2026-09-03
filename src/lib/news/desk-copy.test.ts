@@ -81,6 +81,49 @@ describe("resurfacedSummarySentence (QA-1: a merge is never invisible)", () => {
     });
     assert.ok(sentence.length < 200);
   });
+
+  // QA-1 round 3: matchStrength's "possible" tier files a lead linked to an
+  // existing one instead of stamping or discarding it -- the summary sentence
+  // must say so, and, when it does, also say how many more were filed with no
+  // match at all so the editor gets the full breakdown in one place.
+  describe("QA-1 round 3: possible-match and filed-new counts", () => {
+    it("adds a bit for possibleMatched, singular", () => {
+      const sentence = resurfacedSummarySentence({ resurfacedKilled: 0, resurfacedOpen: 0, possibleMatched: 1 });
+      assert.equal(sentence, "1 filed and marked maybe-same-as an existing lead.");
+    });
+
+    it("adds a bit for possibleMatched, plural", () => {
+      const sentence = resurfacedSummarySentence({ resurfacedKilled: 0, resurfacedOpen: 0, possibleMatched: 3 });
+      assert.equal(sentence, "3 filed and marked maybe-same-as existing leads.");
+    });
+
+    it("combines strong, possible, and filedNew bits in one sentence", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 1,
+        resurfacedOpen: 0,
+        possibleMatched: 2,
+        filedNew: 4,
+        firstDiscardedHeadline: "Council votes on $250,000 library roof repair contract at Sept. 10 meeting",
+      });
+      assert.match(sentence, /^1 lead matched a story you already killed and was stamped, not refiled; /);
+      assert.match(sentence, /2 filed and marked maybe-same-as existing leads/);
+      assert.match(sentence, /4 filed as new/);
+      assert.match(sentence, /— e\.g\. 'Council votes on \$250,000 library roof repair contract at Sept\. 10 meeting'\.$/);
+    });
+
+    it("stays silent when nothing resurfaced or possibly-matched, even if filedNew is set -- an ordinary scan is not worth a sentence", () => {
+      const sentence = resurfacedSummarySentence({ resurfacedKilled: 0, resurfacedOpen: 0, filedNew: 5 });
+      assert.equal(sentence, "");
+    });
+
+    it("omitting possibleMatched/filedNew entirely reproduces the exact pre-round-3 output (back-compat)", () => {
+      const sentence = resurfacedSummarySentence({ resurfacedKilled: 2, resurfacedOpen: 1 });
+      assert.equal(
+        sentence,
+        "2 leads matched stories you already killed and were stamped, not refiled; 1 matched an open lead.",
+      );
+    });
+  });
 });
 
 describe("editor copy", () => {

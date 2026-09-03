@@ -26,6 +26,11 @@ export type LeadRow = {
   resurfaced_count?: number;
   last_resurfaced_at?: string | null;
   last_resurfaced_scan_run_id?: number | null;
+  /** QA-1 round 3: set when this lead was filed as a "possible" (not
+   * "strong") match against an existing lead -- see matchStrength in
+   * lib/news/lead-match.ts. Points at that existing lead's id; null for a
+   * plain new lead or a strong match (which never gets its own new row). */
+  possible_duplicate_of?: number | null;
 };
 
 export type DraftRow = {

@@ -4,6 +4,32 @@ Current release: **0.6.4**.
 
 ## 0.6.4 — 2026-09-02
 
+- **QA-1 round 3: the matcher stopped making a binary discard-or-not decision
+  (Critical).** Round 2's fix still let the matcher merge different agenda
+  items whenever their headlines were close enough in wording alone — a
+  round-3 adversarial set found 6 such false merges (e.g. "Boulder County
+  commissioners hold closed-door executive session on jail expansion" merged
+  into the same lead about "...staff pay raises") and 1 real duplicate the
+  matcher missed. Lexical overlap alone cannot tell "same story reworded"
+  apart from "same agenda template, different item," so a match is no longer
+  all-or-nothing: `matchStrength()` (`src/lib/news/lead-match.ts`) scores
+  every match `findMatchingLead` already flags as "strong" (>= 0.85
+  content-token Jaccard, no unexplained token differences, and a shared
+  source URL or near-identical wording with nothing to compare a URL
+  against) or "possible" (real overlap, not that strong). A strong match
+  still stamps the existing lead "seen again," exactly as before. A possible
+  match is now filed as its own new lead — never silently discarded or
+  merged — with a new `possible_duplicate_of` column (migration `0031`)
+  pointing at the lead it resembles, and a dotted **MAYBE SAME AS #N** chip
+  on the row (`desk-leads.tsx`) linking straight to it so the editor decides.
+  All 6 round-3 false merges, the 7 round-2 negatives, and 16 total negative
+  pairs across both rounds now score "possible" or null, never "strong." The
+  scan summary sentence (`desk-copy.ts`'s `resurfacedSummarySentence`) now
+  reports all three outcomes — stamped as seen again, filed and marked
+  maybe-same, filed as new — instead of only the stamp count. Documented in
+  `docs/editor.md`'s "Killed — seen again" section, now "seen again, and
+  maybe same as."
+
 - **The ops dashboard's owner gate is now enforced on the server, not just
   hidden in React (ENG-01, Critical).** `getOpsHealth` and `runOpsAction`
   (`src/lib/ops/dashboard.ts`) carried only `deskMiddleware` — signed-in and a

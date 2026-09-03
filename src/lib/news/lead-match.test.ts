@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   findMatchingLead,
+  matchStrength,
   normalizeSourceUrl,
   extractAnchors,
   sharedAnchorCount,
@@ -377,5 +378,175 @@ describe("extractAnchors / sharedAnchorCount", () => {
     const bareMonth = extractAnchors("Two closed-door sessions on the books for late September");
     const twoDates = extractAnchors("Council books two sessions -- Sept. 22 and Sept. 29");
     assert.equal(sharedAnchorCount(bareMonth, twoDates), 2);
+  });
+});
+
+/**
+ * GauntletGate QA-1, round 3 (2026-09-02): findMatchingLead's binary
+ * discard-or-not decision merged 6 different-story pairs and missed 1 real
+ * duplicate (see artifacts/gate-townreporter-2026-09-02/artifacts/reverify/
+ * qa1-matcher-output-round3.txt). matchStrength replaces the binary decision
+ * with "strong" (stamp) / "possible" (file, linked) / null (nothing) -- see
+ * its doc comment in lead-match.ts for the exact rule. These tests re-run
+ * every round-3 false merge and every round-2 negative through matchStrength
+ * and require none of them to ever come back "strong".
+ */
+describe("matchStrength", () => {
+  const SAME_URL = ["https://longmont.primegov.com/portal/meeting/12345"];
+
+  function existingLead(headline: string, sourceUrls: string[] = SAME_URL): MatchCandidateLead {
+    return { id: 1, status: "drafted", headline, source_urls: sourceUrls };
+  }
+
+  describe("all 6 round-3 false merges are 'possible', never 'strong'", () => {
+    const cases: [string, string, string][] = [
+      [
+        "NEG-4: Boulder County closed-door executive session, different agenda topic",
+        "Boulder County commissioners hold closed-door executive session on jail expansion, Sept. 5",
+        "Boulder County commissioners hold closed-door executive session on staff pay raises, Sept. 5",
+      ],
+      [
+        "NEG-5: same amount+date city budget lines, different department",
+        "Council approves $3.2 million streetlight replacement budget for 2027",
+        "Council approves $3.2 million sidewalk snow removal budget for 2027",
+      ],
+      [
+        "NEG-7: SVVSD broadband expansion, east county vs west county",
+        "SVVSD approves $850,000 broadband expansion for rural east county schools",
+        "SVVSD approves $850,000 broadband expansion for rural west county schools",
+      ],
+      [
+        "NEG-8: fire district bid review, ambulance vs brush truck",
+        "Fire district board reviews $95,000 ambulance replacement bid, Sept. 19",
+        "Fire district board reviews $95,000 brush truck replacement bid, Sept. 19",
+      ],
+      [
+        "NEG-9: Boulder County Main Street roundabout vs bike corral",
+        "Boulder County transportation board debates Main Street roundabout design",
+        "Boulder County transportation board debates Main Street bike corral placement",
+      ],
+      [
+        "NEG-10: Longmont school board transportation vs technology contract",
+        "Longmont school board approves $2.1 million transportation contract for bus routes serving 3,000 students",
+        "Longmont school board approves $2.1 million technology contract for laptops serving 3,000 students",
+      ],
+    ];
+
+    for (const [name, candidateHeadline, existingHeadline] of cases) {
+      it(`${name}`, () => {
+        const result = matchStrength(
+          { headline: candidateHeadline, source_urls: SAME_URL },
+          existingLead(existingHeadline),
+        );
+        assert.equal(result, "possible", `expected "possible", got ${result}`);
+      });
+    }
+  });
+
+  it("the round-3 missed duplicate (raise/hike synonym swap) is a documented limitation: findMatchingLead's own coarse gate never flagged it, so matchStrength (which only grades pairs that gate already flagged) returns null here -- fixing the coarse gate is out of scope for this round, but it must never silently become 'strong'", () => {
+    const result = matchStrength(
+      { headline: "Council votes to raise water rates by 8% starting January", source_urls: SAME_URL },
+      existingLead("Council approves 8% water rate hike effective January"),
+    );
+    assert.notEqual(result, "strong");
+  });
+
+  it("the live 0.6.2 rewrite pair is a genuine same-story rewrite, but is deliberately 'possible', not 'strong' -- its content-token overlap is far below the 0.85 bar (see matchStrength's doc comment)", () => {
+    const result = matchStrength(
+      {
+        headline:
+          "Council books two executive sessions in eight days — Sept. 22 and Sept. 29 — with packets already posted",
+        source_urls: SAME_URL,
+      },
+      existingLead("Longmont council has two closed-door executive sessions on the books for late September"),
+    );
+    assert.equal(result, "possible");
+  });
+
+  it("a near-identical repeat with only the meeting date changed is 'strong'", () => {
+    const result = matchStrength(
+      {
+        headline: "Council approves $410,000 emergency generator replacement contract, Sept. 9 meeting",
+        source_urls: SAME_URL,
+      },
+      existingLead("Council approves $410,000 emergency generator replacement contract, Oct. 14 meeting"),
+    );
+    assert.equal(result, "strong");
+  });
+
+  it("a near-identical repeat differing only in a plural/singular subject word is 'strong'", () => {
+    const result = matchStrength(
+      { headline: "Council approves new bike lane on Ken Pratt Boulevard", source_urls: SAME_URL },
+      existingLead("Council approves new bike lanes on Ken Pratt Boulevard, Sept. 14"),
+    );
+    assert.equal(result, "strong");
+  });
+
+  describe("all 8 round-2 negatives are 'possible' or null, never 'strong'", () => {
+    const cases: [string, string, string][] = [
+      [
+        "1: library roof vs park irrigation (canonical QA-1 negative)",
+        "Council votes on $250,000 library roof repair contract at Sept. 10 meeting",
+        "Council approves $250,000 park irrigation contract at Sept. 10 meeting",
+      ],
+      [
+        "2: police overtime vs fire truck",
+        "Council approves $180,000 police overtime contract at Sept. 12 meeting",
+        "Council approves $180,000 fire truck contract at Sept. 12 meeting",
+      ],
+      [
+        "3: water rates vs sewer bond",
+        "Council votes on $2 million water rates contract at Sept. 15 meeting",
+        "Council votes on $2 million sewer bond contract at Sept. 15 meeting",
+      ],
+      [
+        "4: generic-only shared words (contract/meeting/council)",
+        "Council approves contract at Tuesday's meeting on $75,000 item",
+        "Council approves contract at Tuesday's meeting on $75,000 item, unrelated matter",
+      ],
+      [
+        "8: shared word is only 'contract' (generic)",
+        "Council approves $410,000 street paving contract at Sept. 9 meeting",
+        "Council approves $410,000 broadband contract at Sept. 9 meeting",
+      ],
+      [
+        "9: shared words are only 'grant'/'meeting' (generic)",
+        "Board approves $95,000 grant for youth meeting programs on Oct. 4",
+        "Board approves $95,000 grant for senior meeting services on Oct. 4",
+      ],
+      [
+        "10: different amount, same date, same URL, different subject",
+        "Council debates $50,000 sign ordinance on Sept. 20",
+        "Council debates $75,000 noise ordinance on Sept. 20",
+      ],
+      [
+        "11: same date + same proper-noun anchor but different subject entirely",
+        "Planning board reviews Twin Peaks rezoning application on Sept. 18",
+        "Planning board reviews Twin Peaks parking variance on Sept. 18",
+      ],
+    ];
+
+    for (const [name, candidateHeadline, existingHeadline] of cases) {
+      it(`${name}`, () => {
+        const result = matchStrength(
+          { headline: candidateHeadline, source_urls: SAME_URL },
+          existingLead(existingHeadline),
+        );
+        assert.notEqual(result, "strong", `must never be "strong", got ${result}`);
+      });
+    }
+  });
+
+  it("returns null for a pair the coarse matcher (pairMatches, shared with findMatchingLead) would never flag as a match at all", () => {
+    const result = matchStrength(
+      { headline: "Council approves new bike lane funding on Main Street", source_urls: SAME_URL },
+      existingLead("Longmont council has two closed-door executive sessions on the books for late September"),
+    );
+    assert.equal(result, null);
+  });
+
+  it("returns null when either headline is empty", () => {
+    assert.equal(matchStrength({ headline: "", source_urls: SAME_URL }, existingLead("Anything at all here")), null);
+    assert.equal(matchStrength({ headline: "Anything at all here", source_urls: SAME_URL }, existingLead("")), null);
   });
 });

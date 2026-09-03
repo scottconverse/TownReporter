@@ -150,8 +150,17 @@ describe("fileScanLeads stamps a resurfaced lead instead of refiling it", () => 
 
       const aiLeads = [
         {
-          // Reworded repeat of the killed lead, same source -- must stamp, not insert.
-          headline: "Two closed executive sessions are on the books for Longmont city council in late September",
+          // Reworded repeat of the killed lead, same source -- must stamp, not
+          // insert. QA-1 round 3: matchStrength requires >= 0.85 content-token
+          // Jaccard for a "strong" (stamp) match, not just findMatchingLead's
+          // looser overlap bar -- the original wording here ("...executive
+          // sessions are on the books...", dropping "door") scored 0.75 and
+          // would now file as a "possible" link instead of stamping, so the
+          // wording was tightened to also include "closed-door" (matching the
+          // existing row's full content-token set exactly) to keep testing
+          // what this test is actually about: a strong repeat gets stamped.
+          headline:
+            "Two closed-door executive sessions are on the books for Longmont city council in late September",
           why: "Same closed-session story, reworded by the scan.",
           topic: "council",
           source_urls: ["https://www.longmontleader.com/agenda/sept-council/"],
@@ -190,12 +199,13 @@ describe("fileScanLeads stamps a resurfaced lead instead of refiling it", () => 
       assert.equal(result.leadsCreated, 1, "exactly one genuinely new lead should have been inserted");
       assert.equal(result.resurfacedKilled, 1, "the killed lead should count as one resurfaced-killed match");
       assert.equal(result.resurfacedOpen, 1, "the open lead should count as one resurfaced-open match");
+      assert.equal(result.possibleMatched, 0, "both matches here are strong, not possible");
       // QA-1: the first discarded candidate's own headline must be surfaced,
       // not lost -- it is the reworded closed-sessions AI lead (the FIRST of
       // the two matches), never the killed row's original headline.
       assert.equal(
         result.firstDiscardedHeadline,
-        "Two closed executive sessions are on the books for Longmont city council in late September",
+        "Two closed-door executive sessions are on the books for Longmont city council in late September",
         "the caller needs the discarded CANDIDATE's headline, not the existing row's, to name a merge",
       );
 
@@ -230,6 +240,108 @@ describe("fileScanLeads stamps a resurfaced lead instead of refiling it", () => 
         select id from leads where newsroom_id = ${NEWSROOM_ID}
       `;
       assert.equal(allLeads.length, 3, "no duplicate rows: two seeded + exactly one newly inserted");
+    },
+  );
+});
+
+/**
+ * GauntletGate QA-1, round 3 (2026-09-02): a "possible" match (real overlap,
+ * not strong enough to trust blindly -- see matchStrength's doc comment in
+ * ./lead-match.ts) must be FILED as its own new row, linked via
+ * `possible_duplicate_of` (migration 0031), never stamped and never silently
+ * discarded. This is the round-3 fix's whole point: the round-3 skeptic
+ * found 6 different-story pairs the pre-round-3 matcher silently merged.
+ */
+describe("fileScanLeads files a 'possible' match as its own row, linked, and does not stamp the existing lead", () => {
+  it(
+    "inserts a new row with possible_duplicate_of set, leaves the existing lead's resurfaced columns untouched",
+    { skip },
+    async () => {
+      const sql = await getSql();
+      const runRows = await sql<{ id: number }>`
+        insert into scan_runs (user_id, newsroom_id) values (${USER_ID}, ${NEWSROOM_ID}) returning id
+      `;
+      const runId = runRows[0]!.id;
+
+      // Round-3 NEG-4: same boilerplate, same date, same county -- a real
+      // overlap, but "jail expansion" and "staff pay raises" are different
+      // agenda items. matchStrength must call this "possible", not "strong".
+      const existingRows = await sql<{ id: number }>`
+        insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, newsworthiness)
+        values (
+          ${USER_ID}, ${NEWSROOM_ID},
+          'Boulder County commissioners hold closed-door executive session on staff pay raises, Sept. 5',
+          'Testing a possible-not-strong match', 'council', 'new',
+          ${JSON.stringify(["https://bouldercounty.gov/agenda/sept-5"])}, 6
+        )
+        returning id
+      `;
+      const existingId = existingRows[0]!.id;
+
+      const existing = [
+        {
+          id: existingId,
+          status: "new",
+          headline: "Boulder County commissioners hold closed-door executive session on staff pay raises, Sept. 5",
+          source_urls: ["https://bouldercounty.gov/agenda/sept-5"],
+        },
+      ];
+
+      const aiLeads = [
+        {
+          headline: "Boulder County commissioners hold closed-door executive session on jail expansion, Sept. 5",
+          why: "A different agenda item on the same meeting page.",
+          topic: "council",
+          source_urls: ["https://bouldercounty.gov/agenda/sept-5"],
+          evidence: "",
+          newsworthiness: 7,
+        },
+      ];
+
+      const result = await fileScanLeads(
+        sql,
+        { userId: USER_ID, newsroomId: NEWSROOM_ID },
+        NEWSROOM_ID,
+        runId,
+        aiLeads,
+        existing,
+      );
+
+      assert.equal(result.leadsCreated, 1, "the possible match is FILED, not discarded");
+      assert.equal(result.possibleMatched, 1);
+      assert.equal(result.resurfacedKilled, 0);
+      assert.equal(result.resurfacedOpen, 0);
+      assert.equal(
+        result.firstDiscardedHeadline,
+        undefined,
+        "a possible match is never discarded, so it must never set firstDiscardedHeadline",
+      );
+
+      const existingAfter = await sql<{ status: string; resurfaced_count: number; last_resurfaced_at: string | null }>`
+        select status, resurfaced_count, last_resurfaced_at from leads where id = ${existingId}
+      `;
+      assert.equal(existingAfter[0]!.status, "new", "the existing lead must not be touched by a possible match");
+      assert.equal(existingAfter[0]!.resurfaced_count, 0, "a possible match must not stamp the existing lead");
+      assert.equal(existingAfter[0]!.last_resurfaced_at, null);
+
+      // Scoped by scan_run_id, not newsroom_id -- this file's tests all share
+      // one scratch database (see `before` above) and the earlier describe
+      // block's leads are still in it, so a newsroom-wide query would also
+      // pick those up.
+      const inserted = await sql<{ id: number; headline: string; possible_duplicate_of: number | null }>`
+        select id, headline, possible_duplicate_of from leads
+        where scan_run_id = ${runId} and id <> ${existingId}
+      `;
+      assert.equal(inserted.length, 1, "exactly one new row for the possible match");
+      assert.equal(
+        inserted[0]!.headline,
+        "Boulder County commissioners hold closed-door executive session on jail expansion, Sept. 5",
+      );
+      assert.equal(
+        inserted[0]!.possible_duplicate_of,
+        existingId,
+        "the new row must point at the existing lead it might be a duplicate of",
+      );
     },
   );
 });

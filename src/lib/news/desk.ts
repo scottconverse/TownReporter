@@ -633,14 +633,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     created_at: l.created_at,
   }));
 
-  const { leadsCreated, resurfacedKilled, resurfacedOpen, firstDiscardedHeadline } = await fileScanLeads(
-    sql,
-    context,
-    owned(context),
-    runId,
-    data.leads,
-    existingLeads,
-  );
+  const { leadsCreated, resurfacedKilled, resurfacedOpen, possibleMatched, firstDiscardedHeadline } =
+    await fileScanLeads(sql, context, owned(context), runId, data.leads, existingLeads);
 
   let proposed = 0;
   for (const p of data.proposed_sources) {
@@ -670,6 +664,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const resurfacedSentence = resurfacedSummarySentence({
     resurfacedKilled,
     resurfacedOpen,
+    possibleMatched,
+    filedNew: leadsCreated - possibleMatched,
     firstDiscardedHeadline,
   });
   if (resurfacedSentence) {

@@ -406,6 +406,37 @@ export type MatchCandidateLead = {
  * 'published' -- a fresh development on a published story should file as
  * new) and, when `created_at` is present, within MATCH_LOOKBACK_DAYS days.
  */
+/**
+ * QA-1 round 3 (2026-09-02): pulled out of findMatchingLead's loop so
+ * matchStrength() below can reuse the exact same "is this even a possible
+ * match" gate that findMatchingLead has always used (the three paths
+ * described in findMatchingLead's doc comment) without duplicating it.
+ * findMatchingLead's own behaviour is unchanged by this extraction -- same
+ * three paths, same order, same early return on the first hit.
+ */
+function pairMatches(
+  candidateHeadline: string,
+  candidateUrls: string[],
+  leadHeadline: string,
+  leadUrls: string[],
+): boolean {
+  const shareUrl = sharesUrl(candidateUrls, leadUrls);
+  if (shareUrl && headlinesOverlapEnough(candidateHeadline, leadHeadline)) {
+    return true;
+  }
+  if (
+    shareUrl &&
+    sharedAnchorCount(extractAnchors(candidateHeadline), extractAnchors(leadHeadline)) >= ANCHOR_MATCH_MIN_SHARED &&
+    sharesContentWord(candidateHeadline, leadHeadline)
+  ) {
+    return true;
+  }
+  if (!shareUrl && headlinesAloneMatch(candidateHeadline, leadHeadline)) {
+    return true;
+  }
+  return false;
+}
+
 export function findMatchingLead(
   candidate: { headline: string; source_urls: string[] },
   existing: MatchCandidateLead[],
@@ -420,20 +451,97 @@ export function findMatchingLead(
       const t = Date.parse(lead.created_at);
       if (Number.isFinite(t) && t < cutoff) continue;
     }
-    const shareUrl = sharesUrl(candidate.source_urls ?? [], lead.source_urls ?? []);
-    if (shareUrl && headlinesOverlapEnough(headline, lead.headline)) {
-      return lead.id;
-    }
-    if (
-      shareUrl &&
-      sharedAnchorCount(extractAnchors(headline), extractAnchors(lead.headline)) >= ANCHOR_MATCH_MIN_SHARED &&
-      sharesContentWord(headline, lead.headline)
-    ) {
-      return lead.id;
-    }
-    if (!shareUrl && headlinesAloneMatch(headline, lead.headline)) {
+    if (pairMatches(headline, candidate.source_urls ?? [], lead.headline, lead.source_urls ?? [])) {
       return lead.id;
     }
   }
   return null;
+}
+/**
+ * GauntletGate QA-1, round 3 fix (2026-09-02): findMatchingLead's binary
+ * discard-or-not decision cannot tell "same story reworded" apart from
+ * "same agenda template, different item" from lexical overlap alone -- the
+ * round-3 adversarial set found 6 false merges (two different agenda items
+ * on the same boilerplate treated as one story) and 1 missed duplicate.
+ * matchStrength replaces the binary decision with two tiers for any pair
+ * pairMatches() already considers "the same story" at all:
+ *
+ *   - "strong": stamp the existing lead (findMatchingLead/fileScanLeads's
+ *     old behaviour) -- only when ALL of:
+ *       1. contentTokens() Jaccard similarity is >= 0.85, AND
+ *       2. every token in the symmetric difference of the two content-token
+ *          sets has a variant partner on the other side (plural/possessive/
+ *          hyphen forms -- see tokenVariant; contentTokens' own stem() call
+ *          already folds most of these before matchStrength ever sees them,
+ *          so this is almost always trivially satisfied by an empty
+ *          symmetric difference, but a real variant that stem() does not
+ *          catch does not block "strong" either), AND
+ *       3. the two leads share a normalised source URL, OR neither side has
+ *          a URL to compare and the Jaccard score is >= 0.95.
+ *   - "possible": pairMatches() found overlap, but not strong enough by the
+ *     rule above -- file the candidate as a new lead linked to the existing
+ *     one (possible_duplicate_of) instead of silently discarding it. This
+ *     is what the 6 round-3 false merges become, and it is also what the
+ *     live 0.6.2 rewrite pair (POS-2) becomes: it is a genuine rewrite of
+ *     the same story, but its content-token Jaccard is far below 0.85 (the
+ *     two headlines share almost no words beyond "executive session"), so
+ *     it is filed and linked rather than silently folded into the old row --
+ *     intentional, not a regression.
+ *   - null: pairMatches() found no overlap at all -- do nothing.
+ *
+ * Only decides the STRENGTH of a pair findMatchingLead-style matching
+ * already flagged; it does not change which pairs count as a match at all
+ * (see pairMatches, shared by both).
+ */
+export function matchStrength(
+  candidate: { headline: string; source_urls?: string[] },
+  existing: { headline: string; source_urls?: string[] },
+): "strong" | "possible" | null {
+  const candidateHeadline = candidate.headline ?? "";
+  const existingHeadline = existing.headline ?? "";
+  if (!candidateHeadline.trim() || !existingHeadline.trim()) return null;
+  const candidateUrls = candidate.source_urls ?? [];
+  const existingUrls = existing.source_urls ?? [];
+
+  if (!pairMatches(candidateHeadline, candidateUrls, existingHeadline, existingUrls)) {
+    return null;
+  }
+
+  const ca = contentTokens(candidateHeadline);
+  const cb = contentTokens(existingHeadline);
+  const score = jaccard(ca, cb);
+  const symmetricOk = symmetricDiffAllVariants(ca, cb);
+
+  const shareUrl = sharesUrl(candidateUrls, existingUrls);
+  const bothSidesHaveUrls = candidateUrls.length > 0 && existingUrls.length > 0;
+  const urlOk = shareUrl || (!bothSidesHaveUrls && score >= 0.95);
+
+  if (score >= 0.85 && symmetricOk && urlOk) return "strong";
+  return "possible";
+}
+
+/** Two content tokens count as the same subject word for matchStrength's
+ * symmetric-difference check when they are plural/possessive/-es variants
+ * of each other. contentTokens() already runs stem() (trailing "s" fold,
+ * words > 4 letters) before matchStrength ever sees a token, and already
+ * turns hyphens and apostrophes into spaces before tokenizing, so most
+ * variant pairs never even reach here as a symmetric-difference entry --
+ * this is the belt-and-suspenders case stem() alone does not fold (e.g. a
+ * short word, or an "-ies" plural). */
+function tokenVariant(a: string, b: string): boolean {
+  if (a === b) return true;
+  const norm = (w: string) => w.replace(/ies$/, "y").replace(/(es|s)$/, "");
+  return norm(a) === norm(b);
+}
+
+/** True when every token present on only one side of a and b's content-
+ * token sets has a tokenVariant() partner somewhere on the other side.
+ * Vacuously true when the symmetric difference is empty. */
+function symmetricDiffAllVariants(a: Set<string>, b: Set<string>): boolean {
+  const onlyA = [...a].filter((t) => !b.has(t));
+  const onlyB = [...b].filter((t) => !a.has(t));
+  return (
+    onlyA.every((x) => [...b].some((y) => tokenVariant(x, y))) &&
+    onlyB.every((x) => [...a].some((y) => tokenVariant(x, y)))
+  );
 }

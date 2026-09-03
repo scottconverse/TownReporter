@@ -20,7 +20,9 @@ export async function completeFirstRunSetup(page, base, opts = {}) {
     ["City", opts.city ?? "Testerville"],
     ["State", opts.state ?? "Wyoming"],
   ];
-  await page.goto(`${base}/desk/setup`, { waitUntil: "networkidle" });
+  // Vite dev mode never goes network-idle under HMR churn, so wait only for
+  // the DOM and then for the element that actually proves the page is live.
+  await page.goto(`${base}/desk/setup`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Paper name", { exact: true }).waitFor({ timeout: 45_000 });
 
   for (let round = 0; round < 12; round++) {
@@ -44,6 +46,20 @@ export async function completeFirstRunSetup(page, base, opts = {}) {
       // A click into pre-hydration HTML does nothing; go around once more.
     }
   }
-  await page.waitForURL(/\/desk$/, { timeout: 45_000 });
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  // Wait for the post-setup UI to actually be there, then assert on the URL
+  // -- a waitForURL alone can pass on a race where the path changes but the
+  // page hasn't rendered yet, and gives no clue what page we're really on if
+  // it fails.
+  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 60_000 });
+  const finalUrl = new URL(page.url());
+  if (finalUrl.pathname !== "/desk") {
+    const heading = await page
+      .locator("h1, h2")
+      .first()
+      .innerText()
+      .catch(() => "(no heading found)");
+    throw new Error(
+      `Expected to land on /desk after setup, but url is "${finalUrl.href}" (path "${finalUrl.pathname}"); visible heading: "${heading}"`
+    );
+  }
 }

@@ -154,46 +154,55 @@ you to reload before retrying. Opinion also explains its required voice file.
 
 A meeting on the calendar is not automatically a story. A five-hour council tape is not automatically a story. Those are records. You decide if there is news.
 
-### Killed — "seen again"
+### Killed — "seen again," and "maybe same as"
 
-Killing a lead never deletes it and never hides it. If the scanner comes back
-across the same story — the same source with a reworded headline, the same
-source page pinned down with a specific date or dollar figure the first
-version only gestured at, or a different portal notice about the same thing
-— it does not refile a duplicate for you to kill twice. It stamps the
-existing killed row instead: a **SEEN AGAIN ×N** badge appears on the row,
-in the same bordered-pill family as KILLED and ≈ PRINTED (not the muted meta
-text below the headline), with the date it last came back, and the Killed
-tab sorts what keeps resurfacing to the top. This matching runs entirely in
-code against leads already on the desk — it never sends the AI a list of
-what you killed, so it costs nothing extra to scan. The first time any lead
-on the Killed tab carries a stamp, a one-line note appears under the filter
-row: "Seen again: the scanner found this story again after you killed it.
-It was not refiled. Back returns it to New."
+The scanner never throws a lead away. If a new lead looks nearly identical to
+one already on the desk, the old one is stamped "seen again." If it only
+looks similar, the new lead is filed and tagged "maybe same as #N" so you
+decide.
 
-An open lead (New, Held, Drafted) that the scanner rematches gets the same
-badge instead of a duplicate row. A story that already **printed** is never
-matched this way — a fresh development on a published story is real news and
-always files as a new lead.
+**Nearly identical — "seen again."** Killing a lead never deletes it and
+never hides it. If the scanner comes back across what is confidently the same
+story — the same source with a reworded headline, the same source page
+pinned down with a specific date or dollar figure the first version only
+gestured at, or a different portal notice about the same thing, with almost
+nothing else different — it does not refile a duplicate for you to kill
+twice. It stamps the existing killed row instead: a **SEEN AGAIN ×N** badge
+appears on the row, in the same bordered-pill family as KILLED and ≈
+PRINTED (not the muted meta text below the headline), with the date it last
+came back, and the Killed tab sorts what keeps resurfacing to the top. The
+first time any lead on the Killed tab carries a stamp, a one-line note
+appears under the filter row: "Seen again: the scanner found this story
+again after you killed it. It was not refiled. Back returns it to New."
 
-The match itself weighs two things together: the same source link, and
-either close wording or a set of shared concrete details (a date, a dollar
-figure, a proper noun) — but a shared date or dollar figure alone is never
-enough. Two different agenda items from the same meeting page that happen to
-name the same figure and date still need at least one real shared subject
-word before they are treated as the same story, so a genuinely different
-story on the same page is never silently folded into an old one. Put plainly:
-two leads are treated as the same story only when they share a subject word,
-not just a date, an amount, or agenda boilerplate ("council," "meeting," a
-month name). When a
-scan run does stamp a lead instead of filing a new one, the scan's own
-result summary names the headline that got merged (for example: "1 lead
-matched a story you already killed and was stamped, not refiled — e.g.
-'…'"), so a merge is something you can glance at and check, never something
-that happens with no trace at all.
+An open lead (New, Held, Drafted) that the scanner rematches this confidently
+gets the same badge instead of a duplicate row. A story that already
+**printed** is never matched this way — a fresh development on a published
+story is real news and always files as a new lead.
 
-Nothing about "seen again" changes what Kill does: the lead stays under
-Killed, and **Back** still returns it to New at any time, resurfaced or not.
+**Only similar — "maybe same as #N."** Two headlines can share real ground —
+a source link, a date, a dollar figure, some of the same wording — without
+being confidently the same story: two different agenda items from the same
+meeting page often share a date and a figure and nothing else. When the
+overlap is real but not that strong, the scanner no longer guesses either
+way. It files the new lead normally, on the queue, and adds a dotted
+**MAYBE SAME AS #N** chip pointing at the existing lead it resembles — click
+it to open that lead and compare. Nothing is merged, stamped, or hidden;
+you make the call.
+
+This matching runs entirely in code against leads already on the desk — it
+never sends the AI a list of what you killed, so it costs nothing extra to
+scan. When a scan run does stamp a lead as seen again, the scan's own result
+summary names the headline that got merged (for example: "1 lead matched a
+story you already killed and was stamped, not refiled — e.g. '…'"), and, in
+the same sentence, says how many more were filed and tagged maybe-same and
+how many were filed as plain new leads — so the whole picture is something
+you can glance at and check, never something that happens with no trace at
+all.
+
+Nothing about "seen again" or "maybe same as" changes what Kill does: the
+lead stays under Killed, and **Back** still returns it to New at any time,
+resurfaced or not.
 
 ---
 

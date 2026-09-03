@@ -172,6 +172,16 @@ export function LeadRowView({
             {lead.last_resurfaced_at ? ` · ${formatShortDate(lead.last_resurfaced_at)}` : ""}
           </span>
         ) : null}
+        {lead.possible_duplicate_of ? (
+          <Link
+            to="/desk/story/$leadId"
+            params={{ leadId: String(lead.possible_duplicate_of) }}
+            className="chip maybe-same"
+            title={`The matcher thinks this might be the same story as lead #${lead.possible_duplicate_of}. Open it to compare.`}
+          >
+            maybe same as #{lead.possible_duplicate_of}
+          </Link>
+        ) : null}
       </div>
     </div>
   );

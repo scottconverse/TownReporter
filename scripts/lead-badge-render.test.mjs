@@ -118,6 +118,7 @@ function baseLead(overrides = {}) {
     created_at: new Date().toISOString(),
     resurfaced_count: 0,
     last_resurfaced_at: null,
+    possible_duplicate_of: null,
     ...overrides,
   };
 }
@@ -162,4 +163,35 @@ test("an open (non-killed) lead with a resurfaced stamp still shows the badge", 
     }),
   );
   assert.match(html, /seen again ×1/);
+});
+
+// QA-1 round 3: matchStrength's "possible" tier files the new lead linked to
+// the existing one it resembles (possible_duplicate_of) instead of silently
+// discarding or merging it -- this chip is the editor's only way to see that
+// link without opening the lead. See lib/news/lead-match.ts's matchStrength
+// and lib/news/lead-filing.ts's fileScanLeads.
+test('a lead with possible_duplicate_of set shows a "maybe same as #N" chip linking to that lead\'s story page', () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, {
+      lead: baseLead({ status: "new", possible_duplicate_of: 42 }),
+    }),
+  );
+  assert.match(html, /maybe same as #42/);
+  const chipIdx = html.indexOf("chip maybe-same");
+  assert.ok(chipIdx >= 0, "expected a chip with the maybe-same class");
+  // It must be a real link an editor can click through to the other lead,
+  // not inert text -- assert the anchor and its target are both present.
+  const tagStart = html.lastIndexOf("<a", chipIdx);
+  assert.ok(tagStart >= 0, "the maybe-same chip should render as an <a> link");
+  const tagEnd = html.indexOf(">", chipIdx);
+  const openingTag = html.slice(tagStart, tagEnd + 1);
+  assert.match(openingTag, /href="\/desk\/story\/\$leadId"/);
+});
+
+test("a lead with no possible_duplicate_of shows no maybe-same chip", () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, { lead: baseLead({ possible_duplicate_of: null }) }),
+  );
+  assert.doesNotMatch(html, /maybe same as/);
+  assert.doesNotMatch(html, /maybe-same/);
 });

@@ -623,21 +623,39 @@ export function scanZeroWhy(input: {
 
 /**
  * The one sentence appended to a scan run's editor summary when the code
- * matcher (see `findMatchingLead` in `./lead-match.ts`) stamped leads
- * instead of refiling them, so the Scan page's result block says so without
- * a JSON/summary column dedicated to the counts (scan_runs has none).
+ * matcher (see `matchStrength` in `./lead-match.ts`) stamped leads or filed
+ * a possible duplicate instead of quietly refiling/discarding them, so the
+ * Scan page's result block says so without a JSON/summary column dedicated
+ * to the counts (scan_runs has none).
  *
- * QA-1 (2026-09-02): a match discards the AI-returned candidate's own
+ * QA-1 (2026-09-02): a STRONG match discards the AI-returned candidate's own
  * headline entirely -- only the existing row gets a resurfaced stamp. That
  * is invisible-by-design when the match is right (a genuine repeat), but
  * indistinguishable from a wrong merge when it isn't. `firstDiscardedHeadline`
- * -- the headline of the first candidate this run discarded as a match --
- * gets named in the sentence so a false merge is at worst reviewable, never
- * silent, without adding a new column to record every one.
+ * -- the headline of the first candidate this run stamped as a strong match
+ * -- gets named in the sentence so a false merge is at worst reviewable,
+ * never silent, without adding a new column to record every one.
+ *
+ * QA-1 round 3 (2026-09-02): the matcher no longer makes a binary
+ * discard-or-not decision (see matchStrength's doc comment for why). A
+ * "possible" match is never discarded -- it is filed as its own lead, linked
+ * to the one it resembles -- so `possibleMatched` gets its own bit alongside
+ * the strong-match counts, and, when either fires, `filedNew` names how many
+ * more leads this run filed with no match at all, so one sentence gives the
+ * editor the full breakdown instead of just the merge count.
  */
 export function resurfacedSummarySentence(input: {
   resurfacedKilled: number;
   resurfacedOpen: number;
+  /** QA-1 round 3: candidates filed and linked (`possible_duplicate_of`)
+   * rather than stamped or discarded -- see matchStrength's "possible" tier.
+   * Optional/omittable so callers written before this tier existed (and
+   * this function's own pre-round-3 tests) still get identical output. */
+  possibleMatched?: number;
+  /** QA-1 round 3: candidates filed with no match at all this run. Only
+   * shown alongside a resurfaced/possible bit -- an ordinary scan with
+   * nothing to flag stays silent, same as before this tier existed. */
+  filedNew?: number;
   firstDiscardedHeadline?: string;
 }): string {
   const bits: string[] = [];
@@ -651,7 +669,19 @@ export function resurfacedSummarySentence(input: {
   if (input.resurfacedOpen > 0) {
     bits.push(`${input.resurfacedOpen} matched ${input.resurfacedOpen === 1 ? "an open lead" : "open leads"}`);
   }
+  const possibleMatched = input.possibleMatched ?? 0;
+  if (possibleMatched > 0) {
+    bits.push(
+      possibleMatched === 1
+        ? `1 filed and marked maybe-same-as an existing lead`
+        : `${possibleMatched} filed and marked maybe-same-as existing leads`,
+    );
+  }
   if (!bits.length) return "";
+  const filedNew = input.filedNew ?? 0;
+  if (filedNew > 0) {
+    bits.push(`${filedNew} filed as new`);
+  }
   const headline = input.firstDiscardedHeadline?.trim();
   if (headline) {
     return `${bits.join("; ")} — e.g. '${headline.slice(0, 120)}'.`;
