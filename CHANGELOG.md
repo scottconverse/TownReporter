@@ -1,6 +1,6 @@
 # Changelog
 
-Current release: **0.6.2**.
+Current release: **0.6.3**.
 
 ## 0.6.3 — 2026-09-02
 
