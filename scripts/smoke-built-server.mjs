@@ -14,11 +14,30 @@
  * A 200 is not proof a page works. This loads pages in Chromium, reads the
  * console, and asserts the things a person would notice.
  *
- * Usage:  SMOKE_BASE_URL=http://127.0.0.1:3000 node scripts/smoke-built-server.mjs
+ * Usage:  SMOKE_BASE_URL=http://127.0.0.1:3460 node scripts/smoke-built-server.mjs
+ *
+ * SMOKE_BASE_URL is REQUIRED -- there is deliberately no default. A previous
+ * version of this script defaulted to http://127.0.0.1:3000, the live prod
+ * port, so an operator who forgot to set the variable (or a caller with a
+ * typo in the env var name) silently smoke-tested whatever was already
+ * running there instead of the build this script was invoked to check --
+ * once actually hitting an unrelated pre-existing listener on that port
+ * during an audit run. Always point this at a spare port (>=3460) that
+ * nothing else on the machine uses.
  */
 import { chromium } from "playwright";
 
-const BASE = (process.env.SMOKE_BASE_URL || "http://127.0.0.1:3000").replace(/\/$/, "");
+const rawBase = process.env.SMOKE_BASE_URL;
+if (!rawBase || !rawBase.trim()) {
+  console.error(
+    "SMOKE_BASE_URL is not set -- refusing to default to a port something else might already " +
+      "be using (this used to default to the live prod port, 3000). Set SMOKE_BASE_URL to the " +
+      "built server you want smoke-tested, e.g.:\n" +
+      "  SMOKE_BASE_URL=http://127.0.0.1:3460 node scripts/smoke-built-server.mjs",
+  );
+  process.exit(1);
+}
+const BASE = rawBase.trim().replace(/\/$/, "");
 
 let failures = 0;
 const ok = (msg) => console.log(`  ok    ${msg}`);

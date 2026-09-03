@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { siteUrl } from "@/lib/paper";
-import { DEFAULT_PAPER_IDENTITY, PaperProvider } from "@/lib/paper-context";
+import { DEFAULT_PAPER_IDENTITY, PaperProvider, resolvePaperIdentity } from "@/lib/paper-context";
 import { getPaperIdentityFn } from "@/lib/news/paper-settings";
 import appCss from "../styles.css?url";
 import { useState } from "react";
@@ -55,14 +55,22 @@ export const Route = createRootRoute({
   */
   beforeLoad: async () => {
     try {
-      return { paper: await getPaperIdentityFn() };
+      // A thrown error is caught below, but a server function can also
+      // resolve to `undefined` without throwing (e.g. under DB stress, or a
+      // slow/short-circuited server function) -- coerce that case too, or
+      // `paper` ends up `undefined` in route context, `<PaperProvider
+      // value={undefined}>` overrides the context's own default, and every
+      // `usePaper()`/`usePaperDateFormatters()` call downstream throws
+      // "Cannot destructure property 'timezone' of undefined", white-screening
+      // the public page.
+      return { paper: resolvePaperIdentity(await getPaperIdentityFn()) };
     } catch (err) {
       console.error("[paper] identity fetch failed, using shipped default", err);
       return { paper: DEFAULT_PAPER_IDENTITY };
     }
   },
   head: ({ match }) => {
-    const paper = match.context.paper ?? DEFAULT_PAPER_IDENTITY;
+    const paper = resolvePaperIdentity(match.context.paper);
     return {
       meta: [
         { charSet: "utf-8" },
@@ -103,7 +111,12 @@ export const Route = createRootRoute({
 });
 
 function Root() {
-  const { paper } = Route.useRouteContext();
+  // Belt-and-suspenders alongside the beforeLoad coercion above: this
+  // guarantees PaperProvider is never handed `undefined`, whatever route
+  // context ends up carrying (e.g. a stale/partial context during a client
+  // transition), so it can never silently override the context's own default
+  // and white-screen usePaper()/usePaperDateFormatters() callers.
+  const paper = resolvePaperIdentity(Route.useRouteContext().paper);
   const [client] = useState(
     () =>
       new QueryClient({

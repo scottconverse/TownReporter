@@ -7,50 +7,17 @@
   route). It only imports src/lib/paper.ts (also client-safe) for the default
   fallback shape, so a build that never configures paper_settings renders
   byte-for-byte what it renders today.
+
+  The type, the shipped default, and the undefined/null fallback logic live in
+  paper-identity.ts (plain .ts, no React) so they can be unit-tested directly
+  -- see paper-identity.test.ts. Re-exported here so every existing import
+  from "@/lib/paper-context" keeps working unchanged.
 */
 import { createContext, useContext, useMemo } from "react";
-import {
-  PAPER,
-  COUNCIL_VOTES_URL,
-  EDITOR_EMAIL,
-  formatDate,
-  formatShortDate,
-  formatDateTime,
-} from "./paper";
+import { formatDate, formatShortDate, formatDateTime } from "./paper";
+import { DEFAULT_PAPER_IDENTITY, resolvePaperIdentity, type PaperIdentity } from "./paper-identity";
 
-export type PaperIdentity = {
-  name: string;
-  city: string;
-  state: string;
-  location: string;
-  timezone: string;
-  tagline: string;
-  kicker: string;
-  deck: string;
-  trust: string;
-  councilVotesUrl: string;
-  /** Runtime-configurable editor contact address; falls back to the build-time EDITOR_EMAIL. */
-  editorEmail: string | null;
-};
-
-/**
- * Same shape `defaultConfig()` in src/lib/news/paper-settings.ts builds from
- * PAPER -- duplicated here (not imported) because that module pulls in
- * src/lib/db.ts and must never reach the client bundle.
- */
-export const DEFAULT_PAPER_IDENTITY: PaperIdentity = {
-  name: PAPER.name,
-  city: PAPER.city,
-  state: PAPER.state,
-  location: PAPER.location,
-  timezone: PAPER.timezone,
-  tagline: PAPER.tagline,
-  kicker: PAPER.kicker,
-  deck: PAPER.deck,
-  trust: PAPER.trust,
-  councilVotesUrl: COUNCIL_VOTES_URL,
-  editorEmail: EDITOR_EMAIL,
-};
+export { DEFAULT_PAPER_IDENTITY, resolvePaperIdentity, type PaperIdentity };
 
 const PaperContext = createContext<PaperIdentity>(DEFAULT_PAPER_IDENTITY);
 

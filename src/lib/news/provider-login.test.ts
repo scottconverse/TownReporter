@@ -518,6 +518,21 @@ describe("ENG-06: never taskkill a PID this process does not still hold", () => 
       const started = await startProviderLogin("codex", NEWSROOM);
       const cancelled = await cancelProviderLogin(started.id, NEWSROOM);
       assert.equal(cancelled?.status, "cancelled");
+
+      // Assert a kill actually happened, not just that the state machine
+      // says "cancelled" -- `patch(id, { status: "cancelled" })` runs
+      // unconditionally after `killTree`, even if the kill itself silently
+      // failed (killTree swallows its own errors), so the status alone does
+      // not prove the child died. killTree's Windows path fires `taskkill`
+      // fire-and-forget, so poll briefly rather than asserting immediately.
+      assert.ok(started.pid, "expected the started login to carry a real child pid");
+      const deadline = Date.now() + 2000;
+      let alive = isAlive(started.pid!);
+      while (alive && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        alive = isAlive(started.pid!);
+      }
+      assert.equal(alive, false, "cancelling the happy path must actually kill the real child");
     } finally {
       restore();
     }

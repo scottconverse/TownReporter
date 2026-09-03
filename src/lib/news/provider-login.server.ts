@@ -209,6 +209,20 @@ export async function ensureProviderLoginsSchema() {
  * PID any of those rows remember belongs, if it belongs to anything at all, to
  * whatever Windows has since recycled that number to. Retiring never spawns
  * `taskkill`; see killTree's callers for why that matters.
+ *
+ * "Once per process" is enforced by `startupSweepDone`, a module-level flag,
+ * not by any process boundary the runtime enforces for us. It is safe only
+ * because every caller reaches `live` through `ensureProviderLoginsSchema()`,
+ * which is always awaited to completion first, and the flag is set
+ * synchronously before this function's first `await` — so two callers in the
+ * same process can never race a double sweep. That invariant would not hold
+ * for a hot-reload dev server that resets this module's state (this flag
+ * included) without restarting the OS process: it would re-run the sweep
+ * against rows this same process still owns in `live`, exactly the scenario
+ * `resetProviderLoginStartupSweepForTest` exists to simulate for tests. This
+ * file is `.server.ts`-only and unlikely to be HMR'd mid-login, but if
+ * `ensureProviderLoginsSchema`'s call sites are ever refactored, re-check
+ * that every caller still awaits it before touching `live`.
  */
 let startupSweepDone = false;
 

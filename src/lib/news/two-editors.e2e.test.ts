@@ -35,7 +35,7 @@ import {
  */
 
 const repoRoot = new URL("../../../", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
-const PSQL_ADMIN_URL = resolveAdminUrl();
+const PSQL_ADMIN_URL = integrationRequested() ? resolveAdminUrl() : "";
 const PORT = 3866;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const dbName = `townreporter_test_twoeditors_${process.pid}_${Date.now()}`;

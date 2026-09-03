@@ -38,7 +38,7 @@ import {
  * `.github/workflows/ci.yml`.
  */
 
-const PSQL_ADMIN_URL = resolveAdminUrl();
+const PSQL_ADMIN_URL = integrationRequested() ? resolveAdminUrl() : "";
 const suffix = `${process.pid}_${Date.now()}`;
 const migrationsDbName = `townreporter_test_parity_migrations_${suffix}`;
 const ensureDbName = `townreporter_test_parity_ensure_${suffix}`;

@@ -18,15 +18,31 @@ import { Client } from "pg";
 /**
  * The admin connection used to CREATE and DROP each file's scratch database.
  *
- * `TEST_POSTGRES_ADMIN_URL` is how CI (and any contributor whose Postgres
- * isn't on 5433 with no password) points these tests at a real server. With
- * it unset, this falls back to the one developer setup this repo assumes
- * locally. That fallback is not a guess about someone else's machine -- it is
- * the same value the previous hardcoded constant used, so a machine that used
- * to pass still passes without setting anything.
+ * `TEST_POSTGRES_ADMIN_URL` is how CI (and any contributor running these
+ * integration tests) points them at a real server. There is deliberately NO
+ * fallback: a previous version of this function defaulted to
+ * `postgres://postgres@127.0.0.1:5433/postgres` -- the same shared dev
+ * Postgres port implicated in a live-site outage, where a DB-heavy test
+ * starved the real paper's own database. Silently dialing a shared port by
+ * default is exactly the failure mode this function must never reproduce.
+ *
+ * Callers must only invoke this function on a path already gated by
+ * `integrationRequested()` (i.e. `TEST_POSTGRES_ADMIN_URL` is confirmed set),
+ * so this throw should never actually fire in a correctly wired caller -- it
+ * exists as a hard backstop against a future call site that connects without
+ * checking the gate first.
  */
 export function resolveAdminUrl(): string {
-  return process.env.TEST_POSTGRES_ADMIN_URL ?? "postgres://postgres@127.0.0.1:5433/postgres";
+  const url = process.env.TEST_POSTGRES_ADMIN_URL?.trim();
+  if (!url) {
+    throw new Error(
+      "TEST_POSTGRES_ADMIN_URL is not set -- refusing to default to a shared Postgres server. " +
+        "Set TEST_POSTGRES_ADMIN_URL to run these integration tests, or run them in the " +
+        "postgres-integration CI job (see .github/workflows/ci.yml), which sets it to an " +
+        "isolated, ephemeral container.",
+    );
+  }
+  return url;
 }
 
 /**

@@ -22,6 +22,42 @@ import { execFileSync } from "node:child_process";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const POLICY = readFileSync(join(ROOT, "SECURITY.md"), "utf8");
 
+/**
+ * SECURITY.md cross-references headings in other docs by quoted section name
+ * (e.g. `docs/manual.md §"What the reader gets"`), not a markdown anchor
+ * link, so nothing checked these automatically -- an audit (0.6.9, AUDIT-001)
+ * found the references correct today but noted the rename that made them
+ * correct would have silently rotted a stale one straight through review,
+ * the same way `docs/manual.md`'s old `## Privacy of the reader` heading
+ * disappeared without anyone updating a link, because there wasn't one to
+ * break. This walks every `path §"heading"` pair SECURITY.md contains and
+ * asserts the heading is a real `##`/`###` line in that file, verbatim.
+ */
+test("every doc section SECURITY.md quotes by name still exists in that doc", () => {
+  const refs = [...POLICY.matchAll(/`(docs\/[\w.-]+\.md)`\s*§"([^"]+)"/g)].map((m) => ({
+    doc: m[1],
+    heading: m[2],
+  }));
+  assert.ok(refs.length > 0, "expected SECURITY.md to still contain at least one §\"...\" doc cross-reference");
+
+  const missing = [];
+  for (const { doc, heading } of refs) {
+    const docText = readFileSync(join(ROOT, doc), "utf8");
+    const headingLines = docText
+      .split(/\r?\n/)
+      .filter((l) => /^#{2,3}\s/.test(l))
+      .map((l) => l.replace(/^#{2,3}\s+/, "").trim());
+    if (!headingLines.includes(heading)) {
+      missing.push(`${doc} §"${heading}"`);
+    }
+  }
+  assert.deepEqual(
+    missing,
+    [],
+    `SECURITY.md quotes a section that no longer exists as a heading: ${missing.join(", ")}`,
+  );
+});
+
 test("the security policy contains no placeholder pretending to be a channel", () => {
   // An angle-bracketed span with prose inside it is the shape of a fill-me-in
   // that got shipped. A real address, a URL or a code span is not.

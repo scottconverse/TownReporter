@@ -215,15 +215,95 @@ if ($PSCmdlet.ShouldProcess("the app", "start")) {
   }
 }
 
+
+<#
+  A 200 is not proof of a working page.
+
+  This is exactly how a broken promote slipped through undetected: the public
+  page was rendering an error boundary ("Something went wrong" plus the
+  thrown message) and every check here still went green, because a rendered
+  error page is still a 200. Fetching /, checking the status code, and
+  stopping there proves the server answered, not that the paper it answered
+  with is real.
+
+  So this checks the actual bytes for two things, on BOTH the local origin
+  and the public URL:
+
+    1. real content is present -- the masthead's <title> tag (set from the
+       live paper identity in every response, error pages included -- so this
+       alone is not sufficient, only necessary) and a real HTML document of a
+       plausible size, not a near-empty error shell;
+    2. none of the literal strings the app's own error boundary renders
+       (src/lib/error-component.tsx's AppErrorComponent, wired as the
+       router's defaultErrorComponent) appear anywhere in the response.
+
+  A near-empty page that also happens to dodge every denylisted string would
+  still fail on the minimum-length check, so the two checks cover each
+  other's blind spot.
+#>
+function Test-RealPageContent {
+  param(
+    [Parameter(Mandatory = $true)][string]$Url,
+    [Parameter(Mandatory = $true)][string]$Label,
+    [int]$TimeoutSec = 30
+  )
+  $result = @{ Ok = $false; Failures = @() }
+  try {
+    $resp = Invoke-WebRequest $Url -UseBasicParsing -TimeoutSec $TimeoutSec
+  } catch {
+    $result.Failures += "$Label did not answer: $($_.Exception.Message)"
+    return $result
+  }
+  if ($resp.StatusCode -ne 200) {
+    $result.Failures += "$Label answered $($resp.StatusCode)"
+    return $result
+  }
+  $html = $resp.Content
+
+  # A rendered error page is a real HTML document too, so status 200 plus
+  # "it has a body" is not enough -- but a genuinely broken response (an
+  # empty body, a bare "OK", a proxy's own error page) is usually far
+  # shorter than a real edition, so a floor still catches that class of
+  # failure the string checks below cannot.
+  if ($html.Length -lt 2000) {
+    $result.Failures += "$Label response is only $($html.Length) bytes -- too small to be a real page"
+  }
+
+  $titleMatch = [regex]::Match($html, '<title>([^<]*)</title>')
+  if (-not $titleMatch.Success -or $titleMatch.Groups[1].Value.Trim().Length -lt 3) {
+    $result.Failures += "$Label served no real <title> (masthead identity missing)"
+  }
+
+  # The literal strings AppErrorComponent renders on any uncaught error --
+  # see src/lib/error-component.tsx and src/router.tsx's defaultErrorComponent.
+  $errorMarkers = @(
+    "Something went wrong",
+    "Cannot destructure",
+    "is not a function",
+    "is not defined",
+    "ChunkLoadError",
+    "Failed to fetch dynamically imported module"
+  )
+  foreach ($marker in $errorMarkers) {
+    if ($html -like "*$marker*") {
+      $result.Failures += "$Label response contains error-boundary text: `"$marker`""
+    }
+  }
+
+  if ($result.Failures.Count -eq 0) {
+    $result.Ok = $true
+  }
+  return $result
+}
+
 # --- 9. verify --------------------------------------------------------------
 Write-Host ""
 Say "checking"
 $fail = @()
 
-try {
-  $local = (Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 30).StatusCode
-  if ($local -eq 200) { Say "[ OK ] the paper answers on $port" } else { $fail += "local answered $local" }
-} catch { $fail += "local did not answer: $($_.Exception.Message)" }
+$localCheck = Test-RealPageContent -Url "http://127.0.0.1:$port/" -Label "local ($port)"
+if ($localCheck.Ok) { Say "[ OK ] the paper answers on $port with real content, no error boundary" }
+else { $fail += $localCheck.Failures }
 
 <#
   A 200 from the front page is server-side HTML and proves nothing about the
@@ -246,10 +326,9 @@ try {
 
 $site = $env:PUBLIC_SITE_URL
 if (-not $site) { $site = "https://townreporter.org" }
-try {
-  $pub = (Invoke-WebRequest $site -UseBasicParsing -TimeoutSec 40).StatusCode
-  if ($pub -eq 200) { Say "[ OK ] $site answers" } else { $fail += "$site answered $pub" }
-} catch { $fail += "$site did not answer: $($_.Exception.Message)" }
+$pubCheck = Test-RealPageContent -Url $site -Label $site -TimeoutSec 40
+if ($pubCheck.Ok) { Say "[ OK ] $site answers with real content, no error boundary" }
+else { $fail += $pubCheck.Failures }
 
 $after = & "$env:USERPROFILE\scoop\apps\postgresql\current\bin\psql.exe" -p 5433 -U postgres -d $dbName -tAc "select count(*) from articles where status='published'"
 $after = "$after".Trim()

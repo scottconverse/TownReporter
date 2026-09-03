@@ -51,7 +51,7 @@ import {
  */
 
 const repoRoot = new URL("../../../", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
-const PSQL_ADMIN_URL = resolveAdminUrl();
+const PSQL_ADMIN_URL = integrationRequested() ? resolveAdminUrl() : "";
 // Every other integration file's PORT is 3861-3868, 3910. Not one of those.
 const PORT = 3869;
 const BASE_URL = `http://127.0.0.1:${PORT}`;

@@ -40,7 +40,7 @@ import {
  * `.github/workflows/ci.yml`, enforced by `scripts/postgres-tests-are-covered.test.mjs`.
  */
 
-const PSQL_ADMIN_URL = resolveAdminUrl();
+const PSQL_ADMIN_URL = integrationRequested() ? resolveAdminUrl() : "";
 const dbName = `townreporter_test_darkschema_${process.pid}_${Date.now()}`;
 
 const dbProbe = integrationRequested()
