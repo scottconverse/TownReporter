@@ -154,7 +154,7 @@ export function modelChoiceHelp(
     return "Claude Opus writes the whole editorial. Codex is offered for Story drafts only: its model declines to write an editorial that takes a position.";
   }
   const noun = scope === "dark" ? "round" : "draft";
-  return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first one's login has lapsed, the ${noun} moves to the next.`;
+  return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first one's login has lapsed or it does not respond in time, the ${noun} moves to the next.`;
 }
 
 export function opinionProviderProblem(error: string): string {

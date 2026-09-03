@@ -45,13 +45,19 @@ import {
   kickJobs,
   latestJob,
   runLooksStalled,
+  setJobFailoverNote,
   setJobModelChoice,
   setJobStage,
   type DeskJob,
 } from "./jobs";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
-import { planAutomaticFailover, looksLikeTimeoutOrNoOutput } from "./automatic-failover.ts";
+import {
+  planAutomaticFailover,
+  looksLikeTimeoutOrNoOutput,
+  failoverReasonPhrase,
+  failoverNoteSentence,
+} from "./automatic-failover.ts";
 import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
 import { looksLikeProviderAuthFailure } from "./preflight.ts";
@@ -729,6 +735,7 @@ export type PerformDraftWorkDeps = {
   probe?: typeof probeProvider;
   setJobModelChoice?: typeof setJobModelChoice;
   setJobStage?: typeof setJobStage;
+  setJobFailoverNote?: typeof setJobFailoverNote;
 };
 
 type ReportedDraftResult = Awaited<ReturnType<typeof reportAndDraft>>;
@@ -750,8 +757,9 @@ async function failOverAndRetry(opts: {
   probe: typeof probeProvider;
   setModelChoice: typeof setJobModelChoice;
   setStage: typeof setJobStage;
+  setFailoverNote: typeof setJobFailoverNote;
 }): Promise<ReportedDraftResult> {
-  const { job, error, draftInput, runReport, probe, setModelChoice, setStage } = opts;
+  const { job, error, draftInput, runReport, probe, setModelChoice, setStage, setFailoverNote } = opts;
   const source = job.model_choice_source ?? "editor";
   const plan = await planAutomaticFailover({
     source,
@@ -785,8 +793,12 @@ async function failOverAndRetry(opts: {
 
   const previousLabel = modelChoiceLabel(job.model_choice);
   await setModelChoice(job.id, plan.next);
-  const switchedBecause = plan.reason === "timeout" ? `${previousLabel} timed out` : `${previousLabel} sign-in lapsed`;
+  const switchedBecause = failoverReasonPhrase(previousLabel, plan.reason);
   await setStage(job.id, `Switched to ${plan.label}: ${switchedBecause}`);
+  // Durable twin of the stage write above: `stage` gets overwritten by
+  // "Done" once the job finishes, so without this the editor could see the
+  // switch reason mid-run but never again once the draft landed.
+  await setFailoverNote(job.id, failoverNoteSentence(plan.label, previousLabel, plan.reason));
   return runReport({ ...draftInput, modelChoice: plan.next });
 }
 
@@ -810,6 +822,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const probe = deps.probe ?? probeProvider;
   const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
   const setStage = deps.setJobStage ?? setJobStage;
+  const setFailoverNote = deps.setJobFailoverNote ?? setJobFailoverNote;
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const leadId = job.subject_id;
   const sql = await getSql();
@@ -865,6 +878,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       probe,
       setModelChoice,
       setStage,
+      setFailoverNote,
     });
   }
   if ("error" in reported) throw new Error(reported.error);

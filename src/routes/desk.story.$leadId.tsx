@@ -562,6 +562,9 @@ function StoryPage() {
                 />
               </Field>
               {data.draft?.form ? <p className="meta">Form · {data.draft.form}</p> : null}
+              {data.job?.failover_note ? (
+                <p className="meta">Model note: {data.job.failover_note}</p>
+              ) : null}
             </form>
           ) : waiting ? null : (
             <p className="meta" style={{ marginTop: 14 }}>

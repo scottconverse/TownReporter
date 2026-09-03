@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.7](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.7)** — 3 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.8](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.8)** — 3 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.8** — the desk now shows why a draft switched writing models, and the Automatic picker says it moves on a timeout too.
 - **0.6.7** — Automatic now falls back to the next writing model when a draft times out, not only when a sign-in has lapsed.
 - **0.6.6** — every CI browser walk except the documented dev-path walk now runs against the built server (`npm start`), ending the cold-dev-server flakiness.
 - **0.6.5** — write a story from a URL, text, or an idea in one box on the Desk; hand-filed leads sort to the top; Dark Desk no longer crashes on a long prompt.

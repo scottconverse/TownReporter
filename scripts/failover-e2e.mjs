@@ -23,14 +23,17 @@
  *
  *   FAILOVER_BASE_URL=http://127.0.0.1:3317 node scripts/failover-e2e.mjs
  *
- * There is no product surface that names which provider wrote a landed
- * draft (desk.story.$leadId.tsx renders the model PICKER, never the model
- * the draft actually ran on) -- so this proves the provider switch through
- * the same channel the desk's own polling uses: the getLead server
- * function's JSON responses, captured over the wire while the page polls
- * every 2s during "waiting". That JSON carries desk_jobs.model_choice and
- * .stage verbatim (src/lib/news/jobs.ts's `latestJob` select list), which is
- * exactly the row failOverAndRetry (src/lib/news/desk.ts) writes.
+ * The model PICKER on desk.story.$leadId.tsx never names which provider a
+ * landed draft actually ran on -- that only ever showed in the job's
+ * transient `stage` text. So this proves the switch through the same
+ * channel the desk's own polling uses: the getLead server function's JSON
+ * responses, captured over the wire while the page polls every 2s during
+ * "waiting". That JSON carries desk_jobs.model_choice, .stage, and (0.6.8)
+ * .failover_note verbatim (src/lib/news/jobs.ts's `latestJob` select list),
+ * which is exactly the row failOverAndRetry (src/lib/news/desk.ts) writes.
+ * failover_note is also the one piece of this the editor DOES see on the
+ * page itself once the job is Done -- desk.story.$leadId.tsx renders it as
+ * "Model note: ..." -- because unlike `stage`, "Done" never overwrites it.
  */
 import { chromium } from "playwright";
 import { fromCrossJSON } from "seroval";
@@ -238,6 +241,22 @@ async function main() {
     );
   }
   step('the completed job\'s model_choice is "codex-balanced" (Codex Terra)');
+
+  // --- the switch reason survives past "Done" (0.6.8) ---------------------
+  // `stage` gets overwritten once the job finishes ("Done" replaces the
+  // "Switched to..." text the assertion above caught mid-run) -- this is
+  // the strengthening 0.6.8 is about: `failover_note` is the durable twin
+  // (src/lib/news/jobs.ts's `setJobFailoverNote`), and it must still read
+  // back on the FINISHED job's own getLead snapshot, not just an earlier
+  // running one.
+  const expectedNote = "This draft moved to Codex Terra because Claude Opus sign-in lapsed";
+  if (String(finished.job.failover_note ?? "") !== expectedNote) {
+    throw new Error(
+      `the completed job's failover_note read ${JSON.stringify(finished.job.failover_note)}, ` +
+        `expected ${JSON.stringify(expectedNote)} -- the durable note did not survive to Done`,
+    );
+  }
+  step('the completed job\'s failover_note is durable: "' + expectedNote + '"');
 
   // --- the landed draft is really there, on the page -----------------------
   const bodyText = await page.getByLabel("Body").inputValue();

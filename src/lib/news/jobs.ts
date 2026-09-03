@@ -46,6 +46,7 @@ export type DeskJob = {
   lane: JobLane;
   status: JobStatus;
   stage: string;
+  failover_note: string;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -80,6 +81,7 @@ export async function ensureJobsSchema() {
       model_choice text not null default 'auto',
       status text not null default 'queued',
       stage text not null default '',
+      failover_note text not null default '',
       error text,
       result_json text not null default '{}',
       created_at timestamptz not null default now(),
@@ -133,6 +135,12 @@ export async function ensureJobsSchema() {
   // PGLite path where migrations do not run.
   await sql.query(
     `alter table desk_jobs add column if not exists model_choice_source text not null default 'editor'`,
+  );
+  // The same column as migrations/0032_job_failover_note.sql, for the same
+  // reason model_choice_source itself is declared twice: this covers the
+  // embedded PGLite path where migrations do not run.
+  await sql.query(
+    `alter table desk_jobs add column if not exists failover_note text not null default ''`,
   );
 }
 
@@ -202,7 +210,7 @@ export async function latestJob(opts: {
   await ensureJobsSchema();
   const sql = await getSql();
   const rows = await sql<DeskJob>`
-    select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error,
+    select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, failover_note, error,
            created_at, updated_at, started_at, finished_at
     from desk_jobs
     where newsroom_id = ${opts.newsroomId} and kind = ${opts.kind} and subject_id = ${opts.subjectId}
@@ -222,7 +230,7 @@ export async function findOpenJob(opts: {
   const rows =
     opts.subjectId != null
       ? await sql<DeskJob>`
-          select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error,
+          select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, failover_note, error,
                  created_at, updated_at, started_at, finished_at
           from desk_jobs
           where newsroom_id = ${opts.newsroomId}
@@ -233,7 +241,7 @@ export async function findOpenJob(opts: {
           limit 1
         `
       : await sql<DeskJob>`
-          select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error,
+          select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, failover_note, error,
                  created_at, updated_at, started_at, finished_at
           from desk_jobs
           where newsroom_id = ${opts.newsroomId}
@@ -284,7 +292,7 @@ export async function enqueueJob(opts: {
     insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage)
     values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${opts.modelChoiceSource ?? "editor"}, ${lane}, ${"queued"}, ${"Queued"})
     on conflict do nothing
-    returning id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error,
+    returning id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, failover_note, error,
               created_at, updated_at, started_at, finished_at
   `;
   const job =
@@ -306,7 +314,7 @@ export async function enqueueJob(opts: {
       insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage)
       values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${opts.modelChoiceSource ?? "editor"}, ${lane}, ${"queued"}, ${"Queued"})
       on conflict do nothing
-      returning id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error,
+      returning id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, failover_note, error,
                 created_at, updated_at, started_at, finished_at
     `;
     if (retry[0]) {
@@ -344,6 +352,20 @@ export async function setJobStage(id: number, stage: string) {
   const sql = await getSql();
   await sql`
     update desk_jobs set stage = ${stage}, updated_at = now() where id = ${id}
+  `;
+}
+
+/**
+ * The durable twin of `setJobStage`. `stage` is transient -- "Done"
+ * overwrites it once the job finishes, so by the time an editor looks at a
+ * completed draft the reason it switched providers is already gone. This
+ * writes the same sentence into a column nothing else overwrites, so it is
+ * still there after the job is Done and the story view can show it.
+ */
+export async function setJobFailoverNote(id: number, note: string) {
+  const sql = await getSql();
+  await sql`
+    update desk_jobs set failover_note = ${note}, updated_at = now() where id = ${id}
   `;
 }
 
@@ -389,7 +411,7 @@ async function drainLane(lane: JobLane): Promise<{ ran: number }> {
       (async () => {
         for (let n = 0; n < 8; n++) {
           const next = await sql<DeskJob>`
-            select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error,
+            select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, failover_note, error,
                    created_at, updated_at, started_at, finished_at
             from desk_jobs
             where lane = ${lane}

@@ -74,7 +74,7 @@ describe("model choice contract", () => {
   it("explains each automatic order and makes explicit choices no-fallback", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries Claude Opus, then Codex Terra. If the first one's login has lapsed, the draft moves to the next.",
+      "Uses your configured gateway when set; otherwise tries Claude Opus, then Codex Terra. If the first one's login has lapsed or it does not respond in time, the draft moves to the next.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),

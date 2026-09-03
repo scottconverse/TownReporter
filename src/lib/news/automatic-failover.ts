@@ -104,3 +104,28 @@ export async function planAutomaticFailover(
   }
   return null;
 }
+
+/**
+ * "<previous label> timed out" / "<previous label> sign-in lapsed" -- the
+ * one piece of wording every failover site (desk.ts's `failOverAndRetry`,
+ * dark.ts, scan-model-run.ts) builds independently for its transient
+ * `stage` write. Pulled out here, pure and hermetic, so 0.6.8's durable
+ * `failover_note` (desk.ts) can reuse the EXACT same wording instead of a
+ * second hand-typed copy that could drift from the stage text.
+ */
+export function failoverReasonPhrase(previousLabel: string, reason: AutomaticFailoverReason): string {
+  return reason === "timeout" ? `${previousLabel} timed out` : `${previousLabel} sign-in lapsed`;
+}
+
+/**
+ * The durable sentence 0.6.8 writes to `desk_jobs.failover_note` when a
+ * Story draft switches providers: "This draft moved to <new label> because
+ * <previous label> <reason>."
+ */
+export function failoverNoteSentence(
+  newLabel: string,
+  previousLabel: string,
+  reason: AutomaticFailoverReason,
+): string {
+  return `This draft moved to ${newLabel} because ${failoverReasonPhrase(previousLabel, reason)}`;
+}

@@ -13,6 +13,7 @@ import {
   STALE_RUNNING_SECONDS,
   HEARTBEAT_MS,
   __setJobWorkForTest,
+  setJobFailoverNote,
   type DeskJob,
 } from "./jobs.ts";
 import { getSql } from "../db.ts";
@@ -27,6 +28,7 @@ function fakeJob(over: Partial<DeskJob>): DeskJob {
     lane: "default",
     status: "running",
     stage: "",
+    failover_note: "",
     error: null,
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
@@ -86,6 +88,42 @@ describe("desk jobs", () => {
     assert.equal(autoFound?.model_choice_source, "auto");
     const autoLatest = await latestJob({ newsroomId, kind: "draft", subjectId: 616162 });
     assert.equal(autoLatest?.model_choice_source, "auto");
+  });
+
+  /*
+    0.6.8: the provider-switch reason used to live only in the transient
+    `stage` column, which "Done" overwrites once the job finishes -- so an
+    editor looking at a finished draft could no longer see why it switched
+    models. `failover_note` is the durable twin; this confirms it defaults
+    empty, that setJobFailoverNote persists it, and that it round-trips
+    through every select list that enumerates job columns (latestJob and
+    findOpenJob included) -- the exact drift risk model_choice_source's own
+    column list carries.
+  */
+  it("defaults failover_note empty and persists it through setJobFailoverNote", async () => {
+    const newsroomId = 91002;
+    const created = await enqueueJob({
+      userId: `job-failover-note-${Date.now()}`,
+      newsroomId,
+      kind: "draft",
+      subjectId: 616163,
+      modelChoice: "claude-frontier",
+      modelChoiceSource: "auto",
+      kick: false,
+    });
+    assert.equal(created.failover_note, "");
+
+    const timeoutNote = "This draft moved to Codex Terra because Claude Opus timed out";
+    await setJobFailoverNote(created.id, timeoutNote);
+    const foundAfterTimeout = await findOpenJob({ newsroomId, kind: "draft", subjectId: 616163 });
+    assert.equal(foundAfterTimeout?.failover_note, timeoutNote);
+    const latestAfterTimeout = await latestJob({ newsroomId, kind: "draft", subjectId: 616163 });
+    assert.equal(latestAfterTimeout?.failover_note, timeoutNote);
+
+    const authNote = "This draft moved to Codex Terra because Claude Opus sign-in lapsed";
+    await setJobFailoverNote(created.id, authNote);
+    const latestAfterAuth = await latestJob({ newsroomId, kind: "draft", subjectId: 616163 });
+    assert.equal(latestAfterAuth?.failover_note, authNote);
   });
 
   it("keeps completed fake model work as an unpublished draft on a cold database read", async () => {
@@ -838,6 +876,27 @@ describe("the lane column is declared the same in both places", () => {
       "desk_jobs_lane_idx",
       "on desk_jobs (lane, status, id asc)",
     ]) {
+      assert.ok(norm(migration).includes(part), `migration missing: ${part}`);
+      assert.ok(norm(code).includes(part), `ensureJobsSchema missing: ${part}`);
+    }
+  });
+});
+
+/**
+ * Same drift risk as 0017/0019, for the same reason: `failover_note` is
+ * declared once for real Postgres (migrations/0032_job_failover_note.sql)
+ * and once for the embedded PGLite path (ensureJobsSchema). 0.6.8.
+ */
+describe("the failover_note column is declared the same in both places", () => {
+  it("migration and ensureJobsSchema agree", async () => {
+    const fs = await import("node:fs");
+    const migration = fs.readFileSync(
+      new URL("../../../migrations/0032_job_failover_note.sql", import.meta.url),
+      "utf8",
+    );
+    const code = fs.readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
+    const norm = (t: string) => t.toLowerCase().replace(/--.*$/gm, "").replace(/\s+/g, " ");
+    for (const part of ["add column if not exists failover_note text not null default ''"]) {
       assert.ok(norm(migration).includes(part), `migration missing: ${part}`);
       assert.ok(norm(code).includes(part), `ensureJobsSchema missing: ${part}`);
     }

@@ -1,6 +1,21 @@
 # Changelog
 
-Current release: **0.6.7**.
+Current release: **0.6.8**.
+
+## 0.6.8 — 2026-09-03
+- **The desk now shows why a draft switched writing models.** The
+  provider-switch reason `failOverAndRetry` computes lived only in the job's
+  transient `stage` column, which "Done" overwrites once the job finishes --
+  so an editor looking at a finished draft could no longer see why it had
+  moved off the model they picked. `desk_jobs` now carries a durable
+  `failover_note`, written once at the moment a Story draft switches
+  providers, and the story view shows it as a quiet "Model note: …" line
+  once the draft has a body.
+- **The Automatic picker's help copy now says it moves on a timeout too.**
+  0.6.7 taught Automatic to fail over on a timeout as well as a lapsed
+  sign-in, but the picker's own help sentence still only mentioned the
+  sign-in case. It now reads "If the first one's login has lapsed or it does
+  not respond in time, the draft moves to the next."
 
 ## 0.6.7 — 2026-09-03
 - **Automatic now fails over on a timeout, not only a sign-in lapse.** A

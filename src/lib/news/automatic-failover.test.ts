@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { planAutomaticFailover } from "./automatic-failover.ts";
+import {
+  planAutomaticFailover,
+  failoverReasonPhrase,
+  failoverNoteSentence,
+} from "./automatic-failover.ts";
 
 /**
  * Live case 2026-09-02, job 41: Automatic pinned to Claude Opus, and Claude
@@ -158,5 +162,38 @@ describe("planAutomaticFailover", () => {
     });
     assert.equal(plan, null);
     assert.deepEqual(calls, [], "there is no rung after the last one to probe");
+  });
+});
+
+/**
+ * 0.6.8: `desk_jobs.failover_note` is the durable twin of the transient
+ * `stage` write every failover site already made ("Switched to <label>:
+ * <reason>") -- it survives past "Done", which overwrites `stage`. Both the
+ * stage wording and the durable note share this same phrase-builder so they
+ * can never drift into two different explanations for the same switch.
+ */
+describe("failoverReasonPhrase", () => {
+  it("reads as a timeout for reason 'timeout'", () => {
+    assert.equal(failoverReasonPhrase("Claude Opus", "timeout"), "Claude Opus timed out");
+  });
+
+  it("reads as a lapsed sign-in for reason 'auth'", () => {
+    assert.equal(failoverReasonPhrase("Claude Opus", "auth"), "Claude Opus sign-in lapsed");
+  });
+});
+
+describe("failoverNoteSentence", () => {
+  it("builds the durable sentence for a timeout switch", () => {
+    assert.equal(
+      failoverNoteSentence("Codex Terra", "Claude Opus", "timeout"),
+      "This draft moved to Codex Terra because Claude Opus timed out",
+    );
+  });
+
+  it("builds the durable sentence for a sign-in-lapse switch", () => {
+    assert.equal(
+      failoverNoteSentence("Codex Terra", "Claude Opus", "auth"),
+      "This draft moved to Codex Terra because Claude Opus sign-in lapsed",
+    );
   });
 });
