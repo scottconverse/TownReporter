@@ -75,6 +75,21 @@ export function looksLikeProviderAuthFailure(detail: string | null | undefined):
   return Boolean(detail) && PROVIDER_AUTH_RE.test(detail!);
 }
 
+/**
+ * "The provider was reachable but slow (or said so directly)." Shared with
+ * `automatic-failover.ts` (audit-lite 0.6.7 FINDING-003: this regex used to
+ * be defined independently in both files -- same question, "does this error
+ * text mean the model was reachable but slow?", answered twice, with no
+ * shared source of truth to keep a future wording change from silently
+ * diverging between this probe-time guidance and that post-run failover
+ * decision).
+ */
+const TIMEOUT_RE = /timed out|timeout/i;
+
+export function looksLikeTimeoutText(detail: string | null | undefined): boolean {
+  return Boolean(detail) && TIMEOUT_RE.test(detail!);
+}
+
 /** Which login is the one that lapsed. */
 export type ProviderAuthTarget = "codex" | "anthropicKey" | "claude" | "unknown";
 
@@ -104,7 +119,7 @@ export function scanPreflight(probe: ProbeResult): Preflight {
   if (probe.ok) return { ok: true };
 
   const detail = probe.error ?? "";
-  const kind: PreflightKind = /timed out|timeout/i.test(detail)
+  const kind: PreflightKind = looksLikeTimeoutText(detail)
     ? "timeout"
     : /Codex is not installed|Codex CLI.*not found/i.test(detail)
       ? "codex-missing"

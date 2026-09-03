@@ -7,7 +7,7 @@ import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
 import { assertRate, audit } from "./ops";
-import { scanSystem, grokChat, parseJsonBlock, probeProvider, AUTOMATIC_LADDER } from "./ai";
+import { scanSystem, grokChat, parseJsonBlock, probeProvider } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
 import { stripReporterNotebook } from "./strip-draft";
 import {
@@ -51,16 +51,11 @@ import {
   type DeskJob,
 } from "./jobs";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
-import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
-import {
-  planAutomaticFailover,
-  looksLikeTimeoutOrNoOutput,
-  failoverReasonPhrase,
-  failoverNoteSentence,
-} from "./automatic-failover.ts";
+import { effectiveStoryModelChoice, storyModelChoice } from "./model-choice.ts";
 import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
+import { failOverAndRetry, type PerformDraftWorkDeps } from "./desk-model-run.ts";
+export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
-import { looksLikeProviderAuthFailure } from "./preflight.ts";
 import type { DraftRow, LeadRow, MemoryRow, ScanRow, SourceRow } from "./types";
 
 function owned(context: { newsroomId?: number }) {
@@ -742,81 +737,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await audit(context.userId, "scan", `run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`, owned(context));
 });
 
-/** Injectable seam so a job with a real Claude/Codex 401 mid-run, and the
- * failover it triggers, can be tested without a real provider. Defaults to
- * the real functions -- the same pattern `reportAndDraft` uses for its own
- * `ReportDeps`. */
-export type PerformDraftWorkDeps = {
-  reportAndDraft?: typeof reportAndDraft;
-  probe?: typeof probeProvider;
-  setJobModelChoice?: typeof setJobModelChoice;
-  setJobStage?: typeof setJobStage;
-  setJobFailoverNote?: typeof setJobFailoverNote;
-};
-
-type ReportedDraftResult = Awaited<ReturnType<typeof reportAndDraft>>;
-type DraftInput = Omit<Parameters<typeof reportAndDraft>[0], "modelChoice">;
-
-/**
- * The first attempt failed. If the job was on Automatic and the failure
- * reads as "the login is gone" or "it timed out / sent nothing back" (not a
- * refusal or an unknown error), try exactly one later rung of the ladder
- * and, if it is ready, run the draft again on it -- once. Anything else,
- * including a second failure on the new rung, is returned/thrown as-is by
- * the caller.
- */
-async function failOverAndRetry(opts: {
-  job: DeskJob;
-  error: string;
-  draftInput: DraftInput;
-  runReport: typeof reportAndDraft;
-  probe: typeof probeProvider;
-  setModelChoice: typeof setJobModelChoice;
-  setStage: typeof setJobStage;
-  setFailoverNote: typeof setJobFailoverNote;
-}): Promise<ReportedDraftResult> {
-  const { job, error, draftInput, runReport, probe, setModelChoice, setStage, setFailoverNote } = opts;
-  const source = job.model_choice_source ?? "editor";
-  const plan = await planAutomaticFailover({
-    source,
-    current: job.model_choice,
-    error,
-    probe: (choice) => probe(choice),
-  });
-  if (!plan) {
-    // Explain WHY Automatic did not move on, when it looked close: still on
-    // Automatic, still an auth failure or a timeout/no-output, and a later
-    // rung existed -- it just was not ready either. The original wording
-    // from the first failure survives so the desk's own classifier
-    // (scanPreflight) still reads it the same way it always did.
-    const ladderIndex = AUTOMATIC_LADDER.indexOf(
-      job.model_choice as (typeof AUTOMATIC_LADDER)[number],
-    );
-    const hasLaterRung = ladderIndex !== -1 && ladderIndex < AUTOMATIC_LADDER.length - 1;
-    const wouldHaveTried =
-      source === "auto" &&
-      hasLaterRung &&
-      (looksLikeTimeoutOrNoOutput(error) || looksLikeProviderAuthFailure(error));
-    if (wouldHaveTried) {
-      const nextRung = AUTOMATIC_LADDER[ladderIndex + 1]!;
-      const nextProbe = await probe(nextRung);
-      const label = modelChoiceLabel(nextRung);
-      const why = nextProbe.ok ? "" : nextProbe.error;
-      return { error: `${error} Automatic tried ${label} next, but it was not ready: ${why}` };
-    }
-    return { error };
-  }
-
-  const previousLabel = modelChoiceLabel(job.model_choice);
-  await setModelChoice(job.id, plan.next);
-  const switchedBecause = failoverReasonPhrase(previousLabel, plan.reason);
-  await setStage(job.id, `Switched to ${plan.label}: ${switchedBecause}`);
-  // Durable twin of the stage write above: `stage` gets overwritten by
-  // "Done" once the job finishes, so without this the editor could see the
-  // switch reason mid-run but never again once the draft landed.
-  await setFailoverNote(job.id, failoverNoteSentence(plan.label, previousLabel, plan.reason));
-  return runReport({ ...draftInput, modelChoice: plan.next });
-}
+// PerformDraftWorkDeps, failOverAndRetry, and its DraftInput/ReportedDraftResult
+// types live in desk-model-run.ts now -- a relative-imports-only sibling module
+// that a plain `node --test` process can load (desk.ts itself imports
+// `@/lib/db`, which only Vite's alias config resolves). See that file's
+// docstring; audit-lite 0.6.7 FINDING-001.
 
 /*
   Wrapped in createServerOnlyFn (not just a plain exported async function):

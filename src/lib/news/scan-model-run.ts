@@ -13,7 +13,7 @@ import type { EffectiveProviderChoice, ProviderProbe, grokChat } from "./ai.ts";
 import { providerBudget } from "./ai.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel } from "./model-choice.ts";
-import { planAutomaticFailover } from "./automatic-failover.ts";
+import { planAutomaticFailover, failoverReasonPhrase } from "./automatic-failover.ts";
 
 /**
  * The scan's one AI read used to hardcode 90s regardless of provider, while
@@ -107,7 +107,7 @@ export async function runScanChatWithFailover(
 
   const previousLabel = modelChoiceLabel(job.model_choice);
   await setModelChoice(job.id, plan.next);
-  const switchedBecause = plan.reason === "timeout" ? `${previousLabel} timed out` : `${previousLabel} sign-in lapsed`;
+  const switchedBecause = failoverReasonPhrase(previousLabel, plan.reason);
   await setStage(job.id, `Switched to ${plan.label}: ${switchedBecause}`);
   return chat(system, user, maxTokens, { timeoutMs: timeoutMs(plan.next), choice: plan.next });
 }

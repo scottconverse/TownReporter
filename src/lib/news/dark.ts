@@ -13,7 +13,7 @@ import {
   modelChoiceLabel,
   storyModelChoice,
 } from "./model-choice.ts";
-import { planAutomaticFailover } from "./automatic-failover.ts";
+import { planAutomaticFailover, failoverReasonPhrase } from "./automatic-failover.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { darkSystemFor } from "./dark-prompt.ts";
@@ -1180,6 +1180,53 @@ export const continueInvestigation = createServerFn({ method: "POST" })
       : startDarkRound(context, data.id, data.modelChoice),
   );
 
+/** Injectable seam for `planDarkRoundFailover`, the same pattern
+ * `PerformDraftWorkDeps` uses in desk-model-run.ts. */
+export type DarkRoundFailoverDeps = {
+  probe?: typeof probeProvider;
+  setModelChoice?: typeof setJobModelChoice;
+  setStage?: typeof setJobStage;
+};
+
+/**
+ * The Dark Desk half of the one-shot Automatic failover round-level check
+ * (see `automatic-failover.ts` and `failOverAndRetry` in desk-model-run.ts,
+ * the same mechanism for Story). Pulled out of `performDarkRound`'s body so
+ * the decide-and-write step can be driven directly in a test with injected
+ * fakes (audit-lite 0.6.7 FINDING-001): `performDarkRound` itself needs a
+ * live investigation row, dials, and a real research loop to reach this
+ * point, which makes it unsuitable as the seam a unit test drives through.
+ *
+ * Returns null when Automatic did not move on (not on Automatic, not a
+ * recognised failure, or no ready later rung) -- the caller keeps `loop`/
+ * `synth` from the attempt that just ran. Otherwise the model_choice and
+ * stage writes have already happened, same as before this was extracted,
+ * and the caller re-runs on the returned rung.
+ */
+export async function planDarkRoundFailover(
+  job: DeskJob,
+  failure: string,
+  deps: DarkRoundFailoverDeps = {},
+): Promise<{ next: EffectiveProviderChoice; label: string; switchedBecause: string } | null> {
+  const probe = deps.probe ?? probeProvider;
+  const setModelChoice = deps.setModelChoice ?? setJobModelChoice;
+  const setStage = deps.setStage ?? setJobStage;
+
+  const plan = await planAutomaticFailover({
+    source: job.model_choice_source ?? "editor",
+    current: job.model_choice,
+    error: failure,
+    probe,
+  });
+  if (!plan) return null;
+
+  const previous = modelChoiceLabel(job.model_choice);
+  await setModelChoice(job.id, plan.next);
+  const switchedBecause = failoverReasonPhrase(previous, plan.reason);
+  await setStage(job.id, `Switched to ${plan.label}: ${switchedBecause}`);
+  return { next: plan.next, label: plan.label, switchedBecause };
+}
+
 export async function performDarkRound(job: DeskJob) {
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const id = job.subject_id;
@@ -1260,19 +1307,9 @@ export async function performDarkRound(job: DeskJob) {
     */
     const failure = synth.error || (loop.plannerFailures > 0 ? loop.summary : "");
     if (failure) {
-      const plan = await planAutomaticFailover({
-        source: job.model_choice_source ?? "editor",
-        current: job.model_choice,
-        error: failure,
-        probe: probeProvider,
-      });
-      if (plan) {
-        const previous = modelChoiceLabel(job.model_choice);
-        await setJobModelChoice(job.id, plan.next);
-        const switchedBecause =
-          plan.reason === "timeout" ? `${previous} timed out` : `${previous} sign-in lapsed`;
-        await setJobStage(job.id, `Switched to ${plan.label}: ${switchedBecause}`);
-        choice = plan.next;
+      const switched = await planDarkRoundFailover(job, failure);
+      if (switched) {
+        choice = switched.next;
         ({ loop, synth } = await runOnce(choice));
       }
     }

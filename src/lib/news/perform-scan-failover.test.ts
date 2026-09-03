@@ -5,6 +5,8 @@ import { runScanChatWithFailover, scanCallTimeoutMs } from "./scan-model-run.ts"
 const LIVE_401 =
   "Claude Code error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
 
+const LIVE_TIMEOUT_NO_OUTPUT = "Claude Code request timed out after 150s, 0 bytes out";
+
 /**
  * `performScanWork` delegates its one AI read, and the Automatic failover
  * around it, to `runScanChatWithFailover` (see the comment on that function
@@ -63,6 +65,58 @@ describe("runScanChatWithFailover", () => {
     assert.ok(
       stageMessages.some((s) => /Switched to Codex Terra: .* sign-in lapsed/.test(s)),
       `expected a "Switched to" stage message, got: ${JSON.stringify(stageMessages)}`,
+    );
+  });
+
+  /**
+   * Audit-lite 0.6.7 FINDING-001: only the sign-in-lapse branch above was
+   * ever exercised through this real wiring; the "timed out" branch (added
+   * the same release, for the second 2026-09-02 incident) had no test here.
+   */
+  it("retries once on a timeout / zero-output failure when the job is on Automatic, and words the stage 'timed out'", async () => {
+    const grokCalls: { system: string; user: string; choice: unknown }[] = [];
+    const probeCalls: string[] = [];
+    const stageMessages: string[] = [];
+    let modelChoiceSetTo: string | undefined;
+
+    const result = await runScanChatWithFailover({
+      job: { id: 46, model_choice: "claude-frontier", model_choice_source: "auto" },
+      system: "SYSTEM PROMPT",
+      user: "USER PAYLOAD",
+      maxTokens: 3500,
+      timeoutMs: () => 90_000,
+      grokChat: async (system, user, _maxTokens, opts) => {
+        grokCalls.push({ system, user, choice: opts?.choice });
+        if (grokCalls.length === 1) return { ok: false as const, error: LIVE_TIMEOUT_NO_OUTPUT };
+        return { ok: true as const, text: '{"leads":[]}' };
+      },
+      probe: async (choice) => {
+        probeCalls.push(choice);
+        return { ok: true as const, label: "Codex Terra", choice: "codex-balanced" as const };
+      },
+      setModelChoice: async (_id, choice) => {
+        modelChoiceSetTo = choice;
+      },
+      setStage: async (_id, stage) => {
+        stageMessages.push(stage);
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(
+      grokCalls.map((c) => c.choice),
+      ["claude-frontier", "codex-balanced"],
+      "the retry must run on the next ladder rung, not the one that just failed",
+    );
+    assert.deepEqual(probeCalls, ["codex-balanced"]);
+    assert.equal(modelChoiceSetTo, "codex-balanced");
+    assert.ok(
+      stageMessages.some((s) => s === "Switched to Codex Terra: Claude Opus timed out"),
+      `expected the "timed out" stage wording, got: ${JSON.stringify(stageMessages)}`,
+    );
+    assert.ok(
+      stageMessages.every((s) => !/sign-in lapsed/.test(s)),
+      "a timeout must never be worded as a sign-in lapse",
     );
   });
 

@@ -17,9 +17,11 @@
  * auth-lapse trigger correctly ignored it -- but nothing else caught it
  * either, and the editor got a silent failure instead of Codex. A timeout or
  * a zero-output response reads the same way to an editor as a dead login:
- * the paper didn't get a draft. So Automatic now treats "timed out" and "0
- * bytes out" as a second, independent trigger, alongside the auth lapse --
- * each is reported back via `reason` so the caller can word the switch
+ * the paper didn't get a draft. So Automatic now treats "timed out" (and,
+ * defensively, "0 bytes out" without the word "timeout" nearby, though no
+ * current adapter produces that shape independently -- see `NO_OUTPUT_RE`'s
+ * own comment) as a second trigger, alongside the auth lapse -- each is
+ * reported back via `reason` so the caller can word the switch
  * accurately.
  *
  * This is still deliberately narrow. A content refusal, an empty (but non-
@@ -34,7 +36,7 @@
  */
 
 import { AUTOMATIC_LADDER, type ProviderProbe } from "./ai.ts";
-import { looksLikeProviderAuthFailure } from "./preflight.ts";
+import { looksLikeProviderAuthFailure, looksLikeTimeoutText } from "./preflight.ts";
 import { modelChoiceLabel, storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
 
 export type AutomaticFailoverInput = {
@@ -57,14 +59,22 @@ export type AutomaticFailoverPlan = {
   reason: AutomaticFailoverReason;
 };
 
-/** "The provider was reachable but slow (or came back with nothing)" — still a failure Automatic should route around. */
-const TIMEOUT_RE = /timed out|timeout/i;
-/** The other shape the live 150s timeout took: a connection that closed having sent nothing. */
+/**
+ * The other shape the live 150s timeout took: a connection that closed
+ * having sent nothing. Defensive/forward-looking today, not an independent
+ * trigger in practice (audit-lite 0.6.7 FINDING-002): the only current
+ * producer of "0 bytes out" text is `ai-claude-code.server.ts`'s timeout
+ * message, and that message always also contains "timed out" on the same
+ * line, so `TIMEOUT_RE` (imported as `looksLikeTimeoutText`, shared with
+ * `preflight.ts`) already matches every real case this regex sees today.
+ * It earns its keep the day some adapter reports a zero-output failure
+ * without the word "timeout" in it.
+ */
 const NO_OUTPUT_RE = /0 bytes out/i;
 
 /** True for a timeout or a response that came back empty of actual output. */
 export function looksLikeTimeoutOrNoOutput(detail: string | null | undefined): boolean {
-  return Boolean(detail) && (TIMEOUT_RE.test(detail!) || NO_OUTPUT_RE.test(detail!));
+  return looksLikeTimeoutText(detail) || (Boolean(detail) && NO_OUTPUT_RE.test(detail!));
 }
 
 /**

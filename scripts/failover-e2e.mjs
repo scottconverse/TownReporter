@@ -191,7 +191,7 @@ async function main() {
   // catch a failure ends up matching page chrome that is present the whole
   // time and firing instantly.
   const landed = page.getByRole("button", { name: /^Redraft$/ });
-  const deadline = Date.now() + 120_000;
+  const deadline = Date.now() + Number(process.env.FAILOVER_DEADLINE_MS || 120_000);
   let sawFailed = false;
   while (Date.now() < deadline) {
     if (await landed.count()) break;
@@ -213,18 +213,26 @@ async function main() {
   }
   step("the draft landed (button reads Redraft)");
 
-  // --- the switch happened: the stage text says so ------------------------
+  // --- the switch happened: the stage text said so, IF a poll caught it ---
+  // `stage` only carries the "Switched to..." text for the brief window
+  // between the switch and the job finishing (it gets overwritten by "Done"
+  // once the job completes), and the client only learns about it through a
+  // 2s poll (desk.story.$leadId.tsx's `refetchInterval`). Audit-lite 0.6.6
+  // FINDING-001: asserting this transient stage as a hard requirement races
+  // that poll interval against FAKE_CODEX_DELAY_MS with no real margin, so a
+  // slow/loaded CI runner can miss the window even when the switch genuinely
+  // happened -- flake, not a real failure. This is now informational only;
+  // the durable, poll-independent proof is the model_choice and
+  // failover_note assertions below, which read the FINISHED job's own
+  // snapshot rather than depending on catching a live transient value.
   const sawSwitch = jobSnapshots.some((s) =>
     /Switched to Codex Terra: Claude Opus sign-in lapsed/.test(String(s.job.stage ?? "")),
   );
-  if (!sawSwitch) {
-    throw new Error(
-      "never observed a getLead response whose job.stage read " +
-        '"Switched to Codex Terra: Claude Opus sign-in lapsed" -- ' +
-        `saw stages: ${JSON.stringify(jobSnapshots.map((s) => s.job.stage))}`,
-    );
-  }
-  step('the job stage recorded "Switched to Codex Terra: Claude Opus sign-in lapsed"');
+  step(
+    sawSwitch
+      ? 'observed the transient stage "Switched to Codex Terra: Claude Opus sign-in lapsed" (informational)'
+      : "did not catch the transient switch stage on the wire (informational -- not required, see durable checks below)",
+  );
 
   // --- the job that finished is pinned to Codex Terra, not Claude --------
   const finished = [...jobSnapshots].reverse().find((s) => s.job.status === "completed");

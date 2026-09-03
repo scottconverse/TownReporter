@@ -197,3 +197,46 @@ describe("failoverNoteSentence", () => {
     );
   });
 });
+
+/**
+ * Audit-lite 0.6.8 FINDING-001: `failoverReasonPhrase` was extracted so the
+ * "<label> timed out" / "<label> sign-in lapsed" wording has exactly one
+ * source of truth, but `dark.ts` and `scan-model-run.ts` kept their own
+ * hand-typed copies of the identical ternary instead of calling it -- so
+ * the single-source-of-truth guarantee the extraction was FOR didn't
+ * actually hold. Both call sites were switched over to the shared helper
+ * (0.6.13). This guard stops a future edit from quietly reintroducing a
+ * duplicate: the literal wording `failoverReasonPhrase` produces must never
+ * appear, hand-typed, in any *production* source file under src/lib/news
+ * other than this one.
+ */
+describe("failoverReasonPhrase wording has exactly one source", () => {
+  it("no other production file under src/lib/news hand-types the 'sign-in lapsed' / 'timed out' wording", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const here = fileURLToPath(new URL(".", import.meta.url));
+    const offenders: string[] = [];
+    for (const name of fs.readdirSync(here)) {
+      if (!name.endsWith(".ts") && !name.endsWith(".tsx")) continue;
+      if (name.endsWith(".test.ts") || name.endsWith(".test.tsx")) continue;
+      if (name === "automatic-failover.ts") continue; // the one source of truth
+      const text = fs.readFileSync(path.join(here, name), "utf8");
+      // "sign-in lapsed" is distinctive to failoverReasonPhrase's own output
+      // (unlike "timed out", which legitimately appears in unrelated
+      // provider error messages, e.g. ai.ts's own timeout error text) --
+      // any hand-typed copy of the ternary this guards against necessarily
+      // includes this exact phrase.
+      if (text.includes("sign-in lapsed")) {
+        offenders.push(name);
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      `these files hand-type the failover switch-reason wording instead of calling ` +
+        `failoverReasonPhrase()/failoverNoteSentence() from automatic-failover.ts: ` +
+        `${JSON.stringify(offenders)}`,
+    );
+  });
+});
