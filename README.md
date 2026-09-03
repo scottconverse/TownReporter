@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.3](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.3)** — 2 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.4](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.4)** — 2 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.4** — gate fixes: ops actions are owner-only on the server; the duplicate matcher requires a shared subject word; Time per call rejects non-numbers.
 - **0.6.3** — ops hotfix: the paper's start and watchdog no longer mistake another program's IPv6-only listener on port 3000 for the paper itself.
 - **0.6.2** — one provider registry with editable time budgets; Dark Desk picks its model; the desk is readable in dark mode with a Text size control; killed leads match reworded repeats; nightly live proof.
 - **0.6.1** — Scan gets the model picker and a real time budget; killed leads are stamped "seen again" instead of refiled; the Server page explains itself; staging before every promote.
