@@ -134,7 +134,18 @@ async function main() {
     .fill("The city has not posted council minutes for any 2026 session.");
   if (await writeBtn.isEnabled()) {
     await writeBtn.click();
-    await page.getByText(/voice|Claude Code|not|cannot/i).first().waitFor({ timeout: 20_000 });
+    // Scoped to the notice region beside the button (role="alert" +
+    // aria-live="assertive"), not a page-wide text search: the model picker's
+    // collapsed "Set up a writing model" details also carries a hidden
+    // "Claude Code installation guide" link, and a loose substring search
+    // matches that hidden link (and matches on the very common word "not")
+    // well before it ever reaches the visible refusal text, so `.first()`
+    // resolved to something that can never become visible.
+    await page
+      .locator('[role="alert"][aria-live="assertive"]')
+      .filter({ hasText: /voice|Claude Code|not|cannot/i })
+      .first()
+      .waitFor({ timeout: 20_000 });
     step("Opinion refuses clearly when asked to write and it cannot");
   } else {
     step("Opinion refused up front, so nothing was submitted");
@@ -156,8 +167,14 @@ async function main() {
   } else {
     // CI has neither Codex nor Claude configured, so the commit boundary
     // refuses the draft -- but the lead it filed before asking is unaffected.
+    // Scoped to the notice region beside the Write button (see the Opinion
+    // step above for why a page-wide text search is the wrong tool here: the
+    // model picker's collapsed help text hides a "Claude Code installation
+    // guide" link that a loose substring match finds first, and never becomes
+    // visible).
     await page
-      .getByText(/not installed|not available|sign in again|Claude Code|cannot write/i)
+      .locator('[role="alert"][aria-live="assertive"]')
+      .filter({ hasText: /not installed|not available|sign in again|Claude Code|cannot write/i })
       .first()
       .waitFor({ timeout: 20_000 });
     step("Write a story refuses clearly when it cannot draft, and the lead is still filed");
