@@ -457,6 +457,8 @@ npm run test:lifecycle   # needs the app on :8080 and Playwright Chromium
 
 Node’s built-in test runner. No network, no model calls. Coverage includes PrimeGov catalog matching, configured YouTube meeting discovery (including the June-vs-August museum false join), retrieval skipping hold-music transcript heads, draft notebook stripping, configured-timezone masthead dates, printed-headline collapse, paper setup, workbench draft-landing, auth gates, the Dark Desk loop, and durable jobs. CI also runs one Playwright lifecycle: create the desk, set up the paper, file a lead, publish, post a correction.
 
+Nearly every CI browser walk builds the app and drives it through `npm start` (`.output/server/index.mjs`) — the same command production runs — rather than `npm run dev`, so the walks prove the built server, not just the dev server. One job (`smoke-dev` / "Documented dev path works in a browser") is the deliberate exception: it exists to prove the README's own `npm run dev` quick start still works.
+
 ---
 
 ## Point it at another city

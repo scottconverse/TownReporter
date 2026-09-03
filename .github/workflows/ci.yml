@@ -36,12 +36,15 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - run: npm run build
       - name: File, publish, correct
         env:
           BETTER_AUTH_SECRET: ci-lifecycle-secret-not-for-production
+          PORT: "8080"
+          HOST: 127.0.0.1
           LIFECYCLE_BASE_URL: http://127.0.0.1:8080
         run: |
-          npm run dev > /tmp/townreporter-dev.log 2>&1 &
+          npm start > /tmp/townreporter-built.log 2>&1 &
           for i in $(seq 1 60); do
             if curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/; then
               break
@@ -49,8 +52,8 @@ jobs:
             sleep 2
           done
           curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ || {
-            echo "dev server did not come up"
-            tail -n 80 /tmp/townreporter-dev.log || true
+            echo "built server did not come up"
+            tail -n 80 /tmp/townreporter-built.log || true
             exit 1
           }
           node scripts/lifecycle-e2e.mjs
@@ -224,19 +227,22 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - run: npm run build
       - name: Opinion, delete, Undo, trash, Server, dials
         env:
           BETTER_AUTH_SECRET: ci-flows-secret-not-for-production
+          PORT: "8080"
+          HOST: 127.0.0.1
           DESK_FLOWS_BASE_URL: http://127.0.0.1:8080
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: |
-          npm run dev > /tmp/flows.log 2>&1 &
+          npm start > /tmp/flows.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ && break
             sleep 2
           done
           curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ || {
-            echo "dev server did not come up"; tail -n 80 /tmp/flows.log; exit 1;
+            echo "built server did not come up"; tail -n 80 /tmp/flows.log; exit 1;
           }
           node scripts/desk-flows-e2e.mjs
 
@@ -263,6 +269,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - run: npm run build
       - name: With no CLI on the machine, the panel says so
         env:
           BETTER_AUTH_SECRET: ci-signin-secret-not-for-production
@@ -271,24 +278,24 @@ jobs:
           PROVIDER_SIGNIN_BASE_URL: http://127.0.0.1:3312
           PROVIDER_SIGNIN_PHASE: missing
         run: |
-          npm run dev -- --port 3312 > /tmp/signin-missing.log 2>&1 &
+          npm start > /tmp/signin-missing.log 2>&1 &
           DEV_PID=$!
           for i in $(seq 1 60); do
             curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3312/ && break
             sleep 2
           done
           curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3312/ || {
-            echo "dev server did not come up"; tail -n 80 /tmp/signin-missing.log; exit 1;
+            echo "built server did not come up"; tail -n 80 /tmp/signin-missing.log; exit 1;
           }
           node scripts/provider-signin-e2e.mjs
           # By PID, never by name: this ends the server this step started and
           # nothing else that happens to be a node process on the runner.
           #
-          # `npm run dev` is `npm run db:migrate && node scripts/with-app-env.mjs
-          # vite dev`, so $! is only the top of a process tree -- npm's own
-          # child shell, with-app-env.mjs, and the vite dev server it spawns are
+          # `npm start` is `node scripts/with-app-env.mjs node .output/server/
+          # index.mjs`, so $! is only the top of a process tree -- npm's own
+          # child shell, with-app-env.mjs, and the built server it spawns are
           # all descendants with their own PIDs. `kill "$DEV_PID"` alone left
-          # that vite process running, still bound to :3312 and still holding
+          # that server process running, still bound to :3312 and still holding
           # phase one's in-memory PGlite desk -- so phase two's fresh server
           # never started, its e2e script (or a truly fresh one) landed on the
           # OLD server, and "Create the desk" showed "This desk already has an
@@ -322,13 +329,13 @@ jobs:
           FAKE_CLAUDE_DELAY_MS: "8000"
         run: |
           rm -f /tmp/fake-claude-signed-in
-          npm run dev -- --port 3312 > /tmp/signin-fake.log 2>&1 &
+          npm start > /tmp/signin-fake.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3312/ && break
             sleep 2
           done
           curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3312/ || {
-            echo "dev server did not come up"; tail -n 80 /tmp/signin-fake.log; exit 1;
+            echo "built server did not come up"; tail -n 80 /tmp/signin-fake.log; exit 1;
           }
           node scripts/provider-signin-e2e.mjs
 
@@ -354,6 +361,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - run: npm run build
       - name: A lapsed Claude Code login fails the draft over to Codex Terra
         env:
           BETTER_AUTH_SECRET: ci-failover-secret-not-for-production
@@ -366,14 +374,14 @@ jobs:
           FAKE_CLAUDE_FAIL_PROMPTS: "1"
           FAKE_CODEX_SIGNED_IN: "1"
         run: |
-          npm run dev -- --port 3317 > /tmp/failover.log 2>&1 &
+          npm start > /tmp/failover.log 2>&1 &
           DEV_PID=$!
           for i in $(seq 1 60); do
             curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3317/ && break
             sleep 2
           done
           curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3317/ || {
-            echo "dev server did not come up"; tail -n 80 /tmp/failover.log; exit 1;
+            echo "built server did not come up"; tail -n 80 /tmp/failover.log; exit 1;
           }
           node scripts/failover-e2e.mjs
           # By PID, never by name -- see the same comment in the
@@ -408,6 +416,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - run: npm run build
       - name: The Dark Desk picker shows the same four models, and Time per call round-trips
         env:
           BETTER_AUTH_SECRET: ci-dark-picker-secret-not-for-production
@@ -416,14 +425,14 @@ jobs:
           DARK_PICKER_BASE_URL: http://127.0.0.1:3316
           CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
         run: |
-          npm run dev -- --port 3316 > /tmp/dark-picker.log 2>&1 &
+          npm start > /tmp/dark-picker.log 2>&1 &
           DEV_PID=$!
           for i in $(seq 1 60); do
             curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3316/ && break
             sleep 2
           done
           curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3316/ || {
-            echo "dev server did not come up"; tail -n 80 /tmp/dark-picker.log; exit 1;
+            echo "built server did not come up"; tail -n 80 /tmp/dark-picker.log; exit 1;
           }
           node scripts/dark-picker-e2e.mjs
           # By PID, never by name -- see the same comment in the
@@ -535,19 +544,22 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - run: npm run build
       - name: File a lead with a source, publish, read it as a reader
         env:
           BETTER_AUTH_SECRET: ci-sources-secret-not-for-production
+          PORT: "8080"
+          HOST: 127.0.0.1
           SOURCES_BASE_URL: http://127.0.0.1:8080
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: |
-          npm run dev > /tmp/sources.log 2>&1 &
+          npm start > /tmp/sources.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ && break
             sleep 2
           done
           curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ || {
-            echo "dev server did not come up"; tail -n 80 /tmp/sources.log; exit 1;
+            echo "built server did not come up"; tail -n 80 /tmp/sources.log; exit 1;
           }
           node scripts/sources-reach-the-reader.mjs
 

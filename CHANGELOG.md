@@ -1,6 +1,17 @@
 # Changelog
 
-Current release: **0.6.5**.
+Current release: **0.6.6**.
+
+## 0.6.6 — 2026-09-03
+- **CI browser walks run against the built server (what production runs), ending
+  the cold-Vite-dev-server flakiness.** On the 2-core CI runner, `npm run dev`
+  served the module graph as hundreds of per-file requests and hydrated slowly,
+  intermittently stalling or throwing dev-only `useContext` errors during
+  navigation. Every browser-walk job now builds and runs `npm start`
+  (`.output/server/index.mjs`) the same way `smoke-built` already proved stable,
+  instead of `npm run dev`. The documented-dev-path walk still exercises
+  `npm run dev` on purpose — it proves the README's own quick start, not just
+  a page render.
 
 ## 0.6.5 — 2026-09-02
 - **First-run no longer bounces a slow machine to a blank setup form.** Two timeout
