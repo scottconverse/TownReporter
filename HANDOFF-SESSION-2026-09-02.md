@@ -1,14 +1,111 @@
 # TownReporter — full-context handoff for a new session (2026-09-02)
 
-## STATE AS OF 18:20 2026-09-02 (read this first)
+## STATE AS OF 21:40 2026-09-02 (read this first)
 
-**Production is on v0.6.2 (eaef0d7)**, promoted 17:43, live at
-https://townreporter.org, served from
-`C:\Users\scott\Desktop\Code\townreporter-web`. Development happens in
-`C:\Users\scott\Desktop\Code\townreporter-dev`. GitHub `github` is the only
-remote (`https://github.com/scottconverse/TownReporter.git`). Tags v0.5.5
-through v0.6.2 and their GitHub releases all exist. Today shipped seven
-releases in sequence, 0.5.9 through 0.6.2:
+**Production is on v0.6.3 (f9c2a1a)**, live at https://townreporter.org,
+served from `C:\Users\scott\Desktop\Code\townreporter-web`. **v0.6.4
+(6495a51) is sitting in dev HEAD and CI right now** — not yet tagged or
+promoted. The coordinator intends to tag/release/promote it tonight if CI
+comes back green; **the next session must check for itself** which one is
+actually live before assuming either way — run `git tag` (dev checkout) and
+fetch `https://townreporter.org/assets/version-*.js` (or read the served
+version constant) rather than trusting this paragraph's tense. Development
+happens in `C:\Users\scott\Desktop\Code\townreporter-dev`. GitHub `github` is
+the only remote (`https://github.com/scottconverse/TownReporter.git`).
+
+**0.6.3 — ops hotfix, already live.** Address-aware port checks
+(`Test-TownReporterPort` / `Get-TownReporterPortOwner` in
+`ops/lib-port.ps1`), shared by start/watchdog/restart/promote/status/stage,
+so a port check only counts a listener bound to an address this app can
+actually use (127.0.0.1, 0.0.0.0, or `.env` `HOST`) — closes the false
+"already up" read that caused the 17:43 IPv6-collision outage (see Incidents
+in the plan file).
+
+**0.6.4 — GauntletGate gate fixes, CI in flight, not yet promoted.** A full
+GauntletGate run (walkthrough + all 5 roles) against the dev tree scored
+**0 Blocker, 2 Critical, 11 Major, 14 Minor, 5 Nit** and returned **DO NOT
+ADVANCE**; first-run coverage was VALID (a brand-new operator with nothing
+installed reaches the desk and every core action degrades gracefully, never
+a dead end). Full detail: `artifacts/gate-townreporter-2026-09-02/GATE-REPORT.md`.
+The two Criticals:
+
+- **ENG-01** — the ops dashboard's owner-only actions (restart app, restart
+  tunnel, migrate, rotate logs, and the host health report) were gated only
+  in React (`isOwner` hiding the panel); the server functions themselves
+  (`getOpsHealth`, `runOpsAction`) checked newsroom membership but not role,
+  so an invited *editor* could call them directly and reach owner-only
+  machine actions.
+- **QA-1** — the scan duplicate-lead matcher could silently discard a
+  genuinely distinct lead that happened to share a portal URL, a date, and a
+  dollar figure with an unrelated one (e.g. two different agenda items on
+  the same PrimeGov page).
+
+Both were fixed and put through **independent adversarial re-verification by
+a fresh agent that did not write the fix**, not just the fixer's own claim:
+
+- ENG-01: `assertOwner` (lifted into `src/lib/news/desk-auth.ts`) is now the
+  first line of both `getOpsHealth` and `runOpsAction`
+  (`src/lib/ops/dashboard.ts`). Proven at runtime — a real invited-editor
+  session against a live built server got refused ("Only the owner can do
+  that."), the owner's identical call passed.
+- QA-1: took three adversarial rounds to actually close. Round 1's fix
+  (require a shared content word on the anchor path) still let the two
+  headline-overlap paths merge different agenda items on shared civic
+  filler words. Round 2 (score every path on content tokens only) still
+  merged 6 of 10 new negative pairs and missed 1 positive — a pure
+  threshold could not distinguish "same story reworded" from "same agenda
+  template, different item." Round 3 changed the product's behavior instead
+  of tuning the threshold: `matchStrength()` (`src/lib/news/lead-match.ts`)
+  now scores every candidate "strong" (stamp the existing lead "seen again,"
+  as before) or "possible" (file it as its own new lead, never discarded,
+  with a new `leads.possible_duplicate_of` column — migration `0031` — and a
+  dotted **MAYBE SAME AS #N** chip on the row for the editor to judge). 0 of
+  18 distinct-story pairs across all three rounds now score "strong."
+
+After fixes, re-verification returned **0 Blocker, 0 Critical** (Major 9,
+Minor 14, Nit 5 — all riding on the watchlist) and **CLEAR TO ADVANCE,
+conditional on CI green and a staged walk of the final tree** — shipping as
+v0.6.4. Also in 0.6.4: Time-per-call now refuses non-numeric/NaN/Infinity
+input instead of silently treating it as a Reset (QA-2); `.env.example`'s
+Opinion comment and `docs/manual.md`'s stale "unreleased candidate" scope
+note both fixed (TEC-01/02); e2e walks hardened (no `networkidle` on setup —
+element/URL waits instead), tied to the CI-stall watchlist item below.
+
+**Watchlist carried forward from the gate** (not blocking, not yet worked):
+ENG-02 (Dark Desk rebuild path recreates tables without `newsroom_id`),
+ENG-03 (migration/ensure drift, 9 tables), ENG-04 (26 inserts omit
+`newsroom_id`), ENG-05 (Automatic doesn't fail over on an unusable-but-
+successful rung — design decision needed), ENG-06 (stale sign-in cancel can
+kill a recycled PID), ENG-11 (stale session cookie honoured on an ownerless
+DB), UIU-01 through UIU-04 (header wraps at 1280px with Large text — belongs
+with the redesign Scott is already considering, do not fix ad hoc), TES-01
+(Scan/Sources screens lack CI browser coverage), TES-02 (build lock not
+namespaced), QA-3 (dev server ships no security headers), the offline cell
+(no walkthrough row exists for it — the web-search chain is unconditional),
+and the repo-committed `.env` shipping `TOWNREPORTER_CLAUDE_CODE=0`.
+
+**Intermittent CI stall, still open.** The first-run setup walk has stalled
+in CI 3 separate times today; a dedicated agent could not reproduce it in 10
+throttled local runs and made no speculative product change. The walks were
+hardened (element/URL waits instead of `networkidle`) and both dependent
+walks passed clean afterward, but the root cause itself is still open — this
+is a mitigation, not a fix, and it may resurface.
+
+**Cross-session messaging.** Same-machine agent-to-agent messaging works.
+Cross-machine (Remote Control) messaging **failed in both directions** with
+a false "delivered" status on the sending side — filed as
+`anthropics/claude-code#91671` (posted at Scott's instruction). Separately,
+`anthropics/claude-code#91549` (Fable being routed code-writing work it
+shouldn't get) is still open.
+
+**Operator notes, unchanged.** The desk redesign is pending — **do not act
+on it**, it is Scott's call. Scott has been away and back intermittently
+today; treat any given moment as "assume away unless told otherwise." The
+nightly proof scheduled task ("TownReporter Nightly Proof", 03:30 daily)
+has not had its first real fire yet as of this writing.
+
+**Prior releases today, for context** (0.5.9 through 0.6.2, all still live
+in history, superseded by 0.6.3/0.6.4 above):
 
 - **0.5.9** — the Zen/Local-model removal swept in (Automatic ladder down to
   Claude → Codex; picker down to Automatic, Codex Terra, Codex Sol, Claude
@@ -139,16 +236,14 @@ and DB backups in `C:\Users\scott\Desktop\Code\townreporter-backups\`
 
 ### Verification ledger
 
-VERIFIED: the app version constant reads 0.6.2 | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/version.ts:2
-VERIFIED: the changelog names 0.6.2 as current | C:/Users/scott/Desktop/Code/townreporter-dev/CHANGELOG.md:3
-VERIFIED: ops/stage.ps1 stages the dev checkout against a copy of real production data before any promote | C:/Users/scott/Desktop/Code/townreporter-dev/ops/stage.ps1:1
-VERIFIED: scripts/stage-editor.mjs creates a staging sign-in for the walk | C:/Users/scott/Desktop/Code/townreporter-dev/scripts/stage-editor.mjs:1
-VERIFIED: docs/staging.md documents ops\stage.ps1 as the one pre-promote staging command | C:/Users/scott/Desktop/Code/townreporter-dev/docs/staging.md:1
-VERIFIED: ops/nightly-proof.ps1 runs the real scan-then-draft pipeline for the nightly proof task | C:/Users/scott/Desktop/Code/townreporter-dev/ops/nightly-proof.ps1:1
-VERIFIED: src/lib/news/provider-registry.ts is the single provider/model registry every picker and ladder now reads from | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/provider-registry.ts:1
+VERIFIED: dev HEAD's version constant reads 0.6.4 | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/version.ts:2
+VERIFIED: the changelog names 0.6.4 as current | C:/Users/scott/Desktop/Code/townreporter-dev/CHANGELOG.md:3
+VERIFIED: the gate verdict lines (DO NOT ADVANCE before fixes, CLEAR TO ADVANCE after) | C:/Users/scott/Desktop/Code/townreporter-dev/artifacts/gate-townreporter-2026-09-02/GATE-REPORT.md:1
+VERIFIED: assertOwner is present as the first check in the ops server functions | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/ops/dashboard.ts:1
+VERIFIED: matchStrength is present in the lead matcher | C:/Users/scott/Desktop/Code/townreporter-dev/src/lib/news/lead-match.ts:1
 
-UNVERIFIED: the fail-over path has been exercised on a live login lapse - not checked; needs a lapsed login on the live desk
-UNVERIFIED: the nightly proof task's first scheduled run (03:30) has not happened yet - not checked; task is registered but has not fired since being added
+UNVERIFIED: v0.6.4 has been promoted to production - not checked; CI was still in flight as of this writing, promotion is planned for tonight if green
+UNVERIFIED: the nightly proof task's first scheduled run (03:30) has happened - not checked; next scheduled fire is 03:30
 
 Read this first. Then `HANDOFF-NEXT-AGENT.md` (locations, the ten hard rules,
 health-check recipe). This file is the story of the last 48 hours and the
