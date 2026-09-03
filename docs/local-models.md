@@ -130,10 +130,10 @@ Story routing and a separate Opinion frontier path:
 
 | Work               | Current provider rule                                                                                                             |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| Scan and Dark Desk | the configured provider (`LLM_*`, Anthropic, Claude Code, or Grok)                                                                |
+| Scan and Dark Desk | the configured provider (`LLM_*`, Anthropic, Claude Code, or Grok), or an explicit picker choice including Local model            |
 | Story — Automatic  | configured `LLM_*` gateway when present; otherwise first ready Claude Opus → Codex Terra rung                                     |
-| Story — explicit   | Codex Terra, Codex Sol, or Claude Opus; no fallback (Zen MiMo and Local Qwen were removed 2026-09-02)                            |
-| Opinion            | Claude Opus only; Codex is not offered because its model declines to write an editorial that takes a position                    |
+| Story — explicit   | Codex Terra, Codex Sol, Claude Opus, or Local model; no fallback (Zen MiMo and Local Qwen were removed 2026-09-02; a generic Local model returned 2026-09-03) |
+| Opinion            | Claude Opus or Local model; Codex is not offered because its model declines to write an editorial that takes a position           |
 
 Pointing `LLM_BASE_URL` at LM Studio therefore makes that gateway the configured
 provider for Scan and Dark Desk and the forced provider for **Story Automatic**.
@@ -158,7 +158,8 @@ Still open, in rough order of merit:
 3. **Re-test the full Story lane after a model/runtime change.** The release
    gate tried the loaded `qwen/qwen3.6-35b-a3b` through the real multi-pass
    Story product and it did not complete. The Local Qwen picker choice was
-   removed 2026-09-02; a local model is reachable only through `LLM_BASE_URL`.
+   removed 2026-09-02; a local model is reachable through `LLM_BASE_URL`, now
+   also as the named "Local model" pick on every picker (0.6.10).
 
 What would change the answer: a local model that proposes eight or ten URLs per
 hop instead of three. Nothing smaller than that is worth the wiring.
@@ -176,55 +177,79 @@ noise; only the Haiku gap survived repetition.
 
 ---
 
-## Adding a local model to the pickers
+## The local model, as a named pick (0.6.10)
 
-As of 0.6.2 this is config plus one registry entry, not a code change spread
-across four files. Everything the desk knows about a writing model lives in
-`PROVIDER_REGISTRY`, in `src/lib/news/provider-registry.ts`.
+As of 0.6.2 a new writing model was config plus one registry entry, not a code
+change spread across four files. Everything the desk knows about a writing
+model lives in `PROVIDER_REGISTRY`, in `src/lib/news/provider-registry.ts`.
+0.6.10 used exactly that path to bring a local model back into every picker
+(Story, Scan, Opinion, Dark Desk) — generic this time, not tied to one model
+name the way "Local Qwen" was before it was removed 2026-09-02.
 
-**Today, with no new entry at all:** point `LLM_BASE_URL` at the endpoint (plus
-`LLM_MODEL`, and `LLM_API_KEY` if it wants one). That is the `configured`
-registry entry. Automatic pins it for Story, Scan and Dark Desk whenever it is
-set. It does not appear in the picker by name, because it is "whatever the
-operator configured", not a model an editor chose.
+**Two ways to reach a local server, and they share one configuration:**
 
-**To give it its own line in every picker**, add an entry:
+1. **Unnamed, the way it has worked since 0.6.2.** Point `LLM_BASE_URL` at the
+   endpoint (plus `LLM_MODEL`, and `LLM_API_KEY` if it wants one). That is the
+   `configured` registry entry. Automatic pins it for Story, Scan and Dark
+   Desk whenever it is set. It does not appear in the picker by name, because
+   it is "whatever the operator configured", not a model an editor chose.
+2. **Named "Local model", in every picker.** The exact same `LLM_BASE_URL` /
+   `LLM_MODEL` / `LLM_API_KEY` also power a picker entry called "Local model"
+   — set them once and an editor can select it explicitly on Story, Scan,
+   Opinion or Dark Desk, the same way they select Claude Opus or Codex. This
+   is deliberate: a second, separate `LOCAL_BASE_URL` would split one local
+   server's configuration across two variable names for no reason. Set
+   `TOWNREPORTER_LOCAL=0` to take the named pick out of the pickers without
+   touching the unnamed gateway path.
+
+The entry itself, in `PROVIDER_REGISTRY`:
 
 ```ts
 {
-  id: "local-qwen",                     // also add it to PICKER_PROVIDER_IDS
-  label: "Local Qwen",                  // what the picker shows
-  detail: "On this machine",            // the half-line under the label
+  id: "local-model",
+  label: "Local model",
+  detail: "llama.cpp, LM Studio, or another OpenAI-compatible server",
   kind: "local",                        // inherits KIND_BUDGETS.local: 600s a call
-  model: "qwen/qwen3.6-35b-a3b",
+  model: "local-model",
   baseUrl: "http://127.0.0.1:1234/v1",
-  envOverrides: { model: "LOCAL_MODEL", baseUrl: "LOCAL_BASE_URL" },
+  envOverrides: { model: "LLM_MODEL", baseUrl: "LLM_BASE_URL", apiKey: "LLM_API_KEY" },
   budget: KIND_BUDGETS.local,
-  enabled: () => Boolean(env("LOCAL_BASE_URL")) ,
+  enabled: () => notSwitchedOff("TOWNREPORTER_LOCAL") &&
+    Boolean(env("LLM_BASE_URL") || (env("LLM_API_KEY") && env("LLM_MODEL"))),
   offSwitchEnv: "TOWNREPORTER_LOCAL",
-  offeredFor: { story: true, scan: true, opinion: false, dark: true },
-  // no ladderRank: Automatic should not reach for it on its own
+  offeredFor: { story: true, scan: true, opinion: true, dark: true },
+  // no ladderRank: Automatic does not reach for it on its own -- when
+  // LLM_BASE_URL is set, the `configured` entry above already pins Automatic
+  // to the same server, so no ladder change was needed.
   // no plannerModel: it serves one model and has never heard of anyone else's
 }
 ```
 
-That one object is enough for: the Story, Scan and Dark Desk pickers; the
-Automatic ladder (if you give it a `ladderRank`); the time budgets on the
-Server page, including the editable per-call field; the help sentence under
-each picker; and the round history's "which model dug this". Every one of
-those is derived from the registry, and `provider-registry.test.ts` fails if a
-new entry is missing a field any of them read.
+That one object is enough for: the Story, Scan, Opinion and Dark Desk
+pickers; the time budgets on the Server page, including the editable per-call
+field; the help sentence under each picker; and the round history's "which
+model dug this". Every one of those is derived from the registry, and
+`provider-registry.test.ts` fails if a new entry is missing a field any of
+them read.
 
 Two things it deliberately does NOT get for free:
 
-- **A transport.** `kind: "local"` speaks the OpenAI-compatible protocol, and
-  `explicitProvider` in `ai.ts` routes `local` down the same path as `openai`.
-  A model server that is not OpenAI-compatible needs a new `kind` and a new
-  adapter.
-- **A planner model.** Leave `plannerModel` unset. Substituting a cheaper
+- **A new transport.** `kind: "local"` speaks the OpenAI-compatible protocol,
+  and `explicitProvider` in `ai.ts` already routed `local` down the same path
+  as `openai` before this entry existed — the resolver builds the request
+  from the same `customGateway()` the `configured` entry uses, so nothing in
+  `ai.ts` needed to change. A model server that is not OpenAI-compatible needs
+  a new `kind` and a new adapter.
+- **A planner model.** `plannerModel` is left unset. Substituting a cheaper
   model only makes sense inside one provider's own family — asking a local
   endpoint for `claude-haiku-4-5` is audit finding TW-001, and the failure is
   silent: the planner falls back to keyword matching without a word.
+
+**Opinion offers it too**, unlike Codex. The Opinion picker excludes Codex
+because `gpt-5.6-sol` refuses to write an editorial that takes a position
+(`EDITORIAL_REFUSAL`, recorded 2026-09-02); a local model carries no such
+policy, so "anywhere an AI acts, the editor can pick the model" applies to
+Opinion the same as everywhere else.
 
 **On time budgets.** `KIND_BUDGETS.local` allows ten minutes for one call
 against the CLIs' two and a half, because that is the measured shape of a 30B

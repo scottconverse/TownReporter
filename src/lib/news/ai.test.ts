@@ -29,6 +29,7 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
     "ANTHROPIC_EFFORT",
     "TOWNREPORTER_CLAUDE_CODE",
     "TOWNREPORTER_CODEX",
+    "TOWNREPORTER_LOCAL",
     "CLAUDE_CLI_PATH",
   ];
   for (const k of keys) prev[k] = process.env[k];
@@ -63,6 +64,7 @@ async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () 
     "ANTHROPIC_EFFORT",
     "TOWNREPORTER_CLAUDE_CODE",
     "TOWNREPORTER_CODEX",
+    "TOWNREPORTER_LOCAL",
     "CLAUDE_CLI_PATH",
   ];
   for (const k of keys) prev[k] = process.env[k];
@@ -263,6 +265,41 @@ describe("resolveProvider", () => {
       assert.equal(resolveProvider()?.model, "claude-sonnet-5"),
     );
   });
+
+  it("resolves the explicit 'local-model' pick to the OpenAI-compatible transport, built from envOverrides", () => {
+    /*
+      0.6.10: kind "local" is a NAME an editor can pick, not a new transport --
+      explicitProvider() in ai.ts already routes "openai" and "local" down the
+      same customGateway() path, and the local-model registry entry's
+      envOverrides name exactly LLM_BASE_URL / LLM_MODEL / LLM_API_KEY, the
+      same variables docs/local-models.md already tells an operator to set.
+      No change to ai.ts was needed to make this resolve correctly.
+    */
+    withEnv(
+      {
+        ...BARE,
+        LLM_BASE_URL: "http://127.0.0.1:1234/v1",
+        LLM_MODEL: "qwen/qwen3.6-35b-a3b",
+        LLM_API_KEY: "sk-local-test",
+      },
+      () => {
+        const p = resolveProvider("local-model");
+        assert.equal(p?.kind, "openai");
+        if (p?.kind === "openai") {
+          assert.equal(p.baseUrl, "http://127.0.0.1:1234/v1");
+          assert.equal(p.model, "qwen/qwen3.6-35b-a3b");
+          assert.equal(p.apiKey, "sk-local-test");
+        }
+      },
+    );
+  });
+
+  it("is unavailable when no local base URL is configured, and honours its own off switch", () => {
+    withEnv(BARE, () => assert.equal(resolveProvider("local-model"), null));
+    withEnv({ ...BARE, LLM_BASE_URL: "http://127.0.0.1:1234/v1", TOWNREPORTER_LOCAL: "0" }, () =>
+      assert.equal(resolveProvider("local-model"), null),
+    );
+  });
 });
 
 describe("grokChat", () => {
@@ -309,6 +346,12 @@ describe("grokChat", () => {
         vars: { ...BARE, ANTHROPIC_API_KEY: "sk-ant-test" },
       },
       { choice: "claude-frontier", kind: "claude-code", label: "Claude Opus", vars: {} },
+      {
+        choice: "local-model",
+        kind: "openai",
+        label: "LLM",
+        vars: { ...BARE, LLM_BASE_URL: "http://127.0.0.1:1234/v1", LLM_MODEL: "local-test" },
+      },
     ] as const;
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => {
@@ -408,6 +451,52 @@ describe("model-picker provider readiness", () => {
           if (!result.ok) assert.match(result.error, /not loaded/i);
         },
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("preflights the explicit local-model pick against its own /models, and drafts through /chat/completions", async () => {
+    // 0.6.10: the local entry is a NAME an editor picks, resolved to the same
+    // OpenAI-compatible transport the configured gateway already uses -- so
+    // preflight and a real draft round-trip work with no ai.ts change.
+    const originalFetch = globalThis.fetch;
+    const calls: { url: string; body?: unknown }[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.endsWith("/models")) {
+        return new Response(JSON.stringify({ data: [{ id: "local-test-model" }] }), {
+          status: 200,
+        });
+      }
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "drafted locally" } }] }),
+        { status: 200 },
+      );
+    };
+    try {
+      await withEnvAsync(
+        {
+          ...BARE,
+          LLM_BASE_URL: "http://127.0.0.1:1234/v1",
+          LLM_MODEL: "local-test-model",
+        },
+        async () => {
+          const preflight = await probeProvider("local-model");
+          assert.equal(preflight.ok, true);
+          if (preflight.ok) assert.equal(preflight.choice, "local-model");
+
+          const draft = await grokChat("system prompt", "user prompt", 32, {
+            choice: "local-model",
+          });
+          assert.equal(draft.ok, true);
+          if (draft.ok) assert.equal(draft.text, "drafted locally");
+        },
+      );
+      assert.equal(calls[0]!.url, "http://127.0.0.1:1234/v1/models");
+      assert.equal(calls[1]!.url, "http://127.0.0.1:1234/v1/chat/completions");
+      assert.equal((calls[1]!.body as { model?: string })?.model, "local-test-model");
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -1,6 +1,29 @@
 # Changelog
 
-Current release: **0.6.9**.
+Current release: **0.6.10**.
+
+## 0.6.10 — 2026-09-03
+- **A local model is a pickable writing model on every surface.** The
+  provider registry gains a `local-model` entry, labeled "Local model" --
+  llama.cpp, LM Studio, or any other OpenAI-compatible server. It reuses the
+  exact env wiring `docs/local-models.md` already documented for the
+  `configured` gateway (`LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY`) rather
+  than inventing a second, split configuration, and it resolves to the same
+  OpenAI-compatible transport `ai.ts` already routed `kind: "local"`
+  through -- no transport change was needed. It shows up in the Story, Scan,
+  Opinion, and Dark Desk pickers with its own generous, editable timeouts
+  (`KIND_BUDGETS.local`, ten minutes a call by default), and preflight hits
+  its `/models` endpoint the same way the configured gateway's does.
+- **Opinion now offers the local model too.** Codex stays excluded from
+  Opinion (its model declines to write editorials that take a position);
+  the local model carries no such refusal, so "anywhere an AI acts, the
+  editor can pick the model" now applies to Opinion as well.
+- **Automatic's ladder is unchanged.** The local entry has no `ladderRank`,
+  so Automatic still tries Claude Opus then Codex Terra on its own; when
+  `LLM_BASE_URL` is set, the pre-existing `configured` gateway pin already
+  makes Automatic use the same server, so no ladder change was needed.
+- Set `TOWNREPORTER_LOCAL=0` to take the named pick out of every picker
+  without touching the unnamed `configured`-gateway path.
 
 ## 0.6.9 — 2026-09-03
 - **Removed the "reader privacy" positioning.** A "reader privacy / zero

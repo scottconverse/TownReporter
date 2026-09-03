@@ -5,7 +5,7 @@ machine through a Cloudflare Tunnel. No hosting bill, no ports open on the
 router.
 
 The live-deployment notes below record the established setup as of the
-tagged **v0.6.9** build, which is what the production checkout runs.
+tagged **v0.6.10** build, which is what the production checkout runs.
 
 ---
 
@@ -188,8 +188,8 @@ the run.
 | ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
 | Scan and Dark Desk  | configured `LLM_*`, Anthropic/Claude Code, or Grok path                                                      | repair the configured endpoint/key or sign back into Claude Code                                              |
 | Story — Automatic   | configured `LLM_*` exclusively when present; otherwise Claude Opus → Codex Terra readiness ladder            | repair the provider named on the failed job; a run stays pinned to one provider                               |
-| Story — explicit    | Codex Terra, Codex Sol, or Claude Opus; no fallback                                                          | open and sign into the named CLI                                                                               |
-| Opinion             | Claude Opus only, through the signed-in Claude Code session; Codex is not offered for editorials             | open Claude Code and renew its login; the completed row records the provider that delivered                   |
+| Story — explicit    | Codex Terra, Codex Sol, Claude Opus, or Local model; no fallback                                             | open and sign into the named CLI, or set `LLM_BASE_URL` for Local model                                        |
+| Opinion             | Claude Opus or Local model, through the signed-in Claude Code session for Claude; Codex is not offered for editorials | open Claude Code and renew its login; the completed row records the provider that delivered              |
 
 Codex reuses the signed-in user's native configuration and full available
 Windows access. TownReporter does not disable search, shell/files,
@@ -202,8 +202,8 @@ does not read or store the token.
 Opinion rejects provider refusals, assistant notes, implausible headlines, and
 incomplete bodies before draft storage. Codex is not offered for editorials
 because its model declines to write a piece that takes a position; the
-Opinion picker is Claude only. A failed request has no draft or Publish
-action.
+Opinion picker offers Claude and Local model. A failed request has no draft
+or Publish action.
 
 `npm test` makes no model call and costs nothing: it runs the whole suite with
 no provider contacted. Its fail-closed launcher removes any inherited

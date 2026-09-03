@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.9)** — 3 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.10](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.10)** — 3 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.10** — a local model (llama.cpp / LM Studio / any OpenAI-compatible server) is now a named writing model you can pick anywhere the desk uses AI, with its own longer timeouts.
 - **0.6.9** — removed a reader-tracking-privacy positioning that was never part of the product's goals; the public page still loads nothing from outside, described plainly.
 - **0.6.8** — the desk now shows why a draft switched writing models, and the Automatic picker says it moves on a timeout too.
 - **0.6.7** — Automatic now falls back to the next writing model when a draft times out, not only when a sign-in has lapsed.
@@ -191,15 +192,16 @@ reporting and writing pass in that run uses the same provider, unless that
 provider's login lapses mid-run -- Automatic then moves to the next ladder
 rung once, if it is ready.
 
-Pick Codex Terra, frontier Codex Sol, or frontier Claude Opus to force that
-provider for one run. Explicit choices never fall back, at enqueue or
-mid-run. The endpoint/model compatibility overrides are listed in
-[docs/setup.md](docs/setup.md#per-run-picker).
+Pick Codex Terra, frontier Codex Sol, frontier Claude Opus, or **Local
+model** to force that provider for one run. Explicit choices never fall
+back, at enqueue or mid-run. The endpoint/model compatibility overrides are
+listed in [docs/setup.md](docs/setup.md#per-run-picker).
 
-Zen MiMo and Local Qwen were removed from the picker (2026-09-02): Claude and
-Codex only, for now. See [docs/local-models.md](docs/local-models.md) for the
-surviving `LLM_BASE_URL` gateway path if you want to point Story at a model
-running on your own hardware.
+Zen MiMo and Local Qwen were removed from the picker (2026-09-02). 0.6.10
+brought a local model back as a named pick, "Local model" -- generic this
+time: whatever `LLM_BASE_URL` (plus `LLM_MODEL` / `LLM_API_KEY`) already
+points at, with its own longer, editable timeouts, shown in every picker
+once that variable is set. See [docs/local-models.md](docs/local-models.md).
 
 Codex and Claude use the operator's existing signed-in CLI/OAuth sessions; no
 API key is required. Readiness is checked before enqueueing. If a login expires,
@@ -229,11 +231,12 @@ For **Scan and Dark Desk**, configured-provider precedence is:
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
-**Opinion is Claude only.** The picker offers Automatic and Claude Opus.
-Claude Code runs its own research pass, then loads the editorial voice by
-file path for the writing pass. Codex is not offered for editorials: its
-model declines to write a piece that takes a position on a local policy
-question, so it stays on the Story picker, where it drafts reporting.
+**Opinion offers Claude and the local model.** The picker offers Automatic,
+Claude Opus, and Local model (once `LLM_BASE_URL` is set). Claude Code runs
+its own research pass, then loads the editorial voice by file path for the
+writing pass. Codex is not offered for editorials: its model declines to
+write a piece that takes a position on a local policy question, so it stays
+on the Story picker, where it drafts reporting.
 
 ### Other models — one OpenAI-compatible URL
 

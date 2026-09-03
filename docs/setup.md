@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.9).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.6.10](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.10).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -45,7 +45,7 @@ on an editor's action:
 
 | What               | Triggered by                                      | Where it goes                                                                                                                                                                                                                                                                                    |
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it tries Claude Opus, then Codex Terra, before enqueue. Opinion is always Claude Opus; Codex is not offered for editorials.              |
+| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it tries Claude Opus, then Codex Terra, before enqueue. Opinion is Claude Opus or Local model; Codex is not offered for editorials.              |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
 | **Searches**       | The research pass, PULL, and every Dark Desk hop  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key, and there is currently no setting to keep a search on this machine — the chain is unconditional. |
 
@@ -230,16 +230,18 @@ then moves to the next ladder rung once, if it is ready. A named choice
 forces only that provider; explicit choices never fall back, at enqueue or
 mid-run.
 
-Zen MiMo and Local Qwen were removed from the picker (2026-09-02): Claude and
-Codex only, for now. See [local-models.md](local-models.md) for the
-surviving `LLM_BASE_URL` gateway path if you want to point Story at a model on
-your own hardware.
+Zen MiMo and Local Qwen were removed from the picker (2026-09-02). 0.6.10
+brought a local model back as a named pick, "Local model": generic this
+time, whatever `LLM_BASE_URL` (plus `LLM_MODEL` / `LLM_API_KEY`) already
+points at, shown on every picker once that variable is set. See
+[local-models.md](local-models.md).
 
 | Choice      | Default identity | Prerequisite / boundary                                                                        |
 | ----------- | ----------------- | ------------------------------------------------------------------------------------------------ |
 | Codex Terra | `gpt-5.6-terra`   | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token.   |
 | Codex Sol   | `gpt-5.6-sol`     | Same Codex login; frontier Story override.                                                       |
 | Claude Opus | `claude-opus-5`   | Signed-in Claude Code, or `ANTHROPIC_API_KEY`.                                                   |
+| Local model | whatever `LLM_MODEL` names | `LLM_BASE_URL` set (plus `LLM_MODEL`, and `LLM_API_KEY` if the server wants one). `TOWNREPORTER_LOCAL=0` takes it out of the pickers. |
 
 Compatibility overrides:
 

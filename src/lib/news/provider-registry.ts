@@ -74,6 +74,7 @@ export const PICKER_PROVIDER_IDS = [
   "codex-balanced",
   "codex-frontier",
   "claude-frontier",
+  "local-model",
 ] as const;
 export const INTERNAL_PROVIDER_IDS = ["configured"] as const;
 
@@ -264,6 +265,37 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     offSwitchEnv: "TOWNREPORTER_CLAUDE_CODE",
     offeredFor: EVERY_SURFACE,
     ladderRank: 1,
+  },
+  {
+    id: "local-model",
+    label: "Local model",
+    detail: "llama.cpp, LM Studio, or another OpenAI-compatible server",
+    kind: "local",
+    /*
+      Same env wiring as the `configured` gateway below, on purpose. The
+      operator rule (docs/local-models.md) is already "point LLM_BASE_URL at
+      llama.cpp / LM Studio"; inventing LOCAL_BASE_URL / LOCAL_MODEL here
+      would split one local server's configuration across two variable
+      names for no reason. This entry does not add a transport -- `kind:
+      "local"` already routes through the same OpenAI-compatible path as
+      `openai` in ai.ts's `explicitProvider` -- it adds a NAME an editor can
+      pick, on top of config that may already exist on this machine.
+    */
+    model: "local-model",
+    baseUrl: "http://127.0.0.1:1234/v1",
+    envOverrides: { model: "LLM_MODEL", baseUrl: "LLM_BASE_URL", apiKey: "LLM_API_KEY" },
+    budget: KIND_BUDGETS.local,
+    // No plannerModel: a local server serves one model and has never heard of
+    // anyone else's identifier. Audit finding TW-001 -- see `plannerModelFor`.
+    enabled: () =>
+      notSwitchedOff("TOWNREPORTER_LOCAL") &&
+      Boolean(env("LLM_BASE_URL") || (env("LLM_API_KEY") && env("LLM_MODEL"))),
+    offSwitchEnv: "TOWNREPORTER_LOCAL",
+    // "Anywhere an AI acts, the editor can pick the model" -- every surface.
+    offeredFor: EVERY_SURFACE,
+    // No ladderRank: Automatic must not reach for this on its own. When
+    // LLM_BASE_URL is set, the `configured` entry below already makes
+    // Automatic pin the same server -- this is the deliberate, named pick.
   },
   {
     id: "configured",

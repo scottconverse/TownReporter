@@ -24,6 +24,7 @@ import {
 const ENV_KEYS = [
   "TOWNREPORTER_CODEX",
   "TOWNREPORTER_CLAUDE_CODE",
+  "TOWNREPORTER_LOCAL",
   "TOWNREPORTER_CODEX_TERRA_MODEL",
   "TOWNREPORTER_CODEX_SOL_MODEL",
   "ANTHROPIC_MODEL",
@@ -95,13 +96,15 @@ describe("the provider registry is the one description of a writing model", () =
     }
   });
 
-  it("offers Opinion Claude only, because Codex declines to write editorials", () => {
+  it("offers Opinion Claude and the local model, because Codex alone declines to write editorials", () => {
     // The provider's own policy, recorded on the entries: gpt-5.6-sol returned
     // "EDITORIAL_REFUSAL: I can't provide an editorial that advocates a
     // position on a local government policy issue" -- twice, on a real subject.
+    // The local model has no such policy, and "anywhere an AI acts, the editor
+    // can pick the model" applies to Opinion too -- it is offered everywhere.
     assert.deepEqual(
       providersFor("opinion").map((entry) => entry.id),
-      ["claude-frontier"],
+      ["claude-frontier", "local-model"],
     );
     // Everything Opinion offers, Story and Dark offer too.
     for (const entry of providersFor("opinion")) {
@@ -284,7 +287,7 @@ describe("effectiveBudget merges the paper's override over the shipped default",
     );
   });
 
-  it("reserves a generous default for the local entry that does not exist yet", () => {
+  it("reserves a generous default for the local entry", () => {
     /*
       The operator's rule: "next we'll be adding local LLMs (llama.cpp / LM
       Studio) -- build the pickers so that is config, not code", and "timeouts
@@ -292,6 +295,7 @@ describe("effectiveBudget merges the paper's override over the shipped default",
       20,000-character pack in minutes, so the local kind gets ten minutes for
       one call rather than the CLI's two and a half.
     */
+    assert.deepEqual(effectiveBudget("local-model"), KIND_BUDGETS.local);
     assert.ok(KIND_BUDGETS.local.callMs >= 600_000);
     assert.ok(KIND_BUDGETS.local.callMs > KIND_BUDGETS["claude-code"].callMs);
     assert.ok(KIND_BUDGETS.local.callMs <= MAX_BUDGET_MS);
@@ -314,5 +318,52 @@ describe("what the editor is allowed to type", () => {
 
   it("names the ceiling in minutes as well as seconds, because 3600 is not a duration anyone reads", () => {
     assert.match(validateProviderSeconds(99_999)!, /60 minutes/);
+  });
+});
+
+describe("the local model is a named pick, everywhere an AI acts", () => {
+  it("is offered on all four surfaces", () => {
+    const entry = providerEntry("local-model")!;
+    for (const surface of SURFACES) {
+      assert.equal(entry.offeredFor[surface], true, `local-model must be offered for ${surface}`);
+    }
+  });
+
+  it("reuses the documented LLM_BASE_URL / LLM_MODEL / LLM_API_KEY wiring, not a split env", () => {
+    // docs/local-models.md already tells an operator to point LLM_BASE_URL at
+    // llama.cpp / LM Studio for the `configured` gateway. A second, separate
+    // LOCAL_BASE_URL for this named pick would split one server's config
+    // across two variable names for no reason -- so this entry reads the
+    // exact same three variables.
+    const entry = providerEntry("local-model")!;
+    assert.deepEqual(entry.envOverrides, {
+      model: "LLM_MODEL",
+      baseUrl: "LLM_BASE_URL",
+      apiKey: "LLM_API_KEY",
+    });
+  });
+
+  it("is disabled until LLM_BASE_URL (or a key plus a model) is configured", () => {
+    withEnv({}, () => assert.equal(providerEnabled("local-model"), false));
+    withEnv({ LLM_BASE_URL: "http://127.0.0.1:1234/v1" }, () =>
+      assert.equal(providerEnabled("local-model"), true),
+    );
+    withEnv({ LLM_API_KEY: "sk-test", LLM_MODEL: "qwen" }, () =>
+      assert.equal(providerEnabled("local-model"), true),
+    );
+  });
+
+  it("honours its own off switch even when a base URL is configured", () => {
+    withEnv({ LLM_BASE_URL: "http://127.0.0.1:1234/v1", TOWNREPORTER_LOCAL: "0" }, () =>
+      assert.equal(providerEnabled("local-model"), false),
+    );
+  });
+
+  it("is not in the Automatic ladder -- the configured gateway already pins Automatic to it", () => {
+    assert.ok(!automaticLadder().includes("local-model"));
+  });
+
+  it("has no planner substitution -- a local server has never heard of another provider's model", () => {
+    assert.equal(plannerModelFor("local-model"), "");
   });
 });

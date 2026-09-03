@@ -1,6 +1,6 @@
 # TownReporter — the manual
 
-**Version 0.6.9 · 3 September 2026**
+**Version 0.6.10 · 3 September 2026**
 
 **Documentation scope:** Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from
@@ -365,17 +365,20 @@ nothing else in the codebase names providers.
 
 | Feature                       | Provider                                                                                                                                       | Model                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Scan                          | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung, with one mid-run failover to the next rung if that login lapses (reusing the sources already fetched, not fetching them again); explicit choice never falls back | Codex Terra/Sol, or Claude Opus                                             |
-| Draft (Queue or workbench)    | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung, with one mid-run failover to the next rung if that login lapses; explicit choice never falls back        | Codex Terra/Sol, or Claude Opus                                             |
-| **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                       | Codex Terra/Sol, or Claude Opus                                             |
+| Scan                          | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung, with one mid-run failover to the next rung if that login lapses (reusing the sources already fetched, not fetching them again); explicit choice never falls back | Codex Terra/Sol, Claude Opus, or Local model                                |
+| Draft (Queue or workbench)    | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung, with one mid-run failover to the next rung if that login lapses; explicit choice never falls back        | Codex Terra/Sol, Claude Opus, or Local model                                |
+| **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                       | Codex Terra/Sol, Claude Opus, or Local model                                |
 | Dark Desk synthesis and brief | the one you pick beside **Keep digging**; Automatic behaves as it does for Draft, with one mid-run failover at the round level                  | the one you picked                                                          |
 | Dark Desk **planner**         | the one you pick                                                                                                                               | a cheaper model from the SAME provider: Haiku on Claude, Terra on either Codex, and your own model on a gateway |
-| **Opinion (editorials)**      | Claude Opus, through the signed-in Claude Code session; Codex is not offered for editorials                                                    | Claude Opus                                                                |
+| **Opinion (editorials)**      | Claude Opus, through the signed-in Claude Code session, or Local model; Codex is not offered for editorials                                     | Claude Opus, or Local model                                                |
 
-**Why Opinion has fewer choices.** An editorial uses the paper's configured
-voice and frontier research, so Opinion's picker offers Automatic and Claude
-Opus only. (Zen MiMo and Local Qwen were removed from every picker
-2026-09-02, so they were never a factor here either way.) Claude Code
+**Why Opinion excludes Codex.** An editorial uses the paper's configured
+voice and frontier research; Codex is not offered for editorials because
+its model declines to write a piece that takes a position. The local
+model carries no such refusal, so Opinion's picker offers Automatic,
+Claude Opus, and Local model. (Zen MiMo and the earlier, model-specific
+Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
+brought a generic local pick back.) Claude Code
 receives the voice by file path. Codex receives the validated voice text over
 stdin, never argv, after its separate research pass finishes. Both Codex passes
 retain native search and the signed-in Windows user's full available machine

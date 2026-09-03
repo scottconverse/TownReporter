@@ -99,6 +99,18 @@ export function ModelPicker(props: Props) {
               >
                 Claude Code installation guide
               </a>
+              . For the local model, start llama.cpp, LM Studio, or any other OpenAI-compatible
+              server on that computer and set <code>LLM_BASE_URL</code> (and, if it wants one,{" "}
+              <code>LLM_MODEL</code> / <code>LLM_API_KEY</code>) in the server&apos;s{" "}
+              <code>.env</code> -- see{" "}
+              <a
+                className="inline-link"
+                href="https://github.com/scottconverse/TownReporter/blob/main/docs/local-models.md"
+                target="_blank"
+                rel="noreferrer"
+              >
+                the local models guide
+              </a>
               .
             </li>
             <li>

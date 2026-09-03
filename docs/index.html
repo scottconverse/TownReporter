@@ -646,7 +646,7 @@
               or doesn’t add up. A human still decides what prints.
             </p>
             <p class="cap">
-              Current release: <b>0.6.9</b>, the build the live paper runs. Everything described
+              Current release: <b>0.6.10</b>, the build the live paper runs. Everything described
               here is on it.
             </p>
             <div class="cta-row">
@@ -787,9 +787,9 @@
             <p class="cap" style="margin: 0 0 10px">One registry</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
               Story, Scan and Dark Desk now all show the same Writing model picker
-              &mdash; Automatic, Codex Terra, Codex Sol or Claude Opus &mdash; each one reading
-              from a single provider registry instead of four files that had to agree by hand.
-              Local models are next.
+              &mdash; Automatic, Codex Terra, Codex Sol, Claude Opus or Local model &mdash; each
+              one reading from a single provider registry instead of four files that had to
+              agree by hand.
             </p>
           </div>
           <div class="panel">
@@ -1027,9 +1027,11 @@ npm run dev
                 sandbox.
               </p>
               <p>
-                Zen MiMo and Local Qwen were removed from the picker (2026-09-02): Claude and Codex
-                only, for now. Codex and Claude reuse their signed-in CLI sessions and check
-                readiness before enqueue.
+                Zen MiMo and Local Qwen were removed from the picker (2026-09-02). 0.6.10
+                brought a local model back as a named pick, &ldquo;Local model&rdquo;: whatever
+                <code>LLM_BASE_URL</code> already points at, on every picker once that variable
+                is set. Codex and Claude reuse their signed-in CLI sessions and check readiness
+                before enqueue.
               </p>
               <p>
                 Prefer a gateway? Any OpenAI-compatible <code>/v1/chat/completions</code> endpoint
@@ -1038,9 +1040,10 @@ npm run dev
                 configured provider for Scan and Dark Desk.
               </p>
               <p>
-                Opinion is Claude only. Automatic and Claude Opus both mean Claude Opus through
-                your signed-in Claude Code session, which reads the editorial voice by file path
-                and keeps its tool-free writing boundary. Codex is not offered for editorials:
+                Opinion offers Claude and the local model. Automatic and Claude Opus both mean
+                Claude Opus through your signed-in Claude Code session, which reads the editorial
+                voice by file path and keeps its tool-free writing boundary; Local model is
+                offered too, once <code>LLM_BASE_URL</code> is set. Codex is not offered for editorials:
                 its model declines to write a piece that takes a position on a local policy
                 question, so it stays on the Story picker. A refusal, assistant note, implausible
                 headline or incomplete body is marked failed and never becomes a draft.

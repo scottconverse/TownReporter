@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.6.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.9).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.10](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.10).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
@@ -112,8 +112,8 @@ One pass: fetch every **accepted** source, then one model read for leads and pro
 - When it files leads, open the queue. When it files nothing, that can be “nothing moved,” not a crash. The page will say which.
 
 Scan has the same **Writing model** picker Story and the queue have, next to
-**Run scan**: Automatic (the default), Codex Terra, Codex Sol, or Claude
-Opus. Automatic uses the operator's configured gateway when one is set;
+**Run scan**: Automatic (the default), Codex Terra, Codex Sol, Claude
+Opus, or Local model. Automatic uses the operator's configured gateway when one is set;
 otherwise it tries Claude Opus, then Codex Terra. If the first one's login
 lapses partway through the run, the scan moves to the next rung once, if it
 is ready, reusing the same fetched sources rather than fetching them again.
@@ -230,11 +230,13 @@ The picker beside it controls this run. **Automatic** uses a configured
 `LLM_*` gateway exclusively when present; otherwise it tries Claude Opus,
 then Codex Terra, chooses the first ready one before enqueueing, and keeps it
 for every reporting and writing pass. Choose a named model to force only
-Codex Terra, frontier Codex Sol, or frontier Claude Opus. Explicit choices
-never fall back. Redraft has the same picker.
+Codex Terra, frontier Codex Sol, frontier Claude Opus, or Local model.
+Explicit choices never fall back. Redraft has the same picker.
 
-Zen MiMo and Local Qwen were removed from the picker (2026-09-02): Claude and
-Codex only, for now.
+Zen MiMo and Local Qwen were removed from the picker (2026-09-02). 0.6.10
+brought a local model back as a named pick, "Local model": whatever
+`LLM_BASE_URL` already points at, shown on every picker once that variable
+is set. See [local-models.md](local-models.md).
 
 Stay on the page. If the click dies before the reply comes back, the workbench
 keeps looking until the draft is on the lead, then fills the form. You should
@@ -326,7 +328,8 @@ A research round is a short batch, then a stop. Remaining pages stay on the file
 ### Which model digs
 
 Next to **Keep digging** there is a **Digging model** picker, the same one the
-queue and the workbench have: Automatic, Codex Terra, Codex Sol, Claude Opus.
+queue and the workbench have: Automatic, Codex Terra, Codex Sol, Claude Opus,
+or Local model.
 Automatic tries Claude Opus, then Codex Terra, and if the first one’s login has
 lapsed the round moves to the next. A model you name yourself never falls back
 — choosing one model is choosing not to run the others.
@@ -405,9 +408,10 @@ Type a subject, a sentence, or paste a URL, and press **Write an editorial**. A
 pasted link gets opened and read before anything is written.
 
 Choose **Automatic** or **Claude Opus** first; both mean Claude Opus through
-your signed-in Claude Code session. Codex is not offered for editorials --
-its model declines to write a piece that takes a position -- so it stays on
-the Story picker.
+your signed-in Claude Code session. **Local model** is offered too, once an
+operator has pointed `LLM_BASE_URL` at a server. Codex is not offered for
+editorials -- its model declines to write a piece that takes a position --
+so it stays on the Story picker.
 Readiness lists every missing prerequisite — voice file, installation, or
 login — before the button is enabled, and the server checks again when you
 click. If OAuth expires, open the named provider on this machine and sign in;
