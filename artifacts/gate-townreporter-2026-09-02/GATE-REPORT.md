@@ -151,3 +151,5 @@ Fix commits on main: e95fce2 (ENG-01, QA-1 round 1, QA-2, TEC-01/02), 40d9a68 (Q
 - Both lanes ran (walkthrough + full). First-run coverage VALID; new user reaches the core feature.
 - Severity roll-up after fixes: **Blocker 0 · Critical 0** · Major 9 (QA-2, TEC-01, TEC-02 cleared; ENG-05/Walkthrough-1 kept as one) · Minor 14 · Nit 5 — Majors ride on the watchlist.
 - The two Criticals are closed with independent adversarial evidence, not the fixer's word.
+
+**Final:** v0.6.4 tagged at 6495a51 (CI 12/12 green, one intermittent walk passed on rerun), promoted 21:10 with backup townreporter_2026-09-02_2110.sql; served version asset reads 0.6.4; migration 0031 applied to the live database; 19 stories before and after. Gate verdict for the shipped build: **CLEAR TO ADVANCE** at 0 Blocker / 0 Critical, with the Majors on the watchlist and the CI first-run stall still under root-cause investigation.
