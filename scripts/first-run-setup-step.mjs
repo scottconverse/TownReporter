@@ -37,27 +37,25 @@ export async function completeFirstRunSetup(page, base, opts = {}) {
     if (survived) break;
   }
 
+  // The desk chrome nav (including the "Queue" link) renders on EVERY /desk*
+  // route, /desk/setup included, so waiting for it proves nothing about
+  // whether setup actually completed -- a waitForURL(/\/desk$/) that follows
+  // it just races the real /desk/setup -> /desk navigation and can time out
+  // with the page still sitting on /desk/setup. The command-center h1 ("The
+  // desk") only renders on the post-setup /desk landing page, never on
+  // /desk/setup, so it -- not the nav -- is the real completion signal.
   for (let attempt = 0; attempt < 2; attempt++) {
     await page.getByRole("button", { name: "Save and open the desk" }).click();
     try {
-      await page.waitForURL((u) => !u.pathname.endsWith("/desk/setup"), { timeout: 20_000 });
+      await Promise.all([
+        page.getByLabel("Paper name", { exact: true }).waitFor({ state: "hidden", timeout: 60_000 }),
+        page.getByRole("heading", { level: 1, name: "The desk", exact: true }).waitFor({ timeout: 60_000 }),
+      ]);
       break;
     } catch {
       // A click into pre-hydration HTML does nothing; go around once more.
     }
   }
-  // Wait for the post-setup UI to actually be there, then assert on the URL
-  // -- a waitForURL alone can pass on a race where the path changes but the
-  // page hasn't rendered yet, and gives no clue what page we're really on if
-  // it fails.
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 60_000 });
-  // The Queue link can render before the router finishes the /desk
-  // transition and before the requests it kicks off have settled -- a
-  // caller that immediately navigates elsewhere with waitUntil:
-  // "networkidle" can have that navigation aborted by the SPA's own
-  // in-flight work. Pin the URL and let the load event and (best-effort)
-  // network settle down before handing control back.
-  await page.waitForURL(/\/desk$/, { timeout: 30_000 });
   await page.waitForLoadState("load");
   try {
     await page.waitForLoadState("networkidle", { timeout: 5_000 });
