@@ -88,6 +88,15 @@ if (argv[0] === "login" && argv.includes("--device-auth")) {
   // pass, which sends "Draft JSON to edit:") gets the write shape below,
   // since it is the superset a JSON-object-shaped answer parses out of.
   const isResearchPass = /\bLead:\s/.test(prompt) && !/NEWS ANGLE:/.test(prompt);
+  /*
+    A browser walk has to be able to SEE the transient "Switched to Codex
+    Terra" stage that failOverAndRetry sets before this draft runs
+    (src/lib/news/desk.ts). The real CLI takes real time to think; a fake
+    that answers in the same millisecond overwrites that stage before any
+    poll can observe it. The delay stands in for the thinking time.
+  */
+  const delay = Number(process.env.FAKE_CODEX_DELAY_MS || 0);
+  if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
   if (isResearchPass) {
     process.stdout.write(
       JSON.stringify({

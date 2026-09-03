@@ -12,6 +12,14 @@ Current release: **0.6.6**.
   instead of `npm run dev`. The documented-dev-path walk still exercises
   `npm run dev` on purpose — it proves the README's own quick start, not just
   a page render.
+- **The failover walk now runs clean on the built server.** Moving CI's browser
+  walks to `npm start` (above) exposed two more issues in the same walk: its
+  server-fn response interceptor only matched Vite's dev-only URL shape, so it
+  saw nothing on a build; once fixed, the instant fake Codex CLI overwrote the
+  transient "Switched to Codex Terra" stage before any poll could observe it.
+  The fake now honors `FAKE_CODEX_DELAY_MS` (mirroring the existing
+  `FAKE_CLAUDE_DELAY_MS`), set in the failover CI job, so the real switch stage
+  is observable. The walk's assertion is unchanged.
 
 ## 0.6.5 — 2026-09-02
 - **First-run no longer bounces a slow machine to a blank setup form.** Two timeout

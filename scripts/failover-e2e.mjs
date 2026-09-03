@@ -112,29 +112,36 @@ async function main() {
   // TanStack Start server functions do not answer with plain JSON: the body
   // is a seroval "cross-JSON" tree (the same format the app's own RPC client
   // decodes with `fromCrossJSON`, see
-  // node_modules/@tanstack/start-client-core/dist/esm/client-rpc/serverFnFetcher.js),
-  // and the export a `/_serverFn/<token>` URL calls is named inside that
-  // token, base64(JSON({file, export})) -- not in the URL text. Both are
-  // decoded here the same way the browser itself decodes them.
+  // node_modules/@tanstack/start-client-core/dist/esm/client-rpc/serverFnFetcher.js).
+  //
+  // Which export a `/_serverFn/<token>` URL calls is NOT reliably readable
+  // from the URL: the dev server's token is base64(JSON({file, export})),
+  // but a built (production) TanStack Start server names the same route
+  // with an opaque per-build hash instead (confirmed 2026-09-03 against a
+  // real `npm run build` + `npm start` -- e.g.
+  // `/_serverFn/3ae2ced499ba...dcdaa?payload=...`, no base64 JSON anywhere
+  // in it), so decoding the token never yielded "getLead" there and every
+  // response was skipped (this walk saw `stages: []` on the built server).
+  // Identify getLead responses by decoded SHAPE instead, which is stable
+  // across dev and prod: a desk_jobs row always carries both `stage` and
+  // `model_choice` as strings (src/lib/news/jobs.ts's `latestJob` select
+  // list), a pair no other server function's response happens to share.
   page.on("response", async (res) => {
     try {
       const url = res.url();
-      const m = url.match(/\/_serverFn\/([^/?]+)/);
-      if (!m) return;
-      let exportName = "";
-      try {
-        exportName = JSON.parse(Buffer.from(m[1], "base64").toString("utf8")).export || "";
-      } catch {
-        return;
-      }
-      if (!exportName.includes("getLead")) return;
+      if (!url.includes("_serverFn")) return;
       const ct = res.headers()["content-type"] || "";
       if (!ct.includes("application/json")) return;
       const raw = await res.json().catch(() => null);
       if (!raw) return;
       const decoded = fromCrossJSON(raw, {});
       const job = decoded?.result?.job;
-      if (job && typeof job === "object") {
+      if (
+        job &&
+        typeof job === "object" &&
+        typeof job.stage === "string" &&
+        typeof job.model_choice === "string"
+      ) {
         jobSnapshots.push({ at: Date.now(), job });
       }
     } catch {
