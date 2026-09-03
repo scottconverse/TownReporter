@@ -46,7 +46,14 @@ try {
   await completeFirstRunSetup(page, base);
   step("owns the desk");
 
-  await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
+  // completeFirstRunSetup already lands on /desk once the SPA transition
+  // has settled, but this is still a fresh goto to /desk/queue -- Vite/HMR
+  // churn means the app can go arbitrarily long without a true network-idle
+  // moment, so wait for the DOM plus a concrete element instead of
+  // "networkidle" (which also risks an aborted navigation if the SPA is
+  // still mid-transition).
+  await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
+  await page.getByText("File a lead yourself").waitFor({ timeout: 30_000 });
   await page.getByText("File a lead yourself").click();
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill("The packet posted with a hearing date.");
