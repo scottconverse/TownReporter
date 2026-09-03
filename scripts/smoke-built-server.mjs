@@ -114,9 +114,9 @@ async function checkInBrowser() {
   }
 }
 
-/** Readers are nobody's product. A cold load must not call out. */
-async function checkReaderPrivacy() {
-  console.log("reader privacy:");
+/** The public front page must not call out. */
+async function checkPublicPageIsSelfContained() {
+  console.log("self-contained page:");
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext();
@@ -140,7 +140,7 @@ async function checkReaderPrivacy() {
 console.log(`smoke: ${BASE}`);
 await checkRoutes();
 await checkInBrowser();
-await checkReaderPrivacy();
+await checkPublicPageIsSelfContained();
 
 if (failures > 0) {
   console.log(`\n${failures} smoke check(s) failed.`);

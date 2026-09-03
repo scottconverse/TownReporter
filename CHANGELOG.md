@@ -1,6 +1,20 @@
 # Changelog
 
-Current release: **0.6.8**.
+Current release: **0.6.9**.
+
+## 0.6.9 — 2026-09-03
+- **Removed the "reader privacy" positioning.** A "reader privacy / zero
+  trackers / does not sell its readers" narrative had accreted across the
+  landing page, README, manual, and code comments; it was never a stated
+  goal of the product. Removed the badge, the FAQ entry, the manual section,
+  and the editorializing code comments that framed self-hosted fonts and a
+  browser smoke check as a privacy pitch.
+- **Kept the check, dropped the language.** The CI check that proves the
+  public front page loads nothing from outside is unchanged and still runs
+  in CI — it is useful hygiene and keeps the page fast. It is now named and
+  described in plain terms: `checkPublicPageIsSelfContained()`, no privacy
+  framing. The factual "what leaves this machine" disclosure in the docs is
+  unchanged.
 
 ## 0.6.8 — 2026-09-03
 - **The desk now shows why a draft switched writing models.** The

@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.8](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.8)** — 3 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.9)** — 3 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.9** — removed a reader-tracking-privacy positioning that was never part of the product's goals; the public page still loads nothing from outside, described plainly.
 - **0.6.8** — the desk now shows why a draft switched writing models, and the Automatic picker says it moves on a timeout too.
 - **0.6.7** — Automatic now falls back to the next writing model when a draft times out, not only when a sign-in has lapsed.
 - **0.6.6** — every CI browser walk except the documented dev-path walk now runs against the built server (`npm start`), ending the cold-dev-server flakiness.
@@ -113,7 +114,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 #### 0.5.1
 
 - **The newsroom watches itself.** The paper was offline for hours and nothing said so. A watchdog now checks the app, the tunnel and the public URL every five minutes and restarts what is down. A [Server page](docs/manual.md#the-server-page) shows all of it.
-- **The reader is nobody's product.** Fonts are served from this machine, a third-party script was removed from every page, and a cold load of the paper makes zero outside requests.
+- **Fonts are self-hosted, and the reader's page stays self-contained.** A third-party script was removed from every page, and a cold load of the paper makes zero outside requests.
 - **Stories are shareable.** Per-story titles, descriptions, canonical URLs and social cards — they all used to share one blurb. Plus a sitemap.
 - **An Opinion desk.** A subject, a sentence or a URL becomes an unsigned editorial: OPINION in the headline, no byline, receipts in an appendix at the end. The writer fetches its own records first, so it takes ten to forty minutes.
 - **Dark Desk has two dials.** _Dig_ — how far it chases. _Nerve_ — how speculative it may be. The panel says in plain words what the current setting will do.
@@ -347,14 +348,11 @@ The investigative lane. An editor points it at a person, document, URL, rumor, o
 **What's the Opinion desk?**
 Give it a subject, a sentence, or a URL and it asks the selected provider for an unsigned editorial — OPINION in the headline, no byline, because an unsigned editorial is the paper's own position. Claims and sources run in an appendix at the end. It is a draft until you publish it. If a provider declines or returns an assistant message instead of a real piece, the run is marked Failed and no draft, Read/Edit action, or Publish button is created. The writing voice is a file on disk that you point at with `TOWNREPORTER_VOICE_FILE`; it is not in this repository, and only its path ever reaches a command line.
 
-**Does the paper track readers?**
-No. Fonts are served from this machine, there is no analytics script, and a cold
-load makes zero requests to any outside host. The browser-based `npm run smoke`
-check enforces this; the Server page does not have a reader-privacy monitor.
-
 **Does anything leave my machine when I use the desk?**
 Yes, and it is worth knowing which things. Reading the paper sends nothing
-anywhere — that is the claim above, and it only covers the reader. Working the
+anywhere: fonts are served from this machine, there is no analytics script, and
+a cold load makes zero requests to any outside host — the browser-based
+`npm run smoke` check enforces this. That only covers the reader. Working the
 desk is different: pages you watch and documents you pull are fetched from the
 sites that host them; Scan and Dark Desk model calls go to the configured
 provider; Story calls go to the effective provider stored for that run (which

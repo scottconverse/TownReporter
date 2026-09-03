@@ -646,7 +646,7 @@
               or doesn’t add up. A human still decides what prints.
             </p>
             <p class="cap">
-              Current release: <b>0.6.8</b>, the build the live paper runs. Everything described
+              Current release: <b>0.6.9</b>, the build the live paper runs. Everything described
               here is on it.
             </p>
             <div class="cta-row">
@@ -697,9 +697,6 @@
           <span class="fact"><b>Node 22</b></span>
           <span class="fact"><b>Codex or Claude</b> · API keys optional</span>
           <span class="fact">Self-host <b>email + password</b></span>
-          <span class="fact"
-            ><b>Zero</b> trackers on the reader's page · zero outside requests</span
-          >
           <span class="fact">Nothing prints until an editor <b>publishes</b></span>
         </div>
       </div>
@@ -764,9 +761,8 @@
             style="width: 100%; border: 1px solid var(--rule); display: block"
           />
           <figcaption class="cap" style="margin-top: 8px">
-            Historical Server page (0.5.1). The Reader privacy row shown here was removed; a browser
-            smoke test checks reader requests instead. The current page reports app, tunnel,
-            database, queue, watchdog and disk health.
+            Historical Server page (0.5.1). The current page reports app, tunnel, database, queue,
+            watchdog and disk health.
           </figcaption>
         </figure>
         <figure style="margin: 26px 0 0">
@@ -1127,13 +1123,6 @@ npm run dev
             meeting channels or local title vocabulary from a city name. The owner supplies them.
           </li>
           <li><b>Dark Desk has no publish button.</b> That is not a missing feature.</li>
-          <li>
-            <b>The desk is not trackerless.</b> For the reader's page, "zero outside requests" means
-            the badge above. Scan and Dark Desk use the configured provider; each Story run uses its
-            persisted configured, Automatic, or explicit provider. Searches use a third-party chain
-            (Exa, then DuckDuckGo, Bing, Brave, Wikipedia) — see
-            <a href="setup.md#what-leaves-this-machine">What leaves this machine</a>.
-          </li>
         </ul>
       </section>
 

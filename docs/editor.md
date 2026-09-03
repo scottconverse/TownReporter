@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.6.8](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.8).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.9).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
@@ -460,8 +460,8 @@ sent to attack had never been missing at all.
 
 ![Server](images/11-server.png)
 
-Historical 0.5.1 screen: the **Reader privacy** row shown here was removed.
-The current health rows are described below; privacy is checked by the
+Historical 0.5.1 screen: the status row shown here was removed. The current
+health rows are described below; outside requests are checked by the
 operator's browser smoke test, not this page.
 
 Everything this machine is doing to keep the paper online, and the few buttons

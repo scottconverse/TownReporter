@@ -334,7 +334,7 @@ async function checkPublic(): Promise<HealthCheck[]> {
 }
 
 /*
-  The Reader privacy row is gone, deliberately.
+  The outside-hosts status row is gone, deliberately.
 
   It fetched the front page and grepped the HTML for outside hosts in
   script/link/img/iframe/video/source tags. Two problems, and the second is
@@ -346,16 +346,16 @@ async function checkPublic(): Promise<HealthCheck[]> {
   An audit found it. No test would have, because the row had none.
 
   Second, and the reason it was removed rather than repaired: even working, it
-  only ever saw hard-coded tags in static HTML. A tracker injected by
-  JavaScript at runtime -- which is how trackers usually arrive -- was
-  invisible to it. The row read as a guarantee and was a spot-check of the
+  only ever saw hard-coded tags in static HTML. A script injected at runtime
+  was invisible to it. The row read as a guarantee and was a spot-check of the
   weakest kind. A gauge that can only say "fine" is worse than no gauge.
 
-  The claim itself is true and still enforced elsewhere: checkReaderPrivacy()
-  in scripts/smoke-built-server.mjs loads the front page in a real browser,
-  counts every request it makes, and fails if any of them leaves this origin.
-  That runs in CI against both the built server and the dev server. One honest
-  check beats an honest one plus a flattering one.
+  The claim itself is true and still enforced elsewhere:
+  checkPublicPageIsSelfContained() in scripts/smoke-built-server.mjs loads
+  the front page in a real browser, counts every request it makes, and fails
+  if any of them leaves this origin. That runs in CI against both the built
+  server and the dev server. One honest check beats an honest one plus a
+  flattering one.
 */
 
 export type LogTail = { name: string; path: string; lines: string[]; error?: string };

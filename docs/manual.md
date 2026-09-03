@@ -1,6 +1,6 @@
 # TownReporter — the manual
 
-**Version 0.6.8 · 3 September 2026**
+**Version 0.6.9 · 3 September 2026**
 
 **Documentation scope:** Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from
@@ -101,9 +101,10 @@ You are responsible for everything that appears on the paper.
 
 ## What the reader gets
 
-- No tracker, no analytics script, no third-party font. A cold load of the paper
-  makes **zero requests to any outside host**. The browser-based `npm run smoke`
-  check enforces this; there is no Server-page reader-privacy monitor.
+- Fonts are self-hosted and no third-party script runs on the page. A cold load
+  of the paper makes **zero requests to any outside host**, proven rather than
+  asserted: `npm run smoke` loads the front page in a real browser and fails the
+  build if any request leaves the machine.
 - Every story has its own title, description, canonical URL, published time and
   social card.
 - An RSS feed at `/feed`, a `sitemap.xml`, and a `robots.txt` that points at it.
@@ -272,8 +273,8 @@ of its own. Budget for a piece, not for a paragraph.
 
 ![Server](images/11-server.png)
 
-Historical 0.5.1 screen: the **Reader privacy** row pictured here no longer
-exists. The browser smoke test is the privacy check.
+Historical 0.5.1 screen: the status row pictured here no longer exists under
+that name. A browser smoke test checks the same thing now.
 
 Version, uptime, memory, the public URL as answered from this machine, tunnel
 processes, database size, what the paper holds, queue depth, the last watchdog
@@ -550,33 +551,6 @@ plans and the configured Claude model synthesises. Non-Claude providers keep
 their configured model instead of receiving a Claude model name. Opinion is a
 separate two-pass path and is always Claude Opus.
 
-## Privacy of the reader
-
-- Fonts are self-hosted in `public/fonts/`; `scripts/fetch-fonts.mjs` refreshes
-  them.
-- There is no analytics script and no third-party embed on a reader page.
-- `npm run smoke` proves it rather than asserting it: it loads the front page in
-  a real browser, counts every request the page makes, and fails if any of them
-  leaves this machine. CI runs it against both the built server and the dev
-  server on every push.
-
-This is scoped to the reader's pages. **Working the desk is not trackerless** —
-Dark Desk sends model calls to the configured provider. Scan and Story each
-send their run to its persisted effective provider: the configured gateway,
-or the selected/ready Codex or Claude choice. Every search (the
-research pass, PULL, and every Dark Desk hop) goes to a
-third-party chain: Exa's hosted endpoint first, then DuckDuckGo, Bing, Brave
-and Wikipedia (`src/lib/news/search-web.ts`), unconditionally and with no key.
-See [docs/setup.md — What leaves this machine](setup.md#what-leaves-this-machine)
-for the full table.
-
-The Server page used to carry a **Reader privacy** row. It was removed in
-0.5.1. It fetched the front page and searched the HTML for outside hosts, which
-could not see a tracker added by JavaScript after the page loaded -- and an
-audit then found the search itself was broken and had been reporting a clean
-result unconditionally. The browser check above is the real one, so the row was
-deleted rather than repaired.
-
 ## Tests
 
 ```bash
@@ -596,6 +570,11 @@ Two rules the suite enforces that are easy to lose:
   becomes more conservative than it was.
 - **The version is locked** across `package.json`, `src/lib/version.ts` and the
   paper's own masthead.
+
+`npm run smoke` is a separate, browser-driven check: it loads the front page in
+a real browser, counts every request the page makes, and fails the build if any
+of them leaves this machine. CI runs it against both the built server and the
+dev server on every push.
 
 ---
 

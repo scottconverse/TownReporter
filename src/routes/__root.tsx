@@ -84,11 +84,10 @@ export const Route = createRootRoute({
         The fonts are served from this origin, not from Google.
 
         Linking `fonts.googleapis.com` meant every reader's browser announced
-        itself to Google before a word of the story rendered — the same kind of
-        leak as the analytics beacon, on a paper whose whole pitch is that it
-        does not sell its readers. The files live in `public/fonts` and the
-        @font-face rules in `src/fonts.css`; regenerate with
-        `node scripts/fetch-fonts.mjs`.
+        itself to Google before a word of the story rendered. Self-hosting
+        removes that third-party dependency at build and runtime. The files
+        live in `public/fonts` and the @font-face rules in `src/fonts.css`;
+        regenerate with `node scripts/fetch-fonts.mjs`.
       */
       { rel: "stylesheet", href: appCss },
       { rel: "manifest", href: "/__grok/manifest.webmanifest" },

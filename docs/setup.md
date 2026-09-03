@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.8](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.8).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.6.9](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.9).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -51,9 +51,9 @@ on an editor's action:
 
 The third row is the one to know before you use it: a name, an LLC, a
 contract number, or an unpublished rumour typed into Dark Desk is seen by
-whichever of those providers answers the query. This is unrelated to reader
-privacy above — the "zero outside requests" claim is about the paper's own
-pages, not the desk.
+whichever of those providers answers the query. This is unrelated to the
+self-contained front page described above — the "zero outside requests"
+claim is about the paper's own pages, not the desk.
 
 ---
 

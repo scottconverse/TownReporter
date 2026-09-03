@@ -2,9 +2,9 @@
  * Download the paper's webfonts and write a local @font-face sheet.
  *
  * The pages linked `fonts.googleapis.com` directly, so every reader's browser
- * announced itself to Google before a single word rendered. That is the same
- * category of leak as the analytics beacon, on a paper whose whole pitch is
- * that it does not sell its readers.
+ * announced itself to Google before a single word rendered. Self-hosting
+ * removes that third-party dependency at build and runtime, and keeps the
+ * paper working offline once the fonts are fetched once.
  *
  * Run this only when the font list changes; the files it writes are committed.
  * It is not part of the build: a build that reaches out to a third party to

@@ -10,7 +10,7 @@ import { execFileSync } from "node:child_process";
  * check were written as `\b` word boundaries and reached disk as literal
  * backspace bytes (0x08), because the edit was made through a shell that ate
  * one level of escaping. No HTML contains a backspace, so the patterns could
- * never match, and the "Reader privacy" row reported "no outside requests"
+ * never match, and the outside-hosts row reported "no outside requests"
  * unconditionally -- a gauge that could only ever say "fine".
  *
  * It survived a typecheck, 534 tests and a browser walk, because a control

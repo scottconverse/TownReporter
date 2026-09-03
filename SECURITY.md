@@ -82,7 +82,7 @@ not be named. There is no bug bounty.
 - Injection of any kind into the public paper — a published story, the feed,
   the sitemap, or the evidence routes.
 - Anything that puts a third-party asset onto a reader's page (see
-  `docs/manual.md` §"Privacy of the reader" for what "reader's page" covers,
+  `docs/manual.md` §"What the reader gets" for what "reader's page" covers,
   and `docs/setup.md` §"What leaves this machine" for what the desk itself
   is already documented to send out — that documented egress is not itself a
   vulnerability).
