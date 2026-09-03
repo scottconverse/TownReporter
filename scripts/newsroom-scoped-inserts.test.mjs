@@ -25,6 +25,24 @@ import { fileURLToPath } from "node:url";
  * reported separately rather than folded in here silently. Adding a table
  * to SCOPED_TABLES is a promise that every insert into it was checked;
  * don't add one without doing that check.
+ *
+ * IMPORTANT (audit-lite 0.6.11 FINDING-001 and FINDING-003): this test is
+ * structural only -- it proves the INSERT's column list mentions
+ * `newsroom_id`, never that the caller's REAL newsroom id lands there
+ * instead of a hardcoded constant. That gap let `investigate.ts` ship 0.6.11
+ * with `anomalies`, `artifacts` and `artifact_blobs` listed here as fixed
+ * while every one of its inserts into those three tables actually hardcoded
+ * `DEFAULT_NEWSROOM_ID` -- this test stayed green throughout, because the
+ * column was always present. 0.6.13 threads the real newsroom id through
+ * those three tables in `investigate.ts` and adds a VALUE-level proof
+ * (`newsroom-scoped-write.proof.test.ts`, describe block
+ * "investigate.ts's anomalies/artifacts writes land in the caller's own
+ * newsroom, not always 1") -- so: don't add a table to SCOPED_TABLES on the
+ * strength of this test alone. Pair it with a proof test in that file (or a
+ * sibling) that runs the real write path for a non-default newsroom and
+ * reads the row back scoped, and cite the commit/PR that added that proof
+ * in the PR description, so a future reviewer can audit the claim instead
+ * of trusting the docstring.
  */
 const SCOPED_TABLES = [
   "leads",

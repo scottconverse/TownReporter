@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
 import { ensureJobsSchema, enqueueJob } from "./jobs.ts";
 import { writeStoryForAuthenticatedEditor } from "./model-request-commit.server.ts";
+import { openInvestigationForEditor } from "./dark-open.ts";
+import { emptyPlan, researchLoop } from "./investigate.ts";
 
 /**
  * GauntletGate ENG-04 proof test.
@@ -116,5 +118,96 @@ describe("a newsroom-scoped write lands in the caller's own newsroom, not always
       select id from leads where user_id = ${userId} and newsroom_id = 1
     `;
     assert.equal(inNewsroom1.length, 1, "a plain newsroom-1 write must still read back under newsroom 1");
+  });
+});
+
+/**
+ * audit-lite 0.6.11 FINDING-001 proof.
+ *
+ * 0.6.11's changelog and `scripts/newsroom-scoped-inserts.test.mjs`'s
+ * `SCOPED_TABLES` both claimed `anomalies`, `artifacts` and `artifact_blobs`
+ * were newsroom-scoped everywhere -- but every insert into them from
+ * `investigate.ts` (the Dark Desk investigation engine) still hardcoded
+ * `DEFAULT_NEWSROOM_ID`, unreachable by that structural guard (it only
+ * checks the column is present, not what value lands in it). 0.6.13 threads
+ * the real newsroom id from `dark-open.ts`/`dark.ts` down through
+ * `investigate.ts`; this proves it landed, the same way the pair above
+ * proves it for `leads`/`drafts`, against a real PGLite database.
+ */
+describe("investigate.ts's anomalies/artifacts writes land in the caller's own newsroom, not always 1", () => {
+  it("seeding an investigation in newsroom 2 files its artifacts row under newsroom 2, not newsroom 1", async () => {
+    const sql = await getSql();
+    const userId = `newsroom2-investigate-${Date.now()}-${Math.random()}`;
+    const opened = await openInvestigationForEditor(
+      userId,
+      { paste: "Longmont council approved the Kimbark contract.\nhttps://example.org/agenda" },
+      2,
+    );
+    assert.equal(opened.ok, true);
+
+    const inNewsroom2 = await sql<{ id: number }>`
+      select id from artifacts
+      where investigation_id = ${opened.investigationId} and newsroom_id = 2
+    `;
+    assert.ok(
+      inNewsroom2.length >= 1,
+      "seedInvestigation's rememberCapture did not file an artifacts row under newsroom 2",
+    );
+
+    const inNewsroom1 = await sql<{ id: number }>`
+      select id from artifacts
+      where investigation_id = ${opened.investigationId} and newsroom_id = 1
+    `;
+    assert.equal(
+      inNewsroom1.length,
+      0,
+      "an artifacts row for a newsroom-2 investigation landed under newsroom 1 instead -- the exact " +
+        "silent-data-loss bug FINDING-001 named",
+    );
+  });
+
+  it("a research hop's anomaly (search-failed) lands under the investigation's real newsroom", async () => {
+    const sql = await getSql();
+    const userId = `newsroom2-anomaly-${Date.now()}-${Math.random()}`;
+    const opened = await openInvestigationForEditor(userId, { paste: "Seed text, no urls here." }, 2);
+    assert.equal(opened.ok, true);
+
+    await researchLoop({
+      userId,
+      investigationId: opened.investigationId,
+      hops: 1,
+      newsroomId: 2,
+      planner: async () => ({ ...emptyPlan(), searches: ["kimbark contract longmont"], stop: true }),
+      searchAttempt: async () => ({
+        state: "SEARCH_FAILED_NETWORK",
+        hits: [],
+        provider: "test",
+        error: "simulated network failure",
+      }),
+      // No real fetches -- nothing was searched successfully, so toFetch
+      // stays empty and this should never be called, but stubbed anyway so
+      // a future behavior change here can't reach the real network.
+      fetch: async (url: string) => ({ ok: false, status: 0, text: "", title: url, extras: [] }),
+    });
+
+    const anomNewsroom2 = await sql<{ id: number }>`
+      select id from anomalies
+      where investigation_id = ${opened.investigationId} and newsroom_id = 2 and kind = 'search-failed'
+    `;
+    assert.ok(
+      anomNewsroom2.length >= 1,
+      "researchLoop's search-failed anomaly did not land under newsroom 2",
+    );
+
+    const anomNewsroom1 = await sql<{ id: number }>`
+      select id from anomalies
+      where investigation_id = ${opened.investigationId} and newsroom_id = 1
+    `;
+    assert.equal(
+      anomNewsroom1.length,
+      0,
+      "an anomaly for a newsroom-2 investigation landed under newsroom 1 instead -- the exact " +
+        "silent-data-loss bug FINDING-001 named",
+    );
   });
 });

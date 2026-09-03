@@ -760,6 +760,7 @@ export async function seedInvestigation(
   investigationId: number,
   paste: string,
   snapshotBits: { title: string; url: string; excerpt: string }[],
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
 ) {
   if (paste.trim()) {
     const hash = await sha256(paste);
@@ -774,6 +775,7 @@ export async function seedInvestigation(
       outcome: "fetched",
       classification: "watch",
       triggerKind: "seed",
+      newsroomId,
     });
   }
   for (const snap of snapshotBits.slice(0, 20)) {
@@ -789,6 +791,7 @@ export async function seedInvestigation(
       outcome: "fetched",
       classification: "watch",
       triggerKind: "seed",
+      newsroomId,
     });
     const refs = extractReferences(`${snap.title}\n${snap.excerpt}`);
     await addFrontierFromRefs(userId, investigationId, refs, snap.url);
@@ -999,8 +1002,20 @@ export async function rememberCapture(opts: {
   extras?: string[];
   observedAt?: Date;
   rawBytes?: Uint8Array;
+  /**
+   * The caller's real newsroom (0.6.13). Threaded down to the `artifacts`
+   * and `artifact_blobs` inserts below -- the two tables 0.6.11 claimed were
+   * newsroom-scoped here but weren't (audit-lite 0.6.11, FINDING-001).
+   * `artifact_versions` and `capture_events` in this same function
+   * deliberately keep the `DEFAULT_NEWSROOM_ID` constant: they are not among
+   * the tables that release claimed fixed, and scoping them is out of scope
+   * for this change (see `scripts/newsroom-scoped-inserts.test.mjs`'s
+   * docstring for the acknowledged file-wide carve-out).
+   */
+  newsroomId?: number;
 }): Promise<CaptureRecord> {
   const sql = await getSql();
+  const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
   let url = opts.url;
   try {
     url = canonicalPublicUrl(opts.url);
@@ -1122,7 +1137,7 @@ export async function rememberCapture(opts: {
           insert into artifact_blobs (
             version_id, user_id, newsroom_id, sha256, mime, original_url, redirect_chain, byte_length, body_b64
           ) values (
-            ${versionId}, ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${rawHash ?? extractedHash}, ${opts.contentType ?? "application/octet-stream"},
+            ${versionId}, ${opts.userId}, ${newsroomId}, ${rawHash ?? extractedHash}, ${opts.contentType ?? "application/octet-stream"},
             ${url}, ${JSON.stringify(opts.redirectChain ?? [])}, ${opts.rawBytes.byteLength}, ${b64}
           )
         `;
@@ -1138,7 +1153,7 @@ export async function rememberCapture(opts: {
         user_id, newsroom_id, investigation_id, url, title, content_hash, full_text,
         classification, fetch_status, fetch_outcome, version_id, capture_event_id, extraction_method
       ) values (
-        ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${opts.investigationId}, ${url}, ${opts.title.slice(0, 200)},
+        ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${url}, ${opts.title.slice(0, 200)},
         ${versionHash}, ${fullText}, ${opts.classification ?? "discovered"},
         ${opts.status}, ${opts.outcome}, ${versionId}, ${captureEventId},
         ${opts.extractionMethod ?? ""}
@@ -1355,8 +1370,11 @@ async function flagPatternAnomalies(opts: {
   extras: string[];
   previous: StructureSnapshot | null;
   now: Date;
+  /** The caller's real newsroom (0.6.13); see `rememberCapture`'s doc comment. */
+  newsroomId?: number;
 }): Promise<number> {
   const sql = await getSql();
+  const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
   const spec = baselineSpec(opts.url, opts.title);
   let usualNth: string | null = null;
   let usualAtt: number | null = null;
@@ -1390,7 +1408,7 @@ async function flagPatternAnomalies(opts: {
     await sql`
       insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
       values (
-        ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${opts.investigationId}, ${a.kind}, ${a.summary.slice(0, 1000)},
+        ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${a.kind}, ${a.summary.slice(0, 1000)},
         ${opts.url}, ${a.details.slice(0, 2000)}
       )
     `;
@@ -1622,6 +1640,17 @@ export async function researchLoop(opts: {
   fetch?: FetchFn;
   planner?: PlannerFn;
   archives?: (url: string) => Promise<string[]>;
+  /**
+   * The investigation's real newsroom (0.6.13). `dark.ts`'s
+   * `executeDarkRun`/`performDarkRound` already resolve this (`owned(context)`
+   * / the local `newsroomId`) before calling in -- it just wasn't being
+   * passed. Threaded to every `rememberCapture`/`flagPatternAnomalies` call
+   * and every inline `anomalies` insert this loop makes directly, so a run
+   * against a newsroom-2 investigation files its evidence and anomaly flags
+   * under newsroom 2, not the hardcoded default (audit-lite 0.6.11,
+   * FINDING-001).
+   */
+  newsroomId?: number;
 }): Promise<{
   hops: number;
   artifacts: number;
@@ -1631,6 +1660,7 @@ export async function researchLoop(opts: {
   plannerFailures: number;
 }> {
   const sql = await getSql();
+  const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
   const fetchDoc = opts.fetch ?? defaultFetch;
   const planner = opts.planner;
@@ -1842,7 +1872,7 @@ export async function researchLoop(opts: {
         await sql`
           insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, details)
           values (
-            ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${opts.investigationId}, ${"search-failed"},
+            ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${"search-failed"},
             ${`Search ${attempt.state} via ${attempt.provider}: ${q.slice(0, 180)}`},
             ${attempt.error ?? attempt.state}
           )
@@ -1972,6 +2002,7 @@ export async function researchLoop(opts: {
         extras: got.extras,
         rawBytes: got.rawBytes,
         classification: got.classification ?? "discovered",
+        newsroomId,
       });
 
       if (outcome === "unchanged") {
@@ -1984,7 +2015,7 @@ export async function researchLoop(opts: {
           await sql`
             insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
             values (
-              ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${opts.investigationId}, ${"disappeared"},
+              ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${"disappeared"},
               ${`Previously captured document is gone: ${url}`},
               ${url},
               ${`Prior hash ${prior.content_hash}. Outcome ${outcome}. Status ${got.status}. Original version retained.`}
@@ -2057,13 +2088,17 @@ export async function researchLoop(opts: {
           await sql`
             insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
             values (
-              ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${opts.investigationId}, ${"changed"},
+              ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${"changed"},
               ${`Document changed: ${url}`}, ${url}, ${delta.slice(0, 4000)}
             )
           `;
         }
         let prevSnap: StructureSnapshot | null = null;
         try {
+          // source_monitors is not one of the tables 0.6.11 claimed fixed and
+          // stays out of scope here (see rememberCapture's doc comment) --
+          // the lookup below deliberately still keys off DEFAULT_NEWSROOM_ID
+          // to match where watchSource/maybeWatch actually write these rows.
           const mon = await sql<{ typical_structure: string | null }>`
             select typical_structure from source_monitors where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url} limit 1
           `;
@@ -2081,6 +2116,7 @@ export async function researchLoop(opts: {
           extras: got.extras,
           previous: prevSnap,
           now: new Date(),
+          newsroomId,
         });
       }
 
@@ -2114,7 +2150,7 @@ export async function researchLoop(opts: {
       });
     }
 
-    await persistPlan(opts.userId, opts.investigationId, plan);
+    await persistPlan(opts.userId, opts.investigationId, plan, newsroomId);
     await resurfaceDeadEnds(opts.userId, opts.investigationId, thisHopEvidenceNames);
 
     if (queries.length) {
@@ -2336,7 +2372,12 @@ async function resolveProvenance(
   return unresolved;
 }
 
-async function persistPlan(userId: string, investigationId: number, plan: HopPlan) {
+async function persistPlan(
+  userId: string,
+  investigationId: number,
+  plan: HopPlan,
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
+) {
   const sql = await getSql();
   const known = await sql<{ canonical: string; name: string }>`
     select canonical, name from entities where newsroom_id = ${DEFAULT_NEWSROOM_ID}
@@ -2566,7 +2607,7 @@ async function persistPlan(userId: string, investigationId: number, plan: HopPla
     await sql`
       insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
       values (
-        ${userId}, ${DEFAULT_NEWSROOM_ID}, ${investigationId}, ${a.kind.slice(0, 40)}, ${a.summary.slice(0, 1000)},
+        ${userId}, ${newsroomId}, ${investigationId}, ${a.kind.slice(0, 40)}, ${a.summary.slice(0, 1000)},
         ${a.url ?? null}, ${""}
       )
     `;
@@ -2669,7 +2710,21 @@ export async function resurfaceDeadEnds(
   return n;
 }
 
-export async function checkBaselines(userId: string, investigationId: number, now = new Date()) {
+export async function checkBaselines(
+  userId: string,
+  investigationId: number,
+  now = new Date(),
+  /**
+   * The investigation's real newsroom (0.6.13); see `rememberCapture`'s doc
+   * comment. `recurring_baselines` below deliberately stays scoped to
+   * `DEFAULT_NEWSROOM_ID` -- it is not one of the three tables 0.6.11
+   * claimed fixed and is out of scope here (same carve-out as
+   * `source_monitors`) -- but the `anomalies` this function reads for
+   * dedup and then writes belong to THIS investigation, so both now use the
+   * caller's real newsroom.
+   */
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
+) {
   const sql = await getSql();
   const rows = await sql<{
     key: string;
@@ -2700,7 +2755,7 @@ export async function checkBaselines(userId: string, investigationId: number, no
     for (const m of missing) {
       const already = await sql<{ id: number }>`
         select id from anomalies
-        where investigation_id = ${investigationId}
+        where investigation_id = ${investigationId} and newsroom_id = ${newsroomId}
           and kind = ${"missing-cadence"} and url is not distinct from ${m.url || null}
         limit 1
       `;
@@ -2721,7 +2776,7 @@ export async function checkBaselines(userId: string, investigationId: number, no
       await sql`
         insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
         values (
-          ${userId}, ${DEFAULT_NEWSROOM_ID}, ${investigationId}, ${"missing-cadence"},
+          ${userId}, ${newsroomId}, ${investigationId}, ${"missing-cadence"},
           ${`Expected recurring record is late: ${m.title || m.key} (${m.daysLate} days past cadence)`},
           ${m.url || null},
           ${details}
@@ -2746,6 +2801,24 @@ export async function checkBaselines(userId: string, investigationId: number, no
   return flagged;
 }
 
+/**
+ * NOT threaded with a real `newsroomId` (0.6.13, audit-lite 0.6.11
+ * FINDING-001 follow-up) -- deliberately, not an oversight. Every anomaly
+ * this function writes is about a `source_monitors` row, and that table's
+ * own writes (`watchSource`/`maybeWatch` in this file) are themselves still
+ * hardcoded to `DEFAULT_NEWSROOM_ID` and are NOT one of the three tables
+ * 0.6.11 claimed fixed (`source_monitors` is explicitly called out as a
+ * pre-existing, out-of-scope pattern in
+ * `scripts/newsroom-scoped-inserts.test.mjs`'s docstring). This function's
+ * only caller, `tickAllDueMonitors` (monitors-cron.ts), also sweeps by
+ * `user_id` alone across every newsroom a user has, with no per-monitor
+ * newsroom to hand in. Passing anything other than the default here would
+ * mark these anomalies under a newsroom the underlying monitor row was
+ * never actually scoped to -- the exact kind of fake fix this task's brief
+ * says not to make. Fixing this for real means scoping `source_monitors`
+ * itself first (and reworking the cron's per-newsroom sweep), which is a
+ * separate, larger change; flagged here rather than folded in silently.
+ */
 export async function runDueMonitors(opts: {
   userId: string;
   now?: Date;

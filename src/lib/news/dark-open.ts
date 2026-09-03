@@ -25,7 +25,7 @@ export async function openInvestigationForEditor(
     returning id
   `;
   const investigationId = created[0]!.id;
-  await seedInvestigation(userId, investigationId, paste, []);
+  await seedInvestigation(userId, investigationId, paste, [], newsroomId);
   await sql`
     update investigations set updated_at = now() where id = ${investigationId}
   `;
