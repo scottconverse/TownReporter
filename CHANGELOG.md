@@ -1,6 +1,43 @@
 # Changelog
 
-Current release: **0.6.12**.
+Current release: **0.6.13**.
+
+## 0.6.13 — 2026-09-03
+- **Opinion editorials with a Local model now actually use that model.** A
+  bug in the model-resolution path silently fell back to Claude whenever an
+  Opinion editorial was drafted with a Local pick selected, so the byline
+  said Local while Claude wrote the piece. Fixed, and a "local" pick can no
+  longer fall through to the paid OpenAI cloud at all -- it now requires an
+  explicit local endpoint (`LLM_BASE_URL` or an equivalent per-model base
+  URL) to resolve, and fails closed instead of silently billing OpenAI when
+  one isn't configured.
+- **The Automatic timeout fail-over now has real regression tests.** The
+  switch-reason wording shown on a draft (why Automatic moved off a model)
+  is now single-sourced instead of duplicated at each call site, and the
+  failover CI walk no longer relies on a timing race to trigger the
+  timeout -- it forces the condition deterministically.
+- **The Dark Desk investigation now actually records its newsroom.**
+  `investigations`, `anomalies`, `artifacts`, and `artifact_blobs` writes
+  from a Dark Desk run were previously claimed as newsroom-scoped (0.6.11)
+  but the investigation row itself and its anomaly/artifact children were
+  not; they now thread the real newsroom id through like the rest of the
+  0.6.11 list.
+- **Test/ops tooling no longer defaults to production resources -- the root
+  cause of the 3 September outage.** The parity test no longer points at
+  the live database by default, and the smoke check no longer probes the
+  live port by default; both now require an explicit opt-in to touch
+  anything beyond the dev/test instance.
+- **The public paper page no longer white-screens on an identity-load
+  hiccup.** If the newsroom identity fetch fails, the page now falls back to
+  defaults and still renders instead of showing a blank screen. The promote
+  step now verifies real page content after a promote, not just an HTTP 200
+  -- an HTTP 200 with a dead client is exactly what caused the outage.
+- **Smaller:** hardened the sign-in-cancel kill test (0.6.12) against a
+  second edge case, and added a doc-reference guard so `SECURITY.md` can't
+  silently drift from the files it points at.
+- **Known follow-up:** `source_monitors` is not yet newsroom-scoped, so
+  `runDueMonitors` anomalies still land on the default newsroom. That is a
+  separate future change, not covered by this release.
 
 ## 0.6.12 — 2026-09-03
 - **Cancelling a stale sign-in can no longer `taskkill` an unrelated process
