@@ -32,7 +32,7 @@
  *                           like, and it is what src/lib/news/automatic-failover.ts
  *                           exists to catch.
  */
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
 const stateFile = process.env.FAKE_CLAUDE_STATE_FILE;
@@ -83,6 +83,29 @@ if (argv[0] === "auth" && argv[1] === "login") {
     if (delay > 0) setTimeout(finish, delay);
     else finish();
   }
+} else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_ECHO_SYSTEM_PROMPT === "1") {
+  /*
+   * For tests that need to prove which route the system prompt travelled by:
+   * `--system-prompt-file <path>` (reads the file off disk, argv only ever
+   * carries the path) vs. `--system-prompt <text>` (the text is argv itself).
+   * Echoes both the mode and the prompt's length back inside `result` so a
+   * test can assert on it after parseCliEnvelope unwraps the envelope.
+   */
+  const fileIdx = argv.indexOf("--system-prompt-file");
+  const inlineIdx = argv.indexOf("--system-prompt");
+  let mode = "none";
+  let promptLength = 0;
+  if (fileIdx !== -1) {
+    mode = "file";
+    promptLength = readFileSync(argv[fileIdx + 1], "utf8").length;
+  } else if (inlineIdx !== -1) {
+    mode = "inline";
+    promptLength = (argv[inlineIdx + 1] || "").length;
+  }
+  process.stdout.write(
+    JSON.stringify({ is_error: false, result: JSON.stringify({ mode, promptLength }) }) + "\n",
+  );
+  process.exit(0);
 } else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_FAIL_PROMPTS === "1") {
   // The exact envelope a real 401 mid-run produced. Exit 0: the CLI's own
   // process succeeded, it is the *call* that failed -- parseCliEnvelope in

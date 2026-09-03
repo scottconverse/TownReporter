@@ -1,10 +1,32 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import {
   CLAUDE_CLI_MISSING,
   claudeCliCandidates,
+  claudeCodeChat,
   parseCliEnvelope,
+  resetClaudeCliCache,
 } from "./ai-claude-code.server.ts";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const FAKE_CLAUDE = join(ROOT, "scripts/fakes/fake-claude-cli.mjs");
+
+function withEnv(vars: Record<string, string | undefined>) {
+  const before: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(vars)) {
+    before[k] = process.env[k];
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  return () => {
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  };
+}
 
 describe("parseCliEnvelope", () => {
   it("pulls the answer out of a success envelope", () => {
@@ -85,5 +107,107 @@ describe("CLAUDE_CLI_MISSING", () => {
     assert.match(CLAUDE_CLI_MISSING, /npm i -g @anthropic-ai\/claude-code/);
     assert.match(CLAUDE_CLI_MISSING, /CLAUDE_CLI_PATH/);
     assert.match(CLAUDE_CLI_MISSING, /ANTHROPIC_API_KEY/);
+  });
+});
+
+describe("claudeCodeChat promotes a long inline system prompt to a file", () => {
+  /*
+   * Every case below pins CLAUDE_CLI_PATH at scripts/fakes/fake-claude-cli.mjs
+   * before calling claudeCodeChat, so none of it can reach a live model or
+   * spend anything — no RUN_LIVE_MODEL_TESTS opt-in needed, unlike the paid
+   * evaluation these tests are neighbours to.
+   */
+  /*
+   * Live crash this guards against: dark_jobs id 49, investigation 3
+   * (2026-09-02). A Dark Desk "Start digging" round built an 11,961-character
+   * system prompt and handed it to claudeCodeChat as a plain `system` string
+   * with no `systemPromptFile` — grokChat's claude-code branch (ai.ts) never
+   * set one. `assertNotAnArgument` correctly refused to let 11,961 characters
+   * become a command-line argument, which is a genuine safety backstop, but
+   * it meant the round could never run. The fix has to live below every
+   * caller: claudeCodeChat itself now promotes an inline prompt over the
+   * safe argv length to a private temp file before it ever reaches argv.
+   */
+  it("writes an over-length system prompt to a file instead of argv, and it survives", async () => {
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: FAKE_CLAUDE,
+      FAKE_CLAUDE_ECHO_SYSTEM_PROMPT: "1",
+    });
+    resetClaudeCliCache();
+    // One character past the incident's 11,961 and well past the 8,000-char
+    // argv safety line, with margin to spare (>32KB, matching the ask).
+    const system = "S".repeat(33_000);
+    try {
+      const result = await claudeCodeChat({
+        system,
+        user: "dig",
+        model: "claude-opus-5",
+        timeoutMs: 10_000,
+      });
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      const echoed = JSON.parse(result.text) as { mode: string; promptLength: number };
+      assert.equal(echoed.mode, "file");
+      assert.equal(echoed.promptLength, system.length);
+    } finally {
+      restore();
+      resetClaudeCliCache();
+    }
+  });
+
+  it("still passes a short system prompt inline, unchanged", async () => {
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: FAKE_CLAUDE,
+      FAKE_CLAUDE_ECHO_SYSTEM_PROMPT: "1",
+    });
+    resetClaudeCliCache();
+    const system = "Reply with the single word ok.";
+    try {
+      const result = await claudeCodeChat({
+        system,
+        user: "ok",
+        model: "claude-opus-5",
+        timeoutMs: 10_000,
+      });
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      const echoed = JSON.parse(result.text) as { mode: string; promptLength: number };
+      assert.equal(echoed.mode, "inline");
+      assert.equal(echoed.promptLength, system.length);
+    } finally {
+      restore();
+      resetClaudeCliCache();
+    }
+  });
+
+  it("honours a caller-supplied systemPromptFile as before, ignoring `system`", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "tr-voice-test-"));
+    const voicePath = join(dir, "voice.txt");
+    writeFileSync(voicePath, "the house voice", "utf8");
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: FAKE_CLAUDE,
+      FAKE_CLAUDE_ECHO_SYSTEM_PROMPT: "1",
+    });
+    resetClaudeCliCache();
+    try {
+      const result = await claudeCodeChat({
+        system: "S".repeat(40_000), // must be ignored: systemPromptFile wins
+        systemPromptFile: voicePath,
+        user: "draft",
+        model: "claude-opus-5",
+        timeoutMs: 10_000,
+      });
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      const echoed = JSON.parse(result.text) as { mode: string; promptLength: number };
+      assert.equal(echoed.mode, "file");
+      assert.equal(echoed.promptLength, "the house voice".length);
+    } finally {
+      restore();
+      resetClaudeCliCache();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
