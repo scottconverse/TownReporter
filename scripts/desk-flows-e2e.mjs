@@ -96,13 +96,14 @@ async function main() {
   await page.getByRole("heading", { name: "Opinion", exact: true }).waitFor();
   step("Opinion desk renders");
 
-  // Opinion is Claude only: Automatic and Claude Opus. Codex's model refuses
-  // editorials that take a position, so it is offered for Story drafts only.
+  // Opinion is Claude and Local only: Automatic, Claude Opus, Local model.
+  // Codex's model refuses editorials that take a position, so it is offered
+  // for Story drafts only.
   const opinionModel = page.getByLabel("Writing model");
-  if ((await opinionModel.locator("option").count()) !== 2 || (await opinionModel.inputValue()) !== "auto") {
+  if ((await opinionModel.locator("option").count()) !== 3 || (await opinionModel.inputValue()) !== "auto") {
     throw new Error("Opinion model picker choices/default do not match the product contract");
   }
-  step("Opinion exposes Automatic and Claude Opus, nothing else");
+  step("Opinion exposes Automatic, Claude Opus, and Local model, nothing else");
 
   // UIUX-03: a live region has to exist before its content changes, or the
   // announcement is frequently never made.
@@ -197,17 +198,17 @@ async function main() {
   step("a lead can be filed by hand");
 
   const storyModel = page.getByLabel("Writing model");
-  if ((await storyModel.locator("option").count()) !== 4 || (await storyModel.inputValue()) !== "auto") {
+  if ((await storyModel.locator("option").count()) !== 5 || (await storyModel.inputValue()) !== "auto") {
     throw new Error("Story model picker choices/default do not match the product contract");
   }
-  step("Story exposes the Claude/Codex model ladder with Automatic selected");
+  step("Story exposes the Claude/Codex/Local model ladder with Automatic selected");
 
   await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
   const row = page.locator(".lead-row", { hasText: leadHeadline }).first();
   await row.waitFor();
 
   const queueModel = row.getByLabel("Writing model");
-  if ((await queueModel.locator("option").count()) !== 4 || (await queueModel.inputValue()) !== "auto") {
+  if ((await queueModel.locator("option").count()) !== 5 || (await queueModel.inputValue()) !== "auto") {
     throw new Error("Queue row model picker choices/default do not match the product contract");
   }
   // CI has neither Codex nor Claude configured, so an explicit Codex choice

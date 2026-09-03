@@ -98,13 +98,13 @@ async function thePickerIsThere() {
 
   const labels = await picker.locator("option").allInnerTexts();
   const names = labels.map((line) => line.split("—")[0].trim());
-  const expected = ["Automatic", "Codex Terra", "Codex Sol", "Claude Opus"];
+  const expected = ["Automatic", "Codex Terra", "Codex Sol", "Claude Opus", "Local model"];
   if (JSON.stringify(names) !== JSON.stringify(expected)) {
     throw new Error(
       `Dark Desk picker offers ${JSON.stringify(names)}, expected ${JSON.stringify(expected)}`,
     );
   }
-  step("the Dark Desk picker offers the same four options Story has");
+  step("the Dark Desk picker offers the same five options Story has");
 
   // Its label says digging, not writing: the model there digs.
   const labelText = await actions.locator(".model-picker-label").innerText();
