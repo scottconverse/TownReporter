@@ -120,26 +120,55 @@ function Root() {
         {/*
           Last resort for a page where React never started.
 
-          This used to fire after 1200ms and decide by reading the first
-          <h1>: if it said "Opening the desk", it sent the visitor to
-          /login. Two things were wrong with that. A signed-in editor sees
-          exactly that heading while their newsroom loads -- and that load
-          runs five DDL statements before its two selects -- so an editor
-          who WAS signed in got thrown out to the sign-in page whenever the
-          database was slow. And 1200ms is shorter than the 2500ms the desk
-          route itself waits, so this timer raced the real logic and usually
-          won. An audit filed it as a Critical.
+          This began as a redirect: after 1200ms it read the first <h1> and,
+          if it said "Opening the desk", sent the visitor to /login. A
+          signed-in editor sees exactly that heading while their newsroom
+          loads -- and that load runs five DDL statements before its two
+          selects -- so a slow database threw a signed-in editor out to the
+          sign-in page. An audit filed it Critical. The repair keyed the
+          check on a marker attribute instead of copy and pushed the delay
+          out to 8000ms, past the desk route's own 2500ms decision.
 
-          Now it keys on an attribute that only the awaiting-a-session
-          screen renders, never on copy, and it waits long enough that the
-          route's own decision always lands first. If that element is still
-          on the page after eight seconds, React did not start at all, and
-          a static sign-in page is a better place to be stranded.
+          It fired again anyway, on 2026-09-02, and cost four browser walks
+          in one day. The reason is structural, not a matter of picking a
+          bigger number: this script gets one timeout and the DOM, and from
+          those it cannot tell "the app's JavaScript will never run" from
+          "the app's JavaScript is still loading". The marker is
+          server-rendered, so it is on the page in BOTH cases. On a cold Vite
+          dev server on a two-core runner, evaluating the module graph past
+          eight seconds is ordinary. And a redirect is not a harmless guess:
+          /login sends a signed-in owner to /desk, /desk sends an owner who
+          has not finished first-run setup to /desk/setup, so every misfire
+          looped the browser back to a BLANK setup form and threw away
+          whatever had been typed.
+
+          So it no longer navigates anyone. It sets one attribute, and a rule
+          in styles.css reveals the escape hatch the awaiting-a-session screen
+          already ships (hidden) in its own server-rendered HTML. The visitor
+          decides. It stamps <html>, which is the one element React is told to
+          ignore on hydration (suppressHydrationWarning, just below): touching
+          anything React rendered -- undoing the link's own `hidden`, or even
+          adding an attribute of our own to the pending screen -- makes the
+          later hydration mismatch and log a warning, on exactly the slow page
+          where this fires. The rule itself lives in styles.css because that
+          is a plain <link>: it is still on the page this is for, where the
+          app's JavaScript is not. A stranded visitor
+          still gets a way out after eight seconds; a visitor whose app was
+          merely slow gets an extra link they can ignore, and it disappears
+          the moment React hydrates. Guessing wrong now costs a link instead
+          of a lost session.
+
+          `data-session-hydrated` is stamped by ScreenPending from an effect,
+          so it appears only once React has hydrated that element: when the
+          app is alive and deliberately waiting, the link is not offered at
+          all.
         */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              'setTimeout(function(){if(document.querySelector("[data-awaiting-session]"))location.replace("/login");},8000);',
+              'setTimeout(function(){var e=document.querySelector(' +
+              '"[data-awaiting-session]:not([data-session-hydrated])");' +
+              'if(e)document.documentElement.setAttribute("data-stranded","");},8000);',
           }}
         />
         <PreviewHostBridge />

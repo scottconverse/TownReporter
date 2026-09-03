@@ -1,8 +1,13 @@
 # Changelog
 
-Current release: **0.6.4**.
+Current release: **0.6.5**.
 
 ## 0.6.5 — 2026-09-02
+- **First-run no longer bounces a slow machine to a blank setup form.** Two timeout
+  guesses treated a still-loading page as "signed out" and redirected /desk/setup ->
+  /login -> /desk -> /desk/setup, landing on an empty form; the CI first-run stall
+  seen on several browser walks was this loop, not a flake. The fallback now reveals a
+  Sign in link instead of navigating, and the desk waits for the real session answer.
 
 - **"Write a story" — one box, one click, like Opinion already has.** Until
   now the only way from a URL, a pasted packet or a bare idea to a draft was

@@ -1003,3 +1003,21 @@
     opacity: 0.7;
   }
 }
+
+/*
+  The way off a page whose JavaScript never arrived.
+
+  ScreenPending server-renders a hidden [data-stranded-signin] link on the
+  awaiting-a-session screen. The inline fallback in __root.tsx stamps
+  data-stranded on <html> after eight seconds if React has not hydrated that
+  screen (see the long comment there for why it stopped redirecting), and this
+  rule is what makes the link appear. Author CSS outranks the UA rule behind
+  `hidden`, so nothing has to touch an attribute React rendered -- undoing one
+  makes a late hydration mismatch and log a warning.
+
+  It lives in the stylesheet, not in the script, because the stylesheet is a
+  plain <link>: it is still there on the page where the app bundle is not.
+*/
+[data-stranded] [data-awaiting-session]:not([data-session-hydrated]) [data-stranded-signin][hidden] {
+  display: block;
+}

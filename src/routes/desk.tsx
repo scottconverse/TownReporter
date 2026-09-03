@@ -12,7 +12,29 @@ export const Route = createFileRoute("/desk")({
   component: DeskGate,
 });
 
-const SESSION_WAIT_MS = 2500;
+/*
+  How long the desk waits before OFFERING a way out -- never before taking
+  one. This used to be two numbers: a 1200ms hint and a 2500ms SESSION_WAIT_MS
+  after which the route stopped showing the pending screen and rendered
+  RedirectToSignIn, sending the visitor to /login on the theory that a session
+  which had not resolved in two and a half seconds was not coming.
+
+  It comes. `useSession` clears isPending when the request settles, success or
+  failure, so a still-pending session is a slow answer, not a missing one --
+  and on a cold server on a two-core box /api/auth/get-session past 2500ms is
+  ordinary. Because /login sends a signed-in owner to /desk, and /desk sends an
+  owner who has not finished first-run setup to /desk/setup, that guess put the
+  browser in a loop that landed back on a BLANK setup form. It is one of the
+  two timers that cost four browser walks on 2026-09-02 (the other is the
+  inline fallback in __root.tsx, which for the same reason no longer navigates
+  either -- see the comment there).
+
+  So the route decides on the session and nothing else: pending means wait,
+  resolved-and-empty means signed out. The timer only decides when to put a
+  Sign in link on the waiting screen, which costs a visitor nothing if it is
+  wrong.
+*/
+const SIGN_IN_OFFER_MS = 1200;
 
 function SignInLink() {
   return (
@@ -27,7 +49,6 @@ function SignInLink() {
 
 function DeskGate() {
   const { user, isPending } = useCurrentUserState();
-  const [gaveUp, setGaveUp] = useState(false);
   /*
     The sign-in remedy waits a beat before it appears.
 
@@ -48,16 +69,12 @@ function DeskGate() {
   });
 
   useEffect(() => {
-    if (user) {
-      setGaveUp(false);
-      return;
-    }
-    const t = window.setTimeout(() => setGaveUp(true), SESSION_WAIT_MS);
-    const hint = window.setTimeout(() => setSlowEnoughToOfferSignIn(true), 1200);
-    return () => {
-      window.clearTimeout(t);
-      window.clearTimeout(hint);
-    };
+    if (user) return;
+    const hint = window.setTimeout(
+      () => setSlowEnoughToOfferSignIn(true),
+      SIGN_IN_OFFER_MS,
+    );
+    return () => window.clearTimeout(hint);
   }, [user]);
 
   if (user) {
@@ -105,7 +122,7 @@ function DeskGate() {
     );
   }
 
-  if (isPending && !gaveUp) {
+  if (isPending) {
     return (
       <ScreenPending
         title="Opening the desk"

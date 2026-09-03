@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { usePaper } from "@/lib/paper-context";
 
 function Ornament({
@@ -46,8 +46,32 @@ export function ScreenPending({
 }) {
   const paper = usePaper();
   const resolvedKicker = kicker ?? paper.kicker;
+  /*
+    Proof that React actually started, for the __root.tsx escape hatch.
+
+    That fallback exists for the page where React never ran, and it can
+    only see the DOM -- so it used to key on `data-awaiting-session`
+    alone. But this screen is SERVER-rendered: the attribute is in the
+    HTML before any script runs, and it is still there while a hydrated
+    React sits waiting for a slow session. On a cold dev server hydration
+    can take longer than the fallback's eight seconds, and a signed-in
+    editor mid first-run setup was thrown to /login, back to /desk, back
+    to /desk/setup with an empty form -- a loop that ate four CI browser
+    walks in one day and would eat a real operator on a slow box. The
+    fallback no longer navigates at all, but it still uses this stamp to
+    keep from offering an escape hatch to someone who does not need one.
+
+    An effect runs only on the client, only after this element is
+    hydrated, so stamping it here is the one thing that distinguishes
+    "React never started" from "React started and is waiting".
+  */
+  const marker = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (awaitingSession) marker.current?.setAttribute("data-session-hydrated", "");
+  }, [awaitingSession]);
   return (
     <div
+      ref={marker}
       className={
         night
           ? "grid min-h-dvh place-items-center bg-ink px-6 text-paper"
@@ -77,6 +101,30 @@ export function ScreenPending({
           </p>
         ) : null}
         {action ? <div className="mt-6">{action}</div> : null}
+        {/*
+          The way out of a page where React never started.
+
+          Server-rendered and hidden, so it costs nothing and needs no
+          script to exist. The inline fallback in __root.tsx unhides it
+          after eight seconds if this screen has not been hydrated by
+          then -- a visitor whose app is merely slow never sees it,
+          because React hydrating this element re-hides it.
+        */}
+        {awaitingSession ? (
+          <div className="mt-6" hidden data-stranded-signin>
+            <a
+              href="/login"
+              className={
+                "pressable inline-flex min-h-11 items-center justify-center border px-4 text-sm " +
+                (night
+                  ? "border-paper bg-ink text-paper"
+                  : "border-ink bg-paper hover:bg-paper-2")
+              }
+            >
+              Sign in
+            </a>
+          </div>
+        ) : null}
       </div>
     </div>
   );
