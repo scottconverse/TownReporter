@@ -2,6 +2,45 @@
 
 Current release: **0.6.4**.
 
+## 0.6.5 — 2026-09-02
+
+- **"Write a story" — one box, one click, like Opinion already has.** Until
+  now the only way from a URL, a pasted packet or a bare idea to a draft was
+  Queue's four-field **File a lead yourself** form (Headline, Why now,
+  Topic, one Source URL), followed by a second trip to the story page to
+  paste the same text again as Reporting notes. **Write a story**, a new
+  section at the top of the desk landing page, is the same shape as
+  Opinion's box: paste a link, text, or an idea into one textarea, pick a
+  model with the shared `ModelPicker`, click **Write**. The parser
+  (`src/lib/news/write-story.ts`) pulls every http(s) URL out as a source
+  (capped at 8), takes the first line as the headline when it reads like one
+  (else the first sentence, else "Story from &lt;host&gt;&lt;path&gt;" when the
+  paste was nothing but a link), and keeps the whole pasted text, verbatim,
+  as the lead's Reporting-notes scratch (capped at 8,000 chars) so the draft
+  reads it as evidence. Filing and drafting go through the same server-side
+  commit boundary Story already uses
+  (`writeStoryForAuthenticatedEditor` in `model-request-commit.server.ts`,
+  wrapping `commitStoryDraftForAuthenticatedEditor`), so a provider that
+  is not signed in or not installed refuses cleanly, structured, before
+  anything is spent — same guided copy and `ProviderSignInButton` Opinion
+  shows. A successful click lands the editor on `/desk/story/<leadId>`,
+  which already knows how to show a running draft. Ctrl+Enter submits.
+- **The queue no longer buries what you just filed.** listLeads' ORDER BY
+  (`src/lib/news/desk.ts`) ranked purely by minute-truncated recency, then
+  newsworthiness, then id -- so a lead filed by hand (`fileLead` or the new
+  Write a story box, both scoring 0) sank below any scan lead filed in the
+  same minute, however low that scan lead's own score. An operator who
+  just pasted a link watched it land at the bottom of the queue instead
+  of the top. Every scan-filed lead carries that scan's `scan_run_id`;
+  nothing filed by hand or promoted from Dark Desk ever does, so the fix
+  is `order by (scan_run_id is null) desc, ...`: hand-filed leads now sort
+  as one group ahead of every scan batch, newest first, and scan leads
+  keep exactly the minute/newsworthiness/id ordering they always had among
+  themselves. Covered by `src/lib/news/lead-queue-order.test.ts`.
+- `docs/editor.md` gets a short "Write a story from a link or your own
+  notes" section describing the new fast path; `docs/manual.md`'s
+  Scan/Draft/Opinion model-routing table gets a **Write a story** row.
+
 ## 0.6.4 — 2026-09-02
 
 - **QA-1 round 3: the matcher stopped making a binary discard-or-not decision
