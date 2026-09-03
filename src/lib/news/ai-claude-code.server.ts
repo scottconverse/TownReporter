@@ -28,8 +28,19 @@
  * separate CLI processes. Latency floor is ~2.5s per call.
  */
 import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { assertNotAnArgument } from "./voice.server.ts";
 import { spawnPlan } from "./cli-spawn.server.ts";
+
+/**
+ * Mirrors the limit in `assertNotAnArgument` (voice.server.ts): the point
+ * past which a string stops being a safe command-line argument. Kept as its
+ * own constant here rather than imported so this module never has to reach
+ * back into voice.server.ts for a number — only for the assertion itself.
+ */
+const SAFE_SYSTEM_ARG_CHARS = 8000;
 
 export type ClaudeCodeResult = { ok: true; text: string } | { ok: false; error: string };
 
@@ -217,7 +228,42 @@ export async function claudeCodeChat(opts: {
     Checked before `findClaudeCli()` so the refusal never depends on whether
     a CLI binary happens to be installed on this machine.
   */
-  if (opts.systemPromptFile && (opts.allowedTools?.length ?? 0) > 0) {
+  /*
+    A long prompt must never become an argument, no matter which caller
+    forgot to plan for it.
+
+    Every desk call used to have to remember to pass `systemPromptFile`
+    itself, and grokChat's claude-code branch never did — it always inlined
+    `system` as `--system-prompt`, which is fine for the one-line prompts
+    most callers send and a live crash the day one doesn't (dark_jobs id 49:
+    an 11,961-character Dark Desk system prompt tripped `assertNotAnArgument`
+    below). Rather than push that discipline onto every caller, this is now
+    the one choke point: a caller-supplied `systemPromptFile` is always
+    honoured as-is, and an inline `system` over the safe argv length is
+    silently promoted to a private temp file instead of being thrown at the
+    command line. Only a system prompt that is both inline AND short ever
+    reaches argv.
+  */
+  let systemPromptFile = opts.systemPromptFile;
+  let ownedTempDir: string | undefined;
+  if (!systemPromptFile && opts.system.length > SAFE_SYSTEM_ARG_CHARS) {
+    ownedTempDir = await mkdtemp(join(tmpdir(), "trd-sysprompt-"));
+    systemPromptFile = join(ownedTempDir, "system-prompt.txt");
+    await writeFile(systemPromptFile, opts.system, "utf8");
+  }
+  const usingFile = Boolean(systemPromptFile);
+
+  const cleanupTempDir = () => {
+    if (!ownedTempDir) return;
+    const dir = ownedTempDir;
+    ownedTempDir = undefined;
+    void rm(dir, { recursive: true, force: true }).catch(() => {
+      /* best-effort; a leftover temp file is not worth failing the call over */
+    });
+  };
+
+  if (systemPromptFile && (opts.allowedTools?.length ?? 0) > 0) {
+    cleanupTempDir();
     throw new Error(
       "Refusing to combine systemPromptFile with any allowedTools in one Claude Code call: " +
         "a private system prompt and network-capable tools must never share a call " +
@@ -227,20 +273,27 @@ export async function claudeCodeChat(opts: {
   }
 
   const bin = await findClaudeCli();
-  if (!bin) return { ok: false, error: CLAUDE_CLI_MISSING };
+  if (!bin) {
+    cleanupTempDir();
+    return { ok: false, error: CLAUDE_CLI_MISSING };
+  }
 
   /*
-    A long prompt must never become an argument. Arguments are visible to any
-    process that can list processes, and Windows caps them at 32,767 characters
-    anyway. `assertNotAnArgument` makes that a refusal rather than a habit.
+    Arguments are visible to any process that can list processes, and Windows
+    caps them at 32,767 characters anyway. `assertNotAnArgument` makes an
+    over-length inline prompt a refusal rather than a habit — it should never
+    actually fire now that the block above promotes long prompts to a file
+    first, but it stays as the backstop for the one path left: a caller-passed
+    `systemPromptFile` was not used, and the prompt is still too long, which
+    only happens if `SAFE_SYSTEM_ARG_CHARS` and `assertNotAnArgument`'s own
+    limit ever drift apart.
   */
-  const usingFile = Boolean(opts.systemPromptFile);
   if (!usingFile) assertNotAnArgument(opts.system, "system prompt");
 
   const args = [
     "-p",
     ...(usingFile
-      ? ["--system-prompt-file", opts.systemPromptFile!]
+      ? ["--system-prompt-file", systemPromptFile!]
       : ["--system-prompt", opts.system]),
     // Drop the harness preamble the newsroom has no use for.
     "--exclude-dynamic-system-prompt-sections",
@@ -268,6 +321,7 @@ export async function claudeCodeChat(opts: {
         windowsHide: true,
       });
     } catch {
+      cleanupTempDir();
       resolve({ ok: false, error: CLAUDE_CLI_MISSING });
       return;
     }
@@ -279,6 +333,7 @@ export async function claudeCodeChat(opts: {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      cleanupTempDir();
       resolve(r);
     };
 

@@ -40,6 +40,32 @@ Current release: **0.6.4**.
 - `docs/editor.md` gets a short "Write a story from a link or your own
   notes" section describing the new fast path; `docs/manual.md`'s
   Scan/Draft/Opinion model-routing table gets a **Write a story** row.
+- **Dark Desk "Start digging" could not run once its system prompt grew past
+  ~8,000 characters (Critical, live crash — dark_jobs id 49, investigation
+  3).** `grokChat`'s claude-code branch (`src/lib/news/ai.ts`) always handed
+  the model's `system` string to `claudeCodeChat` as a plain field, which
+  `claudeCodeChat` (`src/lib/news/ai-claude-code.server.ts`) put on the
+  command line as `--system-prompt` unless the caller separately passed
+  `systemPromptFile`. Story's editorial-voice draft avoided this because
+  `editorial.server.ts` calls `claudeCodeChat` directly with
+  `systemPromptFile` set; every `grokChat` caller — Dark Desk's
+  `synthesizeSignals` and `buildBrief` (`dark.ts`), `grokPlanner`
+  (`investigate.ts`), and any future one — had no such path and relied on
+  `assertNotAnArgument`'s 8,000-character refusal to keep from leaking a long
+  prompt onto every other process on the machine, which is correct behaviour
+  from the guard but meant the call could simply never complete. Fixed at the
+  one choke point instead of in each caller: `claudeCodeChat` now promotes an
+  inline `system` string over the safe argv length to a private temp file
+  (`--system-prompt-file`) automatically, deleting the temp file when the
+  call settles, and only falls back to `assertNotAnArgument`'s hard refusal
+  if that promotion path is ever bypassed. A caller-supplied `systemPromptFile`
+  (Story's voice) is unaffected. Proven with a new `ai-claude-code.test.ts`
+  suite driving the real `claudeCodeChat` against an extended
+  `fake-claude-cli.mjs` (now echoes which flag it received and the prompt
+  length it read) with a 33,000-character system prompt — asserts the file
+  route is used and the call does not throw — plus coverage that a short
+  prompt still goes inline and that an explicit `systemPromptFile` still
+  wins over `system`.
 
 ## 0.6.4 — 2026-09-02
 
