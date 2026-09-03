@@ -34,6 +34,19 @@ Current release: **0.6.4**.
   e.g. '…'`), so a merge — right or wrong — is reviewable, never silent
   (`src/lib/news/lead-filing.ts`, `desk-copy.ts`'s `resurfacedSummarySentence`).
   Documented in `docs/editor.md`'s "Killed — seen again" section.
+- **QA-1 round 2: the headline-overlap match paths merged different agenda
+  items too, not just the anchor path (Critical).** Round 1 gated the anchor
+  path on a shared content word but left `lead-match.ts`'s two headline-Jaccard
+  paths scoring overlap over every surviving word, civic furniture included —
+  "Council approves $180,000 police overtime contract at Sept. 12 meeting"
+  cleared 0.6 Jaccard against "...fire truck contract..." on
+  council/approves/contract/sept/meeting alone. 7 of 13 adversarial pairs
+  merged this way. All three match paths now score overlap over content
+  tokens only (furniture and a shared proper noun stripped, plurals folded)
+  and every path requires a real shared content word, not just a date, an
+  amount, or boilerplate. Re-verified against all 13 adversarial pairs plus 2
+  new positives (plural/singular content noun, a typo case): 0 false merges,
+  0 missed duplicates.
 - **A malformed provider time-budget request is now refused, not treated as a
   Reset (QA-2, Major).** `saveProviderTimeFn` (`src/lib/news/provider-settings.ts`)
   collapsed `NaN`, `Infinity`, and non-numeric `callSeconds` values into the

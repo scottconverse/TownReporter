@@ -185,32 +185,53 @@ export function sharedAnchorCount(a: Set<string>, b: Set<string>): number {
 }
 
 /**
- * QA-1 (2026-09-02): the anchor path above was built for a same-story
- * rewrite that shares a source URL plus >= 2 concrete anchors (a date, a
- * dollar amount, a proper noun...) but almost no prose. It did not guard
- * against two DIFFERENT stories on the same portal page that happen to share
- * a meeting date and a round dollar figure -- "Council votes on $250,000
- * library roof repair contract at Sept. 10 meeting" vs "Council approves
- * $250,000 park irrigation contract at Sept. 10 meeting" cleared the anchor
- * bar (shared URL, shared date, shared amount) despite naming two unrelated
- * subjects, and the matched candidate's content was silently discarded (see
- * lead-filing.ts).
+ * QA-1 (2026-09-02, round 1): the anchor path above was built for a
+ * same-story rewrite that shares a source URL plus >= 2 concrete anchors (a
+ * date, a dollar amount, a proper noun...) but almost no prose. It did not
+ * guard against two DIFFERENT stories on the same portal page that happen to
+ * share a meeting date and a round dollar figure -- "Council votes on
+ * $250,000 library roof repair contract at Sept. 10 meeting" vs "Council
+ * approves $250,000 park irrigation contract at Sept. 10 meeting" cleared
+ * the anchor bar (shared URL, shared date, shared amount) despite naming two
+ * unrelated subjects, and the matched candidate's content was silently
+ * discarded (see lead-filing.ts). Round 1 gated the anchor path on
+ * sharesContentWord and shipped it.
+ *
+ * QA-1 (round 2): round 1 only gated the anchor path. The headline-overlap
+ * paths (shared URL + Jaccard/containment, and the no-URL Jaccard-only path)
+ * still scored overlap over EVERY surviving token, civic furniture included
+ * -- "Council approves $180,000 police overtime contract at Sept. 12
+ * meeting" vs "...fire truck contract..." shares council/approves/contract/
+ * sept/meeting and cleared 0.6 Jaccard despite "police overtime" and "fire
+ * truck" having nothing in common. 7 of 13 adversarial pairs merged this
+ * way. Fixed by scoring all three paths' overlap over CONTENT tokens only
+ * (see contentTokens) and requiring every path to also pass
+ * sharesContentWord -- see findMatchingLead's doc comment for the full rule.
  *
  * These are words a civic-agenda headline reaches for regardless of subject
- * -- true of every item on every meeting's agenda, so sharing one proves
- * nothing about whether two headlines are the SAME item. Combined with
- * PROPER_NOUN_STOPLIST and STOP_WORDS below to build the anchor path's
- * required content-word overlap (see sharesContentWord): the anchor path
- * now also requires at least one shared word that survives all three lists,
- * so "executive"/"sessions" (a real same-story match, kept) still clears the
- * bar while "roof"/"repair" vs "irrigation" (two different subjects, fixed)
- * does not.
+ * -- true of every item on every meeting's agenda (or, for "million"/
+ * "billion"/"grant", generic magnitude/funding words that ride along with an
+ * amount without naming what it's for), so sharing one proves nothing about
+ * whether two headlines are the SAME item. "closed"/"door" were judged NOT
+ * furniture -- open-vs-closed session is a real distinguishing fact, not
+ * boilerplate, and it's load-bearing for the live 0.6.2 match. "executive"
+ * is deliberately not on this list either, for the same reason. "session"/
+ * "sessions" were removed from this list in round 2: they were furniture in
+ * round 1's list but round 1's own doc comment claimed they were "kept" as
+ * content, which was never true of the code -- round 2 makes the code match
+ * the stated intent, and no adversarial pair depends on "session" being
+ * furniture.
  */
 const CONTENT_STOPLIST = new Set([
   "council", "board", "boards", "meeting", "meetings", "vote", "votes", "voted",
   "approve", "approves", "approved", "contract", "contracts", "agenda", "agendas",
-  "item", "items", "session", "sessions", "hearing", "hearings", "notice", "notices",
+  "item", "items", "hearing", "hearings", "notice", "notices",
   "public", "sept", "city",
+  "ordinance", "ordinances", "application", "applications", "variance", "variances",
+  "county", "regular", "special", "packet", "packets", "posted",
+  "million", "billion", "thousand", "grant", "grants",
+  "planning", "review", "reviews", "reviewed",
+  "debate", "debates", "debated",
 ]);
 
 const STOP_WORDS = new Set([
@@ -224,13 +245,17 @@ const STOP_WORDS = new Set([
   "at", "to", "of", "a", "an", "is", "as", "by", "up",
 ]);
 
-function headlineTokens(headline: string): Set<string> {
-  const words = headline
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]+/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length >= 3 && !STOP_WORDS.has(w));
-  return new Set(words);
+/** Strip a trailing "s" so plural/singular variants ("session"/"sessions",
+ * "grants"/"grant") land on the same token. Deliberately conservative: only
+ * words longer than 4 letters, and never a double-s ending ("congress"),
+ * to avoid mangling short words that happen to end in "s". Applied AFTER a
+ * word has already cleared the stoplist/proper-noun checks below, which all
+ * key on the raw word -- see contentTokens. */
+function stem(word: string): string {
+  if (word.length > 4 && word.endsWith("s") && !word.endsWith("ss")) {
+    return word.slice(0, -1);
+  }
+  return word;
 }
 
 function jaccard(a: Set<string>, b: Set<string>): number {
@@ -273,25 +298,45 @@ function sharesUrl(a: string[], b: string[]): boolean {
   return false;
 }
 
+/**
+ * QA-1 (round 2): both headline-overlap paths score CONTENT tokens, not
+ * every surviving word -- see contentTokens and CONTENT_STOPLIST's doc
+ * comment for why scoring civic-agenda furniture ("council approves ...
+ * contract at ... meeting") let two different agenda items look like a
+ * paraphrase of each other. sharesContentWord is also required explicitly:
+ * given the thresholds below are all > 0, a nonzero Jaccard/containment
+ * score already implies at least one shared content token, but the explicit
+ * check keeps that invariant true even if a threshold is ever loosened.
+ */
 function headlinesOverlapEnough(a: string, b: string): boolean {
-  const ta = headlineTokens(a);
-  const tb = headlineTokens(b);
-  return jaccard(ta, tb) >= HEADLINE_JACCARD_THRESHOLD || containment(ta, tb) >= HEADLINE_CONTAINMENT_THRESHOLD;
+  const ta = contentTokens(a);
+  const tb = contentTokens(b);
+  return (
+    (jaccard(ta, tb) >= HEADLINE_JACCARD_THRESHOLD || containment(ta, tb) >= HEADLINE_CONTAINMENT_THRESHOLD) &&
+    sharesContentWord(a, b)
+  );
 }
 
 function headlinesAloneMatch(a: string, b: string): boolean {
-  const ta = headlineTokens(a);
-  const tb = headlineTokens(b);
-  return jaccard(ta, tb) >= HEADLINE_ONLY_THRESHOLD;
+  const ta = contentTokens(a);
+  const tb = contentTokens(b);
+  return jaccard(ta, tb) >= HEADLINE_ONLY_THRESHOLD && sharesContentWord(a, b);
 }
 
 /** Words at least 4 letters long, present in the headline, and NOT on
  * STOP_WORDS, PROPER_NOUN_STOPLIST, or CONTENT_STOPLIST -- see
- * CONTENT_STOPLIST's doc comment. This is deliberately a lower bar than
- * headlineTokens' full-overlap scoring: the anchor path only needs proof
- * the two headlines are about the same SUBJECT, not that they are a close
- * paraphrase of each other. */
+ * CONTENT_STOPLIST's doc comment -- and not a non-stoplisted proper noun
+ * (nonStoplistedProperNouns) either. That last exclusion matters for match
+ * path 2: a shared place name like "Twin Peaks" is already scored as an
+ * anchor (noun:twin, noun:peaks), so reusing it here would let two
+ * different agenda items about the same place ("Twin Peaks rezoning
+ * application" vs "Twin Peaks parking variance") satisfy sharesContentWord
+ * on the location alone -- the anchor path needs a *different* piece of
+ * evidence that the SUBJECT, not just the place, is the same. Plural/
+ * singular variants are folded together (stem) after the stoplist checks,
+ * which all key on the raw word. */
 function contentTokens(headline: string): Set<string> {
+  const properNouns = nonStoplistedProperNouns(headline);
   const words = headline
     .toLowerCase()
     .replace(/[^a-z0-9\s]+/g, " ")
@@ -301,13 +346,15 @@ function contentTokens(headline: string): Set<string> {
         w.length >= 4 &&
         !STOP_WORDS.has(w) &&
         !PROPER_NOUN_STOPLIST.has(w) &&
-        !CONTENT_STOPLIST.has(w),
-    );
+        !CONTENT_STOPLIST.has(w) &&
+        !properNouns.has(w),
+    )
+    .map(stem);
   return new Set(words);
 }
 
-/** QA-1: required alongside the anchor count for match path 2 -- see
- * findMatchingLead and CONTENT_STOPLIST's doc comment. */
+/** QA-1: required alongside the overlap score for every match path (1, 2,
+ * and 3) -- see findMatchingLead and CONTENT_STOPLIST's doc comment. */
 function sharesContentWord(a: string, b: string): boolean {
   const ta = contentTokens(a);
   const tb = contentTokens(b);
@@ -330,19 +377,30 @@ export type MatchCandidateLead = {
  * Find an existing lead that the given AI-returned candidate is the same
  * story as. Returns the matching lead's id, or null when nothing matches.
  *
- * Match rule (three independent paths, any one is sufficient):
- *   1. Shares at least one normalised source URL AND headline token overlap
- *      is >= 0.6 Jaccard OR >= 0.7 containment of the shorter headline.
+ * Match rule (three independent paths, any one is sufficient; every path
+ * also requires sharesContentWord -- QA-1 round 2, see CONTENT_STOPLIST's
+ * doc comment):
+ *   1. Shares at least one normalised source URL AND CONTENT-token overlap
+ *      (contentTokens -- furniture words and shared proper nouns stripped,
+ *      >= 4 letters, plurals folded) is >= 0.6 Jaccard OR >= 0.7 containment
+ *      of the shorter headline.
  *   2. Shares at least one normalised source URL AND the two headlines
  *      share >= ANCHOR_MATCH_MIN_SHARED anchors (concrete dates, dollar
  *      amounts, multi-digit numbers, or non-generic proper nouns) AND share
- *      at least one content word (>= 4 letters, not generic civic
- *      furniture -- see CONTENT_STOPLIST) -- see extractAnchors and
+ *      at least one content word -- see extractAnchors and
  *      ANCHOR_MATCH_MIN_SHARED for why this catches a same-source rewrite
  *      that shares almost no words, and CONTENT_STOPLIST for why anchors
  *      alone are not enough to tell two different agenda items apart (QA-1).
- *   3. No shared URL, but headline token overlap is >= 0.85 Jaccard alone
+ *   3. No shared URL, but CONTENT-token overlap is >= 0.85 Jaccard alone
  *      (a portal notice re-posted under a different deep link).
+ *
+ * Scoring every path over content tokens (not every surviving word) is what
+ * keeps two different agenda items on one templated portal page ("Council
+ * approves $180,000 police overtime contract at Sept. 12 meeting" vs
+ * "...fire truck contract...") from clearing 0.6 Jaccard on furniture words
+ * alone -- round 1 fixed this for path 2 only; round 2 (2026-09-02) closed
+ * the same hole in paths 1 and 3, which QA-1's adversarial set caught
+ * merging 7 of 13 pairs it should not have.
  *
  * Only considers leads whose status is in MATCHABLE_STATUSES (never
  * 'published' -- a fresh development on a published story should file as

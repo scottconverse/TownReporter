@@ -182,7 +182,10 @@ figure, a proper noun) — but a shared date or dollar figure alone is never
 enough. Two different agenda items from the same meeting page that happen to
 name the same figure and date still need at least one real shared subject
 word before they are treated as the same story, so a genuinely different
-story on the same page is never silently folded into an old one. When a
+story on the same page is never silently folded into an old one. Put plainly:
+two leads are treated as the same story only when they share a subject word,
+not just a date, an amount, or agenda boilerplate ("council," "meeting," a
+month name). When a
 scan run does stamp a lead instead of filing a new one, the scan's own
 result summary names the headline that got merged (for example: "1 lead
 matched a story you already killed and was stamped, not refiled — e.g.
