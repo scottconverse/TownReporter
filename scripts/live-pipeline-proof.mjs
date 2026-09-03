@@ -83,6 +83,7 @@ const MODEL_LABELS = {
   "codex-balanced": "Codex Terra",
   "codex-frontier": "Codex Sol",
   "claude-frontier": "Claude Opus",
+  "local-model": "Local model",
 };
 const labelFor = (choice) => MODEL_LABELS[choice] ?? choice ?? "unknown";
 

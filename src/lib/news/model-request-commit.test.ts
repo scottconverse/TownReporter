@@ -426,6 +426,66 @@ describe("authenticated Codex commit boundary", () => {
     await sql`delete from editorial_requests where user_id = ${userId}`;
   });
 
+  /*
+    Audit finding "Opinion 'Local model' pick silently uses Claude": the
+    commit boundary persists and enqueues `readiness.effectiveChoice`
+    verbatim, so once `checkOpinionReadiness` stops overwriting an explicit
+    "local-model" pick with Claude, the commit boundary must be proven to
+    carry that choice all the way to both the `editorial_requests` row and
+    the queued `desk_jobs` row -- not just trust the fix upstream.
+  */
+  it("persists and enqueues an explicit local-model pick, not claude-frontier", async () => {
+    const sql = await ensureCommitBoundarySchema();
+    const userId = `opinion-local-model-${Date.now()}-${Math.random()}`;
+    let enqueuedChoice: string | undefined;
+    const result = await commitOpinionForAuthenticatedEditor(
+      {
+        context: { userId, newsroomId: 1 },
+        subject: "Longmont should fund a second library branch downtown.",
+        modelChoice: "local-model",
+      },
+      {
+        checkReadiness: (choice) =>
+          checkOpinionReadiness(choice, {
+            findVoice: async () => ({ ok: true as const, voice: { path: "C:/voice.md" } }),
+            probeCandidate: async (candidate) => ({
+              ok: true as const,
+              label: "Local model",
+              choice: candidate,
+            }),
+          }),
+        ensureEditorialRequestSchema: async () => undefined,
+        assertRate: async () => undefined,
+        enqueueJob: async (opts) => {
+          enqueuedChoice = opts.modelChoice;
+          return enqueueJob({ ...opts, kick: false });
+        },
+        findOpenJob: async () => null,
+        audit: async () => undefined,
+      },
+    );
+
+    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    if (!result.ok) return;
+    assert.equal(result.modelChoice, "local-model");
+    assert.equal(enqueuedChoice, "local-model");
+
+    const [request] = await sql<{ model_choice: string }>`
+      select model_choice from editorial_requests where user_id = ${userId}
+    `;
+    assert.equal(request?.model_choice, "local-model");
+
+    const [job] = await sql<{ model_choice: string }>`
+      select model_choice from desk_jobs where kind = 'editorial' and user_id = ${userId}
+    `;
+    assert.equal(
+      job?.model_choice,
+      "local-model",
+      "the queued job must run the picked local model, not fall back to Claude",
+    );
+    await sql`delete from editorial_requests where user_id = ${userId}`;
+  });
+
   it("returns a durable queued Opinion as success when only the audit write fails", async () => {
     const sql = await ensureCommitBoundarySchema();
     const userId = `opinion-audit-failure-${Date.now()}-${Math.random()}`;

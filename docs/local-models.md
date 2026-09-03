@@ -200,7 +200,12 @@ name the way "Local Qwen" was before it was removed 2026-09-02.
    is deliberate: a second, separate `LOCAL_BASE_URL` would split one local
    server's configuration across two variable names for no reason. Set
    `TOWNREPORTER_LOCAL=0` to take the named pick out of the pickers without
-   touching the unnamed gateway path.
+   touching the unnamed gateway path. Unlike the unnamed gateway above,
+   `LLM_BASE_URL` itself is required for this named pick to be offered as
+   ready — `LLM_API_KEY` and `LLM_MODEL` alone are not enough. An entry
+   labelled "Local model" that had no local endpoint to point at used to
+   silently fall back to `https://api.openai.com/v1`; it now refuses instead
+   (0.6.13).
 
 The entry itself, in `PROVIDER_REGISTRY`:
 
@@ -214,8 +219,12 @@ The entry itself, in `PROVIDER_REGISTRY`:
   baseUrl: "http://127.0.0.1:1234/v1",
   envOverrides: { model: "LLM_MODEL", baseUrl: "LLM_BASE_URL", apiKey: "LLM_API_KEY" },
   budget: KIND_BUDGETS.local,
-  enabled: () => notSwitchedOff("TOWNREPORTER_LOCAL") &&
-    Boolean(env("LLM_BASE_URL") || (env("LLM_API_KEY") && env("LLM_MODEL"))),
+  // LLM_BASE_URL specifically -- a key plus a model with no base URL is not
+  // enough. An entry named "Local model" must never resolve to a public
+  // cloud endpoint by default (0.6.13; the unnamed `configured` gateway
+  // below still accepts a key plus a model alone, because it makes no
+  // locality claim).
+  enabled: () => notSwitchedOff("TOWNREPORTER_LOCAL") && Boolean(env("LLM_BASE_URL")),
   offSwitchEnv: "TOWNREPORTER_LOCAL",
   offeredFor: { story: true, scan: true, opinion: true, dark: true },
   // no ladderRank: Automatic does not reach for it on its own -- when

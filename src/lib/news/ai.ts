@@ -101,6 +101,31 @@ function customGateway(): LlmConfig | null {
   };
 }
 
+/**
+ * The "Local model" entry's own gateway. Unlike `customGateway()` above, this
+ * NEVER falls back to `https://api.openai.com/v1` -- an entry named "Local
+ * model" that has no LLM_BASE_URL set has no local endpoint to talk to, full
+ * stop. Before this, `explicitProvider`'s `local` branch called
+ * `customGateway()` directly, so an install with only LLM_API_KEY + LLM_MODEL
+ * set (no LLM_BASE_URL) silently sent an editor's "Local model" pick to
+ * OpenAI's paid cloud (audit finding "a 'local' pick can hit the real paid
+ * OpenAI cloud"). `provider-registry.ts`'s `local-model.enabled()` mirrors
+ * this same requirement so the picker never even offers it as ready without
+ * an explicit local endpoint.
+ */
+function localGateway(): LlmConfig | null {
+  const customBase = env("LLM_BASE_URL");
+  if (!customBase) return null;
+  const customKey = env("LLM_API_KEY") ?? env("OPENAI_API_KEY");
+  const customModel = env("LLM_MODEL");
+  return {
+    apiKey: customKey || "not-needed",
+    baseUrl: trimSlash(customBase),
+    model: customModel || "gpt-4o-mini",
+    label: "LLM",
+  };
+}
+
 function xaiGateway(): LlmConfig | null {
   const xai = env("XAI_API_KEY") ?? env("GROK_API_KEY");
   if (!xai) return null;
@@ -202,8 +227,13 @@ function explicitProvider(choice: StoryModelChoice): Provider | null {
 
   if (entry.kind === "codex") return { kind: "codex", model, label: entry.label };
 
-  if (entry.kind === "openai" || entry.kind === "local") {
+  if (entry.kind === "openai") {
     const llm = customGateway();
+    return llm ? { kind: "openai", ...llm } : null;
+  }
+
+  if (entry.kind === "local") {
+    const llm = localGateway();
     return llm ? { kind: "openai", ...llm } : null;
   }
 

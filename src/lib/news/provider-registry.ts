@@ -287,9 +287,19 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     budget: KIND_BUDGETS.local,
     // No plannerModel: a local server serves one model and has never heard of
     // anyone else's identifier. Audit finding TW-001 -- see `plannerModelFor`.
-    enabled: () =>
-      notSwitchedOff("TOWNREPORTER_LOCAL") &&
-      Boolean(env("LLM_BASE_URL") || (env("LLM_API_KEY") && env("LLM_MODEL"))),
+    /*
+      LLM_BASE_URL specifically, not "or LLM_API_KEY + LLM_MODEL" -- an entry
+      NAMED "Local model" must never be ready without an actual local
+      endpoint to point at. Before this, LLM_API_KEY + LLM_MODEL alone made
+      this entry report itself ready, and ai.ts's `explicitProvider` used to
+      resolve that case by falling back to `https://api.openai.com/v1` --
+      together, an editor's "Local model" pick could silently reach OpenAI's
+      paid cloud instead of a local server (audit finding "a 'local' pick can
+      hit the real paid OpenAI cloud"). `ai.ts`'s `localGateway()` now
+      enforces the same requirement at resolution time; this is the readiness
+      half so the picker does not even offer it as ready without one.
+    */
+    enabled: () => notSwitchedOff("TOWNREPORTER_LOCAL") && Boolean(env("LLM_BASE_URL")),
     offSwitchEnv: "TOWNREPORTER_LOCAL",
     // "Anywhere an AI acts, the editor can pick the model" -- every surface.
     offeredFor: EVERY_SURFACE,

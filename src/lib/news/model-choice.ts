@@ -157,7 +157,26 @@ export function modelChoiceHelp(
   return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first one's login has lapsed or it does not respond in time, the ${noun} moves to the next.`;
 }
 
-export function opinionProviderProblem(error: string): string {
+/**
+ * Rewrites the generic "no model configured at all" message into Opinion's
+ * own guidance. `candidate` says WHICH rung was being probed when that
+ * happened -- defaulting to "claude-frontier" keeps every existing call site
+ * (and Automatic, which is still Claude-only) unchanged.
+ *
+ * Before `candidate` existed, this rewrote to "Open Claude Code ... and sign
+ * in" unconditionally, so a "local-model" pick with no LLM_BASE_URL set at
+ * all reported an unrelated Claude sign-in instruction instead of naming the
+ * setting that would actually fix it (audit finding "Opinion 'Local model'
+ * pick silently uses Claude" also named this exact symptom). A local-model
+ * failure now passes its own message through untouched -- `probeProvider`'s
+ * GROK_UNAVAILABLE already names LLM_BASE_URL, and any other local-model
+ * failure (unreachable server, rejected credentials) is already specific.
+ */
+export function opinionProviderProblem(
+  error: string,
+  candidate: OpinionModelChoice = "claude-frontier",
+): string {
+  if (candidate !== "claude-frontier") return error;
   if (!/AI is not available/i.test(error)) return error;
   return "No Opinion model is available. Open Claude Code on this machine and sign in.";
 }

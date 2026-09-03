@@ -275,6 +275,7 @@ type EditorialRuntime = {
     { ok: true; voice: { path: string; bytes: number } } | { ok: false; error: string }
   >;
   runClaudePair: () => Promise<EditorialChatResult>;
+  runLocalPair: () => Promise<EditorialChatResult>;
   fileEditorial: () => Promise<{
     ok: true;
     draftId: number;
@@ -303,7 +304,7 @@ type EditorialOrchestrator = (
       headline: string;
       words: number;
       hadAppendix: boolean;
-      modelChoice: "claude-frontier";
+      modelChoice: "claude-frontier" | "local-model";
     }
   | { ok: false; error: string }
 >;
@@ -339,12 +340,56 @@ function claudeRuntime(events: string[], reply: EditorialChatResult) {
       events.push("claude");
       return reply;
     },
+    // Poison pill: Automatic and an explicit "claude-frontier" pick must
+    // never reach for the local pair. See audit finding "Opinion 'Local
+    // model' pick silently uses Claude" -- the fix for that bug runs in the
+    // opposite direction too, and this guards it.
+    async runLocalPair() {
+      events.push("local");
+      throw new Error("Automatic/claude-frontier must never run the Local model pair");
+    },
     async fileEditorial() {
       events.push("file");
       return {
         ok: true,
         draftId: 41,
         headline: "OPINION: A budget headline",
+        words: 4,
+        hadAppendix: false,
+      };
+    },
+    timeoutMs: () => 60_000,
+  };
+  return runtime;
+}
+
+/**
+ * Audit finding "Opinion 'Local model' pick silently uses Claude": before the
+ * fix, `orchestrateEditorial` always called `runtime.runClaudePair()` no
+ * matter what `modelChoice` said. `runClaudePair` is a poison pill here so
+ * any regression back to that bug fails loudly instead of quietly drafting
+ * on Claude in a test that only checks `runLocalPair` was reached.
+ */
+function localRuntime(events: string[], reply: EditorialChatResult) {
+  const runtime: EditorialRuntime = {
+    async findVoiceFile() {
+      events.push("voice:locate");
+      return { ok: true, voice: { path: "C:\\private\\voice.md", bytes: 1_024 } };
+    },
+    async runClaudePair() {
+      events.push("claude");
+      throw new Error("an explicit local-model pick must never run the Claude pair");
+    },
+    async runLocalPair() {
+      events.push("local");
+      return reply;
+    },
+    async fileEditorial() {
+      events.push("file");
+      return {
+        ok: true,
+        draftId: 42,
+        headline: "OPINION: A local budget headline",
         words: 4,
         hadAppendix: false,
       };
@@ -466,5 +511,70 @@ describe("Opinion runs one Claude pair", () => {
       /codexChat|readVoiceTextForOpenAiCodex|codexModel|ai-codex\.server/,
       "Codex has no seat on the Opinion desk; if it returns, its refusal problem returns with it",
     );
+  });
+});
+
+/*
+  Audit finding "Opinion 'Local model' pick silently uses Claude" (BLOCKER):
+  `orchestrateEditorial` used to call `runtime.runClaudePair()` unconditionally,
+  so an explicit "local-model" pick drafted on Claude anyway. Local models can
+  write editorials -- there is no refusal problem the way Codex had -- so
+  "local-model" must be a fully working, independently-dispatched choice.
+*/
+describe("Opinion runs one Local model pair when explicitly picked", () => {
+  it("an explicit local-model choice runs locate -> local pair -> file, and never touches Claude", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "local-model" },
+      localRuntime(events, { ok: true, text: DELIVERED }),
+    );
+    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    if (!result.ok) return;
+    assert.equal(result.modelChoice, "local-model");
+    assert.deepEqual(events, ["voice:locate", "local", "file"]);
+  });
+
+  it("does not file when the voice file is missing", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const runtime = localRuntime(events, { ok: true, text: DELIVERED });
+    runtime.findVoiceFile = async () => ({ ok: false, error: "No voice file" });
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "local-model" },
+      runtime,
+    );
+    assert.equal(result.ok, false);
+    assert.deepEqual(events, []);
+  });
+
+  it("reports the local pair's failure and files nothing, and does not blame Claude", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "local-model" },
+      localRuntime(events, { ok: false, error: "LLM is unreachable." }),
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) assert.fail("filed on a failed pair");
+    assert.match(result.error, /LLM is unreachable/);
+    assert.doesNotMatch(result.error, /Claude/i);
+    assert.equal(events.includes("file"), false);
+  });
+
+  it("does not file a local-model refusal as an editorial", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "local-model" },
+      localRuntime(events, {
+        ok: true,
+        text: "EDITORIAL_REFUSAL: I can't take a position on this.",
+      }),
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) assert.fail("a refusal was filed");
+    assert.match(result.error, /declined|Nothing was filed/i);
+    assert.equal(events.includes("file"), false);
   });
 });

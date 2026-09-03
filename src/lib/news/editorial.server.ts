@@ -7,7 +7,7 @@ import {
   type WriteEditorialInput,
   type WriteEditorialResult,
 } from "./editorial-orchestration.ts";
-import { findVoiceFile } from "./voice.server.ts";
+import { findVoiceFile, readVoiceTextForLocalModel } from "./voice.server.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { opinionModelChoice } from "./model-choice.ts";
 import {
@@ -148,6 +148,35 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
         model: process.env.TOWNREPORTER_EDITORIAL_MODEL?.trim() || "claude-opus-5",
         timeoutMs: editorialTimeoutMs(),
       });
+    },
+    /*
+      The Local model pair. Unlike the Claude Code CLI, a local server has no
+      WebSearch/WebFetch tool loop to run a separate gathering pass with (see
+      EDITORIAL_TOOLS), so this is one call: it writes straight from the
+      editor's own pointers via `buildWritingPack({ research: "" })`, which
+      renders the honest "the gathering pass found nothing usable" note
+      rather than pretending research happened. It has no `--system-prompt-
+      file` equivalent either, so the voice travels as an ordinary system
+      string through `readVoiceTextForLocalModel` -- the same destination-
+      named-authorization idea voice.server.ts's other text export used for a
+      withdrawn provider path, scoped to this one call site.
+    */
+    runLocalPair: async ({ input: editorialInput }) => {
+      const voice = await readVoiceTextForLocalModel();
+      if (!voice.ok) return voice;
+      const { grokChat } = await import("./ai");
+      return grokChat(
+        voice.text,
+        buildWritingPack({
+          paper: editorialInput.paper,
+          subject: editorialInput.subject,
+          ourStory: editorialInput.ourStory,
+          askedFor: editorialInput.askedFor,
+          research: "",
+        }),
+        4_000,
+        { timeoutMs: editorialTimeoutMs(), choice: "local-model" },
+      );
     },
     fileEditorial,
     timeoutMs: editorialTimeoutMs,

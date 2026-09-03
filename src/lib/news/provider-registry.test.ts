@@ -343,13 +343,25 @@ describe("the local model is a named pick, everywhere an AI acts", () => {
     });
   });
 
-  it("is disabled until LLM_BASE_URL (or a key plus a model) is configured", () => {
+  /*
+    Audit finding "a 'local' pick can hit the real paid OpenAI cloud": a key
+    plus a model with no LLM_BASE_URL used to be enough to mark this entry
+    enabled, and ai.ts's old resolution path for it fell back to
+    "https://api.openai.com/v1" -- so an editor's "Local model" pick could be
+    ready and yet quietly draft on OpenAI's paid cloud. This entry is named
+    "Local model": it must require an actual local endpoint, full stop.
+  */
+  it("is disabled until LLM_BASE_URL is configured -- a key plus a model alone is not enough", () => {
     withEnv({}, () => assert.equal(providerEnabled("local-model"), false));
     withEnv({ LLM_BASE_URL: "http://127.0.0.1:1234/v1" }, () =>
       assert.equal(providerEnabled("local-model"), true),
     );
     withEnv({ LLM_API_KEY: "sk-test", LLM_MODEL: "qwen" }, () =>
-      assert.equal(providerEnabled("local-model"), true),
+      assert.equal(
+        providerEnabled("local-model"),
+        false,
+        "LLM_API_KEY + LLM_MODEL alone must not make a 'local' pick ready -- it has no local endpoint",
+      ),
     );
   });
 

@@ -117,11 +117,12 @@ export async function findVoiceFile(): Promise<
 }
 
 /**
- * Read the validated voice for the operator-authorized OpenAI Codex Opinion
- * path. Keep this as a destination-named function so a future provider cannot
- * inherit that authorization accidentally.
+ * The shared read behind every destination-specific voice-text export below.
+ * Never exported directly -- each caller gets its own destination-named
+ * wrapper so a future provider cannot inherit an existing authorization by
+ * accident (see the two exports immediately below).
  */
-export async function readVoiceTextForOpenAiCodex(): Promise<
+async function readVoiceText(): Promise<
   { ok: true; text: string } | { ok: false; error: string }
 > {
   const found = await findVoiceFile();
@@ -138,6 +139,33 @@ export async function readVoiceTextForOpenAiCodex(): Promise<
   } catch {
     return { ok: false, error: `Cannot read the voice file configured by ${VOICE_ENV}.` };
   }
+}
+
+/**
+ * Read the validated voice for the operator-authorized OpenAI Codex Opinion
+ * path. Keep this as a destination-named function so a future provider cannot
+ * inherit that authorization accidentally.
+ */
+export async function readVoiceTextForOpenAiCodex(): Promise<
+  { ok: true; text: string } | { ok: false; error: string }
+> {
+  return readVoiceText();
+}
+
+/**
+ * Read the validated voice for an explicit "Local model" Opinion pick.
+ *
+ * A local server speaks the OpenAI-compatible chat-completions protocol
+ * only -- there is no `--system-prompt-file` equivalent over HTTP -- so its
+ * voice travels as an ordinary system-message string instead of a file path,
+ * the same way the Codex path above already sends it over stdin rather than
+ * a file. Destination-named for the same reason `readVoiceTextForOpenAiCodex`
+ * is: so a future provider cannot inherit this authorization accidentally.
+ */
+export async function readVoiceTextForLocalModel(): Promise<
+  { ok: true; text: string } | { ok: false; error: string }
+> {
+  return readVoiceText();
 }
 
 /**

@@ -268,12 +268,15 @@ describe("resolveProvider", () => {
 
   it("resolves the explicit 'local-model' pick to the OpenAI-compatible transport, built from envOverrides", () => {
     /*
-      0.6.10: kind "local" is a NAME an editor can pick, not a new transport --
-      explicitProvider() in ai.ts already routes "openai" and "local" down the
-      same customGateway() path, and the local-model registry entry's
-      envOverrides name exactly LLM_BASE_URL / LLM_MODEL / LLM_API_KEY, the
-      same variables docs/local-models.md already tells an operator to set.
-      No change to ai.ts was needed to make this resolve correctly.
+      0.6.10: kind "local" is a NAME an editor can pick, not a new transport,
+      and the local-model registry entry's envOverrides name exactly
+      LLM_BASE_URL / LLM_MODEL / LLM_API_KEY -- the same variables
+      docs/local-models.md already tells an operator to set. When all three
+      are set, this still resolves through the same shape "openai" does.
+      0.6.13: `explicitProvider()`'s "local" branch now calls a dedicated
+      `localGateway()` rather than sharing `customGateway()` with "openai" --
+      see the "refuses ... no local base URL" test below for why (audit
+      finding "a 'local' pick can hit the real paid OpenAI cloud").
     */
     withEnv(
       {
@@ -298,6 +301,34 @@ describe("resolveProvider", () => {
     withEnv(BARE, () => assert.equal(resolveProvider("local-model"), null));
     withEnv({ ...BARE, LLM_BASE_URL: "http://127.0.0.1:1234/v1", TOWNREPORTER_LOCAL: "0" }, () =>
       assert.equal(resolveProvider("local-model"), null),
+    );
+  });
+
+  /*
+    Audit finding "a 'local' pick can hit the real paid OpenAI cloud":
+    LLM_API_KEY + LLM_MODEL alone (no LLM_BASE_URL) used to be enough for
+    `customGateway()` to build a config, and `explicitProvider`'s "local"
+    branch called `customGateway()` directly -- so a "Local model" pick with
+    only a key and a model name silently fell back to baseUrl
+    "https://api.openai.com/v1" and sent the editor's content to OpenAI's
+    paid cloud. A local pick must refuse instead: no local endpoint, no
+    provider, never a silent cloud fallback.
+  */
+  it("refuses an explicit local-model pick that has a key and a model but no local base URL, rather than falling back to OpenAI's cloud", () => {
+    withEnv({ ...BARE, LLM_API_KEY: "sk-looks-real", LLM_MODEL: "gpt-4o-mini" }, () => {
+      const p = resolveProvider("local-model");
+      assert.equal(
+        p,
+        null,
+        "a local-model pick with no LLM_BASE_URL must be refused, not routed to a default gateway",
+      );
+    });
+    withEnv(
+      { ...BARE, OPENAI_API_KEY: "sk-looks-real-too", LLM_MODEL: "gpt-4o-mini" },
+      () => {
+        const p = resolveProvider("local-model");
+        assert.equal(p, null);
+      },
     );
   });
 });

@@ -53,6 +53,19 @@ export type EditorialOrchestrationRuntime = {
     found: { ok: true; voice: { path: string; bytes: number } };
     researchPack: string;
   }) => Promise<ChatResult>;
+  /**
+   * The Local model pair. A local server has no research-tool loop the way
+   * the Claude Code CLI does (see EDITORIAL_TOOLS), so this is one call, not
+   * two: it writes straight from `researchPack` and the voice text. Required
+   * (not optional) so a local-model pick can never silently fall through to
+   * `runClaudePair` -- see the Opinion routing fix, audit finding
+   * "Opinion 'Local model' pick silently uses Claude".
+   */
+  runLocalPair: (context: {
+    input: WriteEditorialInput;
+    found: { ok: true; voice: { path: string; bytes: number } };
+    researchPack: string;
+  }) => Promise<ChatResult>;
   fileEditorial: (
     input: WriteEditorialInput,
     editorial: Editorial,
@@ -130,20 +143,30 @@ export async function orchestrateEditorial(
   });
 
   /*
-    One provider, one pair. Opinion is Claude-only -- see OPINION_MODEL_CHOICES
-    for why Codex left this ladder. A stored request that still says
-    "codex-frontier" (none exist in production) normalises to Automatic and
-    lands here rather than failing.
+    One provider, one pair -- but WHICH provider is the editor's own pick, not
+    always Claude. Opinion offers Claude and Local model (see
+    OPINION_MODEL_CHOICES for why Codex left this ladder); an explicit pick of
+    either one runs only that candidate, never a substitute -- audit finding
+    "Opinion 'Local model' pick silently uses Claude" was exactly this
+    function always calling `runtime.runClaudePair()` regardless of
+    `input.modelChoice`. Automatic still probes Claude only: Local model has
+    no `ladderRank` (see provider-registry.ts), so Automatic must not reach
+    for it on its own. A stored request that still says "codex-frontier"
+    (none exist in production) normalises to Automatic via
+    `opinionModelChoice` and lands on the Claude rung rather than failing.
   */
-  const runPair = async (): Promise<ChatResult> =>
-    runtime.runClaudePair({ input, found, researchPack });
+  const runPair = async (candidate: EffectiveOpinionModelChoice): Promise<ChatResult> =>
+    candidate === "local-model"
+      ? runtime.runLocalPair({ input, found, researchPack })
+      : runtime.runClaudePair({ input, found, researchPack });
 
   const requested = opinionModelChoice(input.modelChoice);
-  const candidates: EffectiveOpinionModelChoice[] = ["claude-frontier"];
+  const candidates: EffectiveOpinionModelChoice[] =
+    requested === "auto" ? ["claude-frontier"] : [requested];
   const failures: string[] = [];
 
   for (const candidate of candidates) {
-    const out = await runPair();
+    const out = await runPair(candidate);
     if (!out.ok) {
       failures.push(out.error);
       continue;

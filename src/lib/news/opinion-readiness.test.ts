@@ -70,4 +70,76 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
     assert.match(result.why, /OAuth session expired/i);
     assert.deepEqual(probed, ["claude-frontier"]);
   });
+
+  /*
+    Audit finding "Opinion 'Local model' pick silently uses Claude":
+    `checkOpinionReadiness` used to hardcode `candidates = ["claude-frontier"]`
+    regardless of the `choice` argument, so an explicit "local-model" pick
+    probed (and, via the commit boundary, persisted and queued) Claude
+    instead. These pin the fix: an explicit pick probes only that candidate.
+  */
+  it("an explicit local-model pick probes ONLY local-model, never Claude", async () => {
+    const probed: string[] = [];
+    const result = await checkOpinionReadiness("local-model", {
+      findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
+      probeCandidate: async (choice) => {
+        probed.push(choice);
+        return { ok: true as const, label: "Local model", choice };
+      },
+    });
+    assert.equal(result.ready, true);
+    assert.equal(
+      result.effectiveChoice,
+      "local-model",
+      "a local-model pick must not be silently replaced by another provider",
+    );
+    assert.deepEqual(probed, ["local-model"]);
+  });
+
+  it("an unready local-model pick is reported as not-ready with the local probe's own message, and stays local-model", async () => {
+    const probed: string[] = [];
+    const result = await checkOpinionReadiness("local-model", {
+      findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
+      probeCandidate: async (choice) => {
+        probed.push(choice);
+        return { ok: false as const, error: "LLM is unreachable. Check that it is running." };
+      },
+    });
+    assert.equal(result.ready, false);
+    assert.match(result.why, /unreachable/i);
+    assert.doesNotMatch(
+      result.why,
+      /Claude Code/i,
+      "a local-model failure must never be reported as a Claude Code problem",
+    );
+    assert.equal(result.effectiveChoice, "local-model");
+    assert.deepEqual(probed, ["local-model"]);
+  });
+
+  it("the real (non-mocked) candidate probe dispatches local-model through ai.ts's generic provider probe, not the Claude Code CLI path", async () => {
+    const result = await withEnv(
+      {
+        LLM_BASE_URL: undefined,
+        LLM_API_KEY: undefined,
+        LLM_MODEL: undefined,
+        OPENAI_API_KEY: undefined,
+      },
+      () =>
+        checkOpinionReadiness("local-model", {
+          findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
+        }),
+    );
+    assert.equal(result.ready, false);
+    assert.doesNotMatch(
+      result.why,
+      /No Opinion model is available\. Open Claude Code on this machine and sign in\./,
+      "an unconfigured local-model pick must not be rewritten into Opinion's Claude-only " +
+        "sign-in message -- that message names no fix for a local server at all",
+    );
+    assert.match(
+      result.why,
+      /LLM_BASE_URL/,
+      "the guidance for an unconfigured local-model pick must name the setting that fixes it",
+    );
+  });
 });
