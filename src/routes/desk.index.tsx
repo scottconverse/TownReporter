@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
-import { Busy, InkButton, SecHead } from "@/components/desk-chrome";
+import { Busy, InkButton, SecHead, areaClass } from "@/components/desk-chrome";
 import { LeadRowView } from "@/components/desk-leads";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
@@ -15,10 +15,12 @@ import {
   runScan,
   setLeadStatus,
   setSourceStatus,
+  writeStoryFromInput,
 } from "@/lib/news/desk";
 import { listInvestigations, listWorthALook, openDarkInvestigation } from "@/lib/news/dark";
 import {
   editorKindLabel,
+  editorDraftError,
   editorFetchError,
   editorScanError,
   editorStatus,
@@ -34,6 +36,10 @@ import {
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context";
+import { ModelPicker } from "@/components/model-picker";
+import type { StoryModelChoice } from "@/lib/news/model-choice";
+import { ProviderSignInButton } from "@/components/provider-signin-button";
+import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 
 export const Route = createFileRoute("/desk/")({ component: DeskHome });
 
@@ -115,6 +121,43 @@ function DeskHome() {
     },
     onError: (err) => {
       setDarkErr(err instanceof Error ? err.message : "Could not open that file.");
+    },
+  });
+
+  /*
+    "Write a story" -- one box, one click, the way Opinion already works.
+
+    Before this, the only path from a URL or an idea to a draft was Queue's
+    four-field form (Headline, Why now, Topic, one Source URL) followed by a
+    separate trip to the story page to paste the same text again as
+    Reporting notes. That is three fields' worth of paraphrasing a link the
+    editor could just paste. This box parses whatever lands in it -- see
+    write-story.ts -- and files it exactly like the form does, with the full
+    text kept so the draft reads it as evidence.
+  */
+  const [storyText, setStoryText] = useState("");
+  const [storyModel, setStoryModel] = useState<StoryModelChoice>("auto");
+  const [storyNotice, setStoryNotice] = useState<{
+    text: string;
+    kind: "error" | "info";
+    authDetail?: string | null;
+  } | null>(null);
+  const writeStory = useMutation({
+    mutationFn: () => writeStoryFromInput({ data: { text: storyText, modelChoice: storyModel } }),
+    onSuccess: (res) => {
+      if (!res?.ok) {
+        const raw = res?.error ?? "That did not file.";
+        setStoryNotice({ text: editorDraftError(raw) ?? raw, kind: "error", authDetail: raw });
+        return;
+      }
+      setStoryText("");
+      setStoryNotice(null);
+      void qc.invalidateQueries({ queryKey: ["leads"] });
+      void navigate({ to: "/desk/story/$leadId", params: { leadId: String(res.leadId) } });
+    },
+    onError: (err) => {
+      const raw = err instanceof Error ? err.message : "That did not file.";
+      setStoryNotice({ text: editorDraftError(raw) ?? raw, kind: "error", authDetail: raw });
     },
   });
 
@@ -214,6 +257,62 @@ function DeskHome() {
           ))}
         </div>
       ) : null}
+
+      <section className="mt-8">
+        <SecHead
+          title="Write a story"
+          sub="Paste a link, a chunk of text, or just the idea. The desk files it as a lead and drafts it with the model you pick. You edit, then publish."
+        />
+        <div className="mt-4 max-w-2xl space-y-3">
+          <label className="block">
+            <span className="text-[11px] tracking-[0.14em] text-muted uppercase">
+              Link, text, or idea
+            </span>
+            <textarea
+              className={areaClass + " mt-1 w-full"}
+              rows={4}
+              value={storyText}
+              disabled={writeStory.isPending}
+              onChange={(e) => setStoryText(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !writeStory.isPending) {
+                  e.preventDefault();
+                  if (storyText.trim().length >= 8) writeStory.mutate();
+                }
+              }}
+              placeholder={
+                "https://…  ·  The planning board moved the Kimbark hearing to Oct. 2  ·  paste a packet"
+              }
+            />
+          </label>
+          <ModelPicker
+            scope="story"
+            value={storyModel}
+            onChange={setStoryModel}
+            disabled={writeStory.isPending}
+          />
+          <div className="flex items-center gap-3">
+            <InkButton
+              tone="solid"
+              onClick={() => writeStory.mutate()}
+              disabled={writeStory.isPending || storyText.trim().length < 8}
+            >
+              {writeStory.isPending ? "Writing…" : "Write"}
+            </InkButton>
+            <span
+              role="alert"
+              aria-live="assertive"
+              aria-atomic="true"
+              className="text-sm text-rust"
+            >
+              {storyNotice?.kind === "error" ? storyNotice.text : ""}
+              {storyNotice?.kind === "error" && looksLikeProviderAuthFailure(storyNotice.authDetail) ? (
+                <ProviderSignInButton detail={storyNotice.authDetail} />
+              ) : null}
+            </span>
+          </div>
+        </div>
+      </section>
 
       {bootFailed ? (
         <ScreenError

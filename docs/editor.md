@@ -66,6 +66,14 @@ Scan does not publish. Draft does not publish. Dark Desk does not publish. **Pub
 
 ---
 
+## Write a story from a link or your own notes
+
+**Write a story**, on the desk landing page, is the fast path into steps 3–5 above when you already know what the story is: paste a URL, a chunk of text, or just the idea into the one box, pick a model, and click **Write**. The desk parses whatever you gave it — every link becomes a source, the first line or sentence becomes the headline, and the whole thing you pasted is kept as the lead's Reporting notes, so the draft reads it as evidence the same way it would if you had typed it into the workbench by hand. You land straight on the story page and watch it draft.
+
+It fills the same fields **File a lead yourself** (Queue) asks for by hand, so use whichever is faster: this box when you have a link or notes to paste, the Queue form when you are typing a lead from nothing. Either way, nothing publishes until you click **Publish** on the workbench.
+
+---
+
 ## Sources (`/desk/sources`)
 
 The watch list chosen during Paper setup. The Longmont edition ships with city, council, agendas, PrimeGov, planning, NextLight, St. Vrain Valley Schools, Boulder County, the library, `@CityofLongmont`, and `@LongmontPublicMedia`; a new installation starts with the sources its owner enters.

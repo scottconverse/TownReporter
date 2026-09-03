@@ -196,6 +196,19 @@ export const listLeads = createServerFn({ method: "GET" })
       from leads l
       left join articles a on a.lead_id = l.id and a.status = 'published'
       where l.newsroom_id = ${owned(context)}
+      -- An editor who just filed a lead by hand sinks below the batch first.
+      --
+      -- fileLead, writeStoryFromInput and a Dark Desk promotion all leave
+      -- newsworthiness at 0 (or whatever the editor typed), and a scan's own
+      -- output routinely scores higher -- so an operator who pasted a link
+      -- into "Write a story" watched it land at the bottom of the same
+      -- minute's scan batch instead of at the top where the thing they just
+      -- asked for belongs. Every lead a scan files carries that scan's
+      -- scan_run_id; nothing an editor files by hand ever does. Leads with no
+      -- scan_run_id sort as one group ahead of every scan-filed lead, in
+      -- their own recency order; scan-filed leads keep exactly the ordering
+      -- below among themselves.
+      --
       -- Newest batch first, best story first WITHIN the batch.
       --
       -- Ordering on the raw timestamp alone put a 14-point "no minutes posted
@@ -205,12 +218,64 @@ export const listLeads = createServerFn({ method: "GET" })
       -- queue whose entire job is "what should I work on next", the score has
       -- to lead. Truncating to the minute keeps one scan's output together
       -- instead of interleaving batches by millisecond.
-      order by date_trunc('minute', l.created_at) desc,
+      order by (l.scan_run_id is null) desc,
+               date_trunc('minute', l.created_at) desc,
                l.newsworthiness desc,
                l.id desc
       limit 80
     `;
   });
+
+/**
+ * Insert a lead exactly the way `fileLead` always has, plus the draft row
+ * `publishLead` reads its source_urls from (see the note below) — pulled out
+ * so `writeStoryFromInput` can file the same shape without duplicating it.
+ */
+async function insertLeadWithDraft(
+  context: { userId: string; newsroomId?: number },
+  input: { headline: string; why: string; topic: string; urls: string[]; notesJson?: string },
+): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
+  const sql = await getSql();
+  const urlsJson = JSON.stringify(input.urls);
+  const rows = input.notesJson
+    ? await sql<{ id: number }>`
+        insert into leads (user_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)
+        values (
+          ${context.userId}, ${input.headline}, ${input.why}, ${input.topic},
+          ${urlsJson}, ${input.why.slice(0, 400)}, 0, 'new', ${input.notesJson}
+        )
+        returning id
+      `
+    : await sql<{ id: number }>`
+        insert into leads (user_id, headline, why, topic, source_urls, evidence, newsworthiness, status)
+        values (
+          ${context.userId}, ${input.headline}, ${input.why}, ${input.topic},
+          ${urlsJson}, ${input.why.slice(0, 400)}, 0, 'new'
+        )
+        returning id
+      `;
+  const id = rows[0]?.id;
+  if (!id) return { ok: false as const, error: "Could not file that lead." };
+  /*
+    Carry the source through to the draft.
+
+    The lead stored the URL and the draft did not, and `publishLead` reads
+    the DRAFT's source_urls. So a lead filed by hand with a source published
+    an article with no sources section at all, on a paper whose front page
+    promises "Sources shown." An audit filed it as UX-005, and it is the
+    worst kind of defect this project can have: the reader is told the
+    evidence is there, and it is not.
+  */
+  await sql`
+    insert into drafts (user_id, lead_id, headline, dek, body, topic, source_urls)
+    values (
+      ${context.userId}, ${id}, ${input.headline}, ${input.why.slice(0, 220)}, '', ${input.topic},
+      ${urlsJson}
+    )
+  `;
+  await audit(context.userId, "lead", `filed ${id}`);
+  return { ok: true as const, id };
+}
 
 export const fileLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
@@ -233,36 +298,7 @@ export const fileLead = createServerFn({ method: "POST" })
         return { ok: false as const, error: "That source URL is not a public http(s) address." };
       }
     }
-    const sql = await getSql();
-    const rows = await sql<{ id: number }>`
-      insert into leads (user_id, headline, why, topic, source_urls, evidence, newsworthiness, status)
-      values (
-        ${context.userId}, ${headline}, ${why}, ${topic},
-        ${JSON.stringify(urls)}, ${why.slice(0, 400)}, 0, 'new'
-      )
-      returning id
-    `;
-    const id = rows[0]?.id;
-    if (!id) return { ok: false as const, error: "Could not file that lead." };
-    /*
-      Carry the source through to the draft.
-
-      The lead stored the URL and the draft did not, and `publishLead` reads
-      the DRAFT's source_urls. So a lead filed by hand with a source published
-      an article with no sources section at all, on a paper whose front page
-      promises "Sources shown." An audit filed it as UX-005, and it is the
-      worst kind of defect this project can have: the reader is told the
-      evidence is there, and it is not.
-    */
-    await sql`
-      insert into drafts (user_id, lead_id, headline, dek, body, topic, source_urls)
-      values (
-        ${context.userId}, ${id}, ${headline}, ${why.slice(0, 220)}, '', ${topic},
-        ${JSON.stringify(urls)}
-      )
-    `;
-    await audit(context.userId, "lead", `filed ${id}`);
-    return { ok: true as const, id };
+    return insertLeadWithDraft(context, { headline, why, topic, urls });
   });
 
 export const getLead = createServerFn({ method: "GET" })
@@ -906,6 +942,28 @@ export const draftLead = createServerFn({ method: "POST" })
       context: { userId: context.userId, newsroomId: owned(context) },
       leadId,
       modelChoice,
+    });
+  });
+
+/**
+ * "Write a story" — the one-box path on the Desk landing page, mirroring
+ * Opinion's single textarea instead of the Queue's four-field form. Any
+ * editor may use it, exactly like `fileLead` and `draftLead`: it parses the
+ * pasted text into a lead (see `write-story.ts`), files it with the full
+ * text kept as Reporting notes scratch so the draft reads it as evidence,
+ * then hands off to the same commit boundary Story uses so a provider
+ * refusal comes back structured and nothing is spent.
+ */
+export const writeStoryFromInput = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { text: string; modelChoice?: string }) => input)
+  .handler(async ({ context, data }) => {
+    const { writeStoryForAuthenticatedEditor } =
+      await import("./model-request-commit.server.ts");
+    return writeStoryForAuthenticatedEditor({
+      context: { userId: context.userId, newsroomId: owned(context) },
+      text: data.text,
+      modelChoice: data.modelChoice,
     });
   });
 

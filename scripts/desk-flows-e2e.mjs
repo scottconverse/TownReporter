@@ -140,6 +140,36 @@ async function main() {
     step("Opinion refused up front, so nothing was submitted");
   }
 
+  // ── Desk landing page: Write a story files a lead from a link + an idea ────
+  const writeStoryHeadline = `The planning board moved the Kimbark hearing to Oct. 2 ${stamp}`;
+  await page.goto(`${base}/desk`, { waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: "Write a story", exact: true }).waitFor();
+  step("Write a story renders on the desk landing page");
+
+  await page
+    .getByPlaceholder(/paste a packet/i)
+    .fill(`https://example.org/agenda-${stamp} ${writeStoryHeadline}`);
+  const writeStoryBtn = page.getByRole("button", { name: "Write", exact: true });
+  await writeStoryBtn.click();
+  if (/\/desk\/story\//.test(page.url())) {
+    step("Write a story lands on the new story's page");
+  } else {
+    // CI has neither Codex nor Claude configured, so the commit boundary
+    // refuses the draft -- but the lead it filed before asking is unaffected.
+    await page
+      .getByText(/not installed|not available|sign in again|Claude Code|cannot write/i)
+      .first()
+      .waitFor({ timeout: 20_000 });
+    step("Write a story refuses clearly when it cannot draft, and the lead is still filed");
+  }
+
+  // ── Queue: the Write a story lead landed, with the full paste kept ────────
+  await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
+  const writeStoryRow = page.locator(".lead-row", { hasText: writeStoryHeadline }).first();
+  await writeStoryRow.waitFor({ timeout: 20_000 });
+  await writeStoryRow.getByText("Filed from the Write a story box.").waitFor({ timeout: 10_000 });
+  step("the Write a story lead is filed and listed in the Queue");
+
   // ── Queue: file a lead, then delete it, then undo ─────────────────────────
   await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
   await page.getByText("File a lead yourself").click();

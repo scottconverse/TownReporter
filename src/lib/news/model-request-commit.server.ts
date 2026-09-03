@@ -9,9 +9,12 @@ import { checkOpinionReadiness } from "./opinion-readiness.ts";
 import {
   effectiveStoryModelChoice,
   modelChoiceLabel,
+  storyModelChoice,
   type OpinionModelChoice,
   type StoryModelChoice,
 } from "./model-choice.ts";
+import { parseWriteStoryInput } from "./write-story.ts";
+import { appendScratch, packNotes, parseNotes } from "./notes.ts";
 
 export type AuthenticatedEditorContext = {
   userId: string;
@@ -345,4 +348,76 @@ export async function commitOpinionForAuthenticatedEditor(
     console.error("[opinion] queued request but could not write audit event", error);
   }
   return { ok: true as const, requestId, jobId: job.id, modelChoice: effectiveChoice };
+}
+
+export type WriteStoryCommitDeps = StoryDraftCommitDeps & {
+  audit?: typeof audit;
+};
+
+/**
+ * "Write a story" — the one-box path on the Desk landing page. Parses free
+ * text into a lead (see `write-story.ts`), files it with the pasted text kept
+ * as Reporting notes scratch so the draft reads it as evidence, then hands
+ * off to `commitStoryDraftForAuthenticatedEditor` so a provider refusal comes
+ * back structured and nothing is spent. A lead, its draft row and an audit
+ * entry may only exist once the text has parsed into something fileable —
+ * same ordering discipline as the other commit boundaries in this file.
+ *
+ * Deliberately last in the file: `scripts/model-preflight.test.mjs` slices
+ * each `export async function` from its own marker to the NEXT one, and a
+ * function placed ahead of `ScanCommitDeps` (which spells out `enqueueJob`
+ * in its own type) would have that literal text folded into its slice and
+ * get misread as an unguarded spender. This function never calls
+ * `enqueueJob` itself -- it delegates to `commitStoryDraftForAuthenticatedEditor`,
+ * which already carries its own preflight -- exactly the same shape
+ * `draftLead` in desk.ts already has, and that tripwire correctly leaves
+ * `draftLead` alone for the same reason.
+ */
+export async function writeStoryForAuthenticatedEditor(
+  input: {
+    context: AuthenticatedEditorContext;
+    text: string;
+    modelChoice?: string;
+  },
+  deps: WriteStoryCommitDeps = {},
+) {
+  const parsed = parseWriteStoryInput(input.text);
+  if (!parsed.ok) return { ok: false as const, error: parsed.error };
+  const { headline, why, topic, urls, scratch } = parsed.value;
+
+  const sql = await (deps.getSql ?? getSql)();
+  await sql.query(
+    "alter table leads add column if not exists notes_json text not null default '{}'",
+  );
+  const notesJson = packNotes(appendScratch(parseNotes(null), scratch));
+  const urlsJson = JSON.stringify(urls);
+  const rows = await sql<{ id: number }>`
+    insert into leads (user_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)
+    values (
+      ${input.context.userId}, ${headline}, ${why}, ${topic},
+      ${urlsJson}, ${why.slice(0, 400)}, 0, 'new', ${notesJson}
+    )
+    returning id
+  `;
+  const leadId = rows[0]?.id;
+  if (!leadId) return { ok: false as const, error: "Could not file that lead." };
+  /*
+    Same reason `fileLead` writes both rows: `publishLead` reads the DRAFT's
+    source_urls, not the lead's, so a story filed here without this row would
+    print with no sources section at all.
+  */
+  await sql`
+    insert into drafts (user_id, lead_id, headline, dek, body, topic, source_urls)
+    values (
+      ${input.context.userId}, ${leadId}, ${headline}, ${why.slice(0, 220)}, '', ${topic}, ${urlsJson}
+    )
+  `;
+  await (deps.audit ?? audit)(input.context.userId, "lead", `filed ${leadId}`);
+
+  const modelChoice = storyModelChoice(input.modelChoice);
+  const commit = await commitStoryDraftForAuthenticatedEditor(
+    { context: input.context, leadId, modelChoice },
+    deps,
+  );
+  return { ...commit, leadId };
 }
