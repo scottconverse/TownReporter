@@ -1,6 +1,51 @@
 # Changelog
 
-Current release: **0.6.10**.
+Current release: **0.6.11**.
+
+## 0.6.11 — 2026-09-03
+- **Data-integrity hardening: every newsroom-scoped write now records its
+  newsroom.** GauntletGate ENG-04 found 26+ insert sites into
+  newsroom-scoped tables (`leads`, `drafts`, `snapshots`, `sources`,
+  `dark_runs`, `dark_signals`, `dark_promises`, `investigations`,
+  `anomalies`, `beat_memory`, `corrections`, `articles`, `artifacts`,
+  `artifact_blobs`) that omitted `newsroom_id`. They worked only because the
+  column defaults to 1 and everything hard-codes the default newsroom; the
+  first editor in a second newsroom would have had their leads, drafts, and
+  Dark Desk rounds silently land in newsroom 1 and vanish from their own
+  reads. Every one of those sites now threads the caller's actual newsroom
+  id through, guarded by a source-grep test
+  (`scripts/newsroom-scoped-inserts.test.mjs`) and proven by a real
+  second-newsroom round-trip test
+  (`src/lib/news/newsroom-scoped-write.proof.test.ts`). The `default 1` stays
+  on every column for this release; dropping it is a possible future
+  hardening step once every scoped table (not just this release's list) is
+  confirmed clean.
+- **The Dark Desk rebuild path and the migration/ensure lists now agree.**
+  `DARK_SCHEMA_STATEMENTS` (the schema `ensureDarkSchema()` recreates after a
+  database is rebuilt underneath a live process) was missing `newsroom_id` on
+  `dark_runs`, `dark_signals`, and `dark_promises` -- after a rebuild, every
+  Dark Desk query 500'd, because every one of them filters on that column
+  (GauntletGate ENG-02). Fixed, and `dark-schema-rebuild.test.ts` now asserts
+  the actual post-rebuild column set (not just that the table exists) plus a
+  real `select ... where newsroom_id = 1` smoke query.
+- **Migration/ensure drift, closed in both directions.** `newsroom_id` was
+  missing from the runtime `ensure*` definitions of `artifact_blobs`,
+  `artifact_chunks`, `audit_events`, `dark_promises`, `dark_runs`,
+  `dark_signals`, and `desk_rate` (present in migrations, absent at runtime);
+  `desk_jobs.claim_token` and `dark_signals.investigation_id` existed only in
+  the runtime ensure lists with no migration at all (a database built from
+  migrations alone would lack them); and a new schema-parity test found two
+  more ensure-only tables with no migration whatsoever, `dark_settings` and
+  `investigation_briefs`/`editorial_extras`. All closed: new migrations
+  0033-0036, and a capstone parity test
+  (`src/lib/news/schema-parity.test.ts`) that builds one database from
+  `migrations/*.sql` alone and one from the runtime `ensure*` functions
+  alone and fails the build if any table's column set disagrees, with a
+  small documented allowlist for the handful of tables that are genuinely
+  migrations-only by design.
+- Groundwork for multiple newsrooms and reader/user accounts -- none of this
+  release turns multi-newsroom on; it makes the schema safe for the day it
+  is.
 
 ## 0.6.10 — 2026-09-03
 - **A local model is a pickable writing model on every surface.** The

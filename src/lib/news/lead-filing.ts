@@ -121,9 +121,9 @@ export async function fileScanLeads(
 
     const urls = JSON.stringify(candidateUrls);
     const inserted = await sql<{ id: number; status: string; headline: string }>`
-        insert into leads (user_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, status, possible_duplicate_of)
+        insert into leads (user_id, newsroom_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, status, possible_duplicate_of)
         values (
-          ${context.userId}, ${runId}, ${lead.headline.slice(0, 180)},
+          ${context.userId}, ${newsroomId}, ${runId}, ${lead.headline.slice(0, 180)},
           ${String(lead.why ?? "").slice(0, 800)},
           ${String(lead.topic ?? "council").slice(0, 40)},
           ${urls},

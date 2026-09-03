@@ -112,6 +112,76 @@ async function darkRunsExists(url: string): Promise<boolean> {
   }
 }
 
+/**
+ * The column set migrations/0012_newsroom_appliance.sql (newsroom_id) and
+ * migrations/0003_dark_desk.sql / 0030_dark_model_choice.sql (everything
+ * else) define for these three tables. GauntletGate ENG-02: the rebuild
+ * path used to recreate these tables in their pre-0012 shape -- the table
+ * came back, but every query dark.ts makes against it (all of which filter
+ * on newsroom_id) failed. A `to_regclass` existence check alone cannot see
+ * that; this compares the actual column set.
+ */
+const EXPECTED_COLUMNS: Record<string, string[]> = {
+  dark_runs: [
+    "error",
+    "finished_at",
+    "id",
+    "model_choice",
+    "newsroom_id",
+    "started_at",
+    "summary",
+    "user_id",
+  ].sort(),
+  dark_signals: [
+    "alternatives",
+    "confidence",
+    "counter_narrative",
+    "created_at",
+    "handoff",
+    "id",
+    "investigation_id",
+    "linkage_map",
+    "name",
+    "newsroom_id",
+    "observation",
+    "pathway",
+    "pattern",
+    "posture",
+    "privacy_review",
+    "run_id",
+    "signal_type",
+    "strength",
+    "user_id",
+    "what_would_kill",
+  ].sort(),
+  dark_promises: [
+    "created_at",
+    "id",
+    "newsroom_id",
+    "source_cite",
+    "status",
+    "user_id",
+    "what",
+    "when_due",
+    "who_promised",
+  ].sort(),
+};
+
+/** The live column set for `table` at `url` (a fresh connection). */
+async function columnsOf(url: string, table: string): Promise<string[]> {
+  const c = new Client({ connectionString: url });
+  await c.connect();
+  try {
+    const rows = await c.query<{ column_name: string }>(
+      `select column_name from information_schema.columns where table_name = $1`,
+      [table],
+    );
+    return rows.rows.map((r) => r.column_name).sort();
+  } finally {
+    await c.end();
+  }
+}
+
 describe("ensureDarkSchema survives a database rebuilt underneath the running process", () => {
   it(
     "recreates the schema after the same database is dropped and recreated, without a stale-success report",
@@ -152,6 +222,36 @@ describe("ensureDarkSchema survives a database rebuilt underneath the running pr
           "rebuilt underneath the process, but dark_runs is still missing -- this is exactly the " +
           "stale-cache failure ENG-104's fix exists to prevent",
       );
+
+      // ENG-02: the table coming back is not enough -- it must come back
+      // USABLE. Assert the actual column set (not just existence) for all
+      // three tables DARK_SCHEMA_STATEMENTS recreates.
+      for (const table of Object.keys(EXPECTED_COLUMNS)) {
+        const cols = await columnsOf(dbUrl, table);
+        assert.deepEqual(
+          cols,
+          EXPECTED_COLUMNS[table],
+          `${table} came back from the rebuild with the wrong column set -- expected ` +
+            `${JSON.stringify(EXPECTED_COLUMNS[table])}, got ${JSON.stringify(cols)}`,
+        );
+      }
+
+      // And the smoke query ENG-02 asked for directly: every dark.ts read
+      // filters on newsroom_id, so a rebuilt dark_runs that has the column
+      // but the query still can't use is exactly the failure a to_regclass
+      // check would miss.
+      const c = new Client({ connectionString: dbUrl });
+      await c.connect();
+      try {
+        await c.query(`insert into dark_runs (user_id, newsroom_id) values ('smoke', 1)`);
+        const smoke = await c.query(`select id from dark_runs where newsroom_id = 1`);
+        assert.ok(
+          smoke.rows.length > 0,
+          "select id from dark_runs where newsroom_id = 1 returned nothing after the rebuild",
+        );
+      } finally {
+        await c.end();
+      }
     },
   );
 });

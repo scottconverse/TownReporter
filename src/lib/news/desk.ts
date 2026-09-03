@@ -77,7 +77,7 @@ async function ensureDraftMemoColumn() {
   );
 }
 
-async function ensureSeeds(userId: string) {
+async function ensureSeeds(userId: string, newsroomId: number = DEFAULT_NEWSROOM_ID) {
   /*
     Nothing is seeded until setup says which city this is.
 
@@ -94,8 +94,8 @@ async function ensureSeeds(userId: string) {
   const config = await getPaperConfig();
   for (const s of config.seedSources) {
     await sql`
-      insert into sources (user_id, url, title, kind, tier, status)
-      values (${userId}, ${s.url}, ${s.title}, ${s.kind}, ${s.tier}, 'accepted')
+      insert into sources (user_id, newsroom_id, url, title, kind, tier, status)
+      values (${userId}, ${newsroomId}, ${s.url}, ${s.title}, ${s.kind}, ${s.tier}, 'accepted')
       on conflict (user_id, url) do nothing
     `;
   }
@@ -104,14 +104,14 @@ async function ensureSeeds(userId: string) {
 export const bootstrapDesk = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
-    await ensureSeeds(context.userId);
+    await ensureSeeds(context.userId, owned(context));
     return { ok: true as const };
   });
 
 export const listSources = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
-    await ensureSeeds(context.userId);
+    await ensureSeeds(context.userId, owned(context));
     const sql = await getSql();
     return sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
@@ -129,11 +129,12 @@ async function upsertSource(
   title: string,
   kind: string,
   tier: string,
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
 ) {
   const sql = await getSql();
   const rows = await sql<SourceRow>`
-    insert into sources (user_id, url, title, kind, tier, status)
-    values (${userId}, ${url}, ${title}, ${kind}, ${tier}, 'accepted')
+    insert into sources (user_id, newsroom_id, url, title, kind, tier, status)
+    values (${userId}, ${newsroomId}, ${url}, ${title}, ${kind}, ${tier}, 'accepted')
     on conflict (user_id, url) do update set title = excluded.title, kind = excluded.kind, tier = excluded.tier, status = 'accepted'
     returning id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
   `;
@@ -148,7 +149,14 @@ export const addSource = createServerFn({ method: "POST" })
     if (!parsed.ok) return { ok: false as const, error: parsed.error };
     const title = data.title.trim() || parsed.host;
     const kind = data.kind || kindFromSourceUrl(parsed.url);
-    const source = await upsertSource(context.userId, parsed.url, title, kind, data.tier || "A");
+    const source = await upsertSource(
+      context.userId,
+      parsed.url,
+      title,
+      kind,
+      data.tier || "A",
+      owned(context),
+    );
     if (!source) return { ok: false as const, error: "Could not save that source." };
     return { ok: true as const, source };
   });
@@ -168,7 +176,14 @@ export const addSourcesBulk = createServerFn({ method: "POST" })
     let added = 0;
     const byTier = { A: 0, B: 0, C: 0 };
     for (const row of rows) {
-      const source = await upsertSource(context.userId, row.url, row.title, row.kind, row.tier);
+      const source = await upsertSource(
+        context.userId,
+        row.url,
+        row.title,
+        row.kind,
+        row.tier,
+        owned(context),
+      );
       if (source) {
         added += 1;
         if (row.tier === "A" || row.tier === "B" || row.tier === "C") {
@@ -245,17 +260,17 @@ async function insertLeadWithDraft(
   const urlsJson = JSON.stringify(input.urls);
   const rows = input.notesJson
     ? await sql<{ id: number }>`
-        insert into leads (user_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)
+        insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)
         values (
-          ${context.userId}, ${input.headline}, ${input.why}, ${input.topic},
+          ${context.userId}, ${owned(context)}, ${input.headline}, ${input.why}, ${input.topic},
           ${urlsJson}, ${input.why.slice(0, 400)}, 0, 'new', ${input.notesJson}
         )
         returning id
       `
     : await sql<{ id: number }>`
-        insert into leads (user_id, headline, why, topic, source_urls, evidence, newsworthiness, status)
+        insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status)
         values (
-          ${context.userId}, ${input.headline}, ${input.why}, ${input.topic},
+          ${context.userId}, ${owned(context)}, ${input.headline}, ${input.why}, ${input.topic},
           ${urlsJson}, ${input.why.slice(0, 400)}, 0, 'new'
         )
         returning id
@@ -273,13 +288,13 @@ async function insertLeadWithDraft(
     evidence is there, and it is not.
   */
   await sql`
-    insert into drafts (user_id, lead_id, headline, dek, body, topic, source_urls)
+    insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls)
     values (
-      ${context.userId}, ${id}, ${input.headline}, ${input.why.slice(0, 220)}, '', ${input.topic},
+      ${context.userId}, ${owned(context)}, ${id}, ${input.headline}, ${input.why.slice(0, 220)}, '', ${input.topic},
       ${urlsJson}
     )
   `;
-  await audit(context.userId, "lead", `filed ${id}`);
+  await audit(context.userId, "lead", `filed ${id}`, owned(context));
   return { ok: true as const, id };
 }
 
@@ -438,7 +453,7 @@ export const runScan = createServerFn({ method: "POST" })
       concrete provider the same way a draft does. See `scanPreflight` and
       `commitScanForAuthenticatedEditor`.
     */
-    await ensureSeeds(context.userId);
+    await ensureSeeds(context.userId, owned(context));
     const modelChoice = storyModelChoice(data.modelChoice);
     const { commitScanForAuthenticatedEditor } = await import("./model-request-commit.server.ts");
     return commitScanForAuthenticatedEditor({
@@ -478,7 +493,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const setStage = deps.setJobStage ?? setJobStage;
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const paperConfig = await getPaperConfig(owned(context));
-  await ensureSeeds(context.userId);
+  await ensureSeeds(context.userId, owned(context));
   const sql = await getSql();
   let runId = job.subject_id;
   if (runId > 0) {
@@ -554,10 +569,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       if (src.last_hash && /404|410|not found|had almost no/i.test(msg)) {
         await sql
           .query(
-            `insert into anomalies (user_id, kind, summary, url, details)
-             values ($1, $2, $3, $4, $5)`,
+            `insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
+             values ($1, $2, $3, $4, $5, $6)`,
             [
               context.userId,
+              owned(context),
               "disappeared",
               `Watched source failed after previously succeeding: ${src.title}`,
               src.url,
@@ -650,8 +666,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       `;
     if (p.changed) {
       await sql`
-          insert into snapshots (user_id, source_id, content_hash, excerpt)
-          values (${context.userId}, ${p.id}, ${p.hash}, ${p.text.slice(0, 32000)})
+          insert into snapshots (user_id, newsroom_id, source_id, content_hash, excerpt)
+          values (${context.userId}, ${owned(context)}, ${p.id}, ${p.hash}, ${p.text.slice(0, 32000)})
         `;
     }
   }
@@ -688,8 +704,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       continue;
     }
     await sql`
-        insert into sources (user_id, url, title, kind, tier, status)
-        values (${context.userId}, ${url.toString()}, ${p.title || url.hostname}, 'discovered', 'unclassified', 'proposed')
+        insert into sources (user_id, newsroom_id, url, title, kind, tier, status)
+        values (${context.userId}, ${owned(context)}, ${url.toString()}, ${p.title || url.hostname}, 'discovered', 'unclassified', 'proposed')
 
         on conflict (user_id, url) do nothing
       `;
@@ -723,7 +739,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       where id = ${runId} and newsroom_id = ${owned(context)}
     `;
 
-  await audit(context.userId, "scan", `run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`);
+  await audit(context.userId, "scan", `run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`, owned(context));
 });
 
 /** Injectable seam so a job with a real Claude/Codex 401 mid-run, and the
@@ -928,11 +944,11 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
 
   await sql`
     insert into drafts (
-      user_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
+      user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
       provenance_json, form, found_note, unanswered, research_json
     )
     values (
-      ${context.userId}, ${leadId}, ${reported.headline}, ${reported.dek}, ${reported.body},
+      ${context.userId}, ${owned(context)}, ${leadId}, ${reported.headline}, ${reported.dek}, ${reported.body},
       ${reported.topic}, ${sourceUrls}, ${notes},
       ${provenanceJson}, ${reported.form}, ${reported.found_note.slice(0, 8000)}, ${unansweredJson},
       ${researchJson}
@@ -942,7 +958,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     update leads set status = 'drafted', notes_json = ${notesJson}
     where id = ${leadId} and newsroom_id = ${owned(context)}
   `;
-  await audit(context.userId, "draft", String(leadId));
+  await audit(context.userId, "draft", String(leadId), owned(context));
 });
 
 export const draftLead = createServerFn({ method: "POST" })
@@ -1166,7 +1182,7 @@ export const pullTodo = createServerFn({ method: "POST" })
       await sql`
         update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
       `;
-      await audit(context.userId, "pull", query.slice(0, 200));
+      await audit(context.userId, "pull", query.slice(0, 200), owned(context));
       return { ok: true as const, notes, dump, found: docs.length, offSubject };
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Pull failed";
@@ -1196,8 +1212,8 @@ export const saveDraft = createServerFn({ method: "POST" })
       `;
     } else {
       await sql`
-        insert into drafts (user_id, lead_id, headline, dek, body, topic)
-        values (${context.userId}, ${data.leadId}, ${data.headline}, ${data.dek}, ${body}, ${data.topic})
+        insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic)
+        values (${context.userId}, ${owned(context)}, ${data.leadId}, ${data.headline}, ${data.dek}, ${body}, ${data.topic})
       `;
     }
     return { ok: true as const };
@@ -1314,11 +1330,11 @@ export async function performPublish(
     }
     await sql`
       insert into articles (
-        user_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
+        user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
         provenance_json, form, found_note, unanswered
       )
       values (
-        ${context.userId}, ${leadId}, ${slug}, ${draft.headline}, ${draft.dek},
+        ${context.userId}, ${owned(context)}, ${leadId}, ${slug}, ${draft.headline}, ${draft.dek},
         ${draft.body}, ${draft.topic}, ${draft.source_urls}, 'published', now(),
         ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}
       )
@@ -1329,14 +1345,14 @@ export async function performPublish(
     const entities = [draft.topic, ...draft.headline.split(/[:,—-]/).slice(0, 2)];
     for (const entity of entities.map((e) => e.trim()).filter((e) => e.length > 2)) {
       await sql`
-        insert into beat_memory (user_id, entity, last_angle)
-        values (${context.userId}, ${entity.slice(0, 80)}, ${draft.dek.slice(0, 200)})
+        insert into beat_memory (user_id, newsroom_id, entity, last_angle)
+        values (${context.userId}, ${owned(context)}, ${entity.slice(0, 80)}, ${draft.dek.slice(0, 200)})
       `;
     }
     return slug;
   });
 
-  await audit(context.userId, "publish", published);
+  await audit(context.userId, "publish", published, owned(context));
   return { ok: true as const, slug: published };
 }
 
@@ -1362,10 +1378,10 @@ export const addCorrection = createServerFn({ method: "POST" })
       articleId = rows[0]?.id ?? null;
     }
     await sql`
-      insert into corrections (user_id, article_id, body)
-      values (${context.userId}, ${articleId}, ${body})
+      insert into corrections (user_id, newsroom_id, article_id, body)
+      values (${context.userId}, ${owned(context)}, ${articleId}, ${body})
     `;
-    await audit(context.userId, "correction", data.articleSlug ?? "unspecified");
+    await audit(context.userId, "correction", data.articleSlug ?? "unspecified", owned(context));
     return { ok: true as const };
   });
 
@@ -1472,7 +1488,7 @@ export const deleteLead = createServerFn({ method: "POST" })
       await sql`delete from deleted_items where id = ${trashId}`.catch(() => undefined);
       return { ok: false as const, error: "That lead is already gone." };
     }
-    await audit(context.userId, "delete-lead", gone[0].headline.slice(0, 120));
+    await audit(context.userId, "delete-lead", gone[0].headline.slice(0, 120), owned(context));
     return { ok: true as const, trashId };
   });
 
@@ -1551,6 +1567,6 @@ export const deleteArticle = createServerFn({ method: "POST" })
       await sql`delete from deleted_items where id = ${trashId}`.catch(() => undefined);
       return { ok: false as const, error: "That story is already gone." };
     }
-    await audit(context.userId, "delete-article", `${slug} — ${gone.headline.slice(0, 100)}`);
+    await audit(context.userId, "delete-article", `${slug} — ${gone.headline.slice(0, 100)}`, owned(context));
     return { ok: true as const, trashId };
   });

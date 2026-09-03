@@ -163,7 +163,7 @@ export const restoreTrashItem = createServerFn({ method: "POST" })
     }
 
     await sql`delete from deleted_items where id = ${id} and newsroom_id = ${owned(context)}`;
-    await audit(context.userId, "restore", `${item.kind} — ${item.label.slice(0, 100)}`);
+    await audit(context.userId, "restore", `${item.kind} — ${item.label.slice(0, 100)}`, owned(context));
     return { ok: true as const, kind: item.kind };
   });
 
@@ -206,6 +206,6 @@ export const purgeTrashItem = createServerFn({ method: "POST" })
         /* unreadable snapshot: the purge itself still stands */
       }
     }
-    await audit(context.userId, "purge", gone[0].label.slice(0, 120));
+    await audit(context.userId, "purge", gone[0].label.slice(0, 120), owned(context));
     return { ok: true as const };
   });

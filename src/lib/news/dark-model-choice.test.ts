@@ -2,7 +2,7 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
 import { ensureInvestigateSchema } from "./investigate.ts";
-import { __setJobWorkForTest, ensureJobsSchema, laneForKind } from "./jobs.ts";
+import { __setJobWorkForTest, drainQueuedJobs, ensureJobsSchema, laneForKind } from "./jobs.ts";
 import { startBriefJob, startDarkRound } from "./dark.ts";
 
 /**
@@ -77,7 +77,22 @@ before(() => {
   __setJobWorkForTest(async () => {});
 });
 
-after(() => {
+after(async () => {
+  /*
+    `enqueueJob` (called by every `startDarkRound`/`startBriefJob` above)
+    kicks a drain via `setTimeout(fn, 0)` (jobs.ts `kickJobs`), fire-and-
+    forget -- it is not awaited by the function that queued it. Left alone,
+    that scheduled drain can fire AFTER this hook has already restored the
+    real `fetch` and the real per-test env (see `withEnv`'s `finally`), so it
+    runs against `runWork` still pointed at the stub -- usually -- but a
+    slow enough tick lets it fire once `__setJobWorkForTest()` below has
+    already put `runWork` back to the real dispatcher, which spawns a REAL
+    Claude Code CLI process using whatever is actually configured on the
+    machine. Draining explicitly, while the stub is still installed and
+    `fetch` is still stubbed, closes that race deterministically instead of
+    hoping every kicked timer loses it.
+  */
+  await drainQueuedJobs();
   globalThis.fetch = originalFetch;
   __setJobWorkForTest();
 });

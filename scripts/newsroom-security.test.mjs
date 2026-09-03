@@ -269,7 +269,7 @@ test("every desk and dark mutation is gated by deskMiddleware", () => {
   assert.match(modelCommit, /assertRate\)\(input\.context\.userId, "draft"\)/);
   assert.match(modelCommit, /assertRate\)\(input\.context\.userId, "scan"\)/);
   assert.match(desk, /withTransaction/);
-  assert.match(dark, /assertRate\(context\.userId, "dark"\)/);
+  assert.match(dark, /assertRate\(context\.userId, "dark"/);
   assert.match(dark, /audit\(\s*(?:context\.)?userId,\s*"dark"/);
 });
 

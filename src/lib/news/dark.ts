@@ -246,6 +246,11 @@ const DARK_SCHEMA_STATEMENTS: readonly string[] = [
     that dug on a different model are different facts about the same file.
   */
   `alter table dark_runs add column if not exists model_choice text`,
+  // Mirrors migrations/0012_newsroom_appliance.sql. A rebuild-under-live-
+  // process (ensureDarkSchema's whole reason to exist) must recreate a
+  // dark_runs/dark_signals/dark_promises the rest of this file can actually
+  // query -- every read here filters on newsroom_id (GauntletGate ENG-02).
+  `alter table dark_runs add column if not exists newsroom_id integer not null default 1`,
   `create table if not exists dark_signals (
       id serial primary key,
       user_id text not null,
@@ -269,6 +274,7 @@ const DARK_SCHEMA_STATEMENTS: readonly string[] = [
     )`,
   `create index if not exists dark_signals_user_idx on dark_signals (user_id, created_at desc)`,
   `alter table dark_signals add column if not exists investigation_id integer`,
+  `alter table dark_signals add column if not exists newsroom_id integer not null default 1`,
   `create table if not exists dark_promises (
       id serial primary key,
       user_id text not null,
@@ -280,6 +286,7 @@ const DARK_SCHEMA_STATEMENTS: readonly string[] = [
       created_at timestamptz not null default now()
     )`,
   `create index if not exists dark_promises_user_idx on dark_promises (user_id, created_at desc)`,
+  `alter table dark_promises add column if not exists newsroom_id integer not null default 1`,
 ];
 
 export async function ensureDarkSchema() {
@@ -689,6 +696,7 @@ async function synthesizeSignals(
    */
   choice?: EffectiveProviderChoice,
   overrides?: ProviderOverrides | null,
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
 ) {
   const sql = await getSql();
   const sources = await sql<SourceRow>`
@@ -808,11 +816,11 @@ async function synthesizeSignals(
     if (!HANDOFFS.has(handoff)) handoff = "HOLD FOR PATTERN";
     await sql`
       insert into dark_signals (
-        user_id, run_id, investigation_id, name, posture, signal_type, strength, confidence,
+        user_id, newsroom_id, run_id, investigation_id, name, posture, signal_type, strength, confidence,
         observation, pattern, linkage_map, alternatives, counter_narrative,
         what_would_kill, pathway, privacy_review, handoff
       ) values (
-        ${userId}, ${runId}, ${investigationId}, ${name.slice(0, 200)},
+        ${userId}, ${newsroomId}, ${runId}, ${investigationId}, ${name.slice(0, 200)},
         ${String(sig.posture ?? "").slice(0, 80)},
         ${String(sig.type ?? "").slice(0, 80)},
         ${strength}, ${confidence},
@@ -835,9 +843,9 @@ async function synthesizeSignals(
     const what = String(p.what ?? "").trim();
     if (!who || !what) continue;
     await sql`
-      insert into dark_promises (user_id, who_promised, what, when_due, source_cite, status)
+      insert into dark_promises (user_id, newsroom_id, who_promised, what, when_due, source_cite, status)
       values (
-        ${userId}, ${who.slice(0, 200)}, ${what.slice(0, 800)},
+        ${userId}, ${newsroomId}, ${who.slice(0, 200)}, ${what.slice(0, 800)},
         ${String(p.when_due ?? "").slice(0, 120) || null},
         ${String(p.source_cite ?? "").slice(0, 400) || null},
         ${String(p.status ?? "open").slice(0, 40)}
@@ -888,19 +896,25 @@ async function executeDarkRun(
     title?: string;
     choice?: EffectiveProviderChoice;
   },
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
 ) {
   const sql = await getSql();
   const choice = opts.choice;
-  const overrides = await readProviderOverrides(DEFAULT_NEWSROOM_ID).catch(() => ({}));
+  const overrides = await readProviderOverrides(newsroomId).catch(() => ({}));
   const runRows = await sql<{ id: number }>`
-    insert into dark_runs (user_id, model_choice) values (${userId}, ${choice ?? null}) returning id
+    insert into dark_runs (user_id, newsroom_id, model_choice)
+    values (${userId}, ${newsroomId}, ${choice ?? null}) returning id
   `;
   const runId = runRows[0]!.id;
   const paste = opts.paste.trim().slice(0, 14000);
 
   let investigationId = opts.investigationId ?? 0;
   if (!investigationId) {
-    const opened = await openInvestigationForEditor(userId, { paste, title: opts.title });
+    const opened = await openInvestigationForEditor(
+      userId,
+      { paste, title: opts.title },
+      newsroomId,
+    );
     investigationId = opened.investigationId;
   }
 
@@ -928,6 +942,7 @@ async function executeDarkRun(
       dials,
       choice,
       overrides,
+      newsroomId,
     );
     await rememberLastModelChoice(investigationId, choice);
     const names = (
@@ -963,6 +978,7 @@ async function executeDarkRun(
       userId,
       "dark",
       `run ${runId} inv ${investigationId} hops ${loop.hops} signals ${synth.stored}`,
+      newsroomId,
     );
     if (synth.error && !loop.paused) {
       await markInvestigationPaused(userId, investigationId, synth.error);
@@ -1013,12 +1029,16 @@ export const runDarkDesk = createServerFn({ method: "POST" })
     const refusal = await darkPreflightRefusal(asked);
     if (refusal) return refusal;
     await ensureDarkSchema();
-    await assertRate(context.userId, "dark");
-    return executeDarkRun(context.userId, {
-      paste: data.paste,
-      investigationId: data.investigationId,
-      choice: probe.ok ? probe.choice : asked,
-    });
+    await assertRate(context.userId, "dark", owned(context));
+    return executeDarkRun(
+      context.userId,
+      {
+        paste: data.paste,
+        investigationId: data.investigationId,
+        choice: probe.ok ? probe.choice : asked,
+      },
+      owned(context),
+    );
   });
 
 export const openDarkInvestigation = createServerFn({ method: "POST" })
@@ -1027,8 +1047,8 @@ export const openDarkInvestigation = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     try {
       await ensureDarkSchema();
-      const opened = await openInvestigationForEditor(context.userId, data);
-      await audit(context.userId, "dark", `open inv ${opened.investigationId}`);
+      const opened = await openInvestigationForEditor(context.userId, data, owned(context));
+      await audit(context.userId, "dark", `open inv ${opened.investigationId}`, owned(context));
       return opened;
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Could not open an investigation";
@@ -1051,11 +1071,15 @@ export const findSomethingToDigInto = createServerFn({ method: "POST" })
     if (!top?.seed?.trim() && !top?.title?.trim()) {
       return { ok: false as const, error: "nothing-new" };
     }
-    const opened = await openInvestigationForEditor(context.userId, {
-      paste: top.seed,
-      title: top.title,
-    });
-    await audit(context.userId, "dark", `open inv ${opened.investigationId} from worth-a-look`);
+    const opened = await openInvestigationForEditor(
+      context.userId,
+      {
+        paste: top.seed,
+        title: top.title,
+      },
+      owned(context),
+    );
+    await audit(context.userId, "dark", `open inv ${opened.investigationId} from worth-a-look`, owned(context));
     return opened;
   });
 
@@ -1123,7 +1147,7 @@ export async function startDarkRound(
     };
   }
 
-  await assertRate(context.userId, "dark");
+  await assertRate(context.userId, "dark", owned(context));
   await sql`
     update investigations set status = ${"investigating"}, updated_at = now()
     where id = ${id} and newsroom_id = ${owned(context)}
@@ -1210,6 +1234,7 @@ export async function performDarkRound(job: DeskJob) {
         dials,
         on,
         overrides,
+        owned(context),
       );
       return { loop: ran, synth: signals };
     };
@@ -1284,6 +1309,7 @@ export async function performDarkRound(job: DeskJob) {
       context.userId,
       "dark-continue",
       `run ${runId} inv ${id} hops ${loop.hops} signals ${synth.stored}`,
+      owned(context),
     );
     /*
       Write the brief while the round is still warm.
@@ -1350,9 +1376,10 @@ export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
       .join("\n\n")
       .slice(0, 4000);
     const created = await sql<{ id: number }>`
-      insert into leads (user_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
+      insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
       values (
         ${context.userId},
+        ${owned(context)},
         ${sig.name.slice(0, 240)},
         ${why},
         'council',
@@ -1364,7 +1391,7 @@ export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
       )
       returning id
     `;
-    await audit(context.userId, "dark-handoff", String(id));
+    await audit(context.userId, "dark-handoff", String(id), owned(context));
     return { ok: true as const, leadId: created[0]!.id };
   });
 
@@ -1386,7 +1413,7 @@ export const queueInvestigation = createServerFn({ method: "POST" })
       order by id asc limit 1
     `;
     if (already[0]) {
-      await audit(context.userId, "dark-handoff", `inv ${id} existing lead ${already[0].id}`);
+      await audit(context.userId, "dark-handoff", `inv ${id} existing lead ${already[0].id}`, owned(context));
       return { ok: true as const, leadId: already[0].id };
     }
     const arts = await sql<{ url: string }>`
@@ -1397,9 +1424,10 @@ export const queueInvestigation = createServerFn({ method: "POST" })
     const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
     const topic = topicFromText(`${inv[0].title}\n${inv[0].summary}`);
     const created = await sql<{ id: number }>`
-      insert into leads (user_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
+      insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
       values (
         ${context.userId},
+        ${owned(context)},
         ${inv[0].title.slice(0, 240)},
         ${`DARK DESK notes. Publication is a separate human action.\n\n${inv[0].summary}`.slice(0, 4000)},
         ${topic},
@@ -1411,7 +1439,7 @@ export const queueInvestigation = createServerFn({ method: "POST" })
       )
       returning id
     `;
-    await audit(context.userId, "dark-handoff", `inv ${id} lead ${created[0]!.id}`);
+    await audit(context.userId, "dark-handoff", `inv ${id} lead ${created[0]!.id}`, owned(context));
     return { ok: true as const, leadId: created[0]!.id };
   });
 
@@ -1428,7 +1456,7 @@ export const parkInvestigation = createServerFn({ method: "POST" })
           updated_at = now()
       where id = ${id} and newsroom_id = ${owned(context)}
     `;
-    await audit(context.userId, "dark", `set aside inv ${id}`);
+    await audit(context.userId, "dark", `set aside inv ${id}`, owned(context));
     return { ok: true as const, investigationId: id };
   });
 
@@ -1451,7 +1479,7 @@ export const reopenParkedInvestigation = createServerFn({ method: "POST" })
           updated_at = now()
       where id = ${id} and newsroom_id = ${owned(context)}
     `;
-    await audit(context.userId, "dark", `pull back inv ${id}`);
+    await audit(context.userId, "dark", `pull back inv ${id}`, owned(context));
     return { ok: true as const, investigationId: id };
   });
 
@@ -1471,7 +1499,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
     await ensureDarkSchema();
-    await assertRate(context.userId, "reddit");
+    await assertRate(context.userId, "reddit", owned(context));
     const { sweepRedditFeeds } = await import("./reddit.server.ts");
     const { subredditNewFeed, subredditSearchFeed, pickCivicPosts, redditAnomaly, civicScore } =
       await import("./reddit.ts");
@@ -1505,7 +1533,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       filed += 1;
     }
 
-    await audit(context.userId, "reddit", `r/${sub} read ${sweep.posts.length} filed ${filed}`);
+    await audit(context.userId, "reddit", `r/${sub} read ${sweep.posts.length} filed ${filed}`, owned(context));
 
     return {
       ok: true as const,
@@ -1571,7 +1599,7 @@ export const saveDarkDials = createServerFn({ method: "POST" })
         set dig = excluded.dig, nerve = excluded.nerve, scope = excluded.scope,
             updated_at = now()
     `;
-    await audit(context.userId, "dark-dials", `dig ${d.dig} nerve ${d.nerve} scope ${d.scope}`);
+    await audit(context.userId, "dark-dials", `dig ${d.dig} nerve ${d.nerve} scope ${d.scope}`, owned(context));
     return {
       ok: true as const,
       dials: d,
@@ -1687,7 +1715,7 @@ export async function startBriefJob(
     return { ok: true as const, pending: true as const, jobId: open.id, modelChoice: persisted };
   }
 
-  await assertRate(context.userId, "brief");
+  await assertRate(context.userId, "brief", owned(context));
   const job = await enqueueJob({
     userId: context.userId,
     newsroomId: owned(context),

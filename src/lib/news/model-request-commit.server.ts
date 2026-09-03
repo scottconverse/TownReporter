@@ -392,9 +392,9 @@ export async function writeStoryForAuthenticatedEditor(
   const notesJson = packNotes(appendScratch(parseNotes(null), scratch));
   const urlsJson = JSON.stringify(urls);
   const rows = await sql<{ id: number }>`
-    insert into leads (user_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)
+    insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)
     values (
-      ${input.context.userId}, ${headline}, ${why}, ${topic},
+      ${input.context.userId}, ${input.context.newsroomId}, ${headline}, ${why}, ${topic},
       ${urlsJson}, ${why.slice(0, 400)}, 0, 'new', ${notesJson}
     )
     returning id
@@ -407,12 +407,17 @@ export async function writeStoryForAuthenticatedEditor(
     print with no sources section at all.
   */
   await sql`
-    insert into drafts (user_id, lead_id, headline, dek, body, topic, source_urls)
+    insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls)
     values (
-      ${input.context.userId}, ${leadId}, ${headline}, ${why.slice(0, 220)}, '', ${topic}, ${urlsJson}
+      ${input.context.userId}, ${input.context.newsroomId}, ${leadId}, ${headline}, ${why.slice(0, 220)}, '', ${topic}, ${urlsJson}
     )
   `;
-  await (deps.audit ?? audit)(input.context.userId, "lead", `filed ${leadId}`);
+  await (deps.audit ?? audit)(
+    input.context.userId,
+    "lead",
+    `filed ${leadId}`,
+    input.context.newsroomId,
+  );
 
   const modelChoice = storyModelChoice(input.modelChoice);
   const commit = await commitStoryDraftForAuthenticatedEditor(

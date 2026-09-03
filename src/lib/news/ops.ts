@@ -1,4 +1,5 @@
 import { getSql } from "../db.ts";
+import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 
 const HOURLY: Record<string, number> = {
   scan: 10,
@@ -34,7 +35,11 @@ const HOURLY: Record<string, number> = {
  * all see each other; at the boundary that can reject a request one early,
  * which is the safe direction for a cost ceiling.
  */
-export async function assertRate(userId: string, action: string) {
+export async function assertRate(
+  userId: string,
+  action: string,
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
+) {
   const cap = HOURLY[action] ?? 20;
   const sql = await getSql();
   await sql.query(`
@@ -49,8 +54,13 @@ export async function assertRate(userId: string, action: string) {
     create index if not exists desk_rate_window_idx
       on desk_rate (user_id, action, created_at desc)
   `);
+  // Mirrors migrations/0012_newsroom_appliance.sql -- was missing from this
+  // ensure list (GauntletGate ENG-03).
+  await sql.query(
+    `alter table desk_rate add column if not exists newsroom_id integer not null default 1`,
+  );
   await sql`
-    insert into desk_rate (user_id, action) values (${userId}, ${action})
+    insert into desk_rate (user_id, action, newsroom_id) values (${userId}, ${action}, ${newsroomId})
   `;
   const rows = await sql<{ c: number }>`
     select count(*)::int as c from desk_rate
@@ -66,6 +76,7 @@ export async function audit(
   userId: string,
   action: string,
   detail: string,
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
 ) {
   const sql = await getSql();
   await sql.query(`
@@ -77,8 +88,13 @@ export async function audit(
       created_at timestamptz not null default now()
     )
   `);
+  // Mirrors migrations/0012_newsroom_appliance.sql -- was missing from this
+  // ensure list (GauntletGate ENG-03).
+  await sql.query(
+    `alter table audit_events add column if not exists newsroom_id integer not null default 1`,
+  );
   await sql`
-    insert into audit_events (user_id, action, detail)
-    values (${userId}, ${action}, ${detail.slice(0, 500)})
+    insert into audit_events (user_id, action, detail, newsroom_id)
+    values (${userId}, ${action}, ${detail.slice(0, 500)}, ${newsroomId})
   `;
 }

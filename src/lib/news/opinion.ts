@@ -272,11 +272,11 @@ export const publishEditorial = createServerFn({ method: "POST" })
       }
       await tx`
         insert into articles (
-          user_id, lead_id, slug, headline, dek, body, topic, source_urls, status,
+          user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status,
           published_at, form
         )
         values (
-          ${context.userId}, ${null}, ${candidate}, ${d.headline}, ${d.dek}, ${d.body},
+          ${context.userId}, ${owned(context)}, ${null}, ${candidate}, ${d.headline}, ${d.dek}, ${d.body},
           ${d.topic || "opinion"}, ${d.source_urls || "[]"}, 'published', now(),
           ${d.form || "editorial"}
         )
@@ -284,7 +284,7 @@ export const publishEditorial = createServerFn({ method: "POST" })
       return candidate;
     });
 
-    await audit(context.userId, "publish-editorial", slug);
+    await audit(context.userId, "publish-editorial", slug, owned(context));
     return { ok: true as const, slug };
   });
 
@@ -334,7 +334,7 @@ export const deleteEditorial = createServerFn({ method: "POST" })
       update editorial_requests set draft_id = null
       where draft_id = ${draftId} and newsroom_id = ${owned(context)}
     `.catch(() => undefined);
-    await audit(context.userId, "delete-editorial", gone[0].headline.slice(0, 120));
+    await audit(context.userId, "delete-editorial", gone[0].headline.slice(0, 120), owned(context));
     return { ok: true as const, trashId };
   });
 
@@ -416,7 +416,7 @@ export const fileWrittenEditorial = createServerFn({ method: "POST" })
               ${"pasted into the Opinion desk"}, ${result.draftId}, now())
     `;
 
-    await audit(context.userId, "file-written-editorial", (ed.headline || "").slice(0, 120));
+    await audit(context.userId, "file-written-editorial", (ed.headline || "").slice(0, 120), owned(context));
     return { ok: true as const, draftId: result.draftId, headline: ed.headline };
   });
 
@@ -461,6 +461,6 @@ export const discardEditorialRequest = createServerFn({ method: "POST" })
       delete from editorial_requests
       where id = ${requestId} and newsroom_id = ${owned(context)} and draft_id is null
     `;
-    await audit(context.userId, "discard-editorial-request", (row.subject ?? "").slice(0, 120));
+    await audit(context.userId, "discard-editorial-request", (row.subject ?? "").slice(0, 120), owned(context));
     return { ok: true as const };
   });

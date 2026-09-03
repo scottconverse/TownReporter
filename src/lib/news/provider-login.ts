@@ -54,10 +54,10 @@ export const startProviderLogin = createServerFn({ method: "POST" })
       broken machine retries, and each retry is a spawned CLI holding a
       loopback listener. The cap is per hour, per editor.
     */
-    await assertRate(context.userId, "provider-login");
+    await assertRate(context.userId, "provider-login", context.newsroomId);
     const mod = await import("./provider-login.server.ts");
     const row = await mod.startProviderLogin(data, context.newsroomId);
-    await audit(context.userId, "provider-login", `${data} ${row.status}`);
+    await audit(context.userId, "provider-login", `${data} ${row.status}`, context.newsroomId);
     return row;
   });
 
@@ -79,7 +79,7 @@ export const cancelProviderLogin = createServerFn({ method: "POST" })
     if (!Number.isInteger(data)) return null;
     const { cancelProviderLogin: cancel } = await import("./provider-login.server.ts");
     const row = await cancel(data, context.newsroomId);
-    await audit(context.userId, "provider-login", `cancel ${data}`);
+    await audit(context.userId, "provider-login", `cancel ${data}`, context.newsroomId);
     return row;
   });
 
@@ -90,9 +90,9 @@ export const testProvider = createServerFn({ method: "POST" })
     assertOwner(context.role);
     if (!isProviderId(data)) return { error: "There is no such writing model." };
     // A real model call, so it spends. Capped like every other spending action.
-    await assertRate(context.userId, "provider-test");
+    await assertRate(context.userId, "provider-test", context.newsroomId);
     const { testProvider: run } = await import("./provider-login.server.ts");
     const result = await run(data);
-    await audit(context.userId, "provider-test", `${data} ${result.ok ? "ok" : "failed"}`);
+    await audit(context.userId, "provider-test", `${data} ${result.ok ? "ok" : "failed"}`, context.newsroomId);
     return result;
   });

@@ -463,6 +463,13 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
   `alter table artifacts add column if not exists newsroom_id integer not null default 1`,
   `alter table source_monitors add column if not exists newsroom_id integer not null default 1`,
   `alter table capture_events add column if not exists newsroom_id integer not null default 1`,
+  // Mirrors migrations/0012_newsroom_appliance.sql. These two were missing
+  // from this ensure list even though the migration adds them (GauntletGate
+  // ENG-03) -- a database built via this path alone (a fresh PGLite dev
+  // instance, or the Node unit-test path when the migration glob is
+  // unavailable) would lack the column every scoped read here filters on.
+  `alter table artifact_blobs add column if not exists newsroom_id integer not null default 1`,
+  `alter table artifact_chunks add column if not exists newsroom_id integer not null default 1`,
   `alter table artifact_versions drop constraint if exists artifact_versions_user_id_url_content_hash_key`,
   `drop index if exists artifact_versions_user_id_url_content_hash_key`,
   `create unique index if not exists artifact_versions_newsroom_url_hash on artifact_versions (newsroom_id, url, content_hash)`,
@@ -1113,9 +1120,9 @@ export async function rememberCapture(opts: {
       try {
         await sql`
           insert into artifact_blobs (
-            version_id, user_id, sha256, mime, original_url, redirect_chain, byte_length, body_b64
+            version_id, user_id, newsroom_id, sha256, mime, original_url, redirect_chain, byte_length, body_b64
           ) values (
-            ${versionId}, ${opts.userId}, ${rawHash ?? extractedHash}, ${opts.contentType ?? "application/octet-stream"},
+            ${versionId}, ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${rawHash ?? extractedHash}, ${opts.contentType ?? "application/octet-stream"},
             ${url}, ${JSON.stringify(opts.redirectChain ?? [])}, ${opts.rawBytes.byteLength}, ${b64}
           )
         `;
@@ -1128,10 +1135,10 @@ export async function rememberCapture(opts: {
   if (opts.investigationId != null) {
     await sql`
       insert into artifacts (
-        user_id, investigation_id, url, title, content_hash, full_text,
+        user_id, newsroom_id, investigation_id, url, title, content_hash, full_text,
         classification, fetch_status, fetch_outcome, version_id, capture_event_id, extraction_method
       ) values (
-        ${opts.userId}, ${opts.investigationId}, ${url}, ${opts.title.slice(0, 200)},
+        ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${opts.investigationId}, ${url}, ${opts.title.slice(0, 200)},
         ${versionHash}, ${fullText}, ${opts.classification ?? "discovered"},
         ${opts.status}, ${opts.outcome}, ${versionId}, ${captureEventId},
         ${opts.extractionMethod ?? ""}
@@ -1381,9 +1388,9 @@ async function flagPatternAnomalies(opts: {
   });
   for (const a of found) {
     await sql`
-      insert into anomalies (user_id, investigation_id, kind, summary, url, details)
+      insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
       values (
-        ${opts.userId}, ${opts.investigationId}, ${a.kind}, ${a.summary.slice(0, 1000)},
+        ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${opts.investigationId}, ${a.kind}, ${a.summary.slice(0, 1000)},
         ${opts.url}, ${a.details.slice(0, 2000)}
       )
     `;
@@ -1833,9 +1840,9 @@ export async function researchLoop(opts: {
         attempt.state !== "SEARCH_SUCCESS_ZERO_RESULTS"
       ) {
         await sql`
-          insert into anomalies (user_id, investigation_id, kind, summary, details)
+          insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, details)
           values (
-            ${opts.userId}, ${opts.investigationId}, ${"search-failed"},
+            ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${opts.investigationId}, ${"search-failed"},
             ${`Search ${attempt.state} via ${attempt.provider}: ${q.slice(0, 180)}`},
             ${attempt.error ?? attempt.state}
           )
@@ -1975,9 +1982,9 @@ export async function researchLoop(opts: {
       if (outcome === "removed" || outcome === "not-found" || outcome === "soft-404") {
         if (prior && prior.fetch_status === 200) {
           await sql`
-            insert into anomalies (user_id, investigation_id, kind, summary, url, details)
+            insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
             values (
-              ${opts.userId}, ${opts.investigationId}, ${"disappeared"},
+              ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${opts.investigationId}, ${"disappeared"},
               ${`Previously captured document is gone: ${url}`},
               ${url},
               ${`Prior hash ${prior.content_hash}. Outcome ${outcome}. Status ${got.status}. Original version retained.`}
@@ -2048,9 +2055,9 @@ export async function researchLoop(opts: {
         const delta = diffExcerpt(prior.full_text, got.text);
         if (delta) {
           await sql`
-            insert into anomalies (user_id, investigation_id, kind, summary, url, details)
+            insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
             values (
-              ${opts.userId}, ${opts.investigationId}, ${"changed"},
+              ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${opts.investigationId}, ${"changed"},
               ${`Document changed: ${url}`}, ${url}, ${delta.slice(0, 4000)}
             )
           `;
@@ -2557,9 +2564,9 @@ async function persistPlan(userId: string, investigationId: number, plan: HopPla
   }
   for (const a of plan.anomalies) {
     await sql`
-      insert into anomalies (user_id, investigation_id, kind, summary, url, details)
+      insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
       values (
-        ${userId}, ${investigationId}, ${a.kind.slice(0, 40)}, ${a.summary.slice(0, 1000)},
+        ${userId}, ${DEFAULT_NEWSROOM_ID}, ${investigationId}, ${a.kind.slice(0, 40)}, ${a.summary.slice(0, 1000)},
         ${a.url ?? null}, ${""}
       )
     `;
@@ -2712,9 +2719,9 @@ export async function checkBaselines(userId: string, investigationId: number, no
         .filter(Boolean)
         .join(" ");
       await sql`
-        insert into anomalies (user_id, investigation_id, kind, summary, url, details)
+        insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
         values (
-          ${userId}, ${investigationId}, ${"missing-cadence"},
+          ${userId}, ${DEFAULT_NEWSROOM_ID}, ${investigationId}, ${"missing-cadence"},
           ${`Expected recurring record is late: ${m.title || m.key} (${m.daysLate} days past cadence)`},
           ${m.url || null},
           ${details}
@@ -2826,9 +2833,9 @@ export async function runDueMonitors(opts: {
         priorCap[0]!.fetch_outcome === "soft-404");
     if (gone) {
       await sql`
-        insert into anomalies (user_id, investigation_id, kind, summary, url, details)
+        insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
         values (
-          ${opts.userId}, ${invId}, ${"disappeared"},
+          ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${invId}, ${"disappeared"},
           ${`Monitored record disappeared: ${url}`},
           ${url},
           ${`Monitor ${m.id}. Outcome ${outcome}. Status ${got.status}. No human reopen required.`}
@@ -2861,9 +2868,9 @@ export async function runDueMonitors(opts: {
     } else {
       if (priorGone && (outcome === "fetched" || outcome === "changed")) {
         await sql`
-          insert into anomalies (user_id, investigation_id, kind, summary, url, details)
+          insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
           values (
-            ${opts.userId}, ${invId}, ${"restored"},
+            ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${invId}, ${"restored"},
             ${`Monitored record restored: ${url}`},
             ${url},
             ${`Prior outcome ${priorCap[0]?.fetch_outcome ?? "missing"}. New hash ${hash}.`}
@@ -2894,9 +2901,9 @@ export async function runDueMonitors(opts: {
       }
       if (outcome === "changed") {
         await sql`
-          insert into anomalies (user_id, investigation_id, kind, summary, url, details)
+          insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
           values (
-            ${opts.userId}, ${invId}, ${"changed"},
+            ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${invId}, ${"changed"},
             ${`Monitored record changed: ${url}`},
             ${url},
             ${diffExcerpt(priorCap[0]?.full_text ?? "", got.text).slice(0, 4000)}
