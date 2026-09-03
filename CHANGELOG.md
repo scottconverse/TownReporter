@@ -1,6 +1,19 @@
 # Changelog
 
-Current release: **0.6.6**.
+Current release: **0.6.7**.
+
+## 0.6.7 — 2026-09-03
+- **Automatic now fails over on a timeout, not only a sign-in lapse.** A
+  production draft on Automatic died with `Claude Code request timed out
+  after 150s, 0 bytes out` while both CLIs were signed in, and the desk
+  never tried Codex — `failOverAndRetry`'s decision only moved on a provider
+  auth lapse and explicitly excluded timeouts. `planAutomaticFailover` now
+  also plans a move to the next ladder rung when the error is a timeout or a
+  zero-output response, on a job Automatic chose, with a later rung that
+  probes ready. The switch is still a single hop, the same as an auth lapse,
+  and an editor's explicit model choice is still never touched. The job
+  stage now reads "…timed out" for this case, so it is not confused with a
+  lapsed sign-in; the existing sign-in-lapsed wording is unchanged.
 
 ## 0.6.6 — 2026-09-03
 - **CI browser walks run against the built server (what production runs), ending

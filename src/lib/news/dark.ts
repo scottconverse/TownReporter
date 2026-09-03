@@ -1222,10 +1222,10 @@ export async function performDarkRound(job: DeskJob) {
       Story and Scan both do this (see automatic-failover.ts and
       scan-model-run.ts) and Dark Desk did not, because until 0.6.2 it had no
       pinned model to fail over FROM. The trigger is deliberately narrow: only
-      a job Automatic chose for, only an error that reads as a lapsed login,
-      only a rung strictly later in the ladder, and only once. A refusal, a
-      timeout, or an empty answer is a real result and must not be papered
-      over with a second provider's opinion.
+      a job Automatic chose for, only an error that reads as a lapsed login OR
+      a timeout/no-output, only a rung strictly later in the ladder, and only
+      once. A refusal or an empty-but-not-zero-byte answer is a real result
+      and must not be papered over with a second provider's opinion.
 
       A hop's own planner failure surfaces in `loop.summary` ("Planner fell
       back on 1 of 4 hops: ...") rather than as a thrown error, because the
@@ -1244,7 +1244,9 @@ export async function performDarkRound(job: DeskJob) {
       if (plan) {
         const previous = modelChoiceLabel(job.model_choice);
         await setJobModelChoice(job.id, plan.next);
-        await setJobStage(job.id, `Switched to ${plan.label}: ${previous} sign-in lapsed`);
+        const switchedBecause =
+          plan.reason === "timeout" ? `${previous} timed out` : `${previous} sign-in lapsed`;
+        await setJobStage(job.id, `Switched to ${plan.label}: ${switchedBecause}`);
         choice = plan.next;
         ({ loop, synth } = await runOnce(choice));
       }

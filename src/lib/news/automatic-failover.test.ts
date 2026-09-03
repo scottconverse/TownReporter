@@ -12,6 +12,13 @@ import { planAutomaticFailover } from "./automatic-failover.ts";
 const LIVE_401 =
   "Claude Code error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
 
+/**
+ * Live case 2026-09-02, second one, same day: Automatic pinned to Claude
+ * Opus, both CLIs signed in, and the draft died with this exact wording --
+ * a timeout that sent nothing back. Automatic never tried Codex.
+ */
+const LIVE_TIMEOUT_NO_OUTPUT = "Claude Code request timed out after 150s, 0 bytes out";
+
 describe("planAutomaticFailover", () => {
   it("moves Automatic to Codex Terra when Claude's login lapsed mid-run and Codex is ready", async () => {
     const calls: string[] = [];
@@ -24,7 +31,22 @@ describe("planAutomaticFailover", () => {
         return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
       },
     });
-    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra" });
+    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "auth" });
+    assert.deepEqual(calls, ["codex-balanced"], "must not probe the current rung or any before it");
+  });
+
+  it("moves Automatic to Codex Terra when Claude's draft timed out with no output and Codex is ready", async () => {
+    const calls: string[] = [];
+    const plan = await planAutomaticFailover({
+      source: "auto",
+      current: "claude-frontier",
+      error: LIVE_TIMEOUT_NO_OUTPUT,
+      probe: async (choice) => {
+        calls.push(choice);
+        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+      },
+    });
+    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
     assert.deepEqual(calls, ["codex-balanced"], "must not probe the current rung or any before it");
   });
 
@@ -34,6 +56,21 @@ describe("planAutomaticFailover", () => {
       source: "editor",
       current: "claude-frontier",
       error: LIVE_401,
+      probe: async (choice) => {
+        calls.push(choice);
+        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+      },
+    });
+    assert.equal(plan, null);
+    assert.deepEqual(calls, [], "an explicit choice must never even probe another provider");
+  });
+
+  it("never fails over an editor's explicit model choice, even on the same timeout", async () => {
+    const calls: string[] = [];
+    const plan = await planAutomaticFailover({
+      source: "editor",
+      current: "claude-frontier",
+      error: LIVE_TIMEOUT_NO_OUTPUT,
       probe: async (choice) => {
         calls.push(choice);
         return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
@@ -53,14 +90,39 @@ describe("planAutomaticFailover", () => {
     assert.equal(plan, null);
   });
 
-  it("never fails over on a timeout, even with auth-shaped wording nearby", async () => {
+  it("moves on a timeout even with auth-shaped wording nearby, and reports it as a timeout, not an auth lapse", async () => {
     const plan = await planAutomaticFailover({
       source: "auto",
       current: "claude-frontier",
       error: "Claude Code readiness check timed out.",
       probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
     });
+    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
+  });
+
+  it("does not fail over on a timeout when Automatic's next rung is not ready either", async () => {
+    const plan = await planAutomaticFailover({
+      source: "auto",
+      current: "claude-frontier",
+      error: LIVE_TIMEOUT_NO_OUTPUT,
+      probe: async () => ({ ok: false, error: "Codex is not installed on this machine." }),
+    });
     assert.equal(plan, null);
+  });
+
+  it("does not fail over on a timeout once the ladder's last rung has already failed", async () => {
+    const calls: string[] = [];
+    const plan = await planAutomaticFailover({
+      source: "auto",
+      current: "codex-balanced",
+      error: LIVE_TIMEOUT_NO_OUTPUT,
+      probe: async (choice) => {
+        calls.push(choice);
+        return { ok: true, label: "Claude Opus", choice: "claude-frontier" };
+      },
+    });
+    assert.equal(plan, null);
+    assert.deepEqual(calls, [], "there is no rung after the last one to probe");
   });
 
   it("never fails over on a content refusal", async () => {

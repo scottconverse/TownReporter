@@ -78,10 +78,12 @@ export type RunScanChatWithFailoverInput = {
 
 /**
  * Run the scan's one AI read on the job's pinned model. If it fails and the
- * job is on Automatic with a login-lapse-shaped error, try exactly one later
- * rung of AUTOMATIC_LADDER, once -- reusing the SAME `system`/`user` text,
- * never re-fetching sources. An editor's explicit model choice, a timeout, a
- * refusal, or any second failure on the new rung is returned as-is.
+ * job is on Automatic with a login-lapse-shaped OR timeout/no-output-shaped
+ * error, try exactly one later rung of AUTOMATIC_LADDER, once -- reusing the
+ * SAME `system`/`user` text, never re-fetching sources. An editor's explicit
+ * model choice, a refusal, or any second failure on the new rung is returned
+ * as-is (see automatic-failover.ts's `planAutomaticFailover` for exactly
+ * what counts).
  */
 export async function runScanChatWithFailover(
   input: RunScanChatWithFailoverInput,
@@ -105,6 +107,7 @@ export async function runScanChatWithFailover(
 
   const previousLabel = modelChoiceLabel(job.model_choice);
   await setModelChoice(job.id, plan.next);
-  await setStage(job.id, `Switched to ${plan.label}: ${previousLabel} sign-in lapsed`);
+  const switchedBecause = plan.reason === "timeout" ? `${previousLabel} timed out` : `${previousLabel} sign-in lapsed`;
+  await setStage(job.id, `Switched to ${plan.label}: ${switchedBecause}`);
   return chat(system, user, maxTokens, { timeoutMs: timeoutMs(plan.next), choice: plan.next });
 }

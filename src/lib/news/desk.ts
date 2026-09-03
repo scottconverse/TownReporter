@@ -51,7 +51,7 @@ import {
 } from "./jobs";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
-import { planAutomaticFailover } from "./automatic-failover.ts";
+import { planAutomaticFailover, looksLikeTimeoutOrNoOutput } from "./automatic-failover.ts";
 import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
 import { looksLikeProviderAuthFailure } from "./preflight.ts";
@@ -736,10 +736,11 @@ type DraftInput = Omit<Parameters<typeof reportAndDraft>[0], "modelChoice">;
 
 /**
  * The first attempt failed. If the job was on Automatic and the failure
- * reads as "the login is gone" (not a timeout, refusal, or unknown error),
- * try exactly one later rung of the ladder and, if it is ready, run the draft
- * again on it -- once. Anything else, including a second failure on the new
- * rung, is returned/thrown as-is by the caller.
+ * reads as "the login is gone" or "it timed out / sent nothing back" (not a
+ * refusal or an unknown error), try exactly one later rung of the ladder
+ * and, if it is ready, run the draft again on it -- once. Anything else,
+ * including a second failure on the new rung, is returned/thrown as-is by
+ * the caller.
  */
 async function failOverAndRetry(opts: {
   job: DeskJob;
@@ -760,10 +761,10 @@ async function failOverAndRetry(opts: {
   });
   if (!plan) {
     // Explain WHY Automatic did not move on, when it looked close: still on
-    // Automatic, still an auth failure, and a later rung existed -- it just
-    // was not ready either. The auth wording from the first failure survives
-    // so the desk's own classifier (scanPreflight) still reads it as
-    // provider-auth, not "unknown".
+    // Automatic, still an auth failure or a timeout/no-output, and a later
+    // rung existed -- it just was not ready either. The original wording
+    // from the first failure survives so the desk's own classifier
+    // (scanPreflight) still reads it the same way it always did.
     const ladderIndex = AUTOMATIC_LADDER.indexOf(
       job.model_choice as (typeof AUTOMATIC_LADDER)[number],
     );
@@ -771,8 +772,7 @@ async function failOverAndRetry(opts: {
     const wouldHaveTried =
       source === "auto" &&
       hasLaterRung &&
-      looksLikeProviderAuthFailure(error) &&
-      !/timed out|timeout/i.test(error);
+      (looksLikeTimeoutOrNoOutput(error) || looksLikeProviderAuthFailure(error));
     if (wouldHaveTried) {
       const nextRung = AUTOMATIC_LADDER[ladderIndex + 1]!;
       const nextProbe = await probe(nextRung);
@@ -785,7 +785,8 @@ async function failOverAndRetry(opts: {
 
   const previousLabel = modelChoiceLabel(job.model_choice);
   await setModelChoice(job.id, plan.next);
-  await setStage(job.id, `Switched to ${plan.label}: ${previousLabel} sign-in lapsed`);
+  const switchedBecause = plan.reason === "timeout" ? `${previousLabel} timed out` : `${previousLabel} sign-in lapsed`;
+  await setStage(job.id, `Switched to ${plan.label}: ${switchedBecause}`);
   return runReport({ ...draftInput, modelChoice: plan.next });
 }
 

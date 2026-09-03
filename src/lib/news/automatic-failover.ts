@@ -1,6 +1,7 @@
 /**
- * Automatic fails over to the next rung of the ladder ONLY when the first
- * provider's login lapsed mid-run.
+ * Automatic fails over to the next rung of the ladder when the first
+ * provider's login lapsed mid-run, OR when it timed out / produced no
+ * output.
  *
  * Live case 2026-09-02, job 41: Automatic pinned to Claude Opus, Claude Code's
  * OAuth token expired between the commit-time probe and the actual draft
@@ -10,13 +11,26 @@
  * nothing on the row said Automatic had picked it — see
  * `model_choice_source` in migrations/0026_model_choice_source.sql.
  *
- * This is deliberately narrow. A content refusal, a timeout, an empty
- * response, or an error this desk does not recognise must never fail over —
- * those are not "the login is gone", and silently swapping providers on them
- * would hide a real problem behind a different provider's answer. An
- * editor's explicit model choice never falls back either: choosing one model
- * IS choosing not to run the others (see `modelChoiceHelp` in
- * ./model-choice.ts).
+ * Live case 2026-09-02 (second one, same day): a different Automatic draft
+ * died with `Claude Code request timed out after 150s, 0 bytes out` while
+ * both CLIs were signed in. That is not "the login is gone", so the
+ * auth-lapse trigger correctly ignored it -- but nothing else caught it
+ * either, and the editor got a silent failure instead of Codex. A timeout or
+ * a zero-output response reads the same way to an editor as a dead login:
+ * the paper didn't get a draft. So Automatic now treats "timed out" and "0
+ * bytes out" as a second, independent trigger, alongside the auth lapse --
+ * each is reported back via `reason` so the caller can word the switch
+ * accurately.
+ *
+ * This is still deliberately narrow. A content refusal, an empty (but non-
+ * zero-byte) response, or an error this desk does not recognise must never
+ * fail over -- those are not "the login is gone" or "nothing came back", and
+ * silently swapping providers on them would hide a real problem behind a
+ * different provider's answer. An editor's explicit model choice never falls
+ * back either: choosing one model IS choosing not to run the others (see
+ * `modelChoiceHelp` in ./model-choice.ts). And a hop only ever goes one rung
+ * -- the single retry in desk.ts's `failOverAndRetry` is the whole loop,
+ * never more.
  */
 
 import { AUTOMATIC_LADDER, type ProviderProbe } from "./ai.ts";
@@ -34,26 +48,49 @@ export type AutomaticFailoverInput = {
   probe: (choice: string) => Promise<ProviderProbe>;
 };
 
-export type AutomaticFailoverPlan = { next: StoryModelChoice; label: string };
+/** Why Automatic is moving on, so the caller can word the switch accurately. */
+export type AutomaticFailoverReason = "auth" | "timeout";
 
-/** A timeout is "the provider was reachable but slow", not "signed out" — never fails over. */
+export type AutomaticFailoverPlan = {
+  next: StoryModelChoice;
+  label: string;
+  reason: AutomaticFailoverReason;
+};
+
+/** "The provider was reachable but slow (or came back with nothing)" — still a failure Automatic should route around. */
 const TIMEOUT_RE = /timed out|timeout/i;
+/** The other shape the live 150s timeout took: a connection that closed having sent nothing. */
+const NO_OUTPUT_RE = /0 bytes out/i;
+
+/** True for a timeout or a response that came back empty of actual output. */
+export function looksLikeTimeoutOrNoOutput(detail: string | null | undefined): boolean {
+  return Boolean(detail) && (TIMEOUT_RE.test(detail!) || NO_OUTPUT_RE.test(detail!));
+}
 
 /**
  * Decide whether Automatic should move to the next rung, and which one.
  *
- * Returns null unless ALL of: the job was on Automatic; the error reads as a
- * provider login failure and not a timeout; AUTOMATIC_LADDER has a rung after
- * `current`; and that rung's probe reports ready. Only rungs strictly AFTER
- * `current` are ever tried, in ladder order, and probing stops at the first
- * one that is ready.
+ * Returns null unless ALL of: the job was on Automatic; the error reads as
+ * either a provider login failure or a timeout/no-output; AUTOMATIC_LADDER
+ * has a rung after `current`; and that rung's probe reports ready. Only
+ * rungs strictly AFTER `current` are ever tried, in ladder order, and
+ * probing stops at the first one that is ready -- a single hop, never a
+ * loop.
+ *
+ * A timeout/no-output reading takes priority over an auth-shaped one when an
+ * error happens to match both (e.g. "session expired" wording inside a
+ * timeout message): the plan's `reason` is "timeout" in that case, matching
+ * the pre-existing rule that a timeout is never treated as a login lapse.
  */
 export async function planAutomaticFailover(
   input: AutomaticFailoverInput,
 ): Promise<AutomaticFailoverPlan | null> {
   if (input.source !== "auto") return null;
-  if (!looksLikeProviderAuthFailure(input.error)) return null;
-  if (TIMEOUT_RE.test(input.error)) return null;
+
+  const isTimeout = looksLikeTimeoutOrNoOutput(input.error);
+  const isAuthLapse = !isTimeout && looksLikeProviderAuthFailure(input.error);
+  if (!isTimeout && !isAuthLapse) return null;
+  const reason: AutomaticFailoverReason = isTimeout ? "timeout" : "auth";
 
   const currentIndex = AUTOMATIC_LADDER.indexOf(input.current as (typeof AUTOMATIC_LADDER)[number]);
   if (currentIndex === -1) return null;
@@ -62,7 +99,7 @@ export async function planAutomaticFailover(
     const rung = AUTOMATIC_LADDER[i];
     const probed = await input.probe(rung);
     if (probed.ok) {
-      return { next: storyModelChoice(rung), label: probed.label || modelChoiceLabel(rung) };
+      return { next: storyModelChoice(rung), label: probed.label || modelChoiceLabel(rung), reason };
     }
   }
   return null;
