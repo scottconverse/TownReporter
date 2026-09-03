@@ -1,6 +1,30 @@
 # Changelog
 
-Current release: **0.6.11**.
+Current release: **0.6.12**.
+
+## 0.6.12 — 2026-09-03
+- **Cancelling a stale sign-in can no longer `taskkill` an unrelated process
+  (GauntletGate ENG-06).** `cancelProviderLogin` and the sign-in expiry timer
+  used to fall back to a PID read straight out of the `provider_logins` row
+  when this process had no live handle for it. After a restart (the shipped
+  restart-app ops button), an `awaiting_user` row still names a PID this
+  server no longer owns -- and Windows recycles PIDs, so Stop or the 10/15
+  minute expiry could `taskkill /T /F` whatever now holds that number, plus
+  its children. `expire`/`cancelProviderLogin`/`pollProviderLogin` now kill
+  only a child this process actually started (`live.get(id)`); the DB `pid`
+  column is never used as a kill target again. A new one-time startup sweep
+  retires any row left `starting`/`awaiting_user` from a previous process to
+  `expired` on the next boot, without ever spawning `taskkill`. The in-flight
+  Stop/expire path is unchanged for a login this process really is running.
+- **The Scan and Sources desk screens now have CI browser coverage
+  (GauntletGate TES-01).** Two model-free Playwright walks --
+  `scripts/scan-desk-e2e.mjs` and `scripts/sources-desk-e2e.mjs` -- each boot
+  the built server with a fake, already-signed-in CLI and assert on the real
+  screen: Scan's previous-scans zero state and Run-scan button (never
+  clicked, so no real scan runs), and Sources' add/drop/restore flow, with a
+  reload after every write to prove each change is stored, not just held in
+  React state. Wired into `ci.yml` as their own jobs, the same shape as
+  `dark-picker`/`provider-signin`.
 
 ## 0.6.11 — 2026-09-03
 - **Data-integrity hardening: every newsroom-scoped write now records its

@@ -5,17 +5,20 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { spawn as spawnCp } from "node:child_process";
 import {
   LOGIN_LIMIT_MS,
   cancelProviderLogin,
   ensureProviderLoginsSchema,
   firstHttpsUrl,
+  getProviderLogin,
   isProviderId,
   lastLine,
   latestProviderLogin,
   parseClaudeLogin,
   parseCodexLogin,
   redactSecrets,
+  resetProviderLoginStartupSweepForTest,
   startProviderLogin,
   stripAnsi,
 } from "./provider-login.server.ts";
@@ -371,5 +374,152 @@ describe("the sign-in state machine, driven by a fake CLI", () => {
     assert.equal(isProviderId("codex"), true);
     assert.equal(isProviderId("gpt"), false);
     assert.equal(isProviderId(null), false);
+  });
+});
+
+describe("ENG-06: never taskkill a PID this process does not still hold", () => {
+  const NEWSROOM = 1;
+
+  /*
+    node:child_process's own `spawn` export cannot be replaced with
+    node:test's `mock.method` (it is a non-configurable property on the
+    built-in module), so "no taskkill happened" is proven the direct way
+    instead: point a row at a REAL process this test spawned itself, run the
+    code path under test, and then prove that process is still alive. If
+    killTree had reached for a DB-read pid the way it used to, this dummy
+    process — which is never added to the module's own `live` map — would be
+    dead afterwards.
+  */
+  function spawnDummy(): { pid: number; kill: () => void } {
+    const child = spawnCp(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    if (!child.pid) throw new Error("dummy process did not get a pid");
+    return {
+      pid: child.pid,
+      kill: () => {
+        try {
+          child.kill();
+        } catch {
+          /* already gone */
+        }
+      },
+    };
+  }
+
+  function isAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  it("cancelling a row absent from the live map performs no kill", async () => {
+    // Consume any pending one-time startup sweep first, so it does not touch
+    // the row this test is about to insert.
+    await ensureProviderLoginsSchema();
+    const dummy = spawnDummy();
+    try {
+      const sql = await getSql();
+      const inserted = await sql.query<{ id: number }>(
+        `insert into provider_logins (newsroom_id, provider, status, pid)
+         values ($1, 'claude', 'awaiting_user', $2) returning id`,
+        [NEWSROOM, dummy.pid],
+      );
+      const id = inserted[0]!.id;
+
+      const result = await cancelProviderLogin(id, NEWSROOM);
+      assert.equal(result?.status, "cancelled");
+      assert.ok(
+        isAlive(dummy.pid),
+        "cancelling a row this process never spawned must not kill the pid it names",
+      );
+    } finally {
+      dummy.kill();
+    }
+  });
+
+  it("expiring a row absent from the live map performs no kill", async () => {
+    await ensureProviderLoginsSchema();
+    const dummy = spawnDummy();
+    try {
+      const sql = await getSql();
+      const inserted = await sql.query<{ id: number }>(
+        `insert into provider_logins (newsroom_id, provider, status, pid, started_at)
+         values ($1, 'codex', 'awaiting_user', $2, now() - interval '1 hour') returning id`,
+        [NEWSROOM, dummy.pid],
+      );
+      const id = inserted[0]!.id;
+
+      // expiresInSeconds is 0 (started an hour ago), so polling it expires it.
+      const { pollProviderLogin } = await import("./provider-login.server.ts");
+      const result = await pollProviderLogin(id, NEWSROOM);
+      assert.equal(result?.status, "expired");
+      assert.ok(
+        isAlive(dummy.pid),
+        "expiring a row this process never spawned must not kill the pid it names",
+      );
+    } finally {
+      dummy.kill();
+    }
+  });
+
+  it("a startup sweep retires a pre-existing open row without a kill", async () => {
+    await ensureProviderLoginsSchema();
+    const dummy = spawnDummy();
+    try {
+      const sql = await getSql();
+      const inserted = await sql.query<{ id: number }>(
+        `insert into provider_logins (newsroom_id, provider, status, pid)
+         values ($1, 'codex', 'awaiting_user', $2) returning id`,
+        [NEWSROOM, dummy.pid],
+      );
+      const id = inserted[0]!.id;
+
+      // Simulate this row surviving into a new process: the one-time sweep
+      // has not run yet in this "process".
+      resetProviderLoginStartupSweepForTest();
+
+      await ensureProviderLoginsSchema(); // this is where the sweep fires
+      const row = await getProviderLogin(id, NEWSROOM);
+      assert.equal(row?.status, "expired");
+      assert.ok(
+        isAlive(dummy.pid),
+        "the startup sweep must retire stale rows without ever killing the pid they name",
+      );
+    } finally {
+      dummy.kill();
+    }
+  });
+
+  it("the happy path still kills the real child this process holds", async () => {
+    const restore = (() => {
+      const before = {
+        CODEX_CLI_PATH: process.env.CODEX_CLI_PATH,
+        FAKE_CODEX_SIGNED_IN: process.env.FAKE_CODEX_SIGNED_IN,
+        FAKE_CODEX_STATE_FILE: process.env.FAKE_CODEX_STATE_FILE,
+        FAKE_CODEX_MODE: process.env.FAKE_CODEX_MODE,
+      };
+      process.env.CODEX_CLI_PATH = join(ROOT, "scripts/fakes/fake-codex-cli.mjs");
+      delete process.env.FAKE_CODEX_SIGNED_IN;
+      delete process.env.FAKE_CODEX_STATE_FILE;
+      process.env.FAKE_CODEX_MODE = "hang";
+      return () => {
+        for (const [k, v] of Object.entries(before)) {
+          if (v === undefined) delete (process.env as Record<string, string | undefined>)[k];
+          else (process.env as Record<string, string>)[k] = v;
+        }
+      };
+    })();
+    try {
+      const started = await startProviderLogin("codex", NEWSROOM);
+      const cancelled = await cancelProviderLogin(started.id, NEWSROOM);
+      assert.equal(cancelled?.status, "cancelled");
+    } finally {
+      restore();
+    }
   });
 });

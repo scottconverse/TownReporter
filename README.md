@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.11](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.11)** — 3 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.12](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.12)** — 3 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.12** — cancelling a stale sign-in can no longer kill an unrelated process; the Scan and Sources screens now have CI browser coverage.
 - **0.6.11** — data-integrity hardening: every newsroom-scoped write now records its newsroom, the Dark Desk rebuild path and the migration/ensure lists agree, guarded by new tests. Groundwork for multiple newsrooms and reader/user accounts.
 - **0.6.10** — a local model (llama.cpp / LM Studio / any OpenAI-compatible server) is now a named writing model you can pick anywhere the desk uses AI, with its own longer timeouts.
 - **0.6.9** — removed a reader-tracking-privacy positioning that was never part of the product's goals; the public page still loads nothing from outside, described plainly.

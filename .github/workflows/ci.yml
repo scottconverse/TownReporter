@@ -451,6 +451,112 @@ jobs:
           }
           kill_tree "$DEV_PID"
 
+  # Scan drives the lead queue everything downstream depends on, and until
+  # this job it had zero CI-gated browser coverage -- the only scripts that
+  # ever touched /desk/scan were the nightly, opt-in, real-money proof job
+  # and two one-off audit scratch files wired into neither `npm test` nor
+  # this file (GauntletGate TES-01). Model-free, same trick as
+  # provider-signin/dark-picker: the fake Claude CLI answers signed in and
+  # Run scan is never clicked, so nothing here spends money or calls a real
+  # provider. See the walk under scripts/, named for what it proves.
+  scan-desk:
+    name: The Scan desk renders, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: The previous-scans list state and the Run-scan button render, without starting a scan
+        env:
+          BETTER_AUTH_SECRET: ci-scan-desk-secret-not-for-production
+          PORT: "3420"
+          HOST: 127.0.0.1
+          SCAN_DESK_BASE_URL: http://127.0.0.1:3420
+          DATABASE_URL: ""
+          CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          FAKE_CLAUDE_SIGNED_IN: "1"
+        run: |
+          npm start > /tmp/scan-desk.log 2>&1 &
+          DEV_PID=$!
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3420/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3420/ || {
+            echo "built server did not come up"; tail -n 80 /tmp/scan-desk.log; exit 1;
+          }
+          node scripts/scan-desk-e2e.mjs
+          # By PID, never by name -- see the same comment in the
+          # provider-signin job above for why a bare `kill "$DEV_PID"` is not
+          # enough (npm/with-app-env.mjs/vite are all separate descendants).
+          kill_tree() {
+            local pid="$1"
+            local child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          kill_tree "$DEV_PID"
+
+  # Sources is the watch list an editor curates -- the scanner only ever
+  # fetches what is accepted here -- and until this job it had zero CI-gated
+  # browser coverage (GauntletGate TES-01). Adds a real source through the
+  # real form, drops it, restores it, and asserts on the real DOM at each
+  # step, reloading after every write so the assertion can only be true if
+  # the change is stored, not merely remembered in React state.
+  sources-desk:
+    name: The Sources desk add/drop/restore, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Adding, dropping, and restoring a watched source all persist
+        env:
+          BETTER_AUTH_SECRET: ci-sources-desk-secret-not-for-production
+          PORT: "3421"
+          HOST: 127.0.0.1
+          SOURCES_DESK_BASE_URL: http://127.0.0.1:3421
+          DATABASE_URL: ""
+          CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          FAKE_CLAUDE_SIGNED_IN: "1"
+        run: |
+          npm start > /tmp/sources-desk.log 2>&1 &
+          DEV_PID=$!
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3421/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3421/ || {
+            echo "built server did not come up"; tail -n 80 /tmp/sources-desk.log; exit 1;
+          }
+          node scripts/sources-desk-e2e.mjs
+          # By PID, never by name -- see the same comment in the
+          # provider-signin job above for why a bare `kill "$DEV_PID"` is not
+          # enough (npm/with-app-env.mjs/vite are all separate descendants).
+          kill_tree() {
+            local pid="$1"
+            local child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          kill_tree "$DEV_PID"
+
   # Delete, trash, and the public corrections feed each had a fix proven only
   # by a unit test: a deleted story's correction could outlive it and print
   # under a null headline, restoring a story from the trash could leave its

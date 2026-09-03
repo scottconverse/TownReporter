@@ -31,6 +31,8 @@ const CLAIMERS = [
   "scripts/provider-signin-e2e.mjs",
   "scripts/failover-e2e.mjs",
   "scripts/dark-picker-e2e.mjs",
+  "scripts/scan-desk-e2e.mjs",
+  "scripts/sources-desk-e2e.mjs",
 ];
 
 test("each desk-claiming walk exists and is referenced by CI", () => {

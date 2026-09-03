@@ -200,6 +200,36 @@ export async function ensureProviderLoginsSchema() {
     create index if not exists provider_logins_open_idx
       on provider_logins (newsroom_id, provider, status, id desc)
   `);
+  await sweepStaleProviderLoginsOnStartup();
+}
+
+/**
+ * Once per process, retire any row this server left `starting`/`awaiting_user`
+ * the last time it ran. A restarted process owns nothing in `live` yet — every
+ * PID any of those rows remember belongs, if it belongs to anything at all, to
+ * whatever Windows has since recycled that number to. Retiring never spawns
+ * `taskkill`; see killTree's callers for why that matters.
+ */
+let startupSweepDone = false;
+
+async function sweepStaleProviderLoginsOnStartup() {
+  if (startupSweepDone) return;
+  startupSweepDone = true;
+  const sql = await getSql();
+  await sql.query(
+    `update provider_logins
+        set status = 'expired',
+            detail = $1,
+            updated_at = now(),
+            finished_at = now()
+      where status in ('starting','awaiting_user')`,
+    ["This process restarted while that sign-in was open."],
+  );
+}
+
+/** Reset the one-time startup-sweep latch. Tests only. */
+export function resetProviderLoginStartupSweepForTest() {
+  startupSweepDone = false;
 }
 
 const OPEN: ProviderLoginStatus[] = ["starting", "awaiting_user"];
@@ -265,9 +295,12 @@ async function patch(id: number, fields: Record<string, unknown>, finished = fal
 type Live = { child: ReturnType<typeof spawn>; timer: NodeJS.Timeout };
 
 /**
- * The children this process started, so Cancel can reach them without going
- * through a PID it read back out of a database. The row's `pid` is the
- * fallback for the case a restart lost this map.
+ * The children this process started. Cancel/expire/poll kill ONLY through
+ * this map — never through a PID read back out of the database. A row's
+ * `pid` column is not proof of ownership: after a restart this map is empty
+ * and every open row's `pid` is just a number Windows is free to have handed
+ * to something else entirely (ENG-06). A row with no entry here is retired
+ * without ever spawning `taskkill`.
  */
 const live = new Map<number, Live>();
 
@@ -489,10 +522,12 @@ export async function startProviderLogin(
 }
 
 async function expire(id: number) {
+  // Only ever kill a child THIS process still holds. A PID read back out of
+  // the row is not proof of ownership — after a restart it is just a number,
+  // and Windows recycles numbers. See killTree's callers, and ENG-06.
   const entry = live.get(id);
-  const row = await getProviderLogin(id);
   forget(id);
-  killTree(entry?.child.pid ?? row?.pid ?? undefined, entry?.child);
+  if (entry) killTree(entry.child.pid, entry.child);
   await patch(
     id,
     {
@@ -510,9 +545,10 @@ export async function cancelProviderLogin(
   const row = await getProviderLogin(id, newsroomId);
   if (!row) return null;
   if (!OPEN.includes(row.status)) return row;
+  // Same rule as expire(): kill only a child this process actually started.
   const entry = live.get(id);
   forget(id);
-  killTree(entry?.child.pid ?? row.pid ?? undefined, entry?.child);
+  if (entry) killTree(entry.child.pid, entry.child);
   await patch(id, { status: "cancelled", detail: "Stopped from the Server page." }, true);
   return getProviderLogin(id, newsroomId);
 }
@@ -541,9 +577,10 @@ export async function pollProviderLogin(
   if (now - (lastPoll.get(id) ?? 0) < 3_000) return row;
   lastPoll.set(id, now);
   if (await probeProviderLogin(row.provider)) {
+    // Same rule again: kill only a child this process actually started.
     const entry = live.get(id);
     forget(id);
-    killTree(entry?.child.pid ?? row.pid ?? undefined, entry?.child);
+    if (entry) killTree(entry.child.pid, entry.child);
     await patch(id, { status: "done", detail: "" }, true);
     return getProviderLogin(id, newsroomId);
   }
