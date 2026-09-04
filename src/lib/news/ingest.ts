@@ -1,6 +1,7 @@
 import { looksLikeSoft404, type FetchOutcome } from "./fetch-outcome.ts";
 import { assertPublicHttpUrl, fetchPublicHttp, fetchPublicHttpTracked } from "./fetch-url.ts";
 import { htmlToPlainText } from "./html-text.ts";
+import { extractArticleText } from "./article-extract.ts";
 import { storableText } from "./storable-text.ts";
 import { needsRenderedFetch } from "./render-detect.ts";
 import { ingestYoutube, isYoutubeUrl, type YoutubeIngest } from "./youtube.ts";
@@ -530,19 +531,31 @@ async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
       });
     }
     const extras = mergePageExtras(body, url);
-    let outText = text;
-    let outTitle = title;
-    let method = "html";
-    if (needsRenderedFetch(url, text, body) && typeof window === "undefined") {
+    // Dark Desk F2: extract the article body, not the whole page. `text`
+    // above (the raw tag-strip) still keeps everything including nav/footer
+    // — it's only used for the soft-404 sniff above, which wants the whole
+    // page. Everything downstream — the render decision, the stored text,
+    // and the "capture failed" classification — is driven off the EXTRACTED
+    // article, so a nav-heavy page with a small real article is kept, and a
+    // nav-only app-shell page with a huge raw stripped length is not
+    // mistaken for a successful capture.
+    const extracted = extractArticleText(body, url.toString());
+    let outText = extracted.text;
+    let outTitle = extracted.title || title;
+    let method = extracted.method === "readability" ? "readability" : "heuristic";
+    if (needsRenderedFetch(url, text, body, outText.length) && typeof window === "undefined") {
       const { fetchRenderedPage } = await import("./render-fetch.ts");
       const rendered = await fetchRenderedPage(url.toString());
-      if (rendered && rendered.text.length > Math.min(text.length, 400)) {
-        outText = rendered.text.slice(0, ARCHIVE_TEXT_CAP);
-        outTitle = rendered.title || title;
-        method = "playwright";
+      if (rendered && rendered.text.length > Math.min(outText.length, 400)) {
+        const renderedExtracted = extractArticleText(rendered.html, rendered.finalUrl);
+        const renderedText = renderedExtracted.text || rendered.text;
+        outText = renderedText.slice(0, ARCHIVE_TEXT_CAP);
+        outTitle = renderedExtracted.title || rendered.title || outTitle;
+        method = renderedExtracted.text ? `playwright+${renderedExtracted.method}` : "playwright";
         mergePageExtras(rendered.html, new URL(rendered.finalUrl), extras);
       }
     }
+    outText = outText.slice(0, ARCHIVE_TEXT_CAP);
     return empty({
       ok: outText.length >= 40,
       status,

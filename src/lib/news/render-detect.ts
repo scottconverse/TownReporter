@@ -20,7 +20,25 @@ export function looksLikeAppShell(stripped: string, html = ""): boolean {
   return false;
 }
 
-export function needsRenderedFetch(url: URL, stripped: string, html = ""): boolean {
+/**
+ * Dark Desk F2: `extractedLength`, when given, is the length of the
+ * POST-extraction article text (see `article-extract.ts`), not the raw
+ * tag-stripped page. A host on `JS_HOST` or showing an explicit
+ * "enable javascript" shell still renders immediately (fast path, no
+ * extraction needed to know). Everything else now ALSO renders when the
+ * extracted article comes up empty/near-empty — this is what catches
+ * non-allowlisted app-shell/CMS pages (e.g. a gov CMS or reddit) that strip
+ * down to plenty of nav but little or no real article body, without
+ * hardcoding any specific host here.
+ */
+export function needsRenderedFetch(
+  url: URL,
+  stripped: string,
+  html = "",
+  extractedLength?: number,
+): boolean {
   if (hostNeedsRendering(url)) return true;
-  return looksLikeAppShell(stripped, html);
+  if (looksLikeAppShell(stripped, html)) return true;
+  if (extractedLength !== undefined && extractedLength < 40) return true;
+  return false;
 }

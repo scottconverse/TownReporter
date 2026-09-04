@@ -44,10 +44,32 @@ export function classifyHttpStatus(status: number): FetchOutcome | null {
   return null;
 }
 
+/**
+ * Minimum characters of real article body below which a 200 response is
+ * treated as a failed capture ("not the article"), not a successful one.
+ */
+export const MIN_ARTICLE_CHARS = 40;
+
+/**
+ * Dark Desk F2: `opts.text` MUST be the EXTRACTED article body (see
+ * `article-extract.ts` / `ingestDocument`), never the raw tag-stripped page.
+ * The `< MIN_ARTICLE_CHARS` floor below decides "capture failed — not the
+ * article", so it has to see the article, not the site's chrome: a nav-only
+ * page extracts to (near) nothing and is correctly failed here even though its
+ * raw stripped HTML was thousands of chars of menu, while a page with a small
+ * but real article extracts to that article and is correctly kept. Soft-404
+ * phrasing that lives in nav/footer is caught upstream in `ingestDocumentRaw`,
+ * which runs `looksLikeSoft404` against the whole-page strip before extraction;
+ * the recheck here is a secondary net on the extracted body.
+ *
+ * `rawText`, when supplied, is that whole-page strip and is used ONLY to widen
+ * soft-404 phrase detection — never to satisfy the emptiness floor.
+ */
 export function classifyFetchedPage(opts: {
   status: number;
   title: string;
   text: string;
+  rawText?: string;
   priorHash?: string | null;
   priorStatus?: number | null;
   newHash?: string;
@@ -59,12 +81,12 @@ export function classifyFetchedPage(opts: {
       : "not-found";
   }
   if (http) return http;
-  if (looksLikeSoft404(opts.title, opts.text)) {
+  if (looksLikeSoft404(opts.title, opts.rawText ?? opts.text)) {
     return opts.priorStatus === 200 || (opts.priorHash && opts.priorHash !== "missing")
       ? "removed"
       : "soft-404";
   }
-  if (opts.text.trim().length < 40) return "parse-failed";
+  if (opts.text.trim().length < MIN_ARTICLE_CHARS) return "parse-failed";
   if (opts.priorHash && opts.newHash && opts.priorHash === opts.newHash) return "unchanged";
   if (opts.priorHash && opts.priorHash !== "missing" && opts.newHash && opts.priorHash !== opts.newHash) {
     return "changed";

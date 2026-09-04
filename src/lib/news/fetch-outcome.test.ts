@@ -87,6 +87,34 @@ describe("classifyFetchedPage", () => {
       "changed",
     );
   });
+
+  it("F2: marks a nav-only page failed by EXTRACTED length, not raw stripped length", () => {
+    // A nav-only page: extraction comes up empty even though the raw stripped
+    // HTML was thousands of chars of menu. Keyed off the extracted `text`,
+    // this is a failed capture, not the article.
+    assert.equal(
+      classifyFetchedPage({
+        status: 200,
+        title: "City of Longmont",
+        text: "",
+        rawText: "Home About Services Departments Contact ".repeat(200),
+        newHash: "x",
+      }),
+      "parse-failed",
+    );
+  });
+
+  it("F2: keeps a small but real article (short extracted body is not a failure)", () => {
+    assert.equal(
+      classifyFetchedPage({
+        status: 200,
+        title: "Council approves budget",
+        text: "The council approved the 2027 budget 5-2 on Tuesday night.",
+        newHash: "y",
+      }),
+      "fetched",
+    );
+  });
 });
 
 describe("classifySearchHtml", () => {
