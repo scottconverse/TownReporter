@@ -2,6 +2,10 @@
 
 Current release: **0.6.14**.
 
+## Unreleased
+- **The masthead deck and trust line now say "non-profit."** Matches what's
+  already live on production; ships with the sections release.
+
 ## 0.6.14 — 2026-09-03
 - **The desk has a Stats tab.** Read-only, editor-only, newsroom-scoped: total
   site views, published stories ranked by views, and site views over the

@@ -555,7 +555,7 @@ export const completeFirstRunSetup = createServerFn({ method: "POST" })
         // on a shared build can belong to another town entirely.
         editorEmail: data.editorEmail ?? "",
         kicker: `Independent civic reporting  ·  ${data.city}`,
-        deck: `${data.name} follows ${data.city}'s meetings, money, contracts and public records — then keeps digging when something changes, disappears or doesn't add up. Human-edited. Sources shown.`,
+        deck: `${data.name} follows ${data.city}'s meetings, money, contracts and public records — then keeps digging when something changes, disappears or doesn't add up. Non-profit. Human-edited. Sources shown.`,
         seedSources: data.watchlist,
         youtubeChannels: data.youtubeChannels,
         meetingKeywords: data.meetingKeywords,

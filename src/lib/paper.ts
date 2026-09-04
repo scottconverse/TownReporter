@@ -6,8 +6,8 @@ export const PAPER = {
   timezone: "America/Denver",
   tagline: "The public record is only the beginning.",
   kicker: "Independent civic reporting  ·  Longmont",
-  deck: "TownReporter follows Longmont's meetings, money, contracts and public records — then keeps digging when something changes, disappears or doesn't add up. Human-edited. Sources shown.",
-  trust: "Civic news, human-edited.",
+  deck: "TownReporter follows Longmont's meetings, money, contracts and public records — then keeps digging when something changes, disappears or doesn't add up. Non-profit. Human-edited. Sources shown.",
+  trust: "Civic news, non-profit, human-edited.",
 } as const;
 
 /**
