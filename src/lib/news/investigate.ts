@@ -26,7 +26,12 @@ import {
   type StructureSnapshot,
 } from "./extract.ts";
 import { sha256, sha256Bytes } from "./url-guard.ts";
-import { classifyFetchedPage, canonicalPublicUrl, type FetchOutcome } from "./fetch-outcome.ts";
+import {
+  classifyFetchedPage,
+  canonicalPublicUrl,
+  canonicalFrontierUrl,
+  type FetchOutcome,
+} from "./fetch-outcome.ts";
 import {
   ARCHIVE_TEXT_CAP,
   PLANNER_TEXT_CAP,
@@ -42,6 +47,7 @@ import {
 } from "./search-web.ts";
 import { retrieveRelevantChunks } from "./retrieve.ts";
 import { identityKey, isConfirmedSame, resolveEntityName } from "./entity-resolve.ts";
+import { isRedditUrl } from "./reddit.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import {
@@ -54,6 +60,8 @@ import {
 export const HOPS_PER_RUN = 5;
 export const SEARCHES_PER_HOP = 3;
 export const FETCHES_PER_HOP = 4;
+/** Dark Desk F5: see the researchLoop fetch loop for why this is capped separately from FETCHES_PER_HOP. */
+export const REDDIT_FETCHES_PER_HOP_CAP = 3;
 
 export type EvidenceHint = {
   source_url?: string;
@@ -416,6 +424,10 @@ alter table investigations add column if not exists pause_reason text;
 alter table frontier_items add column if not exists prior_status text;
 alter table frontier_items add column if not exists reopened_at timestamptz;
 alter table frontier_items add column if not exists reopened_from text;
+alter table frontier_items add column if not exists label_norm text not null default '';
+alter table dead_ends add column if not exists confirmation_count integer not null default 1;
+alter table dead_ends add column if not exists settled boolean not null default false;
+alter table dead_ends add column if not exists dedup_key text not null default '';
 create table if not exists artifact_blobs (
   id serial primary key,
   version_id integer not null,
@@ -479,6 +491,32 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
   `alter table source_monitors drop constraint if exists source_monitors_user_id_url_key`,
   `drop index if exists source_monitors_user_id_url_key`,
   `create unique index if not exists source_monitors_newsroom_url on source_monitors (newsroom_id, url)`,
+  /*
+    Dark Desk F4: unique index on the dedup key persistDiscovery already
+    computes (label_norm). Mirrors migrations/0038_frontier_items_dedup.sql,
+    which dedupes existing rows first -- this ensure-side statement follows
+    the same best-effort convention as the artifact_versions/entities/
+    source_monitors indexes just above: if it runs against a database that
+    was never migrated and still has duplicates, ensureSchemaOnce's
+    try/catch (this file's ensureInvestigateSchema) swallows the failure and
+    the app keeps working on app-level dedup alone -- the migration is what
+    makes the guarantee real.
+  */
+  `create unique index if not exists frontier_items_investigation_label_norm on frontier_items (investigation_id, label_norm)`,
+  /*
+    Dark Desk F4: one row per (investigation, dedup_key) in dead_ends
+    (dedup_key = lower(trim(hypothesis)), computed the same way persistPlan
+    computes it on write), so a re-asserted dead end increments
+    confirmation_count (see persistPlan) instead of inserting a duplicate
+    row -- the fix for the "18x" zombie dead end. A stored column rather
+    than a functional index on lower(hypothesis) directly, so
+    migrations/0039_dead_ends_confirmation.sql can de-collide a
+    pre-existing duplicate WITHOUT deleting or rewriting its hypothesis
+    text (this repo's migration runner refuses any DELETE FROM -- see
+    scripts/no-destructive-migrate.test.mjs). Same best-effort convention
+    as above.
+  */
+  `create unique index if not exists dead_ends_investigation_dedup_key on dead_ends (investigation_id, dedup_key)`,
   /*
     Which writing model this investigation last dug with (0.6.2). Mirrors
     migrations/0030_dark_model_choice.sql. "Keep digging" defaults to it, so
@@ -838,6 +876,44 @@ async function addFrontierFromRefs(
   }
 }
 
+/**
+ * Dark Desk F4 dedup key for a frontier lead.
+ *
+ * A URL-kind label is run through `canonicalFrontierUrl` (strips www/hash/
+ * tracking params/trailing slash AND document-viewer nav params like
+ * municode's `?nodeId=`) and lowercased, so `?nodeId=12345`, a trailing
+ * slash, or `WWW.` vs no-`www.` all collapse to the same row instead of the
+ * "same page saved 7 ways" bug. A non-URL label (an entity name, a
+ * hypothesis-shaped frontier item, etc.) is normalized on case/whitespace
+ * only — collapsing "Front Range LLC" and "front range llc " without
+ * pretending two different-looking phrases are the same lead.
+ *
+ * Returns both the STORED label (canonical for URLs, trimmed-but-original
+ * case otherwise, so the desk still shows a readable label) and the NORM
+ * used for lookup/the unique index.
+ */
+export function frontierDedupKey(kind: string, rawLabel: string): { label: string; norm: string } {
+  const trimmed = rawLabel.trim();
+  if (kind === "url" || /^https?:\/\//i.test(trimmed)) {
+    try {
+      const canon = canonicalFrontierUrl(trimmed);
+      return { label: canon, norm: canon.toLowerCase() };
+    } catch {
+      /* looked like a URL, wasn't one — fall through to generic normalization */
+    }
+  }
+  return { label: trimmed, norm: trimmed.toLowerCase().replace(/\s+/g, " ") };
+}
+
+type FrontierRow = {
+  id: number;
+  queries_tried: string;
+  status: string;
+  evidence: string;
+  closed_reason: string | null;
+  why: string;
+};
+
 /** Record a lead. Unknown/weak/parked never skip this — exhaustion is historical, not a ban. */
 export async function persistDiscovery(
   userId: string,
@@ -852,22 +928,11 @@ export async function persistDiscovery(
   },
 ) {
   const sql = await getSql();
-  const label = item.label.slice(0, 240);
+  const { label: canonLabel, norm } = frontierDedupKey(item.kind, item.label);
+  const label = canonLabel.slice(0, 240);
   if (!label) return;
-  const existing = await sql<{
-    id: number;
-    queries_tried: string;
-    status: string;
-    evidence: string;
-    closed_reason: string | null;
-    why: string;
-  }>`
-    select id, queries_tried, status, evidence, closed_reason, why from frontier_items
-    where investigation_id = ${investigationId} and label = ${label}
-    limit 1
-  `;
-  if (existing[0]) {
-    const row = existing[0];
+
+  async function mergeIntoExisting(row: FrontierRow): Promise<void> {
     if (item.query) {
       const tried = parseJsonArray(row.queries_tried);
       if (!tried.includes(item.query)) {
@@ -911,24 +976,80 @@ export async function persistDiscovery(
         where id = ${row.id}
       `;
     }
+  }
+
+  const existing = await sql<FrontierRow>`
+    select id, queries_tried, status, evidence, closed_reason, why from frontier_items
+    where investigation_id = ${investigationId} and label_norm = ${norm}
+    limit 1
+  `;
+  if (existing[0]) {
+    await mergeIntoExisting(existing[0]);
     return;
   }
+
   const budget = strategiesForFrontier(item.kind, label);
   const next = [...(item.query ? [item.query] : []), ...budget.map((s) => s.query)]
     .filter((q, i, arr) => q && arr.indexOf(q) === i)
     .join(" | ")
     .slice(0, 800);
+  const queriesTriedJson = JSON.stringify(item.query ? [item.query] : []);
+  const strategiesBudgetJson = JSON.stringify(budget.map((s) => s.key));
+  const evidenceVal = (item.evidence ?? "").slice(0, 400);
+  const priorityVal = item.priority ?? 7;
+  const kindVal = item.kind.slice(0, 40);
+  const whyVal = item.why.slice(0, 800);
+  /*
+    Dark Desk F4: app-level dedup above still races on concurrent hops — two
+    hops can both miss the `existing` select and both try to insert the same
+    (investigation_id, label_norm). `on conflict` is the DB-level guard.
+    Mirrors persistPlan's entities upsert immediately below in this file: if
+    the ON CONFLICT target doesn't exist yet (a database whose unique index
+    creation was itself skipped because pre-existing duplicates blocked it —
+    see the ensureInvestigateSchema statement list), this throws and falls
+    through to a re-check-then-plain-insert, never a hard failure.
+  */
+  try {
+    const created = await sql<{ id: number }>`
+      insert into frontier_items (
+        user_id, investigation_id, kind, label, label_norm, why, evidence, priority, next_steps, queries_tried,
+        strategies_tried, strategies_budget, search_zero_count
+      ) values (
+        ${userId}, ${investigationId}, ${kindVal}, ${label}, ${norm},
+        ${whyVal}, ${evidenceVal},
+        ${priorityVal}, ${next},
+        ${queriesTriedJson},
+        ${JSON.stringify([])},
+        ${strategiesBudgetJson},
+        ${0}
+      )
+      on conflict (investigation_id, label_norm) do nothing
+      returning id
+    `;
+    if (created[0]) return;
+  } catch {
+    /* no matching unique constraint on this database — fall through */
+  }
+  const raced = await sql<FrontierRow>`
+    select id, queries_tried, status, evidence, closed_reason, why from frontier_items
+    where investigation_id = ${investigationId} and label_norm = ${norm}
+    limit 1
+  `;
+  if (raced[0]) {
+    await mergeIntoExisting(raced[0]);
+    return;
+  }
   await sql`
     insert into frontier_items (
-      user_id, investigation_id, kind, label, why, evidence, priority, next_steps, queries_tried,
+      user_id, investigation_id, kind, label, label_norm, why, evidence, priority, next_steps, queries_tried,
       strategies_tried, strategies_budget, search_zero_count
     ) values (
-      ${userId}, ${investigationId}, ${item.kind.slice(0, 40)}, ${label},
-      ${item.why.slice(0, 800)}, ${(item.evidence ?? "").slice(0, 400)},
-      ${item.priority ?? 7}, ${next},
-      ${JSON.stringify(item.query ? [item.query] : [])},
+      ${userId}, ${investigationId}, ${kindVal}, ${label}, ${norm},
+      ${whyVal}, ${evidenceVal},
+      ${priorityVal}, ${next},
+      ${queriesTriedJson},
       ${JSON.stringify([])},
-      ${JSON.stringify(budget.map((s) => s.key))},
+      ${strategiesBudgetJson},
       ${0}
     )
   `;
@@ -1956,6 +2077,7 @@ export async function researchLoop(opts: {
       }
     }
 
+    let redditFetchesThisHop = 0;
     while (fetchedThisHop.length < FETCHES_PER_HOP) {
       const url = [
         ...new Set(
@@ -1967,6 +2089,43 @@ export async function researchLoop(opts: {
       if (!url) break;
       fetchedThisRun.add(url);
       fetchedThisHop.push(url);
+
+      let isReddit = false;
+      try {
+        isReddit = isRedditUrl(new URL(url));
+      } catch {
+        isReddit = false;
+      }
+      /*
+        Dark Desk F5: reddit's anonymous rate limit is per IP, so this hop
+        (and every other hop, and the tip-subreddit scan — see
+        reddit.server.ts's module-level pacing clock) must never burn
+        through more than a small number of reddit requests at once. 3 is a
+        deliberately conservative per-hop cap: FETCHES_PER_HOP is 4, so this
+        still leaves room for at least one non-reddit fetch even on an
+        all-reddit hop, and pairs with the >=8s pacing inside
+        fetchRedditDocument to keep total reddit traffic well under
+        Reddit's ~10/min budget across a whole run.
+      */
+      if (isReddit && redditFetchesThisHop >= REDDIT_FETCHES_PER_HOP_CAP) {
+        await persistDiscovery(opts.userId, opts.investigationId, {
+          kind: "url",
+          label: url,
+          why: `Reddit fetch cap (${REDDIT_FETCHES_PER_HOP_CAP} per hop) reached — deferred to respect Reddit's per-IP rate limit`,
+          evidence: url,
+          priority: 8,
+        });
+        await markFrontier(
+          opts.userId,
+          opts.investigationId,
+          url,
+          "deferred",
+          "Reddit fetch cap reached this hop",
+        );
+        continue;
+      }
+      if (isReddit) redditFetchesThisHop += 1;
+
       await persistDiscovery(opts.userId, opts.investigationId, {
         kind: "url",
         label: url,
@@ -2639,13 +2798,36 @@ async function persistPlan(
       limit 40
     `;
     const blob = [d.hypothesis, ...entNames.map((n) => n.name)].join(", ").slice(0, 2000);
-    await sql`
-      insert into dead_ends (user_id, investigation_id, hypothesis, dismissed_because, entities)
-      values (
-        ${userId}, ${investigationId}, ${d.hypothesis.slice(0, 1000)},
-        ${d.reason.slice(0, 2000)}, ${blob}
-      )
-    `;
+    const hypothesisVal = d.hypothesis.slice(0, 1000);
+    const reasonVal = d.reason.slice(0, 2000);
+    const dedupKey = hypothesisVal.toLowerCase().trim();
+    /*
+      Dark Desk F4: the model re-asserting the same dead end every hop used
+      to insert a fresh row every time (18x on one live hypothesis). Upsert
+      keyed on (investigation_id, dedup_key) instead, incrementing
+      confirmation_count; once it crosses DEAD_END_CONFIRMATION_CAP the row
+      is settled and matchDeadEnds stops resurfacing it (see below). Same
+      best-effort try/catch convention as persistDiscovery's frontier_items
+      upsert just above: a database whose unique index creation was skipped
+      (pre-existing duplicates) falls back to the old insert-every-time
+      behavior rather than failing the hop.
+    */
+    try {
+      await sql`
+        insert into dead_ends (user_id, investigation_id, hypothesis, dismissed_because, entities, confirmation_count, settled, dedup_key)
+        values (${userId}, ${investigationId}, ${hypothesisVal}, ${reasonVal}, ${blob}, 1, false, ${dedupKey})
+        on conflict (investigation_id, dedup_key) do update
+        set confirmation_count = dead_ends.confirmation_count + 1,
+            dismissed_because = excluded.dismissed_because,
+            entities = excluded.entities,
+            settled = (dead_ends.confirmation_count + 1 >= ${DEAD_END_CONFIRMATION_CAP})
+      `;
+    } catch {
+      await sql`
+        insert into dead_ends (user_id, investigation_id, hypothesis, dismissed_because, entities, dedup_key)
+        values (${userId}, ${investigationId}, ${hypothesisVal}, ${reasonVal}, ${blob}, ${dedupKey})
+      `;
+    }
     await markFrontier(userId, investigationId, d.hypothesis, "dead-end", d.reason);
     await sql`
       update hypotheses
@@ -2654,6 +2836,60 @@ async function persistPlan(
         and body = ${d.hypothesis.slice(0, 2000)}
     `;
   }
+}
+
+/**
+ * Dark Desk F4: how many times the model may re-assert the same dead end
+ * before it's treated as settled and stops resurfacing. Live data showed one
+ * hypothesis inserted 18x and 42 "revived" rows pinned above real leads — 3
+ * confirmations is enough to be sure it is genuinely a repeat, not enough to
+ * still be crowding the pile by the time it settles.
+ */
+export const DEAD_END_CONFIRMATION_CAP = 3;
+
+/**
+ * Priority given to a resurfaced dead end. Previously `greatest(priority, 11)`
+ * unconditionally forced revived dead ends above fresh leads (real leads
+ * default to 7-10); this sits below that band on purpose so a revived dead
+ * end has to actually compete for attention rather than jump the queue.
+ */
+const REVIVED_DEAD_END_PRIORITY = 6;
+
+/**
+ * Dark Desk F4: words too common to mean anything on their own, so a match
+ * that reduces to just these doesn't count as "the same name".
+ */
+const DEAD_END_MATCH_STOPWORDS = new Set([
+  "the", "and", "for", "with", "from", "this", "that", "were", "have",
+  "been", "into", "during", "after", "before", "about", "city", "county",
+  "council", "board", "meeting", "public", "report", "case",
+]);
+
+function escapeRegExpLiteral(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Dark Desk F4: was "any extracted name >3 chars that's a substring of
+ * hypothesis+entities" — loose enough that "Main" false-positived inside
+ * "Maintenance budget" and revived dead ends that had nothing to do with the
+ * new evidence. Requires either (a) a multi-token phrase where every
+ * meaningful token appears as a whole word, or (b) a single specific
+ * (>=6 char) word as a whole word — never a raw substring.
+ */
+export function meaningfulDeadEndMatch(name: string, blob: string): boolean {
+  const tokens = name
+    .toLowerCase()
+    .split(/\s+/)
+    .map((t) => t.replace(/[^a-z0-9-]/g, ""))
+    .filter((t) => t.length > 2 && !DEAD_END_MATCH_STOPWORDS.has(t));
+  if (!tokens.length) return false;
+  if (tokens.length >= 2) {
+    return tokens.every((t) => new RegExp(`\\b${escapeRegExpLiteral(t)}\\b`, "i").test(blob));
+  }
+  const only = tokens[0]!;
+  if (only.length < 6) return false;
+  return new RegExp(`\\b${escapeRegExpLiteral(only)}\\b`, "i").test(blob);
 }
 
 export async function matchDeadEnds(userId: string, names: string[]) {
@@ -2666,12 +2902,12 @@ export async function matchDeadEnds(userId: string, names: string[]) {
     investigation_id: number | null;
   }>`
     select id, hypothesis, dismissed_because, entities, investigation_id from dead_ends
-    where newsroom_id = ${DEFAULT_NEWSROOM_ID} order by created_at desc limit 80
+    where newsroom_id = ${DEFAULT_NEWSROOM_ID} and settled = false
+    order by created_at desc limit 80
   `;
-  const lower = names.map((n) => n.toLowerCase());
   return rows.filter((r) => {
-    const blob = `${r.hypothesis} ${r.entities}`.toLowerCase();
-    return lower.some((n) => n.length > 3 && blob.includes(n));
+    const blob = `${r.hypothesis} ${r.entities}`;
+    return names.some((n) => meaningfulDeadEndMatch(n, blob));
   });
 }
 
@@ -2689,9 +2925,10 @@ export async function resurfaceDeadEnds(
   for (const h of hits) {
     if (opts.foreignOnly && h.investigation_id === investigationId) continue;
     const label = h.hypothesis.slice(0, 240);
+    const norm = frontierDedupKey("revived-dead-end", label).norm;
     const existing = await sql<{ id: number; status: string }>`
       select id, status from frontier_items
-      where investigation_id = ${investigationId} and label = ${label}
+      where investigation_id = ${investigationId} and label_norm = ${norm}
       limit 1
     `;
     if (existing[0]) {
@@ -2704,7 +2941,7 @@ export async function resurfaceDeadEnds(
               reopened_from = ${names.join(", ").slice(0, 400)},
               closed_reason = ${"New evidence revived this dead end"},
               next_steps = ${`"${label}" Longmont`},
-              priority = greatest(priority, 11)
+              priority = ${REVIVED_DEAD_END_PRIORITY}
           where id = ${existing[0].id}
         `;
         n += 1;
@@ -2715,7 +2952,7 @@ export async function resurfaceDeadEnds(
         label,
         why: `Prior dead end revived: ${h.dismissed_because}`,
         evidence: names.join(", ").slice(0, 400),
-        priority: 11,
+        priority: REVIVED_DEAD_END_PRIORITY,
       });
       n += 1;
     }
@@ -2806,13 +3043,19 @@ export async function checkBaselines(
         `${m.title} rescheduled OR postponed`,
         `${m.title} agenda OR minutes OR notice`,
       ].join(" | ");
+      // Dark Desk F4: label_norm must be set on every frontier_items insert
+      // (it carries the unique index (investigation_id, label_norm)); a bare
+      // insert would default it to '' and collide across missing-record rows.
+      const missingLabel = m.title || m.key;
+      const missingNorm = frontierDedupKey("missing-record", missingLabel).norm;
       await sql`
-        insert into frontier_items (user_id, investigation_id, kind, label, why, priority, next_steps)
+        insert into frontier_items (user_id, investigation_id, kind, label, label_norm, why, priority, next_steps)
         values (
-          ${userId}, ${investigationId}, ${"missing-record"}, ${m.title || m.key},
+          ${userId}, ${investigationId}, ${"missing-record"}, ${missingLabel}, ${missingNorm},
           ${"Dog that didn't bark — expected cadence broken"}, ${12},
           ${next.slice(0, 500)}
         )
+        on conflict (investigation_id, label_norm) do nothing
       `;
       flagged += 1;
     }

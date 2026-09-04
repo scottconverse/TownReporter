@@ -228,10 +228,10 @@ describe("investigative freedom", { timeout: 120000 }, () => {
     const { sql, id } = await bootInv(user, "Reopen");
     await sql`
       insert into frontier_items (
-        user_id, investigation_id, kind, label, why, evidence, priority, status, closed_reason,
+        user_id, investigation_id, kind, label, label_norm, why, evidence, priority, status, closed_reason,
         queries_tried, strategies_tried, strategies_budget, search_zero_count
       ) values (
-        ${user}, ${id}, ${"company"}, ${"Acme Holdings LLC"},
+        ${user}, ${id}, ${"company"}, ${"Acme Holdings LLC"}, ${"acme holdings llc"},
         ${"August SOS search went nowhere"},
         ${"August: SOS business search returned nothing useful."},
         ${6}, ${"exhausted"}, ${"All research strategies attempted in August"},

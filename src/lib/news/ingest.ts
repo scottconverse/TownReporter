@@ -345,6 +345,37 @@ async function ingestYoutubeIfNeeded(url: URL): Promise<YoutubeIngest | null> {
   return ingestYoutube(url);
 }
 
+type RedditIngest = {
+  ok: boolean;
+  status: number;
+  text: string;
+  title: string;
+  contentType: string;
+  extractionMethod: string;
+  redirectChain: string[];
+};
+
+/**
+ * Dark Desk F5: route any reddit.com/redd.it URL through the `.rss`/
+ * browser-UA technique (`reddit.server.ts`'s `fetchRedditDocument`) instead
+ * of the generic tracked-fetch-and-strip-tags path below, which gets
+ * reddit's JS app shell rather than content — the same gap the "dig"
+ * planner tried (and failed) to route around itself by proposing
+ * old.reddit.com URLs, documented in the Dark Desk review.
+ *
+ * `reddit.server.ts` is a `.server.ts` module (see fetch-url.ts's doc
+ * comment on the same constraint) and this file is reachable from client
+ * code, so the import is dynamic and gated the same way `render-fetch.ts`
+ * is used further down in this file: server-side only.
+ */
+async function ingestRedditIfNeeded(url: URL): Promise<RedditIngest | null> {
+  if (typeof window !== "undefined") return null;
+  const { isRedditUrl } = await import("./reddit.ts");
+  if (!isRedditUrl(url)) return null;
+  const { fetchRedditDocument } = await import("./reddit.server.ts");
+  return fetchRedditDocument(url);
+}
+
 export type IngestResult = { text: string; titleHint: string; extras: string[] };
 
 export type IngestDocument = {
@@ -426,6 +457,25 @@ async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
         redirectChain: [url.toString()],
         extractionMethod: "primegov",
         extras: pg.extras,
+      });
+    }
+    const reddit = await ingestRedditIfNeeded(url);
+    if (reddit) {
+      const outcome: FetchOutcome = reddit.ok
+        ? "fetched"
+        : reddit.status === 429 || reddit.status === 0
+          ? "fetch-failed"
+          : "parse-failed";
+      return empty({
+        ok: reddit.ok,
+        status: reddit.status,
+        outcome,
+        text: reddit.text,
+        title: reddit.title,
+        contentType: reddit.contentType,
+        redirectChain: reddit.redirectChain,
+        extractionMethod: reddit.extractionMethod,
+        extras: [],
       });
     }
     const tracked = await fetchPublicHttpTracked(url);

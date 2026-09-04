@@ -25,6 +25,26 @@ export type RedditPost = {
   excerpt: string;
 };
 
+/**
+ * True for reddit.com (any subdomain) and the redd.it short-link host.
+ *
+ * Dark Desk F5: the generic fetch/ingest path (ingest.ts) used to have no
+ * reddit handling at all, so a reddit URL the dig proposed via fetch_urls
+ * got the same tracked-fetch-then-strip-tags treatment as any other page --
+ * which for reddit.com means the JS app shell, not content. This is the
+ * detector that routes such a URL to the `.rss`/browser-UA technique
+ * instead (see reddit.server.ts's fetchRedditDocument).
+ */
+export function isRedditUrl(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  return host === "redd.it" || host === "reddit.com" || host.endsWith(".reddit.com");
+}
+
+/** `/r/<sub>/comments/<id>/<slug>` (with or without a trailing comment id) — a thread permalink, not a listing/user/search page. */
+export function isRedditThreadUrl(url: URL): boolean {
+  return isRedditUrl(url) && /^\/r\/[^/]+\/comments\/[^/]+/i.test(url.pathname);
+}
+
 /** `https://www.reddit.com/r/longmont/new/.rss` */
 export function subredditNewFeed(sub: string): string {
   return `https://www.reddit.com/r/${encodeURIComponent(sub)}/new/.rss`;

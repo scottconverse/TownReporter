@@ -107,6 +107,38 @@ export function canonicalPublicUrl(raw: string): string {
   return u.toString();
 }
 
+/**
+ * Query params that select a scroll position or panel inside a document
+ * *viewer* rather than a different document -- Dark Desk F4. Municode's
+ * code-of-ordinances viewer is the live example: the same ordinance was
+ * saved 7 ways because `?nodeId=12345` (and its variants) named a spot
+ * inside the same page, not a different page. `canonicalPublicUrl` alone
+ * keeps these, because it only strips known tracking params -- it has no
+ * opinion about a site's own in-page navigation params.
+ *
+ * Deliberately narrow: only the params a real "document viewer" is known to
+ * use for in-page navigation, never a generic heuristic that might delete a
+ * param that actually changes the document. Extend this list only when a
+ * specific site's viewer param is confirmed to be scroll/anchor-only.
+ */
+const VIEWER_NAV_PARAMS = /^nodeid$|^node$|^anchor$|^section$/i;
+
+/**
+ * `canonicalPublicUrl`, plus stripping document-viewer navigation params
+ * (see `VIEWER_NAV_PARAMS`) so the same document opened at a different
+ * scroll position collapses to one dedup key. Used for frontier-lead
+ * dedup (`persistDiscovery` in investigate.ts), not for capture identity --
+ * a capture still records the exact URL fetched.
+ */
+export function canonicalFrontierUrl(raw: string): string {
+  const canon = canonicalPublicUrl(raw);
+  const u = new URL(canon);
+  for (const k of [...u.searchParams.keys()]) {
+    if (VIEWER_NAV_PARAMS.test(k)) u.searchParams.delete(k);
+  }
+  return u.toString();
+}
+
 export type SearchState =
   | "SEARCH_SUCCESS_RESULTS"
   | "SEARCH_SUCCESS_ZERO_RESULTS"
