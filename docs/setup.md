@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.15](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.15).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.6.16](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.16).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 

@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
-import { ListSkeleton, ScreenError } from "@/components/states";
+import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   continueInvestigation,
   findSomethingToDigInto,
@@ -65,7 +65,10 @@ function DarkPage() {
   const [noticeOk, setNoticeOk] = useState(false);
   const [noticeAt, setNoticeAt] = useState<"paste" | "work">("work");
   const [openId, setOpenId] = useState<number | null>(null);
-  const [queued, setQueued] = useState<{ leadId: number; invId: number } | null>(null);
+  const [queued, setQueued] = useState<
+    { leadId: number; invId: number; alreadyQueued: boolean } | null
+  >(null);
+  const [queueError, setQueueError] = useState<{ invId: number; message: string } | null>(null);
   const [pendingCard, setPendingCard] = useState<string | null>(null);
   const [cardError, setCardError] = useState<{ id: string; message: string } | null>(null);
   const [cardPhase, setCardPhase] = useState<string>("");
@@ -311,17 +314,25 @@ function DarkPage() {
 
   const toQueue = useMutation({
     mutationFn: (id: number) => queueInvestigation({ data: id }),
+    onMutate: (id) => {
+      // Clear any stale error/confirmation from a previous attempt on this
+      // file so a retry does not show two contradictory banners at once.
+      setQueueError((prev) => (prev?.invId === id ? null : prev));
+    },
     onSuccess: (res, id) => {
       void qc.invalidateQueries({ queryKey: ["leads"] });
       if (res?.ok) {
-        setQueued({ leadId: res.leadId, invId: id });
-        showWorkNotice("On the working queue as a story lead. Dark Desk did not publish.", true);
+        setQueueError(null);
+        setQueued({ leadId: res.leadId, invId: id, alreadyQueued: Boolean(res.alreadyQueued) });
       } else {
-        showWorkNotice(res?.error ?? "Could not send to the queue.");
+        setQueueError({ invId: id, message: res?.error ?? "Could not send to the queue." });
       }
     },
-    onError: (err) => {
-      showWorkNotice(err instanceof Error ? err.message : "Could not send to the queue.");
+    onError: (err, id) => {
+      setQueueError({
+        invId: id,
+        message: err instanceof Error ? err.message : "Could not send to the queue.",
+      });
     },
   });
 
@@ -352,6 +363,9 @@ function DarkPage() {
       showWorkNotice("Set aside. Pull it back from that pile anytime.", true);
       invalidate();
     },
+    onError: (err) => {
+      showWorkNotice(err instanceof Error ? err.message : "Could not set that aside.");
+    },
   });
 
   const pullBack = useMutation({
@@ -360,8 +374,13 @@ function DarkPage() {
       if (res?.ok && res.investigationId) {
         rememberOpen(res.investigationId);
         setNotice(null);
+      } else {
+        showWorkNotice("Could not pull that back.");
       }
       invalidate();
+    },
+    onError: (err) => {
+      showWorkNotice(err instanceof Error ? err.message : "Could not pull that back.");
     },
   });
 
@@ -389,7 +408,9 @@ function DarkPage() {
       parts.push(`Read ${res.read} posts, ${res.civic} looked civic.`);
       if (res.alreadyKnown) parts.push(`${res.alreadyKnown} already on the desk.`);
       if (res.incomplete && res.reason) parts.push(res.reason);
-      showWorkNotice(parts.join(" "), Boolean(res.filed));
+      // A quiet subreddit is a successful read, not a failure — style it as
+      // one. Only an actual incomplete/failed read gets the err styling.
+      showWorkNotice(parts.join(" "), !res.incomplete);
       invalidate();
     },
     onError: (err) => {
@@ -542,7 +563,11 @@ function DarkPage() {
           notice={noticeAt === "work" ? notice : null}
           noticeOk={noticeOk}
           queuedLead={queued?.invId === openId ? queued.leadId : null}
+          queuedAlready={queued?.invId === openId ? queued.alreadyQueued : false}
           queuePending={toQueue.isPending}
+          queueError={queueError?.invId === openId ? queueError.message : null}
+          followPending={followLead.isPending}
+          parkPending={park.isPending}
           onKeepDigging={() => {
             setNotice(null);
             beginDigPhase();
@@ -675,7 +700,7 @@ function DarkPage() {
                 ) : null}
                 <div className="np-acts">
                   <InkButton small disabled={pullBack.isPending} onClick={() => pullBack.mutate(row.id)}>
-                    Pull back
+                    {pullBack.isPending ? "Pulling back…" : "Pull back"}
                   </InkButton>
                   <InkButton tone="quiet" small onClick={() => rememberOpen(row.id)}>
                     Read
@@ -819,7 +844,11 @@ function InvestigationWorkspace({
   notice,
   noticeOk,
   queuedLead,
+  queuedAlready,
   queuePending,
+  queueError,
+  followPending,
+  parkPending,
   onKeepDigging,
   onQueue,
   onClose,
@@ -840,7 +869,11 @@ function InvestigationWorkspace({
   notice: string | null;
   noticeOk: boolean;
   queuedLead: number | null;
+  queuedAlready: boolean;
   queuePending: boolean;
+  queueError: string | null;
+  followPending: boolean;
+  parkPending: boolean;
   onKeepDigging: () => void;
   onQueue: () => void;
   onClose: () => void;
@@ -991,11 +1024,21 @@ function InvestigationWorkspace({
           <InkButton disabled={keepDisabled} onClick={onKeepDigging}>
             {digging ? "Reading…" : "Keep digging"}
           </InkButton>
-          <InkButton tone="ghost" disabled={keepDisabled || queuePending} onClick={onQueue}>
-            {queuePending ? "Sending…" : "Send to the queue"}
-          </InkButton>
-          <InkButton tone="quiet" disabled={keepDisabled} onClick={onPark}>
-            Set aside
+          {queuedLead != null ? (
+            <Link
+              to="/desk/story/$leadId"
+              params={{ leadId: String(queuedLead) }}
+              className="btn queue-done"
+            >
+              {queuedAlready ? "✓ Already on the queue · Open →" : "✓ On the queue · Open →"}
+            </Link>
+          ) : (
+            <InkButton tone="ghost" disabled={keepDisabled || queuePending} onClick={onQueue}>
+              {queuePending ? "Sending…" : "Send to the queue"}
+            </InkButton>
+          )}
+          <InkButton tone="quiet" disabled={keepDisabled || parkPending} onClick={onPark}>
+            {parkPending ? "Setting aside…" : "Set aside"}
           </InkButton>
           <InkButton tone="quiet" onClick={onClose}>
             Close file
@@ -1005,22 +1048,40 @@ function InvestigationWorkspace({
       {stalled ? <p className="note err">{stalledRunCopy("dark")}</p> : null}
       {digging ? <Busy label={phase || "Searching records…"} /> : null}
       {notice && !digging ? <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p> : null}
-      {queuedLead != null ? (
-        <p className="note">
-          On the working queue as a story lead. Dark Desk did not publish.{" "}
-          <Link
-            to="/desk/story/$leadId"
-            params={{ leadId: String(queuedLead) }}
-            className="inline-link"
-          >
-            Open the story lead
-          </Link>
-          {" · "}
-          <Link to="/desk/queue" className="inline-link">
-            Open the queue
-          </Link>
-        </p>
-      ) : null}
+      {
+        /*
+          Persistent, not a fleeting toast: this banner stays mounted for as
+          long as the queue state it describes is true, independent of the
+          transient `notice` line above (which other actions on this file
+          clear). An editor who queues a lead and then keeps digging must
+          still be able to answer "where did it go?" without hunting —
+          especially since a queued lead can later be drafted and drop out of
+          the editor's default Queue view (0.6.16).
+        */
+        queueError != null ? (
+          <Notice kind="err" night>
+            Could not send to the queue: {queueError}
+          </Notice>
+        ) : queuedLead != null ? (
+          <Notice kind="ok" night>
+            {queuedAlready
+              ? "Already on the working queue as a story lead."
+              : "On the working queue as a story lead."}{" "}
+            Dark Desk did not publish.{" "}
+            <Link
+              to="/desk/story/$leadId"
+              params={{ leadId: String(queuedLead) }}
+              className="inline-link"
+            >
+              Open the lead →
+            </Link>
+            {" · "}
+            <Link to="/desk/queue" className="inline-link">
+              Open the queue
+            </Link>
+          </Notice>
+        ) : null
+      }
       {pending ? <p className="meta">Getting this ready…</p> : null}
       {started ? <p className="of-started">{started}</p> : null}
       {inv?.status === "paused" && pauseText && !digging ? (
@@ -1068,7 +1129,7 @@ function InvestigationWorkspace({
                     <InkButton
                       tone="quiet"
                       small
-                      disabled={keepDisabled}
+                      disabled={keepDisabled || followPending}
                       onClick={() =>
                         onFollow({
                           paste: `Followed from the “${parentTitle}” file: ${plainEditorText(f.why) || humanFrontierLabel(f.label)}.\n\n${f.label}\n${f.why}`,
@@ -1076,7 +1137,7 @@ function InvestigationWorkspace({
                         })
                       }
                     >
-                      Follow this lead
+                      {followPending ? "Following…" : "Follow this lead"}
                     </InkButton>
                   </div>
                 ))}

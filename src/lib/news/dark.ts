@@ -1464,53 +1464,66 @@ export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
     return { ok: true as const, leadId: created[0]!.id };
   });
 
+/**
+ * Create-or-find the story lead for an investigation.
+ *
+ * Pulled out of the `createServerFn` handler so a test can prove the three
+ * outcomes the Dark Desk "Send to the queue" button now distinguishes on
+ * screen (new lead / already-queued / not found) without standing up
+ * `deskMiddleware`'s request-and-bearer-token plumbing — see `assertOwner`
+ * above for the same reasoning.
+ */
+export async function queueInvestigationFor(userId: string, newsroomId: number, id: number) {
+  await ensureDarkSchema();
+  const sql = await getSql();
+  const inv = await sql<InvestigationRow>`
+    select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at,
+           last_model_choice
+    from investigations where id = ${id} and newsroom_id = ${newsroomId} limit 1
+  `;
+  if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
+  const already = await sql<{ id: number }>`
+    select id from leads
+    where investigation_id = ${id} and newsroom_id = ${newsroomId}
+    order by id asc limit 1
+  `;
+  if (already[0]) {
+    await audit(userId, "dark-handoff", `inv ${id} existing lead ${already[0].id}`, newsroomId);
+    return { ok: true as const, leadId: already[0].id, alreadyQueued: true as const };
+  }
+  const arts = await sql<{ url: string }>`
+    select url from artifacts
+    where newsroom_id = ${newsroomId} and investigation_id = ${id}
+    order by id desc limit 12
+  `;
+  const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
+  const topic = topicFromText(`${inv[0].title}\n${inv[0].summary}`);
+  const created = await sql<{ id: number }>`
+    insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
+    values (
+      ${userId},
+      ${newsroomId},
+      ${inv[0].title.slice(0, 240)},
+      ${`DARK DESK notes. Publication is a separate human action.\n\n${inv[0].summary}`.slice(0, 4000)},
+      ${topic},
+      'new',
+      ${urls},
+      ${inv[0].summary.slice(0, 4000)},
+      ${12},
+      ${id}
+    )
+    returning id
+  `;
+  await audit(userId, "dark-handoff", `inv ${id} lead ${created[0]!.id}`, newsroomId);
+  return { ok: true as const, leadId: created[0]!.id, alreadyQueued: false as const };
+}
+
 export const queueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((id: number) => id)
-  .handler(async ({ context, data: id }) => {
-    await ensureDarkSchema();
-    const sql = await getSql();
-    const inv = await sql<InvestigationRow>`
-      select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at,
-             last_model_choice
-      from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
-    `;
-    if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
-    const already = await sql<{ id: number }>`
-      select id from leads
-      where investigation_id = ${id} and newsroom_id = ${owned(context)}
-      order by id asc limit 1
-    `;
-    if (already[0]) {
-      await audit(context.userId, "dark-handoff", `inv ${id} existing lead ${already[0].id}`, owned(context));
-      return { ok: true as const, leadId: already[0].id };
-    }
-    const arts = await sql<{ url: string }>`
-      select url from artifacts
-      where newsroom_id = ${owned(context)} and investigation_id = ${id}
-      order by id desc limit 12
-    `;
-    const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
-    const topic = topicFromText(`${inv[0].title}\n${inv[0].summary}`);
-    const created = await sql<{ id: number }>`
-      insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
-      values (
-        ${context.userId},
-        ${owned(context)},
-        ${inv[0].title.slice(0, 240)},
-        ${`DARK DESK notes. Publication is a separate human action.\n\n${inv[0].summary}`.slice(0, 4000)},
-        ${topic},
-        'new',
-        ${urls},
-        ${inv[0].summary.slice(0, 4000)},
-        ${12},
-        ${id}
-      )
-      returning id
-    `;
-    await audit(context.userId, "dark-handoff", `inv ${id} lead ${created[0]!.id}`, owned(context));
-    return { ok: true as const, leadId: created[0]!.id };
-  });
+  .handler(async ({ context, data: id }) =>
+    queueInvestigationFor(context.userId, owned(context), id),
+  );
 
 export const parkInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])

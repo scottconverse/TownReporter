@@ -1,6 +1,23 @@
 # Changelog
 
-Current release: **0.6.15**.
+Current release: **0.6.16**.
+
+## 0.6.16 — 2026-09-04
+- **Dark Desk "Send to the queue" now confirms clearly.** It worked before
+  but gave no visible confirmation and no link, so an owner clicked it four
+  times thinking it was a no-op. It now shows a persistent banner — "On the
+  working queue as a story lead" with a link straight to the lead — and the
+  button itself becomes a done state ("On the queue · Open →") instead of
+  staying clickable. Sending a lead that is already queued now says "Already
+  on the queue" and links to it instead of looking identical to a fresh send.
+  Sending shows "Sending…", and a failed send shows a visible error instead
+  of nothing.
+- **Every other Dark Desk action now gives visible feedback.** "Set aside"
+  and "Pull back" show a pending state and a visible error on failure
+  (previously silent); "Follow this lead" disables and relabels itself while
+  it opens the new file; checking r/longmont no longer paints a quiet night
+  (nothing new to file) in the same red styling as an actual failure to
+  reach Reddit.
 
 ## 0.6.15 — 2026-09-03
 - **Dark Desk plumbing fix — it actually gathers evidence now.** The

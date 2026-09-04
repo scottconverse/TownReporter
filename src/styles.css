@@ -608,6 +608,8 @@
 .desk-ltr .btn.quiet:hover:not(:disabled) {background:color-mix(in srgb,var(--a) 12%,transparent)}
 .desk-ltr .btn.danger {color:var(--warn)}
 .desk-ltr .btn:disabled {opacity:.45;cursor:not-allowed}
+.desk-ltr .btn.queue-done {text-decoration:none;border-color:var(--fg);background:color-mix(in srgb,var(--fg) 10%,transparent)}
+.desk-ltr .btn.queue-done:hover {background:color-mix(in srgb,var(--fg) 18%,transparent)}
 .desk-ltr .inline-link {color:var(--adeep);text-decoration:underline;text-underline-offset:3px;font-size:inherit}
 .desk-ltr .inline-link:hover {color:var(--a)}
 .desk-ltr .chip {font-size:calc(0.8125rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;border:1px solid var(--line);padding:2px 7px;white-space:nowrap;align-self:start;color:var(--mut)}
