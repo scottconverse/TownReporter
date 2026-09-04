@@ -211,3 +211,113 @@ describe("claudeCodeChat promotes a long inline system prompt to a file", () => 
     }
   });
 });
+
+/*
+ * Dark Desk F1: `--allowed-tools ""` (the pre-fix default) still describes a
+ * full, live tool surface to the model — Bash, WebSearch, WebFetch, every
+ * MCP tool — with every one of them pre-denied, so a planner told to "go
+ * find sources" would try one, get refused, and narrate the refusal into
+ * whatever JSON it was returning. `noTools: true` asks the CLI to hide the
+ * surface instead (`--tools ""`), so there is nothing live to try. These
+ * tests pin CLAUDE_CLI_PATH at the fake CLI and assert on the exact argv
+ * flag it saw — no live model, nothing billed.
+ */
+describe("claudeCodeChat's noTools flag reaches the CLI as --tools, not --allowed-tools", () => {
+  it("noTools: true sends --tools \"\" (the surface is hidden, not just denied)", async () => {
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: FAKE_CLAUDE,
+      FAKE_CLAUDE_ECHO_TOOLS: "1",
+    });
+    resetClaudeCliCache();
+    try {
+      const result = await claudeCodeChat({
+        system: "Return JSON only.",
+        user: "plan the next hop",
+        model: "claude-opus-5",
+        timeoutMs: 10_000,
+        noTools: true,
+      });
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      const echoed = JSON.parse(result.text) as { flag: string; value: string };
+      assert.equal(echoed.flag, "--tools");
+      assert.equal(echoed.value, "");
+    } finally {
+      restore();
+      resetClaudeCliCache();
+    }
+  });
+
+  it("omitting both noTools and allowedTools keeps the old --allowed-tools \"\" behaviour, unchanged", async () => {
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: FAKE_CLAUDE,
+      FAKE_CLAUDE_ECHO_TOOLS: "1",
+    });
+    resetClaudeCliCache();
+    try {
+      const result = await claudeCodeChat({
+        system: "Return JSON only.",
+        user: "write the piece",
+        model: "claude-opus-5",
+        timeoutMs: 10_000,
+      });
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      const echoed = JSON.parse(result.text) as { flag: string; value: string };
+      assert.equal(echoed.flag, "--allowed-tools");
+      assert.equal(echoed.value, "");
+    } finally {
+      restore();
+      resetClaudeCliCache();
+    }
+  });
+
+  it("a real allowedTools list still reaches the CLI as --allowed-tools, untouched by noTools", async () => {
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: FAKE_CLAUDE,
+      FAKE_CLAUDE_ECHO_TOOLS: "1",
+    });
+    resetClaudeCliCache();
+    try {
+      const result = await claudeCodeChat({
+        system: "",
+        user: "research the piece",
+        model: "claude-opus-5",
+        timeoutMs: 10_000,
+        allowedTools: ["WebSearch", "WebFetch"],
+      });
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      const echoed = JSON.parse(result.text) as { flag: string; value: string };
+      assert.equal(echoed.flag, "--allowed-tools");
+      assert.equal(echoed.value, "WebSearch,WebFetch");
+    } finally {
+      restore();
+      resetClaudeCliCache();
+    }
+  });
+
+  it("refuses a call that combines noTools with a non-empty allowedTools", async () => {
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: FAKE_CLAUDE,
+      FAKE_CLAUDE_ECHO_TOOLS: "1",
+    });
+    resetClaudeCliCache();
+    try {
+      await assert.rejects(
+        claudeCodeChat({
+          system: "",
+          user: "plan the next hop",
+          model: "claude-opus-5",
+          timeoutMs: 10_000,
+          noTools: true,
+          allowedTools: ["WebFetch"],
+        }),
+        /noTools.*allowedTools|allowedTools.*noTools/is,
+      );
+    } finally {
+      restore();
+      resetClaudeCliCache();
+    }
+  });
+});

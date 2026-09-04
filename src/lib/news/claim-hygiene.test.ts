@@ -31,10 +31,59 @@ const REAL_FINDINGS = [
   "The registered agent for Acme Paving LLC is also the agent for two other bidders",
 ];
 
+/**
+ * Dark Desk F1/F3: on its Claude leg the dig used to be handed a
+ * live-but-denied tool surface (Bash, WebSearch, WebFetch, MCP — see
+ * ai-claude-code.server.ts's `noTools`). Denied, the model would narrate the
+ * refusal straight into the JSON it was returning. These are the shapes seen
+ * in prod (dark_signals / frontier_items), reworded generically.
+ */
+const TOOL_REFUSAL_NARRATION = [
+  "This command requires approval — the operator must allow Bash before it can run",
+  "WebSearch returned no results because the tool call was refused",
+  "WebFetch was blocked by the sandbox policy for this host",
+  "MCP tool schema blackout: no servers were reachable from this session",
+  "ToolSearch returned nothing for the requested capability",
+  "Bash(curl https://firestoneco.gov) — permission denied by the CLI",
+  "Attempted a sandbox escape via the command line to reach the live filesystem",
+  "curl was blocked by an allow-rule before it could reach the host",
+  "The MCP server requires pre-approval that this session does not have",
+];
+
+/**
+ * The false-positive guard: ordinary civic text that happens to share a word
+ * with the tool-refusal vocabulary above (approval, permission, sandbox,
+ * bash, curl, mcp, denied, blocked) but is not tool-refusal narration. A
+ * filter that eats these is worse than the poisoned rows it was meant to
+ * catch.
+ */
+const CIVIC_TEXT_SHARING_VOCABULARY = [
+  "The council approved the budget on a 5-2 vote",
+  "The permit application was filed with the zoning office last week",
+  "A bash of the pipeline extension was thrown at the community center",
+  "The playground sandbox at Roosevelt Park was resurfaced this spring",
+  "The variance request was denied by the board of adjustment",
+  "Construction access was blocked by the contractor's own fencing",
+  "The county clerk requires approval from two commissioners before recording",
+  "MCP, the Metro Coordinating Partnership, co-signed the grant application",
+];
+
 describe("isSelfReferential", () => {
   it("catches every self-referential claim the models actually produced", () => {
     for (const t of REAL_SELF_REFERENTIAL) {
       assert.equal(isSelfReferential(t), true, `missed: ${t.slice(0, 70)}`);
+    }
+  });
+
+  it("catches tool-refusal / sandbox-escape narration", () => {
+    for (const t of TOOL_REFUSAL_NARRATION) {
+      assert.equal(isSelfReferential(t), true, `missed: ${t.slice(0, 70)}`);
+    }
+  });
+
+  it("does not drop ordinary civic text that shares a word with the tool vocabulary", () => {
+    for (const t of CIVIC_TEXT_SHARING_VOCABULARY) {
+      assert.equal(isSelfReferential(t), false, `wrongly dropped: ${t.slice(0, 70)}`);
     }
   });
 

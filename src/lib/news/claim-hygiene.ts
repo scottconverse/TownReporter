@@ -45,12 +45,53 @@ const SELF_REFERENTIAL: RegExp[] = [
   /\b(search|fetch|query|queue)d? (targets?|attempts?) (have been|were) (identified|queued)\b/i,
   /\bthe (investigation|desk|planner|loop|pipeline) (has|had|did) not\b/i,
   /\bunexamined\b|\bunmapped\b|\bunqueried\b/i,
+  /*
+    Tool-refusal / sandbox-escape narration (Dark Desk F1/F3).
+
+    On its Claude leg the dig used to be handed a live-but-denied tool
+    surface (Bash, WebSearch, WebFetch, MCP — see ai-claude-code.server.ts's
+    `noTools`). Denied, the model would sometimes narrate the refusal
+    straight into whatever field it was writing: "This command requires
+    approval", "MCP tool schema blackout", "ToolSearch returned nothing",
+    "pre-approval was denied for curl". None of that is a fact about
+    Longmont. `--tools ""` (F1) stops it at the source; this is the net
+    underneath in case a model still tries.
+
+    These tokens are unambiguous on their own — none of them are civic
+    reporting vocabulary, so they gate a claim by themselves.
+  */
+  /\btoolsearch\b/i,
+  /\bwebsearch\b/i,
+  /\btool schema\b/i,
+  /\ballow-rule\b/i,
+  /\bpre-approval\b/i,
+  /\bsandbox[- ]?escape\b/i,
+  /\bthis command requires approval\b/i,
+  /*
+    Everything below reads as ordinary English on its own — a council
+    "approves" a budget, a "permit application" gets filed, someone throws a
+    retirement "bash", a gas "pipeline" runs under a "sandbox" at the park,
+    a resident is "denied" a variance, a report is "blocked" by a committee.
+    None of those are tool-refusal narration, so none of the words below
+    gate alone. They only gate in combination: a tool/CLI word from
+    TOOL_WORD co-occurring with an actual refusal/gate word from
+    REFUSAL_WORD in the SAME claim. See the false-positive tests in
+    claim-hygiene.test.ts (council-approved-budget, permit-application,
+    bash-of-the-pipeline, sandbox-at-the-park all survive; "Bash requires
+    approval", "MCP permission denied", "curl blocked by sandbox policy" do
+    not).
+  */
 ];
+
+const TOOL_WORD = /\b(bash|curl|mcp|sandbox(?:ed|ing)?|the cli|command[- ]line|tool (?:call|use|surface))\b/i;
+const REFUSAL_WORD =
+  /\b(requires? approval|permission (?:denied|required|needed)|approval (?:required|needed|denied)|not (?:permitted|allowed)|access denied|blackout|refused|blocked|denied)\b/i;
 
 export function isSelfReferential(text: string): boolean {
   const t = String(text ?? "");
   if (!t.trim()) return false;
-  return SELF_REFERENTIAL.some((re) => re.test(t));
+  if (SELF_REFERENTIAL.some((re) => re.test(t))) return true;
+  return TOOL_WORD.test(t) && REFUSAL_WORD.test(t);
 }
 
 /**

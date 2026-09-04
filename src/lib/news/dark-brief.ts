@@ -124,6 +124,8 @@ export function briefIsUseful(b: InvestigationBrief | null | undefined): boolean
 }
 
 export const BRIEF_SYSTEM = `TOWNREPORTER — DARK DESK HYPOTHESIS BRIEF.
+YOU HAVE NO TOOLS IN THIS CALL. Do NOT attempt Bash, WebSearch, WebFetch, or any MCP tool — they will be refused and are not part of your job. This is a synthesis pass over the file already assembled below; you do not fetch or search anything yourself. Return ONLY the JSON described below.
+
 You are writing the read-me-first block above an investigation file for ONE editor with limited time.
 
 The file below is four dense lists. The editor can read them. What they cannot do quickly is see ACROSS them, and what they most need is an answer to: is there actually something here?

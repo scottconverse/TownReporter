@@ -210,6 +210,29 @@ export async function claudeCodeChat(opts: {
    * own claims appendix.
    */
   allowedTools?: string[];
+  /**
+   * Hide the tool surface entirely, via the CLI's `--tools ""` (ENG-121 /
+   * Dark Desk F1).
+   *
+   * `--allowed-tools ""` (the default below when `allowedTools` is omitted)
+   * still hands the model a full, described tool surface — Bash, WebSearch,
+   * WebFetch, every MCP tool, Agent, Edit, Write, everything the interactive
+   * harness ships — with every one of them pre-denied. The model can see
+   * them, and a planner told to "go find sources" will try one, get "This
+   * command requires approval" back, and narrate the refusal into whatever
+   * JSON field it is mid-writing. Measured on this machine: an
+   * `--allowed-tools ""` call sends ~24.6k cached tokens describing 13 tools
+   * the model then lists back when asked; a `--tools ""` call on the same
+   * prompt sends ~0 tool-description tokens and the model reports it has
+   * none.
+   *
+   * `--tools ""` removes the tool definitions from the request instead of
+   * just denying them, so there is nothing live to try and nothing to be
+   * denied doing. Use this for a call that is meant to be pure JSON-in/
+   * JSON-out — the Dark Desk planner, synthesis and brief passes — never for
+   * a call that legitimately needs `allowedTools`.
+   */
+  noTools?: boolean;
 }): Promise<ClaudeCodeResult> {
   /*
     The voice-and-tools invariant, made structural (ENG-107).
@@ -272,6 +295,16 @@ export async function claudeCodeChat(opts: {
     );
   }
 
+  if (opts.noTools && (opts.allowedTools?.length ?? 0) > 0) {
+    cleanupTempDir();
+    throw new Error(
+      "Refusing to combine noTools with any allowedTools in one Claude Code call: " +
+        "noTools asks the CLI to hide the tool surface entirely (--tools \"\"), which " +
+        "would silently win over an allow-list the caller actually wanted honoured. " +
+        "Pass one or the other.",
+    );
+  }
+
   const bin = await findClaudeCli();
   if (!bin) {
     cleanupTempDir();
@@ -302,8 +335,12 @@ export async function claudeCodeChat(opts: {
     "",
     // No file access and no bash, ever. Web tools only when the caller asks:
     // the editorial writer needs them, the planner and synthesis do not.
-    "--allowed-tools",
-    (opts.allowedTools ?? []).join(","),
+    //
+    // `noTools` hides the surface (`--tools ""`) instead of denying an empty
+    // allow-list (`--allowed-tools ""`) — see the `noTools` doc comment
+    // above for why the difference matters (Dark Desk F1). Every other
+    // caller keeps the old `--allowed-tools` behaviour unchanged.
+    ...(opts.noTools ? ["--tools", ""] : ["--allowed-tools", (opts.allowedTools ?? []).join(",")]),
     "--model",
     opts.model,
     "--output-format",

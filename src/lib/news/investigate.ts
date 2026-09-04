@@ -556,7 +556,12 @@ function numOrUndef(v: unknown): number | undefined {
   return undefined;
 }
 
-function parsePlan(raw: unknown): HopPlan {
+/**
+ * Exported for tests only: proving the model-output hygiene filter (Dark
+ * Desk F3) actually reaches claims/frontier/anomalies/dead_ends, not just
+ * claims. See investigate.test.ts.
+ */
+export function parsePlan(raw: unknown): HopPlan {
   const plan = emptyPlan();
   if (!raw || typeof raw !== "object") return plan;
   const o = raw as Record<string, unknown>;
@@ -637,6 +642,14 @@ function parsePlan(raw: unknown): HopPlan {
     }
   }
   for (const f of arr<Record<string, unknown>>("frontier")) {
+    /*
+      Dark Desk F3: the same tool-refusal/sandbox-escape narration that used
+      to poison `claims` (see the comment above) poisons the frontier too —
+      "Bash tool call was denied, still unopened" reads exactly like a real
+      lead and is what the editor's "Still unopened" pile actually showed.
+      Checked against label+why together since either half can carry it.
+    */
+    if (f?.label && isSelfReferential(`${String(f.label)} ${String(f.why ?? "")}`)) continue;
     if (f?.label) {
       plan.frontier.push({
         label: String(f.label),
@@ -648,6 +661,7 @@ function parsePlan(raw: unknown): HopPlan {
     }
   }
   for (const a of arr<Record<string, unknown>>("anomalies")) {
+    if (a?.summary && isSelfReferential(String(a.summary))) continue;
     if (a?.summary) {
       plan.anomalies.push({
         kind: String(a.kind ?? "anomaly"),
@@ -657,6 +671,7 @@ function parsePlan(raw: unknown): HopPlan {
     }
   }
   for (const d of arr<Record<string, unknown>>("dead_ends")) {
+    if (d?.hypothesis && isSelfReferential(`${String(d.hypothesis)} ${String(d.reason ?? "")}`)) continue;
     if (d?.hypothesis) {
       plan.dead_ends.push({ hypothesis: String(d.hypothesis), reason: String(d.reason ?? "") });
     }
@@ -693,6 +708,10 @@ export async function grokPlanner(
     timeoutMs: callMs,
     model: plannerModel(choice),
     choice,
+    // Dark Desk F1: the planner only ever returns JSON (searches/fetch_urls
+    // for the app to run) — it must never be handed a live tool surface to
+    // try and get denied on. See ai-claude-code.server.ts's noTools comment.
+    noTools: true,
   });
   if (!ai?.ok) {
     const why = ai && "error" in ai ? ai.error : "no response";

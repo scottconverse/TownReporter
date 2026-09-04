@@ -458,7 +458,21 @@ export async function grokChat(
   system: string,
   user: string,
   maxTokens = 1400,
-  opts?: { timeoutMs?: number; model?: string; choice?: EffectiveProviderChoice },
+  opts?: {
+    timeoutMs?: number;
+    model?: string;
+    choice?: EffectiveProviderChoice;
+    /**
+     * Hide the Claude Code CLI's tool surface entirely for this call
+     * (`--tools ""`) instead of merely denying an empty allow-list
+     * (`--allowed-tools ""`, the default). See `claudeCodeChat`'s `noTools`
+     * doc comment (ai-claude-code.server.ts) for why the difference
+     * matters. Only the Dark Desk's planner/synthesis/brief calls pass
+     * this — Story/Opinion/Scan and the editorial pair are unaffected.
+     * No-op for every provider except claude-code.
+     */
+    noTools?: boolean;
+  },
   adapters?: GrokChatAdapters,
 ): Promise<GrokOk | GrokErr> {
   if (opts?.choice === "auto") {
@@ -499,6 +513,7 @@ export async function grokChat(
       user,
       model,
       timeoutMs,
+      noTools: opts?.noTools,
     });
   }
   if (provider.kind === "codex") {

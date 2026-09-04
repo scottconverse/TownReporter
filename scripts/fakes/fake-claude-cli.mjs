@@ -106,6 +106,26 @@ if (argv[0] === "auth" && argv[1] === "login") {
     JSON.stringify({ is_error: false, result: JSON.stringify({ mode, promptLength }) }) + "\n",
   );
   process.exit(0);
+} else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_ECHO_TOOLS === "1") {
+  /*
+   * For tests that need to prove which tool-surface flag reached argv:
+   * `--tools ""` (hides the surface entirely, Dark Desk F1's `noTools`) vs.
+   * `--allowed-tools <list>` (a described surface, denied per name). Echoes
+   * back the flag name and the value that followed it.
+   */
+  const toolsIdx = argv.indexOf("--tools");
+  const allowedIdx = argv.indexOf("--allowed-tools");
+  let flag = "none";
+  let value = "";
+  if (toolsIdx !== -1) {
+    flag = "--tools";
+    value = argv[toolsIdx + 1] ?? "";
+  } else if (allowedIdx !== -1) {
+    flag = "--allowed-tools";
+    value = argv[allowedIdx + 1] ?? "";
+  }
+  process.stdout.write(JSON.stringify({ is_error: false, result: JSON.stringify({ flag, value }) }) + "\n");
+  process.exit(0);
 } else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_FAIL_PROMPTS === "1") {
   // The exact envelope a real 401 mid-run produced. Exit 0: the CLI's own
   // process succeeded, it is the *call* that failed -- parseCliEnvelope in

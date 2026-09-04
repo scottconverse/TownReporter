@@ -17,6 +17,7 @@ import { planAutomaticFailover, failoverReasonPhrase } from "./automatic-failove
 import { readProviderOverrides } from "./provider-settings.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { darkSystemFor } from "./dark-prompt.ts";
+import { isSelfReferential } from "./claim-hygiene.ts";
 import { assertRate, audit } from "./ops.ts";
 import {
   checkBaselines,
@@ -209,6 +210,31 @@ type DarkJson = {
     handoff?: string;
   }[];
 };
+
+type DarkSignal = NonNullable<DarkJson["signals"]>[number];
+
+/**
+ * Dark Desk F3: the same tool-refusal/sandbox-escape narration filtered out
+ * of claims/frontier/anomalies/dead_ends (investigate.ts's `parsePlan`) can
+ * land here too — this is the dig's OTHER JSON-returning call. Checked
+ * across every free-text field a refusal could hide in, not just
+ * `observation`. Exported for tests only.
+ */
+export function isPoisonedSignal(sig: DarkSignal): boolean {
+  const text = [
+    sig.name,
+    sig.observation,
+    sig.pattern,
+    sig.linkage_map,
+    sig.alternatives,
+    sig.counter_narrative,
+    sig.what_would_kill,
+    sig.pathway,
+  ]
+    .map((v) => String(v ?? ""))
+    .join(" ");
+  return isSelfReferential(text);
+}
 
 // The inline DDL this desk owns directly (dark_* tables + the brief/settings
 // tables). Kept as a plain statement list — rather than issued one at a time
@@ -787,6 +813,9 @@ async function synthesizeSignals(
   const ai = await grokChat(darkSystemFor(dials), pack.slice(0, 28000), 3200, {
     timeoutMs: providerBudget(choice, overrides).callMs,
     choice,
+    // Dark Desk F1: synthesis reads the pack already assembled above and
+    // returns JSON only — it never fetches or searches itself.
+    noTools: true,
   });
   if (!ai?.ok)
     return {
@@ -810,6 +839,7 @@ async function synthesizeSignals(
   for (const sig of parsed.signals ?? []) {
     const name = String(sig.name ?? "").trim();
     if (!name) continue;
+    if (isPoisonedSignal(sig)) continue;
     const strength = Math.min(15, Math.max(3, Number(sig.strength) || 3));
     const confidence = Math.min(1, Math.max(0, Number(sig.confidence) || 0.3));
     let handoff = String(sig.handoff ?? "HOLD FOR PATTERN").toUpperCase();
@@ -1707,6 +1737,9 @@ export async function buildBrief(
   const ai = await grokChat(BRIEF_SYSTEM, pack.slice(0, 22000), 1200, {
     timeoutMs: providerBudget(choice, overrides).callMs,
     choice,
+    // Dark Desk F1: the brief reads the file already assembled above and
+    // returns JSON only — it never fetches or searches itself.
+    noTools: true,
   });
   if (!ai?.ok) return { ok: false as const, error: "error" in ai ? ai.error : "no response" };
 
