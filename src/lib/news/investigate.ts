@@ -9,6 +9,7 @@ import {
 } from "./ai.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { isSelfReferential, labelAfterCitationCheck } from "./claim-hygiene.ts";
+import { readableCapture } from "./html-text.ts";
 import { DARK_PLANNER } from "./dark-prompt.ts";
 import {
   classifyClaimKind,
@@ -1562,23 +1563,50 @@ export async function retrievePack(
   terms: string[],
 ): Promise<string> {
   const sql = await getSql();
-  const seeds = await sql<{ url: string; title: string; full_text: string }>`
-    select url, title, full_text from artifacts
+  const seedsRaw = await sql<{
+    url: string;
+    title: string;
+    full_text: string;
+    fetch_status: number | null;
+    fetch_outcome: string | null;
+  }>`
+    select url, title, full_text, fetch_status, fetch_outcome from artifacts
     where investigation_id = ${investigationId} and classification = 'watch'
     order by id asc limit 3
   `;
-  const recent = await sql<{
+  const recentRaw = await sql<{
     url: string;
     title: string;
     full_text: string;
     version_id: number | null;
     capture_event_id: number | null;
     content_hash: string;
+    fetch_status: number | null;
+    fetch_outcome: string | null;
   }>`
-    select url, title, full_text, version_id, capture_event_id, content_hash from artifacts
+    select url, title, full_text, version_id, capture_event_id, content_hash,
+      fetch_status, fetch_outcome
+    from artifacts
     where investigation_id = ${investigationId}
     order by id desc limit 40
   `;
+  // Keep failed captures out of the synthesis pool: a blocked/empty page's
+  // text is a paywall notice or a nav shell, not evidence, and feeding it
+  // to the model produces claims sourced from an error page (Dark Desk F6).
+  const isReadable = (a: {
+    full_text: string;
+    fetch_status: number | null;
+    fetch_outcome: string | null;
+    title: string;
+  }) =>
+    readableCapture({
+      text: a.full_text,
+      status: a.fetch_status,
+      outcome: a.fetch_outcome,
+      title: a.title,
+    }).kind === "ok";
+  const seeds = seedsRaw.filter(isReadable);
+  const recent = recentRaw.filter(isReadable);
   const lowered = terms.map((t) => t.toLowerCase()).filter((t) => t.length > 3);
   const scored = recent
     .map((a) => {
@@ -1592,7 +1620,7 @@ export async function retrievePack(
     ...scored.filter((a) => !seeds.some((s) => s.url === a.url)).slice(0, 8),
   ];
 
-  const chunkHits =
+  const chunkHitsRaw =
     lowered.length > 0
       ? await sql<{
           excerpt: string;
@@ -1600,8 +1628,12 @@ export async function retrievePack(
           locator: string;
           version_id: number;
           url: string;
+          fetch_status: number | null;
+          fetch_outcome: string | null;
+          title: string | null;
         }>`
-          select c.excerpt, c.page_number, c.locator, c.version_id, av.url
+          select c.excerpt, c.page_number, c.locator, c.version_id, av.url,
+            av.fetch_status, av.fetch_outcome, av.title
           from artifact_chunks c
           join artifact_versions av on av.id = c.version_id
           where exists (
@@ -1612,6 +1644,17 @@ export async function retrievePack(
           limit 80
         `
       : [];
+  // Same rule as the artifacts pool above: a chunk from a blocked/empty
+  // capture is a paywall notice or an error page, not evidence (Dark Desk
+  // F6).
+  const chunkHits = chunkHitsRaw.filter((c) =>
+    isReadable({
+      full_text: c.excerpt,
+      fetch_status: c.fetch_status,
+      fetch_outcome: c.fetch_outcome,
+      title: c.title ?? "",
+    }),
+  );
   const matchedChunks = chunkHits
     .filter((c) => lowered.some((t) => c.excerpt.toLowerCase().includes(t)))
     .slice(0, 8);

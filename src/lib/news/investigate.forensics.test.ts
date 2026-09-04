@@ -654,3 +654,45 @@ describe("dead-end resurfacing", { timeout: 120000 }, () => {
     assert.equal(item[0]!.prior_status, "dead-end");
   });
 });
+
+describe("retrievePack excludes failed captures (Dark Desk F6)", () => {
+  it("keeps a 403-blocked capture and an empty-body capture out of the synthesis pool", async () => {
+    const user = `forensic-blocked-${Date.now()}`;
+    const { id } = await bootInv(user, "Blocked captures");
+    await rememberCapture({
+      userId: user,
+      investigationId: id,
+      url: "https://example.gov/agenda-real",
+      title: "Real agenda",
+      text: "The council approved UNIQUEMARKER_REALTEXT the rezoning at Tuesday's meeting.",
+      hash: "hash-ok",
+      status: 200,
+      outcome: "fetched",
+    });
+    await rememberCapture({
+      userId: user,
+      investigationId: id,
+      url: "https://example.gov/agenda-blocked",
+      title: "Blocked page",
+      text: "<html><body>Forbidden UNIQUEMARKER_BLOCKEDTEXT</body></html>",
+      hash: "hash-blocked",
+      status: 403,
+      outcome: "fetched",
+    });
+    await rememberCapture({
+      userId: user,
+      investigationId: id,
+      url: "https://example.gov/agenda-empty",
+      title: "Empty page",
+      text: "",
+      hash: "hash-empty",
+      status: 200,
+      outcome: "fetched",
+    });
+    const pack = await retrievePack(user, id, ["UNIQUEMARKER"]);
+    assert.match(pack, /UNIQUEMARKER_REALTEXT/);
+    assert.doesNotMatch(pack, /UNIQUEMARKER_BLOCKEDTEXT/);
+    assert.doesNotMatch(pack, /agenda-blocked/);
+    assert.doesNotMatch(pack, /agenda-empty/);
+  });
+});

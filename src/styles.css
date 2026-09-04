@@ -594,6 +594,7 @@
 .desk-ltr .h1 {font-family:var(--fd);font-weight:600;font-size:30px;line-height:1.05;letter-spacing:-0.015em;margin:4px 0 0}
 .desk-ltr .lede {max-width:640px;color:var(--fg2);margin:10px 0 0;text-wrap:pretty}
 .desk-ltr .meta {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:2px 0 0}
+.desk-ltr .meta.evidence-weak {font-style:italic}
 .desk-ltr .meta-inline {font-size:calc(0.875rem * var(--ts));color:var(--mut);display:inline-block;margin-left:6px}
 .desk-ltr .meta-inline.block {display:block;margin-left:0}
 .desk-ltr .warn-inline {display:block;font-size:calc(0.875rem * var(--ts));color:var(--warn)}
@@ -828,6 +829,7 @@
 .desk-ltr .of-started {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:10px 0 0;font-style:italic}
 .desk-ltr .of-stop {font-size:calc(0.875rem * var(--ts));margin:8px 0 0;max-width:720px}
 .desk-ltr .of-stop b {font-family:var(--fd)}
+.desk-ltr .of-stop.err {color:var(--warn);border-left:3px solid var(--warn);padding-left:10px}
 .desk-ltr .of-grid {display:grid;grid-template-columns:1.4fr 1fr;gap:32px}
 .desk-ltr .of-grid .sechead {margin-top:20px}
 .desk-ltr .of-reads {margin-top:2px}

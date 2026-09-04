@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  blockedDigBannerText,
   composeZeroLeadSummary,
   editorError,
   editorDraftError,
@@ -190,6 +191,26 @@ describe("editor copy", () => {
     assert.doesNotMatch(msg!, /frontier/i);
     assert.doesNotMatch(msg!, /\bhop\b/i);
     assert.doesNotMatch(msg!, /budget/i);
+  });
+
+  it("does not say 'that is normal' when the batch was mostly blocked (Dark Desk F6)", () => {
+    const raw =
+      "Hop budget 5 reached with 65 frontier item(s) still open. Budget pauses work; evidence exhaustion would close it.";
+    const normal = editorPauseReason(raw, { total: 10, ok: 8 });
+    assert.match(normal!, /that is normal/i);
+
+    const mostlyBlocked = editorPauseReason(raw, { total: 10, ok: 3 });
+    assert.ok(mostlyBlocked);
+    assert.doesNotMatch(mostlyBlocked!, /that is normal/i);
+    assert.match(mostlyBlocked!, /7 of 10/);
+    assert.match(mostlyBlocked!, /blocks, paywalls, or empty pages/i);
+    assert.match(mostlyBlocked!, /Keep digging/);
+  });
+
+  it("defaults to the normal reassurance when no capture stats are given", () => {
+    const raw = "Hop budget 5 reached with 12 frontier item(s) still open.";
+    const msg = editorPauseReason(raw);
+    assert.match(msg!, /that is normal/i);
   });
 
   it("does not treat a heuristic hop dump as a reader-facing summary", () => {
@@ -780,5 +801,32 @@ describe("inviteMessage() builds the message the owner sends themselves", () => 
       link: "https://paper.example/login?invite=abc123",
     });
     assert.match(msg, /ask the owner for a new one/);
+  });
+});
+
+describe("blockedDigBannerText (Dark Desk F6)", () => {
+  it("names rate-limiting as the cause and suggests a next move", () => {
+    const text = blockedDigBannerText({
+      total: 10,
+      ok: 2,
+      blocked: 7,
+      empty: 1,
+      dominantReason: "rate-limited",
+    });
+    assert.match(text, /8 of 10/);
+    assert.match(text, /rate-limited \(429/i);
+    assert.match(text, /not evidence there is nothing here/i);
+    assert.match(text, /Keep digging/);
+  });
+
+  it("names an app-shell page when empty captures dominate", () => {
+    const text = blockedDigBannerText({
+      total: 6,
+      ok: 1,
+      blocked: 0,
+      empty: 5,
+      dominantReason: "empty",
+    });
+    assert.match(text, /app-shell/i);
   });
 });

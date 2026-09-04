@@ -27,7 +27,7 @@ function StrengthBar({ value }: { value: number }) {
       <span className="inline-block h-1.5 w-24 bg-rule" aria-hidden>
         <span className="block h-full bg-ink" style={{ width: `${pct}%` }} />
       </span>
-      <span className="text-[11px] tracking-[0.14em] text-muted uppercase">
+      <span className="text-sm tracking-[0.14em] text-muted uppercase">
         {pct}% supported
       </span>
     </span>
@@ -46,7 +46,7 @@ export function InvestigationBriefCard({
   if (!brief) {
     return (
       <section className="mb-6 border border-rule p-4">
-        <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Read this first</p>
+        <p className="text-sm tracking-[0.14em] text-muted uppercase">Read this first</p>
         <p className="mt-2 text-ink-2">
           No brief yet. One is written at the end of each round — or ask for one now.
         </p>
@@ -64,8 +64,8 @@ export function InvestigationBriefCard({
   return (
     <section className="mb-6 border-2 border-ink p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Read this first</p>
-        <span className={`text-[11px] tracking-[0.14em] uppercase ${VERDICT_TONE[brief.verdict]}`}>
+        <p className="text-sm tracking-[0.14em] text-muted uppercase">Read this first</p>
+        <span className={`text-sm tracking-[0.14em] uppercase ${VERDICT_TONE[brief.verdict]}`}>
           {VERDICT_COPY[brief.verdict]}
         </span>
       </div>
@@ -81,14 +81,14 @@ export function InvestigationBriefCard({
       {brief.hypothesis ? (
         <div className="mt-5 border-t border-rule pt-4">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <p className="text-[11px] tracking-[0.14em] text-muted uppercase">The hypothesis</p>
+            <p className="text-sm tracking-[0.14em] text-muted uppercase">The hypothesis</p>
             <StrengthBar value={brief.strength} />
           </div>
           <p className="mt-2 max-w-3xl font-display text-lg leading-snug">{brief.hypothesis}</p>
 
           {brief.supports.length ? (
             <>
-              <p className="mt-3 text-[11px] tracking-[0.14em] text-muted uppercase">
+              <p className="mt-3 text-sm tracking-[0.14em] text-muted uppercase">
                 What points at it
               </p>
               <ul className="mt-1 max-w-3xl space-y-1 text-ink-2">
@@ -101,7 +101,7 @@ export function InvestigationBriefCard({
 
           {brief.benign ? (
             <>
-              <p className="mt-3 text-[11px] tracking-[0.14em] text-muted uppercase">
+              <p className="mt-3 text-sm tracking-[0.14em] text-muted uppercase">
                 The boring explanation that also fits
               </p>
               <p className="mt-1 max-w-3xl text-ink-2">{brief.benign}</p>
@@ -110,7 +110,7 @@ export function InvestigationBriefCard({
 
           {brief.kills_it ? (
             <>
-              <p className="mt-3 text-[11px] tracking-[0.14em] text-muted uppercase">
+              <p className="mt-3 text-sm tracking-[0.14em] text-muted uppercase">
                 What would settle it
               </p>
               <p className="mt-1 max-w-3xl text-ink-2">{brief.kills_it}</p>
@@ -121,7 +121,7 @@ export function InvestigationBriefCard({
 
       {brief.connections.length ? (
         <div className="mt-5 border-t border-rule pt-4">
-          <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
+          <p className="text-sm tracking-[0.14em] text-muted uppercase">
             Connections across the file
           </p>
           <ul className="mt-1 max-w-3xl space-y-1 text-ink-2">
@@ -134,7 +134,7 @@ export function InvestigationBriefCard({
 
       {brief.next ? (
         <div className="mt-5 border-t border-rule pt-4">
-          <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Do this next</p>
+          <p className="text-sm tracking-[0.14em] text-muted uppercase">Do this next</p>
           <p className="mt-1 max-w-3xl text-ink-2">{brief.next}</p>
         </div>
       ) : null}

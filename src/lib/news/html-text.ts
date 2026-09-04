@@ -90,3 +90,64 @@ export function readableCapture(input: {
   }
   return { kind: "ok", body: cleaned, note: null };
 }
+
+/**
+ * Split a batch of captures into readable-vs-blocked, and name the
+ * dominant failure mode so the page can say WHY a dig is stuck instead of
+ * rendering a failing round identically to a working one (Dark Desk F6).
+ */
+export function captureBatchStats(
+  items: Array<{
+    text: string;
+    status?: number | null;
+    outcome?: string | null;
+    title?: string | null;
+  }>,
+): {
+  total: number;
+  ok: number;
+  blocked: number;
+  empty: number;
+  blockedRatio: number;
+  dominantReason: "rate-limited" | "blocked" | "not-found" | "empty" | "other" | null;
+} {
+  let ok = 0;
+  let blocked = 0;
+  let empty = 0;
+  const reasons: Record<string, number> = {};
+  for (const item of items) {
+    const r = readableCapture(item);
+    if (r.kind === "ok") {
+      ok++;
+      continue;
+    }
+    if (r.kind === "empty") {
+      empty++;
+      reasons.empty = (reasons.empty ?? 0) + 1;
+      continue;
+    }
+    blocked++;
+    const status = item.status ?? 0;
+    const key =
+      status === 429
+        ? "rate-limited"
+        : status === 403 || status === 401
+          ? "blocked"
+          : status === 404 || status === 410
+            ? "not-found"
+            : "other";
+    reasons[key] = (reasons[key] ?? 0) + 1;
+  }
+  const total = items.length;
+  const blockedRatio = total > 0 ? (blocked + empty) / total : 0;
+  type Reason = "rate-limited" | "blocked" | "not-found" | "empty" | "other";
+  let dominantReason: Reason | null = null;
+  let max = 0;
+  for (const [key, count] of Object.entries(reasons)) {
+    if (count > max) {
+      max = count;
+      dominantReason = key as Reason;
+    }
+  }
+  return { total, ok, blocked, empty, blockedRatio, dominantReason };
+}

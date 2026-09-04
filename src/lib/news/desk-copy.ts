@@ -165,7 +165,23 @@ export function editorError(raw: string | null | undefined): string | null {
   return plainEditorText(t);
 }
 
-export function editorPauseReason(raw: string | null | undefined): string | null {
+/**
+ * Batch-level readable-vs-total stats, the same shape `captureBatchStats`
+ * (html-text.ts) returns. Optional: when omitted, the pause copy defaults
+ * to the "that is normal" reassurance, same as before this batch signal
+ * existed.
+ */
+export type CaptureBatchSummary = { total: number; ok: number } | null | undefined;
+
+function isMostlyBlocked(stats: CaptureBatchSummary): boolean {
+  if (!stats || stats.total <= 0) return false;
+  return (stats.total - stats.ok) / stats.total > 0.5;
+}
+
+export function editorPauseReason(
+  raw: string | null | undefined,
+  captureStats?: CaptureBatchSummary,
+): string | null {
   if (!raw?.trim()) return null;
   if (/editor set this aside/i.test(raw)) {
     return "You set this aside. Pull it back onto the desk anytime.";
@@ -173,9 +189,38 @@ export function editorPauseReason(raw: string | null | undefined): string | null
   const budget = raw.match(/(\d+)\s+frontier item/i);
   if (budget) {
     const n = budget[1];
+    if (isMostlyBlocked(captureStats)) {
+      const blocked = captureStats!.total - captureStats!.ok;
+      return `Dark Desk opened a batch of records, but most of them (${blocked} of ${captureStats!.total}) hit blocks, paywalls, or empty pages — not real content. It still has ${n} pages, names, or documents it has not opened yet. Click Keep digging and it will try different pages.`;
+    }
     return `Dark Desk opened a batch of records, then stopped so it would not run all night. It still has ${n} pages, names, or documents it has not opened yet. That is normal — not an error, and not “too many leads.” Click Keep digging to read the next batch.`;
   }
   return editorError(raw);
+}
+
+/**
+ * Names the likely cause of a heavily-blocked dig (rate limits, a
+ * paywall/403, a dead link, or an app-shell page that opens but has no
+ * readable text) so the editor knows it's the fetcher or the source, not
+ * "there's nothing here." Dark Desk F6.
+ */
+export function blockedDigBannerText(stats: {
+  total: number;
+  ok: number;
+  blocked: number;
+  empty: number;
+  dominantReason: "rate-limited" | "blocked" | "not-found" | "empty" | "other" | null;
+}): string {
+  const failing = stats.blocked + stats.empty;
+  const reasonText: Record<string, string> = {
+    "rate-limited": "rate-limited (429 Too Many Requests)",
+    blocked: "blocked by the site (403/401)",
+    "not-found": "gone or not found (404)",
+    empty: "opening but returning no readable text — likely an app-shell page",
+    other: "failing to load",
+  };
+  const why = reasonText[stats.dominantReason ?? "other"] ?? reasonText.other;
+  return `This dig is mostly hitting walls: ${failing} of ${stats.total} opened pages were ${why}. That is the source or the fetcher, not evidence there is nothing here. Click Keep digging to try different pages, or open a record directly to check by hand.`;
 }
 
 export function looksLikeInternalSummary(text: string): boolean {

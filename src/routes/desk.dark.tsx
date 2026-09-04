@@ -20,6 +20,7 @@ import {
   type InvestigationRow,
 } from "@/lib/news/dark";
 import {
+  blockedDigBannerText,
   editorError,
   editorKindLabel,
   editorPauseReason,
@@ -43,7 +44,7 @@ import {
   InvestigationBriefCard,
   SectionTldr,
 } from "@/components/investigation-brief";
-import { readableCapture } from "@/lib/news/html-text";
+import { captureBatchStats, readableCapture } from "@/lib/news/html-text";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
@@ -859,6 +860,29 @@ function InvestigationWorkspace({
   const allArtifacts = detail?.artifacts ?? [];
   const artifacts = allArtifacts.filter((a) => !a.url.startsWith("editor://"));
   const pasteArt = allArtifacts.find((a) => a.url.startsWith("editor://"));
+  // Real-vs-blocked, not raw row counts: a mostly-blocked dig must not look
+  // identical to a working one (Dark Desk F6).
+  const captureStats = captureBatchStats(
+    artifacts.map((a) => ({
+      text: a.excerpt ?? "",
+      status: a.fetch_status,
+      outcome: a.fetch_outcome,
+      title: a.title,
+    })),
+  );
+  const readableLabel =
+    captureStats.total === 0
+      ? "0 records on file"
+      : captureStats.ok === captureStats.total
+        ? `${captureStats.total} records on file`
+        : `${captureStats.ok} readable / ${captureStats.total} captured`;
+  const readableCountBadge =
+    captureStats.total === 0
+      ? 0
+      : captureStats.ok === captureStats.total
+        ? captureStats.total
+        : `${captureStats.ok}/${captureStats.total}`;
+  const showBlockedBanner = captureStats.total >= 3 && captureStats.blockedRatio > 0.6;
   const claims = detail?.claims ?? [];
   const hyps = detail?.hypotheses ?? [];
   const searches = detail?.searches ?? [];
@@ -870,18 +894,57 @@ function InvestigationWorkspace({
   const brief = detail?.brief ?? null;
   const facts = claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind));
   const questions = openQuestionsFrom(detail);
-  const findings = [
-    ...signals.map((s) => plainEditorText(`${s.name}: ${s.observation}`)),
-    ...anomalies.map((a) => plainFinding(a.summary, a.url)),
-    ...entities.map((e) => plainEditorText(`${e.name} — ${e.why}`)),
-    ...claims.filter((c) => /FINDING|PATTERN/i.test(c.kind)).map((c) => plainEditorText(c.body)),
-  ].filter(Boolean);
+  // Grade each "On the record" line by whether it ties to a captured
+  // source (a URL, or a claim with evidence/a version), so the list reads
+  // as findings-with-strength instead of one undifferentiated pile
+  // (Dark Desk F6).
+  const findings: { text: string; sourceNote: string | null }[] = [
+    ...signals
+      .map((s) => ({
+        text: plainEditorText(`${s.name}: ${s.observation}`),
+        sourceNote: null,
+      }))
+      .filter((f) => f.text),
+    ...anomalies
+      .map((a) => ({
+        text: plainFinding(a.summary, a.url),
+        sourceNote: a.url ? organizationFromUrl(a.url) || a.url : null,
+      }))
+      .filter((f) => f.text),
+    ...entities
+      .map((e) => ({
+        text: plainEditorText(`${e.name} — ${e.why}`),
+        sourceNote: null,
+      }))
+      .filter((f) => f.text),
+    ...claims
+      .filter((c) => /FINDING|PATTERN/i.test(c.kind))
+      .map((c) => ({
+        text: plainEditorText(c.body),
+        sourceNote: c.evidence ? plainEditorText(c.evidence).slice(0, 160) : null,
+      }))
+      .filter((f) => f.text),
+  ];
   const tests = hyps.map((h) => plainEditorText(h.body)).filter(Boolean);
   const next = frontier.filter((f) =>
     ["open", "investigating", "reopened"].includes(f.status),
   );
-  const leftover = next.length;
-  const pauseText = editorPauseReason(inv?.pause_reason);
+  // The raw row list can hold the same lead under several labels; dedupe by
+  // its displayed text so the pile shows what's actually left to open, not
+  // duplicate rows counted as separate work (Dark Desk F6).
+  const nextDeduped = (() => {
+    const seen = new Set<string>();
+    const out: typeof next = [];
+    for (const f of next) {
+      const key = humanFrontierLabel(f.label).trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(f);
+    }
+    return out;
+  })();
+  const leftover = nextDeduped.length;
+  const pauseText = editorPauseReason(inv?.pause_reason, captureStats);
   const parentTitle = inv?.title || `File ${openId}`;
   const started = startedLine(parentTitle, pasteArt?.excerpt ?? "", inv?.summary ?? "");
   const statusBit = !inv
@@ -895,7 +958,7 @@ function InvestigationWorkspace({
   const budget = inv?.budget ?? 5;
   const statusLine = [
     statusBit,
-    `${artifacts.length} records on file`,
+    readableLabel,
     leftover > 0 ? `${leftover} still to open` : null,
     `round ${round} of ${budget}`,
     inv?.updated_at ? `last touched ${formatShortDate(inv.updated_at)}` : null,
@@ -968,12 +1031,17 @@ function InvestigationWorkspace({
           ) : null}
         </p>
       ) : null}
+      {showBlockedBanner ? (
+        <p className="of-stop err" role="status">
+          <b>Mostly blocked:</b> {blockedDigBannerText(captureStats)}
+        </p>
+      ) : null}
 
       <div className="of-grid">
         <div>
           <SecHead
             title="What to read"
-            count={artifacts.length}
+            count={readableCountBadge}
             sub="Click a title. The captured page opens below — that is the file."
           />
           {artifacts.length > 0 ? (
@@ -985,15 +1053,15 @@ function InvestigationWorkspace({
           )}
         </div>
         <div>
-          {next.length > 0 ? (
+          {nextDeduped.length > 0 ? (
             <>
               <SecHead
                 title="Still unopened"
-                count={next.length}
-                sub="Names, pages, and documents mentioned in the records. Not read yet."
+                count={nextDeduped.length}
+                sub="Names, pages, and documents mentioned in the records. Not read yet, duplicates folded in."
               />
               <div className="of-frontier">
-                {next.slice(0, frN).map((f) => (
+                {nextDeduped.slice(0, frN).map((f) => (
                   <div key={f.id} className="fr-item">
                     <p className="fr-label">{humanFrontierLabel(f.label)}</p>
                     {f.why ? <p className="fr-why">{plainEditorText(f.why)}</p> : null}
@@ -1013,15 +1081,15 @@ function InvestigationWorkspace({
                   </div>
                 ))}
               </div>
-              {next.length > frN ? (
+              {nextDeduped.length > frN ? (
                 <InkButton tone="quiet" small onClick={() => setFrN((n) => n + 10)}>
-                  Next 10 — {next.length - frN} more
+                  Next 10 — {nextDeduped.length - frN} more
                 </InkButton>
               ) : null}
-              {Number(inv?.still_open ?? leftover) > next.length ? (
+              {Number(inv?.still_open ?? leftover) > nextDeduped.length ? (
                 <p className="meta">
-                  {Number(inv?.still_open ?? leftover) - next.length} more were mentioned but not yet
-                  named. They surface as rounds read them.
+                  {Number(inv?.still_open ?? leftover) - nextDeduped.length} more were mentioned but not
+                  yet named. They surface as rounds read them.
                 </p>
               ) : null}
             </>
@@ -1040,9 +1108,14 @@ function InvestigationWorkspace({
             <div className="of-block">
               <p className="side-label">On the record</p>
               <SectionTldr text={brief?.sections?.record ?? ""} />
-              {findings.slice(0, 8).map((n, i) => (
+              {findings.slice(0, 8).map((f, i) => (
                 <p key={i} className="side-item">
-                  {n}
+                  {f.text}
+                  {f.sourceNote ? (
+                    <span className="meta"> — {f.sourceNote}</span>
+                  ) : (
+                    <span className="meta evidence-weak"> — pattern-level, not tied to one source</span>
+                  )}
                 </p>
               ))}
             </div>
