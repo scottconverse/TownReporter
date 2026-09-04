@@ -1,10 +1,26 @@
 # Changelog
 
-Current release: **0.6.14**.
+Current release: **0.6.15**.
 
-## Unreleased
+## 0.6.15 — 2026-09-03
+- **Dark Desk plumbing fix — it actually gathers evidence now.** The
+  investigation now runs the model without a broken locked-toolbox: the
+  model proposes searches and URLs and the app fetches them, so the leads
+  pile no longer fills up with the model's own tool-refusal notes instead
+  of evidence.
+- **Captures now extract the real article, not the site's nav menu.**
+- **Leads dedupe, and dead ends stop resurfacing forever.** The same page
+  no longer appears in the pile many times over, and a dig that already
+  ruled a lead out stays ruled out (migrations 0038 and 0039, applied
+  automatically).
+- **Reddit is fetched the reliable way.** RSS feeds, paced, so reddit tips
+  actually capture instead of silently failing.
+- **The Dark Desk page is honest about what it saw.** It now shows how many
+  captures were readable vs blocked, warns when a dig is being blocked,
+  grades findings by the evidence behind them, and no longer builds
+  analysis out of failed captures.
 - **The masthead deck and trust line now say "non-profit."** Matches what's
-  already live on production; ships with the sections release.
+  already live on production; ships with this release.
 
 ## 0.6.14 — 2026-09-03
 - **The desk has a Stats tab.** Read-only, editor-only, newsroom-scoped: total
