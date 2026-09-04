@@ -1,6 +1,22 @@
 # Changelog
 
-Current release: **0.6.13**.
+Current release: **0.6.14**.
+
+## 0.6.14 — 2026-09-03
+- **The desk has a Stats tab.** Read-only, editor-only, newsroom-scoped: total
+  site views, published stories ranked by views, and site views over the
+  last 7 and 30 days. New "Stats" nav item right after "Server".
+- **Views are counted, but never at the cost of the page that shows them.**
+  Counting is fully decoupled from page render: a client beacon
+  (`navigator.sendBeacon`, falling back to a non-blocking `fetch` with
+  `keepalive`) pings `/api/view` AFTER the page has already loaded. The
+  endpoint validates the target (only `site` or a real published story
+  counts -- nothing else can mint a bucket), swallows every error, and
+  always answers 204 fast. Render itself does zero extra database work for
+  this.
+- **Raw counts, not uniques.** No cookies, no fingerprinting, no IP or
+  user-agent stored -- just a daily count per (newsroom, target) in the new
+  `page_views` table (migrations/0037_page_views.sql).
 
 ## 0.6.13 — 2026-09-03
 - **Opinion editorials with a Local model now actually use that model.** A

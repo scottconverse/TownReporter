@@ -1,6 +1,6 @@
 # TownReporter — the manual
 
-**Version 0.6.13 · 3 September 2026**
+**Version 0.6.14 · 3 September 2026**
 
 **Documentation scope:** Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from
@@ -287,6 +287,21 @@ The owner also sees **Paper setup**, with the same fields used on first run, and
 **Invite an editor**, which creates a one-time, email-bound link that expires
 after seven days. Editors can work the whole desk but cannot change owner-only
 settings or invite another editor.
+
+## Stats
+
+`/desk/stats` — editor-only, right after Server in the nav.
+
+Raw page views, not unique visitors: no cookies, no fingerprinting, no IP or
+user-agent stored, just a daily count. Shows the site total (all-time, last
+7 days, last 30 days) and every published story ranked by views.
+
+Counting is decoupled from page render on purpose: a client beacon fires
+after a public page has already loaded and pings a lightweight endpoint that
+validates the target, swallows its own errors, and always answers fast. A
+stats failure can never slow or break the public page — this page simply has
+nothing new to show until it recovers. Scoped to your newsroom. See
+`src/lib/news/views.ts` and `migrations/0037_page_views.sql`.
 
 ## Published
 

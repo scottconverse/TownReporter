@@ -8,6 +8,7 @@ import { getPublishedArticle, listPublishedArticles } from "@/lib/news/public";
 import { parseUrlList, siteUrl } from "@/lib/paper";
 import { DEFAULT_PAPER_IDENTITY, usePaperDateFormatters } from "@/lib/paper-context";
 import { ProvenanceBlock } from "@/components/provenance";
+import { ViewBeacon } from "@/components/view-beacon";
 
 export const Route = createFileRoute("/articles/$slug")({
   loader: async ({ params }) => {
@@ -150,6 +151,7 @@ function ArticlePage() {
 
   return (
     <PaperShell compact>
+      <ViewBeacon targets={[`story:${slug}`, "site"]} />
       <div className="stagger-in">
         <p className="text-[11px] tracking-[0.16em] text-rust uppercase">
           {article.topic} · {formatDate(article.published_at)}

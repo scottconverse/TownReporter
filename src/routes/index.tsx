@@ -5,6 +5,7 @@ import { PaperShell, TopicChip } from "@/components/paper-chrome";
 import { StoryBody } from "@/components/story-body";
 import { EditionSkeleton, EmptyState, FetchingRule } from "@/components/states";
 import { inkGhost, inkSolid } from "@/components/desk-chrome";
+import { ViewBeacon } from "@/components/view-beacon";
 import {
   listPublishedArticles,
   listPublishedByTopic,
@@ -75,6 +76,7 @@ function Home() {
 
   return (
     <PaperShell>
+      <ViewBeacon targets={["site"]} />
       <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="chip-rail">
           <Link

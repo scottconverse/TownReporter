@@ -20,6 +20,7 @@ import { Route as HowWeReportRouteImport } from './routes/how-we-report'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
+import { Route as ApiViewRouteImport } from './routes/api/view'
 import { Route as ArticlesSlugRouteImport } from './routes/articles.$slug'
 import { Route as DeskIndexRouteImport } from './routes/desk.index'
 import { Route as DeskDarkRouteImport } from './routes/desk.dark'
@@ -31,6 +32,7 @@ import { Route as DeskQueueRouteImport } from './routes/desk.queue'
 import { Route as DeskScanRouteImport } from './routes/desk.scan'
 import { Route as DeskSetupRouteImport } from './routes/desk.setup'
 import { Route as DeskSourcesRouteImport } from './routes/desk.sources'
+import { Route as DeskStatsRouteImport } from './routes/desk.stats'
 import { Route as EvidenceVersionIdRouteImport } from './routes/evidence.$versionId'
 import { Route as EvidenceCompareRouteImport } from './routes/evidence.compare'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -93,6 +95,11 @@ const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   path: '/sitemap.xml',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiViewRoute = ApiViewRouteImport.update({
+  id: '/api/view',
+  path: '/api/view',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ArticlesSlugRoute = ArticlesSlugRouteImport.update({
   id: '/articles/$slug',
   path: '/articles/$slug',
@@ -148,6 +155,11 @@ const DeskSourcesRoute = DeskSourcesRouteImport.update({
   path: '/sources',
   getParentRoute: () => DeskRoute,
 } as any)
+const DeskStatsRoute = DeskStatsRouteImport.update({
+  id: '/stats',
+  path: '/stats',
+  getParentRoute: () => DeskRoute,
+} as any)
 const EvidenceVersionIdRoute = EvidenceVersionIdRouteImport.update({
   id: '/evidence/$versionId',
   path: '/evidence/$versionId',
@@ -191,6 +203,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
   '/desk/memory': typeof DeskMemoryRoute
@@ -201,6 +214,7 @@ export interface FileRoutesByFullPath {
   '/desk/scan': typeof DeskScanRoute
   '/desk/setup': typeof DeskSetupRoute
   '/desk/sources': typeof DeskSourcesRoute
+  '/desk/stats': typeof DeskStatsRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
   '/desk/': typeof DeskIndexRoute
@@ -220,6 +234,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
   '/desk/memory': typeof DeskMemoryRoute
@@ -230,6 +245,7 @@ export interface FileRoutesByTo {
   '/desk/scan': typeof DeskScanRoute
   '/desk/setup': typeof DeskSetupRoute
   '/desk/sources': typeof DeskSourcesRoute
+  '/desk/stats': typeof DeskStatsRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
   '/desk': typeof DeskIndexRoute
@@ -251,6 +267,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
   '/desk/memory': typeof DeskMemoryRoute
@@ -261,6 +278,7 @@ export interface FileRoutesById {
   '/desk/scan': typeof DeskScanRoute
   '/desk/setup': typeof DeskSetupRoute
   '/desk/sources': typeof DeskSourcesRoute
+  '/desk/stats': typeof DeskStatsRoute
   '/evidence/$versionId': typeof EvidenceVersionIdRoute
   '/evidence/compare': typeof EvidenceCompareRoute
   '/desk/': typeof DeskIndexRoute
@@ -283,6 +301,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/robots.txt'
     | '/sitemap.xml'
+    | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
     | '/desk/memory'
@@ -293,6 +312,7 @@ export interface FileRouteTypes {
     | '/desk/scan'
     | '/desk/setup'
     | '/desk/sources'
+    | '/desk/stats'
     | '/evidence/$versionId'
     | '/evidence/compare'
     | '/desk/'
@@ -312,6 +332,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/robots.txt'
     | '/sitemap.xml'
+    | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
     | '/desk/memory'
@@ -322,6 +343,7 @@ export interface FileRouteTypes {
     | '/desk/scan'
     | '/desk/setup'
     | '/desk/sources'
+    | '/desk/stats'
     | '/evidence/$versionId'
     | '/evidence/compare'
     | '/desk'
@@ -342,6 +364,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/robots.txt'
     | '/sitemap.xml'
+    | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
     | '/desk/memory'
@@ -352,6 +375,7 @@ export interface FileRouteTypes {
     | '/desk/scan'
     | '/desk/setup'
     | '/desk/sources'
+    | '/desk/stats'
     | '/evidence/$versionId'
     | '/evidence/compare'
     | '/desk/'
@@ -373,6 +397,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   RobotsDottxtRoute: typeof RobotsDottxtRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
+  ApiViewRoute: typeof ApiViewRoute
   ArticlesSlugRoute: typeof ArticlesSlugRoute
   EvidenceVersionIdRoute: typeof EvidenceVersionIdRoute
   EvidenceCompareRoute: typeof EvidenceCompareRoute
@@ -459,6 +484,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SitemapDotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/view': {
+      id: '/api/view'
+      path: '/api/view'
+      fullPath: '/api/view'
+      preLoaderRoute: typeof ApiViewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/articles/$slug': {
       id: '/articles/$slug'
       path: '/articles/$slug'
@@ -536,6 +568,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskSourcesRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/desk/stats': {
+      id: '/desk/stats'
+      path: '/stats'
+      fullPath: '/desk/stats'
+      preLoaderRoute: typeof DeskStatsRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/evidence/$versionId': {
       id: '/evidence/$versionId'
       path: '/evidence/$versionId'
@@ -591,6 +630,7 @@ interface DeskRouteChildren {
   DeskScanRoute: typeof DeskScanRoute
   DeskSetupRoute: typeof DeskSetupRoute
   DeskSourcesRoute: typeof DeskSourcesRoute
+  DeskStatsRoute: typeof DeskStatsRoute
   DeskIndexRoute: typeof DeskIndexRoute
   DeskStoryLeadIdRoute: typeof DeskStoryLeadIdRoute
   DeskStoryDraftDraftIdRoute: typeof DeskStoryDraftDraftIdRoute
@@ -606,6 +646,7 @@ const DeskRouteChildren: DeskRouteChildren = {
   DeskScanRoute: DeskScanRoute,
   DeskSetupRoute: DeskSetupRoute,
   DeskSourcesRoute: DeskSourcesRoute,
+  DeskStatsRoute: DeskStatsRoute,
   DeskIndexRoute: DeskIndexRoute,
   DeskStoryLeadIdRoute: DeskStoryLeadIdRoute,
   DeskStoryDraftDraftIdRoute: DeskStoryDraftDraftIdRoute,
@@ -625,6 +666,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   RobotsDottxtRoute: RobotsDottxtRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
+  ApiViewRoute: ApiViewRoute,
   ArticlesSlugRoute: ArticlesSlugRoute,
   EvidenceVersionIdRoute: EvidenceVersionIdRoute,
   EvidenceCompareRoute: EvidenceCompareRoute,

@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.6.13](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.13).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.14](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.14).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
@@ -500,6 +500,26 @@ Owners also have:
   already in create-account mode with their email filled in, choose a
   password, and they're an editor. There is no code to type anywhere -- the
   link itself is the credential, and it only works once.
+
+---
+
+## Stats (`/desk/stats`)
+
+Read-only, editor-only. Right after Server in the nav.
+
+Shows raw page views, not unique visitors — no cookies, no fingerprinting,
+just a count of how many times a page loaded. Three things:
+
+- **Site** — all-time total, last 7 days, and last 30 days, added across
+  every public page.
+- **Stories** — every published story, ranked by all-time views, linking
+  straight to the story.
+
+A view is counted by a small beacon that fires from the reader's browser
+*after* the page has already loaded, so it can never slow the paper down —
+and if counting ever fails for any reason, the public page is completely
+unaffected; this page just shows nothing new until it recovers. Views are
+scoped to your newsroom.
 
 ---
 

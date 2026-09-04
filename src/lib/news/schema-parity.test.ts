@@ -120,6 +120,7 @@ if (dbProbe.ok) {
     const providerSettings = await import("./provider-settings.ts");
     const editorialServer = await import("./editorial.server.ts");
     const ops = await import("./ops.ts");
+    const views = await import("./views.ts");
     const db = await import("../db.ts");
     closePoolForTests = db.closePoolForTests;
 
@@ -133,6 +134,7 @@ if (dbProbe.ok) {
     await editorialServer.ensureEditorialRequestSchema();
     await dark.ensureDarkSchema(); // also calls ensureInvestigateSchema
     await investigate.ensureInvestigateSchema();
+    await views.ensureViewsSchema();
     // desk_rate / audit_events: no ensure*Schema name, but the same
     // create-table-if-not-exists-on-every-call shape (ENG-09) -- a real call
     // each creates the table.

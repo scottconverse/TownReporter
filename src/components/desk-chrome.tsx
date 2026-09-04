@@ -16,6 +16,7 @@ const LINKS = [
   { to: "/desk/published", label: "Published" },
   { to: "/desk/opinion", label: "Opinion" },
   { to: "/desk/ops", label: "Server" },
+  { to: "/desk/stats", label: "Stats" },
 ] as const;
 
 const MODE_KEY = "townreporter.desk.mode";

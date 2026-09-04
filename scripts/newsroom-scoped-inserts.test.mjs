@@ -61,6 +61,7 @@ const SCOPED_TABLES = [
   "artifact_blobs",
   "desk_rate",
   "audit_events",
+  "page_views",
 ];
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
