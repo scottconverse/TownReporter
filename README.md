@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.16](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.16)** — 4 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.17](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.17)** — 5 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.17** — Reddit fetching is now strictly one-at-a-time and paced, shared across the tip scan and digs, fixing a concurrency bug that could trigger rate limits; redd.it short links now resolve.
 - **0.6.16** — Dark Desk actions now confirm clearly: "Send to the queue" shows where the lead went and links to it; every action gives visible feedback.
 - **0.6.15** — Dark Desk actually gathers evidence now: the dig runs tool-free (it proposes, the app fetches), captures the real article instead of the nav menu, dedupes leads, caps dead ends, fetches reddit reliably, and the page honestly shows readable-vs-blocked.
 - **0.6.14** — the desk now has a Stats tab: anonymous site and per-story view counts, recorded by a fail-safe beacon that never touches page rendering.

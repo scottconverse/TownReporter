@@ -1,6 +1,18 @@
 # Changelog
 
-Current release: **0.6.16**.
+Current release: **0.6.17**.
+
+## 0.6.17 — 2026-09-05
+- **Reddit requests are now serialized through one shared queue.** Strictly
+  one request in flight at a time, at least 8 seconds apart, shared by the
+  r/longmont tip scan and Dark Desk digs. This fixes a defect (TR-001, found
+  by independent review) where two callers waiting on the same pacing gap
+  could wake together and fire in parallel, breaking the pacing promise and
+  inviting HTTP 429 rate-limits. See the regression test
+  `src/lib/news/reddit-pacing.test.ts`.
+- **redd.it short links now resolve** to the full thread so they route
+  through the reliable `.rss` path instead of failing to expand.
+- No other behavior changed.
 
 ## 0.6.16 — 2026-09-04
 - **Dark Desk "Send to the queue" now confirms clearly.** It worked before
