@@ -136,6 +136,52 @@ export function uncheckedGateTodos(notes: ReportingNotes): NoteTodo[] {
 const TODO_SPLIT_AT = 160;
 
 /**
+ * Common abbreviations whose period must never be read as a sentence end.
+ * Month short forms, titles, street/address words, and a few stock Latin
+ * and legal abbreviations -- the ones actually seen in machine-generated
+ * follow-up text ("the Aug. 25 budget introduction", "the Sept. 1 regular
+ * session"). "U.S" carries its own internal dot so the whole "U.S." token
+ * is matched and protected as one unit.
+ */
+const ABBREVIATIONS = [
+  "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sept", "Sep", "Oct", "Nov", "Dec",
+  "Mr", "Mrs", "Ms", "Dr", "St", "Ave", "Blvd", "No", "vs", "etc", "Inc", "Co", "U.S",
+];
+
+/** A placeholder no reporting note text is ever expected to contain, standing in for a protected "." */
+const PROTECTED_DOT = "ZZDOTZZ";
+
+function abbreviationPeriodRegex(): RegExp {
+  const escaped = ABBREVIATIONS.map((word) => word.split(".").join("\\.")).join("|");
+  return new RegExp(`\\b(?:${escaped})\\.`, "gi");
+}
+
+/**
+ * Hide a period from the sentence splitter below without changing anything
+ * a human reads: an abbreviation's period ("Aug.", "U.S."), and any period
+ * or semicolon that falls inside a parenthetical that has not closed yet
+ * (a model's own aside, "(including the Aug. 25 ... session)", is one
+ * sentence no matter how many periods it contains before the closing paren).
+ */
+function protectNonSentenceEnds(text: string): string {
+  const abbreviationsHidden = text.replace(abbreviationPeriodRegex(), (m) =>
+    m.slice(0, -1) + PROTECTED_DOT,
+  );
+  let depth = 0;
+  let out = "";
+  for (const ch of abbreviationsHidden) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    out += depth > 0 && (ch === "." || ch === ";") ? PROTECTED_DOT : ch;
+  }
+  return out;
+}
+
+function restoreProtectedDots(text: string): string {
+  return text.split(PROTECTED_DOT).join(".");
+}
+
+/**
  * Break a run-on to-do into the separate errands it actually contains.
  *
  * The desk searches a to-do line verbatim when the reporter presses PULL, so
@@ -149,14 +195,25 @@ const TODO_SPLIT_AT = 160;
  * Split on sentence ends and on the joins a model uses to chain errands. A
  * piece that comes out too short to search on is folded back into the one
  * before it rather than kept as a stub.
+ *
+ * Abbreviation periods and periods inside an unclosed parenthetical are
+ * protected first (see `protectNonSentenceEnds`) so "...(including the Aug.
+ * 25 budget introduction and the Sept. 1 regular session, whose minutes are
+ * still unposted)" stays one errand instead of splitting into three at
+ * "Aug." and "Sept." -- a real follow-up line that used to render as three
+ * rows on the Story page's "Still to pull" list.
  */
 export function splitTodoLine(line: string, limit = TODO_SPLIT_AT): string[] {
   const text = line.trim();
   if (text.length <= limit) return text ? [text] : [];
 
   const pieces: string[] = [];
-  for (const raw of text.split(/(?<=[.;])\s+|\s+(?:Then|And then|Also)\s+/i)) {
-    const piece = raw.replace(/\s+/g, " ").replace(/^[\s,;.—-]+|[\s,;]+$/g, "").trim();
+  const protectedText = protectNonSentenceEnds(text);
+  for (const raw of protectedText.split(/(?<=[.;])\s+|\s+(?:Then|And then|Also)\s+/i)) {
+    const piece = restoreProtectedDots(raw)
+      .replace(/\s+/g, " ")
+      .replace(/^[\s,;.—-]+|[\s,;]+$/g, "")
+      .trim();
     if (!piece) continue;
     if (piece.length < 24 && pieces.length) {
       pieces[pieces.length - 1] = `${pieces[pieces.length - 1]} ${piece}`;

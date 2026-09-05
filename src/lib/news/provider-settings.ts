@@ -99,14 +99,21 @@ function stillListed(
  *
  * The `local-model` id's `localModel` field is resolved against the LIVE
  * catalog before this returns: the editor's stored pick when it is still on
- * the server's list, else the currently discovered default, else `null`.
- * Every caller that threads `overrides["local-model"]?.localModel` straight
- * into `grokChat`'s `opts.localModel` (report.ts, dark.ts, investigate.ts)
+ * the server's list, else the currently discovered default. Every caller
+ * that threads `overrides["local-model"]?.localModel` straight into
+ * `grokChat`'s `opts.localModel` (report.ts, dark.ts, investigate.ts)
  * therefore gets "the stored pick, or the discovered default" for free,
- * without needing to know `local-models.ts` exists. Discovery is a
- * cheap, cached (20s), localhost-only call; a failure there is swallowed and
+ * without needing to know `local-models.ts` exists. Discovery is a cheap,
+ * cached (20s), localhost-only call; a failure there is swallowed and
  * simply leaves the stored pick (or nothing) in place, exactly as it stood
  * before this resolution step existed.
+ *
+ * A newsroom with NO stored `local-model` row and NO discovered local
+ * server gets no synthetic entry at all -- "no rows at all" (the shipped-
+ * defaults contract every other provider id already has, and what
+ * `provider-settings.e2e.test.ts`'s "starts with the shipped defaults and
+ * no rows at all" proves against a real Postgres) stays exactly `{}`, the
+ * same as before this field existed.
  */
 export async function readProviderOverrides(
   newsroomId: number = DEFAULT_NEWSROOM_ID,
@@ -134,7 +141,18 @@ export async function readProviderOverrides(
   try {
     const catalog = await refreshLocalCatalog();
     const resolved = stillListed(stored, catalog) ? stored : catalog.defaultModel;
-    out[LOCAL_MODEL_PROVIDER_ID] = { ...(out[LOCAL_MODEL_PROVIDER_ID] ?? {}), localModel: resolved };
+    // "No rows at all" must mean exactly that -- an empty object, the same
+    // shipped-defaults contract every other provider id already has. A
+    // newsroom with no stored row and no discovered local server (the
+    // ordinary case on a CI Postgres runner, which has neither LM Studio
+    // nor Ollama listening) must not gain a synthetic `local-model` entry
+    // just because discovery ran. Only merge in a resolved value when there
+    // is something to say (a live catalog default) or a row already exists
+    // to update (whose `localModel` may need to move from a vanished stored
+    // pick to null, or to the current default).
+    if (resolved || out[LOCAL_MODEL_PROVIDER_ID]) {
+      out[LOCAL_MODEL_PROVIDER_ID] = { ...(out[LOCAL_MODEL_PROVIDER_ID] ?? {}), localModel: resolved };
+    }
   } catch {
     // Discovery failed (should not happen -- it never throws -- but this is
     // a budgets read used by every draft/scan/dig, and it must never fail a

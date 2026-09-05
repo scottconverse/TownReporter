@@ -163,6 +163,33 @@ describe("splitTodoLine", () => {
     assert.deepEqual(splitTodoLine("   "), []);
   });
 
+  /*
+    A real machine follow-up line rendered as three rows on the Story page's
+    "Still to pull" list: the splitter read "Aug." and "Sept." as sentence
+    ends. Both abbreviations sit inside one still-open parenthetical too, so
+    this also proves the "don't split inside an unclosed paren" half of the
+    fix, not just the abbreviation list.
+  */
+  it("does not split on a month abbreviation's period, even inside a parenthetical", () => {
+    const line =
+      "check City Council agendas and packets from August-September 2026 (including the Aug. 25 budget introduction and the Sept. 1 regular session, whose minutes are still unposted)";
+    assert.deepEqual(splitTodoLine(line), [line]);
+  });
+
+  it("does not split on other common abbreviations (titles, streets, U.S., etc.)", () => {
+    const line =
+      "Ask Dr. Alvarez and Mr. Chen at 400 Main St. for the U.S. Census tract map the staff report cites, and confirm the vendor is Acme Co. per the Inc. filing before Friday, etc.";
+    assert.deepEqual(splitTodoLine(line), [line]);
+  });
+
+  it("still splits a real sentence end that happens to follow other text", () => {
+    const line =
+      "Get the resolution and the ballot title text — those are the two documents that settle rate, boundary, sunset and debt. Then the board packet and minutes for the August 2026 meeting, plus the U.S. Census tract map the staff report cites, and confirm with the county clerk before Friday.";
+    const parts = splitTodoLine(line);
+    assert.ok(parts.length >= 2, "a two-sentence line must still split");
+    assert.ok(!parts.some((p) => /U\.$/.test(p) || /U\.S$/.test(p)), "must not split inside U.S.");
+  });
+
   it("machineTodosFrom produces more, shorter lines from one run-on", () => {
     const todos = machineTodosFrom([RUN_ON]);
     assert.ok(todos.length >= 2);
