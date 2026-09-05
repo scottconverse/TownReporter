@@ -1,14 +1,15 @@
 # TownReporter — TODO (canonical, in-repo)
-_Kept current by whichever Claude session is working. Last updated: 2026-09-05. Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
+_Kept current by whichever Claude session is working. Last updated: 2026-09-05 (0.6.17 live). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked on the owner
 
 ---
 
 ## In flight
-- [~] **0.6.17 — Reddit pacing fix (TR-001) release.** Fix merged to `main` at `55488fc` (CI 14/14). Version bump to 0.6.17 → CI → stage on real data → promote → verify live. Done by the Halo-local session at the owner's direction.
+- (nothing in flight)
 
-## Open queue (priority order, per the 2026-09-04 independent verification)
+## Open queue (bug fixes first — owner chose to skip the redesign for now)
+0. [ ] **Prove reddit actually captures on live 0.6.17** — a real thread fetch should return content, not "blocked" (it 429d in independent review before the pacing fix).
 1. [ ] **`source_monitors` newsroom-scoping** — still pinned to `DEFAULT_NEWSROOM_ID` (honest STOP from 0.6.11). Do this BEFORE exposing manual watch controls. Touches `investigate.ts` (`watchSource`/`maybeWatch`/`runDueMonitors`) + `monitors-cron.ts`.
 2. [ ] **Manual "watch this page" for Dark Desk** — wire the existing `watchSource` to an editor button so an editor can put a page on the investigative monitor list by hand (today only the dig adds monitors). Do after #1. Must have clear UX feedback (owner rule).
 3. [ ] **Legal removal** — one-click legal takedown for a published story: immediate purge (skip the 30-day trash), audit trail (who/when/why), and flag which on-disk DB backups still contain the item so an operator can complete the scrub. Context: normal delete keeps a restorable copy 30 days AND the story lingers in every backup taken while it existed.
@@ -29,7 +30,7 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked 
 - [x] 0.6.15 — **Dark Desk plumbing fix**: dig runs tool-free (app fetches), real article extraction, junk filter, URL dedup + capped dead-ends, reddit `.rss` routing, honest page. 247 poisoned/zombie prod rows retired (receipt).
 - [x] 0.6.16 — Dark Desk actions confirm clearly (Send-to-queue links to the lead; feedback on every action).
 - [x] "Non-profit" masthead/deck/welcome copy live.
-- [x] TR-001 fix merged (`55488fc`) — Reddit requests strictly serialized + redd.it links resolve. Releasing as 0.6.17.
+- [x] 0.6.17 — Reddit requests strictly serialized + redd.it links resolve (TR-001). LIVE, tagged v0.6.17, 26 stories intact.
 
 ## Known caveats (honest state)
 - Dark Desk is proven on ONE real staged topic (receipt); the Reddit leg was the weak spot (TR-001, now fixed pending release). Not a certification of every source type.
