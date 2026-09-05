@@ -27,17 +27,42 @@ const registryUrl = moduleUrl(
   "provider-registry.ts",
 );
 const registry = await import(registryUrl);
+const preflightUrl = moduleUrl(
+  await readFile(new URL("../src/lib/news/preflight.ts", import.meta.url), "utf8"),
+  "preflight.ts",
+);
 const choices = moduleUrl(
   await readFile(new URL("../src/lib/news/model-choice.ts", import.meta.url), "utf8"),
   "model-choice.ts",
-  { "./provider-registry.ts": registryUrl },
+  { "./provider-registry.ts": registryUrl, "./preflight.ts": preflightUrl },
 );
+
+/*
+  0.6.19: the picker now asks the server which offered providers are actually
+  usable on this machine (see src/lib/news/provider-availability.ts) instead
+  of trusting `enabled()` -- which reads `process.env` and does not exist in
+  a browser bundle -- to have run anywhere near this component. This one stub
+  module backs both the `useQuery` hook and the `providerAvailability` call
+  it fetches with, so a test can flip `__setAvailability` and see the picker
+  react, the same way the real query response would.
+*/
+const availabilityStubSrc = `
+let current;
+export function __setAvailability(data) { current = data; }
+export const useQuery = () => ({ data: current });
+export const providerAvailability = async () => current;
+`;
+const availabilityStubUrl = `data:text/javascript;base64,${Buffer.from(availabilityStubSrc).toString("base64")}`;
+const availabilityStub = await import(availabilityStubUrl);
+
 const { ModelPicker } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/model-picker.tsx", import.meta.url), "utf8"),
     "model-picker.tsx",
     {
       "@/lib/news/model-choice": choices,
+      "@/lib/news/provider-availability": availabilityStubUrl,
+      "@tanstack/react-query": availabilityStubUrl,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },
@@ -45,6 +70,11 @@ const { ModelPicker } = await import(
 );
 
 function render(props = {}) {
+  // Undefined (the default) means "the query hasn't answered yet" --
+  // ModelPicker treats that as every provider available, same as a real
+  // slow network response would, so existing tests that don't care about
+  // availability keep seeing every option enabled.
+  availabilityStub.__setAvailability(undefined);
   return renderToStaticMarkup(
     createElement(ModelPicker, { value: "auto", onChange() {}, ...props }),
   );
@@ -138,4 +168,36 @@ test("disabled picker retains accessible setup help, associated label, and no-fa
   assert.ok(selectId, "select must have an ID for its explicit label");
   assert.ok(html.includes(`for="${selectId}"`), "visible label must identify the select");
   assert.doesNotMatch(html, /<details[^>]*disabled|<summary[^>]*disabled/);
+});
+
+/*
+  0.6.19: LLM_BASE_URL unset used to mean "Local model" rendered as a plain,
+  always-selectable option that could only fail once picked (owner report
+  2026-09-05). These pin the fix: an unavailable option is a disabled
+  <option> that says so in its own text, and the help line names it too --
+  whether or not it is the current selection.
+*/
+test("an unavailable provider renders as a disabled option labelled 'not set up'", () => {
+  availabilityStub.__setAvailability({ "local-model": false });
+  const html = renderToStaticMarkup(createElement(ModelPicker, { value: "auto", onChange() {} }));
+  assert.match(html, /<option[^>]*value="local-model"[^>]* disabled=""[^>]*>Local model — llama\.cpp, LM Studio, or another OpenAI-compatible server — not set up<\/option>/);
+  // Not selected, but the only unavailable option -- still surfaced.
+  assert.match(html, /Local model is not set up on this server\. See docs\/local-models\.md\./);
+});
+
+test("selecting the unavailable provider replaces the normal help with the specific one", () => {
+  availabilityStub.__setAvailability({ "local-model": false });
+  const html = renderToStaticMarkup(
+    createElement(ModelPicker, { value: "local-model", onChange() {} }),
+  );
+  assert.match(html, /Local model is not set up on this server\. See docs\/local-models\.md\./);
+  assert.doesNotMatch(html, /Uses only Local model for this run; no fallback/);
+});
+
+test("every offered provider available leaves no option disabled and no 'not set up' copy", () => {
+  const available = Object.fromEntries(registry.PICKER_PROVIDER_IDS.map((id) => [id, true]));
+  availabilityStub.__setAvailability(available);
+  const html = renderToStaticMarkup(createElement(ModelPicker, { value: "auto", onChange() {} }));
+  assert.doesNotMatch(html, /disabled=""/);
+  assert.doesNotMatch(html, /not set up/);
 });

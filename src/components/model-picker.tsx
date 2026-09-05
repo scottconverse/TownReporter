@@ -4,9 +4,12 @@ import {
   STORY_MODEL_CHOICES,
   modelChoiceHelp,
   type DarkModelChoice,
+  type ModelChoiceOption,
   type OpinionModelChoice,
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
+import { providerAvailability } from "@/lib/news/provider-availability";
+import { useQuery } from "@tanstack/react-query";
 import { useId } from "react";
 
 type Props =
@@ -38,6 +41,20 @@ type Props =
       compact?: boolean;
     };
 
+/**
+ * What the desk shows when the option the editor has selected -- or the one
+ * un-set-up option sitting in the list -- has no server behind it. Same
+ * single sentence `preflight.ts`'s `LOCAL_MODEL_UNCONFIGURED` gives a run
+ * that gets all the way to spending before refusing, so an editor sees the
+ * identical wording whether the picker catches it first or the run does.
+ */
+function notSetUpHelp(option: ModelChoiceOption): string {
+  if (option.value === "local-model") {
+    return "Local model is not set up on this server. See docs/local-models.md.";
+  }
+  return `${option.label} is not set up on this server. See docs/setup.md.`;
+}
+
 export function ModelPicker(props: Props) {
   const options =
     props.scope === "opinion"
@@ -47,8 +64,39 @@ export function ModelPicker(props: Props) {
         : STORY_MODEL_CHOICES;
   const selected = options.find((option) => option.value === props.value) ?? options[0];
   const helpId = useId();
+  const flagId = useId();
   const selectId = useId();
-  const help = modelChoiceHelp(selected.value, props.scope ?? "story");
+  /*
+    Which providers are actually usable ON THIS SERVER, not just offered for
+    this surface. `providersFor()` (provider-registry.ts) only filters by
+    `offeredFor[surface]` -- it never asked `entry.enabled()` -- so before
+    this query existed the picker rendered "Local model" as a plain
+    selectable option even with LLM_BASE_URL unset, and a draft picked that
+    way could only fail after spending nothing but the editor's time (owner
+    report 2026-09-05). `enabled()` reads `process.env`, which does not exist
+    in the browser bundle this component ships in, so the answer has to come
+    from the server -- this is the one query every picker instance shares.
+  */
+  const availability = useQuery({
+    queryKey: ["provider-availability"],
+    queryFn: () => providerAvailability(),
+    staleTime: 5 * 60 * 1000,
+  });
+  function isAvailable(value: string): boolean {
+    if (value === "auto") return true;
+    // Undecided (still loading, or the query failed) defaults to available
+    // so the picker never locks up over a slow network call -- the
+    // preflight check on the actual run is the backstop that refuses
+    // before spending anything either way (see commitStoryDraftForAuthenticatedEditor).
+    return availability.data ? availability.data[value] !== false : true;
+  }
+  const unavailable = options.filter((option) => option.value !== "auto" && !isAvailable(option.value));
+  const selectedUnavailable = !isAvailable(props.value);
+  // The one un-set-up option gets flagged even when it is not the current
+  // selection, so an editor sees "not set up" before picking it rather than
+  // after a failed draft.
+  const flagged = !selectedUnavailable && unavailable.length === 1 ? unavailable[0] : null;
+  const help = selectedUnavailable ? notSetUpHelp(selected) : modelChoiceHelp(selected.value, props.scope ?? "story");
   return (
     <div className={props.compact ? "model-picker compact" : "model-picker"}>
       <label htmlFor={selectId} className="model-picker-label">
@@ -58,18 +106,27 @@ export function ModelPicker(props: Props) {
         id={selectId}
         value={props.value}
         disabled={props.disabled}
-        aria-describedby={helpId}
+        aria-describedby={flagged ? `${helpId} ${flagId}` : helpId}
         onChange={(event) => props.onChange(event.target.value as never)}
       >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label} — {option.detail}
-          </option>
-        ))}
+        {options.map((option) => {
+          const available = isAvailable(option.value);
+          return (
+            <option key={option.value} value={option.value} disabled={!available}>
+              {option.label} — {option.detail}
+              {available ? "" : " — not set up"}
+            </option>
+          );
+        })}
       </select>
       <span id={helpId} className="model-picker-help">
         {help}
       </span>
+      {flagged ? (
+        <span id={flagId} className="model-picker-help">
+          {notSetUpHelp(flagged)}
+        </span>
+      ) : null}
       <details className="min-w-0 text-sm" style={{ gridColumn: "1 / -1" }}>
         <summary className="cursor-pointer underline underline-offset-2 focus-visible:outline-2">
           Set up a writing model

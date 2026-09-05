@@ -220,9 +220,17 @@ function StoryPage() {
         told "the writing model did not finish this draft, click Draft with
         AI again" -- a retry that cannot succeed, for a draft that was never
         attempted. Prefer the structured answer over pattern-matching it.
+
+        This used to append `res.detail` (the provider's own raw text) under
+        `res.error` (the desk's guidance) -- two stacked messages saying the
+        same "no model is set up" thing in different words (owner screenshot,
+        2026-09-05). `res.error` alone is the single, specific answer:
+        preflight already folds anything `res.detail` would usefully add
+        into it (see `scanPreflight` in preflight.ts), so showing both here
+        only doubled the copy.
       */
       if ("kind" in res && res.kind) {
-        setMsg("detail" in res && res.detail ? `${res.error}\n\n${res.detail}` : res.error);
+        setMsg(res.error);
         return;
       }
       setMsg(editorDraftError(res.error) ?? res.error);

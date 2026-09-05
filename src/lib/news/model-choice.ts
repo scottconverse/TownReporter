@@ -15,6 +15,7 @@ import {
   type PickerProviderId,
   type ProviderSurface,
 } from "./provider-registry.ts";
+import { LOCAL_MODEL_UNCONFIGURED } from "./preflight.ts";
 
 export type ModelChoiceOption = {
   value: StoryModelChoice;
@@ -168,15 +169,19 @@ export function modelChoiceHelp(
  * all reported an unrelated Claude sign-in instruction instead of naming the
  * setting that would actually fix it (audit finding "Opinion 'Local model'
  * pick silently uses Claude" also named this exact symptom). A local-model
- * failure now passes its own message through untouched -- `probeProvider`'s
- * GROK_UNAVAILABLE already names LLM_BASE_URL, and any other local-model
- * failure (unreachable server, rejected credentials) is already specific.
+ * failure that is specifically "nothing is configured" now gets the SAME
+ * `LOCAL_MODEL_UNCONFIGURED` sentence Story and Scan's preflight show (see
+ * ./preflight.ts) -- one wording for "you picked Local model and nothing is
+ * there," everywhere the desk says it. Any other local-model failure
+ * (unreachable server, rejected credentials) is already specific and passes
+ * through untouched.
  */
 export function opinionProviderProblem(
   error: string,
   candidate: OpinionModelChoice = "claude-frontier",
 ): string {
-  if (candidate !== "claude-frontier") return error;
   if (!/AI is not available/i.test(error)) return error;
+  if (candidate === "local-model") return LOCAL_MODEL_UNCONFIGURED;
+  if (candidate !== "claude-frontier") return error;
   return "No Opinion model is available. Open Claude Code on this machine and sign in.";
 }

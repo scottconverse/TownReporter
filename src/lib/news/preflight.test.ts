@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { looksLikeProviderAuthFailure, providerAuthTarget, scanPreflight } from "./preflight.ts";
+import {
+  LOCAL_MODEL_UNCONFIGURED,
+  looksLikeProviderAuthFailure,
+  providerAuthTarget,
+  scanPreflight,
+} from "./preflight.ts";
 
 /**
  * What a new editor meets when nothing is configured yet.
@@ -163,6 +168,40 @@ describe("scan preflight", () => {
     if (p.ok) return;
     assert.equal(p.kind, "unknown");
     assert.equal(p.retryable, false, "unknown is not assumed retryable");
+  });
+
+  it("gives an explicit Local model pick its own single message, not the generic CLI guidance", () => {
+    const p = scanPreflight(
+      {
+        ok: false,
+        error:
+          "AI is not available. No model is set up yet: open Claude Code or Codex on this machine and log in, or set LLM_BASE_URL for an OpenAI-compatible gateway.",
+      },
+      "local-model",
+    );
+    assert.equal(p.ok, false);
+    if (p.ok) return;
+    assert.equal(p.kind, "unconfigured");
+    assert.equal(p.guidance, LOCAL_MODEL_UNCONFIGURED);
+    assert.doesNotMatch(p.guidance, /Claude Code or Codex/);
+    // Nothing left in `detail` for a caller to stack under `guidance` --
+    // that stacking is exactly the doubled copy the owner reported
+    // (2026-09-05): two boxes on the story page saying "no model" twice.
+    assert.equal(p.detail, "");
+  });
+
+  it("leaves the generic unconfigured guidance alone for every other pick", () => {
+    const p = scanPreflight(
+      {
+        ok: false,
+        error: "AI is not available. Set ANTHROPIC_API_KEY, XAI_API_KEY, or LLM_BASE_URL.",
+      },
+      "claude-frontier",
+    );
+    assert.equal(p.ok, false);
+    if (p.ok) return;
+    assert.equal(p.kind, "unconfigured");
+    assert.notEqual(p.guidance, LOCAL_MODEL_UNCONFIGURED);
   });
 });
 

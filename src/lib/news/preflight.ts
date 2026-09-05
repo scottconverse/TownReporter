@@ -107,6 +107,18 @@ function providerAuthGuidance(detail: string): string {
 }
 
 /**
+ * What the desk says when the editor explicitly picked "Local model" and no
+ * local server is configured. One message, not the generic "sign in to
+ * Claude Code or Codex" guidance stacked on top of the provider's own "AI is
+ * not available" text -- an owner screenshot (2026-09-05) showed both boxes
+ * on the story page for a run that never had anything to sign in to. This is
+ * also the message `provider-registry.ts`'s picker shows next to a disabled
+ * "Local model" option, so the two surfaces agree.
+ */
+export const LOCAL_MODEL_UNCONFIGURED =
+  "Local model is not set up on this server. Set LLM_BASE_URL to your local server (Ollama: http://127.0.0.1:11434/v1) and LLM_MODEL to the model name, then restart the paper. See docs/local-models.md. Nothing was spent.";
+
+/**
  * Classify by the provider's message.
  *
  * Matching on text is not lovely, but the probe returns opaque strings from
@@ -114,8 +126,14 @@ function providerAuthGuidance(detail: string): string {
  * typed error first. That is the right refactor; this is the fix that stops a
  * new editor hitting a wall today. Anything unrecognised is `unknown` and is
  * NOT assumed retryable — guessing "try again" is the bug being fixed.
+ *
+ * `modelChoice`, when passed, is the id the editor actually picked (not
+ * "auto"). It only changes ONE thing: an "unconfigured" refusal for
+ * `"local-model"` specifically gets `LOCAL_MODEL_UNCONFIGURED` instead of the
+ * generic sign-in-to-a-CLI guidance, which names logins this pick has
+ * nothing to do with.
  */
-export function scanPreflight(probe: ProbeResult): Preflight {
+export function scanPreflight(probe: ProbeResult, modelChoice?: string): Preflight {
   if (probe.ok) return { ok: true };
 
   const detail = probe.error ?? "";
@@ -131,11 +149,22 @@ export function scanPreflight(probe: ProbeResult): Preflight {
             ? "unconfigured"
             : "unknown";
 
+  const guidance =
+    kind === "unconfigured" && modelChoice === "local-model"
+      ? LOCAL_MODEL_UNCONFIGURED
+      : kind === "provider-auth"
+        ? providerAuthGuidance(detail)
+        : GUIDANCE[kind];
+
   return {
     ok: false,
     kind,
-    guidance: kind === "provider-auth" ? providerAuthGuidance(detail) : GUIDANCE[kind],
-    detail,
+    guidance,
+    // The provider's raw text is redundant with LOCAL_MODEL_UNCONFIGURED
+    // (which already says everything relevant); dropping it here is what
+    // stops a caller that renders `${guidance}\n\n${detail}` from doubling
+    // up on this specific, already-complete message.
+    detail: guidance === LOCAL_MODEL_UNCONFIGURED ? "" : detail,
     retryable: kind === "timeout",
   };
 }

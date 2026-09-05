@@ -118,4 +118,14 @@ describe("model choice contract", () => {
     assert.doesNotMatch(guidance, /ANTHROPIC_API_KEY/);
     assert.doesNotMatch(guidance, /set .*XAI_API_KEY|set .*LLM_BASE_URL/i);
   });
+
+  it("gives an unconfigured Local model pick the same single local-specific message preflight uses", () => {
+    const guidance = opinionProviderProblem(
+      "AI is not available. Set ANTHROPIC_API_KEY, XAI_API_KEY, or LLM_BASE_URL.",
+      "local-model",
+    );
+    assert.match(guidance, /LLM_BASE_URL/);
+    assert.match(guidance, /LLM_MODEL/);
+    assert.doesNotMatch(guidance, /Claude Code/);
+  });
 });

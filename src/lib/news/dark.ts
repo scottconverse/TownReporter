@@ -99,7 +99,7 @@ async function darkPreflightRefusal(choice?: string): Promise<{
   retryable: boolean;
 } | null> {
   const { scanPreflight } = await import("./preflight.ts");
-  const ready = scanPreflight(await probeProvider(choice));
+  const ready = scanPreflight(await probeProvider(choice), choice);
   if (ready.ok) return null;
   return {
     ok: false as const,

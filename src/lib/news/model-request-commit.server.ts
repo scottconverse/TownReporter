@@ -53,7 +53,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
   }
 
   const providerProbe = await (deps.probeProvider ?? probeProvider)(input.modelChoice);
-  const ready = scanPreflight(providerProbe);
+  const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {
     return {
       ok: false as const,
@@ -139,7 +139,7 @@ export async function commitScanForAuthenticatedEditor(
   deps: ScanCommitDeps = {},
 ) {
   const providerProbe = await (deps.probeProvider ?? probeProvider)(input.modelChoice);
-  const ready = scanPreflight(providerProbe);
+  const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {
     return {
       ok: false as const,

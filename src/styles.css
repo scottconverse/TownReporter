@@ -448,11 +448,11 @@
   --warn: var(--color-danger);
   --fd: var(--font-display);
   --fb: var(--font-serif);
-  --n-bg: #211812;
-  --n-bg2: #2c221a;
-  --n-fg: #f6f1e7;
-  --n-fg2: #c8b9a6;
-  --n-line: #463828;
+  --n-bg: #000000;
+  --n-bg2: #141414;
+  --n-fg: #ffffff;
+  --n-fg2: #e0e0e0;
+  --n-line: #444444;
   --n-a: #d2764f;
   --n-adeep: #d2764f;
   --n-warn: #e8b4a8;
@@ -505,6 +505,18 @@
   background-color: var(--bg2);
 }
 .desk-ltr .border-rule {
+  border-color: var(--line);
+}
+/*
+  `divide-rule` (ListSkeleton's row dividers, used across every desk list
+  page) compiles to `:where(.divide-rule > :not(:last-child))` -- a
+  different selector shape than the plain `.border-rule` class above, so it
+  was never caught by that remap and stayed the fixed light `--color-rule`
+  (a tan/beige, not the desk's own `--line`) on every dark-mode list,
+  including the always-black Dark Desk page. `:where()` carries zero
+  specificity, so a plain selector here overrides it with no `!important`.
+*/
+.desk-ltr .divide-rule > :not(:last-child) {
   border-color: var(--line);
 }
 /*
@@ -627,10 +639,33 @@
 .desk-ltr .score {display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;border:1px solid var(--line);font-family:var(--fd);font-weight:600;font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--mut)}
 .desk-ltr .score.warm {border-color:var(--fg);color:var(--fg)}
 .desk-ltr .score.hot {background:var(--a);border-color:var(--a);color:#fff}
-/* White-on-accent is 7.7:1 in light mode but only 3.3:1 against the lighter
-   dark-mode accent (#d2764f) -- fails AA for 14px bold text. Dark ink on the
-   same accent measures 5.35:1, so the dark desk swaps to that instead. */
+/* White-on-accent is 7.7:1 in light mode but only 3.3:1 against the
+   dark-mode accent (#d2764f) -- fails AA for 14px bold text. Black ink on the
+   same accent measures 6.44:1, so the dark desk swaps to that instead. */
 .desk-ltr.night .score.hot {color:var(--bg)}
+/*
+  Notice (src/components/states.tsx) used to take a manual `night` prop and
+  render fixed Tailwind colors (border-danger/35, text-danger, ...) that
+  never flipped for the dark desk -- an error rendered as unreadable
+  dark-red-on-dark-panel (owner screenshot, story page, 2026-09-05). These
+  read the desk's own theme vars instead, so `.desk-ltr.night` above flips
+  them automatically with no per-call prop needed.
+*/
+.desk-ltr .notice-err {border-color:var(--warn);color:var(--warn);background:var(--bg2)}
+.desk-ltr .notice-warn {border-color:var(--adeep);color:var(--fg);background:var(--bg2)}
+.desk-ltr .notice-ok {border-color:var(--line);color:var(--fg);background:var(--bg2)}
+/*
+  ScreenError (src/components/states.tsx) used to pick `bg-ink` for its night
+  background -- `--color-ink` (#1c1410) is a fixed dark BROWN, not the desk's
+  actual night background, so a full-screen error panel on the dark desk
+  showed a brown box instead of matching the black/near-black desk around it.
+  Reads the theme vars instead, so `.desk-ltr.night` flips it with everything
+  else.
+*/
+.desk-ltr .screen-error {border-color:var(--warn);background:var(--bg2);color:var(--fg)}
+.desk-ltr .screen-error-message {color:var(--warn)}
+.desk-ltr .screen-error-retry {border-color:var(--fg);color:var(--fg)}
+.desk-ltr .screen-error-retry:hover {background:var(--bg)}
 .desk-ltr .sechead {margin-top:26px;border-bottom:1px solid var(--fg);padding-bottom:5px;display:flex;flex-wrap:wrap;align-items:baseline;gap:10px}
 .desk-ltr .sechead-l {display:flex;align-items:baseline;gap:8px;margin-right:auto}
 .desk-ltr .sec-title {font-family:var(--fd);font-weight:600;font-size:17px;margin:0}

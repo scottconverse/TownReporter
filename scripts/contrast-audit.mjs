@@ -132,6 +132,9 @@ const PAIRS = [
   { fg: "a", bg: "bg", label: "a:hover / .nav-item.on underline color, on page bg", kind: "ui", size: "large" },
   { fg: "bg", bg: "fg", label: "inverted solid buttons/chips (.btn.solid, .nav-dark, .seg-opt.on, .chip.st-published, .filter.on)", kind: "text", size: "normal" },
   { fg: "line", bg: "bg", label: "hairline borders (.rule1, .chip border, .sechead) -- decorative dividers, not asserted", kind: "decorative", size: "large" },
+  { fg: "warn", bg: "bg2", label: ".notice-err text on the notice's bg2 panel", kind: "text", size: "normal" },
+  { fg: "adeep", bg: "bg2", label: ".notice-warn text on the notice's bg2 panel", kind: "text", size: "normal" },
+  { fg: "fg", bg: "bg2", label: ".notice-ok text on the notice's bg2 panel", kind: "text", size: "normal" },
 ];
 
 // score.hot is a special case: white text in light mode, but the dark desk's
@@ -221,6 +224,6 @@ test("desk tokens parsed from styles.css are the ones the CSS actually declares"
   // A change to a hex value in styles.css should move this audit's numbers
   // without anyone touching this file -- sanity-check the parse itself.
   assert.equal(light.bg.toLowerCase(), "#f6f1e7");
-  assert.equal(dark.bg.toLowerCase(), "#211812");
+  assert.equal(dark.bg.toLowerCase(), "#000000");
   assert.equal(dark.mut.toLowerCase(), dark.fg2.toLowerCase());
 });

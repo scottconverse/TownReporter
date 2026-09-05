@@ -261,16 +261,17 @@ export function ListSkeleton({
   rows?: number;
   night?: boolean;
 }) {
+  /*
+    The night branch used to be `divide-ink-2 border-ink-2` -- `--color-ink-2`
+    (#3a3129) is a fixed dark BROWN, so the dark desk's loading skeleton
+    showed brown divider lines. `divide-rule` / `border-rule` / `bg-paper`
+    are already redirected onto the desk's own theme vars inside `.desk-ltr`
+    (see styles.css), so they render correctly in both themes with no
+    branch needed at all.
+  */
+  void night;
   return (
-    <ul
-      className={
-        night
-          ? "mt-3 divide-y divide-ink-2 border border-ink-2"
-          : "mt-3 divide-y divide-rule border border-rule bg-paper"
-      }
-      aria-busy="true"
-      aria-label="Loading"
-    >
+    <ul className="mt-3 divide-y divide-rule border border-rule bg-paper" aria-busy="true" aria-label="Loading">
       {Array.from({ length: rows }).map((_, i) => (
         <li key={i} className="skeleton-stack space-y-2 px-4 py-3">
           <Rule night={night} className="h-4 w-2/3" />
@@ -357,24 +358,30 @@ export function FetchingRule({ active }: { active: boolean }) {
 export function Notice({
   kind,
   children,
-  night = false,
+  night: _night = false,
 }: {
   kind: "ok" | "err" | "warn";
   children: ReactNode;
+  /** @deprecated no-op — Notice now follows `.desk-ltr`/`.desk-ltr.night` theme vars automatically. */
   night?: boolean;
 }) {
-  const color =
-    kind === "err"
-      ? night
-        ? "border-blush/40 text-blush"
-        : "border-danger/35 bg-paper-2 text-danger"
-      : kind === "warn"
-        ? night
-          ? "border-paper/25 text-paper"
-          : "border-rust/35 bg-paper-2 text-rust"
-        : night
-          ? "border-paper/20 text-paper"
-          : "border-ink/20 bg-paper-2 text-ink";
+  /*
+    Notice used to take a manual `night` boolean and pick fixed Tailwind
+    colors (border-danger/35, text-danger, ...). Call sites on the desk
+    routes almost never passed it, so on the dark desk an error rendered in
+    the *light-mode* dark-red -- unreadable against the dark panel (owner
+    screenshot, story page, 2026-09-05).
+
+    Fixed by styling purely with the `.notice-*` classes below, which read
+    `--fg` / `--bg2` / `--line` / `--warn` / `--adeep` from the `.desk-ltr`
+    scope (see styles.css) -- those flip automatically under
+    `.desk-ltr.night`, so this component needs no theme prop at all. The
+    prop stays, unused, so existing call sites keep compiling.
+
+    Color alone never carries the kind: "err" gets a leading "!" glyph and
+    "warn" a bold "Note:" label so the distinction survives for anyone who
+    can't perceive the color difference.
+  */
   /*
     A live region has to exist BEFORE its content changes.
 
@@ -391,11 +398,13 @@ export function Notice({
   */
   return (
     <p
-      className={"enter-rise mt-3 whitespace-pre-line border px-3 py-2.5 text-sm " + color}
+      className={"enter-rise notice mt-3 whitespace-pre-line border px-3 py-2.5 text-sm notice-" + kind}
       role={kind === "err" ? "alert" : "status"}
       aria-live={kind === "err" ? "assertive" : "polite"}
       aria-atomic="true"
     >
+      {kind === "err" ? <strong aria-hidden="true">! </strong> : null}
+      {kind === "warn" ? <strong>Note: </strong> : null}
       {children}
     </p>
   );
@@ -422,26 +431,27 @@ export function ScreenError({
   retrying?: boolean;
   night?: boolean;
 }) {
+  /*
+    Used to pick fixed Tailwind colors for `night` (border-blush/40, bg-ink,
+    text-blush, ...) -- `bg-ink` (`--color-ink`, #1c1410) is a fixed dark
+    BROWN, not the desk's actual night background, so a full-screen error on
+    the dark desk showed a brown panel instead of matching the black desk
+    around it. `.screen-error*` (styles.css) reads the desk's own theme vars
+    instead, so `.desk-ltr.night` flips these automatically; `night` stays
+    accepted so call sites keep compiling.
+  */
+  void night;
   return (
     <div
-      className={
-        night
-          ? "enter-fade-fast border border-blush/40 bg-ink px-5 py-8 text-center"
-          : "enter-fade-fast border border-danger/35 bg-paper-2 px-5 py-8 text-center"
-      }
+      className="enter-fade-fast screen-error border px-5 py-8 text-center"
       role="alert"
       aria-live="assertive"
       aria-atomic="true"
     >
-      <p className={"text-sm " + (night ? "text-blush" : "text-danger")}>{message}</p>
+      <p className="screen-error-message text-sm">{message}</p>
       <button
         type="button"
-        className={
-          "pressable mt-4 inline-flex min-h-11 items-center justify-center border px-4 text-sm font-medium " +
-          (night
-            ? "border-paper/40 text-paper hover:bg-paper/10"
-            : "border-ink hover:bg-paper")
-        }
+        className="screen-error-retry pressable mt-4 inline-flex min-h-11 items-center justify-center border px-4 text-sm font-medium"
         disabled={retrying}
         onClick={onRetry}
       >
