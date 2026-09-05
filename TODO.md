@@ -16,6 +16,7 @@ B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app u
 4. [x] **Finish "civic → non-profit" in source** — About page + welcome seed say non-profit; migration 0040; this commit.
 5. [ ] **Topics / sections (Phase 8)** — expand beyond the fixed civic topic list (business, etc.). **⏸ Needs the owner's section list.** P8.1 configurable sections in Paper setup; P8.2 per-section scanner sources/prompt.
 6. [ ] **Dark Desk "do it right" pass** — **⏸ parked by owner.** (a) Grant the dig a CURATED, SAFE tool set (guarded web search/fetch with SSRF + domain limits + cost caps, like the owner's `civic-scanner`) so it investigates live instead of the rigid emit-queries/app-fetches loop — do NOT re-open the raw claude-CLI agent surface (Bash/Edit/MCP) on the prod box. (b) Restore the owner's fuller doctrine (two-stage Black Desk → Dark Signal verification, mandatory adversarial gate, self-referential Gate 4, search minimums) — ONLY after testing whether the 6-month-old prompts still hold up. Originals: repos `civic-scanner`, `civic-newsroom`, `civic-transparency-toolkit`, `CivicNewspaper`.
+7. [x] **Reddit subreddit-page fetches** — non-thread reddit URLs now route to their real .rss feeds; old.reddit only for no-feed pages; this commit.
 - **⏸ Redesign** — desk feels clunky/disjointed; owner may bring a designer. **DO NOT ACT** until he decides. Accessibility fixes are fine.
 
 ## Done (this stretch, all live unless noted)

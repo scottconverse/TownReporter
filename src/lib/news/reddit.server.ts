@@ -199,24 +199,113 @@ export type RedditDocument = {
 };
 
 /**
+ * The `.rss` equivalent of a reddit.com URL, or `null` when the page truly
+ * has none (a wiki page, `/r/<sub>/about`, a multireddit landing, the
+ * reddit.com home page, and the like).
+ *
+ * Every one of these classes returns Atom XML `parseRedditFeed` already
+ * parses, via the same browser-like-User-Agent `.rss` technique as a thread
+ * permalink — Reddit does not special-case threads here, only this codebase
+ * used to. Thread permalinks are handled by the caller before this is
+ * reached (see `fetchRedditDocument`); this covers everything else
+ * reddit-shaped:
+ *
+ *  - subreddit front page   `/r/<sub>/`               -> `/r/<sub>/.rss`
+ *  - subreddit sort         `/r/<sub>/new`             -> `/r/<sub>/new/.rss`
+ *                           `/r/<sub>/hot|rising`      -> matching `.rss`
+ *                           `/r/<sub>/top`             -> `/r/<sub>/top/.rss?t=<period>`
+ *  - subreddit search       `/r/<sub>/search?q=…`      -> `/r/<sub>/search.rss?q=…&restrict_sr=on[&sort=…]`
+ *  - site search            `/search?q=…`              -> `/search.rss?q=…`
+ *  - user page              `/user/<name>` or `/u/<name>` -> `/user/<name>/.rss`
+ */
+function redditFeedUrl(url: URL): string | null {
+  if (isRedditThreadUrl(url)) return threadFeed(url.toString());
+
+  // Raw path segments, still percent-encoded as Reddit expects them (e.g. a
+  // multireddit's "+" must survive untouched, not become "%2B").
+  const segments = url.pathname.split("/").filter(Boolean);
+
+  if (segments.length === 2 && (segments[0] === "user" || segments[0] === "u")) {
+    return `https://www.reddit.com/user/${segments[1]}/.rss`;
+  }
+
+  if (segments[0] === "search") {
+    const q = url.searchParams.get("q");
+    return q ? `https://www.reddit.com/search.rss?q=${encodeURIComponent(q)}` : null;
+  }
+
+  if (segments[0] === "r" && segments[1]) {
+    const sub = segments[1];
+    const rest = segments.slice(2);
+
+    if (rest.length === 0) return `https://www.reddit.com/r/${sub}/.rss`;
+
+    if (rest.length === 1 && (rest[0] === "new" || rest[0] === "hot" || rest[0] === "rising")) {
+      return `https://www.reddit.com/r/${sub}/${rest[0]}/.rss`;
+    }
+
+    if (rest.length === 1 && rest[0] === "top") {
+      const t = url.searchParams.get("t");
+      return `https://www.reddit.com/r/${sub}/top/.rss${t ? `?t=${encodeURIComponent(t)}` : ""}`;
+    }
+
+    if (rest.length === 1 && rest[0] === "search") {
+      const q = url.searchParams.get("q");
+      if (!q) return null;
+      const sort = url.searchParams.get("sort");
+      return (
+        `https://www.reddit.com/r/${sub}/search.rss?q=${encodeURIComponent(q)}&restrict_sr=on` +
+        (sort ? `&sort=${encodeURIComponent(sort)}` : "")
+      );
+    }
+  }
+
+  return null;
+}
+
+/** A short, human-readable label for a listing feed — used as the document title/header. */
+function redditListingTitle(url: URL): string {
+  const segments = url.pathname.split("/").filter(Boolean);
+  if (segments[0] === "user" || segments[0] === "u") return `u/${segments[1] ?? ""}`;
+  if (segments[0] === "search") return `Reddit search: ${url.searchParams.get("q") ?? ""}`.trim();
+  if (segments[0] === "r" && segments[1]) {
+    const sub = segments[1];
+    const rest = segments.slice(2);
+    if (rest[0] === "search") return `r/${sub} search: ${url.searchParams.get("q") ?? ""}`.trim();
+    if (rest[0]) return `r/${sub}/${rest[0]}`;
+    return `r/${sub}`;
+  }
+  return url.hostname;
+}
+
+/**
  * Dark Desk F5: fetch a reddit.com/redd.it URL for the generic fetch/ingest
  * path (ingest.ts), the way `reddit.ts`'s doc comment says a curated source
  * already does it — browser-like User-Agent (fetchPublicHttp's default), the
- * `.rss` endpoint for a thread permalink, paced through the same shared
- * queue and cooldown as `sweepRedditFeeds`, shared within this process.
+ * `.rss` endpoint wherever one exists, paced through the same shared queue
+ * and cooldown as `sweepRedditFeeds`, shared within this process.
  *
  * A thread permalink (`/r/<sub>/comments/<id>/...`) gets its `.rss` feed
- * parsed into post title + top comment excerpts — real content instead of
- * the JS app shell. Anything else reddit-shaped (a subreddit front page, a
- * user page) has no `.rss` equivalent, so it falls
- * back to `old.reddit.com`, which still serves plain server-rendered HTML
+ * parsed into post title + top comment excerpts. Everything else
+ * reddit-shaped that `redditFeedUrl` can map — a subreddit front page or
+ * sort, a subreddit or site search, a user page — gets its own `.rss`
+ * listing feed, parsed the same way, one entry per post. Only a page
+ * `redditFeedUrl` returns `null` for (a wiki page, `/about`, the reddit.com
+ * home page, and similar pages with no feed) falls back to
+ * `old.reddit.com`, which still serves plain server-rendered HTML
  * reddit.com does not. Short links resolve through paced, guarded Reddit
  * redirects to a canonical thread before fetching its RSS.
  */
 export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
   const isShortLink = url.hostname === "redd.it";
   const isThread = isShortLink || isRedditThreadUrl(url);
-  const fetchUrl = isShortLink ? url.toString() : isThread ? threadFeed(url.toString()) : oldRedditUrl(url);
+  const listingFeedUrl = isShortLink || isThread ? null : redditFeedUrl(url);
+  const isFeed = isThread || listingFeedUrl !== null;
+  const fetchUrl = isShortLink
+    ? url.toString()
+    : isThread
+      ? threadFeed(url.toString())
+      : (listingFeedUrl ?? oldRedditUrl(url));
   const redirectChain = [url.toString()];
 
   let res: Response;
@@ -230,7 +319,7 @@ export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
       title: url.toString(),
       extras: [],
       contentType: "",
-      extractionMethod: isThread ? "reddit-rss" : "reddit-old",
+      extractionMethod: isFeed ? "reddit-rss" : "reddit-old",
       redirectChain,
     };
   }
@@ -243,7 +332,7 @@ export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
       title: "Too many requests",
       extras: [],
       contentType: "",
-      extractionMethod: isThread ? "reddit-rss" : "reddit-old",
+      extractionMethod: isFeed ? "reddit-rss" : "reddit-old",
       redirectChain,
     };
   }
@@ -256,7 +345,7 @@ export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
       title: url.hostname,
       extras: [],
       contentType: "",
-      extractionMethod: isThread ? "reddit-rss" : "reddit-old",
+      extractionMethod: isFeed ? "reddit-rss" : "reddit-old",
       redirectChain,
     };
   }
@@ -273,6 +362,30 @@ export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
       .slice(0, 40)
       .map((p) => `${p.author ? `${p.author}: ` : ""}${p.excerpt || p.title}`)
       .filter(Boolean)
+      .join("\n\n");
+    const text = `${title}\n\n${body}`.trim();
+    return {
+      ok: text.length >= 40,
+      status: res.status,
+      text,
+      title,
+      extras: [],
+      contentType: "text/plain",
+      extractionMethod: "reddit-rss",
+      redirectChain,
+    };
+  }
+
+  if (isFeed) {
+    const xml = await res.text();
+    const posts = parseRedditFeed(xml);
+    // A listing feed's entries are separate posts, not one thread's
+    // comments — each becomes its own short block (title, author, excerpt)
+    // rather than being read as a running conversation.
+    const title = redditListingTitle(url);
+    const body = posts
+      .slice(0, 40)
+      .map((p) => [p.title, p.author ? `by ${p.author}` : "", p.excerpt].filter(Boolean).join("\n"))
       .join("\n\n");
     const text = `${title}\n\n${body}`.trim();
     return {
@@ -307,9 +420,10 @@ export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
 
 /**
  * Same path/query on old.reddit.com — still server-rendered HTML, unlike
- * reddit.com's JS app shell. Correct for any reddit.com/www.reddit.com/
- * old.reddit.com path (subreddit listing, user page, search). Short links
- * are resolved separately before this fallback.
+ * reddit.com's JS app shell. Used only when `redditFeedUrl` returns `null`
+ * — a page with no `.rss` equivalent (a wiki page, `/about`, the reddit.com
+ * home page, and similar). Short links are resolved separately before this
+ * fallback is even considered.
  */
 function oldRedditUrl(url: URL): string {
   try {

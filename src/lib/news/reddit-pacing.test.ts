@@ -93,7 +93,7 @@ describe("TR-001 shared Reddit request queue", () => {
     assert.equal(observed.maxActive(), 1);
   });
 
-  it("shares the queue across sweep, thread RSS and old-Reddit fallback", async () => {
+  it("shares the queue across sweep, thread RSS and a user-page RSS fetch", async () => {
     const observed = transport();
     await finish(
       Promise.all([
@@ -103,7 +103,21 @@ describe("TR-001 shared Reddit request queue", () => {
       ]),
     );
     assert.equal(observed.starts.length, 3);
-    assert.ok(observed.urls.includes("https://old.reddit.com/user/resident"));
+    assert.ok(observed.urls.includes("https://www.reddit.com/user/resident/.rss"));
+    spaced(observed.starts);
+    assert.equal(observed.maxActive(), 1);
+  });
+
+  it("shares the queue with an old-Reddit fallback for a no-feed page", async () => {
+    const observed = transport();
+    await finish(
+      Promise.all([
+        fetchRedditDocument(new URL(THREAD)),
+        fetchRedditDocument(new URL("https://www.reddit.com/r/longmont/wiki/rules")),
+      ]),
+    );
+    assert.equal(observed.starts.length, 2);
+    assert.ok(observed.urls.includes("https://old.reddit.com/r/longmont/wiki/rules"));
     spaced(observed.starts);
     assert.equal(observed.maxActive(), 1);
   });
@@ -293,6 +307,83 @@ describe("TR-001 shared Reddit request queue", () => {
     setFetchImplForTests(async () => new Response("not a canonical thread"));
     const missing = await finish(fetchRedditDocument(new URL("https://redd.it/abc123")));
     assert.equal(missing.ok, false);
+  });
+
+  const LISTING_XML =
+    `<feed>` +
+    `<entry><title>Water main break on Main St</title><link href="${THREAD}listing1/"/>` +
+    `<author><name>resident1</name></author><content>Crews are on scene, expect closures.</content></entry>` +
+    `<entry><title>Council votes on budget tonight</title><link href="${THREAD}listing2/"/>` +
+    `<author><name>resident2</name></author><content>Meeting starts at 7pm.</content></entry>` +
+    `</feed>`;
+
+  for (const c of [
+    { name: "subreddit front page", page: "https://www.reddit.com/r/longmont/", feed: "https://www.reddit.com/r/longmont/.rss" },
+    { name: "subreddit new", page: "https://www.reddit.com/r/longmont/new", feed: "https://www.reddit.com/r/longmont/new/.rss" },
+    { name: "subreddit hot", page: "https://www.reddit.com/r/longmont/hot", feed: "https://www.reddit.com/r/longmont/hot/.rss" },
+    { name: "subreddit rising", page: "https://www.reddit.com/r/longmont/rising", feed: "https://www.reddit.com/r/longmont/rising/.rss" },
+    {
+      name: "subreddit top with t= carried",
+      page: "https://www.reddit.com/r/longmont/top?t=week",
+      feed: "https://www.reddit.com/r/longmont/top/.rss?t=week",
+    },
+    {
+      name: "subreddit search with q and restrict_sr",
+      page: "https://www.reddit.com/r/longmont/search?q=city%20council&sort=new",
+      feed: "https://www.reddit.com/r/longmont/search.rss?q=city%20council&restrict_sr=on&sort=new",
+    },
+    {
+      name: "site search",
+      page: "https://www.reddit.com/search?q=longmont%20ordinance",
+      feed: "https://www.reddit.com/search.rss?q=longmont%20ordinance",
+    },
+    {
+      name: "user page",
+      page: "https://www.reddit.com/user/resident",
+      feed: "https://www.reddit.com/user/resident/.rss",
+    },
+    {
+      name: "u/ shorthand user page",
+      page: "https://www.reddit.com/u/resident",
+      feed: "https://www.reddit.com/user/resident/.rss",
+    },
+  ]) {
+    it(`routes ${c.name} to its .rss feed`, async () => {
+      const calls: string[] = [];
+      setFetchImplForTests(async (url) => {
+        calls.push(url.toString());
+        return new Response(LISTING_XML, { status: 200 });
+      });
+      const doc = await finish(fetchRedditDocument(new URL(c.page)));
+      assert.deepEqual(calls, [c.feed]);
+      assert.equal(doc.extractionMethod, "reddit-rss");
+      assert.equal(doc.ok, true);
+    });
+  }
+
+  it("falls back to old.reddit.com only for a page with no feed equivalent", async () => {
+    const calls: string[] = [];
+    setFetchImplForTests(async (url) => {
+      calls.push(url.toString());
+      return new Response("<html><title>wiki</title><body>rules go here, long enough text</body></html>", {
+        status: 200,
+      });
+    });
+    const doc = await finish(fetchRedditDocument(new URL("https://www.reddit.com/r/longmont/wiki/rules")));
+    assert.deepEqual(calls, ["https://old.reddit.com/r/longmont/wiki/rules"]);
+    assert.equal(doc.extractionMethod, "reddit-old");
+  });
+
+  it("turns a listing feed's posts into readable document text", async () => {
+    setFetchImplForTests(async () => new Response(LISTING_XML, { status: 200 }));
+    const doc = await finish(fetchRedditDocument(new URL("https://www.reddit.com/r/longmont/new")));
+    assert.equal(doc.ok, true);
+    assert.equal(doc.extractionMethod, "reddit-rss");
+    assert.match(doc.text, /Water main break on Main St/);
+    assert.match(doc.text, /resident1/);
+    assert.match(doc.text, /Crews are on scene/);
+    assert.match(doc.text, /Council votes on budget tonight/);
+    assert.match(doc.text, /resident2/);
   });
 });
 
