@@ -1,6 +1,16 @@
 # Changelog
 
-Current release: **0.6.17**.
+Current release: **0.6.18**.
+
+## 0.6.18 — 2026-09-05
+Bug-fix release. Every item below is live-tested or covered by regression tests.
+- **Interrupted drafts recover honestly.** If the app restarts while a draft is running (for example during a release), the story page now shows one calm state — "The app restarted while this draft was running. It is recovering automatically — about 2 minutes. Nothing was lost." — with a "Recovering…" button, instead of a disabled "Drafting…" beside a "click Draft again" warning. The draft is re-run automatically about two minutes later.
+- **Releases refuse to interrupt an editor.** `ops/promote.ps1` now checks for running or queued desk jobs before it stops the app, and refuses with a list of them. `-WaitForJobs` polls up to 15 minutes until they clear; `-Force` proceeds with a warning.
+- **Dark Desk monitors carry the real newsroom.** Watched sources and the anomalies they raise now record the newsroom that created them instead of the default, closing a gap left in 0.6.11. Guarded by the newsroom-scoped-inserts test and new proof tests.
+- **The ≈ PRINTED chip says which story.** On the Queue, a lead that looks like something already published now shows "matches: <the published headline> · published <date>" with a link to that story, so the editor can judge the duplicate in one click.
+- **"Non-profit" everywhere.** The About page now says non-profit newsroom, and a forward migration (0040) updates the seeded welcome article so fresh installs match the live wording. Subject-matter uses of "civic" (civic reporting, civic pages) are unchanged.
+- **Reddit listings fetch reliably.** Subreddit front/new/top/hot pages, subreddit and site searches, and user pages now fetch through their real `.rss` feeds (parsed like thread feeds) instead of old.reddit HTML; old.reddit is used only for pages with no feed. All reddit requests still go through the single serialized pacer from 0.6.17.
+- Operator cleanup on production (not code): 17 historical duplicate leads left in the Dark Desk pile were retired.
 
 ## 0.6.17 — 2026-09-05
 - **Reddit requests are now serialized through one shared queue.** Strictly

@@ -1,12 +1,12 @@
 # TownReporter — TODO (canonical, in-repo)
-_Kept current by whichever Claude session is working. Last updated: 2026-09-05 (0.6.17 live; #2,#3 done; A,B done; ≈ PRINTED chip now names+links the match). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
+_Kept current by whichever Claude session is working. Last updated: 2026-09-05 (0.6.18 bump done; #6 retired duplicate leads). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked on the owner
 
 ---
 
 ## In flight
-- (nothing in flight)
+- [~] **0.6.18 bug-fix release** — bump done (this commit) → CI → stage on real data → owner's go → promote.
 
 ## Open queue (bug fixes first — owner chose to skip the redesign for now)
 A. [x] **Interrupted-draft UI contradiction** — when the app restarts under a running draft, the story page shows "Drafting…" + "pulling the draft in" AND "stopped without finishing — click Draft again" at once. The job is actually reclaimed and re-run after 120s (STALE_RUNNING_SECONDS). Show ONE honest state: "App restarted mid-draft — recovering automatically (~2 min)"; don't show a disabled Drafting… button beside a click-again message. Done in b0c63a9.
@@ -35,6 +35,7 @@ B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app u
 - [x] #2 Proven: live 0.6.17 code fetched a real r/longmont thread — HTTP 200, reddit-rss, 2,621 chars of real post+comments, one paced request.
 - [x] #3 `source_monitors` newsroom-scoped (8741b1d): monitors + their anomalies carry the real newsroom; guard-listed; 5 proof tests.
 - [x] #4 Queue "≈ PRINTED" chip names + links the story it matched — an editor could only see a hover date before; `nearDuplicate` (src/lib/news/desk-copy.ts) now carries the matched published story's headline on `PrintedDup`, and the Queue row (src/components/desk-leads.tsx) shows "matches: <headline> · published <date>" with the headline as a real link to `/articles/<slug>`, plus the hover title on the chip itself. This commit.
+- [x] #6 — retired the 17 historical duplicate leads on prod (17 → 0, reversible), 2026-09-05.
 
 ## Known caveats (honest state)
 - Dark Desk is proven on ONE real staged topic (receipt); the Reddit leg was the weak spot (TR-001, now fixed pending release). Not a certification of every source type.

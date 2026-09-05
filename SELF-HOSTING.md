@@ -5,7 +5,7 @@ machine through a Cloudflare Tunnel. No hosting bill, no ports open on the
 router.
 
 The live-deployment notes below record the established setup as of the
-tagged **v0.6.17** build, which is what the production checkout runs.
+tagged **v0.6.18** build, which is what the production checkout runs.
 
 ---
 
