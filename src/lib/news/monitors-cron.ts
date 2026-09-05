@@ -1,11 +1,19 @@
 import { getSql } from "../db.ts";
-import { runDueMonitors } from "./investigate.ts";
+import { runDueMonitors, type FetchFn } from "./investigate.ts";
 import { drainQueuedJobs } from "./jobs.ts";
 import { purgeAllOldTrash } from "./trash-store.ts";
 import { audit } from "./ops.ts";
 
-/** Recheck due monitors, finish waiting desk jobs, and expire old trash. Does not require an editor to be signed in. */
-export async function tickAllDueMonitors(): Promise<{
+/**
+ * Recheck due monitors, finish waiting desk jobs, and expire old trash. Does
+ * not require an editor to be signed in.
+ *
+ * `opts.fetch` (0.6.18) lets a test drive this with a stubbed network the
+ * same way `runDueMonitors`/`researchLoop` already accept one -- without it
+ * there was no way to exercise the real cron sweep across two newsrooms
+ * without making live HTTP requests.
+ */
+export async function tickAllDueMonitors(opts?: { fetch?: FetchFn }): Promise<{
   users: number;
   checked: number;
   anomalies: number;
@@ -14,16 +22,25 @@ export async function tickAllDueMonitors(): Promise<{
   purgeError: string | null;
 }> {
   const sql = await getSql();
-  const users = await sql<{ user_id: string }>`
-    select distinct user_id from source_monitors
+  // Grouped by (user_id, newsroom_id), not user_id alone (0.6.18, closes
+  // the 0.6.11 STOP) -- source_monitors is newsroom-scoped now, and a user
+  // with due monitors in two newsrooms must have each swept under its own
+  // newsroom, or the second newsroom's anomalies land under the first's.
+  const groups = await sql<{ user_id: string; newsroom_id: number }>`
+    select distinct user_id, newsroom_id from source_monitors
     where enabled = true and next_check_at <= now()
     limit 40
   `;
   let checked = 0;
   let anomalies = 0;
-  for (const u of users) {
+  for (const g of groups) {
     try {
-      const r = await runDueMonitors({ userId: u.user_id, limit: 12 });
+      const r = await runDueMonitors({
+        userId: g.user_id,
+        newsroomId: g.newsroom_id,
+        limit: 12,
+        fetch: opts?.fetch,
+      });
       checked += r.checked;
       anomalies += r.anomalies;
     } catch {
@@ -55,5 +72,6 @@ export async function tickAllDueMonitors(): Promise<{
     // above is still returned to whoever invoked this tick.
     await audit("system", "trash-purge-failed", purgeError).catch(() => undefined);
   }
-  return { users: users.length, checked, anomalies, jobs, purged, purgeError };
+  const distinctUsers = new Set(groups.map((g) => g.user_id)).size;
+  return { users: distinctUsers, checked, anomalies, jobs, purged, purgeError };
 }

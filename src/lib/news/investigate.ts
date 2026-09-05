@@ -1311,12 +1311,22 @@ export async function rememberCapture(opts: {
       versionId,
       opts.extras ?? [],
       opts.text,
+      newsroomId,
     );
   }
 
   return { versionId, captureEventId, contentHash: opts.hash, url };
 }
 
+/**
+ * `newsroomId` (0.6.18) -- `source_monitors` was the last table left
+ * hardcoded to `DEFAULT_NEWSROOM_ID` after 0.6.13 threaded the real
+ * newsroom through `artifacts`/`artifact_blobs`/`anomalies` (see the
+ * removed docstring on `runDueMonitors` below, and TODO.md item 1). Callers
+ * pass the same `newsroomId` `rememberCapture` already resolved for this
+ * capture, so a monitor created while investigating a newsroom-2 story is
+ * filed under newsroom 2, not silently collapsed into newsroom 1.
+ */
 async function maybeWatch(
   userId: string,
   url: string,
@@ -1325,6 +1335,7 @@ async function maybeWatch(
   versionId: number | null,
   extras: string[],
   text = "",
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
 ) {
   const spec = baselineSpec(url, title);
   if (!spec) return;
@@ -1339,7 +1350,7 @@ async function maybeWatch(
         : 72;
   const structure = JSON.stringify(structureSnapshot(title, "", extras));
   const existing = await sql<{ id: number }>`
-    select id from source_monitors where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url} limit 1
+    select id from source_monitors where newsroom_id = ${newsroomId} and url = ${url} limit 1
   `;
   const next = new Date(Date.now() + cadenceHours * 3600 * 1000).toISOString();
   if (existing[0]) {
@@ -1364,7 +1375,7 @@ async function maybeWatch(
       last_outcome, last_version_id, expected_cadence_days, importance,
       disappearance_sensitive, investigation_id, typical_structure
     ) values (
-      ${userId}, ${DEFAULT_NEWSROOM_ID}, ${url}, ${title.slice(0, 200)}, ${true}, ${cadenceHours},
+      ${userId}, ${newsroomId}, ${url}, ${title.slice(0, 200)}, ${true}, ${cadenceHours},
       ${next}::timestamptz, now(), ${"fetched"},
       ${versionId}, ${Math.round(cadenceHours / 24)}, ${8}, ${true},
       ${investigationId}, ${structure}
@@ -1373,6 +1384,12 @@ async function maybeWatch(
   `;
 }
 
+/**
+ * `newsroomId` (0.6.18) -- see the docstring on `maybeWatch` above. Defaults
+ * to `DEFAULT_NEWSROOM_ID` only so existing single-newsroom callers (and
+ * this repo's own tests) don't have to pass it; a caller that knows the
+ * real newsroom should always pass it explicitly.
+ */
 export async function watchSource(opts: {
   userId: string;
   url: string;
@@ -1380,8 +1397,10 @@ export async function watchSource(opts: {
   investigationId?: number | null;
   nextCheckAt?: Date;
   cadenceHours?: number;
+  newsroomId?: number;
 }) {
   const sql = await getSql();
+  const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
   let url = opts.url;
   try {
     url = canonicalPublicUrl(opts.url);
@@ -1395,7 +1414,7 @@ export async function watchSource(opts: {
       user_id, newsroom_id, url, title, enabled, cadence_hours, next_check_at,
       disappearance_sensitive, investigation_id, importance
     ) values (
-      ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${url}, ${(opts.title ?? url).slice(0, 200)}, ${true}, ${cadence},
+      ${opts.userId}, ${newsroomId}, ${url}, ${(opts.title ?? url).slice(0, 200)}, ${true}, ${cadence},
       ${next}::timestamptz, ${true}, ${opts.investigationId ?? null}, ${8}
     )
     on conflict (newsroom_id, url) do update
@@ -2316,12 +2335,11 @@ export async function researchLoop(opts: {
         }
         let prevSnap: StructureSnapshot | null = null;
         try {
-          // source_monitors is not one of the tables 0.6.11 claimed fixed and
-          // stays out of scope here (see rememberCapture's doc comment) --
-          // the lookup below deliberately still keys off DEFAULT_NEWSROOM_ID
-          // to match where watchSource/maybeWatch actually write these rows.
+          // source_monitors is now newsroom-scoped (0.6.18) -- key this
+          // lookup off the same `newsroomId` watchSource/maybeWatch write
+          // the row under, not the default.
           const mon = await sql<{ typical_structure: string | null }>`
-            select typical_structure from source_monitors where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url} limit 1
+            select typical_structure from source_monitors where newsroom_id = ${newsroomId} and url = ${url} limit 1
           `;
           if (mon[0]?.typical_structure)
             prevSnap = JSON.parse(mon[0].typical_structure) as StructureSnapshot;
@@ -3107,31 +3125,26 @@ export async function checkBaselines(
 }
 
 /**
- * NOT threaded with a real `newsroomId` (0.6.13, audit-lite 0.6.11
- * FINDING-001 follow-up) -- deliberately, not an oversight. Every anomaly
- * this function writes is about a `source_monitors` row, and that table's
- * own writes (`watchSource`/`maybeWatch` in this file) are themselves still
- * hardcoded to `DEFAULT_NEWSROOM_ID` and are NOT one of the three tables
- * 0.6.11 claimed fixed (`source_monitors` is explicitly called out as a
- * pre-existing, out-of-scope pattern in
- * `scripts/newsroom-scoped-inserts.test.mjs`'s docstring). This function's
- * only caller, `tickAllDueMonitors` (monitors-cron.ts), also sweeps by
- * `user_id` alone across every newsroom a user has, with no per-monitor
- * newsroom to hand in. Passing anything other than the default here would
- * mark these anomalies under a newsroom the underlying monitor row was
- * never actually scoped to -- the exact kind of fake fix this task's brief
- * says not to make. Fixing this for real means scoping `source_monitors`
- * itself first (and reworking the cron's per-newsroom sweep), which is a
- * separate, larger change; flagged here rather than folded in silently.
+ * `newsroomId` (0.6.18, closes the 0.6.11 STOP) -- `source_monitors` is now
+ * newsroom-scoped end to end: `watchSource`/`maybeWatch` write the real
+ * newsroom on the row, and this function reads/writes that same newsroom
+ * for the monitor it is ticking and every anomaly it files, instead of the
+ * hardcoded `DEFAULT_NEWSROOM_ID` prior releases used. The caller,
+ * `tickAllDueMonitors` (monitors-cron.ts), now sweeps due monitors grouped
+ * by `(user_id, newsroom_id)` and passes each group's newsroom in here, so
+ * a user with monitors in two newsrooms never has one newsroom's anomalies
+ * collapse into the other's.
  */
 export async function runDueMonitors(opts: {
   userId: string;
+  newsroomId?: number;
   now?: Date;
   fetch?: FetchFn;
   limit?: number;
   archives?: (url: string) => Promise<string[]>;
 }): Promise<{ checked: number; anomalies: number }> {
   const sql = await getSql();
+  const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
   const now = opts.now ?? new Date();
   const fetchDoc = opts.fetch ?? defaultFetch;
   const dueRows = await sql<{
@@ -3145,7 +3158,7 @@ export async function runDueMonitors(opts: {
   }>`
     select id, url, title, investigation_id, cadence_hours, last_version_id, typical_structure
     from source_monitors
-    where newsroom_id = ${DEFAULT_NEWSROOM_ID} and enabled = true and next_check_at <= ${now.toISOString()}::timestamptz
+    where newsroom_id = ${newsroomId} and enabled = true and next_check_at <= ${now.toISOString()}::timestamptz
     order by next_check_at asc
   `;
   const due = dueRows.slice(0, opts.limit ?? 20);
@@ -3166,6 +3179,12 @@ export async function runDueMonitors(opts: {
       select ce.content_hash, ce.http_status as fetch_status, av.full_text, ce.fetch_outcome
       from capture_events ce
       left join artifact_versions av on av.id = ce.version_id
+      -- capture_events/artifact_versions inserts are a separate, already
+      -- acknowledged out-of-scope gap (see rememberCapture's doc comment
+      -- above) and always write DEFAULT_NEWSROOM_ID regardless of the real
+      -- newsroom, so this lookup deliberately still keys off the default
+      -- to match where those rows actually land -- fixing this table is
+      -- not part of the source_monitors scoping this function closes.
       where ce.newsroom_id = ${DEFAULT_NEWSROOM_ID} and ce.source_url = ${url}
       order by ce.id desc limit 1
     `;
@@ -3198,6 +3217,7 @@ export async function runDueMonitors(opts: {
       extras: got.extras,
       observedAt: now,
       rawBytes: got.rawBytes,
+      newsroomId,
     });
     const invId = m.investigation_id;
     const gone = outcome === "removed" || outcome === "not-found" || outcome === "soft-404";
@@ -3213,7 +3233,7 @@ export async function runDueMonitors(opts: {
       await sql`
         insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
         values (
-          ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${invId}, ${"disappeared"},
+          ${opts.userId}, ${newsroomId}, ${invId}, ${"disappeared"},
           ${`Monitored record disappeared: ${url}`},
           ${url},
           ${`Monitor ${m.id}. Outcome ${outcome}. Status ${got.status}. No human reopen required.`}
@@ -3248,7 +3268,7 @@ export async function runDueMonitors(opts: {
         await sql`
           insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
           values (
-            ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${invId}, ${"restored"},
+            ${opts.userId}, ${newsroomId}, ${invId}, ${"restored"},
             ${`Monitored record restored: ${url}`},
             ${url},
             ${`Prior outcome ${priorCap[0]?.fetch_outcome ?? "missing"}. New hash ${hash}.`}
@@ -3281,7 +3301,7 @@ export async function runDueMonitors(opts: {
         await sql`
           insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
           values (
-            ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${invId}, ${"changed"},
+            ${opts.userId}, ${newsroomId}, ${invId}, ${"changed"},
             ${`Monitored record changed: ${url}`},
             ${url},
             ${diffExcerpt(priorCap[0]?.full_text ?? "", got.text).slice(0, 4000)}
@@ -3303,6 +3323,7 @@ export async function runDueMonitors(opts: {
           extras: got.extras,
           previous: prevSnap,
           now,
+          newsroomId,
         });
       }
     }

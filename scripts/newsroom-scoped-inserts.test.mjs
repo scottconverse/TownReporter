@@ -62,6 +62,12 @@ const SCOPED_TABLES = [
   "desk_rate",
   "audit_events",
   "page_views",
+  // 0.6.18: watchSource/maybeWatch/runDueMonitors in investigate.ts now
+  // thread the caller's real newsroom into every source_monitors insert
+  // (closes the 0.6.11 STOP -- see newsroom-scoped-write.proof.test.ts's
+  // "source_monitors and its anomalies" describe block for the VALUE-level
+  // proof this table's inserts land in the caller's own newsroom).
+  "source_monitors",
 ];
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");

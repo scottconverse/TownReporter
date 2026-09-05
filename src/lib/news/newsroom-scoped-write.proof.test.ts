@@ -4,7 +4,8 @@ import { getSql } from "../db.ts";
 import { ensureJobsSchema, enqueueJob } from "./jobs.ts";
 import { writeStoryForAuthenticatedEditor } from "./model-request-commit.server.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
-import { emptyPlan, researchLoop } from "./investigate.ts";
+import { emptyPlan, researchLoop, runDueMonitors, watchSource } from "./investigate.ts";
+import { tickAllDueMonitors } from "./monitors-cron.ts";
 
 /**
  * GauntletGate ENG-04 proof test.
@@ -211,3 +212,169 @@ describe("investigate.ts's anomalies/artifacts writes land in the caller's own n
     );
   });
 });
+
+describe(
+  "source_monitors and its anomalies land in the caller's own newsroom, not always 1 (0.6.18, closes the 0.6.11 STOP)",
+  () => {
+    it("watchSource files a monitor under newsroom 2, not newsroom 1", async () => {
+      const sql = await getSql();
+      const userId = `newsroom2-monitor-${Date.now()}-${Math.random()}`;
+      const url = `https://example.org/newsroom2-monitor-${Date.now()}`;
+
+      await watchSource({
+        userId,
+        url,
+        title: "Newsroom 2 monitored source",
+        newsroomId: 2,
+        nextCheckAt: new Date(),
+      });
+
+      const inNewsroom2 = await sql<{ id: number }>`
+        select id from source_monitors where user_id = ${userId} and url = ${url} and newsroom_id = 2
+      `;
+      assert.equal(inNewsroom2.length, 1, "watchSource did not file the monitor under newsroom 2");
+
+      const inNewsroom1 = await sql<{ id: number }>`
+        select id from source_monitors where user_id = ${userId} and url = ${url} and newsroom_id = 1
+      `;
+      assert.equal(
+        inNewsroom1.length,
+        0,
+        "a newsroom-2 monitor landed under newsroom 1 instead of newsroom 2 -- the exact " +
+          "silent-data-loss bug the 0.6.11 STOP named for source_monitors",
+      );
+    });
+
+    it("watchSource with no newsroomId still files under newsroom 1 (no regression for the default)", async () => {
+      const sql = await getSql();
+      const userId = `newsroom1-monitor-${Date.now()}-${Math.random()}`;
+      const url = `https://example.org/newsroom1-monitor-${Date.now()}`;
+
+      await watchSource({ userId, url, title: "Newsroom 1 monitored source", nextCheckAt: new Date() });
+
+      const inNewsroom1 = await sql<{ id: number }>`
+        select id from source_monitors where user_id = ${userId} and url = ${url} and newsroom_id = 1
+      `;
+      assert.equal(inNewsroom1.length, 1, "an unscoped watchSource call should still default to newsroom 1");
+    });
+
+    it("runDueMonitors files a due monitor's disappearance anomaly under its own newsroom, not newsroom 1", async () => {
+      const sql = await getSql();
+      const userId = `newsroom2-due-${Date.now()}-${Math.random()}`;
+      const url = `https://example.org/newsroom2-due-${Date.now()}`;
+
+      await watchSource({
+        userId,
+        url,
+        title: "Newsroom 2 due monitor",
+        newsroomId: 2,
+        nextCheckAt: new Date(0),
+      });
+
+      const result = await runDueMonitors({
+        userId,
+        newsroomId: 2,
+        now: new Date(),
+        fetch: async () => ({ ok: false, status: 404, text: "", title: "Not Found", extras: [] }),
+        archives: async () => [],
+      });
+      assert.ok(result.checked >= 1, "runDueMonitors did not pick up the due newsroom-2 monitor");
+      assert.ok(result.anomalies >= 1, "runDueMonitors did not file the disappearance anomaly");
+
+      const anomNewsroom2 = await sql<{ id: number }>`
+        select id from anomalies where user_id = ${userId} and url = ${url} and newsroom_id = 2 and kind = 'disappeared'
+      `;
+      assert.equal(
+        anomNewsroom2.length,
+        1,
+        "the monitored disappearance did not land under the monitor's own newsroom (2)",
+      );
+
+      const anomNewsroom1 = await sql<{ id: number }>`
+        select id from anomalies where user_id = ${userId} and url = ${url} and newsroom_id = 1
+      `;
+      assert.equal(
+        anomNewsroom1.length,
+        0,
+        "a newsroom-2 monitor's anomaly landed under newsroom 1 instead -- the exact " +
+          "silent-data-loss bug the 0.6.11 STOP named",
+      );
+    });
+
+    it("a newsroom-1 monitor still reads back under newsroom 1 after being ticked (no regression)", async () => {
+      const sql = await getSql();
+      const userId = `newsroom1-due-${Date.now()}-${Math.random()}`;
+      const url = `https://example.org/newsroom1-due-${Date.now()}`;
+
+      await watchSource({ userId, url, title: "Newsroom 1 due monitor", nextCheckAt: new Date(0) });
+
+      const result = await runDueMonitors({
+        userId,
+        now: new Date(),
+        fetch: async () => ({ ok: false, status: 404, text: "", title: "Not Found", extras: [] }),
+        archives: async () => [],
+      });
+      assert.ok(result.checked >= 1);
+
+      const anomNewsroom1 = await sql<{ id: number }>`
+        select id from anomalies where user_id = ${userId} and url = ${url} and newsroom_id = 1 and kind = 'disappeared'
+      `;
+      assert.equal(anomNewsroom1.length, 1, "an unscoped monitor's anomaly should still land under newsroom 1");
+    });
+
+    it("tickAllDueMonitors sweeps two newsrooms' due monitors without cross-contamination", async () => {
+      const sql = await getSql();
+      const stamp = `${Date.now()}-${Math.random()}`;
+      const userId = `tick-cross-${stamp}`;
+      const urlA = `https://example.org/tick-newsroomA-${stamp}`;
+      const urlB = `https://example.org/tick-newsroomB-${stamp}`;
+      const newsroomA = 9001;
+      const newsroomB = 9002;
+
+      // Same editor, two different newsrooms -- exactly the shape that
+      // collapsed into one newsroom before this fix, because the old sweep
+      // grouped by user_id alone.
+      await watchSource({
+        userId,
+        url: urlA,
+        title: "Tick newsroom A",
+        newsroomId: newsroomA,
+        nextCheckAt: new Date(0),
+      });
+      await watchSource({
+        userId,
+        url: urlB,
+        title: "Tick newsroom B",
+        newsroomId: newsroomB,
+        nextCheckAt: new Date(0),
+      });
+
+      // Network is fully stubbed: any URL (including stray due monitors left
+      // over from other tests sharing this in-process PGLite database) gets
+      // a deterministic 404 so this test never makes a live request.
+      await tickAllDueMonitors({
+        fetch: async () => ({ ok: false, status: 404, text: "", title: "Not Found", extras: [] }),
+      });
+
+      const anomA = await sql<{ id: number }>`
+        select id from anomalies where user_id = ${userId} and url = ${urlA} and newsroom_id = ${newsroomA} and kind = 'disappeared'
+      `;
+      assert.equal(anomA.length, 1, "newsroom A's monitor did not get its own anomaly from the sweep");
+
+      const anomB = await sql<{ id: number }>`
+        select id from anomalies where user_id = ${userId} and url = ${urlB} and newsroom_id = ${newsroomB} and kind = 'disappeared'
+      `;
+      assert.equal(anomB.length, 1, "newsroom B's monitor did not get its own anomaly from the sweep");
+
+      const crossedAIntoB = await sql<{ id: number }>`
+        select id from anomalies where user_id = ${userId} and url = ${urlA} and newsroom_id = ${newsroomB}
+      `;
+      assert.equal(crossedAIntoB.length, 0, "newsroom A's anomaly leaked into newsroom B");
+
+      const crossedBIntoA = await sql<{ id: number }>`
+        select id from anomalies where user_id = ${userId} and url = ${urlB} and newsroom_id = ${newsroomA}
+      `;
+      assert.equal(crossedBIntoA.length, 0, "newsroom B's anomaly leaked into newsroom A");
+    });
+  },
+);

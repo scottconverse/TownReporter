@@ -950,7 +950,7 @@ async function executeDarkRun(
 
   try {
     await checkBaselines(userId, investigationId, new Date(), newsroomId);
-    await runDueMonitors({ userId });
+    await runDueMonitors({ userId, newsroomId });
 
     // Same setting as a continued round: an editor who turned the desk up
     // expects the file they open next to dig that hard too.
@@ -1286,7 +1286,7 @@ export async function performDarkRound(job: DeskJob) {
   const runId = runRows[0]!.id;
   try {
     await checkBaselines(context.userId, id, new Date(), owned(context));
-    await runDueMonitors({ userId: context.userId });
+    await runDueMonitors({ userId: context.userId, newsroomId: owned(context) });
     /*
       Depth comes from the desk's own setting.
 
