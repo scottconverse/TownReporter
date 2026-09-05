@@ -1,5 +1,5 @@
 # TownReporter — TODO (canonical, in-repo)
-_Kept current by whichever Claude session is working. Last updated: 2026-09-05 (0.6.17 live; #2,#3 done; A,B added). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
+_Kept current by whichever Claude session is working. Last updated: 2026-09-05 (0.6.17 live; #2,#3 done; A,B done; ≈ PRINTED chip now names+links the match). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked on the owner
 
@@ -9,8 +9,8 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked 
 - (nothing in flight)
 
 ## Open queue (bug fixes first — owner chose to skip the redesign for now)
-A. [ ] **Interrupted-draft UI contradiction** — when the app restarts under a running draft, the story page shows "Drafting…" + "pulling the draft in" AND "stopped without finishing — click Draft again" at once. The job is actually reclaimed and re-run after 120s (STALE_RUNNING_SECONDS). Show ONE honest state: "App restarted mid-draft — recovering automatically (~2 min)"; don't show a disabled Drafting… button beside a click-again message.
-B. [ ] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app under running desk_jobs. Add a guard: refuse (or wait/drain with a clear message) when a draft/dark job is running; and a startup sweep that marks orphaned running jobs so the UI resets cleanly. Operator rule: never promote while the editor is active without asking.
+A. [x] **Interrupted-draft UI contradiction** — when the app restarts under a running draft, the story page shows "Drafting…" + "pulling the draft in" AND "stopped without finishing — click Draft again" at once. The job is actually reclaimed and re-run after 120s (STALE_RUNNING_SECONDS). Show ONE honest state: "App restarted mid-draft — recovering automatically (~2 min)"; don't show a disabled Drafting… button beside a click-again message. Done in b0c63a9.
+B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app under running desk_jobs. Add a guard: refuse (or wait/drain with a clear message) when a draft/dark job is running; and a startup sweep that marks orphaned running jobs so the UI resets cleanly. Operator rule: never promote while the editor is active without asking. Done in b0c63a9 (-WaitForJobs/-Force).
 2. [ ] **Manual "watch this page" for Dark Desk** — wire the existing `watchSource` to an editor button so an editor can put a page on the investigative monitor list by hand (today only the dig adds monitors). Do after #1. Must have clear UX feedback (owner rule).
 3. [ ] **Legal removal** — one-click legal takedown for a published story: immediate purge (skip the 30-day trash), audit trail (who/when/why), and flag which on-disk DB backups still contain the item so an operator can complete the scrub. Context: normal delete keeps a restorable copy 30 days AND the story lingers in every backup taken while it existed.
 4. [ ] **Finish "civic → non-profit" in source** — `src/routes/about.tsx` still says "a local civic newsroom"; add a seed migration so fresh installs get the non-profit welcome-article text (prod was edited directly). Rides the next release.
@@ -33,6 +33,7 @@ B. [ ] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app u
 - [x] 0.6.17 — Reddit requests strictly serialized + redd.it links resolve (TR-001). LIVE, tagged v0.6.17, 26 stories intact.
 - [x] #2 Proven: live 0.6.17 code fetched a real r/longmont thread — HTTP 200, reddit-rss, 2,621 chars of real post+comments, one paced request.
 - [x] #3 `source_monitors` newsroom-scoped (8741b1d): monitors + their anomalies carry the real newsroom; guard-listed; 5 proof tests.
+- [x] #4 Queue "≈ PRINTED" chip names + links the story it matched — an editor could only see a hover date before; `nearDuplicate` (src/lib/news/desk-copy.ts) now carries the matched published story's headline on `PrintedDup`, and the Queue row (src/components/desk-leads.tsx) shows "matches: <headline> · published <date>" with the headline as a real link to `/articles/<slug>`, plus the hover title on the chip itself. This commit.
 
 ## Known caveats (honest state)
 - Dark Desk is proven on ONE real staged topic (receipt); the Reddit leg was the weak spot (TR-001, now fixed pending release). Not a certification of every source type.

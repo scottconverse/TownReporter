@@ -154,15 +154,22 @@ export function LeadRowView({
         ) : null}
         {draftNotice ? <Notice kind={draftNotice.kind}>{draftNotice.text}</Notice> : null}
         {dup ? (
-          <p className="meta">
-            ≈ covers “{dup.note}”, published {formatShortDate(dup.publishedAt)}
+          <p className="meta dup-match">
+            matches:{" "}
+            <Link to="/articles/$slug" params={{ slug: dup.slug }} className="inline-link">
+              {dup.headline}
+            </Link>{" "}
+            · published {formatShortDate(dup.publishedAt)}
           </p>
         ) : null}
       </div>
       <div className="lead-flags">
         <Chip s={lead.status} />
         {dup ? (
-          <span className="chip dup" title={"Covers ground published " + formatShortDate(dup.publishedAt)}>
+          <span
+            className="chip dup"
+            title={`Covers ground published ${formatShortDate(dup.publishedAt)}: ${dup.headline}`}
+          >
             ≈ printed
           </span>
         ) : null}

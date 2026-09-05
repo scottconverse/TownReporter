@@ -872,7 +872,7 @@ export function inviteMessage(input: {
   );
 }
 
-export type PrintedDup = { slug: string; publishedAt: string; note: string };
+export type PrintedDup = { slug: string; publishedAt: string; note: string; headline: string };
 
 /**
  * "≈ PRINTED" false positives (real case, 2026-09-02): properNounOverlap
@@ -898,7 +898,7 @@ export function nearDuplicate(
       titlesOverlap(lead.headline, p.headline) ||
       (properNounOverlap(lead.headline, p.headline) && sameTopic)
     ) {
-      return { slug: p.slug, publishedAt: p.published_at, note: p.headline };
+      return { slug: p.slug, publishedAt: p.published_at, note: p.headline, headline: p.headline };
     }
   }
   return null;

@@ -477,6 +477,7 @@ describe("Worth a Look presentation", () => {
     );
     assert.ok(dup);
     assert.equal(dup!.slug, "bohn-farm-rezoning");
+    assert.equal(dup!.headline, "Bohn Farm rezoning heads to planning board with staff blessing");
   });
 
   it("does not flag a killed lead as covering an unrelated printed piece on city/month furniture alone (real case 2026-09-02)", () => {

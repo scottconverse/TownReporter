@@ -195,3 +195,43 @@ test("a lead with no possible_duplicate_of shows no maybe-same chip", () => {
   assert.doesNotMatch(html, /maybe same as/);
   assert.doesNotMatch(html, /maybe-same/);
 });
+
+// The "≈ PRINTED" chip used to say only a date on hover -- an editor could
+// not judge a duplicate without opening the lead and guessing. nearDuplicate
+// (desk-copy.ts) now carries the matched published story's headline, and the
+// chip row must name it and link to the real published story so it's
+// judgeable in one click (see PrintedDup in src/lib/news/desk-copy.ts).
+test('a lead with a printed-duplicate match names and links the matched story next to the "≈ printed" chip', () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, {
+      lead: baseLead({ status: "new" }),
+      dup: {
+        slug: "bohn-farm-rezoning",
+        publishedAt: "2026-08-19T12:00:00Z",
+        note: "Bohn Farm rezoning heads to planning board with staff blessing",
+        headline: "Bohn Farm rezoning heads to planning board with staff blessing",
+      },
+    }),
+  );
+  assert.match(html, /class="chip dup"/);
+  assert.match(html, /≈ printed/);
+  // The matched headline must appear as real, readable text near the chip...
+  assert.match(html, /Bohn Farm rezoning heads to planning board with staff blessing/);
+  assert.match(html, /published/);
+  // ...and it must be a real link to the published story, not color-only text.
+  const headlineIdx = html.indexOf("Bohn Farm rezoning heads to planning board with staff blessing");
+  const tagStart = html.lastIndexOf("<a", headlineIdx);
+  assert.ok(tagStart >= 0, "the matched headline should render inside an <a> link");
+  const tagEnd = html.indexOf(">", tagStart);
+  const openingTag = html.slice(tagStart, tagEnd + 1);
+  assert.match(openingTag, /href="\/articles\/\$slug"/);
+  assert.match(openingTag, /class="inline-link"/);
+});
+
+test("a lead with no dup shows no printed chip and no matched-story line", () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, { lead: baseLead({ status: "new" }), dup: null }),
+  );
+  assert.doesNotMatch(html, /chip dup/);
+  assert.doesNotMatch(html, /matches:/);
+});
