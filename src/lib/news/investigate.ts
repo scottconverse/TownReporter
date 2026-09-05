@@ -747,6 +747,7 @@ export async function grokPlanner(
     timeoutMs: callMs,
     model: plannerModel(choice),
     choice,
+    localModel: overrides?.["local-model"]?.localModel,
     // Dark Desk F1: the planner only ever returns JSON (searches/fetch_urls
     // for the app to run) — it must never be handed a live tool surface to
     // try and get denied on. See ai-claude-code.server.ts's noTools comment.

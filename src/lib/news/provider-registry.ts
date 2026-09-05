@@ -131,6 +131,30 @@ function env(key: string): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+/*
+  Whether local-models.ts's discovery has found a reachable local
+  server on THIS machine, right now. A plain module-level flag, not a
+  function that reaches into that module, so this file stays exactly as pure
+  as its own doc comment claims -- no `node:` imports, nothing that only
+  exists on the server. `local-models.ts` is the only writer (via
+  `setLocalDiscoveryReachable`, called after every probe and by its lazy
+  60s background refresh); `local-model.enabled()` below is the only reader.
+  A browser bundle that evaluates this module simply keeps the `false` it
+  starts with, which is fine -- the browser never calls `entry.enabled()`
+  itself (see provider-availability.ts's doc comment).
+*/
+let localDiscoveryReachable = false;
+
+/** Called by local-models.ts after each discovery probe. */
+export function setLocalDiscoveryReachable(value: boolean): void {
+  localDiscoveryReachable = value;
+}
+
+/** Test-only: put the flag back to its start state between test files. */
+export function resetLocalDiscoveryReachableForTests(): void {
+  localDiscoveryReachable = false;
+}
+
 /** `TOWNREPORTER_X=0` means "pretend this machine does not have it". */
 function notSwitchedOff(key: string): boolean {
   return env(key) !== "0";
@@ -299,7 +323,18 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       enforces the same requirement at resolution time; this is the readiness
       half so the picker does not even offer it as ready without one.
     */
-    enabled: () => notSwitchedOff("TOWNREPORTER_LOCAL") && Boolean(env("LLM_BASE_URL")),
+    /*
+      0.6.19: OR discovery. Before this, an entry NAMED "Local model" needed
+      LLM_BASE_URL set by hand even when LM Studio or Ollama was already
+      running on this box with no config at all -- the out-of-the-box "first
+      run comes up alive" rule failed for the exact machine it was written
+      for. `localDiscoveryReachable` is set by local-models.ts's
+      probes of the two default local ports; LLM_BASE_URL still wins when
+      set (an operator who typed it gets exactly that endpoint, discovered
+      or not).
+    */
+    enabled: () =>
+      notSwitchedOff("TOWNREPORTER_LOCAL") && (Boolean(env("LLM_BASE_URL")) || localDiscoveryReachable),
     offSwitchEnv: "TOWNREPORTER_LOCAL",
     // "Anywhere an AI acts, the editor can pick the model" -- every surface.
     offeredFor: EVERY_SURFACE,
@@ -422,6 +457,13 @@ export type ProviderOverride = {
   callMs?: number | null;
   wallMs?: number | null;
   enabled?: boolean | null;
+  /**
+   * The "Local model" entry's own per-newsroom pick -- which local server
+   * and which model on it -- as opposed to `enabled`/`callMs`/`wallMs`,
+   * which apply to any provider. Only ever set on the `local-model` id's
+   * override; see ./provider-settings.ts's `resolveLocalModelChoice`.
+   */
+  localModel?: { baseUrl: string; id: string } | null;
 };
 
 export type ProviderOverrides = Record<string, ProviderOverride>;

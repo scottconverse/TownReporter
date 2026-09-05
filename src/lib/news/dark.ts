@@ -813,6 +813,7 @@ async function synthesizeSignals(
   const ai = await grokChat(darkSystemFor(dials), pack.slice(0, 28000), 3200, {
     timeoutMs: providerBudget(choice, overrides).callMs,
     choice,
+    localModel: overrides?.["local-model"]?.localModel,
     // Dark Desk F1: synthesis reads the pack already assembled above and
     // returns JSON only — it never fetches or searches itself.
     noTools: true,
@@ -1799,6 +1800,7 @@ export async function buildBrief(
   const ai = await grokChat(BRIEF_SYSTEM, pack.slice(0, 22000), 1200, {
     timeoutMs: providerBudget(choice, overrides).callMs,
     choice,
+    localModel: overrides?.["local-model"]?.localModel,
     // Dark Desk F1: the brief reads the file already assembled above and
     // returns JSON only — it never fetches or searches itself.
     noTools: true,

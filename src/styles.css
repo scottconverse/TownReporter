@@ -864,6 +864,12 @@
 .desk-ltr .queue-draft-controls {display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin-top:9px}
 .desk-ltr .queue-draft-controls .model-picker {margin:0}
 @media (max-width:640px){.desk-ltr .model-picker,.desk-ltr .model-picker.compact{grid-template-columns:1fr;width:100%;max-width:none}.desk-ltr .model-picker-help{grid-column:1}}
+.desk-ltr .local-model-picker {display:grid;grid-template-columns:auto minmax(190px,1fr);align-items:center;gap:4px 9px;margin:6px 0 0;padding-top:6px;border-top:1px dashed var(--line)}
+.desk-ltr .local-model-picker select {grid-column:2;min-height:34px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px}
+.desk-ltr .local-model-picker .model-picker-help {grid-column:2}
+.desk-ltr .model-picker-refresh {grid-column:2;justify-self:start;min-height:44px;min-width:44px;padding:6px 14px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));cursor:pointer}
+.desk-ltr .model-picker-refresh:focus-visible {outline:2px solid var(--fg);outline-offset:2px}
+@media (max-width:640px){.desk-ltr .local-model-picker{grid-template-columns:1fr}.desk-ltr .local-model-picker select,.desk-ltr .local-model-picker .model-picker-help,.desk-ltr .model-picker-refresh{grid-column:1}}
 .desk-ltr .work-form {margin-top:16px;display:grid;gap:12px}
 .desk-ltr .dark-lede {max-width:560px;font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:0;text-align:right}
 .desk-ltr .piles {display:grid;grid-template-columns:1fr 1fr 1fr;margin-top:10px}

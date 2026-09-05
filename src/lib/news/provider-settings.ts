@@ -37,6 +37,7 @@ import {
   validateProviderSeconds,
   type ProviderOverrides,
 } from "./provider-registry.ts";
+import { refreshLocalCatalog, type LocalCatalog } from "./local-models.ts";
 
 /**
  * Idempotent runtime ensure for the PGLite preview and unit-test paths,
@@ -55,11 +56,17 @@ export async function ensureProviderSettingsSchema() {
       call_ms integer,
       wall_ms integer,
       enabled boolean,
+      local_model_base_url text,
+      local_model_id text,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       unique (newsroom_id, provider_id)
     )
   `);
+  // Mirrors migrations/0041_provider_local_model.sql for an install whose
+  // table predates it -- same reason the rest of this function exists.
+  await sql.query(`alter table provider_settings add column if not exists local_model_base_url text`);
+  await sql.query(`alter table provider_settings add column if not exists local_model_id text`);
 }
 
 type ProviderSettingRow = {
@@ -67,7 +74,21 @@ type ProviderSettingRow = {
   call_ms: number | null;
   wall_ms: number | null;
   enabled: boolean | null;
+  local_model_base_url: string | null;
+  local_model_id: string | null;
 };
+
+const LOCAL_MODEL_PROVIDER_ID = "local-model";
+
+/** Is a stored `{baseUrl,id}` still on that server's current model list? */
+function stillListed(
+  pick: { baseUrl: string; id: string } | null | undefined,
+  catalog: LocalCatalog,
+): boolean {
+  if (!pick) return false;
+  const server = catalog.servers.find((s) => s.baseUrl === pick.baseUrl);
+  return Boolean(server?.models.some((m) => m.id === pick.id));
+}
 
 /**
  * Every override this paper has stored, keyed by provider id.
@@ -75,6 +96,17 @@ type ProviderSettingRow = {
  * Rows for providers the registry no longer knows about are dropped rather
  * than returned: a retired provider's stored timeout must not resurface as a
  * budget for whatever id happens to be reused later.
+ *
+ * The `local-model` id's `localModel` field is resolved against the LIVE
+ * catalog before this returns: the editor's stored pick when it is still on
+ * the server's list, else the currently discovered default, else `null`.
+ * Every caller that threads `overrides["local-model"]?.localModel` straight
+ * into `grokChat`'s `opts.localModel` (report.ts, dark.ts, investigate.ts)
+ * therefore gets "the stored pick, or the discovered default" for free,
+ * without needing to know `local-models.ts` exists. Discovery is a
+ * cheap, cached (20s), localhost-only call; a failure there is swallowed and
+ * simply leaves the stored pick (or nothing) in place, exactly as it stood
+ * before this resolution step existed.
  */
 export async function readProviderOverrides(
   newsroomId: number = DEFAULT_NEWSROOM_ID,
@@ -82,7 +114,7 @@ export async function readProviderOverrides(
   await ensureProviderSettingsSchema();
   const sql = await getSql();
   const rows = await sql<ProviderSettingRow>`
-    select provider_id, call_ms, wall_ms, enabled
+    select provider_id, call_ms, wall_ms, enabled, local_model_base_url, local_model_id
     from provider_settings where newsroom_id = ${newsroomId}
   `;
   const out: ProviderOverrides = {};
@@ -92,10 +124,121 @@ export async function readProviderOverrides(
       callMs: row.call_ms,
       wallMs: row.wall_ms,
       enabled: row.enabled,
+      localModel:
+        row.local_model_base_url && row.local_model_id
+          ? { baseUrl: row.local_model_base_url, id: row.local_model_id }
+          : null,
     };
+  }
+  const stored = out[LOCAL_MODEL_PROVIDER_ID]?.localModel;
+  try {
+    const catalog = await refreshLocalCatalog();
+    const resolved = stillListed(stored, catalog) ? stored : catalog.defaultModel;
+    out[LOCAL_MODEL_PROVIDER_ID] = { ...(out[LOCAL_MODEL_PROVIDER_ID] ?? {}), localModel: resolved };
+  } catch {
+    // Discovery failed (should not happen -- it never throws -- but this is
+    // a budgets read used by every draft/scan/dig, and it must never fail a
+    // run over a local-model lookup nobody may even be using).
   }
   return out;
 }
+
+/**
+ * What "Local model" should actually call for this newsroom, right now, PLUS
+ * the one-line notice the picker shows when a stored pick had to be
+ * abandoned ("<id> is no longer on the server; using <default>").
+ * `readProviderOverrides` above does the same resolution for every model
+ * call; this is the picker-facing sibling that also explains itself.
+ */
+export type LocalModelChoice = {
+  override: { baseUrl: string; id: string } | null;
+  notice: string | null;
+  catalog: LocalCatalog;
+};
+
+/** The raw stored pick, with no catalog fallback applied -- for the notice only. */
+async function rawStoredLocalModel(
+  newsroomId: number,
+): Promise<{ baseUrl: string; id: string } | null> {
+  await ensureProviderSettingsSchema();
+  const sql = await getSql();
+  const rows = await sql<Pick<ProviderSettingRow, "local_model_base_url" | "local_model_id">>`
+    select local_model_base_url, local_model_id from provider_settings
+    where newsroom_id = ${newsroomId} and provider_id = ${LOCAL_MODEL_PROVIDER_ID}
+  `;
+  const row = rows[0];
+  return row?.local_model_base_url && row.local_model_id
+    ? { baseUrl: row.local_model_base_url, id: row.local_model_id }
+    : null;
+}
+
+export async function resolveLocalModelChoice(
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
+): Promise<LocalModelChoice> {
+  const [stored, catalog] = await Promise.all([
+    rawStoredLocalModel(newsroomId),
+    refreshLocalCatalog(),
+  ]);
+  if (!stored) return { override: catalog.defaultModel, notice: null, catalog };
+  if (stillListed(stored, catalog)) return { override: stored, notice: null, catalog };
+  if (catalog.defaultModel) {
+    return {
+      override: catalog.defaultModel,
+      notice: `${stored.id} is no longer on the server; using ${catalog.defaultModel.id}.`,
+      catalog,
+    };
+  }
+  return { override: null, notice: `${stored.id} is no longer on the server.`, catalog };
+}
+
+export type SaveLocalModelResult = { ok: true } | { ok: false; error: string };
+
+/** Any editor may pick a local model -- it is not a timing/security decision. */
+export async function saveLocalModel(
+  userId: string,
+  choice: { baseUrl: string; id: string } | null,
+): Promise<SaveLocalModelResult> {
+  const me = await requireEditor(userId);
+  await ensureProviderSettingsSchema();
+  const sql = await getSql();
+  await sql.query(
+    `
+      insert into provider_settings (newsroom_id, provider_id, local_model_base_url, local_model_id)
+      values ($1, $2, $3, $4)
+      on conflict (newsroom_id, provider_id) do update
+        set local_model_base_url = excluded.local_model_base_url,
+            local_model_id = excluded.local_model_id,
+            updated_at = now()
+    `,
+    [me.newsroomId, LOCAL_MODEL_PROVIDER_ID, choice?.baseUrl ?? null, choice?.id ?? null],
+  );
+  return { ok: true };
+}
+
+export const getLocalModelChoice = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }): Promise<LocalModelChoice> => {
+    const me = await requireEditor(context.userId);
+    return resolveLocalModelChoice(me.newsroomId);
+  });
+
+export const saveLocalModelFn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((raw: unknown) => {
+    const v = (raw ?? {}) as { baseUrl?: unknown; id?: unknown };
+    if (typeof v.baseUrl === "string" && typeof v.id === "string" && v.baseUrl && v.id) {
+      return { baseUrl: v.baseUrl, id: v.id };
+    }
+    return null;
+  })
+  .handler(async ({ context, data }): Promise<SaveLocalModelResult> => {
+    try {
+      return await saveLocalModel(context.userId, data);
+    } catch (err) {
+      if (err instanceof ForbiddenError) return { ok: false, error: err.message };
+      throw err;
+    }
+  });
 
 /*
   There is deliberately no `paperProviderBudget(newsroomId, choice)` helper

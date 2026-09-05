@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { deskMiddleware } from "./desk-auth.ts";
 import { PICKER_PROVIDER_IDS, providerEnabled } from "./provider-registry.ts";
+import { refreshLocalCatalog, type LocalCatalog } from "./local-models.ts";
 
 /**
  * Per-machine readiness for every picker-offered provider.
@@ -37,4 +38,24 @@ export function computeProviderAvailability(): Record<string, boolean> {
 
 export const providerAvailability = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .handler(async () => computeProviderAvailability());
+  .handler(async () => {
+    // Discovery first, so a machine where LM Studio/Ollama just started
+    // reports "Local model" ready on the very next picker load rather than
+    // waiting on the 60s background tick. `refreshLocalCatalog` is cheap
+    // when the 20s cache is warm and also (re)starts that background tick.
+    await refreshLocalCatalog();
+    return computeProviderAvailability();
+  });
+
+/**
+ * The full local catalog, for the picker's model list and the Server page's
+ * table -- everything `computeProviderAvailability` collapses to one
+ * boolean per provider id. Same discovery-first behaviour as above.
+ */
+export const localModelCatalog = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async (): Promise<LocalCatalog> => refreshLocalCatalog());
+
+export const refreshLocalModelCatalog = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .handler(async (): Promise<LocalCatalog> => refreshLocalCatalog(true));

@@ -8,9 +8,28 @@ import {
   type OpinionModelChoice,
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
-import { providerAvailability } from "@/lib/news/provider-availability";
-import { useQuery } from "@tanstack/react-query";
+import { providerAvailability, localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
+import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId } from "react";
+
+/** Speaks through DeskShell's always-mounted `#desk-announcer` region. */
+function announceToDesk(text: string): void {
+  if (typeof document === "undefined") return;
+  const el = document.getElementById("desk-announcer");
+  if (el) el.textContent = text;
+}
+
+const LOCAL_SERVER_LABELS: Record<string, string> = {
+  lmstudio: "LM Studio",
+  ollama: "Ollama",
+  "openai-compatible": "Configured server",
+};
+
+function localServerLabel(kind: string, baseUrl: string): string {
+  const host = baseUrl.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, "");
+  return `${LOCAL_SERVER_LABELS[kind] ?? "Server"} · ${host}`;
+}
 
 type Props =
   | {
@@ -53,6 +72,108 @@ function notSetUpHelp(option: ModelChoiceOption): string {
     return "Local model is not set up on this server. See docs/local-models.md.";
   }
   return `${option.label} is not set up on this server. See docs/setup.md.`;
+}
+
+/**
+ * The second, model-level select that appears under the picker only when
+ * "Local model" is the chosen provider. Its own component so its two
+ * queries (the live catalog, the newsroom's stored pick) only ever run when
+ * they are needed.
+ */
+function LocalModelSelect({ scope }: { scope: "story" | "opinion" | "dark" }) {
+  const qc = useQueryClient();
+  const selectId = useId();
+  const catalog = useQuery({
+    queryKey: ["local-model-catalog"],
+    queryFn: () => localModelCatalog(),
+    staleTime: 15_000,
+  });
+  const choice = useQuery({
+    queryKey: ["local-model-choice", scope],
+    queryFn: () => getLocalModelChoice(),
+    staleTime: 15_000,
+  });
+  const save = useMutation({
+    mutationFn: (picked: { baseUrl: string; id: string }) => saveLocalModelFn({ data: picked }),
+    onSuccess: (_result, picked) => {
+      qc.invalidateQueries({ queryKey: ["local-model-choice"] });
+      announceToDesk(`Local model set to ${picked.id}.`);
+    },
+  });
+  const refresh = useMutation({
+    mutationFn: () => refreshLocalModelCatalog(),
+    onSuccess: (data) => {
+      qc.setQueryData(["local-model-catalog"], data);
+      announceToDesk(
+        data.servers.some((s) => s.reachable)
+          ? "Local server list refreshed."
+          : "No local server found on this machine.",
+      );
+    },
+  });
+
+  const servers = catalog.data?.servers ?? [];
+  const reachable = servers.filter((s) => s.reachable);
+  const selected = choice.data?.override ?? catalog.data?.defaultModel ?? null;
+  const notice = choice.data?.notice;
+
+  if (catalog.isLoading) return null;
+
+  return (
+    <div className="model-picker local-model-picker" style={{ gridColumn: "1 / -1" }}>
+      <label htmlFor={selectId} className="model-picker-label">
+        Local model
+      </label>
+      {reachable.length === 0 ? (
+        <span className="model-picker-help">
+          No local server found on this machine. Start LM Studio&apos;s server or Ollama, or set
+          LLM_BASE_URL. See docs/local-models.md.
+        </span>
+      ) : (
+        <>
+          <select
+            id={selectId}
+            value={selected ? `${selected.baseUrl} ${selected.id}` : ""}
+            onChange={(event) => {
+              const [baseUrl, id] = event.target.value.split(" ");
+              if (baseUrl && id) save.mutate({ baseUrl, id });
+            }}
+          >
+            {!selected ? <option value="">Choose a model…</option> : null}
+            {reachable.map((server) => (
+              <optgroup key={server.baseUrl} label={localServerLabel(server.kind, server.baseUrl)}>
+                {server.models.map((model) => {
+                  const suffix = [model.loaded ? "loaded" : null, model.thinking ? "thinking off" : null]
+                    .filter(Boolean)
+                    .join(" · ");
+                  return (
+                    <option key={model.id} value={`${server.baseUrl} ${model.id}`}>
+                      {model.id}
+                      {suffix ? ` · ${suffix}` : ""}
+                    </option>
+                  );
+                })}
+              </optgroup>
+            ))}
+          </select>
+          <span className="model-picker-help">
+            Loaded models answer fast. A model that is not loaded gets loaded on the first call,
+            which can take a minute or more.
+          </span>
+          {notice ? <span className="model-picker-help">{notice}</span> : null}
+        </>
+      )}
+      <button
+        type="button"
+        className="model-picker-refresh"
+        style={{ minHeight: 44, minWidth: 44 }}
+        disabled={refresh.isPending}
+        onClick={() => refresh.mutate()}
+      >
+        {refresh.isPending ? "Checking…" : "Refresh"}
+      </button>
+    </div>
+  );
 }
 
 export function ModelPicker(props: Props) {
@@ -126,6 +247,9 @@ export function ModelPicker(props: Props) {
         <span id={flagId} className="model-picker-help">
           {notSetUpHelp(flagged)}
         </span>
+      ) : null}
+      {props.value === "local-model" && !selectedUnavailable ? (
+        <LocalModelSelect scope={props.scope ?? "story"} />
       ) : null}
       <details className="min-w-0 text-sm" style={{ gridColumn: "1 / -1" }}>
         <summary className="cursor-pointer underline underline-offset-2 focus-visible:outline-2">

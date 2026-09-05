@@ -371,6 +371,38 @@ describe("the local model is a named pick, everywhere an AI acts", () => {
     );
   });
 
+  /*
+    0.6.19: discovery-only readiness. Before this, LLM_BASE_URL was the ONLY
+    way this entry became ready even when LM Studio or Ollama was already
+    answering on this machine with zero config -- `local-models.ts`'s
+    probes flip this flag, and `local-model.enabled()` OR's it in.
+  */
+  it("becomes enabled from discovery alone, with no LLM_BASE_URL set", async () => {
+    const { setLocalDiscoveryReachable, resetLocalDiscoveryReachableForTests } = await import(
+      "./provider-registry.ts"
+    );
+    try {
+      withEnv({}, () => assert.equal(providerEnabled("local-model"), false));
+      setLocalDiscoveryReachable(true);
+      withEnv({}, () =>
+        assert.equal(
+          providerEnabled("local-model"),
+          true,
+          "a discovered local server must make this entry ready with no env set at all",
+        ),
+      );
+      withEnv({ TOWNREPORTER_LOCAL: "0" }, () =>
+        assert.equal(
+          providerEnabled("local-model"),
+          false,
+          "the operator off switch still wins over a discovered server",
+        ),
+      );
+    } finally {
+      resetLocalDiscoveryReachableForTests();
+    }
+  });
+
   it("is not in the Automatic ladder -- the configured gateway already pins Automatic to it", () => {
     assert.ok(!automaticLadder().includes("local-model"));
   });

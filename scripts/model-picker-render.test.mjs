@@ -51,6 +51,26 @@ let current;
 export function __setAvailability(data) { current = data; }
 export const useQuery = () => ({ data: current });
 export const providerAvailability = async () => current;
+
+/*
+  0.6.19: model-picker.tsx also renders a second, per-model select (only
+  when "Local model" is both selected AND available -- see
+  ModelPicker's \`!selectedUnavailable\` guard -- which no case in this file
+  exercises yet). These stand in for that select's own queries/mutations and
+  its provider-settings server functions so the module graph resolves; no
+  test here drives them beyond module load.
+*/
+export function useMutation({ mutationFn }) {
+  return { mutate: (...args) => { void mutationFn?.(...args); }, isPending: false };
+}
+export function useQueryClient() {
+  return { invalidateQueries() {}, setQueryData() {} };
+}
+const EMPTY_CATALOG = { servers: [], defaultModel: null, checkedAt: 0 };
+export const localModelCatalog = async () => EMPTY_CATALOG;
+export const refreshLocalModelCatalog = async () => EMPTY_CATALOG;
+export const getLocalModelChoice = async () => ({ override: null, notice: null, catalog: EMPTY_CATALOG });
+export const saveLocalModelFn = async () => ({ ok: true });
 `;
 const availabilityStubUrl = `data:text/javascript;base64,${Buffer.from(availabilityStubSrc).toString("base64")}`;
 const availabilityStub = await import(availabilityStubUrl);
@@ -62,6 +82,7 @@ const { ModelPicker } = await import(
     {
       "@/lib/news/model-choice": choices,
       "@/lib/news/provider-availability": availabilityStubUrl,
+      "@/lib/news/provider-settings": availabilityStubUrl,
       "@tanstack/react-query": availabilityStubUrl,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),

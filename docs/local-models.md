@@ -219,12 +219,11 @@ The entry itself, in `PROVIDER_REGISTRY`:
   baseUrl: "http://127.0.0.1:1234/v1",
   envOverrides: { model: "LLM_MODEL", baseUrl: "LLM_BASE_URL", apiKey: "LLM_API_KEY" },
   budget: KIND_BUDGETS.local,
-  // LLM_BASE_URL specifically -- a key plus a model with no base URL is not
-  // enough. An entry named "Local model" must never resolve to a public
-  // cloud endpoint by default (0.6.13; the unnamed `configured` gateway
-  // below still accepts a key plus a model alone, because it makes no
-  // locality claim).
-  enabled: () => notSwitchedOff("TOWNREPORTER_LOCAL") && Boolean(env("LLM_BASE_URL")),
+  // LLM_BASE_URL still wins outright when set. Otherwise (0.6.19) this is
+  // also ready when `local-models.ts` has found LM Studio or Ollama
+  // answering on their default ports -- see "Zero-config discovery" below.
+  enabled: () =>
+    notSwitchedOff("TOWNREPORTER_LOCAL") && (Boolean(env("LLM_BASE_URL")) || localDiscoveryReachable),
   offSwitchEnv: "TOWNREPORTER_LOCAL",
   offeredFor: { story: true, scan: true, opinion: true, dark: true },
   // no ladderRank: Automatic does not reach for it on its own -- when
@@ -272,3 +271,74 @@ calling it a failure.
 measurement at the top of this page: on the Dark planner prompt, the local 35B
 found about half of what Haiku found. The wiring being easy is not an argument
 for using it.
+
+---
+
+## Zero-config discovery, and picking the model (0.6.19)
+
+If LM Studio or Ollama is running on this machine, TownReporter finds it. Pick
+the model in any Writing model picker — Command Center, a Queue row, the
+Story page, Dark Desk, Opinion, or the Server page's Writing models section.
+Nothing needs to be typed in for this to work.
+
+The config lines below are optional overrides, not requirements:
+
+```
+# Point at a specific server/model instead of discovering one. Also makes
+# "Local model" ready even if LM Studio/Ollama are not on their default ports.
+LLM_BASE_URL=http://127.0.0.1:11434/v1     # Ollama's default
+# LLM_BASE_URL=http://127.0.0.1:1234/v1    # LM Studio's default
+LLM_MODEL=gemma4:12b
+# LLM_API_KEY=...                          # only if the server wants one
+
+# Force thinking off/on for a model, instead of the automatic guess:
+# LLM_REASONING_EFFORT=none                # none | low | medium | high
+
+# Turn off probing the two default ports entirely (LLM_BASE_URL, if set,
+# is still tried):
+# TOWNREPORTER_LOCAL_DISCOVERY=0
+```
+
+**How discovery works.** `src/lib/news/local-models.ts` asks
+`http://127.0.0.1:1234/v1/models` (LM Studio) and
+`http://127.0.0.1:11434/v1/models` (Ollama) for their model lists, with a
+1.5-second timeout each, and drops anything that does not answer with the
+expected `{"data":[{"id":...}]}` shape — a server that is not there, slow, or
+serving something unrelated (an unrelated web app on the same machine that
+happens to answer with an HTML page, say) is treated as absent, not as an
+error. LM Studio's own `/api/v0/models` and Ollama's `/api/ps` are then
+consulted to say which models are actually **loaded** right now and which
+answer with private "thinking" text before the real draft (see "Reasoning
+models break the app silently" above) — that is where each option's
+`· loaded` / `· thinking off` suffix in the picker comes from. The result is
+cached 20 seconds and refreshed in the background every 60 seconds, so
+picker loads do not re-probe on every render; the picker's own Refresh
+button forces an immediate re-check.
+
+**The default.** With nothing configured, "Local model" defaults to the
+first model already **loaded** on LM Studio, then Ollama, then whatever
+`LLM_MODEL` names if it is on a discovered list, then the first model found
+at all. A model that is not loaded still works — the server loads it on the
+first call, which the picker's help text says can take a minute or more.
+
+**Thinking off, automatically.** A reasoning model (Gemma 4, the Qwen3
+family, DeepSeek-R1, gpt-oss, …) answers with the actual draft in a separate
+`reasoning`/`reasoning_content` field and can spend its whole token budget
+there, returning an empty draft with no error. TownReporter now sends
+`reasoning_effort: "none"` to any model it recognises as this kind, unless
+`LLM_REASONING_EFFORT` says otherwise — never to the real OpenAI cloud API,
+which rejects the field outright on a non-reasoning model. If a model still
+returns an empty draft with reasoning text (an unrecognised id, or an
+explicit override), the desk says exactly that instead of "Empty model
+response".
+
+**Per-newsroom pick.** Choosing a model in the picker saves that choice for
+this newsroom — every draft, scan, and dig uses it until changed. If that
+model later disappears from the server's list, the desk falls back to the
+current default and the picker says so in one line, rather than failing.
+
+**Every AI call site has the picker.** This is a standing rule, not new to
+local models: Command Center's composer, every Queue row, the Story page,
+Dark Desk, Opinion, and the Server page all read the one provider registry
+(`src/lib/news/provider-registry.ts`) and the one local-model catalog. There
+is no per-page provider logic to keep in sync.

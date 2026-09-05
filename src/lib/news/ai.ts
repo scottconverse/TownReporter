@@ -113,7 +113,26 @@ function customGateway(): LlmConfig | null {
  * this same requirement so the picker never even offers it as ready without
  * an explicit local endpoint.
  */
-function localGateway(): LlmConfig | null {
+/**
+ * A per-newsroom "Local model" pick, read from provider_settings by the
+ * caller (see ./provider-settings.ts's `resolveLocalModelOverride`) and
+ * passed down through `grokChat`'s `opts.localModel`. Named, not env: the
+ * whole point of the override is that an editor can point "Local model" at
+ * a different server/model than LLM_BASE_URL/LLM_MODEL without an operator
+ * touching `.env`.
+ */
+export type LocalModelOverride = { baseUrl: string; id: string };
+
+function localGateway(override?: LocalModelOverride | null): LlmConfig | null {
+  if (override?.baseUrl && override.id) {
+    const customKey = env("LLM_API_KEY") ?? env("OPENAI_API_KEY");
+    return {
+      apiKey: customKey || "not-needed",
+      baseUrl: trimSlash(override.baseUrl),
+      model: override.id,
+      label: "LLM",
+    };
+  }
   const customBase = env("LLM_BASE_URL");
   if (!customBase) return null;
   const customKey = env("LLM_API_KEY") ?? env("OPENAI_API_KEY");
@@ -189,7 +208,10 @@ export function resolveClaudeCode(): ClaudeCodeConfig | null {
  * the box can take over without touching code; Grok stays as the last fallback
  * for an existing XAI_API_KEY.
  */
-function explicitProvider(choice: StoryModelChoice): Provider | null {
+function explicitProvider(
+  choice: StoryModelChoice,
+  localOverride?: LocalModelOverride | null,
+): Provider | null {
   /*
     Every field below now comes from PROVIDER_REGISTRY: the label the desk
     shows, the model identifier, the environment variable that overrides it,
@@ -233,7 +255,7 @@ function explicitProvider(choice: StoryModelChoice): Provider | null {
   }
 
   if (entry.kind === "local") {
-    const llm = localGateway();
+    const llm = localGateway(localOverride);
     return llm ? { kind: "openai", ...llm } : null;
   }
 
@@ -241,12 +263,15 @@ function explicitProvider(choice: StoryModelChoice): Provider | null {
   return api ? { kind: "anthropic", ...api, model, label: entry.label } : null;
 }
 
-export function resolveProvider(choice?: StoryModelChoice | string): Provider | null {
+export function resolveProvider(
+  choice?: StoryModelChoice | string,
+  localOverride?: LocalModelOverride | null,
+): Provider | null {
   if (choice === "configured") {
     const configured = customGateway();
     return configured ? { kind: "openai", ...configured } : null;
   }
-  if (choice && choice !== "auto") return explicitProvider(storyModelChoice(choice));
+  if (choice && choice !== "auto") return explicitProvider(storyModelChoice(choice), localOverride);
   const custom = customGateway();
   if (custom) return { kind: "openai", ...custom };
   const claude = resolveAnthropic();
@@ -472,6 +497,13 @@ export async function grokChat(
      * No-op for every provider except claude-code.
      */
     noTools?: boolean;
+    /**
+     * A per-newsroom "Local model" pick (see ./provider-settings.ts's
+     * `resolveLocalModelOverride`). Only consulted when the effective
+     * choice resolves to the `local-model` registry entry; every other
+     * provider ignores it.
+     */
+    localModel?: LocalModelOverride | null;
   },
   adapters?: GrokChatAdapters,
 ): Promise<GrokOk | GrokErr> {
@@ -483,7 +515,7 @@ export async function grokChat(
     if (!ready.ok) return ready;
     return grokChat(system, user, maxTokens, { ...opts, choice: ready.choice }, adapters);
   }
-  const provider = resolveProvider(opts?.choice);
+  const provider = resolveProvider(opts?.choice, opts?.localModel);
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
 
   const timeoutMs = opts?.timeoutMs ?? 45_000;
@@ -522,7 +554,7 @@ export async function grokChat(
   }
   const llm = provider;
   const url = `${llm.baseUrl}/chat/completions`;
-  const payload = {
+  const payload: Record<string, unknown> = {
     model,
     temperature: 0.2,
     max_tokens: maxTokens,
@@ -531,6 +563,8 @@ export async function grokChat(
       { role: "user", content: user },
     ],
   };
+  const reasoningEffort = reasoningEffortFor(llm.baseUrl, model);
+  if (reasoningEffort) payload.reasoning_effort = reasoningEffort;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -571,15 +605,68 @@ export async function grokChat(
   if (!res.ok) return { ok: false, error: `${llm.label} API error ${res.status}` };
   const body = (await res.json()) as {
     error?: { message?: string } | string;
-    choices?: { message?: { content?: string; reasoning_content?: string } }[];
+    choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
   };
   if (body.error) {
     const detail = typeof body.error === "string" ? body.error : body.error.message;
     return { ok: false, error: `${llm.label} API error${detail ? `: ${detail}` : ""}` };
   }
-  const text = body.choices?.[0]?.message?.content?.trim() ?? "";
-  if (!text) return { ok: false, error: "Empty model response" };
+  const message = body.choices?.[0]?.message;
+  const text = message?.content?.trim() ?? "";
+  if (!text) {
+    // A "thinking" model (gemma4, qwen3.x, ...) can spend its whole
+    // `max_tokens` budget on `reasoning_content` (most OpenAI-compatible
+    // servers) or `reasoning` (Ollama) and answer with `content: ""` and
+    // `finish_reason: "length"`. Measured on this machine: silent-looking
+    // failure, no HTTP error, just an empty draft -- and "Empty model
+    // response" told the editor nothing about why. `reasoningEffortFor`
+    // above should already prevent this for a model flagged `thinking`, but
+    // an unlisted model, a different quantization, or an explicit
+    // LLM_REASONING_EFFORT override can still hit it, so this checks the
+    // actual response rather than trusting the flag.
+    const reasoning = (message?.reasoning_content ?? message?.reasoning ?? "").trim();
+    if (reasoning) {
+      return {
+        ok: false,
+        error:
+          "The local model spent its whole answer thinking and never wrote the draft. Turn thinking off for it (LLM_REASONING_EFFORT=none) or pick a different local model.",
+      };
+    }
+    return { ok: false, error: "Empty model response" };
+  }
   return { ok: true, text };
+}
+
+const THINKING_MODEL_RE = /gemma-?4|qwen3(?:\.\d+)?|deepseek-r1|gpt-oss|o[134]-|reasoning|think/i;
+const REASONING_EFFORTS = new Set(["none", "low", "medium", "high"]);
+
+/**
+ * `reasoning_effort` to send, or `undefined` to omit the field entirely.
+ *
+ * Real OpenAI's cloud API (`api.openai.com`) rejects this field on a
+ * non-reasoning model with a 400 -- so it is never sent there, full stop,
+ * regardless of `LLM_REASONING_EFFORT` or the model name. Every other
+ * OpenAI-compatible endpoint (a local server, a gateway, xAI) either uses it
+ * or silently ignores an extra field, which local-model servers do.
+ *
+ * `LLM_REASONING_EFFORT` is an explicit operator override and wins outright.
+ * Absent that, a model whose id matches the same "this is a reasoning model"
+ * heuristic `local-models.ts` uses for the picker's "thinking off"
+ * badge gets `"none"` by default -- measured on this machine: without it,
+ * `qwen3.6-35b-a3b` spent its whole 2,200-token budget on `reasoning_content`
+ * and returned an empty draft.
+ */
+function reasoningEffortFor(baseUrl: string, model: string): string | undefined {
+  let hostname = "";
+  try {
+    hostname = new URL(baseUrl).hostname;
+  } catch {
+    hostname = "";
+  }
+  if (/(^|\.)api\.openai\.com$/i.test(hostname)) return undefined;
+  const override = env("LLM_REASONING_EFFORT")?.toLowerCase();
+  if (override && REASONING_EFFORTS.has(override)) return override;
+  return THINKING_MODEL_RE.test(model) ? "none" : undefined;
 }
 
 export function isGrokAvailable(): boolean {

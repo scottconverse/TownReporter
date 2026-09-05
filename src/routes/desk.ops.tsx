@@ -39,6 +39,7 @@ import {
 */
 import { ProviderTimeField } from "@/components/provider-time-field";
 import { editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
+import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -428,12 +429,94 @@ function WritingModels() {
             <ProviderTimeField row={row} onNote={setNote} />
           </div>
         ))}
+      <LocalModelCatalogTable onNote={setNote} />
       <p className="mt-4 max-w-2xl text-sm text-muted">
         These are the command-line tools TownReporter drafts with. Being signed
         in to claude.ai in your browser or the Claude desktop app is a separate
         login and does not count here.
       </p>
     </section>
+  );
+}
+
+/**
+ * Every local model this machine can currently see, one row per model,
+ * grouped by server -- the full catalog `local-models.ts` discovers,
+ * which the pickers only ever show a slice of. "Default" marks the model
+ * Automatic-equivalent resolution would pick when no newsroom has chosen one
+ * yet (see `pickDefault` in that module).
+ */
+function LocalModelCatalogTable({ onNote }: { onNote: (text: string) => void }) {
+  const qc = useQueryClient();
+  const catalog = useQuery({ queryKey: ["local-model-catalog"], queryFn: () => localModelCatalog() });
+  const refresh = useMutation({
+    mutationFn: () => refreshLocalModelCatalog(),
+    onSuccess: (data) => {
+      qc.setQueryData(["local-model-catalog"], data);
+      onNote("Local model list refreshed.");
+    },
+  });
+  if (catalog.isPending) return null;
+  const servers = catalog.data?.servers ?? [];
+  const def = catalog.data?.defaultModel;
+  if (servers.length === 0) return null;
+  return (
+    <div className="mt-3 border border-rule p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="font-display text-lg font-semibold">Local servers found on this machine</h3>
+        <InkButton tone="quiet" small onClick={() => refresh.mutate()} disabled={refresh.isPending}>
+          {refresh.isPending ? "Checking…" : "Refresh"}
+        </InkButton>
+      </div>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-rule">
+              <th className="py-1 pr-3">Server</th>
+              <th className="py-1 pr-3">Model</th>
+              <th className="py-1 pr-3">Loaded</th>
+              <th className="py-1 pr-3">Thinking</th>
+              <th className="py-1 pr-3">Default</th>
+            </tr>
+          </thead>
+          <tbody>
+            {servers.map((server) =>
+              server.reachable ? (
+                server.models.length === 0 ? (
+                  <tr key={server.baseUrl} className="border-b border-rule/40">
+                    <td className="py-1 pr-3">{server.baseUrl}</td>
+                    <td className="py-1 pr-3 text-muted" colSpan={4}>
+                      No chat models found.
+                    </td>
+                  </tr>
+                ) : (
+                  server.models.map((model) => (
+                    <tr key={`${server.baseUrl}-${model.id}`} className="border-b border-rule/40">
+                      <td className="py-1 pr-3">{server.baseUrl}</td>
+                      <td className="py-1 pr-3">{model.id}</td>
+                      <td className="py-1 pr-3">
+                        {model.loaded === null ? "unknown" : model.loaded ? "yes" : "no"}
+                      </td>
+                      <td className="py-1 pr-3">{model.thinking ? "yes (off by default)" : "no"}</td>
+                      <td className="py-1 pr-3">
+                        {def && def.baseUrl === server.baseUrl && def.id === model.id ? "★" : ""}
+                      </td>
+                    </tr>
+                  ))
+                )
+              ) : (
+                <tr key={server.baseUrl} className="border-b border-rule/40">
+                  <td className="py-1 pr-3">{server.baseUrl}</td>
+                  <td className="py-1 pr-3 text-rust" colSpan={4}>
+                    Configured but unreachable.
+                  </td>
+                </tr>
+              ),
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

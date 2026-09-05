@@ -1194,7 +1194,11 @@ export async function reportAndDraft(
       if (timeLeft() < 5_000) {
         return { ok: false, error: "The draft ran out of time before this step." };
       }
-      return grokChat(system, user, maxTokens, { timeoutMs: ms, choice: effectiveModelChoice });
+      return grokChat(system, user, maxTokens, {
+        timeoutMs: ms,
+        choice: effectiveModelChoice,
+        localModel: opts.providerOverrides?.["local-model"]?.localModel,
+      });
     });
   const chat: ReportChat = (system, user, maxTokens) =>
     providerChat(system, user, maxTokens, effectiveModelChoice);

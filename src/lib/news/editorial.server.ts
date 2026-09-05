@@ -165,6 +165,16 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
       const voice = await readVoiceTextForLocalModel();
       if (!voice.ok) return voice;
       const { grokChat } = await import("./ai");
+      // Same per-newsroom "which local server/model" pick every other
+      // surface honours (Story, Scan, Dark Desk) -- see
+      // ./provider-settings.ts's `resolveLocalModelChoice`. Failure here
+      // (no database, discovery unreachable) falls back to the env-only
+      // resolution `localGateway()` already does, exactly as before this
+      // wiring existed.
+      const localModel = await import("./provider-settings.ts")
+        .then((m) => m.resolveLocalModelChoice(editorialInput.newsroomId))
+        .then((r) => r.override)
+        .catch(() => undefined);
       return grokChat(
         voice.text,
         buildWritingPack({
@@ -175,7 +185,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
           research: "",
         }),
         4_000,
-        { timeoutMs: editorialTimeoutMs(), choice: "local-model" },
+        { timeoutMs: editorialTimeoutMs(), choice: "local-model", localModel },
       );
     },
     fileEditorial,
