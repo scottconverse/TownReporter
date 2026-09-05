@@ -1,5 +1,5 @@
 # TownReporter — TODO (canonical, in-repo)
-_Kept current by whichever Claude session is working. Last updated: 2026-09-05 (0.6.17 live). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
+_Kept current by whichever Claude session is working. Last updated: 2026-09-05 (0.6.17 live; #2,#3 done; A,B added). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked on the owner
 
@@ -9,8 +9,8 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked 
 - (nothing in flight)
 
 ## Open queue (bug fixes first — owner chose to skip the redesign for now)
-0. [ ] **Prove reddit actually captures on live 0.6.17** — a real thread fetch should return content, not "blocked" (it 429d in independent review before the pacing fix).
-1. [ ] **`source_monitors` newsroom-scoping** — still pinned to `DEFAULT_NEWSROOM_ID` (honest STOP from 0.6.11). Do this BEFORE exposing manual watch controls. Touches `investigate.ts` (`watchSource`/`maybeWatch`/`runDueMonitors`) + `monitors-cron.ts`.
+A. [ ] **Interrupted-draft UI contradiction** — when the app restarts under a running draft, the story page shows "Drafting…" + "pulling the draft in" AND "stopped without finishing — click Draft again" at once. The job is actually reclaimed and re-run after 120s (STALE_RUNNING_SECONDS). Show ONE honest state: "App restarted mid-draft — recovering automatically (~2 min)"; don't show a disabled Drafting… button beside a click-again message.
+B. [ ] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app under running desk_jobs. Add a guard: refuse (or wait/drain with a clear message) when a draft/dark job is running; and a startup sweep that marks orphaned running jobs so the UI resets cleanly. Operator rule: never promote while the editor is active without asking.
 2. [ ] **Manual "watch this page" for Dark Desk** — wire the existing `watchSource` to an editor button so an editor can put a page on the investigative monitor list by hand (today only the dig adds monitors). Do after #1. Must have clear UX feedback (owner rule).
 3. [ ] **Legal removal** — one-click legal takedown for a published story: immediate purge (skip the 30-day trash), audit trail (who/when/why), and flag which on-disk DB backups still contain the item so an operator can complete the scrub. Context: normal delete keeps a restorable copy 30 days AND the story lingers in every backup taken while it existed.
 4. [ ] **Finish "civic → non-profit" in source** — `src/routes/about.tsx` still says "a local civic newsroom"; add a seed migration so fresh installs get the non-profit welcome-article text (prod was edited directly). Rides the next release.
@@ -31,10 +31,12 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked 
 - [x] 0.6.16 — Dark Desk actions confirm clearly (Send-to-queue links to the lead; feedback on every action).
 - [x] "Non-profit" masthead/deck/welcome copy live.
 - [x] 0.6.17 — Reddit requests strictly serialized + redd.it links resolve (TR-001). LIVE, tagged v0.6.17, 26 stories intact.
+- [x] #2 Proven: live 0.6.17 code fetched a real r/longmont thread — HTTP 200, reddit-rss, 2,621 chars of real post+comments, one paced request.
+- [x] #3 `source_monitors` newsroom-scoped (8741b1d): monitors + their anomalies carry the real newsroom; guard-listed; 5 proof tests.
 
 ## Known caveats (honest state)
 - Dark Desk is proven on ONE real staged topic (receipt); the Reddit leg was the weak spot (TR-001, now fixed pending release). Not a certification of every source type.
-- `source_monitors` is not newsroom-isolated yet (#1).
+- A prior-capture lookup in runDueMonitors still defaults to newsroom 1 (documented, separate gap).
 - Migration 0038 dedupes new writes; historical URL variants aren't fully canonicalized (prod cleanup was a separate operator action).
 - "Live" claims can only be made by the local session after promote + served-bytes check.
 
