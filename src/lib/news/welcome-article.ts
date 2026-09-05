@@ -18,7 +18,7 @@ export const WELCOME_SLUG = "welcome-to-townreporter";
 
 function welcomeBody(cfg: PaperConfig): string {
   const { name, city, state, tagline } = cfg;
-  return `${name} is a small civic newspaper for ${city}, ${state}. It is not a newsletter mill and it is not an autonomous news robot.
+  return `${name} is a small non-profit newspaper for ${city}, ${state}. It is not a newsletter mill and it is not an autonomous news robot.
 
 The public site is the paper: headlines, recaps, corrections, and a permanent record of what we chose to print. Behind it sits a desk. An editor-in-chief signs in, points its writing model at official sources, reviews every draft, and hits publish. Nothing on this masthead goes live because a model felt confident.
 
@@ -41,7 +41,7 @@ This first item is the paper introducing itself. The next items will be reported
  */
 export async function writeWelcomeArticle(newsroomId: number, cfg: PaperConfig): Promise<void> {
   const sql = await getSql();
-  const headline = `A civic paper for ${cfg.city}, ${cfg.state}, edited by a human`;
+  const headline = `A non-profit paper for ${cfg.city}, ${cfg.state}, edited by a human`;
   const dek = `${cfg.name} watches official records, drafts under wire-service rules, and publishes only what an editor signs.`;
   const body = welcomeBody(cfg);
 

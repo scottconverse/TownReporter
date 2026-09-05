@@ -197,8 +197,8 @@ describe("release-walkthrough Blocker fix: before anyone has claimed the desk or
 
     // The migration-seeded article (migrations/0002_newsroom.sql, slug
     // welcome-to-townreporter) must not be publicly readable pre-setup.
-    assert.doesNotMatch(preSetupBody, /A civic paper for Longmont, edited by a human/);
-    assert.doesNotMatch(preSetupBody, /TownReporter is a small civic newspaper for Longmont/);
+    assert.doesNotMatch(preSetupBody, /A non-profit paper for Longmont, edited by a human/);
+    assert.doesNotMatch(preSetupBody, /TownReporter is a small non-profit newspaper for Longmont/);
 
     // It also does not claim to be a real, generic town's paper -- an
     // honest "not set up" state is what the release walkthrough asked for.

@@ -28,7 +28,7 @@ function About() {
       </p>
       <div className="stagger-in mt-6 max-w-2xl space-y-4 text-lg leading-7 text-ink-2">
         <p>
-          {PAPER.name} is a local civic newsroom and investigative record system
+          {PAPER.name} is a local non-profit newsroom and investigative record system
           for {PAPER.location}. The public record is only the beginning.
         </p>
         <p>
