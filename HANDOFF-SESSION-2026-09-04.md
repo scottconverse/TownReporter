@@ -63,7 +63,7 @@ If you are a remote session working **only from this GitHub repo** (no access to
 - **0.6.12** — stale sign-in cancel can't taskkill an unowned PID; CI coverage for Scan & Sources.
 - **0.6.13** — audit-fix + outage-hardening release (Opinion-local Blocker, cloud guard, test/ops no longer default to prod, public-page fallback, promote verifies content).
 - **0.6.14** — **Stats tab** (editor-only): anonymous site + per-story view counts via a fail-safe beacon (`/api/view`, page render does zero stats work).
-- **0.6.15** — **Dark Desk plumbing fix** (see §6). LIVE (commit 3b21bcc). Live pile purged of 247 poisoned/zombie rows.
+- **0.6.15** — **Dark Desk plumbing fix** (see §6). LIVE (commit 3b21bcc). Live pile had 247 poisoned/zombie rows retired (operator receipt: `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md`).
 - **0.6.16** — LIVE (86b542f): Dark Desk actions confirm clearly (Send-to-queue links to the lead; visible feedback on every action). CI 14/14, promoted + verified.
 - Also live (via prod DB edits, and in source for the next release): masthead deck/banner + welcome article now say **"non-profit"**. About-page "civic→non-profit" is source-pending.
 
@@ -75,21 +75,21 @@ If you are a remote session working **only from this GitHub repo** (no access to
 - **F2** real article extraction (`@mozilla/readability`+`linkedom`) — captures the article, not the nav menu.
 - **F3** filter tool-refusal/self-referential junk from ALL model outputs (with a false-positive guard).
 - **F4** dedupe leads by canonical URL + cap zombie dead-ends (migrations 0038/0039).
-- **F5** fetch reddit via `.rss`/browser-UA with 8s pacing. **KNOWN FOLLOW-UP: verify F5 actually routes** — in the proof dig a direct reddit fetch still showed "blocked"; may not be wired for the generic fetch path.
+- **F5** fetch reddit via `.rss`/browser-UA with 8s pacing. Routing IS wired (independently confirmed: `investigate` → `ingestDocument` → `ingestRedditIfNeeded` → `fetchRedditDocument` → thread `.rss`). **KNOWN OPEN DEFECT — TR-001 (Major):** the shared pacer is NOT concurrency-safe (`src/lib/news/reddit.server.ts` ~45-49) — two waiters wake together and fire in parallel, breaking the ≥8s/never-parallel rule; a live thread fetch returned HTTP 429 in independent verification. Also `redd.it` short links aren't resolved by the old.reddit fallback. See RECEIPTS file for the reproduction. **Fix this first.**
 - **F6** honest page (readable-vs-blocked counts, blocked-dig banner, evidence-graded findings, exclude failed captures from synthesis).
 - **F7** retired 247 poisoned/zombie prod rows (status→exhausted, reversible).
-- **Proof:** a staged dig on the budget topic captured the real 2027 Budget PDF ("$547.5M, 5.32%...") with deduped real leads and ZERO junk. **It works.**
+- **Proof (qualified):** a staged dig on the budget topic captured the real 2027 Budget PDF ("$547.5M, 5.32%...") with deduped real leads and zero junk — recorded as an operator receipt in `RECEIPTS-2026-09-04.md` (not repo-reproducible). This proves the pipeline on one real topic on a staged copy; the Reddit leg was NOT proven (it showed "blocked" there and 429'd in independent review). Independent verification (2026-09-04) confirmed main is CI-green and 0.6.16 is served, but rated the "fully fixed" wording as overstated — treat Dark Desk as "core dig works; Reddit pacing has an open Major defect."
 **"Do it right" pass (PARKED, Scott's call, needs testing first):** grant the dig a CURATED, SAFE tool set (guarded web search/fetch with SSRF + domain limits + cost caps — like his civic-scanner) so it investigates live; and restore his fuller doctrine (two-stage Black Desk→Dark Signal verification, mandatory adversarial gate, self-referential Gate 4, search minimums) — ONLY after testing whether the 6-month-old prompts still hold up. His originals: repos **civic-scanner** (mature Claude Code skill), **civic-newsroom**, **civic-transparency-toolkit**, **CivicNewspaper**.
 
-## 7. Open queue (not started)
-- **Topics / sections** — real newsroom sections beyond city-hall (business, etc.). Needs Scott's section list. (Phase 8)
+## 7. Open queue (priority order, per the 2026-09-04 independent verification)
+1. **TR-001 — fix the Reddit pacing concurrency defect** (§6, RECEIPTS). Serialize the request path with one shared queue/mutex, reserve the slot before awaiting, add a 3-concurrent-caller regression (strictly ≥8000 ms apart, max 1 in flight). Also resolve `redd.it` short links. Repo-only task; CI-verifiable.
+2. **`source_monitors` newsroom-scoping** — still pinned to DEFAULT_NEWSROOM_ID (the honest STOP from 0.6.11). Do this BEFORE exposing manual watch controls.
+3. **Manual "watch this page" for Dark Desk** — wire the existing `watchSource` to an editor button (after #2).
+4. **Legal removal** — one-click legal takedown (immediate purge + audit trail + flag which on-disk backups still hold the item). Normal delete keeps a 30-day restorable copy AND stays in backups.
+5. **About-page "civic→non-profit"** + a welcome-article seed migration (source; ride a release).
+6. **Topics / sections** — expand beyond the current civic topic list (business, etc.). Needs Scott's section list. (Phase 8)
+7. **The Dark Desk "do it right" pass** (§6) — parked; needs testing of the old prompts first.
 - **Redesign** — on hold, Scott's decision.
-- **Legal removal** — one-click legal takedown (immediate purge + audit trail + flag which on-disk backups still hold the item). Normal delete keeps a 30-day restorable copy AND stays in backups.
-- **Manual "watch this page" for Dark Desk** — wire the existing `watchSource` to an editor button; bundle with newsroom-scoping `source_monitors`.
-- **`source_monitors` newsroom-scoping** — the honest STOP from 0.6.11.
-- **Verify F5 reddit routing** (above).
-- **About-page "civic→non-profit"** + a welcome-article seed migration (source; ride a release).
-- **The Dark Desk "do it right" pass** (§6).
 
 ## 8. Key files
 - Dark Desk: `src/lib/news/dark-prompt.ts`, `dark-brief.ts`, `dark.ts`, `investigate.ts`, `search-web.ts`, `article-extract.ts`, `ingest.ts`, `html-text.ts`, `reddit.ts`/`reddit.server.ts`; route `src/routes/desk.dark.tsx`.
@@ -97,9 +97,9 @@ If you are a remote session working **only from this GitHub repo** (no access to
 - Paper identity: `src/lib/paper.ts` (PAPER defaults), `paper-context.tsx`, `src/lib/news/paper-settings.ts`; root loader `src/routes/__root.tsx`.
 - Stats: `src/lib/news/views.ts`, route `src/routes/api/view.ts`, `src/routes/desk.stats.tsx`.
 - Ops: `townreporter-web/ops/promote.ps1`, `townreporter-dev/ops/stage.ps1`, `watchdog.ps1`, `start-townreporter.ps1`, `cron-tick.ps1`.
-- Saved reviews: `artifacts/dark-desk-review-2026-09-03/`, `artifacts/audit-lite-2026-09-03/`, `artifacts/gate-townreporter-2026-09-02/`.
+- Saved reviews: `artifacts/dark-desk-review-2026-09-03/` (incl. `RECEIPTS-2026-09-04.md` — the operator receipts for the staged-dig proof, the 247-row cleanup, and the promotes), `artifacts/audit-lite-2026-09-03/`, `artifacts/gate-townreporter-2026-09-02/`.
 
 ## 9. Immediate next steps
-1. **Dark Desk fix is fully shipped + live (0.6.16, verified stable).** Nothing pending there except the F5 reddit-routing verify (§6/§7).
-2. Then pick the next queue item with Scott (topics vs legal-removal vs manual-watch). Redesign stays on hold.
+1. **Dark Desk core dig is shipped + live (0.6.16; CI 14/14; served version verified).** One open Major defect remains: **TR-001 Reddit pacing concurrency** (§6/§7 #1) — fix that first. Claims are qualified per the independent verification; receipts are in the RECEIPTS file.
+2. Then work §7 in order (monitor scoping → manual-watch → legal removal …), confirming each with Scott. Redesign stays on hold.
 3. GitHub issues filed with Anthropic this session (context, not action): Fable delegation, cross-session messaging, sticky Fable→Opus downgrade.
