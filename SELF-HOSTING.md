@@ -291,6 +291,13 @@ screens can be walked before anything is promoted. See `docs/staging.md`.
    It leaves the shared Postgres cluster running. Its promotion marker also
    tells the watchdog to stand down; it does not build in the development
    checkout on your behalf.
+   Before it stops the server, it also refuses to promote while an editor has
+   a desk job (a draft, a scan, a Dark Desk round, an Opinion piece) running
+   or queued -- restarting under one orphans it, and while the 120-second
+   stale-reclaim always recovers it automatically, there is no reason to make
+   an editor watch that happen. It prints the open job(s) and stops. Pass
+   `-WaitForJobs` to have it poll every 15 seconds, up to 15 minutes, for them
+   to clear on their own, or `-Force` to proceed anyway with a loud warning.
 5. Require the local page, public page, a script named by the served HTML, and
    the published-story count to pass the script's checks. Verify the served
    version matches the approved release. A homepage 200 alone is not proof.

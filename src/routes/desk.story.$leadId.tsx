@@ -13,7 +13,12 @@ import {
   parseNotes,
   type ReportingNotes,
 } from "@/lib/news/notes";
-import { editorDraftError, draftHasLanded, stalledRunCopy } from "@/lib/news/desk-copy";
+import {
+  editorDraftError,
+  draftHasLanded,
+  resolveDraftJobState,
+  recoveringDraftCopy,
+} from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { ModelPicker } from "@/components/model-picker";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
@@ -152,20 +157,19 @@ function StoryPage() {
 
   /*
     A job that looks open (no failure, no landed draft) but whose desk_jobs
-    heartbeat has gone cold -- most likely the app restarted mid-draft. The
-    "failed" effect above cannot catch this: the row was never marked
-    failed, it just stopped being touched. Without this, the button stays
-    disabled and the page waits on a click that already happened and a
-    process that is gone. `data.stalled` is computed server-side in
-    `getLead` using the same heartbeat `executeJob` keeps fresh for a live
-    run, so a genuinely slow draft never trips this.
+    heartbeat has gone cold -- most likely the app restarted mid-draft --
+    used to be handled by a `useEffect` here that latched a "stopped, click
+    Draft with AI again" message into local state. That message could go
+    stale: the next poll would find the reclaim drainer had already re-run
+    the same job (fresh heartbeat, still `running`), the effect below would
+    re-arm `waitingSince`, and the leftover message never got cleared --
+    showing a disabled "Drafting…" button, the pending-notice line, AND the
+    stale "click again" notice all at once (the 2026-09-02 incident).
+    `resolveDraftJobState` (./desk-copy.ts), used directly in the JSX below,
+    replaces that: it derives "drafting" vs "recovering" fresh from the job
+    row on every render, so there is nothing left over to contradict a later
+    poll.
   */
-  useEffect(() => {
-    if (!data?.stalled) return;
-    setWaitingSince(null);
-    setSlowWait(false);
-    setMsg(stalledRunCopy("draft"));
-  }, [data?.stalled]);
 
   useEffect(() => {
     const s = parseNotes(data?.lead.notes_json).scratch ?? "";
@@ -309,6 +313,10 @@ function StoryPage() {
     );
   }
 
+  // The one source of truth for what the Draft-with-AI area shows -- see
+  // resolveDraftJobState in desk-copy.ts for why this replaced three
+  // separately-latched pieces of local state.
+  const jobState = resolveDraftJobState(data.job);
   const sources = parseUrlList(data.lead.source_urls);
   const fromDark =
     Boolean(data.lead.investigation_id) ||
@@ -425,7 +433,13 @@ function StoryPage() {
                     draft.mutate();
                   }}
                 >
-                  {waiting ? "Drafting…" : data.draft?.body ? "Redraft" : "Draft with AI"}
+                  {jobState === "recovering"
+                    ? "Recovering…"
+                    : waiting
+                      ? "Drafting…"
+                      : data.draft?.body
+                        ? "Redraft"
+                        : "Draft with AI"}
                 </InkButton>
               </>
             ) : null}
@@ -493,7 +507,18 @@ function StoryPage() {
               </p>
             ) : null}
           </div>
-          {waiting ? (
+          {/*
+            One message for the whole "a draft job is open" span, chosen by
+            resolveDraftJobState so it can never contradict the button above:
+            "recovering" gets the calm restart notice below, everything else
+            (queued, or running with a live heartbeat) gets the ordinary
+            progress line. The "click dropped" wording is deliberately
+            confined to the genuinely-pending case -- it never renders next to
+            a failure or recovery notice (2026-09-02 incident).
+          */}
+          {waiting && jobState === "recovering" ? (
+            <Notice kind="warn">{recoveringDraftCopy()}</Notice>
+          ) : waiting ? (
             <Busy
               label={
                 slowWait

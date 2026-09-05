@@ -12,6 +12,8 @@
     1. refuses if this checkout has uncommitted work, so nothing is lost
     2. backs the database up, and refuses to continue if the dump looks empty
     3. records what is on the paper now, to compare against afterwards
+    3b. refuses if an editor has a desk job running or queued, unless
+        -WaitForJobs (poll up to 15 min) or -Force (proceed anyway) is passed
     4. stops THIS install's server (not the shared Postgres, not other installs)
     5. fetches and fast-forwards to origin/main
     6. installs dependencies only if the lockfile actually moved
@@ -28,14 +30,33 @@
   That is deliberate: the alternative is a script that can be pointed at the
   live paper by accident from a checkout that is mid-edit.
 
+  Between steps 3 and 4 it also refuses to promote while an editor has a desk
+  job (a draft, a scan, a Dark Desk round, an Opinion piece) running or
+  queued -- see the "3b" section below for why: on 2026-09-02 a promotion
+  restarted the app under a running draft, and the story page showed three
+  contradictory things at once while the stale-reclaim spent about two
+  minutes quietly re-running the orphaned job. The reclaim recovers correctly;
+  this guard is about not creating the situation on purpose when it is easy
+  to just wait a few minutes.
+
   ASCII only: Windows PowerShell 5.1 reads a BOM-less UTF-8 file as ANSI.
 
   Usage:
     powershell -ExecutionPolicy Bypass -File ops\promote.ps1
     powershell -ExecutionPolicy Bypass -File ops\promote.ps1 -WhatIf
+    powershell -ExecutionPolicy Bypass -File ops\promote.ps1 -WaitForJobs
+    powershell -ExecutionPolicy Bypass -File ops\promote.ps1 -Force
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
-param()
+param(
+  # Poll every 15s, up to 15 minutes, for open desk jobs to clear instead of
+  # refusing immediately.
+  [switch]$WaitForJobs,
+  # Proceed even though an editor has a job running or queued. Loud on
+  # purpose: this is the one flag that knowingly recreates the 2026-09-02
+  # situation.
+  [switch]$Force
+)
 
 $ErrorActionPreference = "Stop"
 $ops = $PSScriptRoot
@@ -44,6 +65,36 @@ $app = Split-Path -Parent $ops
 
 function Say($msg) { Write-Host "  $msg" }
 function Die($msg) { Write-Host ""; Write-Host "  STOP. $msg" -ForegroundColor Yellow; Write-Host ""; exit 1 }
+
+<#
+  Every job kind (draft, scan, dark, editorial, brief -- see JobKind in
+  src/lib/news/jobs.ts) lives in the one desk_jobs table, so one query covers
+  all of them. Called after $dbName is set (step 2); reads through the same
+  psql binary and port the rest of this script already uses for $dbName.
+
+  Age is measured from started_at, falling back to created_at for a job that
+  is still queued and has not started -- both are timestamptz, so this stays
+  correct across whatever timezone the server runs in.
+#>
+function Get-OpenDeskJobs {
+  $sql = "select id || '|' || kind || '|' || coalesce(stage, '') || '|' || floor(extract(epoch from (now() - coalesce(started_at, created_at))))::text from desk_jobs where status in ('running', 'queued') order by id"
+  $rows = & "$env:USERPROFILE\scoop\apps\postgresql\current\bin\psql.exe" -p 5433 -U postgres -d $dbName -tAc $sql
+  $jobs = @()
+  foreach ($line in $rows) {
+    $line = "$line".Trim()
+    if (-not $line) { continue }
+    $parts = $line -split '\|', 4
+    if ($parts.Count -lt 4) { continue }
+    $jobs += [pscustomobject]@{ Id = $parts[0]; Kind = $parts[1]; Stage = $parts[2]; AgeSec = [int]$parts[3] }
+  }
+  return , $jobs
+}
+
+function Format-OpenDeskJob($job) {
+  $stage = $job.Stage
+  if (-not $stage) { $stage = "(no stage)" }
+  return "    #$($job.Id)  $($job.Kind)  $stage  -- $($job.AgeSec)s old"
+}
 
 Set-Location $app
 Write-Host ""
@@ -130,6 +181,47 @@ if ($head -ne $target) {
 $before = & "$env:USERPROFILE\scoop\apps\postgresql\current\bin\psql.exe" -p 5433 -U postgres -d $dbName -tAc "select count(*) from articles where status='published'"
 $before = "$before".Trim()
 Say "published stories now: $before"
+
+# --- 3b. refuse to restart the app under a running editor job --------------
+<#
+  On 2026-09-02 an operator promoted while the editor had a draft running.
+  Step 4 below stops the app; that orphaned the running desk_job. The 120s
+  stale-reclaim in src/lib/news/jobs.ts correctly picked it back up and
+  re-ran it to completion about two minutes later -- the recovery worked --
+  but for those two minutes the story page showed contradictory things at
+  once, and there was no reason to put the editor through that at all: the
+  job would have finished in the time it takes to notice it is running.
+
+  This checks BEFORE step 4 stops anything, same reasoning as 2b's
+  fast-forward check above: everything that can fail without consequence
+  must fail before the first destructive step.
+#>
+$openJobs = Get-OpenDeskJobs
+if ($openJobs.Count -gt 0 -and $WaitForJobs) {
+  Say "waiting for $($openJobs.Count) open job(s) to clear (checking every 15s, up to 15 minutes)..."
+  $deadline = (Get-Date).AddMinutes(15)
+  while ($openJobs.Count -gt 0 -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Seconds 15
+    $openJobs = Get-OpenDeskJobs
+    if ($openJobs.Count -gt 0) {
+      Say "  still $($openJobs.Count) open:"
+      foreach ($j in $openJobs) { Say (Format-OpenDeskJob $j) }
+    }
+  }
+  if ($openJobs.Count -eq 0) { Say "clear -- no open jobs." }
+}
+if ($openJobs.Count -gt 0 -and -not $Force) {
+  Say "an editor has $($openJobs.Count) job(s) running:"
+  foreach ($j in $openJobs) { Say (Format-OpenDeskJob $j) }
+  Die "Promoting now would restart the app under them. Wait for them to finish, or re-run with -WaitForJobs to poll until clear (max 15 min), or -Force to proceed anyway."
+}
+if ($openJobs.Count -gt 0 -and $Force) {
+  Write-Host ""
+  Write-Host "  WARNING: proceeding with $($openJobs.Count) job(s) still running (-Force):" -ForegroundColor Yellow
+  foreach ($j in $openJobs) { Write-Host "  $(Format-OpenDeskJob $j)" -ForegroundColor Yellow }
+  Write-Host "  The stale-reclaim will re-run them once the app is back up, about 2 minutes after this restart." -ForegroundColor Yellow
+  Write-Host ""
+}
 
 # --- 4. stop this install ---------------------------------------------------
 <#

@@ -529,6 +529,66 @@ export function stalledRunCopy(kind: "scan" | "dark" | "draft" | "editorial"): s
   }
 }
 
+/**
+ * Mirrors `STALE_RUNNING_SECONDS` in `./jobs.ts`, duplicated rather than
+ * imported: this file is bundled into the browser (the story page imports it
+ * directly), and `./jobs.ts` opens a real database connection at module load,
+ * which cannot ship to a client bundle. `desk-copy.test.ts` asserts the two
+ * numbers agree so they cannot drift apart silently.
+ */
+export const DRAFT_JOB_STALE_AFTER_SECONDS = 120;
+
+export type DraftJobUiState = "idle" | "drafting" | "recovering" | "failed" | "done";
+
+/**
+ * One state per draft job, derived from the job row alone -- nothing sticky,
+ * nothing left over from a previous poll. Fixes the 2026-09-02 incident: a
+ * promote-triggered app restart orphaned a running draft job, and the story
+ * page showed three contradictory things at once (a disabled "Drafting…"
+ * button, an italic "the click dropped" line, and a red "this draft stopped
+ * -- click Draft with AI again" notice) because a `useEffect` had latched
+ * "stalled" into local message state, and a second effect then saw the
+ * reclaimed job come back to life and re-armed "waiting" without ever
+ * clearing that stale message. A job can only be in one of these states;
+ * compute it fresh every render instead of remembering it.
+ *
+ * - "drafting": queued, or running with a fresh heartbeat.
+ * - "recovering": running but the heartbeat has gone cold for longer than
+ *   the reclaim window -- the app most likely restarted mid-draft. The
+ *   drainer in `./jobs.ts` will reclaim and re-run this same job on its own;
+ *   the UI must not suggest clicking again, which would just coalesce onto
+ *   the job that is already being retried.
+ * - "failed": the job ended in error. This is the only state where a retry
+ *   click is the right advice.
+ * - "done": the job completed.
+ * - "idle": no job at all (never drafted, or a lead with no draft job on
+ *   record).
+ */
+export function resolveDraftJobState(
+  job: { status: string; updated_at?: string | null } | null | undefined,
+  nowMs: number = Date.now(),
+): DraftJobUiState {
+  if (!job) return "idle";
+  if (job.status === "completed") return "done";
+  if (job.status === "failed") return "failed";
+  if (job.status === "running" || job.status === "queued") {
+    const updated = Date.parse(job.updated_at ?? "");
+    const stale = Number.isFinite(updated) && nowMs - updated > DRAFT_JOB_STALE_AFTER_SECONDS * 1000;
+    return stale ? "recovering" : "drafting";
+  }
+  return "idle";
+}
+
+/**
+ * The single honest notice for `resolveDraftJobState`'s "recovering" state.
+ * Calm on purpose -- this is automatic recovery working as designed, not a
+ * failure the editor needs to act on. Never "click Draft with AI again" here:
+ * that would just coalesce onto the job the drainer is already re-running.
+ */
+export function recoveringDraftCopy(): string {
+  return "The app restarted while this draft was running. It is recovering automatically -- about 2 minutes. Nothing was lost.";
+}
+
 export function editorFetchError(raw: string | null | undefined, url?: string | null): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();

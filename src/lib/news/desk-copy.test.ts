@@ -41,7 +41,11 @@ import {
   createEditorCopy,
   inviteMessage,
   resurfacedSummarySentence,
+  resolveDraftJobState,
+  recoveringDraftCopy,
+  DRAFT_JOB_STALE_AFTER_SECONDS,
 } from "./desk-copy.ts";
+import { STALE_RUNNING_SECONDS } from "./jobs.ts";
 import { presentWorthItem, rankWorthItems } from "./worth-a-look.ts";
 
 const PDF =
@@ -616,6 +620,71 @@ describe("Worth a Look presentation", () => {
       }),
       true,
     );
+  });
+
+  it("keeps its duplicated stale window in lockstep with jobs.ts", () => {
+    // desk-copy.ts cannot import jobs.ts (it opens a real DB connection at
+    // module load and this file ships to the browser), so the reclaim window
+    // is duplicated here. This is the tripwire if the two ever drift apart.
+    assert.equal(DRAFT_JOB_STALE_AFTER_SECONDS, STALE_RUNNING_SECONDS);
+  });
+
+  it("resolveDraftJobState: fresh-running reads as drafting", () => {
+    assert.equal(
+      resolveDraftJobState({ status: "running", updated_at: new Date().toISOString() }),
+      "drafting",
+    );
+  });
+
+  it("resolveDraftJobState: a queued job also reads as drafting", () => {
+    assert.equal(
+      resolveDraftJobState({ status: "queued", updated_at: new Date().toISOString() }),
+      "drafting",
+    );
+  });
+
+  it("resolveDraftJobState: a cold heartbeat on a running job reads as recovering, never as a failure prompting a re-click", () => {
+    const now = Date.now();
+    const staleUpdatedAt = new Date(now - (STALE_RUNNING_SECONDS + 5) * 1000).toISOString();
+    assert.equal(
+      resolveDraftJobState({ status: "running", updated_at: staleUpdatedAt }, now),
+      "recovering",
+    );
+  });
+
+  it("resolveDraftJobState: a heartbeat just inside the window still reads as drafting", () => {
+    const now = Date.now();
+    const freshUpdatedAt = new Date(now - (STALE_RUNNING_SECONDS - 5) * 1000).toISOString();
+    assert.equal(
+      resolveDraftJobState({ status: "running", updated_at: freshUpdatedAt }, now),
+      "drafting",
+    );
+  });
+
+  it("resolveDraftJobState: a failed job reads as failed (the only state where retry is the right advice)", () => {
+    assert.equal(
+      resolveDraftJobState({ status: "failed", updated_at: new Date().toISOString() }),
+      "failed",
+    );
+  });
+
+  it("resolveDraftJobState: a completed job reads as done", () => {
+    assert.equal(
+      resolveDraftJobState({ status: "completed", updated_at: new Date().toISOString() }),
+      "done",
+    );
+  });
+
+  it("resolveDraftJobState: no job at all reads as idle", () => {
+    assert.equal(resolveDraftJobState(null), "idle");
+    assert.equal(resolveDraftJobState(undefined), "idle");
+  });
+
+  it("recoveringDraftCopy never tells the editor to click Draft with AI again", () => {
+    const copy = recoveringDraftCopy();
+    assert.doesNotMatch(copy, /click draft with ai/i);
+    assert.match(copy, /restart/i);
+    assert.match(copy, /nothing was lost/i);
   });
 
   it("tells a claimed desk the paper is open and create is gone", () => {
