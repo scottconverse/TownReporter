@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.6.18](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.18).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.19](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.19).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old

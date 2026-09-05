@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.18](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.18)** — 5 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.19](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.19)** — 5 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.19** — the desk in dark mode is black on white; local models are found automatically (LM Studio, Ollama) and picked per model in every picker; a claims-of-absence gate stops a story from saying something does not exist until the paper has searched the city's own site and the editor has confirmed; Check r/longmont shows its progress and every scored post.
 - **0.6.18** — bug-fix release: interrupted drafts show one honest "recovering" state; promote refuses to restart under a running job; Dark Desk monitors record the real newsroom; the ≈ PRINTED chip names and links the story it matched; About page and fresh-install welcome say non-profit; subreddit/user/search pages fetch via real .rss feeds.
 - **0.6.17** — Reddit fetching is now strictly one-at-a-time and paced, shared across the tip scan and digs, fixing a concurrency bug that could trigger rate limits; redd.it short links now resolve.
 - **0.6.16** — Dark Desk actions now confirm clearly: "Send to the queue" shows where the lead went and links to it; every action gives visible feedback.

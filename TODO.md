@@ -1,12 +1,12 @@
 # TownReporter — TODO (canonical, in-repo)
-_Kept current by whichever Claude session is working. Last updated: 2026-09-05 (0.6.18 LIVE). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
+_Kept current by whichever Claude session is working. Last updated: 2026-09-05 (0.6.19 bump). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked on the owner
 
 ---
 
 ## In flight
-- (nothing in flight)
+- [~] **0.6.19** — bump done (this commit) → CI → stage on real data → owner's go → promote.
 
 ## Open queue (bug fixes first — owner chose to skip the redesign for now)
 A. [x] **Interrupted-draft UI contradiction** — when the app restarts under a running draft, the story page shows "Drafting…" + "pulling the draft in" AND "stopped without finishing — click Draft again" at once. The job is actually reclaimed and re-run after 120s (STALE_RUNNING_SECONDS). Show ONE honest state: "App restarted mid-draft — recovering automatically (~2 min)"; don't show a disabled Drafting… button beside a click-again message. Done in b0c63a9.
@@ -40,6 +40,7 @@ B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app u
 - [x] Check r/longmont: visible progress + result panel with near misses and File-as-tip (owner report 2026-09-05).
 - [x] Desk dark mode: black/white palette, theme-aware Notice, single specific model error, unconfigured providers disabled in the picker (owner reports 2026-09-05).
 - [x] Local model picker: LM Studio + Ollama discovery, model list in every picker, default = loaded model, thinking off, per-newsroom override (owner request 2026-09-05).
+- [x] Editorial integrity gate: no tool-talk, targeted city-site pulls, site notices, claims-of-absence gate with server-side publish refusal (incident 2026-09-05, commit f80a5ce).
 
 ## Known caveats (honest state)
 - Dark Desk is proven on ONE real staged topic (receipt); the Reddit leg was the weak spot (TR-001, now fixed pending release). Not a certification of every source type.

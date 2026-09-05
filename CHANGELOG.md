@@ -1,6 +1,13 @@
 # Changelog
 
-Current release: **0.6.18**.
+Current release: **0.6.19**.
+
+## 0.6.19 — 2026-09-05
+Four owner-reported problems from one day of real use, all fixed with tests.
+- **Stories can no longer claim something does not exist without looking.** A draft said "no city survey page was obtained" while the city's page was one search away. Now: the writing models are told they have no tools and must never mention searching, fetching, permissions or "unavailable"; the paper searches the city's own site for every document the research memo asks for and puts the top hit in evidence before writing; site banners and alerts on official pages are kept as evidence; and a claims-of-absence gate reads the finished draft — any sentence saying something was not found triggers a city-site search, a one-time redraft if the document turns up, or an honest rewrite ("did not find X among the documents it opened") plus a required editor check on the story page. Publish is refused by the server, not just the button, until every claim is ticked. The incident's exact sentences are regression fixtures.
+- **Local models work out of the box.** TownReporter now finds LM Studio (port 1234) and Ollama (port 11434) on its own machine, lists every model in a second dropdown under "Local model" in every picker (grouped by server, marked "loaded" and "thinking off"), defaults to whatever is loaded, and remembers the choice per newsroom (migration 0041). "Thinking" models such as gemma4 and qwen3 get thinking turned off so the draft comes back as text instead of an empty reply. Config lines `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT` and `TOWNREPORTER_LOCAL_DISCOVERY=0` remain as overrides. A provider that is not set up is disabled in the picker and says so. One specific message replaces the two stacked ones when a model is not configured.
+- **Dark mode is black on white.** The desk's dark palette is now a black background with white text; every colour pair passes WCAG AA in both themes. The Notice box follows the theme automatically (it used to ignore dark mode, which made error text unreadable). Three leftover brown surfaces were fixed with it.
+- **Check r/longmont shows its work.** A visible "Reading r/longmont" panel with an elapsed timer replaces a silent minute, then a result panel lists what was read, every top-scored post with its civic score, the near misses below the line, which feeds answered, and a "File as tip" button for anything the word test missed.
 
 ## 0.6.18 — 2026-09-05
 Bug-fix release. Every item below is live-tested or covered by regression tests.
