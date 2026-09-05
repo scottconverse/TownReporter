@@ -37,6 +37,7 @@ B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app u
 - [x] #4 Queue "≈ PRINTED" chip names + links the story it matched — an editor could only see a hover date before; `nearDuplicate` (src/lib/news/desk-copy.ts) now carries the matched published story's headline on `PrintedDup`, and the Queue row (src/components/desk-leads.tsx) shows "matches: <headline> · published <date>" with the headline as a real link to `/articles/<slug>`, plus the hover title on the chip itself. This commit.
 - [x] #6 — retired the 17 historical duplicate leads on prod (17 → 0, reversible), 2026-09-05.
 - [x] 0.6.18 — bug-fix release (A recovering state, B promote guard, #3 monitors scoping, #4 PRINTED chip, #5 non-profit + 0040, #7 reddit listings via .rss). LIVE 2026-09-05, CI 14/14, staged on real data, promote checks OK, 26 stories intact.
+- [x] Check r/longmont: visible progress + result panel with near misses and File-as-tip (owner report 2026-09-05).
 
 ## Known caveats (honest state)
 - Dark Desk is proven on ONE real staged topic (receipt); the Reddit leg was the weak spot (TR-001, now fixed pending release). Not a certification of every source type.

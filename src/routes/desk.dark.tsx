@@ -1,11 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { Busy, DeskShell, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   continueInvestigation,
   findSomethingToDigInto,
+  fileRedditTip,
   getInvestigation,
   getArtifact,
   listDarkRuns,
@@ -25,6 +26,7 @@ import {
   editorKindLabel,
   editorPauseReason,
   editorStatus,
+  elapsedLabel,
   excerptForEditor,
   headlineFromUrl,
   humanFrontierLabel,
@@ -35,9 +37,15 @@ import {
   plainFinding,
   progressLine,
   recordKindFromUrl,
+  redditFeedLabel,
+  redditFeedStatusLabel,
+  redditPostStateLabel,
+  redditResultHeadline,
   stalledRunCopy,
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
+
+type RedditScanResult = Awaited<ReturnType<typeof scanTipSubreddit>>;
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import {
@@ -75,6 +83,10 @@ function DarkPage() {
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
   const phaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasInvestigating = useRef(false);
+  const [redditResult, setRedditResult] = useState<RedditScanResult | null>(null);
+  const [redditElapsed, setRedditElapsed] = useState(0);
+  const [redditAnnounce, setRedditAnnounce] = useState("");
+  const redditStartRef = useRef<number | null>(null);
 
   useEffect(() => {
     try {
@@ -394,9 +406,13 @@ function DarkPage() {
    */
   const reddit = useMutation({
     mutationFn: () => scanTipSubreddit(),
+    onMutate: () => {
+      setRedditResult(null);
+    },
     onSuccess: (res) => {
       if (!res?.ok) {
         showWorkNotice("Reddit did not answer. Try again in a few minutes.");
+        setRedditAnnounce("Reddit did not answer.");
         return;
       }
       const parts: string[] = [];
@@ -411,12 +427,54 @@ function DarkPage() {
       // A quiet subreddit is a successful read, not a failure — style it as
       // one. Only an actual incomplete/failed read gets the err styling.
       showWorkNotice(parts.join(" "), !res.incomplete);
+      setRedditResult(res);
+      setRedditAnnounce(`Finished reading r/${res.subreddit}. ${redditResultHeadline(res)}.`);
       invalidate();
     },
     onError: (err) => {
-      showWorkNotice(err instanceof Error ? err.message : "Reddit did not answer.");
+      const msg = err instanceof Error ? err.message : "Reddit did not answer.";
+      showWorkNotice(msg);
+      setRedditAnnounce(msg);
     },
   });
+
+  const fileTip = useMutation({
+    mutationFn: (post: { url: string; title: string; excerpt: string }) => fileRedditTip({ data: post }),
+    onSuccess: (res, post) => {
+      if (!res?.ok) return;
+      if (res.filed) {
+        setRedditResult((prev) =>
+          prev
+            ? {
+                ...prev,
+                topScores: prev.topScores.map((p) => (p.url === post.url ? { ...p, state: "filed" as const } : p)),
+              }
+            : prev,
+        );
+        invalidate();
+      }
+    },
+    onError: (err) => {
+      showWorkNotice(err instanceof Error ? err.message : "Could not file that tip.");
+    },
+  });
+
+  // Elapsed time for the "Reading r/longmont" panel. The client cannot see
+  // per-feed progress — one synchronous server call — so this is honest
+  // about what it shows: how long the read has taken, not how far along it
+  // is. Announced at start and end only (redditAnnounce), never per tick.
+  useEffect(() => {
+    if (!reddit.isPending) return;
+    redditStartRef.current = Date.now();
+    setRedditElapsed(0);
+    setRedditAnnounce("Reading r/longmont. Three feeds, paced about a minute.");
+    const id = setInterval(() => {
+      if (redditStartRef.current != null) {
+        setRedditElapsed(Math.floor((Date.now() - redditStartRef.current) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [reddit.isPending]);
 
   const writeBrief = useMutation({
     mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice } }),
@@ -547,7 +605,7 @@ function DarkPage() {
         ) : null}
       </form>
 
-      {notice && noticeAt === "work" && openId == null ? (
+      {notice && noticeAt === "work" && openId == null && !redditResult ? (
         <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
       ) : null}
 
@@ -628,10 +686,35 @@ function DarkPage() {
               {reddit.isPending ? "Reading r/longmont…" : "Check r/longmont"}
             </InkButton>
           </div>
-          <p className="mt-2 text-sm text-muted">
-            Tips from the subreddit arrive here as unverified cards. They are a
-            reason to go looking for the record, never a source to cite.
-          </p>
+          {reddit.isPending ? (
+            <div className="reddit-progress">
+              <p className="worth-t">Reading r/longmont</p>
+              <p className="reddit-sub">
+                Three feeds, read 8 seconds apart so Reddit does not block this paper. About a
+                minute.
+              </p>
+              <div className="busy-rule" aria-hidden />
+              <p className="reddit-elapsed" aria-hidden>
+                {elapsedLabel(redditElapsed)}
+              </p>
+              <p className="sr-only" role="status" aria-live="polite">
+                {redditAnnounce}
+              </p>
+            </div>
+          ) : redditResult ? (
+            <RedditResultPanel
+              result={redditResult}
+              announce={redditAnnounce}
+              onDismiss={() => setRedditResult(null)}
+              onFileTip={(post) => fileTip.mutate(post)}
+              filingUrl={fileTip.isPending ? (fileTip.variables?.url ?? null) : null}
+            />
+          ) : (
+            <p className="mt-2 text-sm text-muted">
+              Tips from the subreddit arrive here as unverified cards. They are a
+              reason to go looking for the record, never a source to cite.
+            </p>
+          )}
         </section>
 
         <section>
@@ -783,6 +866,99 @@ function DeskFileCard({
         </InkButton>
         <InkButton tone="quiet" small disabled={digging || locked} onClick={onPark}>
           Set aside
+        </InkButton>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Result of a "Check r/longmont" read.
+ *
+ * Owner report 2026-09-05: the read takes ~60-70s and used to leave a single
+ * easy-to-miss line as its only trace. This panel is the honest version of
+ * "what actually happened" — every scored post (not only the ones filed),
+ * a per-feed log, and a way to file a near miss by hand.
+ */
+function RedditResultPanel({
+  result,
+  announce,
+  onDismiss,
+  onFileTip,
+  filingUrl,
+}: {
+  result: RedditScanResult;
+  announce: string;
+  onDismiss: () => void;
+  onFileTip: (post: { url: string; title: string; excerpt: string }) => void;
+  filingUrl: string | null;
+}) {
+  return (
+    <div className="reddit-result">
+      <p className="worth-t">Reddit read finished</p>
+      <p className="reddit-headline">{redditResultHeadline(result)}</p>
+      <p className="sr-only" role="status" aria-live="polite">
+        {announce}
+      </p>
+      {result.incomplete ? (
+        <Notice kind="warn" night>
+          {result.reason || "The read stopped early."}
+        </Notice>
+      ) : null}
+      {result.read > 0 && result.civic === 0 ? (
+        <p className="reddit-empty">
+          None of these scored 6 or more on the civic word test. Posts that came close are
+          listed so you can file one by hand.
+        </p>
+      ) : null}
+      {result.topScores.length > 0 ? (
+        <div className="tip-list">
+          {result.topScores.map((p) => {
+            const canFile = p.state !== "filed";
+            const filing = filingUrl === p.url;
+            return (
+              <div key={p.url} className="tip-row">
+                <Score v={p.score} />
+                <a href={p.url} target="_blank" rel="noopener" className="inline-link tip-title">
+                  {p.title}
+                </a>
+                <span className={"chip st-" + p.state}>{redditPostStateLabel(p.state)}</span>
+                {canFile ? (
+                  <InkButton
+                    tone="quiet"
+                    small
+                    disabled={filing}
+                    onClick={() => onFileTip({ url: p.url, title: p.title, excerpt: p.excerpt })}
+                  >
+                    {filing ? "Filing…" : "File as tip"}
+                  </InkButton>
+                ) : (
+                  <span />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      <details className="of-trail">
+        <summary>What was read — {result.log.length} feed{result.log.length === 1 ? "" : "s"}</summary>
+        {result.log.map((entry, i) => {
+          const status = redditFeedStatusLabel(entry);
+          const bad = !entry.ok;
+          return (
+            <p key={i} className="feed-row">
+              <span>{redditFeedLabel(entry.url, result.subreddit)}</span>
+              <span className={bad ? "feed-bad" : undefined}>{status}</span>
+              <span>
+                {entry.posts} post{entry.posts === 1 ? "" : "s"}
+              </span>
+            </p>
+          );
+        })}
+      </details>
+      <div className="np-acts">
+        <InkButton tone="quiet" small onClick={onDismiss}>
+          Dismiss
         </InkButton>
       </div>
     </div>

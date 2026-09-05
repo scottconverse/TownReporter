@@ -44,6 +44,11 @@ import {
   resolveDraftJobState,
   recoveringDraftCopy,
   DRAFT_JOB_STALE_AFTER_SECONDS,
+  redditFeedLabel,
+  redditFeedStatusLabel,
+  redditResultHeadline,
+  elapsedLabel,
+  redditPostStateLabel,
 } from "./desk-copy.ts";
 import { STALE_RUNNING_SECONDS } from "./jobs.ts";
 import { presentWorthItem, rankWorthItems } from "./worth-a-look.ts";
@@ -898,5 +903,78 @@ describe("blockedDigBannerText (Dark Desk F6)", () => {
       dominantReason: "empty",
     });
     assert.match(text, /app-shell/i);
+  });
+});
+
+describe("redditFeedLabel (Check r/longmont result panel)", () => {
+  it("labels the new-posts feed", () => {
+    assert.equal(redditFeedLabel("https://www.reddit.com/r/longmont/new/.rss", "longmont"), "r/longmont · new");
+  });
+
+  it("labels a search feed with the decoded query", () => {
+    const url = "https://www.reddit.com/r/longmont/search.rss?q=city%20council%20OR%20ordinance&restrict_sr=on&sort=new";
+    assert.equal(
+      redditFeedLabel(url, "longmont"),
+      "r/longmont · search: city council OR ordinance",
+    );
+  });
+
+  it("falls back to a plain subreddit label for anything else", () => {
+    assert.equal(redditFeedLabel("not a url", "longmont"), "r/longmont");
+  });
+});
+
+describe("redditFeedStatusLabel (Check r/longmont result panel)", () => {
+  it("reports ok", () => {
+    assert.equal(redditFeedStatusLabel({ ok: true, status: 200 }), "ok");
+  });
+  it("reports an HTTP status on failure", () => {
+    assert.equal(redditFeedStatusLabel({ ok: false, status: 404 }), "HTTP 404");
+  });
+  it("names rate limiting from the note", () => {
+    assert.equal(
+      redditFeedStatusLabel({ ok: false, status: 429, note: "rate limited, backing off" }),
+      "rate limited",
+    );
+  });
+  it("falls back to a network error with no status", () => {
+    assert.equal(redditFeedStatusLabel({ ok: false, status: 0, note: "fetch failed" }), "network error");
+  });
+});
+
+describe("redditResultHeadline (Check r/longmont result panel)", () => {
+  it("always shows read and filed, even at zero", () => {
+    assert.equal(
+      redditResultHeadline({ read: 49, civic: 0, filed: 0, alreadyKnown: 0 }),
+      "Read 49 posts · 0 filed as tips",
+    );
+  });
+  it("adds civic and already-known only when nonzero", () => {
+    assert.equal(
+      redditResultHeadline({ read: 49, civic: 4, filed: 3, alreadyKnown: 1 }),
+      "Read 49 posts · 4 looked civic · 3 filed as tips · 1 already known",
+    );
+  });
+  it("singularizes a single post and a single tip", () => {
+    assert.equal(
+      redditResultHeadline({ read: 1, civic: 0, filed: 1, alreadyKnown: 0 }),
+      "Read 1 post · 1 filed as tip",
+    );
+  });
+});
+
+describe("elapsedLabel", () => {
+  it("formats mm:ss", () => {
+    assert.equal(elapsedLabel(0), "0:00 elapsed");
+    assert.equal(elapsedLabel(42), "0:42 elapsed");
+    assert.equal(elapsedLabel(65), "1:05 elapsed");
+  });
+});
+
+describe("redditPostStateLabel", () => {
+  it("labels each state for the editor", () => {
+    assert.equal(redditPostStateLabel("filed"), "filed");
+    assert.equal(redditPostStateLabel("already-known"), "already known");
+    assert.equal(redditPostStateLabel("below-line"), "below the line");
   });
 });

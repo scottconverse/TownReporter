@@ -862,6 +862,28 @@
 .desk-ltr .of-trail summary {font-size:calc(0.875rem * var(--ts));font-weight:600;cursor:pointer;color:var(--fg2)}
 .desk-ltr .of-trail.runs {margin-top:20px}
 .desk-ltr .run-row {margin-top:8px}
+/* Check r/longmont: visible in-progress + result panel (owner report 2026-09-05). */
+.desk-ltr .reddit-progress,
+.desk-ltr .reddit-result {margin-top:14px;padding:12px 14px;border:1px solid var(--line);background:var(--bg2)}
+.desk-ltr .reddit-progress .worth-t,
+.desk-ltr .reddit-result .worth-t {margin-top:0}
+.desk-ltr .reddit-sub {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:4px 0 0}
+.desk-ltr .reddit-elapsed {font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--mut);margin:9px 0 0}
+.desk-ltr .reddit-headline {font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--fg);font-weight:600;margin:0}
+.desk-ltr .reddit-empty {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:6px 0 0}
+.desk-ltr .tip-list {margin-top:12px;border-top:1px solid var(--line)}
+.desk-ltr .tip-row {display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.desk-ltr .tip-title {font-size:calc(0.875rem * var(--ts));min-width:0}
+.desk-ltr .chip.st-filed {border-color:var(--fg);color:var(--fg)}
+.desk-ltr .chip.st-already-known {border-style:dashed;border-color:var(--adeep);color:var(--adeep)}
+.desk-ltr .chip.st-below-line {color:var(--mut)}
+.desk-ltr .feed-row {display:flex;flex-wrap:wrap;column-gap:10px;row-gap:2px;align-items:baseline;padding:5px 0;font-size:calc(0.875rem * var(--ts));border-bottom:1px solid var(--line)}
+.desk-ltr .feed-row:last-child {border-bottom:none}
+.desk-ltr .feed-row .feed-bad {color:var(--warn)}
+@media (max-width: 720px) {
+  .desk-ltr .tip-row {grid-template-columns:auto 1fr auto;}
+  .desk-ltr .tip-row .btn.small {grid-column:1 / -1;justify-self:start}
+}
 .desk-ltr .paper-wrap {max-width:1000px;margin:0 auto;padding:14px 28px 60px}
 /* phase 3 — paper refresh, not yet mounted */
 .desk-ltr .ptop {display:flex;justify-content:space-between;align-items:center;gap:16px;font-size:calc(0.8125rem * var(--ts));text-transform:uppercase;letter-spacing:.14em;color:var(--mut);border-bottom:1px solid var(--line);padding-bottom:6px}

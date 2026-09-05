@@ -1019,3 +1019,73 @@ Return JSON:
 topic must be exactly one of: council, budget, housing, utilities, schools, planning, infrastructure, elections.
 File civic leads when the text contains a meeting, vote, budget figure, contract, deadline, housing/utility/school action, or missing record that is not in Already covered. Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is 0-20. proposed_sources may be any public URL discovered in the text. Max 12 leads.`;
 }
+
+/**
+ * Human label for one reddit feed URL, for the "What was read" list on the
+ * Check r/longmont result panel. Derived from the URL rather than passed
+ * through separately, so the label can never drift from what was actually
+ * fetched.
+ */
+export function redditFeedLabel(url: string, sub: string): string {
+  try {
+    const u = new URL(url);
+    if (/\/search\.rss$/.test(u.pathname)) {
+      const q = (u.searchParams.get("q") ?? "").replace(/\+/g, " ");
+      let decoded = q;
+      try {
+        decoded = decodeURIComponent(q);
+      } catch {
+        // leave as-is on a malformed escape
+      }
+      return `r/${sub} · search: ${decoded}`;
+    }
+    if (/\/new\/\.rss$/.test(u.pathname)) return `r/${sub} · new`;
+    return `r/${sub}`;
+  } catch {
+    return `r/${sub}`;
+  }
+}
+
+/** Status text for one feed's read attempt, for the "What was read" list. */
+export function redditFeedStatusLabel(entry: { ok: boolean; status: number; note?: string }): string {
+  if (entry.ok) return "ok";
+  if (entry.note && /rate limit/i.test(entry.note)) return "rate limited";
+  if (entry.status > 0) return `HTTP ${entry.status}`;
+  return "network error";
+}
+
+/**
+ * The headline line at the top of the Check r/longmont result panel.
+ *
+ * Read and filed always show, even at zero — an editor who saw "read 49
+ * posts" and nothing else needs the fact that 0 were filed, not silence.
+ * Civic and already-known only show when they are nonzero: a quiet run has
+ * nothing to say about either.
+ */
+export function redditResultHeadline(res: {
+  read: number;
+  civic: number;
+  filed: number;
+  alreadyKnown: number;
+}): string {
+  const parts = [`Read ${res.read} post${res.read === 1 ? "" : "s"}`];
+  if (res.civic) parts.push(`${res.civic} looked civic`);
+  parts.push(`${res.filed} filed as tip${res.filed === 1 ? "" : "s"}`);
+  if (res.alreadyKnown) parts.push(`${res.alreadyKnown} already known`);
+  return parts.join(" · ");
+}
+
+/** mm:ss elapsed, for the live timer while a reddit read is in progress. */
+export function elapsedLabel(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(safe / 60);
+  const s = safe % 60;
+  return `${m}:${String(s).padStart(2, "0")} elapsed`;
+}
+
+/** Chip text for one scored reddit post's state, on the result panel. */
+export function redditPostStateLabel(state: "filed" | "already-known" | "below-line"): string {
+  if (state === "filed") return "filed";
+  if (state === "already-known") return "already known";
+  return "below the line";
+}

@@ -1583,7 +1583,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
     await ensureDarkSchema();
     await assertRate(context.userId, "reddit", owned(context));
     const { sweepRedditFeeds } = await import("./reddit.server.ts");
-    const { subredditNewFeed, subredditSearchFeed, pickCivicPosts, redditAnomaly, civicScore } =
+    const { subredditNewFeed, subredditSearchFeed, pickCivicPosts, redditAnomaly, classifyRedditPosts } =
       await import("./reddit.ts");
     const sub = TIP_SUBREDDIT;
 
@@ -1596,7 +1596,8 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
 
     const sql = await getSql();
     let filed = 0;
-    const already: string[] = [];
+    const alreadyKnownUrls = new Set<string>();
+    const filedUrls = new Set<string>();
     for (const post of picked) {
       const seen = await sql<{ id: number }>`
         select id from anomalies
@@ -1604,7 +1605,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
         limit 1
       `;
       if (seen[0]) {
-        already.push(post.title);
+        alreadyKnownUrls.add(post.url);
         continue;
       }
       const a = redditAnomaly(post, sub);
@@ -1613,6 +1614,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
         values (${context.userId}, ${owned(context)}, ${a.kind}, ${a.summary}, ${a.url}, ${a.details})
       `;
       filed += 1;
+      filedUrls.add(post.url);
     }
 
     await audit(context.userId, "reddit", `r/${sub} read ${sweep.posts.length} filed ${filed}`, owned(context));
@@ -1623,16 +1625,63 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       read: sweep.posts.length,
       civic: picked.length,
       filed,
-      alreadyKnown: already.length,
+      alreadyKnown: alreadyKnownUrls.size,
       incomplete: sweep.incomplete,
       reason: sweep.reason ?? "",
       log: sweep.log,
-      // Shown to the editor so a thin result is explainable rather than mysterious.
-      topScores: picked
-        .slice(0, 5)
-        .map((p) => ({ title: p.title, score: civicScore(p), url: p.url })),
+      // Every post read, not only the ones filed, so a near miss stays
+      // visible to the editor instead of vanishing along with the sweep.
+      topScores: classifyRedditPosts(sweep.posts, alreadyKnownUrls, filedUrls)
+        .slice(0, 8)
+        .map((p) => ({ title: p.title, score: p.score, url: p.url, excerpt: p.excerpt, state: p.state })),
     };
   });
+
+/**
+ * File one reddit post as a tip by hand.
+ *
+ * Used from the "File as tip" action next to a post the automatic sweep
+ * scored below the civic line, or scored above it but had already been seen
+ * (`scanTipSubreddit`'s own de-dup). Same anomaly shape, same de-dup on the
+ * permalink, so a hand-filed tip is indistinguishable on the desk from one
+ * the sweep filed itself.
+ *
+ * Pulled out as a plain function (the queueInvestigationFor/queueInvestigation
+ * pattern this file already uses) so it is testable against PGLite without
+ * standing up a request context.
+ */
+export async function fileRedditTipFor(
+  userId: string,
+  newsroomId: number,
+  data: { url: string; title: string; excerpt?: string },
+): Promise<{ ok: true; filed: boolean }> {
+  await ensureDarkSchema();
+  const sql = await getSql();
+  const seen = await sql<{ id: number }>`
+    select id from anomalies
+    where newsroom_id = ${newsroomId} and url = ${data.url}
+    limit 1
+  `;
+  if (seen[0]) {
+    return { ok: true, filed: false };
+  }
+  const { redditAnomaly } = await import("./reddit.ts");
+  const a = redditAnomaly(
+    { title: data.title, url: data.url, updated: "", author: "", excerpt: data.excerpt ?? "" },
+    TIP_SUBREDDIT,
+  );
+  await sql`
+    insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
+    values (${userId}, ${newsroomId}, ${a.kind}, ${a.summary}, ${a.url}, ${a.details})
+  `;
+  await audit(userId, "reddit-manual", `filed by hand: ${data.title}`, newsroomId);
+  return { ok: true, filed: true };
+}
+
+export const fileRedditTip = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((data: { url: string; title: string; excerpt?: string }) => data)
+  .handler(async ({ context, data }) => fileRedditTipFor(context.userId, owned(context), data));
 
 /**
  * The dials, as stored for this newsroom.

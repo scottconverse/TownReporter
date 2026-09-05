@@ -230,6 +230,45 @@ export function civicScore(post: Pick<RedditPost, "title" | "excerpt">): number 
   return Math.max(0, Math.min(20, score));
 }
 
+export type RedditPostState = "filed" | "already-known" | "below-line";
+
+export type ScoredRedditPost = {
+  title: string;
+  score: number;
+  url: string;
+  excerpt: string;
+  state: RedditPostState;
+};
+
+/**
+ * Score every post a sweep read — not only the ones that cleared the civic
+ * threshold — so a near miss stays visible to the editor instead of vanishing
+ * along with the rest of the sweep.
+ *
+ * `filedUrls` and `alreadyKnownUrls` classify what happened to a post that
+ * did clear the threshold: filed this run, or already sitting on the desk
+ * from an earlier read. Anything under the threshold is "below-line"
+ * regardless of the two sets — a post can only be filed or already-known
+ * once it was picked in the first place.
+ */
+export function classifyRedditPosts(
+  posts: RedditPost[],
+  alreadyKnownUrls: ReadonlySet<string> | readonly string[],
+  filedUrls: ReadonlySet<string> | readonly string[],
+  minScore = 6,
+): ScoredRedditPost[] {
+  const known = alreadyKnownUrls instanceof Set ? alreadyKnownUrls : new Set(alreadyKnownUrls);
+  const filed = filedUrls instanceof Set ? filedUrls : new Set(filedUrls);
+  return posts
+    .map((p) => {
+      const score = civicScore(p);
+      const state: RedditPostState =
+        score < minScore ? "below-line" : filed.has(p.url) ? "filed" : known.has(p.url) ? "already-known" : "below-line";
+      return { title: p.title, score, url: p.url, excerpt: p.excerpt, state };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
 /** Posts worth an editor's attention, best first. */
 export function pickCivicPosts(posts: RedditPost[], minScore = 6, limit = 8): RedditPost[] {
   return posts
