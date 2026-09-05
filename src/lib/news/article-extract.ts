@@ -126,3 +126,75 @@ export function extractArticleText(html: string, url?: string): ExtractedArticle
 
   return { text: "", title: readabilityTitle, method: "none" };
 }
+
+/*
+  Site notices: the banner readability throws away.
+
+  The 2026-09-05 incident turned on this. The city's home page and its /news/
+  page BOTH carried "Take the 2026 Community Satisfaction Survey... Open
+  through September 7" in a banner, and both pages were captured. Readability
+  strips banners, alerts and nav by design -- that is what this module is for
+  -- so the single strongest piece of evidence in the whole capture never
+  reached the model, and the story went on to say no such notice existed.
+
+  So banners are kept, separately and clearly labelled, instead of being
+  silently discarded. They are never merged into the article text: a banner is
+  site furniture, and passing it off as article body is the bug this module
+  was written to fix. Callers decide what to do with them (report.ts only
+  shows notices from the paper's own city domains).
+*/
+const NOTICE_SELECTORS = [
+  "[role='alert']",
+  "[class*=alert]",
+  "[class*=banner]",
+  "[class*=notice]",
+  "[id*=alert]",
+  "[id*=banner]",
+  "marquee",
+];
+
+const NOTICE_CAP = 1200;
+const LEAD_TEXT_CHARS = 600;
+
+export function extractSiteNotices(html: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string) => {
+    const text = raw.replace(/\s+/g, " ").trim();
+    if (text.length < 12) return;
+    const key = text.toLowerCase();
+    if (seen.has(key)) return;
+    // A notice already contained in one we kept adds nothing.
+    for (const had of seen) if (had.includes(key)) return;
+    seen.add(key);
+    out.push(text.slice(0, NOTICE_CAP));
+  };
+  try {
+    const { document } = parseHTML(html);
+    for (const sel of NOTICE_SELECTORS) {
+      for (const el of Array.from(document.querySelectorAll(sel))) {
+        push(htmlToPlainText((el as { innerHTML?: string }).innerHTML ?? ""));
+      }
+    }
+    /*
+      The first visible text of the page, before readability runs. On the city
+      home page the survey banner sat above everything readability kept, and
+      an alert class alone would not have caught it on every install.
+    */
+    const body = document.body as { innerHTML?: string } | null;
+    if (body?.innerHTML) {
+      const lead = htmlToPlainText(body.innerHTML).replace(/\s+/g, " ").trim();
+      if (lead) push(lead.slice(0, LEAD_TEXT_CHARS));
+    }
+  } catch {
+    /* a page whose markup will not parse simply has no notices */
+  }
+  let used = 0;
+  const capped: string[] = [];
+  for (const notice of out) {
+    if (used + notice.length > NOTICE_CAP) break;
+    capped.push(notice);
+    used += notice.length;
+  }
+  return capped;
+}

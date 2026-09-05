@@ -11,6 +11,7 @@ import {
   applyTodoPatch,
   notesHaveMemo,
   parseNotes,
+  uncheckedGateTodos,
   type ReportingNotes,
 } from "@/lib/news/notes";
 import {
@@ -362,6 +363,22 @@ function StoryPage() {
   */
   const draftSources = parseUrlList(data.draft?.source_urls ?? "[]");
   const uncredited = uncreditedOutlets(body, draftSources.length > 0 ? draftSources : sources);
+  /*
+    Claims of absence block printing until a person has confirmed each one.
+
+    On 2026-09-05 a draft told readers no city survey page, launch release or
+    agenda item existed, and treated the city's own published deadline as
+    unverified. The city was advertising all of it on its home page. The gate
+    that catches those sentences (absence-gate.ts) puts each one here as a
+    checkbox; the server refuses to publish while one is unticked, and this
+    says so before the editor reaches for the button.
+  */
+  const openClaims = uncheckedGateTodos(notes);
+  const blockedReason = openClaims.length
+    ? openClaims.length === 1
+      ? "Confirm the claim of absence first"
+      : `Confirm the ${openClaims.length} claims of absence first`
+    : "";
 
   return (
     <DeskShell title={data.lead.headline} kicker="Workbench" hideTitle>
@@ -484,12 +501,30 @@ function StoryPage() {
                       </InkButton>
                     </>
                   ) : (
-                    <InkButton
-                      disabled={publish.isPending || !headline.trim() || !body.trim()}
-                      onClick={() => setConfirmingPublish(true)}
-                    >
-                      Publish to the paper
-                    </InkButton>
+                    <>
+                      <InkButton
+                        disabled={
+                          publish.isPending ||
+                          !headline.trim() ||
+                          !body.trim() ||
+                          openClaims.length > 0
+                        }
+                        onClick={() => setConfirmingPublish(true)}
+                      >
+                        Publish to the paper
+                      </InkButton>
+                      {/*
+                        A greyed button with no sentence beside it is a dead
+                        end -- the editor cannot tell whether it is broken,
+                        still loading, or refusing on purpose. The reason is
+                        text, not opacity, and it points at the work.
+                      */}
+                      {blockedReason ? (
+                        <span className="note publish-blocked">
+                          {blockedReason} — see “Claims of absence” in reporting notes.
+                        </span>
+                      ) : null}
+                    </>
                   )
                 ) : null}
               </>
@@ -747,11 +782,47 @@ function ReportingNotesPane({
     },
   });
 
+  /*
+    Claims of absence get their own block, above everything else in the notes.
+
+    They are not to-dos. A to-do is work the story would be better for; one of
+    these is a sentence already in the story asserting that a public document
+    does not exist, and printing it unchecked is how the paper prints something
+    false. The checkbox is the editor saying they opened the city's site.
+  */
+  const gateClaims = notes.todo
+    .map((t, i) => ({ t, i }))
+    .filter((row) => row.t.src === "gate");
+  const absenceBlock = gateClaims.length ? (
+    <div className="note-sec note-gate">
+      <p className="side-label">Verify before print · Claims of absence</p>
+      <p className="note-one">
+        The story says these documents are not there. Open the city's own site and confirm each
+        one. Publishing is blocked until every box is ticked.
+      </p>
+      {gateClaims.map((row) => (
+        <label key={`gate-${row.i}-${row.t.t}`} className="gate-claim">
+          <input
+            type="checkbox"
+            checked={row.t.done}
+            disabled={locked || save.isPending}
+            onChange={() => save.mutate({ toggle: row.i, todos: notes.todo })}
+          />
+          <span>
+            <span className="gate-claim-t">{row.t.t}</span>
+            {row.t.q ? <span className="gate-claim-q">{row.t.q}</span> : null}
+            <span className="gate-claim-ack">I opened the city site and confirmed this</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  ) : null;
+
   const todoList = (prefix: string) =>
-    notes.todo.length ? (
+    notes.todo.filter((t) => t.src !== "gate").length ? (
       <div className="note-sec">
         <p className="side-label">Still to pull</p>
-        {notes.todo.map((t, i) => (
+        {notes.todo.map((t, i) => (t.src === "gate" ? null : (
           <TodoRow
             key={`${prefix}-${t.src}-${t.t}-${i}`}
             item={t}
@@ -760,7 +831,7 @@ function ReportingNotesPane({
             onToggle={() => save.mutate({ toggle: i, todos: notes.todo })}
             onPull={() => pull.mutate({ index: i, query: t.t })}
           />
-        ))}
+        )))}
         <p className="note-hint">
           Pull searches that line and drops the excerpt in the box under the story. The checkbox just strikes it.
         </p>
@@ -785,6 +856,7 @@ function ReportingNotesPane({
               ? "This draft was written before notes were kept. Redraft fills them; lines you add stay."
               : "Draft with AI fills this. You can add a line."}
           </p>
+          {absenceBlock}
           {todoList("empty")}
         </>
       ) : (
@@ -807,6 +879,7 @@ function ReportingNotesPane({
               <p className="note-one">{notes.angle}</p>
             </div>
           ) : null}
+          {absenceBlock}
           {todoList("filled")}
           {notes.found.length ? (
             <div className="note-sec">
@@ -844,6 +917,8 @@ function ReportingNotesPane({
                   <a href={d.url} target="_blank" rel="noreferrer" className="inline-link">
                     {d.title}
                   </a>
+                  {/* Which of the memo's own asks this document was pulled to answer. */}
+                  {d.for ? <span className="opened-for">for: {d.for}</span> : null}
                 </p>
               ))}
             </div>

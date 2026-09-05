@@ -26,6 +26,7 @@ import {
   pullQueries,
   siteOwnDocLinks,
 } from "./pull-plan";
+import { absenceClaims } from "./absence-gate";
 import {
   applyTodoPatch,
   appendScratch,
@@ -36,6 +37,8 @@ import {
   packNotes,
   parseNotes,
   toggleTodo,
+  uncheckedGateTodos,
+  type NoteTodo,
 } from "./notes";
 import { provenanceFromUrls } from "./findings";
 import { buildScanUserMessage, composeZeroLeadSummary, kindFromSourceUrl, resurfacedSummarySentence } from "./desk-copy";
@@ -806,10 +809,18 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     */
     providerOverrides: await readProviderOverrides(owned(context)).catch(() => ({})),
   };
-  let reported = await runReport({
-    ...draftInput,
-    modelChoice: effectiveStoryModelChoice(job.model_choice),
-  });
+  let reported = await runReport(
+    {
+      ...draftInput,
+      modelChoice: effectiveStoryModelChoice(job.model_choice),
+    },
+    /*
+      The absence gate can force one redraft (report.ts). Silently taking twice
+      as long is how an editor loses trust in a desk, so the reason goes on the
+      job where the story page already reads it.
+    */
+    { onStage: (stage) => setStage(job.id, stage) },
+  );
   if ("error" in reported) {
     reported = await failOverAndRetry({
       job,
@@ -841,6 +852,20 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const unansweredJson = JSON.stringify(reported.unanswered).slice(0, 2000);
   const researchJson = JSON.stringify(reported.research_memo ?? {}).slice(0, 8000);
   const yours = keepHumanTodos(prevNotes);
+  /*
+    Claims of absence, as checkboxes the editor must tick before Publish.
+
+    Not advice. `performPublish` refuses while one is unchecked, because the
+    2026-09-05 story would have passed every check the desk had: it read as a
+    careful, sourced piece and its central claim -- that the city had published
+    nothing -- was false. The only cure is a human opening the city's own site.
+  */
+  const gateTodos: NoteTodo[] = absenceClaims(reported.research_memo?.gate).map((claim) => ({
+    t: `Claim of absence: ${claim.sentence}`.slice(0, 400),
+    done: false,
+    src: "gate" as const,
+    q: claim.query ? `Searched: ${claim.query}`.slice(0, 300) : undefined,
+  }));
   const machine = machineTodosFrom([
     reported.research_memo?.follow,
     ...reported.unanswered,
@@ -855,14 +880,29 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     t: f.text.slice(0, 800),
     src: f.source_urls?.[0],
   }));
+  /*
+    Which document answered which of the memo's asks. "The city has nothing"
+    and "nobody looked" used to be indistinguishable in these notes; now the
+    ask is printed beside the document that answered it.
+  */
+  const pulledFor = new Map<string, string>();
+  for (const pull of reported.research_memo?.pulls ?? []) {
+    if (pull.url && pull.fetched === "ok" && !pulledFor.has(pull.url)) {
+      pulledFor.set(pull.url, pull.ask);
+    }
+  }
+  const opened = (reported.research_memo?.captured ?? []).map((doc) => {
+    const answers = pulledFor.get(doc.url);
+    return answers ? { ...doc, for: answers } : doc;
+  });
   const nextNotes = {
     news: reported.research_memo?.news ?? "",
     why: reported.research_memo?.why_it_matters ?? "",
     angle: reported.research_memo?.angle ?? "",
-    todo: [...yours, ...machine].slice(0, 24),
+    todo: [...gateTodos, ...yours, ...machine].slice(0, 24),
     found: [...fromClaims, ...fromFindings].slice(0, 16),
     verify: reported.integrity_notes ? [reported.integrity_notes] : [],
-    opened: reported.research_memo?.captured ?? [],
+    opened,
     scratch: prevNotes.scratch,
   };
   const notesJson = packNotes(nextNotes);
@@ -931,7 +971,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       add?: string;
       toggle?: number;
       scratch?: string;
-      todos?: { t: string; done: boolean; src: "you" | "machine" }[];
+      todos?: NoteTodo[];
     }) => input,
   )
   .handler(async ({ context, data }) => {
@@ -1088,12 +1128,27 @@ export const pullTodo = createServerFn({ method: "POST" })
       const dump = formatPullDump(query, docs);
       let notes = memo;
       notes = appendScratch(notes, dump);
-      if (
-        typeof data.index === "number" &&
-        notes.todo[data.index] &&
-        !notes.todo[data.index].done
-      ) {
-        notes = toggleTodo(notes, data.index);
+      /*
+        Only a pull that actually returned a document strikes the line.
+
+        It used to strike unconditionally, so a line the desk searched and
+        failed on looked exactly like a line it had answered -- the same
+        confusion between "nothing is there" and "we did not find it" that put
+        a false claim of absence in a story on 2026-09-05.
+      */
+      if (typeof data.index === "number" && notes.todo[data.index]) {
+        if (docs.length && !notes.todo[data.index].done) {
+          notes = toggleTodo(notes, data.index);
+        } else if (!docs.length) {
+          notes = {
+            ...notes,
+            todo: notes.todo.map((row, i) =>
+              i === data.index
+                ? { ...row, done: false, q: "pull found nothing" }
+                : row,
+            ),
+          };
+        }
       }
       /*
         Newest first. The cap used to drop from the end, so once a lead had
@@ -1194,6 +1249,32 @@ export async function performPublish(
     return {
       ok: false as const,
       error: "Un-hold this lead before publishing. Working notes stay private until then.",
+    };
+  }
+
+  /*
+    FAIL CLOSED ON A CLAIM OF ABSENCE (2026-09-05).
+
+    The Publish button is disabled in the desk while one of these is unchecked,
+    and a disabled button is a suggestion: a stale tab, a second window, a
+    scripted call or a walkthrough all route straight past it. This is the
+    check that actually holds. A story is allowed to say a document is not
+    there -- once a person has opened the city's own site and confirmed it.
+  */
+  const notesRows = await getSql().then(
+    (sql) =>
+      sql<{ notes_json: string | null }>`
+      select notes_json from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
+    `,
+  );
+  const openClaims = uncheckedGateTodos(parseNotes(notesRows[0]?.notes_json));
+  if (openClaims.length) {
+    return {
+      ok: false as const,
+      error:
+        openClaims.length === 1
+          ? "Confirm the claim of absence first — open the city's own site, check the story is right that the document is not there, then tick it in reporting notes."
+          : `Confirm the ${openClaims.length} claims of absence first — open the city's own site, check the story is right that those documents are not there, then tick them in reporting notes.`,
     };
   }
 

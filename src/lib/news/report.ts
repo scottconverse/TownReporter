@@ -10,6 +10,15 @@ import {
   preferPrimaryUrls,
   primarySourceScore,
 } from "./extract.ts";
+import {
+  documentAsks,
+  findOnCityDomain,
+  isOnDomains,
+  officialDomains,
+  runAbsenceGate,
+  type GateEntry,
+  type PullRecord,
+} from "./absence-gate.ts";
 import { sha256 } from "./fetch-url.ts";
 import { ingestDocument, mapLimit, type PdfPage } from "./ingest.ts";
 import { rememberCapture } from "./investigate.ts";
@@ -83,6 +92,15 @@ export type ResearchMemo = {
   unknowns: string[];
   follow: string;
   captured: { url: string; title: string }[];
+  /*
+    Every primary document the app chased because the memo asked for it: the
+    ask, the query it ran, the hit, and whether the fetch worked. The live
+    incident's memo asked for the city's own survey landing page and the app
+    never searched for it; nothing anywhere recorded that it had not.
+  */
+  pulls?: PullRecord[];
+  /** What the claims-of-absence gate did to this draft. */
+  gate?: GateEntry[];
 };
 
 export type FetchedDoc = {
@@ -90,6 +108,8 @@ export type FetchedDoc = {
   title: string;
   text: string;
   extras: string[];
+  /** Banner / alert text readability strips. See extractSiteNotices. */
+  notices?: string[];
   pages?: PdfPage[];
   version_id?: number | null;
   capture_event_id?: number | null;
@@ -119,6 +139,11 @@ export type ReportDeps = {
   hydrate?: (userId: string, urls: string[]) => Promise<Partial<ProvenanceItem>[]>;
   /** Wall clock for one draft click. Leave room for the writing pass before the HTTP request dies. */
   budgetMs?: number;
+  /**
+   * Where the pipeline says what it is doing, so a redraft forced by the
+   * absence gate is visible in the job rather than happening silently.
+   */
+  onStage?: (stage: string) => void | Promise<void>;
 };
 
 /**
@@ -143,13 +168,27 @@ const FILLER =
   the configured city can reach goes through these builders now; the
   constants below are the Longmont defaults, kept for tests.
 */
-export type PaperIdentityForPrompts = { name: string; city: string; state: string };
+export type PaperIdentityForPrompts = {
+  name: string;
+  city: string;
+  state: string;
+  /*
+    The paper's own official web domains, when the configuration knows them.
+    Derived from the configured seed sources marked "official"; when a caller
+    supplies an identity without them (every unit test does), the pipeline
+    falls back to deriving domains from the lead's own URLs. See
+    officialDomains() in absence-gate.ts.
+  */
+  officialDomains?: string[];
+};
 
 export function reportResearchSystem(p: PaperIdentityForPrompts): string {
   return `You are a civic reporter for ${p.name} in ${p.city}, ${p.state}, doing the RESEARCH pass — not writing the story yet.
 A press release, agenda item, city webpage, or another newsroom’s article is the beginning of reporting, not the finished story.
 Do not invent facts, votes, dollars, names or dates. If it is not in the evidence, it is unknown.
 Source quality affects confidence and attribution, never whether you may look. Unknown means keep investigating.
+
+YOU HAVE NO TOOLS. ${p.name} opens documents for you and puts the text in EVIDENCE. Never mention tools, permissions, sessions, fetching, searching, or what was “unavailable” — those words describe you, not the city. If a document you want is not in EVIDENCE, write its name into the follow field and nothing else. A missing document is never a fact about the world: never write that something does not exist, was not published, was not obtained, or is unverified. What is not yet opened is an ask for the follow field, not a finding.
 
 Research in this order (stop a lane only when it is honestly empty):
 1. CORE EVENT — primary documents first: the named company’s or agency’s own press release / newsroom page, then agendas, minutes, permits, filings, packets.
@@ -209,7 +248,9 @@ Do not write a "Next checks are…" closer. Do not write "What is solid / What i
 Each paragraph must add information. Never restate the same fact in consecutive paragraphs to create length.
 Ban filler: "This development marks…", "The announcement comes as…", "Residents are encouraged to…", "This initiative underscores…", "In a move that…", "It remains to be seen…" unless the sentence contains actual reporting.
 Explain government terms on first use (consent agenda, RFP, ordinance).
-If something important is unknown, say so. Do not fill the hole with generic language.
+If something important is unknown, say so — as an open question, never as a claim that the thing does not exist. Do not fill the hole with generic language.
+
+YOU HAVE NO TOOLS. ${p.name} opens documents for you and puts the text in EVIDENCE. Never mention tools, permissions, sessions, fetching, searching, or what was “unavailable” — those words describe you, not the city. If a document you want is not in EVIDENCE, write its name into the unanswered list and nothing else. A missing document is never a fact about the world: never write in the body that something does not exist, was not published, was not obtained, or is unverified. The body states only what the evidence shows; what is not yet opened goes to reporting notes as “${p.name} has not yet opened X”.
 
 form:
 - brief: 150–350 useful words. A genuinely small item after you opened the primary source. Do not manufacture context.
@@ -249,6 +290,8 @@ Checklist:
 7. Unknowns stated as unknowns?
 8. Delete any "Next checks are…" or "What is solid / not solid yet" closer. That is reporter homework, not the story.
 9. If a company press release is in the evidence, did we use it for their claims, or did we only rewrite another paper?
+10. Delete any sentence about tools, permissions, sessions, fetching, searching or what was "unavailable" — those words describe the software, not the city, and they have no place in a story.
+11. Delete any sentence claiming a document does not exist, was not published, was not obtained, or is unverified. Not having opened a document is not evidence about the world; move the ask to unanswered.
 Factual vocabulary that appears in the sources is not plagiarism. Near-verbatim copying is.
 Return ONLY JSON with the same keys as the draft: headline, dek, body, topic, source_urls, integrity_notes, memory_entities, form, found, unanswered, claims, reporting_trail.`;
 
@@ -886,6 +929,7 @@ async function defaultIngest(url: string): Promise<FetchedDoc> {
       title: got.title || describeSourceUrl(url).title,
       text: got.text,
       extras: got.extras ?? [],
+      notices: got.notices ?? [],
       pages: got.pages,
     };
   } catch {
@@ -1083,7 +1127,21 @@ export function chooseStoryForm(input: {
 
 async function configuredPaper(): Promise<PaperIdentityForPrompts> {
   const cfg = await getPaperConfig();
-  return { name: cfg.name, city: cfg.city, state: cfg.state };
+  return {
+    name: cfg.name,
+    city: cfg.city,
+    state: cfg.state,
+    /*
+      The operator marked these sources official, so they are the trust anchor
+      -- including the agenda portal, which lives on a vendor .com and no
+      heuristic would ever accept on its own.
+    */
+    officialDomains: officialDomains(
+      cfg.city,
+      [],
+      cfg.seedSources.filter((src) => src.kind === "official").map((src) => src.url),
+    ),
+  };
 }
 
 export async function reportAndDraft(
@@ -1246,6 +1304,51 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
 
   await take(sanitizePublicUrls(research?.fetch_urls), 4);
 
+  /*
+    THE MEMO'S OWN ASKS, CHASED FIRST (2026-09-05).
+
+    The research memo said, in `follow`, exactly what the story needed --
+    "Chase the city's own survey landing page and any press release announcing
+    the launch" -- and the app never ran one query for it. Its four follow-up
+    slots went to two comparison cities, a recycling ordinance and a probation
+    page; then the story argued from the absence of the document nobody had
+    looked for.
+
+    So the asks get their own pulls, site-restricted to the paper's own city
+    domain, ahead of the lane and reference searches, and `required` so a tight
+    budget drops a comparison page rather than the primary document. Every ask,
+    query, hit and fetch is recorded in research_memo.pulls: "we searched and
+    the city has nothing" and "we never searched" must never look alike again.
+  */
+  const cityDomains = officialDomains(
+    paper.city,
+    [...seedUrls, ...docs.map((d) => d.url)],
+    paper.officialDomains ?? [],
+  );
+  const pulls: PullRecord[] = [];
+  const askDocs: { ask: string; doc: FetchedDoc }[] = [];
+  if (cityDomains.length) {
+    for (const ask of documentAsks([
+      research?.follow,
+      ...stringsFrom(research?.questions),
+      ...stringsFrom(research?.unknowns),
+    ])) {
+      if (timeLeft() < reserve) break;
+      const found = await findOnCityDomain(ask, cityDomains, paper.city, search, (u) =>
+        seen.has(u),
+      );
+      if (!found.url) {
+        pulls.push({ ask, query: found.query, url: null, fetched: "none" });
+        continue;
+      }
+      await take([found.url], 1, true);
+      const doc = docs.find((d) => d.url === found.url);
+      const got = Boolean(doc?.text);
+      pulls.push({ ask, query: found.query, url: found.url, fetched: got ? "ok" : "failed" });
+      if (got && doc) askDocs.push({ ask, doc });
+    }
+  }
+
   if (form === "brief" && canFollow()) {
     const challengeQ = briefChallengeQuery(opts.lead, research, paper.city);
     try {
@@ -1311,82 +1414,201 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     ...stringsFrom(research?.unknowns),
     "cost contract date name neighborhood delay amendment",
   ].filter((x): x is string => Boolean(x));
-  const writeEvidence = formatRetrievedEvidence(
-    retrieveRelevantChunks(docs, writeQueries, { budgetChars: 16000 }),
-  );
 
-  const packet = [
-    `NEWS ANGLE: ${research?.angle || opts.lead.headline}`,
-    `ACTUAL NEWS: ${research?.news || opts.lead.headline}`,
-    `WHY IT MATTERS: ${research?.why_it_matters || opts.lead.why}`,
-    `SUGGESTED FORM: ${form}`,
-    `OPEN QUESTIONS:\n${stringsFrom(research?.questions).join("\n") || "(none)"}`,
-    `UNKNOWNS:\n${stringsFrom(research?.unknowns).join("\n") || "(none)"}`,
-    `FOLLOW: ${research?.follow || ""}`,
-    `Already covered: ${opts.memory.map((m) => `${m.entity} (${m.last_angle})`).join("; ") || "none"}`,
-    `Evidence (retrieved chunks — locators included):\n${writeEvidence}`,
-    opts.extraEvidence
-      ? `Editor pull box (does not print):\n${opts.extraEvidence.slice(0, 4000)}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const hostLabel = (url: string) => describeSourceUrl(url).organization || url;
 
-  if (timeLeft() < 4_000) return { error: "The draft ran out of time before writing." };
-  const writeAi = await chat(reportWriteSystem(paper), packet, 2200);
-  if (!writeAi.ok) return { error: writeAi.error };
-  const coerced = coerceDraft(writeAi.text, {
-    headline: opts.lead.headline,
-    dek: opts.lead.why,
-    topic: opts.lead.topic,
-  });
-  if (!coerced.body) return { error: "Draft came back unreadable. Try again." };
+  /*
+    Site notices, printed rather than ranked.
 
-  const parsed = parseJsonBlock<Record<string, unknown>>(writeAi.text) ?? {};
-  const announcing = docs[0]?.text ?? "";
-  const beforeParas = coerced.body.split(/\n{2,}/).filter((p) => p.trim()).length;
-  let body = collapseRepeatedParagraphs(stripReporterNotebook(stripAiFiller(coerced.body)));
-  const afterParas = body.split(/\n{2,}/).filter(Boolean).length;
-  if ((looksLikeRewrite(body, announcing) || afterParas < beforeParas) && timeLeft() > 10_000) {
-    const editAi = await chat(
-      REPORT_EDIT_SYSTEM,
-      `Draft JSON to edit:\n${JSON.stringify({
-        headline: coerced.headline,
-        dek: coerced.dek,
-        body,
-        topic: coerced.topic,
-        source_urls: coerced.source_urls,
-        form: parsed.form,
-        found: parsed.found,
-        unanswered: parsed.unanswered,
-        reporting_trail: parsed.reporting_trail,
-      }).slice(
-        0,
-        12000,
-      )}\n\nAnnouncing source excerpt:\n${announcing.slice(0, 3000)}\n\nRetrieved evidence excerpt:\n${writeEvidence.slice(0, 4000)}`,
-      1800,
+    The banner that would have settled the whole 2026-09-05 story -- "Take the
+    2026 Community Satisfaction Survey... Open through September 7" -- was on
+    two captured pages and reached the model from neither: readability strips
+    banners, and a ranked chunk has to win a similarity contest to be seen.
+    This block skips both. Only the paper's own city domains, because another
+    town's alert bar is noise.
+  */
+  const noticeBlock = () =>
+    docs
+      .filter((d) => isOnDomains(d.url, cityDomains) && (d.notices ?? []).length > 0)
+      .map((d) => `SITE NOTICES ON ${hostLabel(d.url)}:\n${(d.notices ?? []).join("\n")}`)
+      .join("\n\n");
+
+  /* The documents pulled for the memo's asks, ahead of everything else. */
+  const primaryBlock = () =>
+    askDocs.length
+      ? `PRIMARY DOCUMENTS PULLED FOR THE MEMO'S ASKS:\n\n${askDocs
+          .map((a) => `for: ${a.ask}\n${a.doc.title}\n${a.doc.url}\n${a.doc.text.slice(0, 3000)}`)
+          .join("\n\n")}`
+      : "";
+
+  const buildPacket = () => {
+    const evidence = formatRetrievedEvidence(
+      retrieveRelevantChunks(docs, writeQueries, { budgetChars: 16000 }),
     );
-    if (editAi.ok) {
-      const edited = coerceDraft(editAi.text, {
-        headline: coerced.headline,
-        dek: coerced.dek,
-        topic: coerced.topic,
-      });
-      if (edited.body) {
-        body = collapseRepeatedParagraphs(stripReporterNotebook(stripAiFiller(edited.body)));
-        const editedUrls = sanitizePublicUrls(edited.source_urls);
-        Object.assign(coerced, {
-          headline: edited.headline,
-          dek: edited.dek,
-          topic: edited.topic,
-          source_urls: editedUrls.length ? editedUrls : coerced.source_urls,
-          integrity_notes: edited.integrity_notes || coerced.integrity_notes,
+    const packet = [
+      `NEWS ANGLE: ${research?.angle || opts.lead.headline}`,
+      `ACTUAL NEWS: ${research?.news || opts.lead.headline}`,
+      `WHY IT MATTERS: ${research?.why_it_matters || opts.lead.why}`,
+      `SUGGESTED FORM: ${form}`,
+      `OPEN QUESTIONS:\n${stringsFrom(research?.questions).join("\n") || "(none)"}`,
+      `UNKNOWNS:\n${stringsFrom(research?.unknowns).join("\n") || "(none)"}`,
+      `FOLLOW: ${research?.follow || ""}`,
+      `Already covered: ${opts.memory.map((m) => `${m.entity} (${m.last_angle})`).join("; ") || "none"}`,
+      primaryBlock(),
+      noticeBlock(),
+      `Evidence (retrieved chunks \u2014 locators included):\n${evidence}`,
+      opts.extraEvidence
+        ? `Editor pull box (does not print):\n${opts.extraEvidence.slice(0, 4000)}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    return { evidence, packet };
+  };
+
+  type WritePass = {
+    coerced: ReturnType<typeof coerceDraft>;
+    parsed: Record<string, unknown>;
+    body: string;
+  };
+
+  /*
+    One writing pass, callable twice.
+
+    It used to be straight-line code. The absence gate can find a document the
+    story said did not exist, and a story built on that absence cannot be
+    patched sentence by sentence -- it has to be written again with the
+    document in evidence. Exactly once: see the redraft below.
+  */
+  const runWritePass = async (): Promise<WritePass | { error: string }> => {
+    if (timeLeft() < 4_000) return { error: "The draft ran out of time before writing." };
+    const built = buildPacket();
+    const writeAi = await chat(reportWriteSystem(paper), built.packet, 2200);
+    if (!writeAi.ok) return { error: writeAi.error };
+    const coerced = coerceDraft(writeAi.text, {
+      headline: opts.lead.headline,
+      dek: opts.lead.why,
+      topic: opts.lead.topic,
+    });
+    if (!coerced.body) return { error: "Draft came back unreadable. Try again." };
+
+    const parsed = parseJsonBlock<Record<string, unknown>>(writeAi.text) ?? {};
+    const announcing = docs[0]?.text ?? "";
+    const beforeParas = coerced.body.split(/\n{2,}/).filter((para) => para.trim()).length;
+    let passBody = collapseRepeatedParagraphs(stripReporterNotebook(stripAiFiller(coerced.body)));
+    const afterParas = passBody.split(/\n{2,}/).filter(Boolean).length;
+    if ((looksLikeRewrite(passBody, announcing) || afterParas < beforeParas) && timeLeft() > 10_000) {
+      const editAi = await chat(
+        REPORT_EDIT_SYSTEM,
+        `Draft JSON to edit:\n${JSON.stringify({
+          headline: coerced.headline,
+          dek: coerced.dek,
+          body: passBody,
+          topic: coerced.topic,
+          source_urls: coerced.source_urls,
+          form: parsed.form,
+          found: parsed.found,
+          unanswered: parsed.unanswered,
+          reporting_trail: parsed.reporting_trail,
+        }).slice(
+          0,
+          12000,
+        )}\n\nAnnouncing source excerpt:\n${announcing.slice(0, 3000)}\n\nRetrieved evidence excerpt:\n${built.evidence.slice(0, 4000)}`,
+        1800,
+      );
+      if (editAi.ok) {
+        const edited = coerceDraft(editAi.text, {
+          headline: coerced.headline,
+          dek: coerced.dek,
+          topic: coerced.topic,
         });
-        const ep = parseJsonBlock<Record<string, unknown>>(editAi.text);
-        if (ep) Object.assign(parsed, ep);
+        if (edited.body) {
+          passBody = collapseRepeatedParagraphs(stripReporterNotebook(stripAiFiller(edited.body)));
+          const editedUrls = sanitizePublicUrls(edited.source_urls);
+          Object.assign(coerced, {
+            headline: edited.headline,
+            dek: edited.dek,
+            topic: edited.topic,
+            source_urls: editedUrls.length ? editedUrls : coerced.source_urls,
+            integrity_notes: edited.integrity_notes || coerced.integrity_notes,
+          });
+          const ep = parseJsonBlock<Record<string, unknown>>(editAi.text);
+          if (ep) Object.assign(parsed, ep);
+        }
       }
     }
+    return { coerced, parsed, body: passBody };
+  };
+
+  const first = await runWritePass();
+  if ("error" in first) return { error: first.error };
+  let writeOut: WritePass = first;
+
+  /*
+    THE CLAIMS-OF-ABSENCE GATE (2026-09-05).
+
+    Code, not prompt. The prompts above now forbid tool-talk and claims of
+    absence; the live model was under prompts too, and printed "No city survey
+    page, launch release or council agenda item confirming any of that was
+    obtained for this piece" about a survey the city was advertising on its own
+    home page. So the draft is checked, and every claim of absence is searched
+    for real before it is allowed to stand.
+  */
+  const unansweredFromWrite = (pass: WritePass): string[] =>
+    Array.isArray(pass.parsed.unanswered)
+      ? pass.parsed.unanswered.map(String).slice(0, 12)
+      : stringsFrom(research?.unknowns);
+
+  const runGate = (pass: WritePass, redraftAllowed: boolean) =>
+    runAbsenceGate({
+      headline: pass.coerced.headline,
+      dek: pass.coerced.dek,
+      body: pass.body,
+      integrity_notes: pass.coerced.integrity_notes,
+      unanswered: unansweredFromWrite(pass),
+      openedTitles: docs.filter((d) => d.text).map((d) => d.title || d.url),
+      knownUrls: docs.map((d) => d.url),
+      domains: cityDomains,
+      city: paper.city,
+      paperName: paper.name,
+      search,
+      redraftAllowed,
+    });
+
+  const gateLog: GateEntry[] = [];
+  let gateOut = await runGate(writeOut, true);
+  if (gateOut.needsRedraft) {
+    gateLog.push(...gateOut.gate);
+    for (const url of gateOut.foundUrls) {
+      await deps.onStage?.(`absence check found ${url}, redrafting`);
+    }
+    await take(gateOut.foundUrls, 4, true);
+    for (const entry of gateOut.gate) {
+      if (!entry.url) continue;
+      const doc = docs.find((d) => d.url === entry.url);
+      pulls.push({
+        ask: `absence check: ${entry.sentence.slice(0, 160)}`,
+        query: entry.query ?? "",
+        url: entry.url,
+        fetched: doc?.text ? "ok" : "failed",
+      });
+      if (doc?.text) askDocs.push({ ask: "a claim of absence in the first draft", doc });
+    }
+    const again = await runWritePass();
+    if (!("error" in again)) writeOut = again;
+    // One redraft per job. The second pass cannot ask for a third.
+    gateOut = await runGate(writeOut, false);
   }
+  gateLog.push(...gateOut.gate);
+
+  const coerced = writeOut.coerced;
+  const parsed = writeOut.parsed;
+  Object.assign(coerced, {
+    headline: gateOut.headline.trim() || coerced.headline,
+    dek: gateOut.dek,
+    integrity_notes: gateOut.integrity_notes,
+  });
+  let body = gateOut.body;
 
   const used = preferStoryUrls(
     sanitizePublicUrls(
@@ -1414,9 +1636,9 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     ...docMeta,
     ...captures,
   ]);
-  const unanswered = Array.isArray(parsed.unanswered)
-    ? parsed.unanswered.map(String).slice(0, 12)
-    : stringsFrom(research?.unknowns);
+  // Already gated: tool-talk in here was rewritten to what TownReporter has
+  // not yet opened, which is the honest version of the same line.
+  const unanswered = gateOut.unanswered.slice(0, 12);
   if (used.length && used.every(isIndexUrl)) {
     unanswered.unshift(`Full URL of the originating story — not the listing page ${used[0]}`);
   }
@@ -1487,6 +1709,8 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
         .filter((d) => d.text)
         .slice(0, 16)
         .map((d) => ({ url: d.url, title: (d.title || d.url).slice(0, 160) })),
+      pulls: pulls.slice(0, 12),
+      gate: gateLog.slice(0, 12),
     },
   };
 }

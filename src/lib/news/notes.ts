@@ -1,6 +1,20 @@
-export type NoteTodo = { t: string; done: boolean; src: "you" | "machine" };
+/*
+  `src: "gate"` is not another kind of to-do. It is a claim of absence the
+  story makes, that the claims-of-absence gate searched for and did not find
+  (see absence-gate.ts and the 2026-09-05 incident). Publishing is blocked
+  while one is unchecked: the box means an editor opened the city's own site
+  and confirmed the story is right to say the document is not there.
+*/
+export type NoteTodo = {
+  t: string;
+  done: boolean;
+  src: "you" | "machine" | "gate";
+  /** What the gate actually searched, so the editor can judge the search. */
+  q?: string;
+};
 export type NoteFound = { t: string; src?: string };
-export type NoteOpened = { url: string; title: string };
+/** `for` names the memo ask this document was pulled to answer, when it was. */
+export type NoteOpened = { url: string; title: string; for?: string };
 
 export type ReportingNotes = {
   news: string;
@@ -12,6 +26,12 @@ export type ReportingNotes = {
   opened: NoteOpened[];
   scratch: string;
 };
+
+function todoSource(raw: unknown): NoteTodo["src"] {
+  if (raw === "you") return "you";
+  if (raw === "gate") return "gate";
+  return "machine";
+}
 
 export function emptyNotes(): ReportingNotes {
   return { news: "", why: "", angle: "", todo: [], found: [], verify: [], opened: [], scratch: "" };
@@ -32,10 +52,12 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
             const r = row as { t?: unknown; done?: unknown; src?: unknown };
             const t = String(r.t ?? "").trim();
             if (!t) return null;
+            const q = String((row as { q?: unknown }).q ?? "").trim();
             return {
               t: t.slice(0, 400),
               done: Boolean(r.done),
-              src: r.src === "you" ? ("you" as const) : ("machine" as const),
+              src: todoSource(r.src),
+              ...(q ? { q: q.slice(0, 300) } : {}),
             };
           })
           .filter((x): x is NoteTodo => Boolean(x))
@@ -62,7 +84,12 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
             const r = row as { url?: unknown; title?: unknown };
             const url = String(r.url ?? "").trim();
             if (!url) return null;
-            return { url: url.slice(0, 500), title: String(r.title ?? url).slice(0, 160) };
+            const answers = String((row as { for?: unknown }).for ?? "").trim();
+            return {
+              url: url.slice(0, 500),
+              title: String(r.title ?? url).slice(0, 160),
+              ...(answers ? { for: answers.slice(0, 200) } : {}),
+            };
           })
           .filter((x): x is NoteOpened => Boolean(x))
           .slice(0, 16)
@@ -90,8 +117,19 @@ export function notesHaveAnything(n: ReportingNotes): boolean {
   return notesHaveMemo(n) || n.todo.length > 0 || n.found.length > 0 || n.verify.length > 0 || n.opened.length > 0;
 }
 
+/**
+ * What survives a redraft: the reporter's own lines, and any claim-of-absence
+ * the gate raised that nobody has confirmed yet. A machine to-do is rebuilt
+ * from the new memo; an unchecked gate item is a block on publishing and
+ * must not be quietly lost by redrafting.
+ */
 export function keepHumanTodos(notes: ReportingNotes): NoteTodo[] {
-  return notes.todo.filter((t) => t.src === "you");
+  return notes.todo.filter((t) => t.src === "you" || (t.src === "gate" && !t.done));
+}
+
+/** The claims of absence an editor still has to confirm by hand. */
+export function uncheckedGateTodos(notes: ReportingNotes): NoteTodo[] {
+  return notes.todo.filter((t) => t.src === "gate" && !t.done);
 }
 
 /** Longer than this and a to-do line stops being one errand. */
@@ -169,10 +207,12 @@ export function sanitizeTodos(raw: unknown): NoteTodo[] {
       const r = row as { t?: unknown; done?: unknown; src?: unknown };
       const t = String(r.t ?? "").trim();
       if (!t) return null;
+      const q = String((row as { q?: unknown }).q ?? "").trim();
       return {
         t: t.slice(0, 400),
         done: Boolean(r.done),
-        src: r.src === "you" ? ("you" as const) : ("machine" as const),
+        src: todoSource(r.src),
+        ...(q ? { q: q.slice(0, 300) } : {}),
       };
     })
     .filter((x): x is NoteTodo => Boolean(x))

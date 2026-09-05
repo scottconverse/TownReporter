@@ -1,7 +1,7 @@
 import { looksLikeSoft404, type FetchOutcome } from "./fetch-outcome.ts";
 import { assertPublicHttpUrl, fetchPublicHttp, fetchPublicHttpTracked } from "./fetch-url.ts";
 import { htmlToPlainText } from "./html-text.ts";
-import { extractArticleText } from "./article-extract.ts";
+import { extractArticleText, extractSiteNotices } from "./article-extract.ts";
 import { storableText } from "./storable-text.ts";
 import { needsRenderedFetch } from "./render-detect.ts";
 import { ingestYoutube, isYoutubeUrl, type YoutubeIngest } from "./youtube.ts";
@@ -390,6 +390,15 @@ export type IngestDocument = {
   redirectChain: string[];
   extractionMethod: string;
   pages: PdfPage[];
+  /*
+    Banner / alert text readability throws away, kept separately.
+
+    See extractSiteNotices in article-extract.ts: the city's own survey banner
+    was captured twice and discarded both times, and the story then said no
+    such notice existed. Never merged into `text` -- site furniture is not
+    article body -- so a consumer has to ask for it on purpose.
+  */
+  notices: string[];
   rawBytes?: Uint8Array;
 };
 
@@ -406,6 +415,7 @@ function clean(doc: IngestDocument): IngestDocument {
     text: storableText(doc.text),
     title: storableText(doc.title),
     extras: doc.extras.map((e) => storableText(e)),
+    notices: (doc.notices ?? []).map((n) => storableText(n)),
   };
 }
 
@@ -426,6 +436,7 @@ async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
     redirectChain: [],
     extractionMethod: "",
     pages: [],
+    notices: [],
     rawBytes: undefined,
     ...over,
   });
@@ -505,6 +516,7 @@ async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
         redirectChain: tracked.chain,
         extractionMethod: "refused-too-large",
         pages: [],
+        notices: [],
       };
     }
     const buf = capped.bytes;
@@ -590,6 +602,7 @@ async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
     // nav-only app-shell page with a huge raw stripped length is not
     // mistaken for a successful capture.
     const extracted = extractArticleText(body, url.toString());
+    let notices = extractSiteNotices(body);
     let outText = extracted.text;
     let outTitle = extracted.title || title;
     let method = extracted.method === "readability" ? "readability" : "heuristic";
@@ -602,6 +615,8 @@ async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
         outText = renderedText.slice(0, ARCHIVE_TEXT_CAP);
         outTitle = renderedExtracted.title || rendered.title || outTitle;
         method = renderedExtracted.text ? `playwright+${renderedExtracted.method}` : "playwright";
+        const renderedNotices = extractSiteNotices(rendered.html);
+        if (renderedNotices.length) notices = renderedNotices;
         mergePageExtras(rendered.html, new URL(rendered.finalUrl), extras);
       }
     }
@@ -613,6 +628,7 @@ async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
       text: outText,
       title: outTitle,
       extras,
+      notices,
       contentType: ctype || "text/html",
       redirectChain: tracked.chain,
       extractionMethod: method,

@@ -824,6 +824,26 @@
 .desk-ltr .todo.done .todo-t {text-decoration:line-through;color:var(--mut)}
 .desk-ltr .todo-t {text-align:left;flex:1;min-width:0}
 .desk-ltr .todo-src {font-size:calc(0.8125rem * var(--ts));color:var(--mut);text-transform:uppercase;letter-spacing:.12em;flex:none}
+/*
+  Claims of absence (2026-09-05). A story saying a public document does not
+  exist is the one thing this desk cannot let through on a model's word, so
+  the block is bordered in the warning colour, sits above the ordinary to-dos,
+  and every line in it is body-sized -- nothing informational under 14px, and
+  no meaning carried by colour alone (the label says what it is).
+*/
+.desk-ltr .note-gate {border:2px solid var(--warn);padding:10px 12px 12px;margin-top:14px;background:var(--bg2)}
+.desk-ltr .note-gate .side-label {color:var(--warn)}
+.desk-ltr .gate-claim {display:flex;gap:10px;align-items:flex-start;margin:10px 0 0;font-size:calc(0.875rem * var(--ts));cursor:pointer}
+.desk-ltr .gate-claim input {width:17px;height:17px;flex:none;margin:2px 0 0;accent-color:var(--warn);cursor:pointer}
+.desk-ltr .gate-claim input:focus-visible {outline:2px solid var(--fg);outline-offset:2px}
+.desk-ltr .gate-claim input:disabled {cursor:not-allowed}
+.desk-ltr .gate-claim > span {display:block;min-width:0}
+.desk-ltr .gate-claim-t {display:block;color:var(--fg);text-wrap:pretty}
+.desk-ltr .gate-claim-q {display:block;margin-top:3px;color:var(--fg2);font-size:calc(0.875rem * var(--ts))}
+.desk-ltr .gate-claim-ack {display:block;margin-top:3px;color:var(--fg2);font-style:italic}
+/* The reason a disabled Publish is disabled, in words rather than opacity. */
+.desk-ltr .publish-blocked {color:var(--warn);font-weight:600}
+.desk-ltr .opened-for {display:block;color:var(--fg2);font-size:calc(0.875rem * var(--ts));margin-top:2px}
 .desk-ltr .note-hint {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:8px 0 0;font-style:italic}
 .desk-ltr .note-add {display:flex;gap:8px;margin-top:14px}
 .desk-ltr .note-add input {flex:1;min-width:0;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 9px}
