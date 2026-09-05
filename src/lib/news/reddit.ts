@@ -61,8 +61,12 @@ export function subredditSearchFeed(sub: string, query: string, sort: "new" | "r
 
 /** The comments of one thread, as a feed. The substance is usually here. */
 export function threadFeed(permalink: string): string {
-  const clean = permalink.split("?")[0]!.replace(/\/+$/, "");
-  return `${clean}/.rss`;
+  const url = new URL(permalink);
+  url.search = "";
+  url.hash = "";
+  const path = url.pathname.replace(/\/+$/, "");
+  url.pathname = path.endsWith("/.rss") ? path : `${path}/.rss`;
+  return url.toString();
 }
 
 function decodeEntities(s: string): string {

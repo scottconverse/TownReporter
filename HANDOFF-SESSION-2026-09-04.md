@@ -4,6 +4,10 @@ You are picking up work on **TownReporter**, a self-hosted civic newspaper for L
 
 ---
 
+## TR-001 repository implementation update
+
+The Reddit pacing/routing fix is implemented in this repository; see [the implementation receipt](artifacts/dark-desk-review-2026-09-03/TR001-IMPLEMENTATION.md) for local gates and independent proof. It includes shared cooldown, body-complete serialization, paced guarded redirects, and redd.it-to-RSS resolution. The older open-defect wording below records the pre-fix state. Confirm CI on the exact current commit before handing it to the Halo-local Claude session for owner-directed staging and promotion. No deployment or live Reddit success is claimed here. The next development priority after this handoff is newsroom-scoping the monitor path.
+
 ## REMOTE / REPO-ONLY BOUNDARY — read first
 If you are a remote session working **only from this GitHub repo** (no access to the owner's local Windows box):
 - **You CAN:** read all code/docs/migrations/`scripts/`/`ops/`, understand the whole system, make changes, and `git push` to `main` — **CI runs on GitHub** (14 jobs, incl. a real-Postgres job that validates migrations + schema parity). You can also clone the owner's doctrine repos (`civic-scanner`, `civic-newsroom`, `civic-transparency-toolkit`, `CivicNewspaper`) for the Dark Desk "do it right" pass.

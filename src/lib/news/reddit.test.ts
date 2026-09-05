@@ -44,6 +44,12 @@ describe("reddit feed URLs", () => {
       "https://www.reddit.com/r/longmont/comments/abc/slug/.rss",
     );
   });
+  it("keeps the feed suffix in the path and makes RSS URLs idempotent", () => {
+    const feed = "https://www.reddit.com/r/longmont/comments/abc/slug/.rss";
+    assert.equal(threadFeed("https://www.reddit.com/r/longmont/comments/abc/slug/#comments"), feed);
+    assert.equal(threadFeed(`${feed}?context=3#comments`), feed);
+  });
+
 });
 
 describe("parseRedditFeed", () => {

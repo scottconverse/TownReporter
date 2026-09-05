@@ -142,12 +142,15 @@ export async function resolveFetch(): Promise<FetchLike> {
   return guardedFetchImpl ?? ((u, i) => fetch(u, i));
 }
 
-export async function fetchPublicHttpTracked(url: URL, hops = 4): Promise<TrackedFetch> {
-  const chain: string[] = [url.toString()];
+/** One guarded HTTP hop. A scheduler can own the send and body lifetime. */
+export async function fetchPublicHttpOnce(
+  url: URL,
+  schedule: (send: () => Promise<Response>) => Promise<Response> = (send) => send(),
+): Promise<Response> {
+  await assertPublicHttpUrl(url.toString());
   const doFetch = await resolveFetch();
-  async function go(u: URL, left: number): Promise<Response> {
-    await assertPublicHttpUrl(u.toString());
-    const res = await doFetch(u, {
+  return schedule(() =>
+    doFetch(url, {
       redirect: "manual",
       headers: {
         "User-Agent":
@@ -156,7 +159,14 @@ export async function fetchPublicHttpTracked(url: URL, hops = 4): Promise<Tracke
           "text/html,application/xhtml+xml,application/xml,text/plain,application/pdf;q=0.8,*/*;q=0.1",
       },
       signal: AbortSignal.timeout(10000),
-    });
+    }),
+  );
+}
+
+export async function fetchPublicHttpTracked(url: URL, hops = 4): Promise<TrackedFetch> {
+  const chain: string[] = [url.toString()];
+  async function go(u: URL, left: number): Promise<Response> {
+    const res = await fetchPublicHttpOnce(u);
     if ([301, 302, 303, 307, 308].includes(res.status)) {
       if (left <= 0) throw new Error("Too many redirects");
       const loc = res.headers.get("location");

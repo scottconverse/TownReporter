@@ -1,6 +1,6 @@
-import { fetchPublicHttp } from "./fetch-url.ts";
+import { fetchPublicHttpOnce } from "./fetch-url.ts";
 import { htmlToPlainText } from "./html-text.ts";
-import { isRedditThreadUrl, parseRedditFeed, threadFeed, type RedditPost } from "./reddit.ts";
+import { isRedditUrl, isRedditThreadUrl, parseRedditFeed, threadFeed, type RedditPost } from "./reddit.ts";
 
 /**
  * Fetching Reddit at a pace that keeps working.
@@ -22,36 +22,72 @@ const MIN_GAP_MS = 8_000;
 const RATE_LIMIT_PAUSE_MS = 60_000;
 const MAX_429 = 3;
 
-/**
- * Module-level, deliberately.
- *
- * The budget that matters is per IP, so two concurrent runs each politely
- * waiting eight seconds would together make a request every four — two polite
- * clients on one connection are one impolite client. Sharing the clock across
- * the whole process is what stops that.
- */
-let lastRequestAt = 0;
+/** One queue for this process; other processes on the same IP need coordination too. */
+let lastRequestAt = Number.NEGATIVE_INFINITY;
 let gapMs = MIN_GAP_MS;
+let cooldownUntil = 0;
+let requestQueue: Promise<void> = Promise.resolve();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * The pacing half only: wait out the shared gap, then make one request.
- * Shared by `sweepRedditFeeds` (many feeds) and `fetchRedditDocument`
- * (Dark Desk F5 — one URL from the generic fetch/ingest path) so every
- * reddit request in the process, regardless of caller, goes through the
- * same clock and never fires two in flight.
+ * Reserve queue order synchronously, before waiting. Only the queue head can
+ * send, and it retains ownership until the response body finishes (or fails).
+ * Check the current cooldown at the head, so a preceding 429 affects waiters.
  */
-async function pacedRedditGet(url: string): Promise<Response> {
-  const since = Date.now() - lastRequestAt;
-  if (since < gapMs) await sleep(gapMs - since);
-  lastRequestAt = Date.now();
-  return fetchPublicHttp(new URL(url));
+function scheduleRedditRequest(send: () => Promise<Response>): Promise<Response> {
+  const request = requestQueue.then(async () => {
+    let wait: number;
+    while ((wait = Math.max(lastRequestAt + gapMs, cooldownUntil) - Date.now()) > 0) {
+      await sleep(wait);
+    }
+    lastRequestAt = Date.now();
+    const res = await send();
+    if (res.status === 429) {
+      gapMs = Math.min(gapMs * 2, RATE_LIMIT_PAUSE_MS);
+      cooldownUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
+    }
+    // Buffer inside the queue: fetch resolves at headers, before the network
+    // body finishes. Return a fresh readable response to existing consumers.
+    const body = res.body === null ? null : await res.arrayBuffer();
+    return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+  });
+  requestQueue = request.then(() => {}, () => {});
+  return request;
 }
 
-/** 429 bookkeeping shared by both callers: slow the shared clock down, honestly. */
-function noteRateLimited() {
-  gapMs = Math.min(gapMs * 2, 60_000);
+/** Every hop stays on Reddit and retains the generic fetcher's DNS/rebinding guard. */
+async function pacedRedditGet(
+  raw: string,
+  chain: string[] = [],
+  resolveShortLink = false,
+): Promise<Response> {
+  let url = new URL(raw);
+  const seen = new Set<string>();
+  for (let hops = 0; ; hops++) {
+    if (!isRedditUrl(url) || !["https:", "http:"].includes(url.protocol) || url.username || url.password) {
+      throw new Error("Reddit redirect must use a public Reddit HTTP(S) URL");
+    }
+    if (seen.has(url.toString())) throw new Error("Reddit redirect loop");
+    seen.add(url.toString());
+    chain.push(url.toString());
+    // Resolve the short URL to its canonical permalink, then request the RSS
+    // directly rather than spending another request on the JavaScript shell.
+    if (resolveShortLink && url.hostname !== "redd.it" && isRedditThreadUrl(url)) {
+      url = new URL(threadFeed(url.toString()));
+      resolveShortLink = false;
+      if (chain[chain.length - 1] !== url.toString()) chain.push(url.toString());
+    }
+    const res = await fetchPublicHttpOnce(url, scheduleRedditRequest);
+    if (![301, 302, 303, 307, 308].includes(res.status)) {
+      if (resolveShortLink && res.ok) throw new Error("Reddit short link did not resolve to a thread");
+      return res;
+    }
+    if (hops >= 4) throw new Error("Too many Reddit redirects");
+    const location = res.headers.get("location");
+    if (!location) throw new Error("Reddit redirect with no location");
+    url = new URL(location, url);
+  }
 }
 
 export type RedditFetchLog = {
@@ -103,8 +139,6 @@ export async function sweepRedditFeeds(
 
     if (res.status === 429) {
       rateLimited += 1;
-      // Back off and slow down for the rest of the run, not just this request.
-      noteRateLimited();
       log.push({ url, ok: false, status: 429, posts: 0, note: "rate limited" });
       if (rateLimited >= MAX_429) {
         return {
@@ -114,7 +148,6 @@ export async function sweepRedditFeeds(
           reason: `Reddit rate-limited this machine ${rateLimited} times. Stopped rather than pushing. Try again in a few minutes.`,
         };
       }
-      await sleep(RATE_LIMIT_PAUSE_MS);
       continue;
     }
 
@@ -148,8 +181,10 @@ export async function sweepRedditFeeds(
 
 /** For tests: forget the shared clock between cases. */
 export function resetRedditPacing() {
-  lastRequestAt = 0;
+  lastRequestAt = Number.NEGATIVE_INFINITY;
   gapMs = MIN_GAP_MS;
+  cooldownUntil = 0;
+  requestQueue = Promise.resolve();
 }
 
 export type RedditDocument = {
@@ -168,23 +203,25 @@ export type RedditDocument = {
  * path (ingest.ts), the way `reddit.ts`'s doc comment says a curated source
  * already does it — browser-like User-Agent (fetchPublicHttp's default), the
  * `.rss` endpoint for a thread permalink, paced through the same shared
- * clock as `sweepRedditFeeds` so this and the tip-subreddit scan can never
- * together exceed reddit's per-IP budget.
+ * queue and cooldown as `sweepRedditFeeds`, shared within this process.
  *
  * A thread permalink (`/r/<sub>/comments/<id>/...`) gets its `.rss` feed
  * parsed into post title + top comment excerpts — real content instead of
  * the JS app shell. Anything else reddit-shaped (a subreddit front page, a
- * user page, a redd.it short link) has no `.rss` equivalent, so it falls
+ * user page) has no `.rss` equivalent, so it falls
  * back to `old.reddit.com`, which still serves plain server-rendered HTML
- * reddit.com does not.
+ * reddit.com does not. Short links resolve through paced, guarded Reddit
+ * redirects to a canonical thread before fetching its RSS.
  */
 export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
-  const isThread = isRedditThreadUrl(url);
-  const fetchUrl = isThread ? threadFeed(url.toString()) : oldRedditUrl(url);
+  const isShortLink = url.hostname === "redd.it";
+  const isThread = isShortLink || isRedditThreadUrl(url);
+  const fetchUrl = isShortLink ? url.toString() : isThread ? threadFeed(url.toString()) : oldRedditUrl(url);
+  const redirectChain = [url.toString()];
 
   let res: Response;
   try {
-    res = await pacedRedditGet(fetchUrl);
+    res = await pacedRedditGet(fetchUrl, redirectChain, isShortLink);
   } catch (err) {
     return {
       ok: false,
@@ -194,12 +231,11 @@ export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
       extras: [],
       contentType: "",
       extractionMethod: isThread ? "reddit-rss" : "reddit-old",
-      redirectChain: [url.toString()],
+      redirectChain,
     };
   }
 
   if (res.status === 429) {
-    noteRateLimited();
     return {
       ok: false,
       status: 429,
@@ -208,7 +244,7 @@ export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
       extras: [],
       contentType: "",
       extractionMethod: isThread ? "reddit-rss" : "reddit-old",
-      redirectChain: [url.toString(), fetchUrl],
+      redirectChain,
     };
   }
 
@@ -221,7 +257,7 @@ export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
       extras: [],
       contentType: "",
       extractionMethod: isThread ? "reddit-rss" : "reddit-old",
-      redirectChain: [url.toString(), fetchUrl],
+      redirectChain,
     };
   }
 
@@ -247,7 +283,7 @@ export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
       extras: [],
       contentType: "text/plain",
       extractionMethod: "reddit-rss",
-      redirectChain: [url.toString(), fetchUrl],
+      redirectChain,
     };
   }
 
@@ -265,19 +301,15 @@ export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
     extras: [],
     contentType: "text/html",
     extractionMethod: "reddit-old",
-    redirectChain: [url.toString(), fetchUrl],
+    redirectChain,
   };
 }
 
 /**
  * Same path/query on old.reddit.com — still server-rendered HTML, unlike
  * reddit.com's JS app shell. Correct for any reddit.com/www.reddit.com/
- * old.reddit.com path (subreddit listing, user page, search). A redd.it
- * short link's path is a bare id in redd.it's own scheme, not a reddit.com
- * path, so this fallback does not resolve it — out of scope here; redd.it
- * links reaching this function fall back to whatever old.reddit.com does
- * with that path (typically a 404), which is at worst a failed capture,
- * never a poisoned one.
+ * old.reddit.com path (subreddit listing, user page, search). Short links
+ * are resolved separately before this fallback.
  */
 function oldRedditUrl(url: URL): string {
   try {
