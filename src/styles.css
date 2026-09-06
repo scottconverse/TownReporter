@@ -910,15 +910,30 @@
 .desk-ltr .corr-form .row-acts {margin-top:8px}
 .desk-ltr .crumb {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin-bottom:14px}
 .desk-ltr .crumb:hover {color:var(--fg)}
-.desk-ltr .story-grid {display:grid;grid-template-columns:minmax(280px,.8fr) 1.6fr;gap:36px}
+/*
+  Direction A stage 2 (2026-09-06): the prototype's story view is a
+  minmax(0, 380px) minmax(0, 1fr) grid with 32px gap, two columns from
+  1024px up and a single stacked column below it (aside first, then the
+  work area) -- see docs/design/DIRECTION-A-BUILD-NOTES-2026-09-06.md
+  "Narrow layout" and Main.dc.html's showStory branch. min-width:0 on
+  BOTH tracks and both grid items is what lets a long headline or a long
+  source URL shrink with its column instead of forcing the grid wider
+  than the viewport (the classic CSS-grid overflow trap -- see the
+  .desk-cc-grid comment in desk-cc-grid-min-width.test.mjs for the same
+  trap on the Command Center).
+*/
+.desk-ltr .story-grid {display:grid;grid-template-columns:minmax(0,380px) minmax(0,1fr);gap:32px;align-items:start;min-width:0}
 .desk-ltr .story-side {min-width:0}
-.desk-ltr .side-h {font-family:var(--fd);font-weight:600;font-size:21px;line-height:1.15;margin:4px 0 0;letter-spacing:-.01em}
+.desk-ltr .story-side > .chip:first-child {display:inline-block;margin-bottom:10px}
+.desk-ltr .story-work {min-width:0;display:flex;flex-direction:column;gap:16px}
+.desk-ltr .side-h {font-family:var(--fd);font-weight:600;font-size:calc(1.375rem * var(--ts));line-height:1.2;margin:4px 0 0;letter-spacing:-.01em}
 .desk-ltr .side-why {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:8px 0 0}
 .desk-ltr .side-note {font-size:calc(0.875rem * var(--ts));margin:12px 0 0;padding:10px 12px;background:var(--bg2)}
 .desk-ltr .side-block {margin-top:16px;border-top:1px solid var(--line);padding-top:8px}
 .desk-ltr .side-label {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.16em;color:var(--adeep);font-weight:600;margin:0 0 4px}
 .desk-ltr .side-item {font-size:calc(0.875rem * var(--ts));margin:5px 0 0;color:var(--fg2)}
-.desk-ltr .side-url {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:3px 0 0;word-break:break-all}
+/* Sources on the lead: long agenda/council URLs wrap instead of forcing the 380px aside track wider (no horizontal scroll at 390/762 -- build-notes "Narrow layout" #5). */
+.desk-ltr .side-url {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:3px 0 0;word-break:break-all;overflow-wrap:anywhere}
 .desk-ltr .notes {margin-top:18px;border:1px solid var(--fg);padding:12px 14px 14px}
 .desk-ltr .notes-head {display:flex;align-items:baseline;gap:10px;justify-content:space-between}
 .desk-ltr .chip.dnp {border-color:var(--warn);color:var(--warn)}
@@ -962,7 +977,18 @@
 .desk-ltr .notes-disc {margin-top:18px;border:1px solid var(--fg)}
 .desk-ltr .notes-disc summary {font-family:var(--fd);font-weight:600;font-size:calc(0.875rem * var(--ts));padding:10px 14px;cursor:pointer;list-style-position:inside}
 .desk-ltr .notes-disc .notes {margin:0;border:none;border-top:1px solid var(--line)}
-@media (max-width:720px) {
+/*
+  Below 1024px: single column, aside first then the work area (source
+  order already puts <aside class="story-side"> before <section
+  class="story-work">, so the grid collapse is the only rule needed --
+  build-notes: "Story page: two columns >= 1024px; single column below,
+  aside first, then the work area"). The <=720px <details> collapse for
+  Reporting notes (ReportingNotesPane's usePhoneNotes) is a separate,
+  narrower rule and stays independent of this breakpoint: at
+  721-1023px the aside is simply stacked full-width above the work area
+  with Reporting notes still expanded inline.
+*/
+@media (max-width:1023px) {
   .desk-ltr .story-grid {grid-template-columns:1fr;gap:22px}
 }
 .desk-ltr .work-bar {display:flex;gap:10px;flex-wrap:wrap;align-items:center}
@@ -1158,7 +1184,7 @@
 .desk-ltr .piles {grid-template-columns:1fr}
 .desk-ltr .piles>section {padding:0 0 18px}
 .desk-ltr .piles>section+section {border-left:none;border-top:1px solid var(--line);padding-top:14px}
-.desk-ltr .of-grid, .desk-ltr .story-grid, .desk-ltr .board-lower {grid-template-columns:1fr}
+.desk-ltr .of-grid, .desk-ltr .board-lower {grid-template-columns:1fr}
 .desk-ltr .board-lower>div {padding:0;border-left:none!important}
 }
 @media (prefers-reduced-motion:reduce) {

@@ -6,7 +6,7 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked 
 ---
 
 ## In flight
-- [~] Direction A build — stage 1 LIVE in 0.6.21; next: stage 2 (story page), stage 3 (narrow story layout).
+- [~] Direction A build — stage 1 LIVE in 0.6.21; stage 2 (story page) committed this commit; next: bump 0.6.22 → CI → stage → owner's go.
 
 ## Open queue (bug fixes first — owner chose to skip the redesign for now)
 - [ ] **Redesign build (direction A) — awaiting owner's go.** Auditor verdict 2026-09-05: use this repo's system; take from Codex only more air in the queue and a Follow-ups list on the rail. Scope: queue as lead column + Dark Desk/wire rail; airier queue rows; Follow-ups on the rail (who/what/due/overdue in words); real narrow-window layout; no sidebar/teal/tiles/banner. Reference: docs/design/DESIGN-AUDIT-BRIEF-2026-09-05.md, docs/design/WORKFLOWS-SPEC-2026-09-05.md, the design canvas (owner's artifact).

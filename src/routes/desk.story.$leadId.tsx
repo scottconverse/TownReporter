@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Busy, DeskShell, Field, InkButton, leadOrigin, announceToDesk } from "@/components/desk-chrome";
+import { Busy, Chip, DeskShell, Field, InkButton, leadOrigin, announceToDesk } from "@/components/desk-chrome";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   createFollowUp,
@@ -401,6 +401,7 @@ function StoryPage() {
       </Link>
       <div className="story-grid">
         <aside className="story-side">
+          <Chip s={data.lead.status} />
           <p className="kick">{fromDark ? "Working notes from Dark Desk" : "The lead"}</p>
           <h2 className="side-h">{data.lead.headline}</h2>
           <p className="side-why">{data.lead.why}</p>

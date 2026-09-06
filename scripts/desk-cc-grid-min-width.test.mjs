@@ -68,6 +68,45 @@ test(".nav-toggle (the mobile Menu button) is at least 40px tall", () => {
   assert.match(toggle[1], /min-height:\s*40px/, ".nav-toggle must declare min-height:40px");
 });
 
+/*
+  Direction A stage 2 (story page, 2026-09-06): the prototype's story view is
+  a minmax(0, 380px) minmax(0, 1fr) grid, gap 32px, two columns from 1024px
+  up and a single stacked column (aside first, then the work area) below it.
+  Both grid items need min-width:0 for the same reason as .desk-cc-grid's
+  children above -- a long headline or source URL must shrink with its
+  column, not force the grid wider than the viewport.
+*/
+test(".story-grid matches the prototype's two-column spec and collapses at 1024px", () => {
+  const grid = css.match(/\.desk-ltr \.story-grid \{([^}]*)\}/);
+  assert.ok(grid, "expected a base .desk-ltr .story-grid rule");
+  assert.match(
+    grid[1],
+    /grid-template-columns:\s*minmax\(0,\s*380px\)\s*minmax\(0,\s*1fr\)/,
+    ".story-grid must use the prototype's minmax(0, 380px) minmax(0, 1fr) columns",
+  );
+  assert.match(grid[1], /gap:\s*32px/, ".story-grid must use the prototype's 32px gap");
+  assert.match(grid[1], /min-width:\s*0\b/, ".story-grid itself must declare min-width:0");
+  const side = css.match(/\.desk-ltr \.story-side \{([^}]*)\}/);
+  assert.ok(side, "expected a base .desk-ltr .story-side rule");
+  assert.match(side[1], /min-width:\s*0\b/, ".story-side must declare min-width:0");
+  const work = css.match(/\.desk-ltr \.story-work \{([^}]*)\}/);
+  assert.ok(work, "expected a base .desk-ltr .story-work rule");
+  assert.match(work[1], /min-width:\s*0\b/, ".story-work must declare min-width:0");
+  const narrow = [...css.matchAll(/@media \(max-width:\s*1023px\)\s*\{([^{]*\.story-grid\s*\{[^}]*\})/g)];
+  assert.ok(narrow.length > 0, "expected a max-width:1023px rule collapsing .story-grid to one column");
+  assert.match(
+    narrow[0][1],
+    /grid-template-columns:\s*1fr/,
+    "below 1024px .story-grid must collapse to a single column",
+  );
+});
+
+test(".side-url (sources on the lead) wraps long agenda/council URLs instead of overflowing the 380px aside", () => {
+  const url = css.match(/\.desk-ltr \.side-url \{([^}]*)\}/);
+  assert.ok(url, "expected a base .desk-ltr .side-url rule");
+  assert.match(url[1], /overflow-wrap:\s*anywhere\b/, ".side-url must declare overflow-wrap:anywhere");
+});
+
 test("the desk nav row (.deskname) wraps instead of forcing horizontal overflow, and .nav-dark never breaks across two lines", () => {
   const deskname = css.match(/\.desk-ltr \.deskname \{([^}]*)\}/);
   assert.ok(deskname, "expected a base .desk-ltr .deskname rule");
