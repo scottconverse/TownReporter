@@ -90,7 +90,7 @@ Masthead: brand, "Editor's desk — Longmont", date, View paper, Light/Dark, Tex
 
 ## 8. The prototype canvas
 
-A Claude Design canvas holds the proposed direction. The owner shares the link separately. It contains:
+The proposed direction is a clickable canvas. In this package it is `prototype/editors-desk-redesign.html`; open it in any modern browser (view-only offline). It contains:
 
 - **Page "Desk":** a clickable prototype of the Command Center in direction **A — Front page** (one dominant column, the queue as the lead story, Dark Desk and the wire in a right rail; opens dark; Light/Dark and Normal/Large work; tabs switch; queue actions work; composer files and drafts; the story view is two-column with the claims-of-absence gate). Beside it, static sketches of two rejected-for-now directions: **B — Work list** (left rail, one task list) and **C — Calm desk** (composer then a three-stage pipeline).
 - **Page "Workflows":** four clickable scenarios for features that do not exist yet, each with its waiting and failure states: *Watch a page*, *Legal removal*, *Sections*, *Investigation*. Their spec is in §9.
