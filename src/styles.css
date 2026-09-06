@@ -609,7 +609,7 @@
 .desk-ltr .rule1 {border-bottom:1px solid var(--fg)}
 .desk-ltr .deskname {display:flex;align-items:center;gap:2px;padding:2px 0;flex-wrap:wrap}
 /* Mobile-only disclosure for the desk nav (UX-001); invisible from 640px up. */
-.desk-ltr .nav-toggle {display:none;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;padding:8px 14px;color:var(--fg2);background:none;border:none;width:100%;text-align:center;cursor:pointer}
+.desk-ltr .nav-toggle {display:none;min-height:40px;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;padding:8px 14px;color:var(--fg2);background:none;border:none;width:100%;text-align:center;cursor:pointer}
 .desk-ltr .nav-item {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;padding:8px 14px;color:var(--fg2);border-bottom:2px solid transparent}
 .desk-ltr .nav-item:hover {color:var(--fg)}
 .desk-ltr .nav-item.on {color:var(--adeep);border-bottom-color:var(--a)}
@@ -836,12 +836,17 @@
 */
 .desk-ltr .wire-mem-row {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help}
 /*
-  A proposed source's title can be a long unbroken run inside a flex-ish
-  paragraph next to its Accept/Drop buttons; truncate the title itself
-  (full text in the title= tooltip) so the row never forces the rail wider
-  than its column, and Accept/Drop always stay visible.
+  A proposed source's title can be a long unbroken run; truncate the title
+  itself (full text in the title= tooltip) so it never forces the rail
+  wider than its column. Direction A stage-1 fix #3 (2026-09-06): a short
+  title used to leave room for "Accept" to sit on the title's own line
+  while "Drop" wrapped to a second line by itself -- confusing and
+  inconsistent. The row is now a two-row flex column: the title always on
+  its own line, Accept/Drop always together on the line below it.
 */
-.desk-ltr .wire-proposed span {display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+.desk-ltr .wire-proposed {display:flex;flex-direction:column;gap:4px;min-width:0}
+.desk-ltr .wire-proposed span:first-child {display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.desk-ltr .wire-proposed-acts {display:flex;gap:6px;flex-wrap:wrap}
 
 .desk-ltr .pipeline {display:flex;align-items:stretch;gap:10px;margin-top:18px;flex-wrap:wrap}
 .desk-ltr .pipe-cell {flex:1;min-width:150px;border:1px solid var(--line);padding:10px 14px;text-align:left;display:flex;flex-direction:column;gap:2px;transition:border-color .15s}
@@ -967,23 +972,36 @@
   error notice on the right -- was three stacked full-width blocks, which
   left most of a 1440px row empty since .model-picker caps at 420px.
 */
-.desk-ltr .composer-row {display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.desk-ltr .composer-row {display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap;min-width:0}
 .desk-ltr .composer-row .model-picker {margin:0}
-.desk-ltr .model-picker {display:grid;grid-template-columns:auto minmax(190px,1fr);align-items:center;gap:4px 9px;max-width:420px;margin:12px 0}
+/*
+  Direction A stage-1 fix #2 (2026-09-06): a grid item's default min-width
+  is auto (its content's intrinsic width), not 0 -- so the select's own
+  intrinsic width (long option text like "Automatic -- Recommended lad...")
+  was winning against both the minmax(190px,1fr) track and the 640px
+  collapse-to-1fr rule below, forcing the whole picker (and everything
+  inside it) to 556px regardless of viewport. min-width:0 on the grid
+  container AND the select is what actually lets the track shrink.
+  Desktop also widened: the select column was minmax(190px,1fr), which let
+  a 1fr track collapse back toward 190px and truncate the label text; now
+  minmax(260px,420px) with the help/notice lines pulled onto their own
+  full-width row (grid-column:1/-1) instead of a cramped ~180px column.
+*/
+.desk-ltr .model-picker {display:grid;grid-template-columns:auto minmax(260px,420px);align-items:center;gap:4px 9px;max-width:100%;min-width:0;margin:12px 0}
 .desk-ltr .model-picker.compact {margin:0;grid-template-columns:auto minmax(170px,230px)}
 .desk-ltr .model-picker-label {font-size:calc(0.875rem * var(--ts));letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
-.desk-ltr .model-picker select {min-height:40px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px}
+.desk-ltr .model-picker select {min-height:40px;width:100%;max-width:100%;min-width:0;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px}
 .desk-ltr .model-picker select:focus {border-color:var(--fg);outline:2px solid var(--fg);outline-offset:2px}
-.desk-ltr .model-picker-help {grid-column:2;font-size:calc(0.875rem * var(--ts));color:var(--mut)}
+.desk-ltr .model-picker-help {grid-column:1 / -1;font-size:calc(0.875rem * var(--ts));color:var(--mut)}
 .desk-ltr .queue-draft-controls {display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin-top:9px}
 .desk-ltr .queue-draft-controls .model-picker {margin:0}
-@media (max-width:640px){.desk-ltr .model-picker,.desk-ltr .model-picker.compact{grid-template-columns:1fr;width:100%;max-width:none}.desk-ltr .model-picker-help{grid-column:1}}
-.desk-ltr .local-model-picker {display:grid;grid-template-columns:auto minmax(190px,1fr);align-items:center;gap:4px 9px;margin:6px 0 0;padding-top:6px;border-top:1px dashed var(--line)}
-.desk-ltr .local-model-picker select {grid-column:2;min-height:40px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px}
+@media (max-width:720px){.desk-ltr .model-picker,.desk-ltr .model-picker.compact{grid-template-columns:1fr;width:100%;max-width:none;min-width:0}.desk-ltr .model-picker-help{grid-column:1}}
+.desk-ltr .local-model-picker {display:grid;grid-template-columns:auto minmax(190px,1fr);align-items:center;gap:4px 9px;margin:6px 0 0;padding-top:6px;border-top:1px dashed var(--line);min-width:0}
+.desk-ltr .local-model-picker select {grid-column:2;min-height:40px;width:100%;max-width:100%;min-width:0;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px}
 .desk-ltr .local-model-picker .model-picker-help {grid-column:2}
 .desk-ltr .model-picker-refresh {grid-column:2;justify-self:start;min-height:44px;min-width:44px;padding:6px 14px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));cursor:pointer}
 .desk-ltr .model-picker-refresh:focus-visible {outline:2px solid var(--fg);outline-offset:2px}
-@media (max-width:640px){.desk-ltr .local-model-picker{grid-template-columns:1fr}.desk-ltr .local-model-picker select,.desk-ltr .local-model-picker .model-picker-help,.desk-ltr .model-picker-refresh{grid-column:1}}
+@media (max-width:720px){.desk-ltr .local-model-picker{grid-template-columns:1fr;min-width:0}.desk-ltr .local-model-picker select,.desk-ltr .local-model-picker .model-picker-help,.desk-ltr .model-picker-refresh{grid-column:1}}
 .desk-ltr .work-form {margin-top:16px;display:grid;gap:12px}
 .desk-ltr .dark-lede {max-width:560px;font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:0;text-align:right}
 .desk-ltr .piles {display:grid;grid-template-columns:1fr 1fr 1fr;margin-top:10px}

@@ -615,15 +615,17 @@ function DeskHome() {
                   <b>Proposed sources</b> · {proposed.length}
                 </p>
                 {proposed.slice(0, 5).map((s) => (
-                  <p key={s.id} className="wire-row wire-proposed">
-                    <span title={s.title}>{s.title}</span>{" "}
-                    <InkButton tone="quiet" small onClick={() => srcStatus.mutate({ id: s.id, status: "accepted" })}>
-                      Accept
-                    </InkButton>
-                    <InkButton tone="quiet" small onClick={() => srcStatus.mutate({ id: s.id, status: "rejected" })}>
-                      Drop
-                    </InkButton>
-                  </p>
+                  <div key={s.id} className="wire-row wire-proposed">
+                    <span title={s.title}>{s.title}</span>
+                    <span className="wire-proposed-acts">
+                      <InkButton tone="quiet" small onClick={() => srcStatus.mutate({ id: s.id, status: "accepted" })}>
+                        Accept
+                      </InkButton>
+                      <InkButton tone="quiet" small onClick={() => srcStatus.mutate({ id: s.id, status: "rejected" })}>
+                        Drop
+                      </InkButton>
+                    </span>
+                  </div>
                 ))}
                 {proposed.length > 5 ? (
                   <p className="wire-sum">
