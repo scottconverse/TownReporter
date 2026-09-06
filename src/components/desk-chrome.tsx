@@ -370,19 +370,30 @@ export function InkButton({
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
-  tone?: "solid" | "ghost" | "danger" | "invert" | "quiet";
+  /**
+   * "danger" is a confirm-step destructive action -- always rendered solid
+   * too, so it does not look like the same low-emphasis outline as the
+   * Cancel/Keep button next to it ("Yes, delete", "Yes, do it").
+   *
+   * "quiet-danger" is Kill: a real action, not a confirm step, that still
+   * needs to read as heading toward removal rather than as a neutral
+   * secondary action like Hold or Back sitting right beside it. It keeps
+   * quiet's low-emphasis footprint (no solid fill) but must still carry a
+   * visible warn border and text -- see the `.btn.quiet.danger` override
+   * in styles.css, which exists because `.btn.quiet`'s `border-color:
+   * transparent` and `.btn.danger`'s `border-color: var(--warn)` are equal
+   * specificity, and only a combined selector reliably wins that tie.
+   */
+  tone?: "solid" | "ghost" | "danger" | "invert" | "quiet" | "quiet-danger";
   type?: "button" | "submit";
   small?: boolean;
   ariaLabel?: string;
 }) {
   const cls =
     "btn" +
-    // "danger" is always rendered solid too: a destructive confirm step
-    // ("Yes, delete", "Yes, do it") must not look like the same
-    // low-emphasis outline as the Cancel/Keep button sitting next to it.
     (tone === "solid" || tone === "invert" || tone === "danger" ? " solid" : "") +
-    (tone === "danger" ? " danger" : "") +
-    (tone === "quiet" ? " quiet" : "") +
+    (tone === "danger" || tone === "quiet-danger" ? " danger" : "") +
+    (tone === "quiet" || tone === "quiet-danger" ? " quiet" : "") +
     (small ? " small" : "");
   return (
     <button type={type} onClick={onClick} disabled={disabled} className={cls} aria-label={ariaLabel}>

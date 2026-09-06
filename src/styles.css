@@ -583,16 +583,16 @@
 .desk-ltr .brand-sub {margin-left:12px;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.14em;color:var(--mut)}
 .desk-ltr .leave-editor {
   display:inline-flex;align-items:center;min-height:44px;margin-left:12px;
-  font-size:12px;letter-spacing:.04em;color:var(--mut);background:transparent;border:0;padding:0;cursor:pointer;
+  font-size:calc(0.875rem * var(--ts));letter-spacing:.04em;color:var(--mut);background:transparent;border:0;padding:0;cursor:pointer;
 }
 .desk-ltr .leave-editor:hover {color:var(--fg)}
 .desk-ltr .leave-ask {
   display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-left:12px;
-  max-width:28rem;font-size:12px;color:var(--mut);
+  max-width:28rem;font-size:calc(0.875rem * var(--ts));color:var(--mut);
 }
 .desk-ltr .leave-yes,
 .desk-ltr .leave-no {
-  display:inline-flex;align-items:center;min-height:44px;padding:0 12px;font-size:12px;cursor:pointer;
+  display:inline-flex;align-items:center;min-height:44px;padding:0 12px;font-size:calc(0.875rem * var(--ts));cursor:pointer;
 }
 .desk-ltr .leave-yes {background:var(--fg);color:var(--bg);border:0}
 .desk-ltr .leave-no {background:transparent;color:var(--fg);border:1px solid var(--fg)}
@@ -638,8 +638,15 @@
 .desk-ltr .btn.small {padding:6px 12px;font-size:calc(0.875rem * var(--ts));min-height:36px}
 .desk-ltr .btn.quiet {border-color:transparent;color:var(--adeep);font-weight:600;padding-inline:6px}
 .desk-ltr .btn.quiet:hover:not(:disabled) {background:color-mix(in srgb,var(--a) 12%,transparent)}
-.desk-ltr .btn.danger {border-color:var(--warn);color:var(--warn)}
-.desk-ltr .btn.danger:hover:not(:disabled) {background:var(--warn);color:var(--bg)}
+/* Equal specificity between .btn.quiet (border-color: transparent) and
+   .btn.danger (border-color: var(--warn)) let source order decide the
+   winner in the built stylesheet -- Kill (tone="quiet-danger", used for a
+   real but non-final action) rendered with a transparent border, so it
+   read as a neutral secondary action with no warn signal at all. The
+   combined selector has higher specificity and wins regardless of
+   declaration order. */
+.desk-ltr .btn.danger, .desk-ltr .btn.quiet.danger {border-color:var(--warn);color:var(--warn)}
+.desk-ltr .btn.danger:hover:not(:disabled), .desk-ltr .btn.quiet.danger:hover:not(:disabled) {background:var(--warn);color:var(--bg)}
 /* Kill/Delete confirm-step buttons render tone="danger", which InkButton
    also marks "solid" -- a destructive confirm reads as a real stop sign
    (solid warn fill), not the same low-emphasis outline as every other
