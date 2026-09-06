@@ -1,13 +1,12 @@
 # TownReporter — TODO (canonical, in-repo)
-_Kept current by whichever Claude session is working. Last updated: 2026-09-06 (0.6.21 in flight). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
+_Kept current by whichever Claude session is working. Last updated: 2026-09-06 (0.6.21 live). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked on the owner
 
 ---
 
 ## In flight
-- [~] **0.6.21** (direction A, stage 1) — bump done (this commit) → CI → owner's go → promote. Next: stage 2 story page, stage 3 narrow story layout.
-- [~] Direction A build — stage 1 shipped in 0.6.21 (96b4faa, 417179d, 7aa3369); stage 2 = story page; stage 3 = narrow story layout.
+- [~] Direction A build — stage 1 LIVE in 0.6.21; next: stage 2 (story page), stage 3 (narrow story layout).
 
 ## Open queue (bug fixes first — owner chose to skip the redesign for now)
 - [ ] **Redesign build (direction A) — awaiting owner's go.** Auditor verdict 2026-09-05: use this repo's system; take from Codex only more air in the queue and a Follow-ups list on the rail. Scope: queue as lead column + Dark Desk/wire rail; airier queue rows; Follow-ups on the rail (who/what/due/overdue in words); real narrow-window layout; no sidebar/teal/tiles/banner. Reference: docs/design/DESIGN-AUDIT-BRIEF-2026-09-05.md, docs/design/WORKFLOWS-SPEC-2026-09-05.md, the design canvas (owner's artifact).
@@ -41,6 +40,7 @@ B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app u
 - [x] 0.6.19 — LIVE 2026-09-05 (tag v0.6.19 at 25bc882): claims-of-absence gate + city-site pulls + site notices (f80a5ce); local model discovery + per-model picker + thinking off + migration 0041 (2e4b8b3); black-on-white dark desk + theme-aware Notice + single model error (6158100); Check r/longmont progress/results/File-as-tip (9ad5369). Staged on real data, incident replay proved the gate, CI 14/14, promote checks OK.
 - [x] Five desk rule defects (14px floor, Large scales headlines and reading panes, one button family + invert/--muted fixes, Kill styled as destructive, Held/aside chips) — auditor punch list 2026-09-05.
 - [x] 0.6.20 — LIVE 2026-09-06 (tag v0.6.20 at 2a25936): five desk rule defects from the design audit — 14px floor, Large text scales headlines/panes, one button family, destructive buttons look destructive, Held/set-aside chips; guard tests added.
+- [x] 0.6.21 — LIVE 2026-09-06 (tag v0.6.21 at 08eef0a): redesigned Command Center, direction A stage 1 — queue as lead column, Dark Desk / Follow-ups / wire rail, airier queue rows, Follow-ups object (migration 0042, /desk/follow-ups), narrow layout measured clean at six widths.
 
 ## Known caveats (honest state)
 - Dark Desk is proven on ONE real staged topic (receipt); the Reddit leg was the weak spot (TR-001, now fixed pending release). Not a certification of every source type.

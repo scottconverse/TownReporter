@@ -33,7 +33,7 @@ If you are a remote session working **only from this GitHub repo** (no access to
 
 **Verify/CI state:** Staged on real data. Incident replay proved the gate. CI 14/14 green. All promotes checked OK. 26 stories intact.
 
-### 2026-09-06 — 0.6.20 live; redesign verdict
+### 2026-09-06 — 0.6.20 and 0.6.21 live; direction A stage 1 shipped
 
 **VERIFIED by the local session 2026-09-06.**
 
@@ -41,7 +41,9 @@ If you are a remote session working **only from this GitHub repo** (no access to
 
 The design audit verdict from 2026-09-05 (quoted): "Fable is better for this paper. Codex looks more finished. Fable is the design that still belongs to TownReporter: newsroom words, black desk, scores and Hold/Kill, rust on cream, no marketing banner on the editor's first screen. Use Fable's system. Take only two things from Codex: more air in the queue, and a Follow-ups list on the rail. Don't take the teal sidebar product." Agreed plan: (1) the five rule defects shipped first (0.6.20, done); (2) the redesign build uses direction A (queue as the lead column; Dark Desk + the wire in a right rail), more air in queue rows (headline first, why line under it, actions on their own line, nothing hidden), a Follow-ups object on the rail (who was asked, for what, due when, "overdue" stated in words), and a real narrow-window layout; nothing from the Codex chrome (no sidebar, teal, tiles, banner).
 
-**Owner decisions still open:** section list; legal-removal retain policy; whether the old Dark Desk methods are adopted. The redesign build has NOT started and awaits the owner's go.
+**0.6.21 (2026-09-06, LIVE, tag v0.6.21 at 08eef0a) shipped direction A stage 1 complete:** the redesigned Command Center with queue as the lead column, Follow-ups and Dark Desk tabs alongside it, the wire rail on the right, airier queue rows (headline first, why-line below, actions on their own row), and a Follow-ups object tracking who was asked, for what, and due when. The Follow-ups code lives in `src/lib/news/follow-ups.ts`, `src/components/follow-up-item.tsx`, and `src/routes/desk.follow-ups.tsx`; migration 0042 adds the schema. The spec is in `docs/design/DIRECTION-A-BUILD-NOTES-2026-09-06.md` and the prototype in `docs/design/prototype/Main.dc.html`. Responsive layout was measured clean at six widths (1440, 1280, 1024, 900, 762, 390 px), with guard tests in `scripts/desk-cc-grid-min-width.test.mjs` and `scripts/desk-min-font.test.mjs`. Next stages are stage 2 (story page aligned to the prototype's two-column view) and stage 3 (narrow story layout); other tabs remain as they are.
+
+**Owner decisions still open:** section list; legal-removal retain policy; whether the old Dark Desk methods are adopted.
 
 ---
 
