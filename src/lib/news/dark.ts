@@ -33,7 +33,7 @@ import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-loo
 import { openInvestigationForEditor } from "./dark-open.ts";
 import { titlesOverlap, topicFromText } from "./desk-copy.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
-import { TIP_SUBREDDIT, TIP_SUBREDDIT_QUERIES } from "../paper.ts";
+import { TIP_SUBREDDIT, TIP_SUBREDDIT_QUERY_GROUPS } from "../paper.ts";
 import {
   BRIEF_SYSTEM,
   briefIsUseful,
@@ -1584,15 +1584,23 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
     await ensureDarkSchema();
     await assertRate(context.userId, "reddit", owned(context));
     const { sweepRedditFeeds } = await import("./reddit.server.ts");
-    const { subredditNewFeed, subredditSearchFeed, pickCivicPosts, redditAnomaly, classifyRedditPosts } =
-      await import("./reddit.ts");
+    const {
+      subredditNewFeed,
+      subredditSearchFeed,
+      pickCivicPosts,
+      redditAnomaly,
+      classifyRedditPosts,
+      selectRotatingQueryGroups,
+    } = await import("./reddit.ts");
     const sub = TIP_SUBREDDIT;
 
-    const feeds = [
-      subredditNewFeed(sub),
-      ...TIP_SUBREDDIT_QUERIES.map((q) => subredditSearchFeed(sub, q)),
-    ];
-    const sweep = await sweepRedditFeeds(feeds, 3);
+    // Rotate by hour so successive checks sweep different ground instead of
+    // asking the same three questions of the subreddit every time.
+    const hourIndex = Math.floor(Date.now() / 3_600_000);
+    const groups = selectRotatingQueryGroups(TIP_SUBREDDIT_QUERY_GROUPS, hourIndex, 3);
+    const feeds = [subredditNewFeed(sub), ...groups.map((g) => subredditSearchFeed(sub, g.query))];
+    const searched = ["newest", ...groups.map((g) => g.label)];
+    const sweep = await sweepRedditFeeds(feeds, feeds.length);
     const picked = pickCivicPosts(sweep.posts);
 
     const sql = await getSql();
@@ -1620,6 +1628,19 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
 
     await audit(context.userId, "reddit", `r/${sub} read ${sweep.posts.length} filed ${filed}`, owned(context));
 
+    // Every post read, not only the ones filed, so a near miss stays visible
+    // to the editor instead of vanishing along with the sweep. Split at the
+    // civic threshold: the desk shows what cleared it and, separately, the
+    // near misses (3-5) that almost did — the sniffing the owner asked to see.
+    const classified = classifyRedditPosts(sweep.posts, alreadyKnownUrls, filedUrls);
+    const asCard = (p: (typeof classified)[number]) => ({
+      title: p.title,
+      score: p.score,
+      url: p.url,
+      excerpt: p.excerpt,
+      state: p.state,
+    });
+
     return {
       ok: true as const,
       subreddit: sub,
@@ -1630,11 +1651,10 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       incomplete: sweep.incomplete,
       reason: sweep.reason ?? "",
       log: sweep.log,
-      // Every post read, not only the ones filed, so a near miss stays
-      // visible to the editor instead of vanishing along with the sweep.
-      topScores: classifyRedditPosts(sweep.posts, alreadyKnownUrls, filedUrls)
-        .slice(0, 8)
-        .map((p) => ({ title: p.title, score: p.score, url: p.url, excerpt: p.excerpt, state: p.state })),
+      // Which of the rotating searches ran this check, newest-posts first.
+      searched,
+      topScores: classified.filter((p) => p.score >= 6).slice(0, 12).map(asCard),
+      nearMisses: classified.filter((p) => p.score >= 3 && p.score < 6).slice(0, 5).map(asCard),
     };
   });
 

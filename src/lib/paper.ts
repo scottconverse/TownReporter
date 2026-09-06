@@ -274,11 +274,35 @@ export const TIP_SUBREDDIT = "longmont";
 /**
  * Searches run against the subreddit, alongside its newest posts.
  *
- * Kept short on purpose: each one is a request against a rate limit shared by
- * everything on this machine, so the list is the few angles that actually turn
- * up records rather than conversation.
+ * Community-life extension, 2026-09-06: two fixed searches ("council/ordinance"
+ * and "closure/construction") made the desk government-only by construction —
+ * a bakery closing, a landlord selling, a school losing a program, a pantry
+ * shutting never matched either one and never surfaced, no matter how loud the
+ * subreddit was about it. This is eight angles instead of two, each a slice of
+ * community life a resident is likely to post about days before any record
+ * exists. Only 3 run per check (`selectRotatingQueryGroups` in reddit.ts),
+ * rotated by the hour so three consecutive checks cover all eight — one
+ * request against a rate limit shared by everything on this machine still
+ * buys one search, so breadth comes from rotation, not from asking for more
+ * at once.
  */
-export const TIP_SUBREDDIT_QUERIES = [
-  "city council OR ordinance OR public hearing",
-  "closure OR construction OR detour",
+export const TIP_SUBREDDIT_QUERY_GROUPS = [
+  { key: "government", label: "government", query: "council OR ordinance OR hearing OR agenda" },
+  { key: "infrastructure", label: "infrastructure", query: "closure OR construction OR detour OR outage OR water" },
+  {
+    key: "business",
+    label: "business & work",
+    query: "closing OR opening OR \"laid off\" OR hiring OR rent OR lease OR (restaurant OR shop OR store)",
+  },
+  { key: "schools", label: "schools & families", query: "school OR SVVSD OR boundary OR principal OR bus" },
+  { key: "housing", label: "housing", query: "landlord OR eviction OR HOA OR \"rent increase\" OR sold OR development" },
+  { key: "health-safety", label: "health & safety", query: "hospital OR clinic OR scam OR fire OR crash OR flood" },
+  {
+    key: "community",
+    label: "community",
+    query: "nonprofit OR pantry OR shelter OR library OR church OR volunteer OR fundraiser",
+  },
+  { key: "arts-venues", label: "arts & venues", query: "theater OR venue OR festival OR cancelled OR museum" },
 ] as const;
+
+export type TipSubredditQueryGroup = (typeof TIP_SUBREDDIT_QUERY_GROUPS)[number];

@@ -443,11 +443,14 @@ function DarkPage() {
     onSuccess: (res, post) => {
       if (!res?.ok) return;
       if (res.filed) {
+        const markFiled = (p: RedditScanResult["topScores"][number]) =>
+          p.url === post.url ? { ...p, state: "filed" as const } : p;
         setRedditResult((prev) =>
           prev
             ? {
                 ...prev,
-                topScores: prev.topScores.map((p) => (p.url === post.url ? { ...p, state: "filed" as const } : p)),
+                topScores: prev.topScores.map(markFiled),
+                nearMisses: prev.nearMisses.map(markFiled),
               }
             : prev,
         );
@@ -467,7 +470,7 @@ function DarkPage() {
     if (!reddit.isPending) return;
     redditStartRef.current = Date.now();
     setRedditElapsed(0);
-    setRedditAnnounce("Reading r/longmont. Three feeds, paced about a minute.");
+    setRedditAnnounce("Reading r/longmont. Four feeds, paced about a minute.");
     const id = setInterval(() => {
       if (redditStartRef.current != null) {
         setRedditElapsed(Math.floor((Date.now() - redditStartRef.current) / 1000));
@@ -690,7 +693,7 @@ function DarkPage() {
             <div className="reddit-progress">
               <p className="worth-t">Reading r/longmont</p>
               <p className="reddit-sub">
-                Three feeds, read 8 seconds apart so Reddit does not block this paper. About a
+                Four feeds, read 8 seconds apart so Reddit does not block this paper. About a
                 minute.
               </p>
               <div className="busy-rule" aria-hidden />
@@ -873,12 +876,59 @@ function DeskFileCard({
 }
 
 /**
+ * A list of scored posts with a "File as tip" action — shared between the
+ * filed/above-threshold list and the near-misses list below it, so the two
+ * read the same way even though only one of them cleared the civic line.
+ */
+function RedditTipRows({
+  posts,
+  onFileTip,
+  filingUrl,
+}: {
+  posts: RedditScanResult["topScores"];
+  onFileTip: (post: { url: string; title: string; excerpt: string }) => void;
+  filingUrl: string | null;
+}) {
+  return (
+    <div className="tip-list">
+      {posts.map((p) => {
+        const canFile = p.state !== "filed";
+        const filing = filingUrl === p.url;
+        return (
+          <div key={p.url} className="tip-row">
+            <Score v={p.score} />
+            <a href={p.url} target="_blank" rel="noopener" className="inline-link tip-title">
+              {p.title}
+            </a>
+            <span className={"chip st-" + p.state}>{redditPostStateLabel(p.state)}</span>
+            {canFile ? (
+              <InkButton
+                tone="quiet"
+                small
+                disabled={filing}
+                onClick={() => onFileTip({ url: p.url, title: p.title, excerpt: p.excerpt })}
+              >
+                {filing ? "Filing…" : "File as tip"}
+              </InkButton>
+            ) : (
+              <span />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * Result of a "Check r/longmont" read.
  *
  * Owner report 2026-09-05: the read takes ~60-70s and used to leave a single
  * easy-to-miss line as its only trace. This panel is the honest version of
  * "what actually happened" — every scored post (not only the ones filed),
- * a per-feed log, and a way to file a near miss by hand.
+ * which searches ran this time, the top 5 near-misses shown by default so the
+ * owner can see what almost made it, a per-feed log, and a way to file a near
+ * miss by hand.
  */
 function RedditResultPanel({
   result,
@@ -897,6 +947,9 @@ function RedditResultPanel({
     <div className="reddit-result">
       <p className="worth-t">Reddit read finished</p>
       <p className="reddit-headline">{redditResultHeadline(result)}</p>
+      {result.searched.length > 0 ? (
+        <p className="reddit-searched">Searched: {result.searched.join(" · ")}</p>
+      ) : null}
       <p className="sr-only" role="status" aria-live="polite">
         {announce}
       </p>
@@ -912,32 +965,16 @@ function RedditResultPanel({
         </p>
       ) : null}
       {result.topScores.length > 0 ? (
-        <div className="tip-list">
-          {result.topScores.map((p) => {
-            const canFile = p.state !== "filed";
-            const filing = filingUrl === p.url;
-            return (
-              <div key={p.url} className="tip-row">
-                <Score v={p.score} />
-                <a href={p.url} target="_blank" rel="noopener" className="inline-link tip-title">
-                  {p.title}
-                </a>
-                <span className={"chip st-" + p.state}>{redditPostStateLabel(p.state)}</span>
-                {canFile ? (
-                  <InkButton
-                    tone="quiet"
-                    small
-                    disabled={filing}
-                    onClick={() => onFileTip({ url: p.url, title: p.title, excerpt: p.excerpt })}
-                  >
-                    {filing ? "Filing…" : "File as tip"}
-                  </InkButton>
-                ) : (
-                  <span />
-                )}
-              </div>
-            );
-          })}
+        <RedditTipRows posts={result.topScores} onFileTip={onFileTip} filingUrl={filingUrl} />
+      ) : null}
+      {result.nearMisses.length > 0 ? (
+        <div className="reddit-near-misses">
+          <p className="worth-t">Near misses — scored 3-5</p>
+          <p className="reddit-sub">
+            Not civic enough to file automatically, but close. Worth a glance before they scroll
+            off the feed.
+          </p>
+          <RedditTipRows posts={result.nearMisses} onFileTip={onFileTip} filingUrl={filingUrl} />
         </div>
       ) : null}
       <details className="of-trail">

@@ -59,6 +59,28 @@ export function subredditSearchFeed(sub: string, query: string, sort: "new" | "r
   );
 }
 
+/**
+ * Which of a rotating set of query groups to run this check.
+ *
+ * Reddit's rate limit buys this desk a handful of requests per check, not
+ * one per angle on community life — so instead of running every search every
+ * time (too slow, too much of the budget) or picking the same three forever
+ * (the other five angles never get read), the groups rotate by hour: a
+ * window of `perCheck` consecutive groups, advancing by `perCheck` each hour
+ * and wrapping around. With 8 groups and 3 per check that means three
+ * consecutive checks — three different hours — cover all 8 exactly once,
+ * with no repeats inside a single check.
+ */
+export function selectRotatingQueryGroups<T>(groups: readonly T[], hourIndex: number, perCheck = 3): T[] {
+  const n = groups.length;
+  if (n === 0 || perCheck <= 0) return [];
+  const take = Math.min(perCheck, n);
+  const start = (((hourIndex * perCheck) % n) + n) % n;
+  const out: T[] = [];
+  for (let i = 0; i < take; i++) out.push(groups[(start + i) % n]!);
+  return out;
+}
+
 /** The comments of one thread, as a feed. The substance is usually here. */
 export function threadFeed(permalink: string): string {
   const url = new URL(permalink);
@@ -140,7 +162,19 @@ export function parseRedditFeed(xml: string): RedditPost[] {
  * the first time: the list held "closure" and the real post said "will close",
  * so a road-closure story this paper had already published scored 3 out of 20
  * and would have been filtered out by its own threshold. Calibrated against a
- * real day of the subreddit, kept as a fixture beside the tests.
+ * real day of the subreddit (2026-08-28), kept as a fixture beside the tests.
+ *
+ * Community-life extension, 2026-09-06: that calibration day was entirely
+ * government and infrastructure, so the list only ever learned that
+ * vocabulary — a bakery closing after 14 years, a landlord selling a building,
+ * a school district redrawing a boundary, a pantry losing its funding all
+ * scored 0-2 and never surfaced, not because they aren't news but because
+ * nothing here recognised the shape of them. The entries below the original
+ * civic list are that: a change with a record behind it, just not a
+ * government record — a business opening or closing, a layoff, a sale, an
+ * eviction, a school or hospital or nonprofit changing what it does. See
+ * `CHANGE_SIGNAL` below for how this stops "the pizza place is closing" from
+ * being penalised the same way "best pizza?" is.
  */
 const STRONG: RegExp[] = [
   /\b(city )?council\b/,
@@ -172,7 +206,50 @@ const STRONG: RegExp[] = [
   /\bconstruct(ion|ing)\b/,
   /\b(co|us|sh)[ -]?\d{1,3}\b/,
   /\bleft turns?\b|\blane closure\b|\broad work\b/,
+
+  // --- Community-life extension, 2026-09-06 (see comment above). ---
+  /\bopen(?:ing|ed|s)?\b(?:\W+\w+){0,4}\W+\b(?:shop|store|restaurant|business|location|bakery|cafe|salon|gym|clinic|branch)\b/,
+  /\b(?:closing (?:its|their|the) doors|shutting down|going out of business|for good|after \d+ years)\b/,
+  /\blaid off\b|\blayoffs?\b|\blay-offs?\b|\bhiring freeze\b/,
+  /\b(?:sold|sale pending)\b(?:\W+\w+){0,6}\W+\b(?:building|business|store|shop|property|block)\b/,
+  /\bnotice to vacate\b/,
+  /\brent increase\b/,
+  /\bboundary (?:change|proposal)\b|\bredistrict(?:ing)?\b|\bschool closure\b|\bprogram cut\b/,
+  /\bprincipal\b|\bsuperintendent\b/,
+  /\b(?:hospital|clinic|urgent care)\b(?:\W+\w+){0,4}\W+\b(?:closing|clos(?:e|ed)|wait time|cuts?|cutting)\b/,
+  /\b(?:scam|fraud|phishing)\b(?:\W+\w+){0,4}\W+\bseniors?\b/,
+  /\bflood(?:ing)?\b|\bsewer backup\b/,
+  /\bcancell?ed\b(?:\W+\w+){0,3}\W+\b(?:season|festival)\b/,
+  /\bpermit denied\b|\bvariance denied\b/,
+  /\bhoa\b(?:\W+\w+){0,3}\W+\b(?:fine|assessment)\b/,
+  /\b(?:nonprofit|pantry|shelter)\b(?:\W+\w+){0,4}\W+\b(?:closing|clos(?:e|ed)|funding|cuts?)\b/,
+  /\bstrike\b|\bunion\b/,
 ];
+
+/**
+ * The subset of `STRONG` that marks a *change*, as opposed to a topic
+ * (council, budget, RTD are civic topics; closing, laid off, sold are
+ * changes). Used only to decide whether `CHATTER` should count for a post —
+ * see `civicScore`.
+ */
+const CHANGE_SIGNAL: RegExp[] = [
+  /\bclos(?:e|es|ed|ing|ure|ures)\b/,
+  /\bopen(?:ing|ed|s)?\b(?:\W+\w+){0,4}\W+\b(?:shop|store|restaurant|business|location|bakery|cafe|salon|gym|clinic|branch)\b/,
+  /\b(?:closing (?:its|their|the) doors|shutting down|going out of business|for good|after \d+ years)\b/,
+  /\blaid off\b|\blayoffs?\b|\blay-offs?\b|\bhiring freeze\b/,
+  /\b(?:sold|sale pending)\b(?:\W+\w+){0,6}\W+\b(?:building|business|store|shop|property|block)\b/,
+  /\bevict(?:ion|ed)\b|\bnotice to vacate\b/,
+  /\brent increase\b|\brent (?:went up|hike)\b/,
+  /\bboundary (?:change|proposal)\b|\bredistrict(?:ing)?\b|\bschool closure\b|\bprogram cut\b/,
+];
+
+/**
+ * A named place: a capitalised street name, or "on <Street>". Checked against
+ * the original-case text, before `civicScore` lowercases everything else — a
+ * post that names a place is more likely to be a specific, checkable claim
+ * than one that only names a category of thing.
+ */
+const NAMED_PLACE = /\b(?:[A-Z][a-zA-Z]+\s){1,2}(?:Street|St\.?|Ave\.?|Avenue|Main|Blvd\.?|Boulevard)\b|\bon\s+[A-Z][a-zA-Z]+\b/;
 
 const WEAK: RegExp[] = [
   /\blongmont\b/, /\bboulder county\b/, /\bcity\b/, /\bcounty\b/, /\bstate\b/,
@@ -214,18 +291,31 @@ function countMatches(hay: string, patterns: RegExp[]): number {
  * small talk at 0–2, which is where the threshold sits. The number is carried
  * through to the editor rather than collapsed into a boolean, so a thin result
  * is explainable instead of mysterious.
+ *
+ * Community-life extension, 2026-09-06: chatter is only counted when the post
+ * has no `CHANGE_SIGNAL` match. "Best pizza in town?" is chatter and nothing
+ * else. "The pizza place on Main Street is closing after 20 years" mentions
+ * pizza too, but it is news — penalising it the same way would put the
+ * scorer right back to punishing a shop for closing, the bug this whole
+ * extension exists to fix. A named place (a capitalised street, or "on
+ * <Street>") adds a small +2: it is the shape of a specific, checkable claim
+ * rather than a general one, checked against the original case before the
+ * rest of the scorer lowercases everything.
  */
 export function civicScore(post: Pick<RedditPost, "title" | "excerpt">): number {
-  const hay = `${post.title} ${post.excerpt}`.toLowerCase();
+  const raw = `${post.title} ${post.excerpt}`;
+  const hay = raw.toLowerCase();
   if (!hay.trim()) return 0;
   const strong = countMatches(hay, STRONG);
   const weak = countMatches(hay, WEAK);
-  const chatter = countMatches(hay, CHATTER);
+  const hasChangeSignal = countMatches(hay, CHANGE_SIGNAL) > 0;
+  const chatter = hasChangeSignal ? 0 : countMatches(hay, CHATTER);
   // A date, a dollar figure or a file number is the shape of a record.
   const specifics =
     (/\$\s?[\d,]{3,}/.test(hay) ? 2 : 0) +
     (/\b(ordinance|resolution|case|permit|file|measure)\s*(no\.?|#)?\s*[\w-]*\d/.test(hay) ? 3 : 0) +
-    (/\b\d{1,2}-\d{1,2}\b/.test(hay) ? 1 : 0);
+    (/\b\d{1,2}-\d{1,2}\b/.test(hay) ? 1 : 0) +
+    (NAMED_PLACE.test(raw) ? 2 : 0);
   const score = strong * 3 + weak + specifics - chatter * 3;
   return Math.max(0, Math.min(20, score));
 }
@@ -270,7 +360,7 @@ export function classifyRedditPosts(
 }
 
 /** Posts worth an editor's attention, best first. */
-export function pickCivicPosts(posts: RedditPost[], minScore = 6, limit = 8): RedditPost[] {
+export function pickCivicPosts(posts: RedditPost[], minScore = 6, limit = 12): RedditPost[] {
   return posts
     .map((p) => ({ p, s: civicScore(p) }))
     .filter((x) => x.s >= minScore)

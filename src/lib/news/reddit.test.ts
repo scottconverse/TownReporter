@@ -8,10 +8,12 @@ import {
   parseRedditFeed,
   pickCivicPosts,
   redditAnomaly,
+  selectRotatingQueryGroups,
   subredditNewFeed,
   subredditSearchFeed,
   threadFeed,
 } from "./reddit.ts";
+import { TIP_SUBREDDIT_QUERY_GROUPS } from "../paper.ts";
 import {
   presentWorthItem,
   rankWorthItems,
@@ -55,7 +57,7 @@ describe("reddit feed URLs", () => {
 describe("parseRedditFeed", () => {
   it("reads a real feed", () => {
     const posts = parseRedditFeed(FEED);
-    assert.equal(posts.length, 11);
+    assert.equal(posts.length, 12);
     const first = posts[0]!;
     assert.match(first.title, /Lunar Eclipse/);
     assert.match(first.url, /^https:\/\/www\.reddit\.com\/r\/longmont\/comments\//);
@@ -130,8 +132,15 @@ describe("civicScore", () => {
 describe("pickCivicPosts", () => {
   it("returns the day's real stories and nothing else", () => {
     const picked = pickCivicPosts(parseRedditFeed(FEED));
-    assert.equal(picked.length, 3);
-    assert.match(picked[0]!.title, /city council votes/i, "best first");
+    assert.equal(picked.length, 4);
+    // Council vote and the CO 119 closure both name a place and both carry
+    // several civic markers; the named-place bonus (2026-09-06) ties them at
+    // the top rather than favouring one, so both belong ahead of everything
+    // else rather than either specifically being first.
+    const top2 = picked.slice(0, 2).map((p) => p.title);
+    assert.ok(top2.some((t) => /city council votes/i.test(t)), "council vote in the top two");
+    assert.ok(top2.some((t) => /left turns/i.test(t)), "road closure in the top two");
+    assert.equal(picked.some((p) => /bakery/i.test(p.title)), true, "the community-life addition surfaces too");
     assert.equal(picked.some((p) => /soap|appetizer|eclipse/i.test(p.title)), false);
   });
 
@@ -246,5 +255,88 @@ describe("tip cards read honestly", () => {
       anomalies: [{ kind: "disappeared", summary: "Packet gone", url: "https://x.gov/a", details: "" }],
     }).map(presentWorthItem);
     assert.doesNotMatch(card!.why, /subreddit/i);
+  });
+});
+
+describe("civicScore — community-life extension (2026-09-06)", () => {
+  /**
+   * The owner's own example: a bakery closing after 14 years scored 0-2
+   * under the government-only word list and never surfaced.
+   */
+  it("scores a bakery closing as news", () => {
+    const s = civicScore({
+      title: "After 14 years, Riverside Bakery on Main Street is closing for good",
+      excerpt: "The owners say the new lease doubled their rent and they can't make it work. Last day is September 30.",
+    });
+    assert.ok(s >= 6, `bakery closing scored ${s}`);
+  });
+
+  it("still scores plain chatter at 0", () => {
+    const s = civicScore({
+      title: "Best pizza in Longmont?",
+      excerpt: "Looking for recommendations, moving here next month.",
+    });
+    assert.equal(s, 0);
+  });
+
+  it("scores a landlord selling the building as news", () => {
+    const s = civicScore({
+      title: "My landlord just sold the building, we got a 30-day notice",
+      excerpt: "Not sure what happens to our lease now.",
+    });
+    assert.ok(s >= 6, `landlord sale scored ${s}`);
+  });
+
+  it("scores a school boundary change as news", () => {
+    const s = civicScore({
+      title: "SVVSD boundary change proposed for Longs Peak Elementary",
+      excerpt: "The district says school lines may shift for fall 2027.",
+    });
+    assert.ok(s >= 6, `boundary change scored ${s}`);
+  });
+
+  /**
+   * "Best pizza?" alone is chatter and scores 0 (above). The same word next
+   * to a change signal — a shop closing — must not be penalised the same way,
+   * or the scorer is back to punishing news for mentioning a restaurant.
+   */
+  it("does not penalise a shop/restaurant/coffee word when a change signal is present", () => {
+    const chatter = civicScore({ title: "Best pizza in Longmont?", excerpt: "any recommendations?" });
+    const news = civicScore({
+      title: "The pizza place on Main Street is closing after 20 years",
+      excerpt: "Owners cite rising costs.",
+    });
+    assert.equal(chatter, 0);
+    assert.ok(news >= 6, `pizza-place-closing scored ${news}`);
+  });
+});
+
+describe("selectRotatingQueryGroups", () => {
+  const groups = TIP_SUBREDDIT_QUERY_GROUPS;
+
+  it("has eight query groups", () => {
+    assert.equal(groups.length, 8);
+  });
+
+  it("picks 3 distinct groups per hour", () => {
+    for (let hour = 0; hour < 12; hour++) {
+      const picked = selectRotatingQueryGroups(groups, hour, 3);
+      assert.equal(picked.length, 3);
+      assert.equal(new Set(picked.map((g) => g.key)).size, 3, `hour ${hour} repeated a group`);
+    }
+  });
+
+  it("covers all 8 groups across any 3 consecutive hours", () => {
+    for (let hour = 0; hour < 12; hour++) {
+      const covered = new Set<string>();
+      for (let h = hour; h < hour + 3; h++) {
+        for (const g of selectRotatingQueryGroups(groups, h, 3)) covered.add(g.key);
+      }
+      assert.equal(covered.size, 8, `hours ${hour}-${hour + 2} covered only ${covered.size}`);
+    }
+  });
+
+  it("is stable for the same hour", () => {
+    assert.deepEqual(selectRotatingQueryGroups(groups, 5, 3), selectRotatingQueryGroups(groups, 5, 3));
   });
 });

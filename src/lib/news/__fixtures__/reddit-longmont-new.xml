@@ -8,6 +8,14 @@
   real mix: one genuine civic story, one incident, and a lot of small talk. The
   first version of the scorer gave the CO 119 closure — a story this paper had
   already published — a 3 out of 20, below its own threshold.
+
+  Community-life extension, 2026-09-06: this calibration day happened to be
+  all government and infrastructure, which is exactly how the scorer ended up
+  government-only by construction. example12 below is a later addition — a
+  business closing, the kind of post the original list scored 0-2 on — so the
+  fixture still proves the extension against a realistic post rather than
+  only against inline strings in the test file (see reddit.test.ts's
+  "community-life extension" describe block for more of those).
 -->
 <feed xmlns="http://www.w3.org/2005/Atom">
   <title>Longmont</title>
@@ -87,5 +95,12 @@
     <link href="https://www.reddit.com/r/longmont/comments/aaa011/rent_utility_recovery_fee/" />
     <updated>2026-08-26T19:00:00+00:00</updated>
     <content type="html">&lt;div&gt;Landlord sent a letter. Is that even legal here?&lt;/div&gt;</content>
+  </entry>
+  <entry>
+    <author><name>/u/example12</name></author>
+    <title>After 14 years, Riverside Bakery on Main Street is closing for good</title>
+    <link href="https://www.reddit.com/r/longmont/comments/aaa012/riverside_bakery_closing/" />
+    <updated>2026-08-26T15:00:00+00:00</updated>
+    <content type="html">&lt;div&gt;The owners say the new lease doubled their rent and they can't make it work. Last day is September 30.&lt;/div&gt;</content>
   </entry>
 </feed>

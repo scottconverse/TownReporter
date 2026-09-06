@@ -1090,6 +1090,9 @@
 .desk-ltr .reddit-elapsed {font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--mut);margin:9px 0 0}
 .desk-ltr .reddit-headline {font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--fg);font-weight:600;margin:0}
 .desk-ltr .reddit-empty {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:6px 0 0}
+.desk-ltr .reddit-searched {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:4px 0 0}
+.desk-ltr .reddit-near-misses {margin-top:16px;padding-top:12px;border-top:1px dashed var(--line)}
+.desk-ltr .reddit-near-misses .worth-t {margin-top:0}
 .desk-ltr .tip-list {margin-top:12px;border-top:1px solid var(--line)}
 .desk-ltr .tip-row {display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
 .desk-ltr .tip-title {font-size:calc(0.875rem * var(--ts));min-width:0}
