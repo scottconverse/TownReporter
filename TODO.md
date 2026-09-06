@@ -1,15 +1,15 @@
 # TownReporter — TODO (canonical, in-repo)
-_Kept current by whichever Claude session is working. Last updated: 2026-09-06 (0.6.20 bump). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
+_Kept current by whichever Claude session is working. Last updated: 2026-09-06 (0.6.20 live). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked on the owner
 
 ---
 
 ## In flight
-- [~] **0.6.20** — bump done (this commit) → CI → stage on real data → owner's go → promote.
+- (nothing in flight)
 
 ## Open queue (bug fixes first — owner chose to skip the redesign for now)
-- [ ] Redesign, phase 2 — owner walks the clickable prototype (direction A) and the four workflow scenarios (Watch a page, Legal removal, Sections, Investigation) on the design canvas; an outside designer audits using docs/design/DESIGN-AUDIT-BRIEF-2026-09-05.md (the package page with screenshots is an artifact the owner shares); then build the real desk in the chosen direction.
+- [ ] **Redesign build (direction A) — awaiting owner's go.** Auditor verdict 2026-09-05: use this repo's system; take from Codex only more air in the queue and a Follow-ups list on the rail. Scope: queue as lead column + Dark Desk/wire rail; airier queue rows; Follow-ups on the rail (who/what/due/overdue in words); real narrow-window layout; no sidebar/teal/tiles/banner. Reference: docs/design/DESIGN-AUDIT-BRIEF-2026-09-05.md, docs/design/WORKFLOWS-SPEC-2026-09-05.md, the design canvas (owner's artifact).
 A. [x] **Interrupted-draft UI contradiction** — when the app restarts under a running draft, the story page shows "Drafting…" + "pulling the draft in" AND "stopped without finishing — click Draft again" at once. The job is actually reclaimed and re-run after 120s (STALE_RUNNING_SECONDS). Show ONE honest state: "App restarted mid-draft — recovering automatically (~2 min)"; don't show a disabled Drafting… button beside a click-again message. Done in b0c63a9.
 B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app under running desk_jobs. Add a guard: refuse (or wait/drain with a clear message) when a draft/dark job is running; and a startup sweep that marks orphaned running jobs so the UI resets cleanly. Operator rule: never promote while the editor is active without asking. Done in b0c63a9 (-WaitForJobs/-Force).
 2. [ ] **Manual "watch this page" for Dark Desk** — wire the existing `watchSource` to an editor button so an editor can put a page on the investigative monitor list by hand (today only the dig adds monitors). Do after #1. Must have clear UX feedback (owner rule).
@@ -18,7 +18,6 @@ B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app u
 5. [ ] **Topics / sections (Phase 8)** — expand beyond the fixed civic topic list (business, etc.). **⏸ Needs the owner's section list.** P8.1 configurable sections in Paper setup; P8.2 per-section scanner sources/prompt.
 6. [ ] **Dark Desk "do it right" pass** — **⏸ parked by owner.** (a) Grant the dig a CURATED, SAFE tool set (guarded web search/fetch with SSRF + domain limits + cost caps, like the owner's `civic-scanner`) so it investigates live instead of the rigid emit-queries/app-fetches loop — do NOT re-open the raw claude-CLI agent surface (Bash/Edit/MCP) on the prod box. (b) Restore the owner's fuller doctrine (two-stage Black Desk → Dark Signal verification, mandatory adversarial gate, self-referential Gate 4, search minimums) — ONLY after testing whether the 6-month-old prompts still hold up. Originals: repos `civic-scanner`, `civic-newsroom`, `civic-transparency-toolkit`, `CivicNewspaper`.
 7. [x] **Reddit subreddit-page fetches** — non-thread reddit URLs now route to their real .rss feeds; old.reddit only for no-feed pages; this commit.
-- **⏸ Redesign** — desk feels clunky/disjointed; owner may bring a designer. **DO NOT ACT** until he decides. Accessibility fixes are fine.
 
 ## Done (this stretch, all live unless noted)
 - [x] 0.6.7 — Automatic fails over to Codex on a timeout, not only a sign-in lapse.
@@ -40,6 +39,7 @@ B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app u
 - [x] 0.6.18 — bug-fix release (A recovering state, B promote guard, #3 monitors scoping, #4 PRINTED chip, #5 non-profit + 0040, #7 reddit listings via .rss). LIVE 2026-09-05, CI 14/14, staged on real data, promote checks OK, 26 stories intact.
 - [x] 0.6.19 — LIVE 2026-09-05 (tag v0.6.19 at 25bc882): claims-of-absence gate + city-site pulls + site notices (f80a5ce); local model discovery + per-model picker + thinking off + migration 0041 (2e4b8b3); black-on-white dark desk + theme-aware Notice + single model error (6158100); Check r/longmont progress/results/File-as-tip (9ad5369). Staged on real data, incident replay proved the gate, CI 14/14, promote checks OK.
 - [x] Five desk rule defects (14px floor, Large scales headlines and reading panes, one button family + invert/--muted fixes, Kill styled as destructive, Held/aside chips) — auditor punch list 2026-09-05.
+- [x] 0.6.20 — LIVE 2026-09-06 (tag v0.6.20 at 2a25936): five desk rule defects from the design audit — 14px floor, Large text scales headlines/panes, one button family, destructive buttons look destructive, Held/set-aside chips; guard tests added.
 
 ## Known caveats (honest state)
 - Dark Desk is proven on ONE real staged topic (receipt); the Reddit leg was the weak spot (TR-001, now fixed pending release). Not a certification of every source type.

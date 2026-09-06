@@ -33,6 +33,16 @@ If you are a remote session working **only from this GitHub repo** (no access to
 
 **Verify/CI state:** Staged on real data. Incident replay proved the gate. CI 14/14 green. All promotes checked OK. 26 stories intact.
 
+### 2026-09-06 — 0.6.20 live; redesign verdict
+
+**VERIFIED by the local session 2026-09-06.**
+
+0.6.20 shipped the five desk rule defects from the design audit (14px floor, Large text scales headlines/panes, one button family + destructive buttons styled, Held/set-aside chips) with guard test scripts added. The release was staged on real data (29 stories intact), promoted successfully, and the served version now reads 0.6.20.
+
+The design audit verdict from 2026-09-05 (quoted): "Fable is better for this paper. Codex looks more finished. Fable is the design that still belongs to TownReporter: newsroom words, black desk, scores and Hold/Kill, rust on cream, no marketing banner on the editor's first screen. Use Fable's system. Take only two things from Codex: more air in the queue, and a Follow-ups list on the rail. Don't take the teal sidebar product." Agreed plan: (1) the five rule defects shipped first (0.6.20, done); (2) the redesign build uses direction A (queue as the lead column; Dark Desk + the wire in a right rail), more air in queue rows (headline first, why line under it, actions on their own line, nothing hidden), a Follow-ups object on the rail (who was asked, for what, due when, "overdue" stated in words), and a real narrow-window layout; nothing from the Codex chrome (no sidebar, teal, tiles, banner).
+
+**Owner decisions still open:** section list; legal-removal retain policy; whether the old Dark Desk methods are adopted. The redesign build has NOT started and awaits the owner's go.
+
 ---
 
 ## 0. Your role & how to work
