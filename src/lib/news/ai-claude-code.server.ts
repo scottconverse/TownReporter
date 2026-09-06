@@ -422,6 +422,102 @@ export async function claudeCodeChat(opts: {
   });
 }
 
+/**
+ * One prompt naming exactly one file, answered with the CLI's `Read` tool
+ * and nothing else — `--tools "Read"` rather than `claudeCodeChat`'s
+ * `--allowed-tools`/`--tools ""` pair, because this is the one call in the
+ * desk that WANTS a live tool: OCR for a scanned PDF page (ocr.ts). The
+ * model cannot see the page's bytes any other way here, so it is told to
+ * read the one temp file this call wrote and nothing else — the prompt
+ * names that single path inside a per-run temp directory the caller owns
+ * and deletes afterward (see ocr.ts's `claudeCodeTranscribePage`).
+ *
+ * This is intentionally a separate, narrower function rather than a new
+ * flag on `claudeCodeChat`: that function's whole contract is "no live
+ * tool, ever, except the editorial writer's explicit `allowedTools`", and
+ * ENG-107's checks exist to keep a private system prompt away from any
+ * call that can also act. This call never takes a `systemPromptFile` and
+ * never takes `allowedTools` — it has exactly one tool, exposed on
+ * purpose, for exactly one file.
+ */
+export async function claudeCodeReadChat(opts: {
+  /** Instructions plus the exact file path to read, in one user message. */
+  prompt: string;
+  filePath: string;
+  model: string;
+  timeoutMs: number;
+}): Promise<ClaudeCodeResult> {
+  const bin = await findClaudeCli();
+  if (!bin) return { ok: false, error: CLAUDE_CLI_MISSING };
+
+  const args = [
+    "-p",
+    "--tools",
+    "Read",
+    "--setting-sources",
+    "",
+    "--model",
+    opts.model,
+    "--output-format",
+    "json",
+  ];
+  const userMessage = `${opts.prompt}\n\nRead the file at exactly this path and use only its contents: ${opts.filePath}`;
+
+  return new Promise<ClaudeCodeResult>((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      const plan = spawnPlan(bin, args);
+      child = spawn(plan.command, plan.args, {
+        stdio: ["pipe", "pipe", "pipe"],
+        cwd: process.env.TMPDIR || process.env.TEMP || process.cwd(),
+        windowsHide: true,
+      });
+    } catch {
+      resolve({ ok: false, error: CLAUDE_CLI_MISSING });
+      return;
+    }
+
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (r: ClaudeCodeResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const timer = setTimeout(() => {
+      killTree(child);
+      const tail = stderr.trim().split("\n").pop()?.slice(0, 200) ?? "";
+      const seen = `${Math.round(opts.timeoutMs / 1000)}s, ${stdout.length} bytes out`;
+      finish({
+        ok: false,
+        error: `Claude Code request timed out after ${seen}${tail ? ` — ${tail}` : ""}`,
+      });
+    }, opts.timeoutMs);
+
+    child.stdout?.on("data", (d) => {
+      stdout += String(d);
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += String(d);
+    });
+    child.on("error", () => finish({ ok: false, error: CLAUDE_CLI_MISSING }));
+    child.on("close", (code) => {
+      if (code !== 0 && !stdout.trim()) {
+        const detail = stderr.trim().split("\n").pop()?.slice(0, 200) || `exit ${code}`;
+        finish({ ok: false, error: `Claude Code failed: ${detail}` });
+        return;
+      }
+      finish(parseCliEnvelope(stdout));
+    });
+    child.stdin?.on("error", () => {
+      /* close/error reports the process result */
+    });
+    child.stdin?.end(userMessage);
+  });
+}
+
 /** Pull the answer out of `--output-format json`. Exported for tests. */
 export function parseCliEnvelope(stdout: string): ClaudeCodeResult {
   const raw = stdout.trim();

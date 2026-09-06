@@ -126,6 +126,22 @@ if (argv[0] === "auth" && argv[1] === "login") {
   }
   process.stdout.write(JSON.stringify({ is_error: false, result: JSON.stringify({ flag, value }) }) + "\n");
   process.exit(0);
+} else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_ECHO_READ_CALL === "1") {
+  /*
+   * For OCR's `claudeCodeReadChat` (ai-claude-code.server.ts): the one place
+   * this desk hands the CLI a live tool on purpose. Proves the CLI actually
+   * received `--tools Read` (not `--allowed-tools`, not a wider surface) and
+   * that the prompt on stdin names exactly one file path, by echoing both
+   * back for the test to assert on.
+   */
+  const toolsIdx = argv.indexOf("--tools");
+  const tools = toolsIdx !== -1 ? (argv[toolsIdx + 1] ?? "") : "";
+  let stdin = "";
+  for await (const chunk of process.stdin) stdin += chunk;
+  process.stdout.write(
+    JSON.stringify({ is_error: false, result: JSON.stringify({ tools, stdin }) }) + "\n",
+  );
+  process.exit(0);
 } else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_FAIL_PROMPTS === "1") {
   // The exact envelope a real 401 mid-run produced. Exit 0: the CLI's own
   // process succeeded, it is the *call* that failed -- parseCliEnvelope in

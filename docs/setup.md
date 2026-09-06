@@ -266,6 +266,16 @@ invalid delivery -- a refusal, an assistant note, an incomplete piece --
 creates no draft. The completed request and job store the provider that
 finished.
 
+**Scanned PDFs** (a council packet with no text layer) are read by whichever
+model you picked, the same way a person would: the model looks directly at
+the scanned page images and transcribes them (`src/lib/news/ocr.ts`). Claude
+Opus (API or CLI) and Codex can always do this. A local model can only do it
+if it is a *vision* model -- pick one marked **`· vision`** in the picker (or
+in the Server page's local-model table). See
+[local-models.md](local-models.md#scanned-pdfs-and-why-they-need-a-vision-model)
+for the full picture, including the one scan format (fax-style CCITT/JBIG2
+compression) this cannot read yet.
+
 ### The Opinion voice
 
 The Opinion desk writes in a voice held in a **file on disk**, named by path:

@@ -185,3 +185,24 @@ export function opinionProviderProblem(
   if (candidate !== "claude-frontier") return error;
   return "No Opinion model is available. Open Claude Code on this machine and sign in.";
 }
+
+/**
+ * The option label a local model gets in the picker: its id, plus "loaded" /
+ * "thinking off" / "vision" whichever apply — e.g. "gemma4:12b · loaded ·
+ * vision". A pure function (no JSX), kept in this module rather than
+ * model-picker.tsx so it can be unit-tested directly: this repo has no
+ * component-rendering test harness (no jsdom/testing-library dependency,
+ * and `node --test`'s type-stripping cannot parse JSX), so the picker's
+ * render behaviour is pinned here instead of through a DOM assertion.
+ */
+export function localModelOptionLabel(model: {
+  id: string;
+  loaded: boolean | null;
+  thinking: boolean;
+  vision: boolean;
+}): string {
+  const suffix = [model.loaded ? "loaded" : null, model.thinking ? "thinking off" : null, model.vision ? "vision" : null]
+    .filter(Boolean)
+    .join(" · ");
+  return suffix ? `${model.id} · ${suffix}` : model.id;
+}

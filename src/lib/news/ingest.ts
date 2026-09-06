@@ -107,9 +107,53 @@ export type PdfExtract = {
   method: "unpdf" | "tj-regex" | "ocr" | "none";
   needsOcr: boolean;
   pages: PdfPage[];
+  /** Who read the scan, when `method === "ocr"`: "Claude", "Codex", or a local model id. */
+  ocrProvider?: string;
+  ocrPagesRead?: number;
+  ocrPagesTotal?: number;
+  /** Set when `needsOcr` is true and OCR was attempted (or refused) — the honest reason why. */
+  needsOcrReason?: string;
 };
-export type OcrResult = { text: string; pages: PdfPage[] };
-export type OcrImpl = (buf: Uint8Array) => Promise<OcrResult>;
+
+/**
+ * The editor's model choice and per-run identifiers, passed down to a scanned
+ * PDF's OCR pass so it honours the same picker the rest of the desk does
+ * (see docs/setup.md's per-run picker). `provider` is a `PickerProviderId`
+ * (./provider-registry.ts) or "auto"/undefined for the same Automatic ladder
+ * every other AI call falls back to. Left undefined by every caller that has
+ * not been taught to pass a newsroom's actual pick — Automatic still reads
+ * every scan, it just cannot yet honour a *chosen* provider from here.
+ */
+export type OcrOptions = {
+  provider?: string;
+  newsroomId?: string;
+  jobLabel?: string;
+  localModel?: { baseUrl: string; id: string } | null;
+  /**
+   * Test-only per-transport override (mirrors ai.ts's `GrokChatAdapters`),
+   * keyed by the transport kind ("anthropic" | "codex" | "claude-code" |
+   * "local"). Typed loosely here so this module never has to import
+   * provider-registry.ts's `ProviderKind` just for a test seam — see
+   * ocr.ts's `OcrAdapters` for the real, narrower type real callers use.
+   */
+  adapters?: Partial<
+    Record<
+      string,
+      (image: { bytes: Uint8Array; mime: "image/jpeg" | "image/png" }, timeoutMs: number) => Promise<string>
+    >
+  >;
+};
+export type OcrResult = {
+  text: string;
+  pages: PdfPage[];
+  /** Set when OCR actually read at least one page. */
+  provider?: string;
+  pagesRead?: number;
+  pagesTotal?: number;
+  /** Set when OCR could not run at all — the honest, editor-facing reason. */
+  reason?: string;
+};
+export type OcrImpl = (buf: Uint8Array, opts?: OcrOptions) => Promise<OcrResult>;
 
 let ocrImpl: OcrImpl | null = null;
 export function setOcrImpl(impl: OcrImpl | null) {
@@ -133,6 +177,7 @@ async function loadDefaultOcr(): Promise<OcrImpl | null> {
 export async function extractPdfBetter(
   buf: Uint8Array,
   impl: OcrImpl | undefined | null = undefined,
+  opts?: OcrOptions,
 ): Promise<PdfExtract> {
   const ocr = impl === undefined ? ocrImpl ?? (await loadDefaultOcr()) : impl;
   try {
@@ -167,7 +212,7 @@ export async function extractPdfBetter(
   }
   if (ocr) {
     try {
-      const ocrResult = await ocr(buf);
+      const ocrResult = await ocr(buf, opts);
       if (ocrResult.text.trim().length >= 40) {
         return {
           text: ocrResult.text.slice(0, ARCHIVE_TEXT_CAP),
@@ -176,13 +221,48 @@ export async function extractPdfBetter(
           pages: ocrResult.pages.length
             ? ocrResult.pages
             : [{ page: 1, text: ocrResult.text.slice(0, ARCHIVE_TEXT_CAP) }],
+          ocrProvider: ocrResult.provider,
+          ocrPagesRead: ocrResult.pagesRead,
+          ocrPagesTotal: ocrResult.pagesTotal,
         };
       }
+      return {
+        text: fallback,
+        method: "none",
+        needsOcr: true,
+        pages: [],
+        needsOcrReason: ocrResult.reason,
+      };
     } catch {
       /* OCR failed — still report needs-ocr */
     }
   }
   return { text: fallback, method: "none", needsOcr: true, pages: [] };
+}
+
+/**
+ * `IngestDocument.extractionMethod` for a scanned page read by OCR, in a
+ * form that survives the plain-text `extraction_method` DB column
+ * unchanged (see investigate.ts) and still says who read it and how much.
+ */
+export function encodeOcrExtractionMethod(
+  provider: string | undefined,
+  pagesRead: number | undefined,
+  pagesTotal: number | undefined,
+): string {
+  return `ocr:${provider ?? "unknown"}:${pagesRead ?? 0}/${pagesTotal ?? 0}`;
+}
+
+/** The editor-facing sentence for a stored `extraction_method` value. */
+export function describeExtractionMethod(method: string | undefined | null): string {
+  const raw = (method ?? "").trim();
+  const m = /^ocr:([^:]*):(\d+)\/(\d+)$/.exec(raw);
+  if (m) {
+    const [, provider, read, total] = m;
+    return `Read by OCR · ${provider} · ${read} of ${total} pages`;
+  }
+  if (!raw || raw === "none") return "Not read yet.";
+  return raw;
 }
 
 export type TextChunk = {
@@ -400,6 +480,12 @@ export type IngestDocument = {
   */
   notices: string[];
   rawBytes?: Uint8Array;
+  /** Set when `extractionMethod` encodes an OCR read (see `describeExtractionMethod`). */
+  ocrProvider?: string;
+  ocrPagesRead?: number;
+  ocrPagesTotal?: number;
+  /** Set when `outcome === "needs-ocr"` — the honest, editor-facing reason why. */
+  needsOcrReason?: string;
 };
 
 /**
@@ -416,14 +502,15 @@ function clean(doc: IngestDocument): IngestDocument {
     title: storableText(doc.title),
     extras: doc.extras.map((e) => storableText(e)),
     notices: (doc.notices ?? []).map((n) => storableText(n)),
+    needsOcrReason: doc.needsOcrReason ? storableText(doc.needsOcrReason) : doc.needsOcrReason,
   };
 }
 
-export async function ingestDocument(raw: string): Promise<IngestDocument> {
-  return clean(await ingestDocumentRaw(raw));
+export async function ingestDocument(raw: string, ocrOptions?: OcrOptions): Promise<IngestDocument> {
+  return clean(await ingestDocumentRaw(raw, ocrOptions));
 }
 
-async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
+async function ingestDocumentRaw(raw: string, ocrOptions?: OcrOptions): Promise<IngestDocument> {
   const empty = (over: Partial<IngestDocument>): IngestDocument => ({
     ok: false,
     status: 0,
@@ -542,7 +629,7 @@ async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
     }
 
     if (ctype.includes("pdf") || path.endsWith(".pdf")) {
-      const pdf = await extractPdfBetter(buf);
+      const pdf = await extractPdfBetter(buf, undefined, ocrOptions);
       const title = url.pathname.split("/").pop() ?? "pdf";
       if (pdf.needsOcr) {
         return empty({
@@ -555,6 +642,7 @@ async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
           needsOcr: true,
           redirectChain: tracked.chain,
           extractionMethod: pdf.method,
+          needsOcrReason: pdf.needsOcrReason,
           pages: pdf.pages,
           rawBytes: buf,
         });
@@ -567,7 +655,13 @@ async function ingestDocumentRaw(raw: string): Promise<IngestDocument> {
         title,
         contentType: "application/pdf",
         redirectChain: tracked.chain,
-        extractionMethod: pdf.method,
+        extractionMethod:
+          pdf.method === "ocr"
+            ? encodeOcrExtractionMethod(pdf.ocrProvider, pdf.ocrPagesRead, pdf.ocrPagesTotal)
+            : pdf.method,
+        ocrProvider: pdf.ocrProvider,
+        ocrPagesRead: pdf.ocrPagesRead,
+        ocrPagesTotal: pdf.ocrPagesTotal,
         pages: pdf.pages,
         rawBytes: buf,
       });

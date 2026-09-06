@@ -36,6 +36,16 @@ export type LocalModelEntry = {
   kind: LocalModelKind;
   /** Answers with reasoning_content/reasoning instead of content by default. */
   thinking: boolean;
+  /**
+   * Can this model read an image? Drives OCR provider resolution for scanned
+   * PDFs (ocr.ts) and the " · vision" picker suffix. LM Studio reports this
+   * directly (`/api/v0/models`'s `type === "vlm"`); Ollama does not put it in
+   * the plain `/models` list, so `enrichOllama` makes one `/api/show` call
+   * per model and reads `capabilities`. An unknown/plain OpenAI-compatible
+   * server reports nothing about vision, so it is always `false` here --
+   * never a guess from the model's name.
+   */
+  vision: boolean;
 };
 
 export type LocalServerKind = "lmstudio" | "ollama" | "openai-compatible";
@@ -140,9 +150,34 @@ async function enrichLmStudio(root: string, ids: string[]): Promise<LocalModelEn
       loaded: meta ? meta.state === "loaded" : null,
       kind,
       thinking: isThinking(id),
+      vision: meta?.type === "vlm",
     });
   }
   return out;
+}
+
+/**
+ * One `/api/show` call per model -- the only way to learn Ollama's
+ * `capabilities` list, which the plain `/models`/`/api/ps` endpoints never
+ * include. Cached for free by the catalog's own 20s cache (`CACHE_MS`
+ * below), so this only actually hits the network once per refresh. Never
+ * throws: a model that does not answer, or answers with no `capabilities`
+ * array, is simply not vision-capable as far as this desk can tell.
+ */
+async function ollamaSupportsVision(root: string, id: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${root}/api/show`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ name: id, model: id }),
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    if (!res.ok) return false;
+    const body = (await res.json()) as { capabilities?: unknown };
+    return Array.isArray(body.capabilities) && body.capabilities.includes("vision");
+  } catch {
+    return false;
+  }
 }
 
 async function enrichOllama(root: string, ids: string[]): Promise<LocalModelEntry[]> {
@@ -157,12 +192,14 @@ async function enrichOllama(root: string, ids: string[]): Promise<LocalModelEntr
   } catch {
     // /api/ps missing or unreachable -- loaded state stays unknown, not an error.
   }
-  return ids.map((id) => ({
+  const vision = await Promise.all(ids.map((id) => ollamaSupportsVision(root, id)));
+  return ids.map((id, i) => ({
     id,
     label: id,
     loaded: running.size > 0 ? running.has(id) : null,
     kind: "chat" as const,
     thinking: isThinking(id),
+    vision: vision[i] ?? false,
   }));
 }
 
@@ -188,7 +225,14 @@ async function probeServer(
       ? await enrichLmStudio(serverRoot(base), ids)
       : kind === "ollama"
         ? await enrichOllama(serverRoot(base), ids)
-        : ids.map((id) => ({ id, label: id, loaded: null, kind: "chat" as const, thinking: isThinking(id) }));
+        : ids.map((id) => ({
+            id,
+            label: id,
+            loaded: null,
+            kind: "chat" as const,
+            thinking: isThinking(id),
+            vision: false,
+          }));
   return { kind, baseUrl: base, reachable: true, models };
 }
 

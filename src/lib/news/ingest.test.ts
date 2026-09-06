@@ -1,8 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  describeExtractionMethod,
   discoverDocLinks,
   discoverStoryLinks,
+  encodeOcrExtractionMethod,
   extractPdfBetter,
   extractPdfText,
   mapLimit,
@@ -45,6 +47,55 @@ describe("extractPdfBetter", () => {
     assert.equal(scanned.needsOcr, false);
     assert.match(scanned.text, /scanned council packet/);
     assert.equal(scanned.pages[0]?.page, 1);
+  });
+
+  it("carries the OCR provider and page counts through to the extract", async () => {
+    const scanned = await extractPdfBetter(new Uint8Array([0, 1, 2, 3, 4]), async () => ({
+      text: "OCR recovered the scanned council packet award",
+      pages: [{ page: 1, text: "OCR recovered the scanned council packet award" }],
+      provider: "Claude",
+      pagesRead: 1,
+      pagesTotal: 3,
+    }));
+    assert.equal(scanned.ocrProvider, "Claude");
+    assert.equal(scanned.ocrPagesRead, 1);
+    assert.equal(scanned.ocrPagesTotal, 3);
+  });
+
+  it("stays needs-ocr, with the honest reason, below the 40-character floor", async () => {
+    const scanned = await extractPdfBetter(new Uint8Array([0, 1, 2, 3, 4]), async () => ({
+      text: "",
+      pages: [],
+      reason: "the chosen local model cannot read images — pick a vision model (marked · vision in the picker).",
+    }));
+    assert.equal(scanned.needsOcr, true);
+    assert.equal(scanned.method, "none");
+    assert.match(scanned.needsOcrReason ?? "", /vision model/);
+  });
+});
+
+describe("encodeOcrExtractionMethod / describeExtractionMethod", () => {
+  it("round-trips a stored OCR extraction method into the editor-facing sentence", () => {
+    const stored = encodeOcrExtractionMethod("Claude", 3, 5);
+    assert.equal(stored, "ocr:Claude:3/5");
+    assert.equal(describeExtractionMethod(stored), "Read by OCR · Claude · 3 of 5 pages");
+  });
+
+  it("defaults a missing provider/page count without throwing", () => {
+    const stored = encodeOcrExtractionMethod(undefined, undefined, undefined);
+    assert.equal(stored, "ocr:unknown:0/0");
+    assert.equal(describeExtractionMethod(stored), "Read by OCR · unknown · 0 of 0 pages");
+  });
+
+  it("passes a non-OCR method through unchanged", () => {
+    assert.equal(describeExtractionMethod("unpdf"), "unpdf");
+    assert.equal(describeExtractionMethod("readability"), "readability");
+  });
+
+  it("says a blank or 'none' method plainly", () => {
+    assert.equal(describeExtractionMethod(""), "Not read yet.");
+    assert.equal(describeExtractionMethod("none"), "Not read yet.");
+    assert.equal(describeExtractionMethod(null), "Not read yet.");
   });
 });
 

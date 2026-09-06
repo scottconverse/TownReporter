@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   effectiveStoryModelChoice,
+  localModelOptionLabel,
   modelChoiceLabel,
   modelChoiceHelp,
   OPINION_MODEL_CHOICES,
@@ -127,5 +128,27 @@ describe("model choice contract", () => {
     assert.match(guidance, /LLM_BASE_URL/);
     assert.match(guidance, /LLM_MODEL/);
     assert.doesNotMatch(guidance, /Claude Code/);
+  });
+});
+
+describe("localModelOptionLabel", () => {
+  it("appends ' · vision' for a vision-capable model, alongside loaded/thinking", () => {
+    assert.equal(
+      localModelOptionLabel({ id: "qwen2.5vl-7b", loaded: true, thinking: false, vision: true }),
+      "qwen2.5vl-7b · loaded · vision",
+    );
+  });
+
+  it("shows the bare id when nothing else applies", () => {
+    assert.equal(
+      localModelOptionLabel({ id: "gemma4:12b", loaded: null, thinking: false, vision: false }),
+      "gemma4:12b",
+    );
+  });
+
+  it("never claims vision for a plain chat model", () => {
+    const label = localModelOptionLabel({ id: "gemma4:12b", loaded: true, thinking: true, vision: false });
+    assert.doesNotMatch(label, /vision/);
+    assert.equal(label, "gemma4:12b · loaded · thinking off");
   });
 });

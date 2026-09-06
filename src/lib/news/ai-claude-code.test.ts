@@ -321,3 +321,41 @@ describe("claudeCodeChat's noTools flag reaches the CLI as --tools, not --allowe
     }
   });
 });
+
+/**
+ * OCR's one scoped Read (ocr.ts's `claudeCodeTranscribePage`): the only
+ * place this desk hands the Claude Code CLI a live tool on purpose, and only
+ * for exactly one file it just wrote itself. `--tools Read` — not
+ * `--allowed-tools`, which describes a wider surface even when every entry
+ * is denied — and the prompt on stdin names exactly one path.
+ */
+describe("claudeCodeReadChat sends --tools Read and names exactly one file", () => {
+  it("passes --tools Read and a prompt naming one temp path", async () => {
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: FAKE_CLAUDE,
+      FAKE_CLAUDE_ECHO_READ_CALL: "1",
+    });
+    resetClaudeCliCache();
+    try {
+      const { claudeCodeReadChat } = await import("./ai-claude-code.server.ts");
+      const result = await claudeCodeReadChat({
+        prompt: "Transcribe this page verbatim.",
+        filePath: "C:\\Users\\editor\\AppData\\Local\\Temp\\trd-ocr-abc123\\page.jpg",
+        model: "claude-opus-5",
+        timeoutMs: 10_000,
+      });
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      const echoed = JSON.parse(result.text) as { tools: string; stdin: string };
+      assert.equal(echoed.tools, "Read");
+      assert.match(echoed.stdin, /trd-ocr-abc123[\\/]page\.jpg/);
+      // Exactly one path is named — the prompt does not also carry a second
+      // temp file or a directory listing for the model to wander into.
+      const pathMentions = echoed.stdin.match(/trd-ocr-abc123[\\/]page\.jpg/g) ?? [];
+      assert.equal(pathMentions.length, 1);
+    } finally {
+      restore();
+      resetClaudeCliCache();
+    }
+  });
+});

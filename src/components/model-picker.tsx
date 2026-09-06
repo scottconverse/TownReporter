@@ -2,6 +2,7 @@ import {
   DARK_MODEL_CHOICES,
   OPINION_MODEL_CHOICES,
   STORY_MODEL_CHOICES,
+  localModelOptionLabel,
   modelChoiceHelp,
   type DarkModelChoice,
   type ModelChoiceOption,
@@ -142,17 +143,11 @@ function LocalModelSelect({ scope }: { scope: "story" | "opinion" | "dark" }) {
             {!selected ? <option value="">Choose a model…</option> : null}
             {reachable.map((server) => (
               <optgroup key={server.baseUrl} label={localServerLabel(server.kind, server.baseUrl)}>
-                {server.models.map((model) => {
-                  const suffix = [model.loaded ? "loaded" : null, model.thinking ? "thinking off" : null]
-                    .filter(Boolean)
-                    .join(" · ");
-                  return (
-                    <option key={model.id} value={`${server.baseUrl} ${model.id}`}>
-                      {model.id}
-                      {suffix ? ` · ${suffix}` : ""}
-                    </option>
-                  );
-                })}
+                {server.models.map((model) => (
+                  <option key={model.id} value={`${server.baseUrl} ${model.id}`}>
+                    {localModelOptionLabel(model)}
+                  </option>
+                ))}
               </optgroup>
             ))}
           </select>

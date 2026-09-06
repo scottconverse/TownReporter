@@ -476,6 +476,7 @@ function LocalModelCatalogTable({ onNote }: { onNote: (text: string) => void }) 
               <th className="py-1 pr-3">Model</th>
               <th className="py-1 pr-3">Loaded</th>
               <th className="py-1 pr-3">Thinking</th>
+              <th className="py-1 pr-3">Vision</th>
               <th className="py-1 pr-3">Default</th>
             </tr>
           </thead>
@@ -485,7 +486,7 @@ function LocalModelCatalogTable({ onNote }: { onNote: (text: string) => void }) 
                 server.models.length === 0 ? (
                   <tr key={server.baseUrl} className="border-b border-rule/40">
                     <td className="py-1 pr-3">{server.baseUrl}</td>
-                    <td className="py-1 pr-3 text-muted" colSpan={4}>
+                    <td className="py-1 pr-3 text-muted" colSpan={5}>
                       No chat models found.
                     </td>
                   </tr>
@@ -498,6 +499,7 @@ function LocalModelCatalogTable({ onNote }: { onNote: (text: string) => void }) 
                         {model.loaded === null ? "unknown" : model.loaded ? "yes" : "no"}
                       </td>
                       <td className="py-1 pr-3">{model.thinking ? "yes (off by default)" : "no"}</td>
+                      <td className="py-1 pr-3">{model.vision ? "yes" : "no"}</td>
                       <td className="py-1 pr-3">
                         {def && def.baseUrl === server.baseUrl && def.id === model.id ? "★" : ""}
                       </td>
@@ -507,7 +509,7 @@ function LocalModelCatalogTable({ onNote }: { onNote: (text: string) => void }) 
               ) : (
                 <tr key={server.baseUrl} className="border-b border-rule/40">
                   <td className="py-1 pr-3">{server.baseUrl}</td>
-                  <td className="py-1 pr-3 text-rust" colSpan={4}>
+                  <td className="py-1 pr-3 text-rust" colSpan={5}>
                     Configured but unreachable.
                   </td>
                 </tr>

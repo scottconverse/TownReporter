@@ -200,4 +200,75 @@ describe("local model discovery", () => {
     const byFirst = await withEnv({}, () => discoverLocalModels(true));
     assert.equal(byFirst.defaultModel?.id, "halo/qwen3-coder-30b-a3b-q6k");
   });
+
+  it("flags an LM Studio vlm as vision, and a plain llm as not", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": {
+        data: [{ id: "google/gemma-4-12b-qat" }, { id: "qwen2.5vl-7b" }],
+      },
+      "http://127.0.0.1:1234/api/v0/models": {
+        data: [
+          { id: "google/gemma-4-12b-qat", state: "loaded", type: "llm" },
+          { id: "qwen2.5vl-7b", state: "not-loaded", type: "vlm" },
+        ],
+      },
+      "http://127.0.0.1:11434/v1/models": "timeout",
+    }) as typeof fetch;
+
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    const lmstudio = catalog.servers.find((s) => s.kind === "lmstudio")!;
+    assert.equal(lmstudio.models.find((m) => m.id === "google/gemma-4-12b-qat")?.vision, false);
+    assert.equal(lmstudio.models.find((m) => m.id === "qwen2.5vl-7b")?.vision, true);
+  });
+
+  it("reads Ollama vision capability from one /api/show call per model", async () => {
+    globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: string }) => {
+      const url = String(input);
+      if (url.startsWith("http://127.0.0.1:1234")) {
+        const err = new Error("aborted");
+        err.name = "TimeoutError";
+        throw err;
+      }
+      if (url === "http://127.0.0.1:11434/v1/models") {
+        return new Response(JSON.stringify(OLLAMA_MODELS), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "http://127.0.0.1:11434/api/ps") {
+        return new Response(JSON.stringify(OLLAMA_PS), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "http://127.0.0.1:11434/api/show" && init?.method === "POST") {
+        const requested = JSON.parse(init.body ?? "{}") as { name?: string };
+        const capabilities = requested.name === "gemma4:12b" ? ["completion", "vision"] : ["completion"];
+        return new Response(JSON.stringify({ capabilities }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    const ollama = catalog.servers.find((s) => s.kind === "ollama")!;
+    assert.equal(ollama.models.find((m) => m.id === "gemma4:12b")?.vision, true);
+    assert.equal(ollama.models.find((m) => m.id === "gemma4:e4b")?.vision, false);
+    assert.equal(ollama.models.find((m) => m.id === "translategemma:4b")?.vision, false);
+  });
+
+  it("marks an unknown OpenAI-compatible server's models as not vision-capable", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": "timeout",
+      "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://localhost:9999/v1/models": { data: [{ id: "some-model" }] },
+    }) as typeof fetch;
+    const catalog = await withEnv({ LLM_BASE_URL: "http://localhost:9999/v1" }, () =>
+      discoverLocalModels(true),
+    );
+    const server = catalog.servers.find((s) => s.baseUrl === "http://localhost:9999/v1");
+    assert.equal(server?.models[0]?.vision, false);
+  });
 });

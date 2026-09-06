@@ -342,3 +342,31 @@ local models: Command Center's composer, every Queue row, the Story page,
 Dark Desk, Opinion, and the Server page all read the one provider registry
 (`src/lib/news/provider-registry.ts`) and the one local-model catalog. There
 is no per-page provider logic to keep in sync.
+
+---
+
+## Scanned PDFs, and why they need a *vision* model
+
+A council packet with no text layer — a fax-quality scan of a paper agenda —
+cannot be read by extracting text that was never stored in the file. This
+desk reads it the way a person would: it pulls the page images the scan
+already embeds and asks the model you picked to look at them and transcribe
+what they say (`src/lib/news/ocr.ts`). The Anthropic API, the Codex CLI, and
+the Claude Code CLI can all do this. A **local** model can only do it if it
+was built to accept images at all — an ordinary text-only local model
+cannot, no matter how good it is at writing.
+
+The picker marks which local models can: an entry with **`· vision`** after
+its name can read images; one without it cannot. LM Studio reports this
+itself; for Ollama, TownReporter asks each model directly (`ollama pull` a
+vision model such as `qwen2.5vl` or `llama3.2-vision` to get one). The Server
+page's local-model table also has a **Vision** column, for the same answer
+without opening the picker.
+
+Pick "Local model" for a scan without a vision-marked model selected, and the
+desk says so honestly rather than guessing at the page's contents: *"the
+chosen local model cannot read images — pick a vision model (marked ·
+vision in the picker)."* A PDF whose scanner used CCITT/JBIG2 fax
+compression (no embedded JPEG or PNG page image at all — most scanners do
+embed one or the other) cannot be read by any provider yet; the desk says
+that plainly too, rather than returning empty text with no explanation.

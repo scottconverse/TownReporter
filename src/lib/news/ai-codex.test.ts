@@ -69,6 +69,28 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     ]);
   });
 
+  it("attaches page images via the verified `codex exec -i/--image <FILE>...` flag, after `exec`", () => {
+    const args = buildCodexArgs({ model: "gpt-5.6-sol", imagePaths: ["C:\\tmp\\page.jpg"] });
+    const execIdx = args.indexOf("exec");
+    const imageIdx = args.indexOf("--image");
+    assert.ok(execIdx >= 0, "exec subcommand must be present");
+    assert.ok(imageIdx > execIdx, "--image must come after the exec subcommand");
+    assert.equal(args[imageIdx + 1], "C:\\tmp\\page.jpg");
+    assert.equal(args.includes("--model"), true);
+  });
+
+  it("attaches multiple page images as repeated --image flags", () => {
+    const args = buildCodexArgs({ model: "gpt-5.6-sol", imagePaths: ["a.jpg", "b.png"] });
+    const imageIdxs = args.reduce<number[]>((acc, a, i) => (a === "--image" ? [...acc, i] : acc), []);
+    assert.equal(imageIdxs.length, 2);
+    assert.equal(args[imageIdxs[0]! + 1], "a.jpg");
+    assert.equal(args[imageIdxs[1]! + 1], "b.png");
+  });
+
+  it("omits --image entirely for a normal text call", () => {
+    assert.equal(buildCodexArgs({ model: "gpt-5.6-sol" }).includes("--image"), false);
+  });
+
   it("rejects an unvalidated model name before launching Codex", async () => {
     const result = await codexChat({
       system: "Draft a brief.",

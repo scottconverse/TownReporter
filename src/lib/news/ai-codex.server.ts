@@ -185,12 +185,24 @@ export async function probeCodex(
   };
 }
 
-export function buildCodexArgs(input: { model: string; webSearch?: boolean }): string[] {
+export function buildCodexArgs(input: {
+  model: string;
+  webSearch?: boolean;
+  /**
+   * Page images to attach via `codex exec`'s `-i/--image <FILE>...` flag
+   * (verified present in `codex exec --help` — repeatable). Used for OCR:
+   * a scanned PDF page goes to a temp file, and Codex is asked to
+   * transcribe it (see ocr.ts's `codexTranscribePage`). Never combined with
+   * a normal text draft — that path never sets this.
+   */
+  imagePaths?: string[];
+}): string[] {
   return [
     "--ask-for-approval",
     "never",
     "--search",
     "exec",
+    ...(input.imagePaths?.length ? input.imagePaths.flatMap((p) => ["--image", p]) : []),
     "--model",
     input.model,
     "--sandbox",
@@ -223,13 +235,19 @@ export async function codexChat(input: {
   timeoutMs: number;
   systemPromptText?: string;
   webSearch?: boolean;
+  imagePaths?: string[];
 }): Promise<ChatResult> {
   const bin = await findCodexCli();
   if (!bin) return { ok: false, error: CODEX_CLI_MISSING };
   if (!/^[A-Za-z0-9._-]+$/.test(input.model)) {
     return { ok: false, error: "Codex model name is invalid." };
   }
-  const result = await run(bin, buildCodexArgs(input), buildCodexPrompt(input), input.timeoutMs);
+  const result = await run(
+    bin,
+    buildCodexArgs({ model: input.model, webSearch: input.webSearch, imagePaths: input.imagePaths }),
+    buildCodexPrompt(input),
+    input.timeoutMs,
+  );
   if (result.timedOut) return { ok: false, error: "Codex request timed out" };
   const text = result.stdout.trim();
   if (result.code === 0 && text) return { ok: true, text };
