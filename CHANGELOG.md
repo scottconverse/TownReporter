@@ -1,6 +1,12 @@
 # Changelog
 
-Current release: **0.6.21**.
+Current release: **0.6.22**.
+
+## 0.6.22 — 2026-09-06
+Direction A, stage 2: the story page.
+- **The story page matches the redesign's proportions.** A 380px left column carries the lead, its status chip, the sources and the Reporting notes; the draft and its work bar sit on the right. Below 1024px the page is one column, lead first. Long source URLs wrap instead of widening the column. Measured: no horizontal scroll at 390 or 762; the guard test now covers the story grid.
+- **Headlines in the lead column scale with Large text** (they were a fixed 21px).
+- **The local model row** under the Writing model picker reads as a plain second row, not a boxed frame.
 
 ## 0.6.21 — 2026-09-06
 The redesigned Command Center, stage 1 of direction A. Chosen by an outside design audit over a full alternative; built on the desk's own system (newsroom words, black dark mode, scores and Hold/Kill, rust on cream), taking from the alternative only more air in the queue and a Follow-ups list.

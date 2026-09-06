@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.21](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.21)** — 6 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.22](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.22)** — 6 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -86,6 +86,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.22** — the story page aligned to the redesign: a 380px column for the lead, its sources and the reporting notes, the draft on the right, one column below 1024px, no overflow at any width; the local model row under the picker reads as a plain second row.
 - **0.6.21** — the redesigned Command Center (direction A): the queue is the lead column, Dark Desk, Follow-ups and the wire sit in a right rail, queue rows breathe, and the desk lays out cleanly from 1440 down to a phone. New: Follow-ups — who you asked, for what, and when it is due.
 - **0.6.20** — desk readability release from the design audit: nothing informational under 14px, Large text now scales headlines and reading panes, one button family, destructive buttons look destructive, Held and set-aside leads have their own chips.
 - **0.6.19** — the desk in dark mode is black on white; local models are found automatically (LM Studio, Ollama) and picked per model in every picker; a claims-of-absence gate stops a story from saying something does not exist until the paper has searched the city's own site and the editor has confirmed; Check r/longmont shows its progress and every scored post.
