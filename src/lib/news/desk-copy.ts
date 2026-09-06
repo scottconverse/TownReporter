@@ -640,6 +640,26 @@ export function workingQueueEmptyCopy(input: {
   return "Queue is empty — run a scan or file a lead.";
 }
 
+/**
+ * Direction A, stage 1 resilience fix: `listFollowUps` reaches a real query
+ * (see follow-ups.ts) and can throw -- a stale connection, a locked table, a
+ * database the ensure chain hasn't reached yet. Before this, both the desk
+ * rail (desk.index.tsx) and the story page's follow-up block
+ * (desk.story.$leadId.tsx) treated `data ?? []` the same for "loaded, zero
+ * rows" and "failed to load", so a real failure quietly rendered as "no one
+ * owes you an answer" -- indistinguishable from the healthy empty state.
+ *
+ * One line, shown instead of the list/empty-state copy, whenever the query
+ * is in its error state. Kept as a plain string function (no JSX) so it can
+ * be unit tested with plain `node --test` the same as every other copy
+ * helper in this file, matching this repo's "no component-test framework"
+ * convention (see follow-ups.test.ts and schema-parity.test.ts for the
+ * server-side half of this fix).
+ */
+export function followUpsRailCopy(isError: boolean): string | null {
+  return isError ? "Follow-ups could not be loaded. See the server log." : null;
+}
+
 function socialSiteName(url?: string | null): string | null {
   if (!url) return null;
   try {

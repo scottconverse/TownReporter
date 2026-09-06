@@ -30,6 +30,7 @@ import {
   editorScanError,
   editorStatus,
   flakyFailureCopy,
+  followUpsRailCopy,
   investigationStopKind,
   nearDuplicate,
   openLeads,
@@ -520,9 +521,12 @@ function DeskHome() {
                   All follow-ups
                 </Link>
               }
-              sub={(followUps.data ?? []).length === 0 ? "No one owes you an answer right now." : undefined}
+              sub={
+                followUpsRailCopy(followUps.isError) ??
+                ((followUps.data ?? []).length === 0 ? "No one owes you an answer right now." : undefined)
+              }
             />
-            {(followUps.data ?? []).length === 0 ? null : (
+            {followUps.isError || (followUps.data ?? []).length === 0 ? null : (
               (followUps.data ?? []).slice(0, 3).map((f) => (
                 <FollowUpItem
                   key={f.id}

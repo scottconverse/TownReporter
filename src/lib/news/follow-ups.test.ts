@@ -58,6 +58,54 @@ function ctx(userId: string, newsroomId: number) {
   return { userId, newsroomId };
 }
 
+/**
+ * CI failure reproduction (postgres-integration job, run 34023014131): the
+ * hypothesis was that `follow_ups` never joins the runtime ensure chain, so
+ * a fresh database's first `/desk` request hits a missing relation. This is
+ * that check in isolation, run first in this file (before any other test's
+ * `ensureFixtureTables()`/`ensureFollowUpsSchema()` call could create the
+ * table) against a database this process has not migrated at all -- plain
+ * `node --test` never runs `migrations/*.sql` (see the file docstring above
+ * and src/lib/db.ts's `createPgliteSql`), so this IS "boot PGLite fresh,
+ * skip migrations". It calls `performListFollowUps`, the exact function
+ * `listFollowUps` (desk.ts, a createServerFn) delegates to for the desk
+ * loader's query, and asserts the table goes from absent to present as a
+ * side effect of that one call.
+ */
+describe("a fresh database with no migrations applied", { timeout: 30000 }, () => {
+  it("has no follow_ups table until the first perform* call, which creates it via the ensure chain", async () => {
+    // performListFollowUps joins leads/articles too -- migrations-only
+    // tables with no ensure* counterpart (see schema-parity.test.ts's
+    // ALLOWLIST), unrelated to the bug this test guards against. Stand
+    // those up the same way every other test in this file does; the thing
+    // under test is follow_ups specifically, created by ensureFollowUpsSchema
+    // (called at the top of performListFollowUps) and nothing else here.
+    await ensureFixtureTables();
+
+    const sql = await getSql();
+    const before = await sql<{ exists: boolean }>`
+      select exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'follow_ups'
+      ) as exists
+    `;
+    assert.equal(before[0]!.exists, false, "follow_ups must not exist before any Follow-ups call on a fresh database");
+
+    // The same code path the desk loader's listFollowUps hits -- see
+    // src/lib/news/desk.ts's listFollowUps handler.
+    const rows = await performListFollowUps(ctx(`fresh-db-user-${Date.now()}`, 999_999));
+    assert.deepEqual(rows, []);
+
+    const after = await sql<{ exists: boolean }>`
+      select exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'follow_ups'
+      ) as exists
+    `;
+    assert.equal(after[0]!.exists, true, "performListFollowUps's ensureFollowUpsSchema() call must create follow_ups");
+  });
+});
+
 describe("Follow-ups server functions", { timeout: 30000 }, () => {
   it("creates a follow-up and lists it back, newsroom-scoped", async () => {
     await ensureFixtureTables();

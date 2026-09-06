@@ -32,6 +32,7 @@ import {
   draftHasLanded,
   resolveDraftJobState,
   recoveringDraftCopy,
+  followUpsRailCopy,
 } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { ModelPicker } from "@/components/model-picker";
@@ -972,7 +973,9 @@ function ReportingNotesPane({
       )}
       <div className="note-sec">
         <p className="side-label">People who still need to respond</p>
-        {leadFollowUps.length === 0 ? (
+        {followUpsRailCopy(followUps.isError) ? (
+          <p className="note-one">{followUpsRailCopy(followUps.isError)}</p>
+        ) : leadFollowUps.length === 0 ? (
           <p className="note-one">No one owes you an answer on this story right now.</p>
         ) : (
           leadFollowUps.map((f) => (

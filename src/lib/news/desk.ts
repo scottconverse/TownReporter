@@ -1230,7 +1230,18 @@ import {
 export const listFollowUps = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .validator((input?: { status?: "open" | "answered" | "dropped"; limit?: number }) => input ?? {})
-  .handler(async ({ context, data }) => _performListFollowUps(context, data));
+  .handler(async ({ context, data }) => {
+    try {
+      return await _performListFollowUps(context, data);
+    } catch (err) {
+      // The desk rail (desk.index.tsx) and the story page's follow-up block
+      // (desk.story.$leadId.tsx) both render a plain notice instead of
+      // crashing when this throws -- log once here so the cause is on
+      // record, since the client only ever sees "could not be loaded".
+      console.error("listFollowUps failed:", err);
+      throw err;
+    }
+  });
 
 export const createFollowUp = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])

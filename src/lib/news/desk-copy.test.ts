@@ -12,6 +12,7 @@ import {
   editorScanError,
   editorStatus,
   flakyFailureCopy,
+  followUpsRailCopy,
   headlineFromUrl,
   humanFrontierLabel,
   investigationStopKind,
@@ -976,5 +977,19 @@ describe("redditPostStateLabel", () => {
     assert.equal(redditPostStateLabel("filed"), "filed");
     assert.equal(redditPostStateLabel("already-known"), "already known");
     assert.equal(redditPostStateLabel("below-line"), "below the line");
+  });
+});
+
+describe("followUpsRailCopy", () => {
+  // Direction A, stage 1 resilience fix: a thrown listFollowUps used to be
+  // indistinguishable from a genuinely empty list on both the desk rail and
+  // the story page's follow-up block -- see desk.index.tsx and
+  // desk.story.$leadId.tsx, which both render this in place of the
+  // list/empty-state copy whenever the follow-ups query is in error.
+  it("returns null when the query has not errored, so callers fall through to their normal empty/list copy", () => {
+    assert.equal(followUpsRailCopy(false), null);
+  });
+  it("returns a plain one-line notice when the query errored", () => {
+    assert.equal(followUpsRailCopy(true), "Follow-ups could not be loaded. See the server log.");
   });
 });
