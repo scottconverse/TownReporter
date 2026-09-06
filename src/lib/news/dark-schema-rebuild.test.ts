@@ -57,6 +57,7 @@ const repoRoot = new URL("../../../", import.meta.url).pathname.replace(/^\/([A-
 
 let ensureDarkSchema: () => Promise<void>;
 let closePoolForTests: () => Promise<void>;
+let darkSchemaStatements: readonly string[] = [];
 
 if (dbProbe.ok) {
   before(async () => {
@@ -81,6 +82,7 @@ if (dbProbe.ok) {
     const db = await import("../db.ts");
     ensureDarkSchema = dark.ensureDarkSchema;
     closePoolForTests = db.closePoolForTests;
+    darkSchemaStatements = dark.DARK_SCHEMA_STATEMENTS;
   }, 60_000);
 
   after(async () => {
@@ -113,59 +115,48 @@ async function darkRunsExists(url: string): Promise<boolean> {
 }
 
 /**
- * The column set migrations/0012_newsroom_appliance.sql (newsroom_id) and
- * migrations/0003_dark_desk.sql / 0030_dark_model_choice.sql (everything
- * else) define for these three tables. GauntletGate ENG-02: the rebuild
- * path used to recreate these tables in their pre-0012 shape -- the table
- * came back, but every query dark.ts makes against it (all of which filter
- * on newsroom_id) failed. A `to_regclass` existence check alone cannot see
- * that; this compares the actual column set.
+ * Derived from `DARK_SCHEMA_STATEMENTS` itself (src/lib/news/dark.ts) rather
+ * than copy-pasted -- a hard-coded list here drifted the moment 0043 added
+ * columns to it (`searches_json`/`stage` on dark_runs, six gate columns plus
+ * `stage`/`verification_status`/`verified_at` on dark_signals) without this
+ * test being updated, and CI caught the rebuild reporting the OLD shape as
+ * success. Parsing the same statement list `ensureDarkSchema()` executes
+ * means this can't rot again the same way: add a column to
+ * DARK_SCHEMA_STATEMENTS and this expectation moves with it.
+ *
+ * GauntletGate ENG-02: the rebuild path used to recreate these tables in
+ * their pre-0012 shape -- the table came back, but every query dark.ts makes
+ * against it (all of which filter on newsroom_id) failed. A `to_regclass`
+ * existence check alone cannot see that; this compares the actual column set.
  */
-const EXPECTED_COLUMNS: Record<string, string[]> = {
-  dark_runs: [
-    "error",
-    "finished_at",
-    "id",
-    "model_choice",
-    "newsroom_id",
-    "started_at",
-    "summary",
-    "user_id",
-  ].sort(),
-  dark_signals: [
-    "alternatives",
-    "confidence",
-    "counter_narrative",
-    "created_at",
-    "handoff",
-    "id",
-    "investigation_id",
-    "linkage_map",
-    "name",
-    "newsroom_id",
-    "observation",
-    "pathway",
-    "pattern",
-    "posture",
-    "privacy_review",
-    "run_id",
-    "signal_type",
-    "strength",
-    "user_id",
-    "what_would_kill",
-  ].sort(),
-  dark_promises: [
-    "created_at",
-    "id",
-    "newsroom_id",
-    "source_cite",
-    "status",
-    "user_id",
-    "what",
-    "when_due",
-    "who_promised",
-  ].sort(),
-};
+function columnsFromSchemaStatements(statements: readonly string[]): Record<string, string[]> {
+  const columns: Record<string, Set<string>> = {};
+  const ensureTable = (table: string) => (columns[table] ??= new Set());
+
+  for (const statement of statements) {
+    const created = statement.match(/create table if not exists (\w+)\s*\(([\s\S]*)\)\s*$/);
+    if (created) {
+      const [, table, body] = created;
+      const set = ensureTable(table);
+      for (const line of body.split(/,\s*\n/)) {
+        const name = line.trim().split(/\s+/)[0];
+        if (name) set.add(name);
+      }
+      continue;
+    }
+    const altered = statement.match(
+      /alter table (\w+) add column if not exists (\w+)/,
+    );
+    if (altered) {
+      const [, table, column] = altered;
+      ensureTable(table).add(column);
+    }
+  }
+
+  return Object.fromEntries(
+    Object.entries(columns).map(([table, set]) => [table, [...set].sort()]),
+  );
+}
 
 /** The live column set for `table` at `url` (a fresh connection). */
 async function columnsOf(url: string, table: string): Promise<string[]> {
@@ -224,15 +215,16 @@ describe("ensureDarkSchema survives a database rebuilt underneath the running pr
       );
 
       // ENG-02: the table coming back is not enough -- it must come back
-      // USABLE. Assert the actual column set (not just existence) for all
-      // three tables DARK_SCHEMA_STATEMENTS recreates.
-      for (const table of Object.keys(EXPECTED_COLUMNS)) {
+      // USABLE. Assert the actual column set (not just existence) for the
+      // three dark.ts reads and writes against by name.
+      const expectedColumns = columnsFromSchemaStatements(darkSchemaStatements);
+      for (const table of ["dark_runs", "dark_signals", "dark_promises"]) {
         const cols = await columnsOf(dbUrl, table);
         assert.deepEqual(
           cols,
-          EXPECTED_COLUMNS[table],
+          expectedColumns[table],
           `${table} came back from the rebuild with the wrong column set -- expected ` +
-            `${JSON.stringify(EXPECTED_COLUMNS[table])}, got ${JSON.stringify(cols)}`,
+            `${JSON.stringify(expectedColumns[table])}, got ${JSON.stringify(cols)}`,
         );
       }
 

@@ -263,7 +263,7 @@ export function isPoisonedSignal(sig: DarkSignal): boolean {
 // batch and skip it entirely once the database already has these objects.
 // See that function's doc comment for why a per-process boolean would be
 // wrong here (a rebuilt database under a live process must not look "ensured").
-const DARK_SCHEMA_STATEMENTS: readonly string[] = [
+export const DARK_SCHEMA_STATEMENTS: readonly string[] = [
   `create table if not exists investigation_briefs (
       investigation_id integer primary key,
       newsroom_id integer not null default 1,
