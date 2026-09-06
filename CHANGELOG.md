@@ -1,6 +1,14 @@
 # Changelog
 
-Current release: **0.6.20**.
+Current release: **0.6.21**.
+
+## 0.6.21 — 2026-09-06
+The redesigned Command Center, stage 1 of direction A. Chosen by an outside design audit over a full alternative; built on the desk's own system (newsroom words, black dark mode, scores and Hold/Kill, rust on cream), taking from the alternative only more air in the queue and a Follow-ups list.
+- **The queue is the lead column.** "Needs you" is a slim strip under the nav; the composer sits at the top of the main column; the queue follows with room to breathe — headline, why, meta and actions on their own lines, chips top-right, nothing hidden. Dark Desk, Follow-ups and The wire move to a right rail.
+- **Follow-ups.** A new object for the people the editor has asked and what they owe: who, for what, due when, with "Overdue N days" stated in words. Record a reply (it lands in the story's reporting notes), Nudge, or Drop. Add one from a story's "People who still need to respond". Rail block on the desk plus a full list at `/desk/follow-ups`. Migration 0042, newsroom-scoped, guarded by the scoped-inserts test.
+- **The wire fits the rail.** Last scan on one line with the note behind "Read the scan note"; source health on one line; the first five proposed sources with Accept/Drop and "N more · Review them in Sources"; Beat memory one line per entity. Nothing removed — the full lists live on their own pages.
+- **A real narrow layout.** Two columns at 1180 and above, a narrower rail to 900, one column below with Follow-ups above Dark Desk; the nav wraps instead of forcing a horizontal scroll. Measured: no horizontal scroll at 1440, 1280, 1024, 900, 762 or 390; every small button at least 40px on narrow screens. A static test guards the rules.
+- The composer spans the column; the model picker's select is wide enough to read and its help runs full width.
 
 ## 0.6.20 — 2026-09-05
 Desk readability release. Five defects against rules the owner had already written, found by an outside design audit; each is now guarded by a test.

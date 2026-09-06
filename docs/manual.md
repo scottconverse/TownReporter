@@ -1,6 +1,6 @@
 # TownReporter — the manual
 
-**Version 0.6.20 · 5 September 2026**
+**Version 0.6.21 · 6 September 2026**
 
 **Documentation scope:** Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from
@@ -147,6 +147,7 @@ Three columns: the queue on the left, Dark Desk in the middle, the wire on the
 right. The line under the heading is the whole point of the page — _2 drafts
 ready to publish, 14 proposed sources await review, 1 Dark Desk file ready for
 another round_. If that line is empty there is nothing for you to do.
+As of 0.6.21 the desk is one main column (composer, then the queue) with a right rail: Dark Desk, Follow-ups, The wire.
 
 ## Scan
 
