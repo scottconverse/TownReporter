@@ -377,7 +377,10 @@ export function InkButton({
 }) {
   const cls =
     "btn" +
-    (tone === "solid" || tone === "invert" ? " solid" : "") +
+    // "danger" is always rendered solid too: a destructive confirm step
+    // ("Yes, delete", "Yes, do it") must not look like the same
+    // low-emphasis outline as the Cancel/Keep button sitting next to it.
+    (tone === "solid" || tone === "invert" || tone === "danger" ? " solid" : "") +
     (tone === "danger" ? " danger" : "") +
     (tone === "quiet" ? " quiet" : "") +
     (small ? " small" : "");
@@ -427,8 +430,23 @@ export function Score({ v }: { v: number }) {
   );
 }
 
+const CHIP_LABELS: Record<string, string> = {
+  aside: "set aside",
+  closed: "closed",
+  exhausted: "exhausted",
+};
+
+/**
+ * Every real status renders its own word, styled -- nothing falls through to
+ * the unstyled default look. "held", "aside", "closed", and "exhausted" used
+ * to collapse onto one shared "set aside" label (or, for "held", no styled
+ * chip at all besides the generic `.chip` gray), which read as the same
+ * status even though an editor treats them differently: held is coming back,
+ * aside/closed/exhausted are done. The visible word is uppercased by the
+ * `.chip` CSS rule (text-transform), so "held" already renders HELD.
+ */
 export function Chip({ s }: { s: string }) {
-  const label = s === "aside" || s === "closed" || s === "exhausted" ? "set aside" : s;
+  const label = CHIP_LABELS[s] ?? s;
   return <span className={"chip st-" + s}>{label}</span>;
 }
 

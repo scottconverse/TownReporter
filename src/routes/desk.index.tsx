@@ -265,7 +265,7 @@ function DeskHome() {
         />
         <div className="mt-4 max-w-2xl space-y-3">
           <label className="block">
-            <span className="text-[11px] tracking-[0.14em] text-muted uppercase">
+            <span className="text-sm tracking-[0.14em] text-muted uppercase">
               Link, text, or idea
             </span>
             <textarea
@@ -446,7 +446,7 @@ function DeskHome() {
                     <div className="np-acts">
                       <Link
                         to="/desk/dark"
-                        className="btn invert small"
+                        className="btn solid small"
                         onClick={() => {
                           try {
                             sessionStorage.setItem(OPEN_KEY, String(row.id));

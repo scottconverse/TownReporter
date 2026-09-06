@@ -281,7 +281,7 @@ function OpinionPage() {
         ) : null}
         <div className="mt-4 max-w-2xl space-y-3">
           <label className="block">
-            <span className="text-[11px] tracking-[0.14em] text-muted uppercase">
+            <span className="text-sm tracking-[0.14em] text-muted uppercase">
               Subject or link
             </span>
             <textarea
@@ -293,7 +293,7 @@ function OpinionPage() {
             />
           </label>
           <label className="block">
-            <span className="text-[11px] tracking-[0.14em] text-muted uppercase">
+            <span className="text-sm tracking-[0.14em] text-muted uppercase">
               Anything you want it to know (optional)
             </span>
             <input
@@ -359,7 +359,7 @@ function OpinionPage() {
         {showWritten ? (
           <div className="mt-4 max-w-2xl space-y-3">
             <label className="block">
-              <span className="text-[11px] tracking-[0.14em] text-muted uppercase">The piece</span>
+              <span className="text-sm tracking-[0.14em] text-muted uppercase">The piece</span>
               <textarea
                 className={areaClass + " mt-1 w-full"}
                 rows={14}
@@ -442,7 +442,7 @@ function OpinionPage() {
                     </span>
                   </span>
                   {!r.finished_at && r.stalled ? (
-                    <span className="text-[11px] tracking-[0.14em] text-rust uppercase">
+                    <span className="text-sm tracking-[0.14em] text-rust uppercase">
                       Stalled
                     </span>
                   ) : !r.finished_at ? (
@@ -450,11 +450,11 @@ function OpinionPage() {
                     // animates, and the clock counts up, so it is visibly alive.
                     <Elapsed since={r.created_at} />
                   ) : r.error ? (
-                    <span className="text-[11px] tracking-[0.14em] text-rust uppercase">
+                    <span className="text-sm tracking-[0.14em] text-rust uppercase">
                       Failed
                     </span>
                   ) : r.published_slug ? (
-                    <span className="text-[11px] tracking-[0.14em] text-muted uppercase">
+                    <span className="text-sm tracking-[0.14em] text-muted uppercase">
                       Published
                     </span>
                   ) : null}
@@ -593,7 +593,7 @@ function OpinionPage() {
               </pre>
               {piece.data.fact_sheet ? (
                 <div>
-                  <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
+                  <p className="text-sm tracking-[0.14em] text-muted uppercase">
                     Editor's fact sheet — not printed
                   </p>
                   <pre className="mt-1 max-h-72 overflow-auto border border-rule bg-paper-2 p-3 text-sm whitespace-pre-wrap">
@@ -603,7 +603,7 @@ function OpinionPage() {
               ) : null}
               {piece.data.image_prompt ? (
                 <div>
-                  <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
+                  <p className="text-sm tracking-[0.14em] text-muted uppercase">
                     Image prompt — not printed
                   </p>
                   <pre className="mt-1 max-h-56 overflow-auto border border-rule bg-paper-2 p-3 text-sm whitespace-pre-wrap">
@@ -641,7 +641,7 @@ function Elapsed({ since }: { since: string }) {
   const ss = String(secs % 60).padStart(2, "0");
 
   return (
-    <span className="inline-flex items-center gap-2 text-[11px] tracking-[0.14em] text-rust uppercase">
+    <span className="inline-flex items-center gap-2 text-sm tracking-[0.14em] text-rust uppercase">
       <span className="ink-dot" aria-hidden />
       Writing {mm}:{ss}
     </span>

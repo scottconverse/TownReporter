@@ -44,7 +44,7 @@ function StatsPage() {
             <SecHead title="Site" sub="Every public page view, added together." />
             <ul className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <li className="border border-rule p-4">
-                <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
+                <p className="text-sm tracking-[0.14em] text-muted uppercase">
                   All time
                 </p>
                 <p className="mt-1 font-display text-3xl font-semibold">
@@ -52,7 +52,7 @@ function StatsPage() {
                 </p>
               </li>
               <li className="border border-rule p-4">
-                <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
+                <p className="text-sm tracking-[0.14em] text-muted uppercase">
                   Last 7 days
                 </p>
                 <p className="mt-1 font-display text-3xl font-semibold">
@@ -60,7 +60,7 @@ function StatsPage() {
                 </p>
               </li>
               <li className="border border-rule p-4">
-                <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
+                <p className="text-sm tracking-[0.14em] text-muted uppercase">
                   Last 30 days
                 </p>
                 <p className="mt-1 font-display text-3xl font-semibold">

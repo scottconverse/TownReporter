@@ -39,6 +39,7 @@ B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app u
 - [x] #6 — retired the 17 historical duplicate leads on prod (17 → 0, reversible), 2026-09-05.
 - [x] 0.6.18 — bug-fix release (A recovering state, B promote guard, #3 monitors scoping, #4 PRINTED chip, #5 non-profit + 0040, #7 reddit listings via .rss). LIVE 2026-09-05, CI 14/14, staged on real data, promote checks OK, 26 stories intact.
 - [x] 0.6.19 — LIVE 2026-09-05 (tag v0.6.19 at 25bc882): claims-of-absence gate + city-site pulls + site notices (f80a5ce); local model discovery + per-model picker + thinking off + migration 0041 (2e4b8b3); black-on-white dark desk + theme-aware Notice + single model error (6158100); Check r/longmont progress/results/File-as-tip (9ad5369). Staged on real data, incident replay proved the gate, CI 14/14, promote checks OK.
+- [x] Five desk rule defects (14px floor, Large scales headlines and reading panes, one button family + invert/--muted fixes, Kill styled as destructive, Held/aside chips) — auditor punch list 2026-09-05.
 
 ## Known caveats (honest state)
 - Dark Desk is proven on ONE real staged topic (receipt); the Reddit leg was the weak spot (TR-001, now fixed pending release). Not a certification of every source type.

@@ -235,3 +235,88 @@ test("a lead with no dup shows no printed chip and no matched-story line", () =>
   assert.doesNotMatch(html, /chip dup/);
   assert.doesNotMatch(html, /matches:/);
 });
+
+// Owner audit, 2026-09-05: "held", "aside", "closed" and "exhausted" used to
+// collapse onto the same "set aside" label (or, for "held", no dedicated
+// label at all) -- an editor could not tell a lead that is coming back
+// (held) from one that is done (aside/closed/exhausted) without opening it.
+// This exercises the REAL Chip() component from desk-chrome.tsx (the
+// LeadRowView tests above stub Chip away, since they're testing the row
+// around it), so it needs its own module stubs for desk-chrome.tsx's other
+// imports -- none of which Chip touches, but the module can't load without
+// them resolving to something.
+const reactRouterStubForChrome = inlineModule(`
+  import { createElement } from "react";
+  export function Link({ to, children, ...rest }) {
+    return createElement("a", { href: String(to ?? "#"), ...rest }, children);
+  }
+  export function useMatchRoute() { return () => false; }
+  export function useNavigate() { return () => {}; }
+  export function useRouterState() { return "/"; }
+`);
+const reactQueryStub = inlineModule(`
+  export function useMutation() { return { mutate() {}, isPending: false, isError: false }; }
+  export function useQueryClient() { return { invalidateQueries: async () => {} }; }
+`);
+const paperContextStubForChrome = inlineModule(`
+  export function usePaper() { return { name: "The Paper", city: "Longmont" }; }
+  export function usePaperDateFormatters() { return { formatDate: () => "" }; }
+`);
+const authGatesStub = inlineModule(`
+  import { createElement } from "react";
+  export function UserButton() { return createElement("span"); }
+`);
+const authClientStub = inlineModule(`
+  export async function signOut() {}
+`);
+const currentUserStub = inlineModule(`
+  export function useCurrentUserState() { return { user: null, isPending: false }; }
+`);
+const claimStub = inlineModule(`
+  export async function leaveEditor() { return { ok: true }; }
+`);
+const deskCopyStub = inlineModule(`
+  export function createEditorCopy() { return {}; }
+`);
+
+const { Chip } = await import(
+  moduleUrl(
+    await readFile(new URL("../src/components/desk-chrome.tsx", import.meta.url), "utf8"),
+    "desk-chrome.tsx",
+    {
+      "@tanstack/react-router": reactRouterStubForChrome,
+      "@tanstack/react-query": reactQueryStub,
+      "@/lib/paper-context": paperContextStubForChrome,
+      "@/lib/auth/gates": authGatesStub,
+      "@/lib/auth/client": authClientStub,
+      "@/lib/auth/use-current-user": currentUserStub,
+      "@/lib/news/claim": claimStub,
+      "@/lib/news/desk-copy": deskCopyStub,
+      react: import.meta.resolve("react"),
+      "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+    },
+  )
+);
+
+test("a held lead renders the HELD chip with the st-held class", () => {
+  const html = renderToStaticMarkup(createElement(Chip, { s: "held" }));
+  assert.match(html, /class="chip st-held"/);
+  // The visible word comes from the .chip CSS uppercase transform, not the
+  // markup itself, so the rendered text is lowercase "held" -- assert that
+  // rather than "HELD", and rely on the CSS text-transform (unit-tested by
+  // styles.css's own uppercase declaration on .chip) for the capitalization.
+  assert.match(html, />held</);
+});
+
+test("set-aside, closed, and exhausted leads each render their own labelled, styled chip -- none falls through to the unstyled default", () => {
+  const cases = [
+    { s: "aside", cls: "st-aside", label: "set aside" },
+    { s: "closed", cls: "st-closed", label: "closed" },
+    { s: "exhausted", cls: "st-exhausted", label: "exhausted" },
+  ];
+  for (const { s, cls, label } of cases) {
+    const html = renderToStaticMarkup(createElement(Chip, { s }));
+    assert.match(html, new RegExp(`class="chip ${cls}"`), `expected ${s} to render class chip ${cls}`);
+    assert.match(html, new RegExp(`>${label}<`), `expected ${s} to render the label "${label}"`);
+  }
+});

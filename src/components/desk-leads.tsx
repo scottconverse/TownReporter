@@ -105,7 +105,7 @@ export function LeadRowView({
               confirming ? (
                 <>
                   <InkButton
-                    tone="ghost"
+                    tone="danger"
                     small
                     onClick={() => {
                       setConfirming(false);

@@ -131,6 +131,7 @@ const PAIRS = [
   { fg: "adeep", bg: "bg", label: ".chip.st-drafted / .kick / .inline-link / .np-link, on page bg", kind: "text", size: "normal" },
   { fg: "a", bg: "bg", label: "a:hover / .nav-item.on underline color, on page bg", kind: "ui", size: "large" },
   { fg: "bg", bg: "fg", label: "inverted solid buttons/chips (.btn.solid, .nav-dark, .seg-opt.on, .chip.st-published, .filter.on)", kind: "text", size: "normal" },
+  { fg: "bg", bg: "warn", label: ".btn.danger.solid (Yes, delete / Yes, do it) -- bg text on warn fill", kind: "text", size: "normal" },
   { fg: "line", bg: "bg", label: "hairline borders (.rule1, .chip border, .sechead) -- decorative dividers, not asserted", kind: "decorative", size: "large" },
   { fg: "warn", bg: "bg2", label: ".notice-err text on the notice's bg2 panel", kind: "text", size: "normal" },
   { fg: "adeep", bg: "bg2", label: ".notice-warn text on the notice's bg2 panel", kind: "text", size: "normal" },

@@ -80,7 +80,7 @@ function StateDot({ state }: { state: HealthState }) {
   return (
     <span className="inline-flex items-center gap-2">
       <span className={`inline-block h-2.5 w-2.5 rounded-full ${DOT[state]}`} aria-hidden />
-      <span className="text-[11px] tracking-[0.14em] text-muted uppercase">{WORD[state]}</span>
+      <span className="text-sm tracking-[0.14em] text-muted uppercase">{WORD[state]}</span>
     </span>
   );
 }
@@ -182,7 +182,7 @@ function OpsPage() {
           <ul className="mt-4 divide-y divide-rule border-y border-rule">
             {checks.map((c) => (
               <li key={c.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-3">
-                <span className="w-40 shrink-0 text-[11px] tracking-[0.14em] text-muted uppercase">
+                <span className="w-40 shrink-0 text-sm tracking-[0.14em] text-muted uppercase">
                   {c.label}
                 </span>
                 <span className="min-w-0 flex-1 break-words">{c.value}</span>
@@ -211,7 +211,7 @@ function OpsPage() {
                   <h3 className="font-display text-lg font-semibold">
                     {a.label}
                     {a.interrupts ? (
-                      <span className="ml-2 text-[11px] tracking-[0.14em] text-rust uppercase">
+                      <span className="ml-2 text-sm tracking-[0.14em] text-rust uppercase">
                         interrupts
                       </span>
                     ) : null}
@@ -265,7 +265,7 @@ function OpsPage() {
         <div className="mt-4 space-y-6">
           {(health.data?.logs ?? []).map((l) => (
             <div key={l.path}>
-              <h3 className="text-[11px] tracking-[0.14em] text-muted uppercase">
+              <h3 className="text-sm tracking-[0.14em] text-muted uppercase">
                 {l.name}
               </h3>
               {l.error ? (
@@ -273,7 +273,7 @@ function OpsPage() {
               ) : l.lines.length === 0 ? (
                 <p className="mt-1 text-sm text-muted">Nothing logged.</p>
               ) : (
-                <pre className="mt-1 max-h-56 overflow-auto border border-[var(--line)] bg-[var(--bg2)] p-3 text-xs whitespace-pre-wrap text-[var(--fg)]">
+                <pre className="mt-1 max-h-56 overflow-auto border border-[var(--line)] bg-[var(--bg2)] p-3 text-sm whitespace-pre-wrap text-[var(--fg)]">
                   {l.lines.join("\n")}
                 </pre>
               )}
@@ -661,12 +661,12 @@ function ProviderRow({
       </div>
 
       <p className="mt-1">
-        <span className="text-[11px] tracking-[0.14em] text-muted uppercase">
+        <span className="text-sm tracking-[0.14em] text-muted uppercase">
           {status.installed ? "Installed" : "Not installed"}
         </span>{" "}
         <span>{line}</span>
       </p>
-      {status.path ? <p className="mt-1 text-xs break-all text-muted">{status.path}</p> : null}
+      {status.path ? <p className="mt-1 text-sm break-all text-muted">{status.path}</p> : null}
       {status.detail && !open ? (
         <p className="mt-1 text-sm text-ink-2">{status.detail}</p>
       ) : null}
@@ -694,7 +694,7 @@ function ProviderRow({
           )}
           {login?.code ? (
             <div className="mt-3">
-              <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
+              <p className="text-sm tracking-[0.14em] text-muted uppercase">
                 Enter this one-time code
               </p>
               <p className="mt-1 font-mono text-2xl tracking-[0.2em]" data-signin-code>
@@ -816,7 +816,7 @@ function RecentlyDeleted() {
             <li key={r.id} className="py-3">
               <div className="flex flex-wrap items-baseline justify-between gap-3">
                 <span className="min-w-0 flex-1">
-                  <span className="text-[11px] tracking-[0.14em] text-rust uppercase">
+                  <span className="text-sm tracking-[0.14em] text-rust uppercase">
                     {r.kind === "article" ? "Was on the paper" : r.kind === "lead" ? "Lead" : "Editorial"}
                   </span>{" "}
                   <span className="font-display text-lg">{r.label}</span>
@@ -1023,7 +1023,7 @@ function InviteAnEditor() {
         {err ? <p className="text-sm text-rust">{err}</p> : null}
         {link ? (
           <div className="border border-rule bg-paper-2 p-3">
-            <p className="text-xs tracking-[0.14em] text-muted uppercase">
+            <p className="text-sm tracking-[0.14em] text-muted uppercase">
               Shown once — copy it now
             </p>
             <p className="mt-1 text-sm break-all">{link}</p>
@@ -1038,7 +1038,7 @@ function InviteAnEditor() {
             </InkButton>
             {message ? (
               <div className="mt-3 border-t border-rule pt-3">
-                <p className="text-xs tracking-[0.14em] text-muted uppercase">
+                <p className="text-sm tracking-[0.14em] text-muted uppercase">
                   Ready-to-send message
                 </p>
                 <p className="mt-1 whitespace-pre-wrap text-sm">{message}</p>
