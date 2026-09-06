@@ -51,6 +51,22 @@ The design audit verdict from 2026-09-05 (quoted): "Fable is better for this pap
 
 0.6.22 (tag v0.6.22 at 2508cdc) shipped direction A stage 2, aligning the story page to the prototype: 380px lead column with a right sidebar (read story/drafting pane), a second column layout at viewports ≥1024px with single-column layout below, wrapped source URLs, and headline scaling with Large text. A plain local model row was added as a second display row. The release was staged on real data (26 stories intact), promoted successfully, and the served version now reads 0.6.22. Direction A is now complete for the two Command Center screens that the editor uses most; other tabs (Sources, Scan, Published, Opinion, Server, Stats) remain unchanged by design.
 
+### 2026-09-06 — 0.6.23 live; Dark Desk doctrine restored
+
+**VERIFIED by the local session 2026-09-06.**
+
+0.6.23 (tag v0.6.23 at b52a3ae) shipped the owner's restored Dark Desk doctrine with full implementation: two-stage verification (Black Desk → Dark Signal), four mandatory gates (newsworthiness, claims-of-absence, city-data validation, self-referential), adversarial search postures (three modes: standard, paranoid, confirmation-seeking), and search minimums. The absence gate now searches a four-rung ladder (official domains, city-wide, document-word synonyms, local press) before asking the editor to confirm when all rungs return empty. Reddit community-life search was extended to eight rotating groups (govt/infra/business/schools/housing/health-safety/community/arts) with change-signal scoring (closing/opening, laid off, sold, etc.). Scanned PDF documents now extract embedded page images and ask the picked model to transcribe them, with honest OCR-needs reasons shown in words on Dark Desk's "What to read" list and the story page's "Documents opened" (vision capability is labeled per-model). llama.cpp discovery was added alongside LM Studio and Ollama with zero-config auto-detection on 127.0.0.1:8080. Opinion desk and Paper setup each gained a Copy button and County field (which had a read-only column that was never written until now). The last newsroom-1 default was fixed on both read and write sides of capture_events (migration 0043).
+
+**Dark Desk doctrine source:** the guiding prompts and doctrine originate from the owner's own repos: `civic-scanner`, `civic-newsroom`, `civic-transparency-toolkit`, and `CivicNewspaper`. Implementation gate sources: `src/lib/news/dark-gates.ts` (gate orchestration), `src/lib/news/dark-verify.ts` (verification logic and search ladder), `docs/dark-desk.md` (operator documentation).
+
+**Absence gate ladder:** (1) official domains (registered city, library, school sites); (2) city-wide search (all pages at the registered domain root); (3) document-word synonyms (parsed article content + AI-generated alternatives + local context); (4) local press (other newsroom sites, community blogs, social media).
+
+**Legal removal policy (owner decision, 2026-09-06):** when a published story is removed by legal order, the removal record keeps a SEALED, owner-only copy of the removed text that auto-deletes after 12 months. When the reason is an explicit court order to destroy, keep nothing.
+
+**Next verification step:** five live Dark Desk runs on the LIVE paper. Owner topics: (1) did a second Democrat in the 2025 mayoral race split the vote against Shakeel Dalal; (2) what is the city not telling us about the 2027 budget. Report per run: stage reached, gates passed/missed, the searches run with tiers and outcomes, newsworthiness verdicts, what reached the queue.
+
+**Verify/CI state:** CI 14/14 green. Staged on real data (30 published stories intact). Promote checks OK. Served version reads 0.6.23. Backup townreporter_2026-09-06_1435.sql taken on promote.
+
 ---
 
 ## 0. Your role & how to work
