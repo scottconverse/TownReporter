@@ -607,14 +607,14 @@
 .desk-ltr .mast-ver {font-size:calc(0.875rem * var(--ts));letter-spacing:.08em;color:var(--mut)}
 .desk-ltr .rule2 {margin-top:10px;height:5px;border-top:3px solid var(--fg);border-bottom:1px solid var(--fg)}
 .desk-ltr .rule1 {border-bottom:1px solid var(--fg)}
-.desk-ltr .deskname {display:flex;align-items:center;gap:2px;padding:2px 0}
+.desk-ltr .deskname {display:flex;align-items:center;gap:2px;padding:2px 0;flex-wrap:wrap}
 /* Mobile-only disclosure for the desk nav (UX-001); invisible from 640px up. */
 .desk-ltr .nav-toggle {display:none;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;padding:8px 14px;color:var(--fg2);background:none;border:none;width:100%;text-align:center;cursor:pointer}
 .desk-ltr .nav-item {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;padding:8px 14px;color:var(--fg2);border-bottom:2px solid transparent}
 .desk-ltr .nav-item:hover {color:var(--fg)}
 .desk-ltr .nav-item.on {color:var(--adeep);border-bottom-color:var(--a)}
 .desk-ltr .nav-sep {flex:1}
-.desk-ltr .nav-dark {background:var(--fg);color:var(--bg);margin:4px 0;padding:6px 14px;border-bottom:none}
+.desk-ltr .nav-dark {background:var(--fg);color:var(--bg);margin:4px 0;padding:6px 14px;border-bottom:none;white-space:nowrap}
 .desk-ltr .nav-dark:hover {color:var(--bg);opacity:.88}
 .desk-ltr .nav-dark.on {color:var(--bg);box-shadow:inset 0 -3px 0 var(--a)}
 .desk-ltr .deskmain {max-width:1420px;margin:0 auto;padding:20px 28px 90px}
@@ -781,6 +781,15 @@
 */
 .desk-ltr .row-acts {display:inline-flex;gap:8px;flex-wrap:wrap;margin-left:8px}
 .desk-ltr .row-acts.static {margin-left:0}
+/*
+  The queue row's actions row keeps the row-acts class too (CI's desk-flows
+  walk, scripts/desk-flows.walk.mjs, still selects '.row-acts' under a
+  lead-row) -- this combined-class rule wins over the plain .row-acts
+  block-level defaults above so the airier-row spacing (flex-wrap, 16px gap,
+  10px margin-top, no inline margin-left) still applies.
+*/
+.desk-ltr .lead-actions.row-acts {display:flex;gap:16px;margin-left:0;margin-top:10px}
+
 /* A delete says what it costs, in the row, before it happens. */
 .desk-ltr .del-warn {display:block;font-size:calc(0.875rem * var(--ts));color:var(--adeep);margin-top:6px;max-width:60ch}
 @media (max-width:640px) {
@@ -820,6 +829,20 @@
 .desk-ltr .text-warn {color:var(--warn);font-weight:600}
 .desk-ltr .followup-reply-form {margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .desk-ltr .mem-e {font-family:var(--fd);font-weight:600}
+/*
+  Beat memory (Direction A stage 1): each entity is one line -- title only,
+  the long last-angle description moves to a title= tooltip instead of
+  printing as its own paragraph (was a wall of text in a 360px rail).
+*/
+.desk-ltr .wire-mem-row {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help}
+/*
+  A proposed source's title can be a long unbroken run inside a flex-ish
+  paragraph next to its Accept/Drop buttons; truncate the title itself
+  (full text in the title= tooltip) so the row never forces the rail wider
+  than its column, and Accept/Drop always stay visible.
+*/
+.desk-ltr .wire-proposed span {display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+
 .desk-ltr .pipeline {display:flex;align-items:stretch;gap:10px;margin-top:18px;flex-wrap:wrap}
 .desk-ltr .pipe-cell {flex:1;min-width:150px;border:1px solid var(--line);padding:10px 14px;text-align:left;display:flex;flex-direction:column;gap:2px;transition:border-color .15s}
 .desk-ltr .pipe-cell:hover {border-color:var(--fg)}
@@ -938,6 +961,14 @@
   .desk-ltr .story-grid {grid-template-columns:1fr;gap:22px}
 }
 .desk-ltr .work-bar {display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.desk-ltr .composer {min-width:0}
+/*
+  One row below the textarea: the model picker on the left, Write + the
+  error notice on the right -- was three stacked full-width blocks, which
+  left most of a 1440px row empty since .model-picker caps at 420px.
+*/
+.desk-ltr .composer-row {display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.desk-ltr .composer-row .model-picker {margin:0}
 .desk-ltr .model-picker {display:grid;grid-template-columns:auto minmax(190px,1fr);align-items:center;gap:4px 9px;max-width:420px;margin:12px 0}
 .desk-ltr .model-picker.compact {margin:0;grid-template-columns:auto minmax(170px,230px)}
 .desk-ltr .model-picker-label {font-size:calc(0.875rem * var(--ts));letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
@@ -1136,7 +1167,8 @@
   .desk-ltr .nav-dark { margin-left: auto; }
   .desk-ltr .deskname.nav-open .nav-dark { margin: 4px 0; }
   .desk-ltr .mast-tools { flex-wrap: wrap; gap: 10px; }
-  .desk-ltr .btn.small { min-height: 36px; padding: 6px 12px; }
+  .desk-ltr .btn.small { min-height: 40px; padding: 6px 12px; }
+  .desk-ltr .seg-opt { min-height: 40px; display: inline-flex; align-items: center; }
   .desk-ltr .reader-index { max-height: 220px; }
   .desk-ltr .mast-ver { display: none; }
   .desk-ltr .needs { flex-direction: column; align-items: flex-start; gap: 6px; }

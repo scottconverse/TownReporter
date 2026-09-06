@@ -69,7 +69,7 @@ export function LeadRowView({
         <p className="meta">
           {lead.topic} · {formatAge(lead.created_at)} · {leadOrigin(lead)}
         </p>
-        <div className="lead-actions">
+        <div className="lead-actions row-acts">
           <Link
             to="/desk/story/$leadId"
             params={{ leadId: String(lead.id) }}

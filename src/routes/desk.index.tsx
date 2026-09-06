@@ -289,18 +289,19 @@ function DeskHome() {
         </div>
       ) : null}
 
-      <section className="mt-8">
+      <section className="mt-8 composer">
         <SecHead
           title="Write a story"
           sub="Paste a link, a chunk of text, or just the idea. The desk files it as a lead and drafts it with the model you pick. You edit, then publish."
         />
-        <div className="mt-4 max-w-2xl space-y-3">
+        <div className="mt-4 space-y-3">
           <label className="block">
             <span className="text-sm tracking-[0.14em] text-muted uppercase">
               Link, text, or idea
             </span>
             <textarea
               className={areaClass + " mt-1 w-full"}
+              style={{ minHeight: 88, width: "100%" }}
               rows={4}
               value={storyText}
               disabled={writeStory.isPending}
@@ -316,31 +317,41 @@ function DeskHome() {
               }
             />
           </label>
-          <ModelPicker
-            scope="story"
-            value={storyModel}
-            onChange={setStoryModel}
-            disabled={writeStory.isPending}
-          />
-          <div className="flex items-center gap-3">
-            <InkButton
-              tone="solid"
-              onClick={() => writeStory.mutate()}
-              disabled={writeStory.isPending || storyText.trim().length < 8}
-            >
-              {writeStory.isPending ? "Writing…" : "Write"}
-            </InkButton>
-            <span
-              role="alert"
-              aria-live="assertive"
-              aria-atomic="true"
-              className="text-sm text-rust"
-            >
-              {storyNotice?.kind === "error" ? storyNotice.text : ""}
-              {storyNotice?.kind === "error" && looksLikeProviderAuthFailure(storyNotice.authDetail) ? (
-                <ProviderSignInButton detail={storyNotice.authDetail} />
-              ) : null}
-            </span>
+          {/*
+            One row: the picker (label + select inline, its own help text
+            under it) on the left, Write + the error notice on the right.
+            Was a stack of three full-width blocks -- the picker's fixed
+            max-width (420px) left most of the row empty at 1440 while
+            reading as narrower than it is; putting Write beside it uses
+            that space instead of below it.
+          */}
+          <div className="composer-row">
+            <ModelPicker
+              scope="story"
+              value={storyModel}
+              onChange={setStoryModel}
+              disabled={writeStory.isPending}
+            />
+            <div className="flex items-center gap-3">
+              <InkButton
+                tone="solid"
+                onClick={() => writeStory.mutate()}
+                disabled={writeStory.isPending || storyText.trim().length < 8}
+              >
+                {writeStory.isPending ? "Writing…" : "Write"}
+              </InkButton>
+              <span
+                role="alert"
+                aria-live="assertive"
+                aria-atomic="true"
+                className="text-sm text-rust"
+              >
+                {storyNotice?.kind === "error" ? storyNotice.text : ""}
+                {storyNotice?.kind === "error" && looksLikeProviderAuthFailure(storyNotice.authDetail) ? (
+                  <ProviderSignInButton detail={storyNotice.authDetail} />
+                ) : null}
+              </span>
+            </div>
           </div>
         </div>
       </section>
@@ -509,10 +520,9 @@ function DeskHome() {
                   All follow-ups
                 </Link>
               }
+              sub={(followUps.data ?? []).length === 0 ? "No one owes you an answer right now." : undefined}
             />
-            {(followUps.data ?? []).length === 0 ? (
-              <p className="wire-sum">No one owes you an answer right now.</p>
-            ) : (
+            {(followUps.data ?? []).length === 0 ? null : (
               (followUps.data ?? []).slice(0, 3).map((f) => (
                 <FollowUpItem
                   key={f.id}
@@ -552,7 +562,19 @@ function DeskHome() {
                     </>
                   )}
                 </p>
-                {scanZeroWhy(last) ? <p className="wire-sum">{scanZeroWhy(last)}</p> : null}
+                {/*
+                  The scan note (PrimeGov summary / why-zero explanation) can
+                  run to several sentences -- a rail this narrow cannot carry
+                  it inline without becoming a wall of text, so it reads
+                  collapsed by default. The one-line stat above is always
+                  visible; nothing is lost, only tucked behind a click.
+                */}
+                {scanZeroWhy(last) ? (
+                  <details className="wire-flaky">
+                    <summary>Read the scan note</summary>
+                    <p className="wire-sum">{scanZeroWhy(last)}</p>
+                  </details>
+                ) : null}
                 {last.error && last.leads_created > 0 ? (
                   <p className="wire-warn">{editorScanError(last.error)}</p>
                 ) : null}
@@ -563,9 +585,12 @@ function DeskHome() {
             <div className="wire-block">
               <p className="wire-line">
                 <b>Source health</b> · {accepted.length} on watch
-                {officialFail.length + flakyFail.length
-                  ? ` · ${officialFail.length + flakyFail.length} failing`
-                  : ""}
+                {officialFail.length ? ` · ${officialFail.length} failing` : ""}
+                {flakyFail.length ? ` · ${flakyFail.length} flaky` : ""}
+                {" · "}
+                <Link to="/desk/sources" className="np-link">
+                  Sources
+                </Link>
               </p>
               {officialFail.map((s) => (
                 <p key={s.id} className="wire-warn">
@@ -582,19 +607,34 @@ function DeskHome() {
                   ))}
                 </details>
               ) : null}
-              {proposed.map((s) => (
-                <p key={s.id} className="wire-row">
-                  Proposed: {s.title}{" "}
-                  <InkButton tone="quiet" small onClick={() => srcStatus.mutate({ id: s.id, status: "accepted" })}>
-                    Accept
-                  </InkButton>
-                  <InkButton tone="quiet" small onClick={() => srcStatus.mutate({ id: s.id, status: "rejected" })}>
-                    Drop
-                  </InkButton>
-                </p>
-              ))}
-              {!officialFail.length && !flakyFail.length && !proposed.length ? <p className="meta">All quiet.</p> : null}
+              {!officialFail.length && !flakyFail.length ? <p className="meta">All quiet.</p> : null}
             </div>
+            {proposed.length ? (
+              <div className="wire-block">
+                <p className="wire-line">
+                  <b>Proposed sources</b> · {proposed.length}
+                </p>
+                {proposed.slice(0, 5).map((s) => (
+                  <p key={s.id} className="wire-row wire-proposed">
+                    <span title={s.title}>{s.title}</span>{" "}
+                    <InkButton tone="quiet" small onClick={() => srcStatus.mutate({ id: s.id, status: "accepted" })}>
+                      Accept
+                    </InkButton>
+                    <InkButton tone="quiet" small onClick={() => srcStatus.mutate({ id: s.id, status: "rejected" })}>
+                      Drop
+                    </InkButton>
+                  </p>
+                ))}
+                {proposed.length > 5 ? (
+                  <p className="wire-sum">
+                    {proposed.length - 5} more proposed ·{" "}
+                    <Link to="/desk/sources" className="inline-link">
+                      Review them in Sources
+                    </Link>
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             <div className="wire-block">
               <p className="wire-line">
                 <b>On the paper</b>
@@ -617,8 +657,8 @@ function DeskHome() {
                 <b>Beat memory</b> · what we already covered
               </p>
               {(memory.data ?? []).slice(0, 4).map((m) => (
-                <p key={m.id} className="wire-row">
-                  <b className="mem-e">{m.entity}</b> <span className="meta-inline">{m.last_angle}</span>
+                <p key={m.id} className="wire-row wire-mem-row" title={m.last_angle}>
+                  <b className="mem-e">{m.entity}</b>
                 </p>
               ))}
               {/* Every sibling widget explains its empty state; this one rendered
