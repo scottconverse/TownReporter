@@ -3,9 +3,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DeskShell,
+  Field,
   InkButton,
   LeaveEditorControl,
   SecHead,
+  announceToDesk,
+  inputClass,
 } from "@/components/desk-chrome";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { ListSkeleton } from "@/components/states";
@@ -17,6 +20,7 @@ import { inviteEditor, myDesk } from "@/lib/news/claim";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { PaperSetupForm } from "@/components/paper-setup-form";
 import { getPaperConfigForEditor } from "@/lib/news/paper-settings";
+import { getDarkCounty, saveDarkCounty } from "@/lib/news/dark";
 import {
   cancelProviderLogin,
   getProviderStatuses,
@@ -914,7 +918,79 @@ function PaperSetup() {
         visit.
       </p>
       {current.isPending ? null : <PaperSetupForm initial={current.data} submitLabel="Save" />}
+      {me.data?.role === "owner" ? <DarkDeskCounty /> : null}
     </section>
+  );
+}
+
+/**
+ * County for the Dark Desk's searches (0.6.22 owner request).
+ *
+ * A separate small field with its own save, not folded into the big Paper
+ * setup form above: it writes `dark_settings.county`, not `paper_settings`
+ * -- the same table and the same newsroom-scoped upsert the dig/nerve/scope
+ * dials already use (saveDarkDials in src/lib/news/dark.ts), because
+ * `readDarkPlace` (the Dark Desk's own location-scoping read) already reads
+ * county from there and nothing wrote it. Kept in Paper setup rather than on
+ * the Dark Desk page itself because it is paper identity -- where the paper
+ * *is* -- not a run dial like dig/nerve/scope.
+ */
+function DarkDeskCounty() {
+  const county = useQuery({ queryKey: ["dark-county"], queryFn: () => getDarkCounty() });
+  const [value, setValue] = useState("");
+  const [touched, setTouched] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!touched && county.data) setValue(county.data.county);
+  }, [county.data, touched]);
+
+  const save = useMutation({
+    mutationFn: (input: { county: string }) => saveDarkCounty({ data: input }),
+    onSuccess: (res) => {
+      setErr(null);
+      setSavedAt(Date.now());
+      setTouched(false);
+      announceToDesk(res.county ? "County saved." : "County cleared. Dark Desk searches will use the city only.");
+    },
+    onError: (e) => {
+      const msg = e instanceof Error ? e.message : "That did not save.";
+      setErr(msg);
+      announceToDesk("County did not save.");
+    },
+  });
+
+  return (
+    <div className="mt-6 max-w-md">
+      <Field
+        label="County"
+        hint="Used when the Dark Desk searches — it looks for the city and the county. Blank means it searches by city only."
+      >
+        <input
+          className={inputClass + " mt-1 w-full"}
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setTouched(true);
+            setSavedAt(null);
+          }}
+          placeholder="Boulder County"
+        />
+      </Field>
+      <div className="mt-2 flex items-center gap-3">
+        <InkButton
+          tone="quiet"
+          small
+          disabled={save.isPending || county.isPending}
+          onClick={() => save.mutate({ county: value })}
+        >
+          {save.isPending ? "Saving…" : "Save county"}
+        </InkButton>
+        {savedAt ? <p className="text-sm text-ink-2">Saved.</p> : null}
+        {err ? <p className="text-sm text-rust">{err}</p> : null}
+      </div>
+    </div>
   );
 }
 

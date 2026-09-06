@@ -10,6 +10,7 @@ import {
   inputClass,
 } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
+import { CopyButton } from "@/components/copy-button";
 import {
   deleteEditorial,
   discardEditorialRequest,
@@ -593,9 +594,12 @@ function OpinionPage() {
               </pre>
               {piece.data.fact_sheet ? (
                 <div>
-                  <p className="text-sm tracking-[0.14em] text-muted uppercase">
-                    Editor's fact sheet — not printed
-                  </p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm tracking-[0.14em] text-muted uppercase">
+                      Editor's fact sheet — not printed
+                    </p>
+                    <CopyButton text={piece.data.fact_sheet} announceText="Fact sheet copied." />
+                  </div>
                   <pre className="mt-1 max-h-72 overflow-auto border border-rule bg-paper-2 p-3 text-sm whitespace-pre-wrap">
                     {piece.data.fact_sheet}
                   </pre>
@@ -603,9 +607,12 @@ function OpinionPage() {
               ) : null}
               {piece.data.image_prompt ? (
                 <div>
-                  <p className="text-sm tracking-[0.14em] text-muted uppercase">
-                    Image prompt — not printed
-                  </p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm tracking-[0.14em] text-muted uppercase">
+                      Image prompt — not printed
+                    </p>
+                    <CopyButton text={piece.data.image_prompt} announceText="Image prompt copied." />
+                  </div>
                   <pre className="mt-1 max-h-56 overflow-auto border border-rule bg-paper-2 p-3 text-sm whitespace-pre-wrap">
                     {piece.data.image_prompt}
                   </pre>

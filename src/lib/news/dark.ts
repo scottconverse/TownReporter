@@ -2049,6 +2049,14 @@ export const getDarkDials = createServerFn({ method: "GET" })
     };
   });
 
+export const getDarkCounty = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    await ensureDarkSchema();
+    const { place } = await readDarkPlace(owned(context));
+    return { county: place.county ?? "" };
+  });
+
 export const saveDarkDials = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: { dig: number; nerve: number; scope: string }) => input)
@@ -2072,6 +2080,45 @@ export const saveDarkDials = createServerFn({ method: "POST" })
       description: describeDials(d),
       minutes: estimateMinutes(d),
     };
+  });
+
+/**
+ * The county for this newsroom's Dark Desk searches, as stored on
+ * `dark_settings` -- the same table and the same newsroom-scoped upsert as
+ * the dig/nerve/scope dials above. Extracted as a plain function (the
+ * `fileRedditTipFor` pattern this file already uses) so it is testable
+ * against PGLite without a request context; the `createServerFn` wrapper
+ * below is the thin layer Paper setup's county field actually calls.
+ *
+ * Blank clears the column back to null rather than storing an empty
+ * string, so `readDarkPlace` (which does `.trim() || null`) and any other
+ * reader sees one unambiguous "not set" value.
+ */
+export async function saveDarkCountyFor(newsroomId: number, county: string): Promise<string> {
+  const sql = await getSql();
+  const trimmed = county.trim();
+  await sql`
+    insert into dark_settings (newsroom_id, county, updated_at)
+    values (${newsroomId}, ${trimmed || null}, now())
+    on conflict (newsroom_id) do update
+      set county = excluded.county, updated_at = now()
+  `;
+  return trimmed;
+}
+
+export const saveDarkCounty = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { county: string }) => input)
+  .handler(async ({ context, data }) => {
+    await ensureDarkSchema();
+    const county = await saveDarkCountyFor(owned(context), data.county);
+    await audit(
+      context.userId,
+      "dark-county",
+      county ? `county set to ${county}` : "county cleared (city-only scoping)",
+      owned(context),
+    );
+    return { ok: true as const, county };
   });
 
 /**
