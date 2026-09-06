@@ -2,21 +2,26 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
-import { Busy, InkButton, SecHead, areaClass } from "@/components/desk-chrome";
+import { Busy, InkButton, SecHead, areaClass, announceToDesk } from "@/components/desk-chrome";
 import { LeadRowView } from "@/components/desk-leads";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import {
+  dropFollowUp,
+  listFollowUps,
   listLeads,
   listMemory,
   listPublishedDesk,
   listScans,
   listSources,
+  nudgeFollowUp,
+  recordFollowUpReply,
   runScan,
   setLeadStatus,
   setSourceStatus,
   writeStoryFromInput,
 } from "@/lib/news/desk";
+import { FollowUpItem } from "@/components/follow-up-item";
 import { listInvestigations, listWorthALook, openDarkInvestigation } from "@/lib/news/dark";
 import {
   editorKindLabel,
@@ -82,6 +87,32 @@ function DeskHome() {
   const worth = useQuery({ queryKey: ["worth-a-look"], queryFn: () => listWorthALook() });
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
   const memory = useQuery({ queryKey: ["memory"], queryFn: () => listMemory() });
+  const followUps = useQuery({
+    queryKey: ["follow-ups", "open"],
+    queryFn: () => listFollowUps({ data: { status: "open" } }),
+  });
+  const replyFollowUp = useMutation({
+    mutationFn: (input: { id: number; replyText: string; repliedOn: string }) =>
+      recordFollowUpReply({ data: input }),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+      announceToDesk(res?.ok ? "Reply recorded." : (res && "error" in res && res.error) || "Could not save that reply.");
+    },
+  });
+  const nudgeFollow = useMutation({
+    mutationFn: (id: number) => nudgeFollowUp({ data: { id } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+      announceToDesk("Nudge stamped.");
+    },
+  });
+  const dropFollow = useMutation({
+    mutationFn: (id: number) => dropFollowUp({ data: { id } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+      announceToDesk("Follow-up dropped.");
+    },
+  });
 
   const setStatus = useMutation({
     mutationFn: (input: { id: number; status: "held" | "killed" | "new" }) =>
@@ -330,8 +361,8 @@ function DeskHome() {
       ) : booting ? (
         <ListSkeleton rows={6} />
       ) : (
-        <div className="front">
-          <section>
+        <div className="desk-cc-grid">
+          <section className="gc-queue">
             <SecHead
               title="The queue"
               count={queue.length}
@@ -396,7 +427,7 @@ function DeskHome() {
             )}
           </section>
 
-          <section className="nightpanel">
+          <section className="nightpanel gc-darkdesk">
             <SecHead
               title="Dark Desk"
               aside={
@@ -470,7 +501,36 @@ function DeskHome() {
             )}
           </section>
 
-          <section className="wirecol">
+          <section className="gc-followups">
+            <SecHead
+              title={`Follow-ups · ${followUps.data?.length ?? 0}`}
+              aside={
+                <Link to="/desk/follow-ups" className="np-link">
+                  All follow-ups
+                </Link>
+              }
+            />
+            {(followUps.data ?? []).length === 0 ? (
+              <p className="wire-sum">No one owes you an answer right now.</p>
+            ) : (
+              (followUps.data ?? []).slice(0, 3).map((f) => (
+                <FollowUpItem
+                  key={f.id}
+                  item={f}
+                  onReply={(replyText, repliedOn) =>
+                    replyFollowUp.mutate({ id: f.id, replyText, repliedOn })
+                  }
+                  onNudge={() => nudgeFollow.mutate(f.id)}
+                  onDrop={() => dropFollow.mutate(f.id)}
+                  nudging={nudgeFollow.isPending}
+                  dropping={dropFollow.isPending}
+                  replying={replyFollowUp.isPending}
+                />
+              ))
+            )}
+          </section>
+
+          <section className="wirecol gc-wire">
             <SecHead
               title="The wire"
               aside={

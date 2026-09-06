@@ -1211,14 +1211,50 @@ export const setLeadStatus = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-/**
- * Publishing, separated from the server function that wraps it.
- *
- * Same shape as `performScanWork` and `performDraftWork`: the transport layer
- * owns authentication, this owns the work. It is also the only way to exercise
- * a publish end to end without a browser session, which is how the desk's own
- * walkthrough is run.
- */
+export {
+  ensureFollowUpsSchema,
+  performListFollowUps,
+  performCreateFollowUp,
+  performRecordFollowUpReply,
+  performNudgeFollowUp,
+  performDropFollowUp,
+} from "./follow-ups.ts";
+import {
+  performListFollowUps as _performListFollowUps,
+  performCreateFollowUp as _performCreateFollowUp,
+  performRecordFollowUpReply as _performRecordFollowUpReply,
+  performNudgeFollowUp as _performNudgeFollowUp,
+  performDropFollowUp as _performDropFollowUp,
+} from "./follow-ups.ts";
+
+export const listFollowUps = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input?: { status?: "open" | "answered" | "dropped"; limit?: number }) => input ?? {})
+  .handler(async ({ context, data }) => _performListFollowUps(context, data));
+
+export const createFollowUp = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator(
+    (input: { leadId?: number | null; articleId?: number | null; who: string; what: string; dueOn?: string | null }) =>
+      input,
+  )
+  .handler(async ({ context, data }) => _performCreateFollowUp(context, data));
+
+export const recordFollowUpReply = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { id: number; replyText: string; repliedOn?: string | null }) => input)
+  .handler(async ({ context, data }) => _performRecordFollowUpReply(context, data));
+
+export const nudgeFollowUp = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { id: number }) => input)
+  .handler(async ({ context, data }) => _performNudgeFollowUp(context, data.id));
+
+export const dropFollowUp = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { id: number }) => input)
+  .handler(async ({ context, data }) => _performDropFollowUp(context, data.id));
+
 export async function performPublish(
   context: { userId: string; newsroomId?: number },
   leadId: number,

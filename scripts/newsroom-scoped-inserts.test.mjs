@@ -68,6 +68,10 @@ const SCOPED_TABLES = [
   // "source_monitors and its anomalies" describe block for the VALUE-level
   // proof this table's inserts land in the caller's own newsroom).
   "source_monitors",
+  // 0.6.21: the Follow-ups object (migrations/0042_follow_ups.sql). Every
+  // insert lives in createFollowUp (src/lib/news/desk.ts) and writes
+  // newsroom_id from the caller's own context, never a hardcoded constant.
+  "follow_ups",
 ];
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");

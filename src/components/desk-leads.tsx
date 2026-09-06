@@ -68,72 +68,72 @@ export function LeadRowView({
         <p className="lead-why">{lead.why}</p>
         <p className="meta">
           {lead.topic} · {formatAge(lead.created_at)} · {leadOrigin(lead)}
-          <span className="row-acts">
-            <Link
-              to="/desk/story/$leadId"
-              params={{ leadId: String(lead.id) }}
-              className="btn quiet small"
-            >
-              Open
-            </Link>
-            {dup ? (
-              <Link to="/articles/$slug" params={{ slug: dup.slug }} className="btn quiet small">
-                The piece
-              </Link>
-            ) : null}
-            {lead.status !== "held" && lead.status !== "published" && lead.status !== "killed" && onHold ? (
-              <InkButton tone="quiet" small onClick={onHold}>
-                Hold
-              </InkButton>
-            ) : null}
-            {lead.status === "held" && onBack ? (
-              <InkButton tone="quiet" small onClick={onBack}>
-                Back
-              </InkButton>
-            ) : null}
-            {lead.status === "killed" && onBack ? (
-              <InkButton tone="quiet" small onClick={onBack}>
-                Back
-              </InkButton>
-            ) : null}
-            {lead.status !== "killed" && lead.status !== "published" && onKill ? (
-              <InkButton tone="quiet-danger" small onClick={onKill}>
-                Kill
-              </InkButton>
-            ) : null}
-            {onDelete ? (
-              confirming ? (
-                <>
-                  <InkButton
-                    tone="danger"
-                    small
-                    onClick={() => {
-                      setConfirming(false);
-                      onDelete();
-                    }}
-                  >
-                    Yes, delete
-                  </InkButton>
-                  <InkButton tone="quiet" small onClick={() => setConfirming(false)}>
-                    Keep
-                  </InkButton>
-                </>
-              ) : (
-                <InkButton tone="quiet" small onClick={() => setConfirming(true)}>
-                  Delete
-                </InkButton>
-              )
-            ) : null}
-          </span>
-          {confirming ? (
-            <span className="del-warn">
-              Deletes this lead and any draft on it.
-              {lead.status === "published"
-                ? " The printed story stays on the paper — remove that under Published."
-                : ""}
-            </span>
-          ) : null}
         </p>
+        <div className="lead-actions">
+          <Link
+            to="/desk/story/$leadId"
+            params={{ leadId: String(lead.id) }}
+            className="btn quiet small"
+          >
+            Open
+          </Link>
+          {dup ? (
+            <Link to="/articles/$slug" params={{ slug: dup.slug }} className="btn quiet small">
+              The piece
+            </Link>
+          ) : null}
+          {lead.status !== "held" && lead.status !== "published" && lead.status !== "killed" && onHold ? (
+            <InkButton tone="quiet" small onClick={onHold}>
+              Hold
+            </InkButton>
+          ) : null}
+          {lead.status === "held" && onBack ? (
+            <InkButton tone="quiet" small onClick={onBack}>
+              Back
+            </InkButton>
+          ) : null}
+          {lead.status === "killed" && onBack ? (
+            <InkButton tone="quiet" small onClick={onBack}>
+              Back
+            </InkButton>
+          ) : null}
+          {lead.status !== "killed" && lead.status !== "published" && onKill ? (
+            <InkButton tone="quiet-danger" small onClick={onKill}>
+              Kill
+            </InkButton>
+          ) : null}
+          {onDelete ? (
+            confirming ? (
+              <>
+                <InkButton
+                  tone="danger"
+                  small
+                  onClick={() => {
+                    setConfirming(false);
+                    onDelete();
+                  }}
+                >
+                  Yes, delete
+                </InkButton>
+                <InkButton tone="quiet" small onClick={() => setConfirming(false)}>
+                  Keep
+                </InkButton>
+              </>
+            ) : (
+              <InkButton tone="quiet" small onClick={() => setConfirming(true)}>
+                Delete
+              </InkButton>
+            )
+          ) : null}
+        </div>
+        {confirming ? (
+          <p className="del-warn">
+            Deletes this lead and any draft on it.
+            {lead.status === "published"
+              ? " The printed story stays on the paper — remove that under Published."
+              : ""}
+          </p>
+        ) : null}
         {lead.status !== "killed" && lead.status !== "published" && onDraft ? (
           <div className="queue-draft-controls">
             <ModelPicker

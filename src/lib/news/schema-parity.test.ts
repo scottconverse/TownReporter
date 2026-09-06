@@ -119,6 +119,7 @@ if (dbProbe.ok) {
     const providerLoginServer = await import("./provider-login.server.ts");
     const providerSettings = await import("./provider-settings.ts");
     const editorialServer = await import("./editorial.server.ts");
+    const followUps = await import("./follow-ups.ts");
     const ops = await import("./ops.ts");
     const views = await import("./views.ts");
     const db = await import("../db.ts");
@@ -135,6 +136,7 @@ if (dbProbe.ok) {
     await dark.ensureDarkSchema(); // also calls ensureInvestigateSchema
     await investigate.ensureInvestigateSchema();
     await views.ensureViewsSchema();
+    await followUps.ensureFollowUpsSchema();
     // desk_rate / audit_events: no ensure*Schema name, but the same
     // create-table-if-not-exists-on-every-call shape (ENG-09) -- a real call
     // each creates the table.

@@ -24,6 +24,7 @@ import { Route as ApiViewRouteImport } from './routes/api/view'
 import { Route as ArticlesSlugRouteImport } from './routes/articles.$slug'
 import { Route as DeskIndexRouteImport } from './routes/desk.index'
 import { Route as DeskDarkRouteImport } from './routes/desk.dark'
+import { Route as DeskFollowUpsRouteImport } from './routes/desk.follow-ups'
 import { Route as DeskMemoryRouteImport } from './routes/desk.memory'
 import { Route as DeskOpinionRouteImport } from './routes/desk.opinion'
 import { Route as DeskOpsRouteImport } from './routes/desk.ops'
@@ -113,6 +114,11 @@ const DeskIndexRoute = DeskIndexRouteImport.update({
 const DeskDarkRoute = DeskDarkRouteImport.update({
   id: '/dark',
   path: '/dark',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskFollowUpsRoute = DeskFollowUpsRouteImport.update({
+  id: '/follow-ups',
+  path: '/follow-ups',
   getParentRoute: () => DeskRoute,
 } as any)
 const DeskMemoryRoute = DeskMemoryRouteImport.update({
@@ -206,6 +212,7 @@ export interface FileRoutesByFullPath {
   '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
+  '/desk/follow-ups': typeof DeskFollowUpsRoute
   '/desk/memory': typeof DeskMemoryRoute
   '/desk/opinion': typeof DeskOpinionRoute
   '/desk/ops': typeof DeskOpsRoute
@@ -237,6 +244,7 @@ export interface FileRoutesByTo {
   '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
+  '/desk/follow-ups': typeof DeskFollowUpsRoute
   '/desk/memory': typeof DeskMemoryRoute
   '/desk/opinion': typeof DeskOpinionRoute
   '/desk/ops': typeof DeskOpsRoute
@@ -270,6 +278,7 @@ export interface FileRoutesById {
   '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
+  '/desk/follow-ups': typeof DeskFollowUpsRoute
   '/desk/memory': typeof DeskMemoryRoute
   '/desk/opinion': typeof DeskOpinionRoute
   '/desk/ops': typeof DeskOpsRoute
@@ -304,6 +313,7 @@ export interface FileRouteTypes {
     | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
+    | '/desk/follow-ups'
     | '/desk/memory'
     | '/desk/opinion'
     | '/desk/ops'
@@ -335,6 +345,7 @@ export interface FileRouteTypes {
     | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
+    | '/desk/follow-ups'
     | '/desk/memory'
     | '/desk/opinion'
     | '/desk/ops'
@@ -367,6 +378,7 @@ export interface FileRouteTypes {
     | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
+    | '/desk/follow-ups'
     | '/desk/memory'
     | '/desk/opinion'
     | '/desk/ops'
@@ -512,6 +524,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskDarkRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/desk/follow-ups': {
+      id: '/desk/follow-ups'
+      path: '/follow-ups'
+      fullPath: '/desk/follow-ups'
+      preLoaderRoute: typeof DeskFollowUpsRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/desk/memory': {
       id: '/desk/memory'
       path: '/memory'
@@ -622,6 +641,7 @@ declare module '@tanstack/react-router' {
 
 interface DeskRouteChildren {
   DeskDarkRoute: typeof DeskDarkRoute
+  DeskFollowUpsRoute: typeof DeskFollowUpsRoute
   DeskMemoryRoute: typeof DeskMemoryRoute
   DeskOpinionRoute: typeof DeskOpinionRoute
   DeskOpsRoute: typeof DeskOpsRoute
@@ -638,6 +658,7 @@ interface DeskRouteChildren {
 
 const DeskRouteChildren: DeskRouteChildren = {
   DeskDarkRoute: DeskDarkRoute,
+  DeskFollowUpsRoute: DeskFollowUpsRoute,
   DeskMemoryRoute: DeskMemoryRoute,
   DeskOpinionRoute: DeskOpinionRoute,
   DeskOpsRoute: DeskOpsRoute,

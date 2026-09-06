@@ -728,19 +728,47 @@
 .desk-ltr .needs-item.quiet::before {background:none;border:1px solid var(--mut)}
 .desk-ltr .needs-item.quiet:hover {color:var(--fg2)}
 .desk-ltr .ov-head {display:flex;align-items:end;justify-content:space-between;gap:20px;flex-wrap:wrap}
-.desk-ltr .front {display:grid;grid-template-columns:1.35fr .95fr .9fr;margin-top:6px}
-.desk-ltr .front>section {min-width:0;padding:0 20px}
-.desk-ltr .front>section:first-child {padding-left:0}
-.desk-ltr .front>section+section {border-left:1px solid var(--line)}
+/*
+  Direction A, stage 1 (docs/design/DIRECTION-A-BUILD-NOTES-2026-09-06.md):
+  the Command Center's own layout, replacing the old three-column `.front`
+  grid on this page only -- `.front` itself is not reused anywhere else (see
+  the build note), so it is gone rather than kept alongside this.
+
+  Named grid areas, not DOM order, carry the narrow-layout reshuffle: the
+  rail's Follow-ups block sits between Dark Desk and The wire at >=900px but
+  moves ABOVE Dark Desk in the single-column order below 900px. Redefining
+  which area occupies which cell needs no markup change, just a new
+  grid-template-areas per breakpoint.
+*/
+.desk-ltr .desk-cc-grid {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 360px;
+  grid-template-areas:"queue darkdesk" "queue followups" "queue wire";
+  gap:40px;
+  margin-top:6px;
+  align-items:start;
+}
+.desk-ltr .gc-queue {grid-area:queue;min-width:0}
+.desk-ltr .gc-darkdesk {grid-area:darkdesk;min-width:0}
+.desk-ltr .gc-followups {grid-area:followups;min-width:0}
+.desk-ltr .gc-wire {grid-area:wire;min-width:0}
 .desk-ltr .lead-list {margin-top:4px}
-.desk-ltr .lead-row {display:grid;grid-template-columns:auto 1fr auto;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);align-items:start}
+.desk-ltr .lead-row {display:grid;grid-template-columns:auto 1fr auto;gap:16px;padding:18px 0;border-bottom:1px solid var(--line);align-items:start}
 .desk-ltr .lead-flags {display:flex;flex-direction:column;align-items:end;gap:4px}
 .desk-ltr .lead-row.dead {opacity:.5}
 .desk-ltr .lead-main {min-width:0}
 .desk-ltr .hl-link {font-family:var(--fd);font-weight:600;font-size:calc(0.96875rem * var(--ts));line-height:1.25;text-align:left;letter-spacing:-.01em}
 .desk-ltr .hl-link:hover {color:var(--adeep)}
 .desk-ltr .hl-link.sm {font-size:calc(0.875rem * var(--ts))}
-.desk-ltr .lead-why {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:3px 0 0;text-wrap:pretty}
+.desk-ltr .lead-why {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:6px 0 0;text-wrap:pretty}
+.desk-ltr .lead-row .meta {margin-top:8px}
+/*
+  The queue row's own actions row (Open · Hold · Kill · The piece), separated
+  from the meta line above it (topic · age · origin) per the airier-rows
+  rhythm: 18px above the headline, 6px headline→why, 8px why→meta, 10px
+  meta→actions, 18px below the row -- see build-notes' "Airier queue rows".
+*/
+.desk-ltr .lead-actions {display:flex;gap:16px;flex-wrap:wrap;margin-top:10px}
 /*
   Row actions are always visible.
 
@@ -778,6 +806,19 @@
 .desk-ltr .wire-block {margin-top:14px;border-top:1px solid var(--line);padding-top:2px}
 .desk-ltr .wire-row {font-size:calc(0.875rem * var(--ts));margin:6px 0 0}
 .desk-ltr .wire-warn {font-size:calc(0.875rem * var(--ts));color:var(--warn);margin:6px 0 0}
+/*
+  The Follow-ups object (Direction A stage 1). One item: who · what · due ·
+  the story link, matching the anatomy in build-notes' "Follow-ups" section.
+  `.text-warn` is the one place overdue is ALSO stated in words ("Overdue N
+  days") -- colour never carries the meaning alone.
+*/
+.desk-ltr .followup-item {padding:14px 0;border-bottom:1px solid var(--line)}
+.desk-ltr .followup-item:last-child {border-bottom:none}
+.desk-ltr .followup-item.done {opacity:.7}
+.desk-ltr .followup-who {font-family:var(--fd);font-weight:600;font-size:calc(0.9375rem * var(--ts));margin:0}
+.desk-ltr .followup-what {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:4px 0 0}
+.desk-ltr .text-warn {color:var(--warn);font-weight:600}
+.desk-ltr .followup-reply-form {margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .desk-ltr .mem-e {font-family:var(--fd);font-weight:600}
 .desk-ltr .pipeline {display:flex;align-items:stretch;gap:10px;margin-top:18px;flex-wrap:wrap}
 .desk-ltr .pipe-cell {flex:1;min-width:150px;border:1px solid var(--line);padding:10px 14px;text-align:left;display:flex;flex-direction:column;gap:2px;transition:border-color .15s}
@@ -1045,9 +1086,26 @@
 .desk-ltr .pname {font-size:38px}
 .desk-ltr .feat-h .p-hl {font-size:30px}
 }
+/*
+  900-1179px: rail narrows to 300px; queue row actions may wrap to two
+  lines; nothing hides (build-notes' "Narrow layout").
+*/
+@media (max-width:1179px) and (min-width:900px) {
+.desk-ltr .desk-cc-grid {grid-template-columns:minmax(0,1fr) 300px}
+}
+/*
+  <900px: single column. Order per build-notes: Needs you (outside this
+  grid, above it) · composer · queue · Follow-ups · Dark Desk · The wire --
+  Follow-ups moves ABOVE Dark Desk here, unlike the two-column rail order.
+*/
+@media (max-width:899px) {
+.desk-ltr .desk-cc-grid {
+  grid-template-columns:1fr;
+  grid-template-areas:"queue" "followups" "darkdesk" "wire";
+  gap:28px;
+}
+}
 @media (max-width:1080px) {
-.desk-ltr .front {grid-template-columns:1fr 1fr}
-.desk-ltr .wirecol {grid-column:1/-1;border-left:none!important;border-top:1px solid var(--line);padding:14px 0 0!important}
 .desk-ltr .piles {grid-template-columns:1fr}
 .desk-ltr .piles>section {padding:0 0 18px}
 .desk-ltr .piles>section+section {border-left:none;border-top:1px solid var(--line);padding-top:14px}
@@ -1060,8 +1118,6 @@
 @media (max-width: 720px) {
   .desk-ltr .masthead,
   .desk-ltr .deskmain { padding-left: 16px; padding-right: 16px; }
-  .desk-ltr .front { grid-template-columns: 1fr; }
-  .desk-ltr .front > section + section { border-left: none; border-top: 1px solid var(--line); padding: 14px 0 0; }
   .desk-ltr .src-add { grid-template-columns: 1fr; }
   .desk-ltr .mast-date,
   .desk-ltr .brand-sub { display: none; }

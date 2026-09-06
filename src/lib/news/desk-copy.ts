@@ -1089,3 +1089,32 @@ export function redditPostStateLabel(state: "filed" | "already-known" | "below-l
   if (state === "already-known") return "already known";
   return "below the line";
 }
+
+/**
+ * The Follow-ups object's due-date line (Direction A stage 1, rail and
+ * /desk/follow-ups): "due Tue Sep 9" / "due today" / "Overdue 3 days" --
+ * overdue is always stated in words, never colour alone (see the build
+ * notes' "Follow-ups" section). `dueOn` is a plain `YYYY-MM-DD` date (no
+ * time component), compared at day granularity against `today` so a
+ * follow-up due "today" reads as today regardless of time of day.
+ */
+export function followUpDueLabel(dueOn: string | null | undefined, today: Date = new Date()): string {
+  if (!dueOn) return "";
+  const due = new Date(dueOn + "T00:00:00");
+  if (Number.isNaN(due.getTime())) return "";
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startOfDue = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  const diffDays = Math.round((startOfDue.getTime() - startOfToday.getTime()) / 86_400_000);
+  if (diffDays < 0) {
+    const days = Math.abs(diffDays);
+    return `Overdue ${days} day${days === 1 ? "" : "s"}`;
+  }
+  if (diffDays === 0) return "due today";
+  const formatted = due.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  return `due ${formatted}`;
+}
+
+/** True when followUpDueLabel's text represents an overdue follow-up (for styling in `--warn`). */
+export function followUpIsOverdue(dueOn: string | null | undefined, today: Date = new Date()): boolean {
+  return followUpDueLabel(dueOn, today).startsWith("Overdue");
+}

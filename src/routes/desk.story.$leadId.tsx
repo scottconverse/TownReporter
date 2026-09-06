@@ -1,9 +1,22 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Busy, DeskShell, Field, InkButton, leadOrigin } from "@/components/desk-chrome";
+import { Busy, DeskShell, Field, InkButton, leadOrigin, announceToDesk } from "@/components/desk-chrome";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
-import { draftLead, getLead, publishLead, pullTodo, saveDraft, saveReportingNotes } from "@/lib/news/desk";
+import {
+  createFollowUp,
+  dropFollowUp,
+  draftLead,
+  getLead,
+  listFollowUps,
+  nudgeFollowUp,
+  publishLead,
+  pullTodo,
+  recordFollowUpReply,
+  saveDraft,
+  saveReportingNotes,
+} from "@/lib/news/desk";
+import { FollowUpItem } from "@/components/follow-up-item";
 import { uncreditedOutlets } from "@/lib/news/report";
 import { parseUrlList, TOPICS } from "@/lib/paper";
 import { usePaperDateFormatters } from "@/lib/paper-context";
@@ -719,6 +732,38 @@ function ReportingNotesPane({
   const [pullMsg, setPullMsg] = useState("");
   const small = usePhoneNotes();
   const filled = notesHaveMemo(notes);
+
+  /*
+    "People who still need to respond" (Direction A stage 1, the Follow-ups
+    object). Today this is the only place a follow-up is created; the rail
+    on /desk and /desk/follow-ups both read the same rows.
+  */
+  const followUps = useQuery({
+    queryKey: ["follow-ups", "lead", leadId],
+    queryFn: () => listFollowUps({ data: { limit: 50 } }),
+  });
+  const leadFollowUps = (followUps.data ?? []).filter((f) => f.lead_id === leadId);
+  const [addingFollowUp, setAddingFollowUp] = useState(false);
+  const [fuWho, setFuWho] = useState("");
+  const [fuWhat, setFuWhat] = useState("");
+  const [fuDue, setFuDue] = useState("");
+  const addFollowUp = useMutation({
+    mutationFn: () =>
+      createFollowUp({ data: { leadId, who: fuWho.trim(), what: fuWhat.trim(), dueOn: fuDue || null } }),
+    onSuccess: (res) => {
+      if (res?.ok) {
+        setFuWho("");
+        setFuWhat("");
+        setFuDue("");
+        setAddingFollowUp(false);
+        void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+        announceToDesk("Follow-up added.");
+      } else {
+        announceToDesk((res && "error" in res && res.error) || "Could not add that follow-up.");
+      }
+    },
+  });
+
   const save = useMutation({
     mutationFn: (input: { add?: string; toggle?: number; todos: ReportingNotes["todo"] }) =>
       saveReportingNotes({ data: { leadId, ...input } }),
@@ -925,6 +970,76 @@ function ReportingNotesPane({
           ) : null}
         </>
       )}
+      <div className="note-sec">
+        <p className="side-label">People who still need to respond</p>
+        {leadFollowUps.length === 0 ? (
+          <p className="note-one">No one owes you an answer on this story right now.</p>
+        ) : (
+          leadFollowUps.map((f) => (
+            <FollowUpItem
+              key={f.id}
+              item={f}
+              onReply={
+                f.status === "open"
+                  ? (replyText, repliedOn) => {
+                      // The server appends the reply to this lead's own
+                      // "found" notes too; refresh both.
+                      void recordFollowUpReply({ data: { id: f.id, replyText, repliedOn } }).then(() => {
+                        void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+                        void qc.invalidateQueries({ queryKey: ["lead", leadId] });
+                        announceToDesk("Reply recorded.");
+                      });
+                    }
+                  : undefined
+              }
+              onDrop={
+                f.status === "open"
+                  ? () => {
+                      void dropFollowUp({ data: { id: f.id } }).then(() => {
+                        void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+                        announceToDesk("Follow-up dropped.");
+                      });
+                    }
+                  : undefined
+              }
+              onNudge={
+                f.status === "open"
+                  ? () => {
+                      void nudgeFollowUp({ data: { id: f.id } }).then(() => {
+                        void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+                        announceToDesk("Nudge stamped.");
+                      });
+                    }
+                  : undefined
+              }
+            />
+          ))
+        )}
+        {!locked ? (
+          addingFollowUp ? (
+            <div className="note-add followup-reply-form">
+              <input value={fuWho} onChange={(e) => setFuWho(e.target.value)} placeholder="Who — e.g. City Manager's office" />
+              <input value={fuWhat} onChange={(e) => setFuWhat(e.target.value)} placeholder="For what — one line" />
+              <input type="date" value={fuDue} onChange={(e) => setFuDue(e.target.value)} aria-label="Due date" />
+              <InkButton
+                small
+                tone="ghost"
+                disabled={!fuWho.trim() || !fuWhat.trim() || addFollowUp.isPending}
+                onClick={() => addFollowUp.mutate()}
+              >
+                Save
+              </InkButton>
+              <InkButton small tone="quiet" onClick={() => setAddingFollowUp(false)}>
+                Cancel
+              </InkButton>
+            </div>
+          ) : (
+            <InkButton small tone="ghost" onClick={() => setAddingFollowUp(true)}>
+              Add a follow-up
+            </InkButton>
+          )
+        ) : null}
+      </div>
       {!locked ? (
         <div className="note-add">
           <input

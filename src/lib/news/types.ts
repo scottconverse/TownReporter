@@ -100,3 +100,25 @@ export type CorrectionRow = {
   headline: string | null;
   slug?: string | null;
 };
+
+/**
+ * The Follow-ups object (Direction A, stage 1): who the editor asked and
+ * what they owe. One row per ask; `lead_id`/`article_id` link it to the
+ * story it belongs to when known. See migrations/0042_follow_ups.sql.
+ */
+export type FollowUpRow = {
+  id: number;
+  lead_id: number | null;
+  article_id: number | null;
+  who: string;
+  what: string;
+  due_on: string | null;
+  status: "open" | "answered" | "dropped";
+  nudged_at: string | null;
+  answered_at: string | null;
+  reply_text: string | null;
+  created_at: string;
+  lead_headline?: string | null;
+  article_slug?: string | null;
+  article_headline?: string | null;
+};

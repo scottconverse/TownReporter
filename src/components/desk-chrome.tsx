@@ -498,6 +498,20 @@ export function Busy({ label }: { label: string }) {
   );
 }
 
+/**
+ * Speaks through the always-mounted `#desk-announcer` live region above
+ * (see the docstring on it): writing into text that's already in the
+ * document, rather than mounting a notice together with its message, is
+ * what makes a screen reader announce it reliably (UIUX-03). Model-picker.tsx
+ * has its own private copy of the same function; this export exists so
+ * newer call sites (the Follow-ups object) share one implementation.
+ */
+export function announceToDesk(text: string): void {
+  if (typeof document === "undefined") return;
+  const el = document.getElementById("desk-announcer");
+  if (el) el.textContent = text;
+}
+
 export function leadOrigin(lead: {
   investigation_id?: number | null;
   why?: string;
