@@ -1,6 +1,6 @@
 # TownReporter — the manual
 
-**Version 0.6.22 · 6 September 2026**
+**Version 0.6.23 · 6 September 2026**
 
 **Documentation scope:** Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from

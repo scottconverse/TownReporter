@@ -1,6 +1,14 @@
 # Changelog
 
-Current release: **0.6.22**.
+Current release: **0.6.23**.
+
+## 0.6.23 — 2026-09-06
+The investigative desk goes back to the owner's own doctrine, and the paper can read what it captures.
+- **The Dark Desk runs in two stages again.** A speculative pass whose signals are capped at half confidence in code, then a verification pass that must answer four questions before anything may be called verified: did we try to disprove it, do the "independent" sources trace back to one origin, what context is missing, and is this signal about AI or journalism itself (which never finalizes). The application runs four adversarial searches per signal — the ordinary explanation, the official record, the local press, the counter-case — across at least three source tiers, and logs every query, tier and outcome where the editor can read them. Searches carry at least three phrasings and are scoped to the city and county. The five story shapes are back to the original three. A newsworthiness gate asks whether anyone's life changes, whether it is new, and whether a record exists; a no to all three keeps the item as something to watch, not a lead. None of this stops the digging: an unanswered gate leaves a signal unverified and the investigation continues, which is the non-gating rule this desk has always had. Doctrine in `docs/dark-desk.md`; migration 0043.
+- **Reddit looks for the whole town.** Eight rotating searches — government, infrastructure, business and work, schools and families, housing, health and safety, community groups, arts and venues — three per check, plus the newest posts. The scoring now recognises a change with a record behind it: a shop closing after fourteen years, a landlord selling a building, a school boundary moving, layoffs, a pantry losing its funding. A named place or street adds weight. Small talk is only penalised when nothing is actually changing. The near-misses are listed with a one-click "File as tip", so the editor can see what almost made it.
+- **Scanned PDFs are read.** A PDF with no text layer is now transcribed by the model you picked — the Anthropic API, Codex, Claude Code with a single scoped file read, or a local model that can see images — up to twelve pages, and the capture says "Read by OCR · <model> · N of M pages" wherever a document's source is shown. When it cannot be read, the reason is in words, not a status.
+- **Local models: one recommended path.** Install Ollama, pull a model, start the paper. LM Studio and llama.cpp's own server are found the same way, with no configuration. Models that can read images are marked "· vision" in the picker and on the Server page.
+- **Small things.** The image prompt and the fact sheet on the Opinion desk each have a Copy button. Paper setup takes a county, which the Dark Desk uses when it searches.
 
 ## 0.6.22 — 2026-09-06
 Direction A, stage 2: the story page.

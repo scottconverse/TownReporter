@@ -1,12 +1,12 @@
 # TownReporter — TODO (canonical, in-repo)
-_Kept current by whichever Claude session is working. Last updated: 2026-09-06 (0.6.22 live). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
+_Kept current by whichever Claude session is working. Last updated: 2026-09-06 (0.6.23 live). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked on the owner
 
 ---
 
 ## In flight
-- (nothing in flight)
+- [~] **0.6.23** — bump done (this commit) → CI → stage on real data → owner's go → promote.
 
 ## Open queue (bug fixes first — owner chose to skip the redesign for now)
 - [ ] **Direction A follow-through** — owner's live verdict on the new desk; polish list from real use; the outside designer's audit (docs/design/DESIGN-AUDIT-BRIEF-2026-09-05.md) may add items. Other tabs (Sources, Scan, Published, Opinion, Server, Stats) keep their current pages under the new masthead by design.

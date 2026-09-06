@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.22](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.22)** — 6 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.23](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.23)** — 6 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
