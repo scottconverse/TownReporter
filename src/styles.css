@@ -1022,7 +1022,7 @@
 .desk-ltr .queue-draft-controls {display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin-top:9px}
 .desk-ltr .queue-draft-controls .model-picker {margin:0}
 @media (max-width:720px){.desk-ltr .model-picker,.desk-ltr .model-picker.compact{grid-template-columns:1fr;width:100%;max-width:none;min-width:0}.desk-ltr .model-picker-help{grid-column:1}}
-.desk-ltr .local-model-picker {display:grid;grid-template-columns:auto minmax(190px,1fr);align-items:center;gap:4px 9px;margin:6px 0 0;padding-top:6px;border-top:1px dashed var(--line);min-width:0}
+.desk-ltr .local-model-picker {display:grid;grid-template-columns:auto minmax(190px,1fr);align-items:center;gap:4px 9px;margin:8px 0 0;min-width:0}
 .desk-ltr .local-model-picker select {grid-column:2;min-height:40px;width:100%;max-width:100%;min-width:0;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px}
 .desk-ltr .local-model-picker .model-picker-help {grid-column:2}
 .desk-ltr .model-picker-refresh {grid-column:2;justify-self:start;min-height:44px;min-width:44px;padding:6px 14px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));cursor:pointer}
