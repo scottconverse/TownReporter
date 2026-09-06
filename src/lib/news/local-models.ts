@@ -2,11 +2,12 @@
   Finds a local, OpenAI-compatible model server on the machine running this
   desk, without asking the operator to type anything.
 
-  Two probes, always at the same two ports, plus whatever LLM_BASE_URL
-  already names: LM Studio's default (http://127.0.0.1:1234/v1) and Ollama's
-  default (http://127.0.0.1:11434/v1). Owner rule "out of the box, with LM
-  Studio or Ollama running, Local model is live with no config" -- this is
-  the module that makes that true.
+  Three probes, always at the same three ports, plus whatever LLM_BASE_URL
+  already names: LM Studio's default (http://127.0.0.1:1234/v1), Ollama's
+  default (http://127.0.0.1:11434/v1), and llama.cpp's llama-server default
+  (http://127.0.0.1:8080/v1). Owner rule "out of the box, with LM Studio,
+  Ollama, or llama.cpp running, Local model is live with no config" -- this
+  is the module that makes that true.
 
   Server-only by the `.server.ts` suffix: it makes outbound fetches to
   localhost ports and holds an in-memory cache, neither of which belongs in
@@ -48,7 +49,7 @@ export type LocalModelEntry = {
   vision: boolean;
 };
 
-export type LocalServerKind = "lmstudio" | "ollama" | "openai-compatible";
+export type LocalServerKind = "lmstudio" | "ollama" | "llamacpp" | "openai-compatible";
 
 export type LocalServer = {
   kind: LocalServerKind;
@@ -97,7 +98,29 @@ function isThinking(id: string): boolean {
 function inferKind(baseUrl: string): LocalServerKind {
   if (/:1234\b/.test(baseUrl)) return "lmstudio";
   if (/:11434\b/.test(baseUrl)) return "ollama";
+  if (/:8080\b/.test(baseUrl)) return "llamacpp";
   return "openai-compatible";
+}
+
+/**
+ * llama-server (llama.cpp's OpenAI-compatible server) exposes no load or
+ * vision metadata in `/v1/models` -- `loaded` stays null like any other
+ * plain server. Vision is a guess from the id, the same shape the picker
+ * already understands: `vl`/`vision` in the name, or the two model
+ * families (Gemma 4, GLM-4.x V) that ship vision variants under llama.cpp
+ * ids that don't otherwise say so.
+ */
+const LLAMACPP_VISION_RE = /vl|vision|gemma-?4|glm-4\.\d*v/i;
+
+function enrichLlamaCpp(ids: string[]): LocalModelEntry[] {
+  return ids.map((id) => ({
+    id,
+    label: id,
+    loaded: null,
+    kind: "chat" as const,
+    thinking: isThinking(id),
+    vision: LLAMACPP_VISION_RE.test(id),
+  }));
 }
 
 const PROBE_TIMEOUT_MS = 1_500;
@@ -225,19 +248,21 @@ async function probeServer(
       ? await enrichLmStudio(serverRoot(base), ids)
       : kind === "ollama"
         ? await enrichOllama(serverRoot(base), ids)
-        : ids.map((id) => ({
-            id,
-            label: id,
-            loaded: null,
-            kind: "chat" as const,
-            thinking: isThinking(id),
-            vision: false,
-          }));
+        : kind === "llamacpp"
+          ? enrichLlamaCpp(ids)
+          : ids.map((id) => ({
+              id,
+              label: id,
+              loaded: null,
+              kind: "chat" as const,
+              thinking: isThinking(id),
+              vision: false,
+            }));
   return { kind, baseUrl: base, reachable: true, models };
 }
 
 function pickDefault(servers: LocalServer[]): { baseUrl: string; id: string } | null {
-  const priority: LocalServerKind[] = ["lmstudio", "ollama", "openai-compatible"];
+  const priority: LocalServerKind[] = ["lmstudio", "ollama", "llamacpp", "openai-compatible"];
   const ordered = servers
     .filter((s) => s.reachable)
     .slice()
@@ -292,6 +317,7 @@ export async function discoverLocalModels(force = false): Promise<LocalCatalog> 
     const defaults: [string, LocalServerKind][] = [
       ["http://127.0.0.1:1234/v1", "lmstudio"],
       ["http://127.0.0.1:11434/v1", "ollama"],
+      ["http://127.0.0.1:8080/v1", "llamacpp"],
     ];
     for (const [base, kind] of defaults) {
       if (seen.has(base)) continue;

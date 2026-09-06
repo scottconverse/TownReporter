@@ -88,6 +88,7 @@ describe("local model discovery", () => {
       "http://127.0.0.1:1234/v1/models": LM_STUDIO_MODELS,
       "http://127.0.0.1:1234/api/v0/models": LM_STUDIO_NATIVE,
       "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "timeout",
     }) as typeof fetch;
 
     const catalog: LocalCatalog = await withEnv({}, () => discoverLocalModels(true));
@@ -108,6 +109,7 @@ describe("local model discovery", () => {
     globalThis.fetch = fakeFetch({
       "http://127.0.0.1:1234/v1/models": "timeout",
       "http://127.0.0.1:11434/v1/models": OLLAMA_MODELS,
+      "http://127.0.0.1:8080/v1/models": "timeout",
       "http://127.0.0.1:11434/api/ps": OLLAMA_PS,
     }) as typeof fetch;
 
@@ -125,6 +127,7 @@ describe("local model discovery", () => {
     globalThis.fetch = fakeFetch({
       "http://127.0.0.1:1234/v1/models": "timeout",
       "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "timeout",
       "http://localhost:8080/v1/models": "html",
     }) as typeof fetch;
 
@@ -142,6 +145,7 @@ describe("local model discovery", () => {
     globalThis.fetch = fakeFetch({
       "http://127.0.0.1:1234/v1/models": "timeout",
       "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "timeout",
     }) as typeof fetch;
     const catalog = await withEnv({}, () => discoverLocalModels(true));
     assert.deepEqual(catalog.servers, []);
@@ -166,6 +170,7 @@ describe("local model discovery", () => {
       "http://127.0.0.1:1234/v1/models": LM_STUDIO_MODELS,
       "http://127.0.0.1:1234/api/v0/models": LM_STUDIO_NATIVE,
       "http://127.0.0.1:11434/v1/models": OLLAMA_MODELS,
+      "http://127.0.0.1:8080/v1/models": "timeout",
       "http://127.0.0.1:11434/api/ps": OLLAMA_PS,
     }) as typeof fetch;
     const catalog = await withEnv({}, () => discoverLocalModels(true));
@@ -187,6 +192,7 @@ describe("local model discovery", () => {
       "http://127.0.0.1:1234/v1/models": LM_STUDIO_MODELS,
       "http://127.0.0.1:1234/api/v0/models": unloadedLmStudioNative,
       "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "timeout",
     }) as typeof fetch;
 
     const byModel = await withEnv({ LLM_MODEL: "google/gemma-4-12b-qat" }, () =>
@@ -213,6 +219,7 @@ describe("local model discovery", () => {
         ],
       },
       "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "timeout",
     }) as typeof fetch;
 
     const catalog = await withEnv({}, () => discoverLocalModels(true));
@@ -263,6 +270,7 @@ describe("local model discovery", () => {
     globalThis.fetch = fakeFetch({
       "http://127.0.0.1:1234/v1/models": "timeout",
       "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "timeout",
       "http://localhost:9999/v1/models": { data: [{ id: "some-model" }] },
     }) as typeof fetch;
     const catalog = await withEnv({ LLM_BASE_URL: "http://localhost:9999/v1" }, () =>
@@ -270,5 +278,37 @@ describe("local model discovery", () => {
     );
     const server = catalog.servers.find((s) => s.baseUrl === "http://localhost:9999/v1");
     assert.equal(server?.models[0]?.vision, false);
+  });
+
+  it("drops llama.cpp's port when it answers 200 with HTML (this machine's real port-8080 web app)", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": "timeout",
+      "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "html",
+    }) as typeof fetch;
+
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    assert.ok(!catalog.servers.some((s) => s.kind === "llamacpp"));
+  });
+
+  it("discovers a real llama-server on :8080 and marks vision by id heuristic", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": "timeout",
+      "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": {
+        data: [{ id: "qwen2.5-coder-7b-instruct.gguf" }, { id: "gemma-4-12b-it.gguf" }],
+      },
+    }) as typeof fetch;
+
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    const llamacpp = catalog.servers.find((s) => s.kind === "llamacpp");
+    assert.ok(llamacpp?.reachable);
+    assert.equal(llamacpp!.baseUrl, "http://127.0.0.1:8080/v1");
+    const coder = llamacpp!.models.find((m) => m.id === "qwen2.5-coder-7b-instruct.gguf")!;
+    assert.equal(coder.loaded, null);
+    assert.equal(coder.vision, false);
+    const gemma = llamacpp!.models.find((m) => m.id === "gemma-4-12b-it.gguf")!;
+    assert.equal(gemma.vision, true);
+    assert.equal(gemma.thinking, true);
   });
 });

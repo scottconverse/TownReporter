@@ -1,4 +1,26 @@
-# Local models: what was measured, and why the answer is mostly no
+# Local models
+
+Install [Ollama](https://ollama.com). Run `ollama pull gemma4:12b` (or any
+model you like). Start TownReporter. The Writing model picker lists it under
+**Local model** — nothing else to configure.
+
+Also works with no config: LM Studio (start its server) · llama.cpp
+(`llama-server -m <model.gguf>`).
+
+Overrides, only if you need one:
+
+```
+LLM_BASE_URL=http://127.0.0.1:11434/v1   # point at a specific server/model instead of discovering one
+LLM_MODEL=gemma4:12b                     # pick a specific model on that server
+LLM_REASONING_EFFORT=none                # force thinking off/on instead of the automatic guess
+TOWNREPORTER_LOCAL_DISCOVERY=0           # turn off probing the default ports entirely
+```
+
+For scanned PDFs, pick a model marked **· vision** — an ordinary text-only
+local model cannot read a scan's page images.
+
+## What was measured, and why local isn't the answer everywhere
+
 
 **Measured 29 August 2026 on the machine that runs townreporter.org.**
 

@@ -366,10 +366,30 @@ export const getLead = createServerFn({ method: "GET" })
       }
     }
     const job = await latestJob({ newsroomId: owned(context), kind: "draft", subjectId: id });
+    /*
+      "Documents opened for this draft" is model-authored (notes.opened, from
+      the draft's own notebook) and carries no capture status of its own --
+      it is just a url/title pair the model wrote down. Look each url up
+      against what was actually captured so the notes pane can say when one
+      of them was a scanned PDF read by OCR (or still needs it), the same
+      words `describeExtractionMethod` gives everywhere else on the desk.
+    */
+    const openedUrls = [...new Set(notes.opened.map((o) => o.url).filter(Boolean))];
+    const extractionByUrl: Record<string, string | null> = {};
+    if (openedUrls.length) {
+      const rows = await sql<{ url: string; extraction_method: string | null }>`
+        select distinct on (url) url, extraction_method
+        from artifacts
+        where newsroom_id = ${owned(context)} and url = any(${openedUrls})
+        order by url, id desc
+      `;
+      for (const r of rows) extractionByUrl[r.url] = r.extraction_method;
+    }
     return {
       lead,
       draft,
       articleSlug: live[0]?.slug ?? null,
+      openedExtractionByUrl: extractionByUrl,
       job,
       // Draft has no separate run table -- desk_jobs IS the record, so
       // "orphaned" cannot happen here; only a cold heartbeat means dead.

@@ -97,6 +97,15 @@ describe("encodeOcrExtractionMethod / describeExtractionMethod", () => {
     assert.equal(describeExtractionMethod("none"), "Not read yet.");
     assert.equal(describeExtractionMethod(null), "Not read yet.");
   });
+
+  it("says a stored needs-ocr reason in words", () => {
+    assert.equal(
+      describeExtractionMethod("needs-ocr:the chosen local model cannot read images"),
+      "Scanned PDF — not readable yet: the chosen local model cannot read images",
+    );
+    // No reason recorded (OCR never attempted) -- still honest, no dangling colon.
+    assert.equal(describeExtractionMethod("needs-ocr:"), "Scanned PDF — not readable yet");
+  });
 });
 
 describe("discoverDocLinks", () => {

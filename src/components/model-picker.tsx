@@ -24,6 +24,7 @@ function announceToDesk(text: string): void {
 const LOCAL_SERVER_LABELS: Record<string, string> = {
   lmstudio: "LM Studio",
   ollama: "Ollama",
+  llamacpp: "llama.cpp",
   "openai-compatible": "Configured server",
 };
 

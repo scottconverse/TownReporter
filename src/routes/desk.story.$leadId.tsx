@@ -35,6 +35,7 @@ import {
   followUpsRailCopy,
 } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
+import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
@@ -453,6 +454,7 @@ function StoryPage() {
             notes={notes}
             hasDraft={Boolean(data.draft)}
             locked={locked || onPaper}
+            openedExtractionByUrl={data.openedExtractionByUrl ?? {}}
           />
         </aside>
 
@@ -722,11 +724,14 @@ function ReportingNotesPane({
   notes,
   hasDraft,
   locked,
+  openedExtractionByUrl,
 }: {
   leadId: number;
   notes: ReportingNotes;
   hasDraft: boolean;
   locked: boolean;
+  /** Capture-time extraction method for each `notes.opened` url, when known (see getLead). */
+  openedExtractionByUrl: Record<string, string | null>;
 }) {
   const qc = useQueryClient();
   const [line, setLine] = useState("");
@@ -959,15 +964,21 @@ function ReportingNotesPane({
           {notes.opened.length ? (
             <div className="note-sec">
               <p className="side-label">Documents opened for this draft</p>
-              {notes.opened.map((d) => (
-                <p key={d.url} className="note-one">
-                  <a href={d.url} target="_blank" rel="noreferrer" className="inline-link">
-                    {d.title}
-                  </a>
-                  {/* Which of the memo's own asks this document was pulled to answer. */}
-                  {d.for ? <span className="opened-for">for: {d.for}</span> : null}
-                </p>
-              ))}
+              {notes.opened.map((d) => {
+                const method = openedExtractionByUrl[d.url] ?? null;
+                const raw = (method ?? "").trim();
+                const ocrLine = /^(ocr|needs-ocr):/.test(raw) ? describeExtractionMethod(raw) : null;
+                return (
+                  <p key={d.url} className="note-one">
+                    <a href={d.url} target="_blank" rel="noreferrer" className="inline-link">
+                      {d.title}
+                    </a>
+                    {/* Which of the memo's own asks this document was pulled to answer. */}
+                    {d.for ? <span className="opened-for">for: {d.for}</span> : null}
+                    {ocrLine ? <span className="opened-for">{ocrLine}</span> : null}
+                  </p>
+                );
+              })}
             </div>
           ) : null}
         </>

@@ -253,17 +253,13 @@ export function encodeOcrExtractionMethod(
   return `ocr:${provider ?? "unknown"}:${pagesRead ?? 0}/${pagesTotal ?? 0}`;
 }
 
-/** The editor-facing sentence for a stored `extraction_method` value. */
-export function describeExtractionMethod(method: string | undefined | null): string {
-  const raw = (method ?? "").trim();
-  const m = /^ocr:([^:]*):(\d+)\/(\d+)$/.exec(raw);
-  if (m) {
-    const [, provider, read, total] = m;
-    return `Read by OCR · ${provider} · ${read} of ${total} pages`;
-  }
-  if (!raw || raw === "none") return "Not read yet.";
-  return raw;
-}
+/**
+ * The editor-facing sentence for a stored `extraction_method` value. Lives
+ * in extraction-label.ts (a dependency-free module, unlike this one) so
+ * browser route components can import it directly; re-exported here so
+ * every existing `from "./ingest.ts"` import keeps working unchanged.
+ */
+export { describeExtractionMethod } from "./extraction-label.ts";
 
 export type TextChunk = {
   index: number;
@@ -641,7 +637,11 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: OcrOptions): Promise<
           contentType: "application/pdf",
           needsOcr: true,
           redirectChain: tracked.chain,
-          extractionMethod: pdf.method,
+          // Folds the honest reason into the one column the DB already has
+          // for this (`extraction_method`) rather than adding a new one --
+          // `describeExtractionMethod` in extraction-label.ts turns this
+          // back into "Scanned PDF — not readable yet: <reason>" for the desk.
+          extractionMethod: pdf.needsOcrReason ? `needs-ocr:${pdf.needsOcrReason}` : "none",
           needsOcrReason: pdf.needsOcrReason,
           pages: pdf.pages,
           rawBytes: buf,

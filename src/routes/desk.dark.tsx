@@ -53,6 +53,7 @@ import {
   SectionTldr,
 } from "@/components/investigation-brief";
 import { captureBatchStats, readableCapture } from "@/lib/news/html-text";
+import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
@@ -1543,6 +1544,17 @@ function InvestigationWorkspace({
   );
 }
 
+/**
+ * Only worth a line when the capture went through OCR (read, or still
+ * blocked on it) -- an ordinary html/unpdf/primegov capture's method is not
+ * something an editor needs to see on every row.
+ */
+function ocrStatusLine(method: string | null | undefined): string | null {
+  const raw = (method ?? "").trim();
+  if (!/^(ocr|needs-ocr):/.test(raw)) return null;
+  return describeExtractionMethod(raw);
+}
+
 function OpenedRecords({
   artifacts,
 }: {
@@ -1556,6 +1568,7 @@ function OpenedRecords({
     version_id: number | null;
     created_at: string;
     excerpt?: string;
+    extraction_method?: string | null;
   }[];
 }) {
   const { formatShortDate } = usePaperDateFormatters();
@@ -1649,7 +1662,9 @@ function OpenedRecords({
                 {rowOrg ? ` · ${rowOrg}` : ""}
               </span>
               <span className="read-title">{rowTitle || "Captured page"}</span>
-              {preview.kind === "ok" && preview.body ? (
+              {ocrStatusLine(a.extraction_method) ? (
+                <span className="np-meta">{ocrStatusLine(a.extraction_method)}</span>
+              ) : preview.kind === "ok" && preview.body ? (
                 <span className="np-meta">{excerptForEditor(preview.body, 140)}</span>
               ) : null}
             </button>
@@ -1685,6 +1700,9 @@ function OpenedRecords({
             </button>
           </p>
           {selected.url.startsWith("http") ? <p className="read-url">{selected.url}</p> : null}
+          {ocrStatusLine(selected.extraction_method) ? (
+            <p className="meta">{ocrStatusLine(selected.extraction_method)}</p>
+          ) : null}
           {body.isPending && !body.data ? (
             <p className="meta">Opening the captured copy…</p>
           ) : cap?.kind === "blocked" ? (

@@ -233,8 +233,10 @@ mid-run.
 Zen MiMo and Local Qwen were removed from the picker (2026-09-02). 0.6.10
 brought a local model back as a named pick, "Local model": generic this
 time, whatever `LLM_BASE_URL` (plus `LLM_MODEL` / `LLM_API_KEY`) already
-points at, shown on every picker once that variable is set. See
-[local-models.md](local-models.md).
+points at, shown on every picker once that variable is set. With nothing
+configured, TownReporter also discovers Ollama, LM Studio, or llama.cpp
+running on their default ports. See
+[local-models.md](local-models.md) for the one-command way to get started.
 
 | Choice      | Default identity | Prerequisite / boundary                                                                        |
 | ----------- | ----------------- | ------------------------------------------------------------------------------------------------ |

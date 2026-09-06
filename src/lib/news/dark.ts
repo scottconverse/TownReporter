@@ -552,9 +552,10 @@ export const getInvestigation = createServerFn({ method: "GET" })
       version_id: number | null;
       created_at: string;
       excerpt: string;
+      extraction_method: string | null;
     }>`
       select id, url, title, classification, fetch_status, fetch_outcome, version_id,
-        created_at, left(full_text, 2500) as excerpt
+        created_at, left(full_text, 2500) as excerpt, extraction_method
       from artifacts
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 60
