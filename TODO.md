@@ -1,12 +1,12 @@
 # TownReporter — TODO (canonical, in-repo)
-_Kept current by whichever Claude session is working. Last updated: 2026-09-05 (0.6.19 live). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
+_Kept current by whichever Claude session is working. Last updated: 2026-09-06 (0.6.20 bump). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked on the owner
 
 ---
 
 ## In flight
-- (nothing in flight)
+- [~] **0.6.20** — bump done (this commit) → CI → stage on real data → owner's go → promote.
 
 ## Open queue (bug fixes first — owner chose to skip the redesign for now)
 - [ ] Redesign, phase 2 — owner walks the clickable prototype (direction A) and the four workflow scenarios (Watch a page, Legal removal, Sections, Investigation) on the design canvas; an outside designer audits using docs/design/DESIGN-AUDIT-BRIEF-2026-09-05.md (the package page with screenshots is an artifact the owner shares); then build the real desk in the chosen direction.

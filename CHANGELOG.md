@@ -1,6 +1,14 @@
 # Changelog
 
-Current release: **0.6.19**.
+Current release: **0.6.20**.
+
+## 0.6.20 — 2026-09-05
+Desk readability release. Five defects against rules the owner had already written, found by an outside design audit; each is now guarded by a test.
+- **Nothing informational under 14px.** Chips, kickers, field labels, nav items and segmented controls move from 13px to 14px; the Server and Stats pages drop their smaller utility sizes. A new test (`scripts/desk-min-font.test.mjs`) fails the build if any desk rule resolves below 14px at Normal.
+- **Large text reaches the text that matters.** Page titles, section titles, lead headlines, Dark Desk document titles and the full-document reading pane, and the Server/Stats figures now scale with the Normal/Large control. Before, only the small print grew.
+- **One button family.** The undefined `btn invert` style is gone (it rendered as a plain outline beside a solid button meant to match it); the model-picker label's `--muted` typo is fixed; every desk button has a real minimum height (44px, small 36px) and the two input families now match.
+- **Destructive buttons look destructive.** Kill, "Yes, delete" and the other confirm-step actions carry the warn colour on the border and fill, not only the text, and are no longer the same shape as Cancel. Contrast checked in both themes (8.1:1 light, 11.5:1 dark).
+- **Held and set-aside leads have chips.** HELD, SET ASIDE, CLOSED and EXHAUSTED each render their own labelled chip instead of falling through to an unstyled default.
 
 ## 0.6.19 — 2026-09-05
 Four owner-reported problems from one day of real use, all fixed with tests.
