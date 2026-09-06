@@ -17,6 +17,24 @@ If you are a remote session working **only from this GitHub repo** (no access to
 
 ---
 
+## Update 2026-09-05 — 0.6.18 and 0.6.19 are live
+
+**What shipped:** 0.6.18 (2026-09-05, LIVE) fixed the interrupted-draft UI contradiction, added a promote job guard to refuse promotion when drafts are running, newsroom-scoped the monitors list, added a PRINTED chip that names and links to the matched story, marked non-profit in the copy, and wired reddit listings via .rss feeds. 0.6.19 (2026-09-05, LIVE, tag v0.6.19 at 25bc882) added four major features: claims-of-absence editorial gate (no tool-talk in drafts; gate source at `src/lib/news/absence-gate.ts`), targeted city-site pulls for the memo's actual asks (`article-extract.ts`), site-notice integration (`report.ts` pulls), and server-side publish refusal when claims are invalid (`desk.ts` performPublish); local model discovery for LM Studio (127.0.0.1:1234) and Ollama (127.0.0.1:11434) with per-model picker in every picker, thinking turned off, per-newsroom override (discovery in `src/lib/news/local-models.ts`, `provider-availability.ts`, settings in `provider-settings.ts`, docs in `docs/local-models.md`); dark desk styling (black background, white text); and Check r/longmont progress with a result panel showing near misses and File-as-tip.
+
+**The incident that drove the gate:** a draft claimed "no city survey page was obtained" while the city page existed in the fetches; the owner's outside audit caught it before publish. Replayed on staging with 0.6.19 → the paper pulled the survey page correctly, the launch release itself landed the story with correct claims, no tool-talk, and the gate had nothing to block. The absence-gate `src/lib/news/absence-gate.ts` lines 32–67 check claims against opened documents, and `desk.ts` `performPublish` lines 211–220 refuse publish when claims fail.
+
+**Local model facts:** LM Studio runs on `127.0.0.1:1234` with 20 chat models loaded, none active on startup; Ollama runs on `127.0.0.1:11434` with `gemma4:12b`, `gemma4:e4b`, and `translategemma:4b` loaded. Thinking models no longer require `reasoning_effort` (now automatic). Default when nothing is loaded = first chat model listed (currently a coder model); editors should pick a writing model in the picker or load one in LM Studio.
+
+**Owner rules added today:** dark mode uses black background and white text (not gray). Every AI surface reads one provider registry, so a local entry is config-only and sits alongside cloud providers (no double registry). UI/UX is co-equal with code quality.
+
+**Redesign state:** a clickable prototype canvas exists as a Claude Design artifact (direction A "Front page", dark by default, story view two-column with the claims-of-absence block visible). The owner has not yet given a verdict. Static sketches B and C sit beside it. No redesign work starts until the owner walks direction A and decides.
+
+**What's next (from TODO.md open queue):** Redesign phase 2 (owner verdict), then work through #2 (monitor scoping before manual watch), #3 (manual "watch this page" button), #4 (legal removal), #5 (About-page non-profit + welcome seed), and #6 (Topics / sections, pending Scott's list). Always confirm each with Scott. Verify each on real staged data before promoting.
+
+**Verify/CI state:** Staged on real data. Incident replay proved the gate. CI 14/14 green. All promotes checked OK. 26 stories intact.
+
+---
+
 ## 0. Your role & how to work
 - **You coordinate; you do NOT hand-write feature code.** Delegate implementation to Sonnet subagents (Opus for hard/trust-boundary work, Haiku for cheap mechanical jobs). You brief, gate, review diffs, run CI, stage, tag, promote. This is a hard, repeated owner rule — burning premium (Fable) budget on grunt coding is the thing that most annoys the owner.
 - **One heavy agent at a time** (protects the live box + budget). Subagents here have a habit of spawning a nested agent and pausing on their own background test run — when that happens, check the working tree and send them a message to "finish in the FOREGROUND: run the gate, commit, push."

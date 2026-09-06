@@ -1,14 +1,15 @@
 # TownReporter — TODO (canonical, in-repo)
-_Kept current by whichever Claude session is working. Last updated: 2026-09-05 (0.6.19 bump). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
+_Kept current by whichever Claude session is working. Last updated: 2026-09-05 (0.6.19 live). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked on the owner
 
 ---
 
 ## In flight
-- [~] **0.6.19** — bump done (this commit) → CI → stage on real data → owner's go → promote.
+- (nothing in flight)
 
 ## Open queue (bug fixes first — owner chose to skip the redesign for now)
+- [ ] **Redesign, phase 2** — owner walks the clickable prototype (direction A) and gives a verdict; then build the real desk in that direction.
 A. [x] **Interrupted-draft UI contradiction** — when the app restarts under a running draft, the story page shows "Drafting…" + "pulling the draft in" AND "stopped without finishing — click Draft again" at once. The job is actually reclaimed and re-run after 120s (STALE_RUNNING_SECONDS). Show ONE honest state: "App restarted mid-draft — recovering automatically (~2 min)"; don't show a disabled Drafting… button beside a click-again message. Done in b0c63a9.
 B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app under running desk_jobs. Add a guard: refuse (or wait/drain with a clear message) when a draft/dark job is running; and a startup sweep that marks orphaned running jobs so the UI resets cleanly. Operator rule: never promote while the editor is active without asking. Done in b0c63a9 (-WaitForJobs/-Force).
 2. [ ] **Manual "watch this page" for Dark Desk** — wire the existing `watchSource` to an editor button so an editor can put a page on the investigative monitor list by hand (today only the dig adds monitors). Do after #1. Must have clear UX feedback (owner rule).
@@ -37,15 +38,14 @@ B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app u
 - [x] #4 Queue "≈ PRINTED" chip names + links the story it matched — an editor could only see a hover date before; `nearDuplicate` (src/lib/news/desk-copy.ts) now carries the matched published story's headline on `PrintedDup`, and the Queue row (src/components/desk-leads.tsx) shows "matches: <headline> · published <date>" with the headline as a real link to `/articles/<slug>`, plus the hover title on the chip itself. This commit.
 - [x] #6 — retired the 17 historical duplicate leads on prod (17 → 0, reversible), 2026-09-05.
 - [x] 0.6.18 — bug-fix release (A recovering state, B promote guard, #3 monitors scoping, #4 PRINTED chip, #5 non-profit + 0040, #7 reddit listings via .rss). LIVE 2026-09-05, CI 14/14, staged on real data, promote checks OK, 26 stories intact.
-- [x] Check r/longmont: visible progress + result panel with near misses and File-as-tip (owner report 2026-09-05).
-- [x] Desk dark mode: black/white palette, theme-aware Notice, single specific model error, unconfigured providers disabled in the picker (owner reports 2026-09-05).
-- [x] Local model picker: LM Studio + Ollama discovery, model list in every picker, default = loaded model, thinking off, per-newsroom override (owner request 2026-09-05).
-- [x] Editorial integrity gate: no tool-talk, targeted city-site pulls, site notices, claims-of-absence gate with server-side publish refusal (incident 2026-09-05, commit f80a5ce).
+- [x] 0.6.19 — LIVE 2026-09-05 (tag v0.6.19 at 25bc882): claims-of-absence gate + city-site pulls + site notices (f80a5ce); local model discovery + per-model picker + thinking off + migration 0041 (2e4b8b3); black-on-white dark desk + theme-aware Notice + single model error (6158100); Check r/longmont progress/results/File-as-tip (9ad5369). Staged on real data, incident replay proved the gate, CI 14/14, promote checks OK.
 
 ## Known caveats (honest state)
 - Dark Desk is proven on ONE real staged topic (receipt); the Reddit leg was the weak spot (TR-001, now fixed pending release). Not a certification of every source type.
 - A prior-capture lookup in runDueMonitors still defaults to newsroom 1 (documented, separate gap).
 - Migration 0038 dedupes new writes; historical URL variants aren't fully canonicalized (prod cleanup was a separate operator action).
+- Local model default when nothing is loaded = first chat model listed (currently a coder model); pick a writing model in the picker or load one in LM Studio.
+- Gate claims-of-absence: proven on one replayed incident; watch the first week of real drafts for false positives (a sentence about what an opened document omits must NOT be flagged — regression test exists).
 - "Live" claims can only be made by the local session after promote + served-bytes check.
 
 ## Operating gotchas (see handoff §3 for detail)
