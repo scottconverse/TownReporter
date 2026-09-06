@@ -493,19 +493,28 @@ test("scan includes Tier C and never prunes snapshot history", () => {
   assert.doesNotMatch(desk, /offset 8/);
 });
 
-test("Dark Desk digs, does not auto-publish, does not cap confidence", () => {
+// Updated 2026-09-06: this test used to assert "does not cap confidence" and
+// pinned `Math.min(1,` in the stage-1 insert, which pinned the drift itself.
+// The owner's original Black Desk prompt is explicit — "Confidence range for
+// all signals: 0.1-0.5 (Low). By design. This is the feature." — so stage 1 is
+// capped in code (capSpeculativeConfidence) and stage 2 (dark-verify.ts) is
+// where a higher number can be earned. Everything else here is unchanged.
+test("Dark Desk digs, does not auto-publish, and caps stage-1 confidence at 0.5", () => {
   const dark = readFileSync(join(ROOT, "src/lib/news/dark.ts"), "utf8");
+  const gates = readFileSync(join(ROOT, "src/lib/news/dark-gates.ts"), "utf8");
   const desk = readFileSync(join(ROOT, "src/lib/news/desk.ts"), "utf8");
   const prompt = readFileSync(join(ROOT, "src/lib/news/dark-prompt.ts"), "utf8");
   assert.match(dark, /researchLoop/);
   assert.match(dark, /continueInvestigation/);
-  assert.match(dark, /Math\.min\(1,/);
-  assert.doesNotMatch(dark, /Math\.min\(0\.5,/);
+  assert.match(dark, /capSpeculativeConfidence/);
+  assert.match(gates, /BLACK_DESK_CONFIDENCE_CAP = 0\.5/);
   assert.doesNotMatch(dark, /insert into articles/);
   assert.doesNotMatch(dark, /update leads set status = 'published'/);
   assert.match(desk, /Held and killed leads cannot print|Un-hold this lead before publishing/);
   assert.doesNotMatch(desk, /Dark desk items cannot print/);
-  assert.doesNotMatch(prompt, /CAPPED AT 0\.5/);
+  // The cap caps a NUMBER, never the digging: the non-gating rule stays in the
+  // prompt and an unverified signal keeps its file and its frontier open.
+  assert.match(prompt, /NON-GATING RULE/);
   assert.match(prompt, /Search broadly/);
 });
 

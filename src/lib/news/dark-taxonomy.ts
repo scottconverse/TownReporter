@@ -1,8 +1,8 @@
 /**
  * What the dark desk is looking for, named.
  *
- * The five original postures cover the shape of an investigation — absence,
- * repetition, money, coordination, connection. What they do not cover is the
+ * The three original postures cover the shape of an investigation — absence,
+ * repetition, money. What they do not cover is the
  * shape of *municipal* concealment, which has its own vocabulary: a board that
  * quietly stops meeting, a utility easement at a city edge that precedes an
  * annexation nobody has proposed, a pilot that was never going to end.
@@ -14,7 +14,7 @@
  * The nerve gates are low on purpose. An earlier version locked the sharpest
  * lenses — manufactured chorus, pre-agenda lock-in — behind nerve 6, which
  * confused a lens with an accusation. Looking for astroturf is not alleging it;
- * RULE 1 and RULE 3 are what stop the desk asserting it, and they never move.
+ * RULE 1 and RULE 2 are what stop the desk asserting it, and they never move.
  */
 export type SignalType = {
   id: string;

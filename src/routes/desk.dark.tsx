@@ -324,8 +324,18 @@ function DarkPage() {
     },
   });
 
+  /*
+    "Send unverified, as a tip."
+
+    The four gates decide whether a signal may be called verified; they do not
+    decide what the editor is allowed to do. An editor who wants a speculative
+    file on the queue anyway can say so, and the lead then carries the words
+    "sent unverified" in its own notes rather than pretending.
+  */
+  const [sendUnverified, setSendUnverified] = useState(false);
+
   const toQueue = useMutation({
-    mutationFn: (id: number) => queueInvestigation({ data: id }),
+    mutationFn: (id: number) => queueInvestigation({ data: { id, asTip: sendUnverified } }),
     onMutate: (id) => {
       // Clear any stale error/confirmation from a previous attempt on this
       // file so a retry does not show two contradictory banners at once.
@@ -627,6 +637,8 @@ function DarkPage() {
           queuedAlready={queued?.invId === openId ? queued.alreadyQueued : false}
           queuePending={toQueue.isPending}
           queueError={queueError?.invId === openId ? queueError.message : null}
+          sendUnverified={sendUnverified}
+          onSendUnverified={setSendUnverified}
           followPending={followLead.isPending}
           parkPending={park.isPending}
           onKeepDigging={() => {
@@ -1060,6 +1072,8 @@ function InvestigationWorkspace({
   queuedAlready,
   queuePending,
   queueError,
+  sendUnverified,
+  onSendUnverified,
   followPending,
   parkPending,
   onKeepDigging,
@@ -1085,6 +1099,8 @@ function InvestigationWorkspace({
   queuedAlready: boolean;
   queuePending: boolean;
   queueError: string | null;
+  sendUnverified: boolean;
+  onSendUnverified: (v: boolean) => void;
   followPending: boolean;
   parkPending: boolean;
   onKeepDigging: () => void;
@@ -1138,6 +1154,20 @@ function InvestigationWorkspace({
   const entities = detail?.entities ?? [];
   const signals = detail?.signals ?? [];
   const brief = detail?.brief ?? null;
+  /*
+    The two stages, said out loud.
+
+    A file whose signals are all still stage 1 has not been checked against an
+    opposing account, and the queue button says so in words rather than just
+    going grey. Ticking "send unverified, as a tip" un-blocks it — the gate
+    decides what may be CALLED verified, never what the editor may do.
+  */
+  const verifiedSignals = signals.filter((s) => s.verification_status === "verified");
+  const queueBlocked = signals.length > 0 && verifiedSignals.length === 0 && !sendUnverified;
+  const queueBlockedReason =
+    signals.length === 1
+      ? "The one signal on this file is still speculative — the desk has not shown that it tried to disprove it, so it cannot go to the queue as a finding."
+      : `None of the ${signals.length} signals on this file have been through the four gates yet — the desk has not shown that it tried to disprove them, so they cannot go to the queue as findings.`;
   const facts = claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind));
   const questions = openQuestionsFrom(detail);
   // Grade each "On the record" line by whether it ties to a captured
@@ -1246,7 +1276,11 @@ function InvestigationWorkspace({
               {queuedAlready ? "✓ Already on the queue · Open →" : "✓ On the queue · Open →"}
             </Link>
           ) : (
-            <InkButton tone="ghost" disabled={keepDisabled || queuePending} onClick={onQueue}>
+            <InkButton
+              tone="ghost"
+              disabled={keepDisabled || queuePending || queueBlocked}
+              onClick={onQueue}
+            >
               {queuePending ? "Sending…" : "Send to the queue"}
             </InkButton>
           )}
@@ -1295,6 +1329,22 @@ function InvestigationWorkspace({
           </Notice>
         ) : null
       }
+      {signals.length > 0 && queuedLead == null ? (
+        <p className="of-stop" role="status">
+          <b>{queueBlocked ? "Not ready for the queue:" : "Ready for the queue:"}</b>{" "}
+          {queueBlocked
+            ? queueBlockedReason
+            : `${verifiedSignals.length} of ${signals.length} signal${signals.length === 1 ? "" : "s"} on this file passed all four gates.`}{" "}
+          <label className="tip-toggle">
+            <input
+              type="checkbox"
+              checked={sendUnverified}
+              onChange={(e) => onSendUnverified(e.currentTarget.checked)}
+            />{" "}
+            Send unverified, as a tip
+          </label>
+        </p>
+      ) : null}
       {pending ? <p className="meta">Getting this ready…</p> : null}
       {started ? <p className="of-started">{started}</p> : null}
       {inv?.status === "paused" && pauseText && !digging ? (
@@ -1430,12 +1480,47 @@ function InvestigationWorkspace({
               ))}
             </div>
           ) : null}
+          {signals.length > 0 ? (
+            <div className="of-block">
+              <SecHead
+                title="Signals"
+                count={signals.length}
+                sub="Stage one asks the question. Stage two runs the adversarial searches and answers the four gates. Only a signal that passed all four is called verified."
+              />
+              {signals.map((s) => (
+                <div key={s.id} className="side-item sig-card">
+                  <p>
+                    <b>{s.name}</b> <span className="chip">{s.stageChip}</span>
+                  </p>
+                  <p className="meta">{s.stageSentence}</p>
+                  {s.newsworthiness ? <p className="meta">{s.newsworthiness}</p> : null}
+                  {s.adversarial.length > 0 ? (
+                    <details className="of-trail">
+                      <summary>
+                        Searches this round — {s.adversarial.length} run against this signal
+                      </summary>
+                      {s.adversarial.map((a, i) => (
+                        <p key={i} className="side-item">
+                          “{a.query}” · {a.tier} · {a.outcome}
+                        </p>
+                      ))}
+                    </details>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
           <details className="of-trail">
-            <summary>Research trail — {searches.length} searches</summary>
+            <summary>Searches this round — {searches.length}</summary>
             {searches.length ? (
               searches.map((s, i) => (
                 <p key={`${s.hop}-${i}`} className="side-item">
-                  “{s.query}”
+                  “{s.query}” · {s.tier || "unrecorded tier"} ·{" "}
+                  {s.state === "SEARCH_SUCCESS_RESULTS"
+                    ? "results"
+                    : s.state === "SEARCH_SUCCESS_ZERO_RESULTS"
+                      ? "no results found"
+                      : s.state || "outcome not recorded"}
                 </p>
               ))
             ) : (

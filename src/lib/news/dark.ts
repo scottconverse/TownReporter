@@ -17,6 +17,17 @@ import { planAutomaticFailover, failoverReasonPhrase } from "./automatic-failove
 import { readProviderOverrides } from "./provider-settings.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { darkSystemFor } from "./dark-prompt.ts";
+import {
+  GATE_KEYS,
+  GATE_WORDS,
+  capSpeculativeConfidence,
+  newsworthinessWords,
+  normalizePosture,
+  readNewsworthiness,
+  stageWords,
+  type Place,
+} from "./dark-gates.ts";
+import { verifyRunSignals } from "./dark-verify.ts";
 import { isSelfReferential } from "./claim-hygiene.ts";
 import { assertRate, audit } from "./ops.ts";
 import {
@@ -32,6 +43,8 @@ import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
 import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
 import { titlesOverlap, topicFromText } from "./desk-copy.ts";
+import { officialDomains } from "./absence-gate.ts";
+import { getPaperConfig } from "./paper-settings.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { TIP_SUBREDDIT, TIP_SUBREDDIT_QUERY_GROUPS } from "../paper.ts";
 import {
@@ -131,6 +144,14 @@ export type DarkSignalRow = {
   privacy_review: string;
   handoff: string;
   created_at: string;
+  /** 'black-desk' (stage 1, speculative) or 'dark-signal-desk' (stage 2 ran). */
+  stage?: string | null;
+  /** 'unverified' until all four gates are answered. Never assumed. */
+  verification_status?: string | null;
+  gates_missing?: string | null;
+  adversarial_json?: string | null;
+  newsworthiness_json?: string | null;
+  newsworthiness_decision?: string | null;
 };
 
 export type DarkRunRow = {
@@ -313,6 +334,27 @@ const DARK_SCHEMA_STATEMENTS: readonly string[] = [
     )`,
   `create index if not exists dark_promises_user_idx on dark_promises (user_id, created_at desc)`,
   `alter table dark_promises add column if not exists newsroom_id integer not null default 1`,
+  /*
+    The two stages, and the four gates between them. Mirrors
+    migrations/0043_dark_gates.sql. A signal is filed by the Black Desk
+    (stage 1, speculative, confidence capped at 0.5) and stays
+    `verification_status = 'unverified'` until the Dark Signal Desk has run
+    the adversarial searches and the model has answered all four gates.
+  */
+  `alter table dark_signals add column if not exists stage text not null default 'black-desk'`,
+  `alter table dark_signals add column if not exists verification_status text not null default 'unverified'`,
+  `alter table dark_signals add column if not exists gate_disproof text`,
+  `alter table dark_signals add column if not exists gate_source_independence text`,
+  `alter table dark_signals add column if not exists gate_missing_context text`,
+  `alter table dark_signals add column if not exists gate_self_referential boolean`,
+  `alter table dark_signals add column if not exists gates_missing text`,
+  `alter table dark_signals add column if not exists adversarial_json text`,
+  `alter table dark_signals add column if not exists newsworthiness_json text`,
+  `alter table dark_signals add column if not exists newsworthiness_decision text`,
+  `alter table dark_signals add column if not exists verified_at timestamptz`,
+  `alter table dark_runs add column if not exists searches_json text`,
+  `alter table dark_runs add column if not exists stage text`,
+  `alter table dark_settings add column if not exists county text`,
 ];
 
 export async function ensureDarkSchema() {
@@ -612,22 +654,59 @@ export const getInvestigation = createServerFn({ method: "GET" })
       state: string | null;
       provider: string | null;
       generated_json: string | null;
+      tier: string | null;
+      strategy: string | null;
     }>`
-      select hop, query, state, provider, generated_json from search_log
+      select hop, query, state, provider, generated_json, tier, strategy from search_log
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 40
     `;
-    const signals = await sql<{
+    const signalRows = await sql<{
       id: number;
       name: string;
       observation: string;
       handoff: string;
       strength: number;
+      confidence: number;
+      posture: string;
+      stage: string | null;
+      verification_status: string | null;
+      gates_missing: string | null;
+      adversarial_json: string | null;
+      newsworthiness_json: string | null;
+      newsworthiness_decision: string | null;
     }>`
-      select id, name, observation, handoff, strength from dark_signals
+      select id, name, observation, handoff, strength, confidence, posture,
+             stage, verification_status, gates_missing, adversarial_json,
+             newsworthiness_json, newsworthiness_decision
+      from dark_signals
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 12
     `.catch(() => []);
+    /*
+      The stage is spelled out in words on the way to the page, not left as a
+      column name for the UI to interpret. Every state an editor can hit gets
+      a sentence: "Black Desk · speculative, ≤50%", "Verified · four gates",
+      or "Unverified · gates missing: ...".
+    */
+    const signals = signalRows.map((s) => {
+      const words = stageWords(s);
+      let adversarial: { query: string; tier: string; outcome: string; url: string | null }[] = [];
+      try {
+        adversarial = s.adversarial_json ? JSON.parse(s.adversarial_json) : [];
+      } catch {
+        adversarial = [];
+      }
+      let newsworthiness: string | null = null;
+      try {
+        newsworthiness = s.newsworthiness_json
+          ? newsworthinessWords(readNewsworthiness(JSON.parse(s.newsworthiness_json)))
+          : null;
+      } catch {
+        newsworthiness = null;
+      }
+      return { ...s, stageChip: words.chip, stageSentence: words.sentence, adversarial, newsworthiness };
+    });
     const briefRow = await sql<{ brief_json: string }>`
       select brief_json from investigation_briefs where investigation_id = ${id} limit 1
     `.catch(() => []);
@@ -842,17 +921,27 @@ async function synthesizeSignals(
     if (!name) continue;
     if (isPoisonedSignal(sig)) continue;
     const strength = Math.min(15, Math.max(3, Number(sig.strength) || 3));
-    const confidence = Math.min(1, Math.max(0, Number(sig.confidence) || 0.3));
+    /*
+      Stage 1 is the Black Desk, and the Black Desk is capped.
+
+      "Confidence range for all signals: 0.1-0.5 (Low). By design. This is the
+      feature." (the operator's 03-black-desk.md). The prompt says so too, but
+      a prompt is a request and this is a rule -- a speculative pass that files
+      at 0.85 has quietly become a verification pass that never verified
+      anything. Stage 2 (dark-verify.ts) is where a higher number can be
+      earned.
+    */
+    const confidence = capSpeculativeConfidence(sig.confidence);
     let handoff = String(sig.handoff ?? "HOLD FOR PATTERN").toUpperCase();
     if (!HANDOFFS.has(handoff)) handoff = "HOLD FOR PATTERN";
     await sql`
       insert into dark_signals (
         user_id, newsroom_id, run_id, investigation_id, name, posture, signal_type, strength, confidence,
         observation, pattern, linkage_map, alternatives, counter_narrative,
-        what_would_kill, pathway, privacy_review, handoff
+        what_would_kill, pathway, privacy_review, handoff, stage, verification_status, gates_missing
       ) values (
         ${userId}, ${newsroomId}, ${runId}, ${investigationId}, ${name.slice(0, 200)},
-        ${String(sig.posture ?? "").slice(0, 80)},
+        ${normalizePosture(sig.posture)},
         ${String(sig.type ?? "").slice(0, 80)},
         ${strength}, ${confidence},
         ${String(sig.observation ?? "").slice(0, 4000)},
@@ -863,7 +952,10 @@ async function synthesizeSignals(
         ${String(sig.what_would_kill ?? "").slice(0, 2000)},
         ${String(sig.pathway ?? "").slice(0, 2000)},
         ${String(sig.privacy_review ?? "").slice(0, 500)},
-        ${handoff}
+        ${handoff},
+        ${"black-desk"},
+        ${"unverified"},
+        ${GATE_KEYS.map((k) => GATE_WORDS[k]).join("; ")}
       )
     `;
     stored += 1;
@@ -885,6 +977,91 @@ async function synthesizeSignals(
   }
 
   return { stored, summary: header, error: undefined as string | undefined };
+}
+
+/**
+ * Where this desk is searching, and whose records count as official.
+ *
+ * The Dark Signal Desk's searches are location-scoped by default — the
+ * operator's civic-scanner passes a `user_location` on every search for
+ * exactly this reason, and an unscoped query comes back with a national
+ * explainer instead of a clue. The county sits next to the city because
+ * that is where half the records actually live (assessor, clerk, court).
+ */
+export async function readDarkPlace(newsroomId: number): Promise<{
+  place: Place;
+  official: string[];
+  press: string[];
+}> {
+  const sql = await getSql();
+  const cfg = await getPaperConfig(newsroomId).catch(() => null);
+  const county = await sql<{ county: string | null }>`
+    select county from dark_settings where newsroom_id = ${newsroomId} limit 1
+  `.catch(() => [] as { county: string | null }[]);
+  const srcs = await sql<{ url: string; tier: string | null }>`
+    select url, tier from sources where newsroom_id = ${newsroomId} order by id asc limit 60
+  `.catch(() => [] as { url: string; tier: string | null }[]);
+  const city = cfg?.city || "Longmont";
+  const official = officialDomains(
+    city,
+    srcs.map((s) => s.url),
+    srcs.filter((s) => (s.tier ?? "").toUpperCase() === "A").map((s) => s.url),
+  );
+  const press: string[] = [];
+  for (const s of srcs) {
+    if ((s.tier ?? "").toUpperCase() !== "B") continue;
+    try {
+      const host = new URL(s.url).hostname.replace(/^www\./i, "").toLowerCase();
+      if (!press.includes(host)) press.push(host);
+    } catch {
+      /* an unparseable watch-list URL is not a press domain */
+    }
+  }
+  return {
+    place: {
+      city,
+      state: cfg?.state || "Colorado",
+      county: county[0]?.county?.trim() || null,
+    },
+    official,
+    press,
+  };
+}
+
+/**
+ * Stage 2, run for real, from both places a round can start.
+ *
+ * Swallows its own failure on purpose: a provider that will not answer must
+ * leave the round's signals honestly unverified — which is the correct and
+ * visible outcome — rather than failing a dig that did find things.
+ */
+async function runVerificationStage(
+  userId: string,
+  newsroomId: number,
+  runId: number,
+  investigationId: number,
+  choice?: EffectiveProviderChoice,
+  overrides?: ProviderOverrides | null,
+): Promise<string> {
+  try {
+    const { place, official, press } = await readDarkPlace(newsroomId);
+    const out = await verifyRunSignals({
+      userId,
+      newsroomId,
+      runId,
+      investigationId,
+      place,
+      officialDomains: official,
+      pressDomains: press,
+      choice,
+      overrides,
+    });
+    return out.summary;
+  } catch (err) {
+    return `Verification could not run this round (${
+      err instanceof Error ? err.message : "unknown"
+    }). Every signal from this round stays unverified.`;
+  }
 }
 
 function asDarkError(err: unknown): string {
@@ -957,6 +1134,10 @@ async function executeDarkRun(
     // expects the file they open next to dig that hard too.
     const dials = await readDarkDials(DEFAULT_NEWSROOM_ID);
     const budget = budgetFor(dials);
+    // Location scoping and domain tiers come from the paper's own settings,
+    // so the loop's searches name this town and the run record can say which
+    // tier answered.
+    const where = await readDarkPlace(newsroomId).catch(() => null);
     const loop = await researchLoop({
       userId,
       investigationId,
@@ -964,6 +1145,9 @@ async function executeDarkRun(
       choice,
       providerOverrides: overrides,
       newsroomId,
+      place: where?.place,
+      officialDomains: where?.official,
+      pressDomains: where?.press,
     });
 
     const synth = await synthesizeSignals(
@@ -975,6 +1159,19 @@ async function executeDarkRun(
       choice,
       overrides,
       newsroomId,
+    );
+    /*
+      Stage 2. Nothing this round filed may be shown as finalized until the
+      Dark Signal Desk has run the adversarial searches and the model has
+      answered all four gates.
+    */
+    const verifySummary = await runVerificationStage(
+      userId,
+      newsroomId,
+      runId,
+      investigationId,
+      choice,
+      overrides,
     );
     await rememberLastModelChoice(investigationId, choice);
     const names = (
@@ -991,6 +1188,7 @@ async function executeDarkRun(
     const header = [
       loop.summary,
       synth.summary,
+      verifySummary,
       `Hops ${loop.hops} of ${budget.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
       `Setting: dig ${dials.dig}/10, nerve ${dials.nerve}/10 (${stanceFor(dials).label}), scope ${dials.scope}.`,
       revived.length
@@ -1297,6 +1495,7 @@ export async function performDarkRound(job: DeskJob) {
     */
     const dials = await readDarkDials(owned(context));
     const budget = budgetFor(dials);
+    const where = await readDarkPlace(owned(context)).catch(() => null);
     const runOnce = async (on: EffectiveProviderChoice) => {
       const ran = await researchLoop({
         userId: context.userId,
@@ -1305,6 +1504,9 @@ export async function performDarkRound(job: DeskJob) {
         choice: on,
         providerOverrides: overrides,
         newsroomId: owned(context),
+        place: where?.place,
+        officialDomains: where?.official,
+        pressDomains: where?.press,
       });
       const signals = await synthesizeSignals(
         context.userId,
@@ -1346,6 +1548,15 @@ export async function performDarkRound(job: DeskJob) {
         ({ loop, synth } = await runOnce(choice));
       }
     }
+    // Stage 2, on the "Keep digging" path too.
+    const verifySummary = await runVerificationStage(
+      context.userId,
+      owned(context),
+      runId,
+      id,
+      choice,
+      overrides,
+    );
     await rememberLastModelChoice(id, choice);
     const names = (
       await sql<{ name: string }>`
@@ -1360,6 +1571,7 @@ export async function performDarkRound(job: DeskJob) {
     const header = [
       loop.summary,
       synth.summary,
+      verifySummary,
       `Hops ${loop.hops} of ${budget.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
       `Setting: dig ${dials.dig}/10, nerve ${dials.nerve}/10 (${stanceFor(dials).label}), scope ${dials.scope}.`,
       revived.length
@@ -1408,62 +1620,125 @@ export async function performDarkRound(job: DeskJob) {
   }
 }
 
+/**
+ * Send ONE signal to the working queue as a story lead.
+ *
+ * Two gates stand in front of this, both from the operator's originals, and
+ * both answerable in words on screen:
+ *
+ * 1. The four adversarial gates. "A signal moves from open collection to
+ *    closed escalation ONLY after all 4 gates of the Adversarial
+ *    Verification Protocol are completed with documented results."
+ *    An editor may still push an unverified signal through — deliberately,
+ *    with `asTip` — and the lead then says so in its own notes.
+ * 2. The newsworthiness gate. A no to all three questions (does anyone's
+ *    life change, is it new, is there a record) keeps it in the file as a
+ *    watch item rather than a lead.
+ *
+ * Plain function so both gates can be proved without deskMiddleware, the same
+ * pattern `queueInvestigationFor` already uses in this file.
+ */
+export async function sendDarkSignalToQueueFor(
+  userId: string,
+  newsroomId: number,
+  id: number,
+  opts: { asTip?: boolean } = {},
+): Promise<
+  | { ok: true; leadId: number; asTip: boolean }
+  | { ok: false; error: string; blocked?: "unverified" | "watch" }
+> {
+  await ensureDarkSchema();
+  const sql = await getSql();
+  const rows = await sql<DarkSignalRow>`
+    select id, run_id, investigation_id, name, posture, signal_type, strength, confidence,
+      observation, pattern, linkage_map, alternatives, counter_narrative,
+      what_would_kill, pathway, privacy_review, handoff, created_at,
+      stage, verification_status, gates_missing, newsworthiness_json, newsworthiness_decision
+    from dark_signals where id = ${id} and newsroom_id = ${newsroomId} limit 1
+  `;
+  const sig = rows[0];
+  if (!sig) return { ok: false as const, error: "Signal not found" };
+
+  const verified = sig.verification_status === "verified";
+  const words = stageWords(sig);
+  if (!verified && !opts.asTip) {
+    return {
+      ok: false as const,
+      blocked: "unverified" as const,
+      error: `${words.sentence} Tick "send unverified, as a tip" if you want it on the queue anyway.`,
+    };
+  }
+
+  let news: ReturnType<typeof readNewsworthiness> = null;
+  try {
+    news = sig.newsworthiness_json ? readNewsworthiness(JSON.parse(sig.newsworthiness_json)) : null;
+  } catch {
+    news = null;
+  }
+  if (verified && !opts.asTip && sig.newsworthiness_decision === "watch") {
+    return {
+      ok: false as const,
+      blocked: "watch" as const,
+      error: `Kept in the file as a watch item, not a lead. ${newsworthinessWords(news)} Nobody's life changes, it is not new, and there is no record to point at — send it as a tip if you disagree.`,
+    };
+  }
+
+  const arts = sig.investigation_id
+    ? await sql<{ url: string }>`
+        select url from artifacts
+        where newsroom_id = ${newsroomId} and investigation_id = ${sig.investigation_id}
+        order by id desc limit 12
+      `
+    : await sql<{ url: string }>`
+        select url from artifacts
+        where newsroom_id = ${newsroomId}
+        order by id desc limit 12
+      `;
+  const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
+  const why = [
+    `DARK DESK investigation notes. Claim kinds in the evidence. Publication is a separate human action.`,
+    `Posture: ${sig.posture}. Type: ${sig.signal_type}. Strength ${sig.strength} / confidence ${sig.confidence}.`,
+    `Stage: ${words.chip}. ${words.sentence}`,
+    `Newsworthiness gate: ${newsworthinessWords(news)}`,
+    verified ? "" : "Sent unverified, at the editor's direction. Treat it as a tip, not a finding.",
+    sig.observation,
+    `Linkage: ${sig.linkage_map}`,
+    `Alternatives: ${sig.alternatives}`,
+    `Pathway: ${sig.pathway}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, 4000);
+  const created = await sql<{ id: number }>`
+    insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
+    values (
+      ${userId},
+      ${newsroomId},
+      ${sig.name.slice(0, 240)},
+      ${why},
+      'council',
+      'new',
+      ${urls},
+      ${sig.observation.slice(0, 4000)},
+      ${Math.min(20, sig.strength)},
+      ${sig.investigation_id}
+    )
+    returning id
+  `;
+  await audit(userId, "dark-handoff", String(id), newsroomId);
+  return { ok: true as const, leadId: created[0]!.id, asTip: !verified };
+}
+
 export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
-  .handler(async ({ context, data: id }) => {
-    await ensureDarkSchema();
-    const sql = await getSql();
-    const rows = await sql<DarkSignalRow>`
-      select id, run_id, investigation_id, name, posture, signal_type, strength, confidence,
-        observation, pattern, linkage_map, alternatives, counter_narrative,
-        what_would_kill, pathway, privacy_review, handoff, created_at
-      from dark_signals where id = ${id} and newsroom_id = ${owned(context)} limit 1
-    `;
-    const sig = rows[0];
-    if (!sig) return { ok: false as const, error: "Signal not found" };
-    const arts = sig.investigation_id
-      ? await sql<{ url: string }>`
-          select url from artifacts
-          where newsroom_id = ${owned(context)} and investigation_id = ${sig.investigation_id}
-          order by id desc limit 12
-        `
-      : await sql<{ url: string }>`
-          select url from artifacts
-          where newsroom_id = ${owned(context)}
-          order by id desc limit 12
-        `;
-    const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
-    const why = [
-      `DARK DESK investigation notes. Claim kinds in the evidence. Publication is a separate human action.`,
-      `Posture: ${sig.posture}. Type: ${sig.signal_type}. Strength ${sig.strength} / confidence ${sig.confidence}.`,
-      sig.observation,
-      `Linkage: ${sig.linkage_map}`,
-      `Alternatives: ${sig.alternatives}`,
-      `Pathway: ${sig.pathway}`,
-    ]
-      .filter(Boolean)
-      .join("\n\n")
-      .slice(0, 4000);
-    const created = await sql<{ id: number }>`
-      insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
-      values (
-        ${context.userId},
-        ${owned(context)},
-        ${sig.name.slice(0, 240)},
-        ${why},
-        'council',
-        'new',
-        ${urls},
-        ${sig.observation.slice(0, 4000)},
-        ${Math.min(20, sig.strength)},
-        ${sig.investigation_id}
-      )
-      returning id
-    `;
-    await audit(context.userId, "dark-handoff", String(id), owned(context));
-    return { ok: true as const, leadId: created[0]!.id };
-  });
+  .validator((input: number | { id: number; asTip?: boolean }) =>
+    typeof input === "number" ? { id: input } : input,
+  )
+  .handler(async ({ context, data }) =>
+    sendDarkSignalToQueueFor(context.userId, owned(context), data.id, {
+      asTip: data.asTip === true,
+    }),
+  );
 
 /**
  * Create-or-find the story lead for an investigation.
@@ -1474,7 +1749,12 @@ export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
  * `deskMiddleware`'s request-and-bearer-token plumbing — see `assertOwner`
  * above for the same reasoning.
  */
-export async function queueInvestigationFor(userId: string, newsroomId: number, id: number) {
+export async function queueInvestigationFor(
+  userId: string,
+  newsroomId: number,
+  id: number,
+  opts: { asTip?: boolean } = {},
+) {
   await ensureDarkSchema();
   const sql = await getSql();
   const inv = await sql<InvestigationRow>`
@@ -1483,6 +1763,35 @@ export async function queueInvestigationFor(userId: string, newsroomId: number, 
     from investigations where id = ${id} and newsroom_id = ${newsroomId} limit 1
   `;
   if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
+  /*
+    The verification gate, at the file level.
+
+    A file that has filed signals may not become a story lead while every one
+    of those signals is still speculative -- that is the escalation boundary
+    the original draws ("A signal moves from open collection to closed
+    escalation ONLY after all 4 gates ... are completed with documented
+    results"). A file with NO signals is untouched by this: there is nothing
+    to verify, so there is nothing to gate, and the editor's own reading of
+    the captured records is the lead.
+  */
+  const gate = await sql<{ total: number; verified: number }>`
+    select count(*)::int as total,
+           count(*) filter (where verification_status = 'verified')::int as verified
+    from dark_signals
+    where investigation_id = ${id} and newsroom_id = ${newsroomId}
+  `.catch(() => [] as { total: number; verified: number }[]);
+  const total = Number(gate[0]?.total ?? 0);
+  const verifiedCount = Number(gate[0]?.verified ?? 0);
+  if (total > 0 && verifiedCount === 0 && !opts.asTip) {
+    return {
+      ok: false as const,
+      blocked: "unverified" as const,
+      error:
+        total === 1
+          ? "The one signal on this file has not passed the four gates yet — the desk has not shown that it tried to disprove it. Tick \"send unverified, as a tip\" to put it on the queue anyway."
+          : `None of the ${total} signals on this file have passed the four gates yet — the desk has not shown that it tried to disprove them. Tick "send unverified, as a tip" to put the file on the queue anyway.`,
+    };
+  }
   const already = await sql<{ id: number }>`
     select id from leads
     where investigation_id = ${id} and newsroom_id = ${newsroomId}
@@ -1521,9 +1830,13 @@ export async function queueInvestigationFor(userId: string, newsroomId: number, 
 
 export const queueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
-  .handler(async ({ context, data: id }) =>
-    queueInvestigationFor(context.userId, owned(context), id),
+  .validator((input: number | { id: number; asTip?: boolean }) =>
+    typeof input === "number" ? { id: input } : input,
+  )
+  .handler(async ({ context, data }) =>
+    queueInvestigationFor(context.userId, owned(context), data.id, {
+      asTip: data.asTip === true,
+    }),
   );
 
 export const parkInvestigation = createServerFn({ method: "POST" })

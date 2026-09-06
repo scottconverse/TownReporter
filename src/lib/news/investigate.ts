@@ -12,6 +12,12 @@ import { isSelfReferential, labelAfterCitationCheck } from "./claim-hygiene.ts";
 import { readableCapture } from "./html-text.ts";
 import { DARK_PLANNER } from "./dark-prompt.ts";
 import {
+  enforceSearchMinimums,
+  tierForQuery,
+  tierForUrl,
+  type Place,
+} from "./dark-gates.ts";
+import {
   classifyClaimKind,
   detectMissingCadence,
   detectPatternAnomalies,
@@ -409,6 +415,10 @@ alter table search_log add column if not exists selected_json text;
 alter table search_log add column if not exists fetched_json text;
 alter table search_log add column if not exists generated_json text;
 alter table search_log add column if not exists query_fingerprint text;
+-- Which source tier answered: official / local-press / community. The
+-- operator's civic-scanner orders them that way and the desk has to be able
+-- to say which one actually came back (migrations/0043_dark_gates.sql).
+alter table search_log add column if not exists tier text;
 alter table recurring_baselines add column if not exists sightings integer;
 alter table recurring_baselines add column if not exists usual_weekday text;
 alter table recurring_baselines add column if not exists usual_nth_weekday text;
@@ -1854,6 +1864,16 @@ export async function researchLoop(opts: {
    * FINDING-001).
    */
   newsroomId?: number;
+  /**
+   * Where the searching is scoped to. Every query this loop runs names the
+   * place — the operator's civic-scanner passes a location on every search,
+   * and an unscoped query comes back with a national explainer rather than a
+   * clue about this town.
+   */
+  place?: Place;
+  /** The paper's own official domains, so the loop can record which tier answered. */
+  officialDomains?: string[];
+  pressDomains?: string[];
 }): Promise<{
   hops: number;
   artifacts: number;
@@ -1864,6 +1884,9 @@ export async function researchLoop(opts: {
 }> {
   const sql = await getSql();
   const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
+  const place: Place = opts.place ?? { city: "Longmont", state: "Colorado" };
+  const officialDomainList = opts.officialDomains ?? [];
+  const pressDomainList = opts.pressDomains ?? [];
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
   const fetchDoc = opts.fetch ?? defaultFetch;
   const planner = opts.planner;
@@ -2022,7 +2045,22 @@ export async function researchLoop(opts: {
         fill.push(q);
       }
     }
-    const queries = [...planned, ...fill].slice(0, SEARCHES_PER_HOP);
+    /*
+      Search minimums, enforced by the app rather than asked for in prose.
+
+      The operator's Dark Signal Desk requires at least three distinct query
+      variations per hypothesis before anything may be written down as "not
+      found", and every query location-scoped. The planner is told the same
+      thing; this is what happens when it does not comply. Planner queries
+      keep their place at the front -- the fill only ever adds what is
+      missing.
+    */
+    const withMinimums = enforceSearchMinimums(
+      planned,
+      plan.hypotheses.map((h) => h.text).filter(Boolean),
+      place,
+    ).filter((q) => !tried.has(queryFingerprint(q)));
+    const queries = [...withMinimums, ...fill].slice(0, SEARCHES_PER_HOP);
     const selectedThisHop: string[] = [];
     const fetchedThisHop: string[] = [];
     const thisHopEvidenceNames: string[] = [];
@@ -2041,17 +2079,27 @@ export async function researchLoop(opts: {
       const strategy = matchedFrontier
         ? strategyKeyForQuery(matchedFrontier.kind, matchedFrontier.label, q)
         : "adhoc";
+      /*
+        Which tier answered: the paper's own official record, local press, or
+        the community. Taken from the URL that actually came back where one
+        did, and from what the query was aiming at where nothing did — a
+        query nobody answered still says which kind of source was tried.
+      */
+      const tier = selected[0]
+        ? tierForUrl(selected[0], officialDomainList, pressDomainList)
+        : tierForQuery(q, officialDomainList);
       const logRows = await sql<{ id: number }>`
         insert into search_log (
           user_id, investigation_id, hop, query, results_json, provider, state, caused_by,
-          frontier_id, strategy, selected_json, query_fingerprint, research_question
+          frontier_id, strategy, selected_json, query_fingerprint, research_question, tier
         )
         values (
           ${opts.userId}, ${opts.investigationId}, ${hop + 1}, ${q.slice(0, 300)},
           ${JSON.stringify(attempt.hits).slice(0, 8000)},
           ${attempt.provider}, ${attempt.state}, ${plan.summary.slice(0, 200)},
           ${matchedFrontier?.id ?? null}, ${strategy},
-          ${JSON.stringify(selected).slice(0, 4000)}, ${fp}, ${plan.questions[0] ?? plan.summary.slice(0, 200)}
+          ${JSON.stringify(selected).slice(0, 4000)}, ${fp}, ${plan.questions[0] ?? plan.summary.slice(0, 200)},
+          ${tier}
         )
         returning id
       `;

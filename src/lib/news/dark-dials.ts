@@ -121,7 +121,7 @@ export function stanceFor(dials: DarkDials): DarkStance {
     was tighter than the original at nine notches out of ten. The operator
     caught each one: "you always go conservative and this is NOT the place."
 
-    He is right. The safety that matters lives in RULE 1–3 and in the fact that
+    He is right. The safety that matters lives in RULE 1–2 and in the fact that
     nothing here publishes — not in a confidence floor quietly deleting the
     weird thing before anyone sees it.
   */

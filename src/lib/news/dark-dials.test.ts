@@ -163,7 +163,7 @@ describe("taxonomy", () => {
    * A lens is not an accusation. An earlier version locked manufactured chorus
    * and pre-agenda lock-in behind nerve 6, which meant a desk set to 5 was not
    * even looking for the two things the operator most wanted found. RULE 1 and
-   * RULE 3 are what stop it asserting them, and those never move.
+   * RULE 2 are what stop it asserting them, and those never move.
    */
   it("lets the desk look for astroturf without waiting for the top of the dial", () => {
     const mid = signalTypesFor(3).map((t) => t.id);
@@ -189,9 +189,11 @@ describe("darkSystemFor", () => {
    */
   it("keeps every floor at maximum nerve", () => {
     const wild = darkSystemFor({ dig: 10, nerve: 10, scope: "adjacent" });
-    assert.match(wild, /RULE 1 — COORDINATION IS NOT WRONGDOING BY ITSELF/);
-    assert.match(wild, /RULE 2 — PRIVATE CITIZENS: NO DRIVE-BY DOSSIERS/);
-    assert.match(wild, /RULE 3 — ALLEGING PAID DECEPTION IS DEFAMATION-GRADE/);
+    // Updated 2026-09-06: the invented "Chorus that rhymes" posture is gone,
+    // and the RULE that existed only to constrain it went with it. Two floors
+    // remain, renumbered, and neither may be dialled away.
+    assert.match(wild, /RULE 1 — PRIVATE CITIZENS: NO DRIVE-BY DOSSIERS/);
+    assert.match(wild, /RULE 2 — ALLEGING PAID DECEPTION IS DEFAMATION-GRADE/);
     assert.match(wild, /NON-GATING RULE/);
     assert.match(wild, /nothing here publishes/i);
   });
@@ -199,7 +201,7 @@ describe("darkSystemFor", () => {
   it("still contains the whole constitution at minimum nerve", () => {
     const careful = darkSystemFor({ dig: 1, nerve: 1, scope: "city" });
     assert.ok(careful.startsWith(DARK_SYSTEM.slice(0, 60)));
-    assert.match(careful, /RULE 3/);
+    assert.match(careful, /RULE 2/);
   });
 
   it("tells the model which run it is on", () => {

@@ -1081,6 +1081,12 @@
 .desk-ltr .of-trail summary {font-size:calc(0.875rem * var(--ts));font-weight:600;cursor:pointer;color:var(--fg2)}
 .desk-ltr .of-trail.runs {margin-top:20px}
 .desk-ltr .run-row {margin-top:8px}
+/* The two Dark Desk stages, on the open file. Nothing here carries meaning by
+   styling alone -- the chip repeats a sentence that is already in words. */
+.desk-ltr .of-block {margin-top:18px}
+.desk-ltr .sig-card {padding:10px 12px;border:1px solid var(--line);background:var(--bg2);margin-top:10px}
+.desk-ltr .sig-card .chip {display:inline-block;font-size:calc(0.875rem * var(--ts));border:1px solid var(--line);padding:1px 7px;color:var(--fg2);white-space:nowrap}
+.desk-ltr .tip-toggle {display:inline-flex;align-items:center;gap:6px;font-size:calc(0.875rem * var(--ts));color:var(--fg2);cursor:pointer;white-space:nowrap}
 /* Check r/longmont: visible in-progress + result panel (owner report 2026-09-05). */
 .desk-ltr .reddit-progress,
 .desk-ltr .reddit-result {margin-top:14px;padding:12px 14px;border:1px solid var(--line);background:var(--bg2)}
