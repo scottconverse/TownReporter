@@ -45,6 +45,12 @@ The design audit verdict from 2026-09-05 (quoted): "Fable is better for this pap
 
 **Owner decisions still open:** section list; legal-removal retain policy; whether the old Dark Desk methods are adopted.
 
+### 2026-09-06 — 0.6.22 live; direction A complete
+
+**VERIFIED by the local session 2026-09-06.**
+
+0.6.22 (tag v0.6.22 at 2508cdc) shipped direction A stage 2, aligning the story page to the prototype: 380px lead column with a right sidebar (read story/drafting pane), a second column layout at viewports ≥1024px with single-column layout below, wrapped source URLs, and headline scaling with Large text. A plain local model row was added as a second display row. The release was staged on real data (26 stories intact), promoted successfully, and the served version now reads 0.6.22. Direction A is now complete for the two Command Center screens that the editor uses most; other tabs (Sources, Scan, Published, Opinion, Server, Stats) remain unchanged by design.
+
 ---
 
 ## 0. Your role & how to work

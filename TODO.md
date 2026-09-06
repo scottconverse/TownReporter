@@ -1,15 +1,15 @@
 # TownReporter — TODO (canonical, in-repo)
-_Kept current by whichever Claude session is working. Last updated: 2026-09-06 (0.6.22 bump). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
+_Kept current by whichever Claude session is working. Last updated: 2026-09-06 (0.6.22 live). Companion to `HANDOFF-SESSION-2026-09-04.md` (the full context) and `artifacts/dark-desk-review-2026-09-03/RECEIPTS-2026-09-04.md` (operator receipts)._
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked on the owner
 
 ---
 
 ## In flight
-- [~] **0.6.22** (direction A, stage 2) — bump done (this commit) → CI → stage → owner's go → promote. After it: direction A is complete for the Command Center and story page; other tabs unchanged by design.
+- (nothing in flight)
 
 ## Open queue (bug fixes first — owner chose to skip the redesign for now)
-- [ ] **Redesign build (direction A) — awaiting owner's go.** Auditor verdict 2026-09-05: use this repo's system; take from Codex only more air in the queue and a Follow-ups list on the rail. Scope: queue as lead column + Dark Desk/wire rail; airier queue rows; Follow-ups on the rail (who/what/due/overdue in words); real narrow-window layout; no sidebar/teal/tiles/banner. Reference: docs/design/DESIGN-AUDIT-BRIEF-2026-09-05.md, docs/design/WORKFLOWS-SPEC-2026-09-05.md, the design canvas (owner's artifact).
+- [ ] **Direction A follow-through** — owner's live verdict on the new desk; polish list from real use; the outside designer's audit (docs/design/DESIGN-AUDIT-BRIEF-2026-09-05.md) may add items. Other tabs (Sources, Scan, Published, Opinion, Server, Stats) keep their current pages under the new masthead by design.
 A. [x] **Interrupted-draft UI contradiction** — when the app restarts under a running draft, the story page shows "Drafting…" + "pulling the draft in" AND "stopped without finishing — click Draft again" at once. The job is actually reclaimed and re-run after 120s (STALE_RUNNING_SECONDS). Show ONE honest state: "App restarted mid-draft — recovering automatically (~2 min)"; don't show a disabled Drafting… button beside a click-again message. Done in b0c63a9.
 B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app under running desk_jobs. Add a guard: refuse (or wait/drain with a clear message) when a draft/dark job is running; and a startup sweep that marks orphaned running jobs so the UI resets cleanly. Operator rule: never promote while the editor is active without asking. Done in b0c63a9 (-WaitForJobs/-Force).
 2. [ ] **Manual "watch this page" for Dark Desk** — wire the existing `watchSource` to an editor button so an editor can put a page on the investigative monitor list by hand (today only the dig adds monitors). Do after #1. Must have clear UX feedback (owner rule).
@@ -41,6 +41,7 @@ B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app u
 - [x] Five desk rule defects (14px floor, Large scales headlines and reading panes, one button family + invert/--muted fixes, Kill styled as destructive, Held/aside chips) — auditor punch list 2026-09-05.
 - [x] 0.6.20 — LIVE 2026-09-06 (tag v0.6.20 at 2a25936): five desk rule defects from the design audit — 14px floor, Large text scales headlines/panes, one button family, destructive buttons look destructive, Held/set-aside chips; guard tests added.
 - [x] 0.6.21 — LIVE 2026-09-06 (tag v0.6.21 at 08eef0a): redesigned Command Center, direction A stage 1 — queue as lead column, Dark Desk / Follow-ups / wire rail, airier queue rows, Follow-ups object (migration 0042, /desk/follow-ups), narrow layout measured clean at six widths.
+- [x] 0.6.22 — LIVE 2026-09-06 (tag v0.6.22 at 2508cdc): direction A stage 2 — story page aligned to the prototype (380px lead column, one column below 1024, wrapped URLs, scaling headline), plain local model row. Direction A complete for the Command Center and story page.
 
 ## Known caveats (honest state)
 - Dark Desk is proven on ONE real staged topic (receipt); the Reddit leg was the weak spot (TR-001, now fixed pending release). Not a certification of every source type.
