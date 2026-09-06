@@ -1158,11 +1158,20 @@ export async function rememberCapture(opts: {
    * The caller's real newsroom (0.6.13). Threaded down to the `artifacts`
    * and `artifact_blobs` inserts below -- the two tables 0.6.11 claimed were
    * newsroom-scoped here but weren't (audit-lite 0.6.11, FINDING-001).
-   * `artifact_versions` and `capture_events` in this same function
-   * deliberately keep the `DEFAULT_NEWSROOM_ID` constant: they are not among
-   * the tables that release claimed fixed, and scoping them is out of scope
+   * 0.6.23 also threads it into `capture_events` (closing the TODO.md
+   * "Known caveats" line about `runDueMonitors`'s prior-capture lookup
+   * defaulting to newsroom 1: that lookup reads `capture_events`, so
+   * scoping the write is what makes scoping the read mean anything -- see
+   * `runDueMonitors` below). `artifact_versions` in this same function
+   * deliberately keeps the `DEFAULT_NEWSROOM_ID` constant: it is not among
+   * the tables that release claimed fixed, and scoping it is out of scope
    * for this change (see `scripts/newsroom-scoped-inserts.test.mjs`'s
-   * docstring for the acknowledged file-wide carve-out).
+   * docstring for the acknowledged file-wide carve-out). `capture_events`
+   * rows still join to `artifact_versions` by `version_id`, not by
+   * newsroom, so that carve-out doesn't undermine the fix here: the right
+   * version's `full_text` is found either way, because `version_id` on
+   * the capture event already points at the exact version created for
+   * that fetch.
    */
   newsroomId?: number;
 }): Promise<CaptureRecord> {
@@ -1263,7 +1272,7 @@ export async function rememberCapture(opts: {
       redirect_chain, version_id, disappearance, soft_404, trigger_kind, monitor_id,
       content_hash, content_type, extraction_method
     ) values (
-      ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${opts.investigationId}, ${url}, ${observed}::timestamptz,
+      ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${url}, ${observed}::timestamptz,
       ${opts.status}, ${opts.outcome}, ${JSON.stringify(opts.redirectChain ?? [])},
       ${versionId}, ${disappearance}, ${soft404}, ${opts.triggerKind ?? "investigation"},
       ${opts.monitorId ?? null}, ${versionHash}, ${opts.contentType ?? ""},
@@ -3228,13 +3237,19 @@ export async function runDueMonitors(opts: {
       select ce.content_hash, ce.http_status as fetch_status, av.full_text, ce.fetch_outcome
       from capture_events ce
       left join artifact_versions av on av.id = ce.version_id
-      -- capture_events/artifact_versions inserts are a separate, already
-      -- acknowledged out-of-scope gap (see rememberCapture's doc comment
-      -- above) and always write DEFAULT_NEWSROOM_ID regardless of the real
-      -- newsroom, so this lookup deliberately still keys off the default
-      -- to match where those rows actually land -- fixing this table is
-      -- not part of the source_monitors scoping this function closes.
-      where ce.newsroom_id = ${DEFAULT_NEWSROOM_ID} and ce.source_url = ${url}
+      -- 0.6.23: scoped to this monitor's own newsroom (closes the TODO.md
+      -- "Known caveats" line -- this lookup used to key off the hardcoded
+      -- DEFAULT_NEWSROOM_ID, so two newsrooms watching the same url would
+      -- compare against each other's captures instead of their own).
+      -- rememberCapture now writes the real newsroom onto capture_events,
+      -- so this filter actually isolates rows per newsroom instead of
+      -- just matching where they used to all land by accident.
+      -- artifact_versions (joined above for full_text) is still not
+      -- newsroom-scoped -- see rememberCapture's doc comment -- but that
+      -- doesn't matter here: ce.version_id already points at the exact
+      -- version row created for this fetch, so the join finds the right
+      -- text regardless of what newsroom_id sits on the version row.
+      where ce.newsroom_id = ${newsroomId} and ce.source_url = ${url}
       order by ce.id desc limit 1
     `;
     const got = asFetched(await fetchDoc(url), url);

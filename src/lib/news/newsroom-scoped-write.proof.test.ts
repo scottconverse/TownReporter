@@ -378,3 +378,147 @@ describe(
     });
   },
 );
+
+/**
+ * TODO.md "Known caveats" proof (0.6.23).
+ *
+ * `runDueMonitors`'s prior-capture lookup used to key off `DEFAULT_NEWSROOM_ID`
+ * no matter which newsroom's monitor it was ticking, because `rememberCapture`
+ * always wrote `capture_events.newsroom_id` as the hardcoded default too --
+ * so two newsrooms watching the same public url shared one prior-capture
+ * history. Newsroom 2's very first check of a url newsroom 1 already
+ * monitored would be compared against newsroom 1's last capture and get
+ * misclassified "changed" (or "unchanged") instead of "fetched" (first
+ * sighting) -- exactly the shape of "a change in paper 2 must not be judged
+ * against paper 1's capture". 0.6.23 threads the real newsroom into both the
+ * `capture_events` write and the `runDueMonitors` read; this proves it with
+ * two different-content fetches under two newsrooms on the same url, against
+ * a real PGLite database.
+ */
+describe("runDueMonitors's prior-capture lookup is scoped to the monitor's own newsroom (0.6.23)", () => {
+  it("newsroom 2's first capture of a url newsroom 1 already monitors is judged as a first sighting, not a change", async () => {
+    const sql = await getSql();
+    const stamp = `${Date.now()}-${Math.random()}`;
+    const url = `https://example.org/shared-prior-capture-${stamp}`;
+    const userA = `newsroom1-prior-${stamp}`;
+    const userB = `newsroom2-prior-${stamp}`;
+
+    // Newsroom 1 watches the url and captures its own version of the page.
+    await watchSource({
+      userId: userA,
+      url,
+      title: "Shared agenda page",
+      newsroomId: 1,
+      nextCheckAt: new Date(0),
+    });
+    const contentA =
+      "Newsroom 1's capture of the agenda page, with enough body text to clear the article floor.";
+    const resultA = await runDueMonitors({
+      userId: userA,
+      newsroomId: 1,
+      now: new Date(),
+      fetch: async () => ({ ok: true, status: 200, text: contentA, title: "Agenda", extras: [] }),
+      archives: async () => [],
+    });
+    assert.ok(resultA.checked >= 1, "newsroom 1's due monitor was not ticked");
+
+    // Newsroom 2 starts watching the SAME url independently and captures
+    // completely different content on its first check. If the prior-capture
+    // lookup still leaked across newsrooms, this would be misread as a
+    // change (or even "unchanged", if the hashes happened to match) against
+    // newsroom 1's capture instead of being newsroom 2's own first sighting.
+    await watchSource({
+      userId: userB,
+      url,
+      title: "Shared agenda page",
+      newsroomId: 2,
+      nextCheckAt: new Date(0),
+    });
+    const contentB =
+      "Newsroom 2's own, totally different capture text for the very same shared agenda url.";
+    const resultB = await runDueMonitors({
+      userId: userB,
+      newsroomId: 2,
+      now: new Date(),
+      fetch: async () => ({ ok: true, status: 200, text: contentB, title: "Agenda", extras: [] }),
+      archives: async () => [],
+    });
+    assert.ok(resultB.checked >= 1, "newsroom 2's due monitor was not ticked");
+
+    const changedForB = await sql<{ id: number }>`
+      select id from anomalies where user_id = ${userB} and url = ${url} and newsroom_id = 2 and kind = 'changed'
+    `;
+    assert.equal(
+      changedForB.length,
+      0,
+      "newsroom 2's first-ever capture was misclassified as 'changed' against newsroom 1's " +
+        "capture -- the exact caveat TODO.md named",
+    );
+
+    const monitorB = await sql<{ last_outcome: string }>`
+      select last_outcome from source_monitors where user_id = ${userB} and url = ${url} and newsroom_id = 2
+    `;
+    assert.equal(
+      monitorB[0]?.last_outcome,
+      "fetched",
+      "newsroom 2's first capture should be a plain first sighting ('fetched'), not compared " +
+        "against another newsroom's history",
+    );
+
+    // Sanity: newsroom 1's own capture history is untouched by newsroom 2's
+    // monitor existing on the same url.
+    const monitorA = await sql<{ last_outcome: string }>`
+      select last_outcome from source_monitors where user_id = ${userA} and url = ${url} and newsroom_id = 1
+    `;
+    assert.equal(monitorA[0]?.last_outcome, "fetched");
+  });
+
+  it("newsroom 2 still correctly detects its OWN later change, scoped to its own prior capture", async () => {
+    const sql = await getSql();
+    const stamp = `${Date.now()}-${Math.random()}`;
+    const url = `https://example.org/own-change-prior-capture-${stamp}`;
+    const userId = `newsroom2-own-change-${stamp}`;
+
+    await watchSource({
+      userId,
+      url,
+      title: "Newsroom 2's own monitor",
+      newsroomId: 2,
+      nextCheckAt: new Date(0),
+    });
+
+    const first = "The first version of newsroom 2's monitored page, long enough to be an article.";
+    await runDueMonitors({
+      userId,
+      newsroomId: 2,
+      now: new Date(),
+      fetch: async () => ({ ok: true, status: 200, text: first, title: "Page", extras: [] }),
+      archives: async () => [],
+    });
+
+    // Make the monitor due again immediately for a second tick.
+    await sql`
+      update source_monitors set next_check_at = ${new Date(0).toISOString()}::timestamptz
+      where user_id = ${userId} and url = ${url} and newsroom_id = 2
+    `;
+
+    const second = "A materially different second version of the same monitored page's text body.";
+    const resultTwo = await runDueMonitors({
+      userId,
+      newsroomId: 2,
+      now: new Date(),
+      fetch: async () => ({ ok: true, status: 200, text: second, title: "Page", extras: [] }),
+      archives: async () => [],
+    });
+    assert.ok(resultTwo.checked >= 1, "newsroom 2's second tick did not run");
+
+    const changed = await sql<{ id: number }>`
+      select id from anomalies where user_id = ${userId} and url = ${url} and newsroom_id = 2 and kind = 'changed'
+    `;
+    assert.equal(
+      changed.length,
+      1,
+      "newsroom 2's second capture should be detected as 'changed' against its own first capture",
+    );
+  });
+});

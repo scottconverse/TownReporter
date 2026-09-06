@@ -49,7 +49,6 @@ B. [x] **Promote kills in-flight drafts** — ops/promote.ps1 restarts the app u
 
 ## Known caveats (honest state)
 - Dark Desk is proven on ONE real staged topic (receipt); the Reddit leg was the weak spot (TR-001, now fixed pending release). Not a certification of every source type.
-- A prior-capture lookup in runDueMonitors still defaults to newsroom 1 (documented, separate gap).
 - Migration 0038 dedupes new writes; historical URL variants aren't fully canonicalized (prod cleanup was a separate operator action).
 - Local model default when nothing is loaded = first chat model listed (currently a coder model); pick a writing model in the picker or load one in LM Studio.
 - Gate claims-of-absence: proven on one replayed incident; watch the first week of real drafts for false positives (a sentence about what an opened document omits must NOT be flagged — regression test exists).

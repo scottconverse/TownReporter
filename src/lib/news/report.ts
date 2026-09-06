@@ -15,6 +15,7 @@ import {
   findOnCityDomain,
   isOnDomains,
   officialDomains,
+  pressDomains,
   runAbsenceGate,
   type GateEntry,
   type PullRecord,
@@ -180,6 +181,12 @@ export type PaperIdentityForPrompts = {
     officialDomains() in absence-gate.ts.
   */
   officialDomains?: string[];
+  /**
+   * The paper's local-press-tier hosts (watch-list Tier B), for the absence
+   * gate's ladder (0.6.23) -- see pressDomains() in absence-gate.ts. Derived
+   * the same way officialDomains is: from the configured seed sources.
+   */
+  pressDomains?: string[];
 };
 
 export function reportResearchSystem(p: PaperIdentityForPrompts): string {
@@ -1141,6 +1148,7 @@ async function configuredPaper(): Promise<PaperIdentityForPrompts> {
       [],
       cfg.seedSources.filter((src) => src.kind === "official").map((src) => src.url),
     ),
+    pressDomains: pressDomains(cfg.seedSources),
   };
 }
 
@@ -1573,6 +1581,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
       openedTitles: docs.filter((d) => d.text).map((d) => d.title || d.url),
       knownUrls: docs.map((d) => d.url),
       domains: cityDomains,
+      pressDomains: paper.pressDomains ?? [],
       city: paper.city,
       paperName: paper.name,
       search,

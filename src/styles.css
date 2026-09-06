@@ -967,6 +967,21 @@
 .desk-ltr .gate-claim-t {display:block;color:var(--fg);text-wrap:pretty}
 .desk-ltr .gate-claim-q {display:block;margin-top:3px;color:var(--fg2);font-size:calc(0.875rem * var(--ts))}
 .desk-ltr .gate-claim-ack {display:block;margin-top:3px;color:var(--fg2);font-style:italic}
+.desk-ltr .gate-claim-block {margin-top:10px}
+.desk-ltr .gate-claim-block .gate-claim {margin-top:0}
+/*
+  The exact ladder the absence gate ran, for the editor who wants to see it
+  rather than take "0 more ways" on faith. Collapsed by default so the
+  checkbox row above stays the thing an editor actually has to act on;
+  nothing here drops below 14px in either theme (contrast-audit.mjs).
+*/
+.desk-ltr .gate-claim-queries {margin:6px 0 0 27px;font-size:calc(0.875rem * var(--ts));color:var(--fg2)}
+.desk-ltr .gate-claim-queries summary {cursor:pointer;color:var(--fg2)}
+.desk-ltr .gate-claim-queries summary:focus-visible {outline:2px solid var(--fg);outline-offset:2px}
+.desk-ltr .gate-claim-queries ul {margin:6px 0 0;padding-left:18px}
+.desk-ltr .gate-claim-queries li {margin-top:3px;color:var(--fg2);text-wrap:pretty}
+.desk-ltr .gate-claim-queries code {font-size:calc(0.875rem * var(--ts));color:var(--fg)}
+.desk-ltr .gate-claim-query-outcome {color:var(--fg2)}
 /* The reason a disabled Publish is disabled, in words rather than opacity. */
 .desk-ltr .publish-blocked {color:var(--warn);font-weight:600}
 .desk-ltr .opened-for {display:block;color:var(--fg2);font-size:calc(0.875rem * var(--ts));margin-top:2px}

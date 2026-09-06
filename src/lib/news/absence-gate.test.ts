@@ -4,12 +4,15 @@ import {
   absenceClaims,
   askQueries,
   documentAsks,
+  findAbsenceEvidence,
   findOnCityDomain,
   namedDocument,
   notYetOpened,
   officialDomains,
+  pressDomains,
   runAbsenceGate,
   splitSentences,
+  synonymVariation,
   TOOL_TALK,
   WORLD_ABSENCE,
 } from "./absence-gate.ts";
@@ -113,6 +116,109 @@ describe("the memo's document asks become site-restricted queries", () => {
   });
 });
 
+/*
+  The absence ladder (0.6.23): "don't make extra work for the editor making
+  them check something you can check first." Before this, a claim of absence
+  ran ONE site:<domain> search; a miss handed the editor a checkbox the app
+  could often have cleared itself. These tests exercise the ladder in
+  isolation (findAbsenceEvidence) before the full gate tests below check it
+  wired into runAbsenceGate.
+*/
+describe("the absence ladder exhausts every rung before giving up", () => {
+  const DOMAIN_B = "otherville.gov";
+  const PRESS = "longmontleader.com";
+
+  it("runs one query per official domain, in order, and stops at the first hit", async () => {
+    const calls: string[] = [];
+    const search = async (q: string) => {
+      calls.push(q);
+      if (q.startsWith(`site:${DOMAIN_B}`)) return [{ url: `https://${DOMAIN_B}/survey` }];
+      return [];
+    };
+    const found = await findAbsenceEvidence("survey page", [DOMAIN, DOMAIN_B], CITY, [], search);
+    assert.equal(found.url, `https://${DOMAIN_B}/survey`);
+    assert.equal(calls.length, 2, "the ladder should stop at the domain that hit, not run every rung");
+    assert.deepEqual(
+      found.steps.map((s) => s.hit),
+      [false, true],
+    );
+  });
+
+  it("widens past site: to an unrestricted city query when no official domain has it", async () => {
+    const calls: string[] = [];
+    const search = async (q: string) => {
+      calls.push(q);
+      if (!q.includes("site:") && q.includes(CITY)) return [{ url: SURVEY_URL }];
+      return [];
+    };
+    const found = await findAbsenceEvidence("survey page", [DOMAIN], CITY, [], search);
+    assert.equal(found.url, SURVEY_URL);
+    assert.equal(calls.length, 2, "one site: miss, then the unrestricted rung that hit");
+    assert.doesNotMatch(calls[1]!, /site:/);
+  });
+
+  it("tries a synonym variation before giving up", async () => {
+    const calls: string[] = [];
+    const search = async (q: string) => {
+      calls.push(q);
+      // Only the packet-swapped query finds anything -- the plain "agenda"
+      // query and the site: rungs come back empty.
+      if (/\bpacket\b/i.test(q)) return [{ url: `https://${DOMAIN}/packet` }];
+      return [];
+    };
+    const found = await findAbsenceEvidence("council agenda item", [DOMAIN], CITY, [], search);
+    assert.equal(found.url, `https://${DOMAIN}/packet`);
+    assert.equal(calls.length, 3, "site: miss, unrestricted miss, then the synonym rung that hit");
+  });
+
+  it("tries one local-press-tier query as the last rung, only when the paper has press domains", async () => {
+    const calls: string[] = [];
+    const search = async (q: string) => {
+      calls.push(q);
+      if (q.includes(`site:${PRESS}`)) return [{ url: `https://${PRESS}/survey-story` }];
+      return [];
+    };
+    const found = await findAbsenceEvidence("survey page", [DOMAIN], CITY, [PRESS], search);
+    assert.equal(found.url, `https://${PRESS}/survey-story`);
+    assert.equal(calls.length, 4, "site:, unrestricted, synonym, then the press rung that hit");
+    assert.match(calls[3]!, new RegExp(`site:${PRESS.replace(/\./g, "\\.")}`));
+  });
+
+  it("skips the press rung entirely when the paper has no press-tier domains", async () => {
+    const calls: string[] = [];
+    const search = async (q: string) => {
+      calls.push(q);
+      return [];
+    };
+    const found = await findAbsenceEvidence("survey page", [DOMAIN], CITY, [], search);
+    assert.equal(found.url, null);
+    assert.equal(calls.length, 3, "no press domains configured, so no fourth rung is ever queried");
+  });
+
+  it("comes back empty, with every rung it tried on the record, when nothing anywhere hits", async () => {
+    const found = await findAbsenceEvidence("survey page", [DOMAIN, DOMAIN_B], CITY, [PRESS], async () => []);
+    assert.equal(found.url, null);
+    assert.equal(found.steps.length, 5, "2 domains + unrestricted + synonym + press = 5 rungs");
+    assert.ok(found.steps.every((s) => s.hit === false));
+  });
+
+  it("swaps the document word for the next synonym, deterministically", () => {
+    assert.match(synonymVariation("council agenda item"), /\bpacket\b/i);
+    assert.doesNotMatch(synonymVariation("council agenda item"), /\bagenda\b/i);
+    // No document word at all -- the ladder still tries something.
+    assert.match(synonymVariation("customer satisfaction survey"), /\bagenda\b/i);
+  });
+
+  it("derives press-tier hosts from the watch list's Tier B entries, same as the Dark Desk engine", () => {
+    const hosts = pressDomains([
+      { url: `https://www.${PRESS}/local-news`, tier: "B" },
+      { url: SURVEY_URL, tier: "A" },
+      { url: "not a url", tier: "B" },
+    ]);
+    assert.deepEqual(hosts, [PRESS]);
+  });
+});
+
 describe("the claims-of-absence gate", () => {
   const base = {
     headline: "City's 2026 community satisfaction survey closes Sept. 7",
@@ -198,6 +304,78 @@ describe("the claims-of-absence gate", () => {
     assert.match(String(namedDocument(FALSE_SENTENCE)), /survey page/i);
     assert.equal(namedDocument("Nothing here at all."), null);
   });
+
+  it("finds evidence further down the ladder (not just the first site: query) and redrafts once, no checkbox", async () => {
+    // The site:domain query misses; only the unrestricted city query hits.
+    // Before the ladder, this claim would have gone straight to the editor.
+    const search = async (q: string) =>
+      !q.includes("site:") && q.includes(CITY) ? [{ url: SURVEY_URL, title: "Survey" }] : [];
+    const out = await runAbsenceGate({ ...base, search, redraftAllowed: true });
+    assert.equal(out.needsRedraft, true);
+    assert.deepEqual(out.foundUrls, [SURVEY_URL]);
+    const entry = out.gate.find((g) => g.kind === "absence");
+    assert.ok(entry);
+    assert.equal(entry.needsCheck, undefined, "a redrafted claim must not also raise an editor checkbox");
+    assert.ok(entry.steps && entry.steps.length >= 2, "the miss before the hit should be on the record");
+    assert.equal(entry.steps![0]!.hit, false);
+    assert.equal(entry.steps![entry.steps!.length - 1]!.hit, true);
+  });
+
+  it("records every rung of the ladder and writes the honest 'searched N more ways' summary when it all comes up empty", async () => {
+    const out = await runAbsenceGate({ ...base, search: searchFindingNothing, redraftAllowed: false });
+    const entry = absenceClaims(out.gate)[0];
+    assert.ok(entry);
+    // base has one official domain and no press domains: site:, unrestricted,
+    // synonym = 3 rungs, so the summary should say "2 more ways".
+    assert.equal(entry!.steps?.length, 3);
+    assert.ok(entry!.steps!.every((s) => s.hit === false));
+    assert.equal(
+      entry!.summary,
+      `TownReporter searched ${DOMAIN} and 2 more ways and found nothing. Confirm you checked ` +
+        `yourself before this prints.`,
+    );
+  });
+
+  it("counts a local-press-tier rung into the summary when the paper has one configured", async () => {
+    const PRESS = "longmontleader.com";
+    const out = await runAbsenceGate({
+      ...base,
+      pressDomains: [PRESS],
+      search: searchFindingNothing,
+      redraftAllowed: false,
+    });
+    const entry = absenceClaims(out.gate)[0];
+    assert.ok(entry);
+    // site:, unrestricted, synonym, press = 4 rungs -> "3 more ways".
+    assert.equal(entry!.steps?.length, 4);
+    assert.match(entry!.summary ?? "", /and 3 more ways and found nothing/);
+  });
+});
+
+/*
+  The 2026-09-05 incident sentence must still be caught, and the four
+  sentences it could be confused with -- a document that WAS opened, saying
+  what it does not cover -- must never be. Named as fixtures rather than
+  buried in a regex test so a future change to WORLD_ABSENCE has to look at
+  this exact list.
+*/
+describe("the absence trigger tells 'nobody looked' from 'I read it and it doesn't say'", () => {
+  const MUST_NOT_FLAG = [
+    "What the announcing release does not say is which hydrants go offline",
+    "The packet does not list the vendor",
+    "The minutes are silent on the vote count",
+    "The agenda gives no start time",
+  ];
+
+  for (const sentence of MUST_NOT_FLAG) {
+    it(`does not flag: "${sentence}"`, () => {
+      assert.equal(WORLD_ABSENCE.test(sentence), false);
+    });
+  }
+
+  it("still flags the live incident sentence", () => {
+    assert.equal(WORLD_ABSENCE.test(FALSE_SENTENCE), true);
+  });
 });
 
 describe("site notices survive the article extractor", () => {
@@ -249,5 +427,30 @@ describe("gate claims live in the reporting notes as checkboxes", () => {
       keepHumanTodos(ticked).map((t) => t.src),
       ["you"],
     );
+  });
+
+  it("round-trips the ladder's exact queries through notes storage (0.6.23)", () => {
+    const packed = JSON.stringify({
+      todo: [
+        {
+          t: `Claim of absence: ${FALSE_SENTENCE}`,
+          done: false,
+          src: "gate",
+          q: "TownReporter searched longmontcolorado.gov and 2 more ways and found nothing. Confirm you checked yourself before this prints.",
+          queries: [
+            { query: "site:longmontcolorado.gov survey", hit: false },
+            { query: "survey Longmont", hit: false },
+            { query: "packet Longmont", hit: false },
+          ],
+        },
+      ],
+    });
+    const notes = parseNotes(packed);
+    assert.equal(notes.todo[0]!.queries?.length, 3);
+    assert.deepEqual(
+      notes.todo[0]!.queries!.map((q) => q.query),
+      ["site:longmontcolorado.gov survey", "survey Longmont", "packet Longmont"],
+    );
+    assert.ok(notes.todo[0]!.queries!.every((q) => q.hit === false));
   });
 });

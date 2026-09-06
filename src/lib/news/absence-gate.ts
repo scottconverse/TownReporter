@@ -42,8 +42,16 @@ export type GateEntry = {
   action: string;
   /** The document the gate found, when it found one. */
   url?: string;
-  /** The query the gate actually ran, so the editor can judge it. */
+  /** The query that found a hit, or the last one tried when the ladder came up empty. */
   query?: string;
+  /**
+   * Every query the absence ladder ran for this sentence, in order, with
+   * whether it hit -- so the gate record (and the story page) can show the
+   * editor everything the app already checked, not just the first miss.
+   */
+  steps?: LadderStep[];
+  /** The plain-language line the editor sees beside the checkbox. */
+  summary?: string;
   /** True when an editor must confirm this claim by hand before the story prints. */
   needsCheck?: boolean;
 };
@@ -259,6 +267,28 @@ export function isOnDomains(url: string, domains: string[]): boolean {
   return domains.some((d) => host === d || host.endsWith(`.${d}`));
 }
 
+/**
+ * The paper's local-press-tier hosts (watch-list Tier B), for the absence
+ * ladder's last rung.
+ *
+ * `dark.ts`'s `readDarkPlace` built this same list inline for the Dark Desk
+ * investigation engine's `tierForUrl`/`tierForQuery`. Extracted here (0.6.23)
+ * rather than imported from `dark.ts`, because `dark.ts` already imports
+ * `officialDomains` from this file -- importing back would be a cycle, and
+ * pulling in the Dark Desk engine's dependencies just for a domain list is
+ * the "dark-only code" the absence-ladder work was told not to drag in.
+ * `dark.ts` now calls this helper too, so there is one list, not two.
+ */
+export function pressDomains(sources: { url: string; tier?: string | null }[]): string[] {
+  const out: string[] = [];
+  for (const s of sources) {
+    if ((s.tier ?? "").toUpperCase() !== "B") continue;
+    const host = hostOf(s.url);
+    if (host && !out.includes(host)) out.push(host);
+  }
+  return out;
+}
+
 /*
   ---------------------------------------------------------------------------
   The memo's document asks
@@ -389,6 +419,137 @@ export async function findOnCityDomain(
 
 /*
   ---------------------------------------------------------------------------
+  The absence ladder (0.6.23)
+  ---------------------------------------------------------------------------
+  "Don't make extra work for the editor making them check something you can
+  check first." A claim of absence used to trigger exactly one site:<domain>
+  search; a miss handed the editor a checkbox the app could often have
+  cleared itself. The ladder below runs every way the app can reasonably
+  check before it gives up:
+
+    (a) site:<domain> + key terms, once per official domain the paper has
+    (b) the same key terms plus the city name, unrestricted (no site: filter)
+    (c) one variation swapping the document word for a synonym
+    (d) one local-press-tier query, if the paper has press-tier domains
+
+  It stops at the first hit. Every query it actually ran, and whether that
+  query hit, is returned in `steps` so the gate record (and the story page)
+  can show the editor exactly what was checked -- not just a promise that
+  something was.
+*/
+
+/** The document-type words the incident sentence and its neighbours use. */
+export const DOC_SYNONYMS = [
+  "agenda",
+  "packet",
+  "minutes",
+  "notice",
+  "report",
+  "release",
+  "ordinance",
+  "resolution",
+  "statement",
+] as const;
+
+/**
+ * Swap the document word in `terms` for the next word in `DOC_SYNONYMS`
+ * (wrapping around), or append the first synonym when `terms` names no
+ * document word at all. Deterministic, so the same ask always tries the
+ * same variation rather than a random one a test can't pin down.
+ */
+export function synonymVariation(terms: string): string {
+  const lower = terms.toLowerCase();
+  const foundIndex = DOC_SYNONYMS.findIndex((w) => new RegExp(`\\b${w}\\b`, "i").test(lower));
+  if (foundIndex < 0) return `${terms} ${DOC_SYNONYMS[0]}`.trim();
+  const swap = DOC_SYNONYMS[(foundIndex + 1) % DOC_SYNONYMS.length];
+  const found = DOC_SYNONYMS[foundIndex];
+  return terms.replace(new RegExp(`\\b${found}\\b`, "i"), swap);
+}
+
+/** One rung of the ladder: the query that ran, and whether it hit. */
+export type LadderStep = { query: string; hit: boolean };
+
+export type LadderResult = {
+  url: string | null;
+  /** The query that found the hit, or the last query tried when none did. */
+  query: string;
+  /** Every query the ladder actually ran, in order, with its outcome. */
+  steps: LadderStep[];
+};
+
+/**
+ * Run the absence ladder for one ask and stop at the first hit.
+ *
+ * Step (a) requires the hit to be on the paper's own official domain, the
+ * same bar `findOnCityDomain` already held it to. Steps (b)-(d) widen the
+ * search itself (no `site:` restriction, a synonym swap, a press-tier
+ * domain) but still require the hit to land on a domain the paper actually
+ * trusts -- official or local-press -- so a general web search can't
+ * "confirm" a claim against an unrelated site. That is the same discipline
+ * `officialDomains` already applies: a domain has to earn the paper's trust,
+ * not just appear in a result.
+ */
+export async function findAbsenceEvidence(
+  ask: string,
+  domains: string[],
+  city: string,
+  press: string[],
+  search: GateSearch,
+  exclude: (url: string) => boolean = () => false,
+): Promise<LadderResult> {
+  const terms = askTerms(ask) || ask.slice(0, 80);
+  const steps: LadderStep[] = [];
+
+  const run = async (query: string, accept: (url: string) => boolean): Promise<string | null> => {
+    let hits: GateHit[] = [];
+    try {
+      hits = await search(query);
+    } catch {
+      steps.push({ query, hit: false });
+      return null;
+    }
+    const hit = hits.find((h) => h?.url && accept(h.url) && !exclude(h.url));
+    steps.push({ query, hit: Boolean(hit) });
+    return hit ? hit.url : null;
+  };
+
+  // (a) site:<domain> for EACH official domain, stopping at the first hit.
+  for (const d of domains) {
+    const url = await run(`site:${d} ${terms}`.trim(), (u) => isOnDomains(u, [d]));
+    if (url) return { url, query: steps[steps.length - 1]!.query, steps };
+  }
+
+  const onTrustedDomain = (u: string) => isOnDomains(u, domains) || isOnDomains(u, press);
+
+  // (b) the same terms plus the city name, no site: restriction.
+  {
+    const query = `${terms} ${city}`.trim();
+    const url = await run(query, onTrustedDomain);
+    if (url) return { url, query, steps };
+  }
+
+  // (c) one variation swapping the document word for a synonym.
+  {
+    const query = `${synonymVariation(terms)} ${city}`.trim();
+    const url = await run(query, onTrustedDomain);
+    if (url) return { url, query, steps };
+  }
+
+  // (d) one local-press-tier query, only if the paper has press domains.
+  if (press.length) {
+    const query = `${press
+      .slice(0, 3)
+      .map((d) => `site:${d}`)
+      .join(" OR ")} ${terms}`.trim();
+    const url = await run(query, (u) => isOnDomains(u, press));
+    if (url) return { url, query, steps };
+  }
+
+  return { url: null, query: steps[steps.length - 1]?.query ?? "", steps };
+}
+
+/*
+  ---------------------------------------------------------------------------
   The gate itself
   ---------------------------------------------------------------------------
 */
@@ -403,6 +564,8 @@ export type AbsenceGateInput = {
   /** URLs already in evidence -- a "find" that is one of these is not news. */
   knownUrls: string[];
   domains: string[];
+  /** The paper's local-press-tier hosts (watch-list Tier B); see `pressDomains()`. */
+  pressDomains?: string[];
   city: string;
   /** The paper's own name, for the sentences the gate writes. */
   paperName?: string;
@@ -490,11 +653,12 @@ export async function runAbsenceGate(input: AbsenceGateInput): Promise<AbsenceGa
     .map((s) => s.trim())
     .filter((s) => s && WORLD_ABSENCE.test(s));
 
-  const verdicts = new Map<string, { url: string | null; query: string }>();
+  const press = input.pressDomains ?? [];
+  const verdicts = new Map<string, LadderResult>();
   for (const sentence of absences) {
     if (verdicts.has(sentence)) continue;
     const ask = namedDocument(sentence) ?? sentence;
-    const found = await findOnCityDomain(ask, input.domains, input.city, input.search, (u) =>
+    const found = await findAbsenceEvidence(ask, input.domains, input.city, press, input.search, (u) =>
       known.has(u),
     );
     verdicts.set(sentence, found);
@@ -503,6 +667,17 @@ export async function runAbsenceGate(input: AbsenceGateInput): Promise<AbsenceGa
   let needsRedraft = false;
   const honest = (sentence: string) =>
     `${paperName} did not find ${namedDocument(sentence) ?? "that document"} among the documents it opened: ${joinTitles(input.openedTitles)}.`;
+  // "TownReporter searched <domain> and <n> more ways and found nothing" --
+  // <n> is every rung of the ladder after the first, so the editor sees the
+  // real count of things the app already tried, not just one search.
+  const summaryFor = (found: LadderResult) => {
+    const domain = input.domains[0] ?? "the city's own site";
+    const more = Math.max(0, found.steps.length - 1);
+    return (
+      `${paperName} searched ${domain} and ${more} more way${more === 1 ? "" : "s"} and found ` +
+      `nothing. Confirm you checked yourself before this prints.`
+    );
+  };
   const verifyLines: string[] = [];
 
   for (const [sentence, found] of verdicts) {
@@ -515,6 +690,7 @@ export async function runAbsenceGate(input: AbsenceGateInput): Promise<AbsenceGa
         action: `absence check found ${found.url}, redrafting`,
         url: found.url,
         query: found.query,
+        steps: found.steps,
       });
       continue;
     }
@@ -525,11 +701,15 @@ export async function runAbsenceGate(input: AbsenceGateInput): Promise<AbsenceGa
       action: `rewritten to what TownReporter actually did: ${to}`,
       url: found.url ?? undefined,
       query: found.query,
+      steps: found.steps,
+      summary: summaryFor(found),
       needsCheck: true,
     });
     const what = namedDocument(sentence) ?? "that document";
     verifyLines.push(
-      `VERIFY BEFORE PRINT — the story says ${what} was not found. Open ${input.domains[0] ?? "the city's own site"} yourself and confirm before publishing.`,
+      `VERIFY BEFORE PRINT — the story says ${what} was not found. TownReporter searched ` +
+        `${input.domains[0] ?? "the city's own site"} and ${Math.max(0, found.steps.length - 1)} ` +
+        `more way${found.steps.length === 2 ? "" : "s"}; open it yourself and confirm before publishing.`,
     );
   }
 

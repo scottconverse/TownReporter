@@ -853,19 +853,42 @@ function ReportingNotesPane({
         one. Publishing is blocked until every box is ticked.
       </p>
       {gateClaims.map((row) => (
-        <label key={`gate-${row.i}-${row.t.t}`} className="gate-claim">
-          <input
-            type="checkbox"
-            checked={row.t.done}
-            disabled={locked || save.isPending}
-            onChange={() => save.mutate({ toggle: row.i, todos: notes.todo })}
-          />
-          <span>
-            <span className="gate-claim-t">{row.t.t}</span>
-            {row.t.q ? <span className="gate-claim-q">{row.t.q}</span> : null}
-            <span className="gate-claim-ack">I opened the city site and confirmed this</span>
-          </span>
-        </label>
+        <div key={`gate-${row.i}-${row.t.t}`} className="gate-claim-block">
+          <label className="gate-claim">
+            <input
+              type="checkbox"
+              checked={row.t.done}
+              disabled={locked || save.isPending}
+              onChange={() => save.mutate({ toggle: row.i, todos: notes.todo })}
+            />
+            <span>
+              <span className="gate-claim-t">{row.t.t}</span>
+              {row.t.q ? <span className="gate-claim-q">{row.t.q}</span> : null}
+              <span className="gate-claim-ack">I opened the city site and confirmed this</span>
+            </span>
+          </label>
+          {row.t.queries?.length ? (
+            // Kept out of the <label> on purpose: a <details> is itself an
+            // interactive element, and nesting it inside the label risks the
+            // checkbox toggling on a click meant only to expand the list.
+            <details className="gate-claim-queries">
+              <summary>
+                {row.t.queries.length} search{row.t.queries.length === 1 ? "" : "es"} TownReporter
+                already ran
+              </summary>
+              <ul>
+                {row.t.queries.map((q, qi) => (
+                  <li key={`gate-${row.i}-q-${qi}`}>
+                    <code>{q.query}</code>
+                    <span className="gate-claim-query-outcome">
+                      {q.hit ? " — found a match" : " — no match"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </div>
       ))}
     </div>
   ) : null;

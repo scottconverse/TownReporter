@@ -884,7 +884,12 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     t: `Claim of absence: ${claim.sentence}`.slice(0, 400),
     done: false,
     src: "gate" as const,
-    q: claim.query ? `Searched: ${claim.query}`.slice(0, 300) : undefined,
+    // 0.6.23: the summary line names every rung of the ladder the gate ran
+    // ("searched <domain> and <n> more ways"), not just the first query --
+    // falls back to the old one-line form for a gate record from before this
+    // release that has no `summary`.
+    q: (claim.summary ?? (claim.query ? `Searched: ${claim.query}` : undefined))?.slice(0, 300),
+    queries: claim.steps?.map((s) => ({ query: s.query, hit: s.hit })),
   }));
   const machine = machineTodosFrom([
     reported.research_memo?.follow,

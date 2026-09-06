@@ -5,12 +5,22 @@
   while one is unchecked: the box means an editor opened the city's own site
   and confirmed the story is right to say the document is not there.
 */
+/** One query the absence gate's ladder ran, and whether it hit. */
+export type NoteTodoQuery = { query: string; hit: boolean };
+
 export type NoteTodo = {
   t: string;
   done: boolean;
   src: "you" | "machine" | "gate";
   /** What the gate actually searched, so the editor can judge the search. */
   q?: string;
+  /**
+   * The absence gate's full ladder for this claim (0.6.23) -- every query it
+   * ran, in order, with its outcome. `q` is the plain-language summary line;
+   * this is the exact list the story page renders under a `<details>` so the
+   * editor can see everything the app already checked, not just the summary.
+   */
+  queries?: NoteTodoQuery[];
 };
 export type NoteFound = { t: string; src?: string };
 /** `for` names the memo ask this document was pulled to answer, when it was. */
@@ -53,11 +63,24 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
             const t = String(r.t ?? "").trim();
             if (!t) return null;
             const q = String((row as { q?: unknown }).q ?? "").trim();
+            const rawQueries = (row as { queries?: unknown }).queries;
+            const queries: NoteTodoQuery[] = Array.isArray(rawQueries)
+              ? rawQueries
+                  .map((qr) => {
+                    if (!qr || typeof qr !== "object") return null;
+                    const query = String((qr as { query?: unknown }).query ?? "").trim();
+                    if (!query) return null;
+                    return { query: query.slice(0, 300), hit: Boolean((qr as { hit?: unknown }).hit) };
+                  })
+                  .filter((x): x is NoteTodoQuery => Boolean(x))
+                  .slice(0, 12)
+              : [];
             return {
               t: t.slice(0, 400),
               done: Boolean(r.done),
               src: todoSource(r.src),
               ...(q ? { q: q.slice(0, 300) } : {}),
+              ...(queries.length ? { queries } : {}),
             };
           })
           .filter((x): x is NoteTodo => Boolean(x))
@@ -265,11 +288,24 @@ export function sanitizeTodos(raw: unknown): NoteTodo[] {
       const t = String(r.t ?? "").trim();
       if (!t) return null;
       const q = String((row as { q?: unknown }).q ?? "").trim();
+      const rawQueries = (row as { queries?: unknown }).queries;
+      const queries: NoteTodoQuery[] = Array.isArray(rawQueries)
+        ? rawQueries
+            .map((qr) => {
+              if (!qr || typeof qr !== "object") return null;
+              const query = String((qr as { query?: unknown }).query ?? "").trim();
+              if (!query) return null;
+              return { query: query.slice(0, 300), hit: Boolean((qr as { hit?: unknown }).hit) };
+            })
+            .filter((x): x is NoteTodoQuery => Boolean(x))
+            .slice(0, 12)
+        : [];
       return {
         t: t.slice(0, 400),
         done: Boolean(r.done),
         src: todoSource(r.src),
         ...(q ? { q: q.slice(0, 300) } : {}),
+        ...(queries.length ? { queries } : {}),
       };
     })
     .filter((x): x is NoteTodo => Boolean(x))

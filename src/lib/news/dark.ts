@@ -43,7 +43,7 @@ import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
 import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
 import { titlesOverlap, topicFromText } from "./desk-copy.ts";
-import { officialDomains } from "./absence-gate.ts";
+import { officialDomains, pressDomains as pressDomainsOf } from "./absence-gate.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { TIP_SUBREDDIT, TIP_SUBREDDIT_QUERY_GROUPS } from "../paper.ts";
@@ -1008,16 +1008,7 @@ export async function readDarkPlace(newsroomId: number): Promise<{
     srcs.map((s) => s.url),
     srcs.filter((s) => (s.tier ?? "").toUpperCase() === "A").map((s) => s.url),
   );
-  const press: string[] = [];
-  for (const s of srcs) {
-    if ((s.tier ?? "").toUpperCase() !== "B") continue;
-    try {
-      const host = new URL(s.url).hostname.replace(/^www\./i, "").toLowerCase();
-      if (!press.includes(host)) press.push(host);
-    } catch {
-      /* an unparseable watch-list URL is not a press domain */
-    }
-  }
+  const press = pressDomainsOf(srcs);
   return {
     place: {
       city,
