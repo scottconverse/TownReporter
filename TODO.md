@@ -6,7 +6,7 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · **⏸** blocked 
 ---
 
 ## In flight
-- (nothing in flight)
+- [~] Direction A build — stage 1 (Command Center + Follow-ups) committed 96b4faa; next: stage 2 story page.
 
 ## Open queue (bug fixes first — owner chose to skip the redesign for now)
 - [ ] **Redesign build (direction A) — awaiting owner's go.** Auditor verdict 2026-09-05: use this repo's system; take from Codex only more air in the queue and a Follow-ups list on the rail. Scope: queue as lead column + Dark Desk/wire rail; airier queue rows; Follow-ups on the rail (who/what/due/overdue in words); real narrow-window layout; no sidebar/teal/tiles/banner. Reference: docs/design/DESIGN-AUDIT-BRIEF-2026-09-05.md, docs/design/WORKFLOWS-SPEC-2026-09-05.md, the design canvas (owner's artifact).
