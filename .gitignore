@@ -52,3 +52,6 @@ artifacts/RENAME-TO-ZIP.txt
 artifacts/**
 !artifacts/**/
 !artifacts/**/*.md
+
+# Claude Code session worktrees and local settings are never part of the paper
+.claude/
