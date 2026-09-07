@@ -33,6 +33,9 @@ import {
  * (where the migration glob is unavailable) each define their own scratch
  * table inline for exactly this reason -- grep `create table if not exists
  * leads` across `src/lib/news/*.test.ts`.
+ * Sections/watch additionally require core tables in this parity fixture, so
+ * their dependencies replay 0002 and its 0005 ops extension. These dependencies
+ * still participate in the existing comparison; no column mismatch is waived.
  *
  * Needs a real Postgres (`TEST_POSTGRES_ADMIN_URL` -- see pg-admin.ts); skips
  * with a reason otherwise. Named in the `postgres-integration` CI job in
@@ -55,6 +58,26 @@ const dbProbe = integrationRequested()
 const skip = dbProbe.ok ? false : dbProbe.reason;
 
 const repoRoot = new URL("../../../", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+// Sections/watch require migrations-owned core tables. Replay their ops extension
+// too: 0002 also creates subscribers, whose confirmation fields arrive in 0005.
+// Neither subscriber table nor columns have a runtime ensure counterpart.
+const CORE_DEPENDENCY_MIGRATIONS = ["0002_newsroom.sql", "0005_ops.sql"];
+
+it("parity dependency fixtures include subscriber confirmation fields", async () => {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const fixture = new PGlite();
+  try {
+    for (const file of CORE_DEPENDENCY_MIGRATIONS) {
+      await fixture.exec(await readFile(new URL(`../../../migrations/${file}`, import.meta.url), "utf8"));
+    }
+    const result = await fixture.query<{ status: string; confirm_token: string | null }>(
+      "insert into subscribers(email) values ('parity@example.test') returning status, confirm_token",
+    );
+    assert.deepEqual(result.rows, [{ status: "pending", confirm_token: null }]);
+  } finally {
+    await fixture.close();
+  }
+});
 
 /**
  * Tables with a documented, intentional gap on one side. Every entry needs a
@@ -143,7 +166,9 @@ if (dbProbe.ok) {
     // Sections depend on the actual migrations-owned newsroom tables, not a
     // sources(id) stand-in: verify the snapshot column and all filing triggers.
     const sectionSql = await db.getSql();
-    await sectionSql.query(await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8"));
+    for (const file of CORE_DEPENDENCY_MIGRATIONS) {
+      await sectionSql.query(await readFile(new URL(`../../../migrations/${file}`, import.meta.url), "utf8"));
+    }
     for (const table of ["sources", "snapshots", "leads", "drafts", "articles", "scan_runs", "beat_memory", "corrections"]) {
       await sectionSql.query(`alter table ${table} add column if not exists newsroom_id integer not null default 1`);
     }
