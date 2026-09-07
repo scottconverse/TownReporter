@@ -1,11 +1,62 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  copyFileSync,
+  existsSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const windows = process.platform === "win32";
+test(
+  "one source folder cannot be rebound to a different data directory",
+  { skip: !windows && "Windows PowerShell required" },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "tr-pointer-test-"));
+    try {
+      mkdirSync(join(root, "installer"));
+      copyFileSync(resolve("installer/Install.ps1"), join(root, "installer/Install.ps1"));
+      const requested = join(root, "different-data");
+      writeFileSync(
+        join(root, ".townreporter-install.json"),
+        JSON.stringify({ DataRoot: join(root, "original-data") }),
+      );
+      let message = "unexpected success";
+      try {
+        execFileSync(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            join(root, "installer/Install.ps1"),
+            "-DataRoot",
+            requested,
+          ],
+          { encoding: "utf8", stdio: "pipe" },
+        );
+      } catch (error) {
+        message = String(error.stderr);
+      }
+      assert.match(message, /already belongs to another data directory/);
+      assert.equal(
+        existsSync(requested),
+        false,
+        "refusal must happen before creating or modifying the other data directory",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 test(
   "private credentials, incomplete extraction and lifecycle concurrency hold on Windows",
   { skip: !windows && "Windows PowerShell required" },

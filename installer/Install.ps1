@@ -3,6 +3,12 @@ $ErrorActionPreference = 'Stop'
 if (![Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { throw 'This package supports Windows x64. ARM64 is not yet tested.' }
 $app = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $pointerFile = Join-Path $app '.townreporter-install.json'
+if ($DataRoot -and (Test-Path -LiteralPath $pointerFile)) {
+  $recordedRoot = (Get-Content -LiteralPath $pointerFile -Raw | ConvertFrom-Json).DataRoot
+  if ([IO.Path]::GetFullPath($recordedRoot) -ine [IO.Path]::GetFullPath($DataRoot)) {
+    throw 'This source folder already belongs to another data directory. Extract a separate package folder for a second installation. Nothing was changed.'
+  }
+}
 if (!$DataRoot) {
   if (Test-Path -LiteralPath $pointerFile) { $DataRoot = (Get-Content -LiteralPath $pointerFile -Raw | ConvertFrom-Json).DataRoot }
   else { $DataRoot = Join-Path $env:LOCALAPPDATA ('TownReporter\' + [guid]::NewGuid().ToString('N')) }
@@ -138,6 +144,9 @@ Write-Host 'Installing browser retrieval support...'
 $nativeExit = Invoke-LoggedNative $nodeExe @((Join-Path $AppRoot 'node_modules\playwright\cli.js'), 'install', 'chromium') (Join-Path $DataRoot 'browser-install.log')
 if ($nativeExit -ne 0) { throw "Chromium installation failed. Read $DataRoot\browser-install.log; rerun Install to resume." }
 Write-Host 'Building TownReporter. This can take several minutes...'
+# Dependency installation needs dev tools, but Vite and the served React runtime
+# must agree on production JSX. A development build fails under production Node.
+$env:NODE_ENV = 'production'
 $nativeExit = Invoke-LoggedNative (Join-Path $nodeRoot 'npm.cmd') @('run', 'build') (Join-Path $DataRoot 'build.log')
 if ($nativeExit -ne 0) { throw "Build failed. No new app was started. Read $DataRoot\build.log." }
 & $nodeExe (Join-Path $AppRoot 'scripts\install-build-manifest.mjs') write $AppRoot

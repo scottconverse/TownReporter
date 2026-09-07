@@ -90,6 +90,28 @@ function Invoke-LoggedNative([string]$Executable, [string[]]$Arguments, [string]
   if ($null -eq $nativeExit) { throw "Native command did not return an exit code. Read $LogFile." }
   return $nativeExit
 }
+function Wait-InstallReadiness([string]$ProbeScript, [int]$TimeoutSeconds = 120) {
+  $clock = [Diagnostics.Stopwatch]::StartNew()
+  $budget = $TimeoutSeconds * 1000
+  while ($clock.ElapsedMilliseconds -lt $budget) {
+    # Bound the whole probe process, including CIM and HTTP; nested request
+    # timeouts alone did not bound startup when the page consistently returned 500.
+    $probe = Start-Process powershell.exe -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"'+$ProbeScript+'"'),'-DataRoot',('"'+$DataRoot+'"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $DataRoot 'readiness.out.log') -RedirectStandardError (Join-Path $DataRoot 'readiness.err.log')
+    try {
+      $null = $probe.Handle
+      $remaining = [Math]::Max(0, $budget - $clock.ElapsedMilliseconds)
+      if (!$probe.WaitForExit([int]$remaining)) {
+        # This exact Process object owns only the read-only probe we just created.
+        if (!$probe.HasExited) { $probe.Kill() }
+        return $false
+      }
+      if ($probe.ExitCode -eq 0) { return $true }
+    } finally { $probe.Dispose() }
+    $remaining = [Math]::Max(0, $budget - $clock.ElapsedMilliseconds)
+    if ($remaining -gt 0) { Start-Sleep -Milliseconds ([int][Math]::Min(2000, $remaining)) }
+  }
+  return $false
+}
 function Get-OwnedPostgres {
   $pgData = Join-Path $DataRoot 'pgdata'
   Assert-PlainDirectory $pgData

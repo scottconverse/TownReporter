@@ -2,7 +2,7 @@ name: Windows packaged installation
 
 on:
   push:
-    branches: [main, codex/installability]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
