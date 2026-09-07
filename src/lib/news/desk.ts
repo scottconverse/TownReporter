@@ -20,7 +20,6 @@ import {
 } from "./schema";
 import { reportAndDraft } from "./report";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
-import { withCurrentDraftForPublish, withLeadDraftLock } from "./draft-order.server.ts";
 import { evidenceNeedsReview, evidenceReviewToken, mayInheritLeadSources } from "./draft-evidence.ts";
 import { webSearch } from "./search-web";
 import { dropListingUrls, namedSubjects, preferPrimaryUrls } from "./extract";
@@ -787,6 +786,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   job: DeskJob,
   deps: PerformDraftWorkDeps = {},
 ) {
+  const { withLeadDraftLock } = await import("./draft-order.server.ts");
   const runReport = deps.reportAndDraft ?? reportAndDraft;
   const probe = deps.probe ?? probeProvider;
   const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
@@ -1286,10 +1286,11 @@ export const dropFollowUp = createServerFn({ method: "POST" })
   .validator((input: { id: number }) => input)
   .handler(async ({ context, data }) => _performDropFollowUp(context, data.id));
 
-export async function performPublish(
+export const performPublish = createServerOnlyFn(async function performPublish(
   context: { userId: string; newsroomId?: number },
   leadId: number,
 ): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
+  const { withCurrentDraftForPublish } = await import("./draft-order.server.ts");
   const already = await getSql().then(
     (sql) =>
       sql<{ slug: string }>`
@@ -1428,7 +1429,7 @@ export async function performPublish(
 
   await audit(context.userId, "publish", `Article ${published.id}`, owned(context), {kind:"articles",id:published.id});
   return { ok: true as const, slug: published.slug };
-}
+});
 
 export const publishLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
