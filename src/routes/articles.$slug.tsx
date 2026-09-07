@@ -7,6 +7,7 @@ import { inkGhost } from "@/components/desk-chrome";
 import { getPublishedArticle, listPublishedArticles } from "@/lib/news/public";
 import { parseUrlList, siteUrl } from "@/lib/paper";
 import { DEFAULT_PAPER_IDENTITY, usePaperDateFormatters } from "@/lib/paper-context";
+import { usePublicSections } from "@/lib/use-sections";
 import { ProvenanceBlock } from "@/components/provenance";
 import { ViewBeacon } from "@/components/view-beacon";
 
@@ -95,6 +96,7 @@ export const Route = createFileRoute("/articles/$slug")({
 });
 
 function ArticlePage() {
+  const {sections}=usePublicSections();
   const { formatDate } = usePaperDateFormatters();
   const { slug } = Route.useParams();
   const loaded = Route.useLoaderData();
@@ -154,7 +156,7 @@ function ArticlePage() {
       <ViewBeacon targets={[`story:${slug}`, "site"]} />
       <div className="stagger-in">
         <p className="text-[11px] tracking-[0.16em] text-rust uppercase">
-          {article.topic} · {formatDate(article.published_at)}
+          {sections.find(s=>s.key===article.topic)?.name??article.topic} · {formatDate(article.published_at)}
         </p>
         <h1 className="mt-3 max-w-3xl font-display text-4xl font-semibold leading-tight sm:text-5xl">
           {article.headline}

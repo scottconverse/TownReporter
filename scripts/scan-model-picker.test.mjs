@@ -35,11 +35,7 @@ test("Scan's model choice defaults to Automatic and is not persisted (useState, 
 });
 
 test("the chosen model is passed into runScan, and the picker is disabled while a scan is running", () => {
-  assert.match(
-    src,
-    /runScan\(\{\s*data:\s*\{\s*modelChoice\s*\}\s*\}\)/,
-    "the click must send the editor's choice, not rely on the desk's configured-provider chain",
-  );
+  assertScanDispatch(src);
   const pickerAt = src.indexOf("<ModelPicker");
   assert.ok(pickerAt >= 0, "ModelPicker must be rendered");
   const pickerTag = src.slice(pickerAt, src.indexOf(">", pickerAt) + 1);
@@ -58,4 +54,19 @@ test("Scan's failure states still show the Sign in button the 0.6.0 work added",
     signInCount >= 2,
     "both the preflight-blocked state and the failed-run state must offer the sign-in button",
   );
+});
+
+
+function assertScanDispatch(source) {
+  const dispatch = source.match(/runScan\(\{\s*data:\s*\{([^}]*)\}\s*\}\)/);
+  assert.ok(dispatch, "Scan must send its explicit data object");
+  assert.match(dispatch[1], /(?:^|,)\s*modelChoice\s*(?=,|$)/,
+    "the click must send the selected model");
+  assert.match(dispatch[1], /(?:^|,)\s*sectionKey\s*:\s*sectionKey\s*\|\|\s*undefined\s*(?=,|$)/,
+    "the click must send the selected section or General");
+}
+
+test("Scan dispatch check rejects removal of either selected model or selected section", () => {
+  assert.throws(() => assertScanDispatch(src.replace(/data:\s*\{\s*modelChoice,/, "data: {")), /selected model/);
+  assert.throws(() => assertScanDispatch(src.replace(/,\s*sectionKey:sectionKey\|\|undefined/, "")), /selected section/);
 });

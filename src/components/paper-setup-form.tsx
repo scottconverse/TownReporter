@@ -5,7 +5,7 @@
   during first-run is fixable later without touching a file).
 */
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { InkButton, inputClass } from "@/components/desk-chrome";
 import { completeFirstRunSetup } from "@/lib/news/paper-settings";
 import type { PaperConfig } from "@/lib/news/paper-settings";
@@ -26,6 +26,7 @@ export function PaperSetupForm({
   firstRun?: boolean;
   submitLabel?: string;
 }) {
+  const queryClient=useQueryClient();
   /*
     Every identity field starts blank on a first run, not just the council
     link and the watch list. `initial` falls back to the shipped Longmont
@@ -98,14 +99,18 @@ export function PaperSetupForm({
             })),
         },
       }),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       if (!res.ok) {
         setError(res.error);
         return;
       }
       setError(null);
       setSavedAt(Date.now());
-      onDone?.();
+      // Settle the saved configuration before another route mounts its form
+      // from cached data. Do not reset an already-mounted editor's unsaved fields.
+      await queryClient.invalidateQueries({queryKey:["paper-config-for-setup"],refetchType:"all"});
+      await queryClient.invalidateQueries({queryKey:["paper-config-for-invite"]});
+      await onDone?.();
     },
     onError: (err) => setError(err instanceof Error ? err.message : "That did not save."),
   });

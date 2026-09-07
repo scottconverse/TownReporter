@@ -1,4 +1,4 @@
-import { ensureSchemaOnce, getSql } from "../db.ts";
+import { ensureSchemaOnce, getSql, type Sql } from "../db.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import {
   grokChat,
@@ -538,6 +538,7 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
     next time someone presses the button.
   */
   `alter table investigations add column if not exists last_model_choice text`,
+  `alter table source_monitors add column if not exists manual_watch boolean not null default false`,
   `alter table recurring_baselines drop constraint if exists recurring_baselines_user_id_key_key`,
   `drop index if exists recurring_baselines_user_id_key_key`,
   `create unique index if not exists recurring_baselines_newsroom_key on recurring_baselines (newsroom_id, key)`,
@@ -1153,6 +1154,8 @@ async function recordStrategyTried(
 }
 
 export async function rememberCapture(opts: {
+  /** An explicit transaction client; every capture write uses this client. */
+  sql?: Sql;
   userId: string;
   investigationId: number | null;
   url: string;
@@ -1185,7 +1188,7 @@ export async function rememberCapture(opts: {
    */
   newsroomId?: number;
 }): Promise<CaptureRecord> {
-  const sql = await getSql();
+  const sql = opts.sql ?? await getSql();
   const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
   let url = opts.url;
   try {
@@ -1348,6 +1351,7 @@ export async function rememberCapture(opts: {
       opts.extras ?? [],
       opts.text,
       newsroomId,
+      sql,
     );
   }
 
@@ -1372,10 +1376,11 @@ async function maybeWatch(
   extras: string[],
   text = "",
   newsroomId: number = DEFAULT_NEWSROOM_ID,
+  transactionSql?: Sql,
 ) {
   const spec = baselineSpec(url, title);
   if (!spec) return;
-  const sql = await getSql();
+  const sql = transactionSql ?? await getSql();
   const awaitingTape = /no transcript yet|upcoming live stream/i.test(text);
   const cadenceHours = awaitingTape
     ? 6
@@ -1401,7 +1406,7 @@ async function maybeWatch(
             else next_check_at
           end,
           investigation_id = coalesce(investigation_id, ${investigationId})
-      where id = ${existing[0].id}
+      where id = ${existing[0].id} and manual_watch = false
     `;
     return;
   }
@@ -3279,7 +3284,7 @@ export async function runDueMonitors(opts: {
   }>`
     select id, url, title, investigation_id, cadence_hours, last_version_id, typical_structure
     from source_monitors
-    where newsroom_id = ${newsroomId} and enabled = true and next_check_at <= ${now.toISOString()}::timestamptz
+    where newsroom_id = ${newsroomId} and manual_watch = false and enabled = true and next_check_at <= ${now.toISOString()}::timestamptz
     order by next_check_at asc
   `;
   const due = dueRows.slice(0, opts.limit ?? 20);

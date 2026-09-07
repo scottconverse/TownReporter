@@ -9,10 +9,13 @@ import { usePaperDateFormatters } from "@/lib/paper-context";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { ModelPicker } from "@/components/model-picker";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
+import { useEditorSections } from "@/lib/use-sections";
 
 export const Route = createFileRoute("/desk/scan")({ component: ScanPage });
 
 function ScanPage() {
+  const {sections}=useEditorSections();
+  const [sectionKey,setSectionKey]=useState("");
   const { formatDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   const scans = useQuery({
@@ -43,7 +46,7 @@ function ScanPage() {
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
 
   const scan = useMutation({
-    mutationFn: () => runScan({ data: { modelChoice } }),
+    mutationFn: () => runScan({ data: { modelChoice, sectionKey:sectionKey||undefined } }),
     onSuccess: (res) => {
       if (res && "ok" in res && res.ok === false) {
         setBlocked({
@@ -74,6 +77,8 @@ function ScanPage() {
 
   return (
     <DeskShell title="Scan" kicker="Reporter pass">
+      <label className="mb-4 block text-sm">Scan scope <select className="ml-2 border border-rule bg-transparent p-2" value={sectionKey} onChange={e=>{setSectionKey(e.target.value);setBlocked(null);}} disabled={scanning}><option value="">General Scan · all accepted sources</option>{sections.filter(s=>!["about","opinion"].includes(s.key)).map(s=><option value={s.key} key={s.key}>{s.name} · assigned sources</option>)}</select></label>
+      {sectionKey?<p className="mb-4 text-sm">Uses this section’s assigned accepted sources and saved reporting brief. <Link to="/desk/ops" className="underline">Configure sections in Paper setup</Link>.</p>:null}
       <p className="lede">
         One pass over the watch list: fetch every accepted source, then one AI read for leads and
         proposed sources. It runs only when you click — this is the expensive button, not a loop.

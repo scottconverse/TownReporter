@@ -66,3 +66,11 @@ different newsrooms without overwriting or silently dropping the other record.
 It preserves existing rows and does not infer historical ownership.
 
 The ordered units are in [TODO.md](TODO.md): review/fix the restored engine, fetch caps, sections, manual watching, legal removal and investigative settings. Five live runs and real-data staging require Halo-local execution; their absence cannot be turned into a passing result. Local mocked checks may proceed independently.
+
+## 0.6.25 implementation checkpoint
+
+Sections and manual investigative watches are implemented together; resolve the release tag and exact CI before calling the candidate published. Migration0045 preserves permanent section keys and story URLs while explicit retirement maps late filing through replacement aliases. Scan runs store immutable section guidance/source snapshots. Migration0046 extends existing monitors/captures with daily manual watches, history, lease fencing and idempotent file/lead actions. Readiness checks fail closed when required objects are missing.
+
+Current Command Center and Dark Desk screenshots use disposable local fixtures. Older public-paper and other tour screenshots remain attributed historical examples. The first-owner concurrency defect found during0.6.24 verification was corrected in PR#8; no timeout or assertion was weakened.
+
+Legal removal and investigative settings are the next in-progress units. Legal inventory includes ambiguous historical editorial drafts and beat-memory/audit copies: no fuzzy auto-deletion or universal-erasure claim is permitted. Explicitly review shared references; owner-only retained payloads expire after12 calendar months, while destruction must never store removed text. External backup attestations cannot prove cleanup by themselves. Settings must snapshot once per round and show deferred signals in the denominator. Five Halo investigations and promotion remain external.

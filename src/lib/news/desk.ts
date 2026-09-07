@@ -1,8 +1,10 @@
+import { ensureNewsroomSources as ensureSeeds } from "./source-seeds.server.ts";
+import { selectedScanSources } from "./section-types.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
-import { getPaperConfig, isOnboarded } from "./paper-settings";
+import { getPaperConfig } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
@@ -73,30 +75,6 @@ async function ensureDraftMemoColumn() {
   await sql.query(
     "alter table leads add column if not exists notes_json text not null default '{}'",
   );
-}
-
-async function ensureSeeds(userId: string, newsroomId: number = DEFAULT_NEWSROOM_ID) {
-  /*
-    Nothing is seeded until setup says which city this is.
-
-    getPaperConfig falls back to the shipped Longmont watch list when no
-    settings row exists, and this runs from listSources on the desk's first
-    render -- before the redirect to /desk/setup lands. A brand-new paper in
-    another state was therefore given all eleven of Longmont's real civic
-    sources, marked accepted and Tier A, and the scanner would go and fetch
-    them. They were permanent: setup never removed them and there is no bulk
-    delete. Found by the release walkthrough, not by a unit test.
-  */
-  if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return;
-  const sql = await getSql();
-  const config = await getPaperConfig();
-  for (const s of config.seedSources) {
-    await sql`
-      insert into sources (user_id, newsroom_id, url, title, kind, tier, status)
-      values (${userId}, ${newsroomId}, ${s.url}, ${s.title}, ${s.kind}, ${s.tier}, 'accepted')
-      on conflict (user_id, url) do nothing
-    `;
-  }
 }
 
 export const bootstrapDesk = createServerFn({ method: "POST" })
@@ -455,7 +433,7 @@ export const listScans = createServerFn({ method: "GET" })
 
 export const runScan = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { modelChoice?: string } | undefined) => input ?? {})
+  .validator((input: { modelChoice?: string; sectionKey?: string } | undefined) => input ?? {})
   .handler(async ({ context, data }) => {
     /*
       Check the model BEFORE spending the scan.
@@ -477,6 +455,7 @@ export const runScan = createServerFn({ method: "POST" })
     return commitScanForAuthenticatedEditor({
       context: { userId: context.userId, newsroomId: owned(context) },
       modelChoice,
+      sectionKey:data.sectionKey,
     });
   });
 
@@ -514,6 +493,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await ensureSeeds(context.userId, owned(context));
   const sql = await getSql();
   let runId = job.subject_id;
+  const {getSections}=await import("./sections.server.ts");
+  const sectionConfig=await getSections(owned(context));
   if (runId > 0) {
     const existing = await sql<{ id: number }>`
       select id from scan_runs where id = ${runId} and newsroom_id = ${owned(context)} limit 1
@@ -527,12 +508,17 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     runId = runRows[0]!.id;
   }
 
-  const sources = await sql<SourceRow>`
+  const [scanRun]=await sql<{section_snapshot:string|null}>`select section_snapshot from scan_runs where id=${runId} and newsroom_id=${owned(context)}`;
+  const sectionSnapshot=scanRun?.section_snapshot?JSON.parse(scanRun.section_snapshot) as import("./section-types.ts").SectionScanSnapshot:null;
+  const allowedTopics=sectionSnapshot?[sectionSnapshot.key]:sectionConfig.sections.filter(s=>!s.replacementKey&&!["about","opinion"].includes(s.key)).map(s=>s.key);
+  const allSources = await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
       from sources
       where newsroom_id = ${owned(context)} and status = 'accepted'
       order by case tier when 'A' then 0 when 'B' then 1 else 2 end, id asc
     `;
+  const sources=selectedScanSources(sectionSnapshot,allSources);
+  if(sectionSnapshot&&!sources.length) throw new Error("This section no longer has accepted assigned sources. Review Paper setup and start a new scan.");
 
   const fetched: { title: string; url: string; text: string; changed: boolean }[] = [];
   const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
@@ -625,6 +611,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   }
 
   const userMsg = buildScanUserMessage({
+    topics:allowedTopics,
+    section:sectionSnapshot,
     city: paperConfig.city,
     state: paperConfig.state,
     reread,
@@ -666,7 +654,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   }
 
   const raw = parseJsonBlock<unknown>(ai.text);
-  const data = parseScanResult(raw);
+  const data = parseScanResult(raw,allowedTopics);
   if (!shouldCommitFetchHashes({ aiOk: true, parseError: data.parseError })) {
     await sql`
         update scan_runs

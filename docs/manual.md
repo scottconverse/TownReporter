@@ -1,8 +1,8 @@
 # TownReporter — the manual
 
-**Version 0.6.24 · 7 September 2026**
+**Version 0.6.25 · 7 September 2026**
 
-**Documentation scope:** Queue, workbench, Opinion and Paper setup images are
+**Documentation scope:** The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from
 29 August. Their old **Leave as editor** header link now lives as **Give up
 the desk** on the Server page.
@@ -52,9 +52,20 @@ establish PDF page order: new OCR records identify images, not PDF pages.
 Historical stored OCR page labels require re-ingest or operator review if cited. Unsupported fax-style scans, failed
 transcription and partial reads are reported rather than treated as complete.
 
-Configurable sections, manual investigative page watching and legal removal
-are still open at this documentation baseline; normal Sources and Delete do
-not implement them. [The canonical queue](../TODO.md) records current work.
+Configurable sections are available in Paper setup (see Newspaper sections below).
+Manual investigative page watching is available in Dark Desk. Legal removal remains open work; normal Delete does not implement it. [The canonical queue](../TODO.md) records current work.
+
+## Newspaper sections
+
+The owner manages sections in **Server → Newspaper sections**, below Paper setup. Add a name and permanent key, rename a display label, move sections up or down, or hide them from the newspaper's section navigation. Keys cannot change after saving: existing story and section links stay valid. Hiding does not delete stories or prevent filing.
+
+For reporting sections, enter a reporting brief and scan instructions, then select accepted Sources. **Scan → Scan scope** offers General or a section. A section run uses only its assigned accepted sources and saves the guidance and source IDs with the queued run. Later configuration edits do not change that run; a source dropped before execution is excluded. A section without accepted sources cannot start. General retains all accepted sources.
+
+**Preview changes** shows proposed navigation and retirement impact without saving. **Cancel changes** discards the proposal. **Apply changes** saves, confirms the result and links to the newspaper. If another owner tab saved first, the stale save is refused and your edits remain visible; **Reload saved configuration** explicitly replaces them with the saved version.
+
+Retire a section only into an active reporting section. Review the count of affected leads, drafts and articles, then use **Confirm retirement and apply**. Their section changes; their identities, article URLs and text remain. Old section links follow the replacement, including later retirements. Opinion and About remain reserved page routes: they cannot retire and do not run section scans. Their section-list labels and visibility do not remove the permanent page links.
+
+Editors can use configured sections when filing and scanning; only the owner changes their configuration. Existing legacy topic keys are preserved during migration. These changes require a normal release and local-operator promotion; this repository does not establish the deployed version.
 
 ## Two rooms
 
@@ -167,9 +178,7 @@ required.
 
 ![The desk](images/04-desk.png)
 
-The historical image shows the former three-column desk. The current layout has the queue in the main column and Dark Desk, Follow-ups and wire in the rail. The line under the heading is the whole point of the page — _2 drafts
-ready to publish, 14 proposed sources await review, 1 Dark Desk file ready for
-another round_. If that line is empty there is nothing for you to do.
+The current development image shows the queue in the main column and Dark Desk, Follow-ups and wire in the rail. When present, **Needs you** links flag outstanding actions such as drafts and proposed sources. Review the queue and Follow-ups even when no alert is shown.
 As of 0.6.21 the desk is one main column (composer, then the queue) with a right rail: Dark Desk, Follow-ups, The wire.
 
 ## Scan
@@ -922,6 +931,12 @@ npm run typecheck
 npm run db:migrate
 npx playwright install chromium
 ```
+
+## Manual investigative page watches
+
+Dark Desk's **Watched pages** panel records a named public URL and the editor's reason for watching it. It uses the existing source-monitor scheduler, guarded capture engine and dated capture versions, independently of accepted-source scanning. See [the editor workflow](editor.md#watch-a-specific-page-in-dark-desk) for first captures, readable differences, failed checks, OCR selection, explicit lead/record actions and pause/stop behavior.
+
+Migration 0046 adds watch state, a per-check lease and action history to the existing monitor/capture system. A transaction locks and verifies the lease before capture, history, baseline and optional file attachment writes. Failed checks keep the last readable baseline. Scheduler and manual checks share this path; an expired worker cannot overwrite a newer lease's result. The editor chooses an active configured reporting section when explicitly creating a lead. Stored captures and action targets remain newsroom scoped. Capture history and complete stored-text downloads preserve evidence; they are not legal-removal or backup-management features.
 
 ## Documents
 

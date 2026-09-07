@@ -9,6 +9,7 @@ import { SignedIn, SignedOut, UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { deskClaimState } from "@/lib/news/claim";
 import { createEditorCopy } from "@/lib/news/desk-copy";
+import { usePublicSections } from "@/lib/use-sections";
 
 export function Masthead({ compact = false }: { compact?: boolean }) {
   const paper = usePaper();
@@ -403,6 +404,7 @@ export function TopicChip({
   topic: string;
   active?: boolean;
 }) {
+  const {sections}=usePublicSections();
   return (
     <Link
       to="/"
@@ -414,7 +416,7 @@ export function TopicChip({
           : "border-rule text-ink-2 hover:border-ink hover:text-ink")
       }
     >
-      {topic}
+      {sections.find(s=>s.key===topic)?.name??topic}
     </Link>
   );
 }

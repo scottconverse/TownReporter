@@ -56,6 +56,7 @@ import type { WorthSeed } from "@/lib/news/worth-a-look";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 import { ModelPicker } from "@/components/model-picker";
+import { PageWatchPanel } from "@/components/page-watch-panel";
 import { darkModelChoice, modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/dark")({
@@ -72,6 +73,7 @@ function DarkPage() {
   const [noticeOk, setNoticeOk] = useState(false);
   const [noticeAt, setNoticeAt] = useState<"paste" | "work">("work");
   const [openId, setOpenId] = useState<number | null>(null);
+  const [fileFocusRequest, setFileFocusRequest] = useState<{ id: number } | null>(null);
   const [queued, setQueued] = useState<{
     leadId: number;
     invId: number;
@@ -117,6 +119,7 @@ function DarkPage() {
   }
 
   function rememberOpen(id: number | null) {
+    setFileFocusRequest(null);
     setOpenId(id);
     try {
       if (id != null) sessionStorage.setItem(OPEN_KEY, String(id));
@@ -124,6 +127,11 @@ function DarkPage() {
     } catch {
       /* ignore */
     }
+  }
+
+  function openWatchedFile(id: number) {
+    rememberOpen(id);
+    setFileFocusRequest({ id });
   }
 
   function beginDigPhase() {
@@ -167,6 +175,19 @@ function DarkPage() {
       return false;
     },
   });
+
+  useEffect(() => {
+    if (
+      fileFocusRequest?.id !== openId ||
+      detail.data?.investigation.id !== openId
+    ) return;
+    // Wait for the selected file's data to render before moving the editor.
+    const workspace = document.getElementById("investigation-workspace");
+    if (!workspace) return;
+    workspace.scrollIntoView({ behavior: "auto", block: "start" });
+    workspace.focus({ preventScroll: true });
+    setFileFocusRequest(null);
+  }, [fileFocusRequest, openId, detail.data]);
 
   /*
     Open a file, and the picker shows what that file was last dug with.
@@ -619,6 +640,7 @@ function DarkPage() {
           </p>
         ) : null}
       </form>
+      <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} />
 
       {notice && noticeAt === "work" && openId == null && !redditResult ? (
         <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
@@ -1259,7 +1281,7 @@ function InvestigationWorkspace({
     .join(" · ");
 
   return (
-    <section id="investigation-workspace" className="openfile">
+    <section id="investigation-workspace" className="openfile" tabIndex={-1} aria-label="Investigation workspace">
       <div className="of-head">
         <div>
           <p className="kick">Open file</p>

@@ -6,7 +6,7 @@ questions, and the evidence it gathered while asking them.
 
 It runs in **two stages**, and the split is the whole point.
 
-Documentation baseline: 0.6.24, reviewed from repository code on 2026-09-07.
+Documentation baseline: 0.6.25, reviewed from repository code on 2026-09-07.
 This describes software behavior, not independent confirmation of a reporting
 conclusion or the current production deployment. See [the takeover handoff](../HANDOFF-NEXT-AGENT.md).
 
@@ -166,6 +166,10 @@ verified**, and what may go to the working queue **as a finding**. An editor
 who wants a speculative signal on the queue anyway can tick **"send
 unverified, as a tip"** — and the lead then carries the words "sent
 unverified" in its own notes rather than pretending otherwise.
+
+## Watching a specific page
+
+The **Watched pages** panel can start a daily investigative watch without opening a dig. It keeps dated captures and compares each readable result with the last readable one; blocked or failed checks remain distinct from unchanged text. A capture becomes a lead only through an explicit **Create unverified lead** action, or can be attached to an investigation. See [the editor workflow](editor.md#watch-a-specific-page-in-dark-desk) for OCR choice, downloads, history, pause and stop. These watches do not accept ordinary scanning sources or implement legal removal.
 
 ## Where this lives in the code
 

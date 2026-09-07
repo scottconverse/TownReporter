@@ -308,6 +308,8 @@ test("every server function in src/ is gated, or is named on the public allowlis
     "src/lib/news/evidence.ts::listPublicVersionsForUrl",
     "src/lib/news/evidence.ts::comparePublicEvidence",
     // The public paper itself.
+    // Reader navigation labels only; the projection is tested below.
+    "src/lib/news/sections.ts::publicSections",
     "src/lib/news/public.ts::listPublishedArticles",
     "src/lib/news/public.ts::getPublishedArticle",
     "src/lib/news/public.ts::listPublishedByTopic",
@@ -865,4 +867,17 @@ test("AGENTS.md and AGENTS.project.md carry a scope note disclaiming product doc
     [],
     `these files are missing the scope note that keeps a GitHub reader from mistaking them for TownReporter's own docs: ${offenders.join(", ")}`,
   );
+});
+
+
+test("public sections return only reader navigation fields, never editorial guidance or sources", () => {
+  const source = stripComments(readFileSync(join(ROOT, "src/lib/news/sections.ts"), "utf8"));
+  const block = source.slice(source.indexOf("export const publicSections"), source.indexOf("export const editorSections"));
+  assert.match(block, /getSections\(DEFAULT_NEWSROOM_ID\)/);
+  const projection = block.match(/return (config\.sections\.map\([\s\S]*?\));/);
+  assert.ok(projection, "public sections must explicitly project reader fields");
+  const project = new Function("config", `return ${projection[1]};`);
+  assert.deepEqual(project({ sections: [{ key: "schools", name: "Schools", visible: true, replacementKey: null,
+    brief: "PRIVATE_BRIEF", instructions: "PRIVATE_INSTRUCTIONS", sourceIds: [42] }] }),
+    [{ key: "schools", name: "Schools", visible: true, replacementKey: null }]);
 });

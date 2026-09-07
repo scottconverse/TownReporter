@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.24](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.24).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.6.25](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.25).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -538,15 +538,16 @@ Ingest uses `ListUpcomingMeetings` / `ListArchivedMeetings?year=` and `CompiledD
 
 If the city uses Legistar, Granicus, CivicClerk, BoardDocs, or Municode instead, add those URLs as official sources. The Playwright render path already knows those hosts.
 
-### 5. Topics
+### 5. Newspaper sections
 
-The built-in `TOPICS` list in `src/lib/paper.ts` still supplies the topic choices at this baseline. Editor-owned configurable sections are [planned work](../TODO.md), not yet a Paper setup control. A code change to the constant is not a substitute for that workflow.
+After saving Paper setup, open **Server → Newspaper sections**. The owner can add, rename, reorder, hide and retire sections, assign accepted sources, and write reporting briefs and scan instructions. Preview before applying; retirement requires a replacement and explicit impact confirmation. See [the editor guide](editor.md#newspaper-sections) for the full workflow.
+
+Migration 0045 preserves existing topic keys and seeds their labels. It does not rename or delete stories. Runtime filing resolves retired keys so queued work cannot restore a retired section. Existing keys are stable URLs; display names can change. Source assignments and section configuration belong to one newsroom.
 
 ### What city setup does **not** do
 
 - Invent an agenda portal from the city name. Add the exact public URL.
-- Replace the built-in topic taxonomy. That remains the advanced `TOPICS`
-  constant in `src/lib/paper.ts`.
+- Choose your reporting priorities. Configure sections and assign accepted sources in the owner controls after Paper setup.
 - Convert an existing town's archive into a different town's archive. Use a
   fresh database for a different publication.
 - Give you legal cover. You are the publisher.
