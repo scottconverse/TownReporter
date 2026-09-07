@@ -4,6 +4,8 @@ Current release: **0.6.28**.
 
 ## Unreleased
 
+- Completed jobs keep their successful status if redundant completion bookkeeping or a late worker error occurs. Ordinary running jobs still report success or failure, and replaced claims remain protected.
+
 - Multi-source drafting preserves complete structured provenance, findings and unanswered questions through saving and publication. Raw character truncation no longer corrupts their JSON. Previously damaged records are not guessed or rewritten.
 
 - Background drafting refuses final saves after its job claim or editor permission is lost. Draft, lead status/notes, audit and job completion now commit together; audit failure rolls the whole save back. A waiting recovery worker cannot reclaim an already committed draft job.
