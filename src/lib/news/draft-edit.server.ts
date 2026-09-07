@@ -1,13 +1,13 @@
-import { withTransaction } from "../db.ts";
+import { withLeadDraftLock } from "./draft-order.server.ts";
 import { stripReporterNotebook } from "./strip-draft.ts";
 import { evidenceReviewToken, reconcileDraftEvidence, type EvidenceDecision } from "./draft-evidence.ts";
 import type { DraftRow } from "./types.ts";
 export type DraftEditInput = { leadId: number; headline: string; dek: string; body: string; topic: string; evidenceDecision?: EvidenceDecision; evidenceToken?: string };
 export async function saveDraftForEditor(context: { userId: string; newsroomId: number }, data: DraftEditInput) {
-  return withTransaction(async (sql) => {
+  return withLeadDraftLock(context, data.leadId, async (sql) => {
     const existing = await sql<DraftRow>`
       select * from drafts where lead_id = ${data.leadId} and newsroom_id = ${context.newsroomId}
-      order by updated_at desc limit 1 for update
+      order by updated_at desc, id desc limit 1 for update
     `;
     const body = stripReporterNotebook(data.body);
     const decision = data.evidenceDecision === "keep" || data.evidenceDecision === "remove" ? data.evidenceDecision : undefined;

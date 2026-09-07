@@ -406,7 +406,7 @@ Low-level configured-provider precedence is below. Per-run explicit choices on S
 
 **Write a story** and the story workbench offer **Research public sources** or **Use only supplied material**. The latter opens only explicitly supplied URLs and reads the supplied text; it skips discovery and external searches. Its queued scope survives retries and provider selection. Choose Claude or a local/API model for supplied-only work; Codex is refused because its native tools cannot enforce that boundary. Instructions pasted inside source material do not replace this control.
 
-After a body edit, drafts with reporting evidence require an explicit evidence review before publishing. Keep the evidence only after checking it against the revised text, or remove the old public evidence. Removal preserves the original private draft archive and does not remove body links. Save, review and publish refuse stale snapshots and remain scoped to the editor's newsroom. See [the workbench instructions](editor.md#draft).
+After a body edit, drafts with reporting evidence require an explicit evidence review before publishing. Keep the evidence only after checking it against the revised text, or remove the old public evidence. Removal preserves the original private draft archive and does not remove body links. An evidence-review decision is refused if its saved draft has changed, and these actions remain scoped to the editor's newsroom. See [the workbench instructions](editor.md#draft).
 
 ### Which feature uses which provider
 

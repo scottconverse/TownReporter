@@ -412,7 +412,7 @@ export async function writeStoryForAuthenticatedEditor(
   await sql.query(
     "alter table leads add column if not exists notes_json text not null default '{}'",
   );
-  const notesJson = packNotes({ ...appendScratch(parseNotes(null), scratch), researchScope: input.researchScope === "supplied" ? "supplied" : "public" });
+  const notesJson = packNotes({ ...appendScratch(parseNotes(null), scratch), suppliedUrls: urls, researchScope: input.researchScope === "supplied" ? "supplied" : "public" });
   const urlsJson = JSON.stringify(urls);
   const rows = await sql<{ id: number }>`
     insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)

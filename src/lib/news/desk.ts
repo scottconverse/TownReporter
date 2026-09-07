@@ -1,7 +1,7 @@
 import { ensureNewsroomSources as ensureSeeds } from "./source-seeds.server.ts";
 import { selectedScanSources } from "./section-types.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { getSql, withTransaction } from "@/lib/db";
+import { getSql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig } from "./paper-settings";
@@ -19,9 +19,9 @@ import {
   shouldCommitFetchHashes,
 } from "./schema";
 import { reportAndDraft } from "./report";
-import { draftSourceInputs } from "./draft-input.ts";
-import { withCurrentDraftForPublish } from "./draft-order.server.ts";
-import { evidenceNeedsReview, evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.ts";
+import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
+import { withCurrentDraftForPublish, withLeadDraftLock } from "./draft-order.server.ts";
+import { evidenceNeedsReview, evidenceReviewToken, mayInheritLeadSources } from "./draft-evidence.ts";
 import { webSearch } from "./search-web";
 import { dropListingUrls, namedSubjects, preferPrimaryUrls } from "./extract";
 import {
@@ -298,7 +298,7 @@ export const fileLead = createServerFn({ method: "POST" })
         return { ok: false as const, error: "That source URL is not a public http(s) address." };
       }
     }
-    return insertLeadWithDraft(context, { headline, why, topic, urls });
+    return insertLeadWithDraft(context, { headline, why, topic, urls, notesJson: packNotes({ ...parseNotes(null), suppliedUrls: urls }) });
   });
 
 export const getLead = createServerFn({ method: "GET" })
@@ -318,7 +318,7 @@ export const getLead = createServerFn({ method: "GET" })
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
              provenance_json, form, found_note, unanswered, research_json
       from drafts where lead_id = ${id} and newsroom_id = ${owned(context)}
-      order by updated_at desc limit 1
+      order by updated_at desc, id desc limit 1
     `;
     const live = await sql<{ slug: string }>`
       select slug from articles
@@ -867,7 +867,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const watched = await sql<{ url: string }>`
     select url from sources where newsroom_id = ${owned(context)}
   `;
-  const cited = reported.source_urls.length ? reported.source_urls : urls;
+  const cited = reported.source_urls.length ? reported.source_urls : draftInput.urls;
   const sourceUrls = JSON.stringify(
     dropListingUrls(
       cited,
@@ -877,7 +877,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const notes = reported.integrity_notes;
   const provenanceJson = JSON.stringify(reported.provenance).slice(0, 8000);
   const unansweredJson = JSON.stringify(reported.unanswered).slice(0, 2000);
-  const researchJson = JSON.stringify(reported.research_memo ?? {}).slice(0, 8000);
+  const researchJson = JSON.stringify({ ...reported.research_memo, researchScope: draftInput.researchScope });
   const yours = keepHumanTodos(prevNotes);
   /*
     Claims of absence, as checkboxes the editor must tick before Publish.
@@ -937,9 +937,11 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     opened,
     scratch: prevNotes.scratch,
     researchScope: draftInput.researchScope,
+    suppliedUrls: prevNotes.suppliedUrls,
   };
   const notesJson = packNotes(nextNotes);
 
+  await withLeadDraftLock({ newsroomId: owned(context) }, leadId, async (sql) => {
   await sql`
     insert into drafts (
       user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
@@ -956,6 +958,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     update leads set status = 'drafted', notes_json = ${notesJson}
     where id = ${leadId} and newsroom_id = ${owned(context)}
   `;
+  });
   await audit(context.userId, "draft", String(leadId), owned(context));
 });
 
@@ -1024,6 +1027,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       scratch: data.scratch,
     });
     if (data.researchScope === "supplied" || data.researchScope === "public") notes.researchScope = data.researchScope;
+    if (typeof data.scratch === "string") notes.suppliedUrls = sanitizePublicUrls([...(notes.suppliedUrls ?? []), ...suppliedUrlsFromText(data.scratch)]).slice(0, 8);
     const json = packNotes(notes);
     await sql`
       update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
@@ -1347,7 +1351,7 @@ export async function performPublish(
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
              provenance_json, form, found_note, unanswered, research_json
       from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
-      order by updated_at desc limit 1
+      order by updated_at desc, id desc limit 1
     `,
   );
   const row = drafts[0];
@@ -1364,7 +1368,7 @@ export async function performPublish(
     are exactly the stories an operator has in flight right now. Publishing
     one of them would print an article with no sources and no warning.
   */
-  if (parseUrlList(draft.source_urls).length === 0 && !publicEvidenceWasRemoved(row)) {
+  if (parseUrlList(draft.source_urls).length === 0 && mayInheritLeadSources(row)) {
     const fromLead = await getSql().then(
       (sql) =>
         sql<{ source_urls: string }>`

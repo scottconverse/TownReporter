@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { reportAndDraft, REPORT_RESEARCH_SYSTEM, type FetchedDoc } from "./report.ts";
 import type { LeadRow } from "./types.ts";
 import { runAbsenceGate } from "./absence-gate.ts";
+import { draftSourceInputs } from "./draft-input.ts";
+import { parseNotes } from "./notes.ts";
 
 const lead: LeadRow = { id: 1, headline: "Library hours change on Tuesday", why: "Editor's supplied notice", topic: "community", status: "new", source_urls: "[]", evidence: "", newsworthiness: 1, created_at: "2026-09-07" };
 const alien = "https://vendor.example/news/test-automation-press-release";
@@ -23,7 +25,8 @@ function dependencies(log: { searches: string[]; fetched: string[]; packets: str
 }
 it("supplied-only never searches, follows discoveries, or credits an invented URL", async () => {
   const log = { searches: [] as string[], fetched: [] as string[], packets: [] as string[] };
-  const result = await reportAndDraft({ userId: "scope", lead, urls: [supplied], memory: [], extraEvidence: "The library opens at noon Tuesday.", researchScope: "supplied", modelChoice: "claude-frontier" }, dependencies(log));
+  const sources = draftSourceInputs([alien], parseNotes(JSON.stringify({suppliedUrls:[supplied],opened:[{url:alien,title:"Prior automatic discovery"}]})), "supplied");
+  const result = await reportAndDraft({ userId: "scope", lead, ...sources, memory: [], extraEvidence: "The library opens at noon Tuesday.", researchScope: "supplied", modelChoice: "claude-frontier" }, dependencies(log));
   assert.ok(!("error" in result));
   assert.deepEqual(log.searches, []);
   assert.deepEqual(log.fetched, [supplied]);

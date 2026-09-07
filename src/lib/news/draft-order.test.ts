@@ -1,7 +1,7 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
-import { withCurrentDraftForPublish } from "./draft-order.server.ts";
+import { withCurrentDraftForPublish, withLeadDraftLock } from "./draft-order.server.ts";
 import type { DraftRow } from "./types.ts";
 it("a replacement draft landing after the publish read prevents stale publication", async () => {
   const sql = await getSql();
@@ -18,4 +18,22 @@ it("a replacement draft landing after the publish read prevents stale publicatio
   }), /draft changed/i);
   const [count] = await sql<{n:number}>`select count(*)::integer as n from articles`;
   assert.equal(count.n,0);
+  const [latest] = await sql<DraftRow>`select * from drafts where lead_id=501 order by updated_at desc,id desc limit 1`;
+  let lateDraft: Promise<unknown> | undefined;
+  await withCurrentDraftForPublish({newsroomId:81},501,latest,async tx => {
+    // A reporting worker finishes while publication holds the shared lead fence.
+    lateDraft=withLeadDraftLock({newsroomId:81},501,async worker => {
+      await worker`insert into drafts(lead_id,newsroom_id,body,updated_at) values(501,81,'Late draft C',now())`;
+    });
+    // Attach rejection handling immediately; its outcome is asserted after commit.
+    void lateDraft.catch(()=>{});
+    await tx`insert into articles(body) values(${latest.body})`;
+    await tx`update leads set status='published' where id=501`;
+  });
+  assert.ok(lateDraft);
+  await assert.rejects(lateDraft,/already been published/);
+  const articles=await sql<{body:string}>`select body from articles`;
+  assert.deepEqual(articles.map(a=>a.body),['Draft B']);
+  const [draftCount]=await sql<{n:number}>`select count(*)::integer as n from drafts`;
+  assert.equal(draftCount.n,2);
 });

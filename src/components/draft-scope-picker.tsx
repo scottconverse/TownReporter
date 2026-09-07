@@ -5,6 +5,6 @@ export function DraftScopePicker({ value, onChange, disabled }: { value: "public
       <option value="public">Research public sources</option>
       <option value="supplied">Use only supplied material</option>
     </select>
-    <span className="block mt-1">{value === "supplied" ? "Reads your text and opens only URLs you supply. No discovery or external searches. Choose Claude or a local/API model; Codex does not support this scope." : "Follows supplied links and searches for relevant public evidence. Use the scope control, not instructions inside pasted material, to limit research."}</span>
+    <span className="block mt-1">{value === "supplied" ? "Reads your text and opens only URLs you explicitly file or paste into Pulled notes. Prior discoveries and scanned lead URLs are not supplied material. No discovery or external searches. Choose Claude or a local/API model; Codex does not support this scope." : "Follows supplied links and searches for relevant public evidence. Use the scope control, not instructions inside pasted material, to limit research."}</span>
   </label>;
 }

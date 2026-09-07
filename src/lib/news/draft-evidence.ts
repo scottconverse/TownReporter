@@ -7,6 +7,9 @@ const normalized = (body: string) => body.replace(/\s+/g, " ").trim();
 export function publicEvidenceWasRemoved(draft: Partial<DraftRow>): boolean {
   return (memo(draft.research_json).evidenceReview as { decision?: string } | undefined)?.decision === "remove";
 }
+export function mayInheritLeadSources(draft: Partial<DraftRow>): boolean {
+  return !publicEvidenceWasRemoved(draft) && memo(draft.research_json).researchScope !== "supplied";
+}
 export function evidenceNeedsReview(draft: Partial<DraftRow>, body: string): boolean {
   const review = memo(draft.research_json).evidenceReview as { required?: boolean } | undefined;
   const hasEvidence = [draft.source_urls, draft.provenance_json, draft.found_note, draft.unanswered].some(x => Boolean(x?.trim() && !["[]", "{}"].includes(x.trim())));

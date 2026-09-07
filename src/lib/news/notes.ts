@@ -36,6 +36,8 @@ export type ReportingNotes = {
   opened: NoteOpened[];
   scratch: string;
   researchScope?: "public" | "supplied";
+  /** URLs explicitly filed/pasted by the editor, never discovery history. */
+  suppliedUrls?: string[];
 };
 
 function todoSource(raw: unknown): NoteTodo["src"] {
@@ -128,6 +130,7 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
       opened,
       scratch: String(o.scratch ?? "").slice(0, 8000),
       ...(o.researchScope === "supplied" || o.researchScope === "public" ? { researchScope: o.researchScope } : {}),
+      ...(Array.isArray(o.suppliedUrls) ? { suppliedUrls: o.suppliedUrls.filter((u): u is string => typeof u === "string").slice(0, 8) } : {}),
     };
   } catch {
     return base;
@@ -486,6 +489,7 @@ export function packNotes(notes: ReportingNotes, limit = 16000): string {
   // Last resort: the memo and the to-do list only. Still valid JSON.
   return JSON.stringify({
     researchScope: work.researchScope,
+    suppliedUrls: work.suppliedUrls,
     news: work.news,
     why: work.why,
     angle: work.angle,

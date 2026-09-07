@@ -1,5 +1,5 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
-import { evidenceNeedsReview, type EvidenceDecision } from "@/lib/news/draft-evidence";
+import { evidenceNeedsReview, mayInheritLeadSources, type EvidenceDecision } from "@/lib/news/draft-evidence";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -390,7 +390,7 @@ function StoryPage() {
     something the story hangs on, and that call stays the editor's.
   */
   const draftSources = parseUrlList(data.draft?.source_urls ?? "[]");
-  const uncredited = uncreditedOutlets(body, draftSources.length > 0 ? draftSources : sources);
+  const uncredited = uncreditedOutlets(body, draftSources.length > 0 || !mayInheritLeadSources(data.draft ?? {}) ? draftSources : sources);
   /*
     Claims of absence block printing until a person has confirmed each one.
 
