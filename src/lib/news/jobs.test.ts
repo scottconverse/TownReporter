@@ -434,6 +434,115 @@ describe("desk jobs", () => {
     `;
     assert.equal(final[0]?.status, settled, "the ghost must not have changed anything");
   });
+
+  it("does not turn atomically completed work into a failure when redundant completion errors", async () => {
+    await ensureJobsSchema();
+    const sql = await getSql();
+    const newsroomId = 91007;
+    const job = await enqueueJob({
+      userId: `job-terminal-${Date.now()}`,
+      newsroomId,
+      kind: "draft",
+      subjectId: 100,
+      kick: false,
+    });
+    await sql.query(`
+      create or replace function reject_redundant_job_completion() returns trigger
+      language plpgsql as $$
+      begin
+        if old.id = ${job.id} and old.status = 'completed' and new.status = 'completed' then
+          raise exception 'redundant completion rejected';
+        end if;
+        return new;
+      end $$
+    `);
+    await sql.query(`
+      create trigger reject_redundant_job_completion_trigger
+      before update on desk_jobs for each row
+      execute function reject_redundant_job_completion()
+    `);
+    __setJobWorkForTest(async (claimedJob) => {
+      await sql`
+        update desk_jobs set status = 'completed', stage = 'Done', updated_at = now()
+        where id = ${claimedJob.id} and claim_token = ${claimedJob.claim_token}
+      `;
+    });
+    try {
+      assert.equal(await executeJob(job), true);
+      const [stored] = await sql<{ status: string; error: string | null }>`
+        select status,error from desk_jobs where id = ${job.id}
+      `;
+      assert.deepEqual(stored, { status: "completed", error: null });
+    } finally {
+      __setJobWorkForTest();
+      await sql.query(
+        "drop trigger if exists reject_redundant_job_completion_trigger on desk_jobs",
+      );
+      await sql.query("drop function if exists reject_redundant_job_completion() cascade");
+    }
+  });
+
+  it("does not downgrade completed work when its worker reports a late error", async () => {
+    const sql = await getSql();
+    const newsroomId = 91010;
+    const job = await enqueueJob({
+      userId: "late-error-terminal",
+      newsroomId,
+      kind: "draft",
+      subjectId: 103,
+      kick: false,
+    });
+    __setJobWorkForTest(async (claimedJob) => {
+      await sql`
+        update desk_jobs
+        set status = 'completed', stage = 'Done', error = null, updated_at = now()
+        where id = ${claimedJob.id} and claim_token = ${claimedJob.claim_token}
+      `;
+      throw new Error("late error after atomic completion");
+    });
+    try {
+      assert.equal(await executeJob(job), true);
+      const [stored] = await sql<{ status: string; error: string | null }>`
+        select status,error from desk_jobs where id = ${job.id}
+      `;
+      assert.deepEqual(stored, { status: "completed", error: null });
+    } finally {
+      __setJobWorkForTest();
+    }
+  });
+
+  it("still settles ordinary running work as completed or failed", async () => {
+    const newsroomId = 91008;
+    const success = await enqueueJob({
+      userId: "ordinary-terminal",
+      newsroomId,
+      kind: "draft",
+      subjectId: 101,
+      kick: false,
+    });
+    __setJobWorkForTest(async () => undefined);
+    try {
+      assert.equal(await executeJob(success), true);
+      assert.equal((await latestJob({ newsroomId, kind: "draft", subjectId: 101 }))?.status, "completed");
+
+      const failure = await enqueueJob({
+        userId: "ordinary-terminal",
+        newsroomId,
+        kind: "draft",
+        subjectId: 102,
+        kick: false,
+      });
+      __setJobWorkForTest(async () => {
+        throw new Error("ordinary worker failure");
+      });
+      assert.equal(await executeJob(failure), true);
+      const failed = await latestJob({ newsroomId, kind: "draft", subjectId: 102 });
+      assert.equal(failed?.status, "failed");
+      assert.equal(failed?.error, "ordinary worker failure");
+    } finally {
+      __setJobWorkForTest();
+    }
+  });
 });
 
 /**
