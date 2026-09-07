@@ -2,6 +2,12 @@
 
 Current release: **0.6.27**.
 
+## Unreleased
+
+- Reddit pacing measures elapsed time with a monotonic clock and records the interval after transport setup. Clock adjustments and variable request setup cannot shorten the required eight-second gap; requests remain serialized and 429 cooldowns are preserved.
+
+- Corrections can attach only to published articles in the editor's newsroom. An unavailable selected article is refused without writing a correction or audit event, instead of attaching to another newsroom or silently saving an unattached note.
+
 ## 0.6.27 — 2026-09-07
 
 - Windows installation package with pinned prerequisite downloads, private persistent PostgreSQL, editor onboarding, provider configuration, and installation-owned start/stop/health controls. Mac/Linux source setup remains available. Installation timing and provider assumptions are recorded with release verification; no universal under-an-hour or public-hosting claim is made.

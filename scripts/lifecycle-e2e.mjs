@@ -7,6 +7,7 @@
  *   LIFECYCLE_BASE_URL=http://127.0.0.1:8080 node scripts/lifecycle-e2e.mjs
  */
 import { chromium } from "playwright";
+import { fromCrossJSON, toJSONAsync } from "seroval";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
 
@@ -22,8 +23,39 @@ const why = "The packet posted this morning with a new date.";
 const body =
   "Testerville City Council set a special session on the water plant. The packet is on the city site.";
 const correction = "The session is Tuesday evening, not Wednesday morning.";
+const rejectedCorrection = `This missing-story correction must stay private ${stamp}.`;
+const generalCorrection = `General correction without a story slug ${stamp}.`;
 
 let page;
+let addCorrectionUrl;
+
+async function callObservedAddCorrection(data) {
+  if (!addCorrectionUrl) throw new Error("the correction server-function request was not observed");
+  const body = JSON.stringify(await toJSONAsync({ data }));
+  const response = await page.evaluate(
+    async ({ url, body }) => {
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          "x-tsr-serverFn": "true",
+        },
+        body,
+      });
+      return { status: res.status, headers: Object.fromEntries(res.headers), body: await res.json() };
+    },
+    { url: addCorrectionUrl, body },
+  );
+  if (response.status !== 200) {
+    throw new Error(`correction server function returned HTTP ${response.status}`);
+  }
+  const decoded = response.headers["x-tss-serialized"]
+    ? fromCrossJSON(response.body, {})
+    : response.body;
+  return decoded?.result ?? decoded;
+}
 
 async function dump(err) {
   const message = err instanceof Error ? err.message : String(err);
@@ -107,8 +139,26 @@ async function main() {
     if (i === 5) throw new Error("the correction form never opened after six clicks");
   }
   await page.getByPlaceholder("What was wrong").fill(correction);
+  const correctionRequest = page.waitForRequest(
+    (request) => request.method() === "POST" && request.url().includes("/_serverFn/"),
+  );
   await page.getByRole("button", { name: "Publish correction" }).click({ force: true });
+  addCorrectionUrl = (await correctionRequest).url();
   await page.getByText(/Tuesday evening/).waitFor({ timeout: 20_000 }).catch(() => {});
+
+  // Reuse the opaque route URL emitted by the real UI so these probes cross
+  // the same authenticated HTTP/server-function boundary as a normal editor.
+  const missing = await callObservedAddCorrection({
+    articleSlug: `missing-correction-target-${stamp}`,
+    body: rejectedCorrection,
+  });
+  if (missing?.ok !== false || missing?.error !== "That published story is not available in this newsroom.") {
+    throw new Error(`missing-story correction was not generically refused: ${JSON.stringify(missing)}`);
+  }
+  const noSlug = await callObservedAddCorrection({ body: generalCorrection });
+  if (noSlug?.ok !== true) {
+    throw new Error(`the existing no-slug correction behavior changed: ${JSON.stringify(noSlug)}`);
+  }
   for (let i = 0; i < 4; i++) {
     try {
       await page.goto(articleUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
@@ -126,6 +176,13 @@ async function main() {
   }
   await page.getByRole("heading", { name: "Corrections" }).waitFor();
   await page.getByText(/Tuesday evening/).waitFor();
+  if ((await page.getByText(rejectedCorrection, { exact: true }).count()) !== 0) {
+    throw new Error("the rejected missing-story correction reached the article page");
+  }
+  await page.goto(`${base}/corrections`, { waitUntil: "domcontentloaded" });
+  if ((await page.getByText(rejectedCorrection, { exact: true }).count()) !== 0) {
+    throw new Error("the rejected missing-story correction reached the public corrections feed");
+  }
 
   await browser.close();
   console.log(JSON.stringify({ ok: true, email, headline }));

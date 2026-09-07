@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import dns from "node:dns/promises";
 import { syncBuiltinESMExports } from "node:module";
+import { performance } from "node:perf_hooks";
 import { setImmediate } from "node:timers/promises";
 import { setFetchImplForTests } from "./fetch-url.ts";
 import { fetchRedditDocument, resetRedditPacing, sweepRedditFeeds } from "./reddit.server.ts";
@@ -9,7 +10,9 @@ import { fetchRedditDocument, resetRedditPacing, sweepRedditFeeds } from "./redd
 const THREAD = "https://www.reddit.com/r/longmont/comments/abc123/budget/";
 const RSS = `${THREAD}.rss`;
 const XML = `<feed><entry><title>Longmont budget</title><link href="${THREAD}"/><content>The city budget includes funding for streets and public libraries.</content></entry></feed>`;
+const nativeSetTimeout = setTimeout;
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+let monotonicOffsetMs = 0;
 
 // The transport AND DNS are mocked: no Reddit requests or DNS traffic.
 // Step the clock while letting native promise/stream jobs drain between ticks.
@@ -40,6 +43,8 @@ describe("TR-001 shared Reddit request queue", () => {
     mock.method(dns, "lookup", async () => [{ address: "151.101.1.140", family: 4 }]);
     syncBuiltinESMExports();
     mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000_000 });
+    monotonicOffsetMs = 0;
+    mock.method(performance, "now", () => Date.now() + monotonicOffsetMs);
     resetRedditPacing();
   });
   afterEach(() => {
@@ -47,6 +52,7 @@ describe("TR-001 shared Reddit request queue", () => {
     resetRedditPacing();
     mock.timers.reset();
     mock.restoreAll();
+    globalThis.setTimeout = nativeSetTimeout;
     syncBuiltinESMExports();
   });
 
@@ -97,6 +103,77 @@ describe("TR-001 shared Reddit request queue", () => {
     assert.equal(observed.starts.length, 3);
     spaced(observed.starts);
     assert.equal(observed.maxActive(), 1);
+  });
+
+  it("does not send early when the wall clock jumps ahead", async () => {
+    const starts: number[] = [];
+    setFetchImplForTests(async () => {
+      starts.push(performance.now());
+      return new Response(XML);
+    });
+    const work = Promise.all([
+      fetchRedditDocument(new URL(THREAD)),
+      fetchRedditDocument(new URL(THREAD)),
+    ]);
+
+    for (let i = 0; i < 10 && starts.length < 1; i++) {
+      await setImmediate();
+      mock.timers.tick(0);
+    }
+    assert.equal(starts.length, 1, "the first queued request must start");
+    for (let i = 0; i < 10; i++) {
+      await setImmediate();
+      mock.timers.tick(0);
+    }
+
+    mock.timers.tick(7_999);
+    await setImmediate();
+    monotonicOffsetMs -= 1;
+    mock.timers.setTime(Date.now() + 1);
+    mock.timers.tick(0);
+    for (let i = 0; i < 10; i++) await setImmediate();
+
+    assert.equal(starts.length, 1, "a wall-clock jump must not satisfy the monotonic 8s gap");
+    mock.timers.tick(1);
+    const docs = await finish(work);
+    assert.ok(docs.every((doc) => doc.ok));
+    spaced(starts);
+  });
+
+  it("rechecks the deadline when a timer wakes one millisecond early", async (t) => {
+    const scheduledTimeout = setTimeout;
+    const earlyTimeout = t.mock.method(
+      globalThis,
+      "setTimeout",
+      ((callback: (...args: unknown[]) => void, ms = 0, ...args: unknown[]) =>
+        scheduledTimeout(callback, Math.max(Number(ms) - 1, 0), ...args)) as typeof setTimeout,
+    );
+    const observed = transport(0);
+
+    try {
+      await finish(
+        Promise.all([fetchRedditDocument(new URL(THREAD)), fetchRedditDocument(new URL(THREAD))]),
+      );
+      spaced(observed.starts);
+    } finally {
+      earlyTimeout.mock.restore();
+      t.mock.restoreAll();
+    }
+  });
+
+  it("measures the gap from the transport start after synchronous setup", async () => {
+    let setupCalls = 0;
+    mock.method(AbortSignal, "timeout", () => {
+      if (setupCalls++ === 0) mock.timers.tick(250);
+      return new AbortController().signal;
+    });
+    const observed = transport(0);
+
+    await finish(
+      Promise.all([fetchRedditDocument(new URL(THREAD)), fetchRedditDocument(new URL(THREAD))]),
+    );
+
+    spaced(observed.starts);
   });
 
   it("shares the queue across sweep, thread RSS and a user-page RSS fetch", async () => {
@@ -420,11 +497,13 @@ it("TR-001 real-clock three-caller transport regression", async (t) => {
   mock.method(dns, "lookup", async () => [{ address: "151.101.1.140", family: 4 }]);
   syncBuiltinESMExports();
   resetRedditPacing();
-  const starts: number[] = [];
+  const wallStarts: number[] = [];
+  const elapsedStarts: number[] = [];
   let active = 0;
   let maxActive = 0;
   setFetchImplForTests(async () => {
-    starts.push(Date.now());
+    wallStarts.push(Date.now());
+    elapsedStarts.push(performance.now());
     active++;
     maxActive = Math.max(maxActive, active);
     await pause(150);
@@ -436,10 +515,18 @@ it("TR-001 real-clock three-caller transport regression", async (t) => {
       Array.from({ length: 3 }, () => fetchRedditDocument(new URL(THREAD))),
     );
     assert.ok(docs.every((doc) => doc.ok));
-    const offsets = starts.map((value) => value - starts[0]!);
-    t.diagnostic(`request offsets ${JSON.stringify(offsets)} ms; max in flight ${maxActive}`);
-    assert.equal(starts.length, 3);
-    for (let i = 1; i < starts.length; i++) assert.ok(starts[i]! - starts[i - 1]! >= 8000);
+    const wallOffsets = wallStarts.map((value) => value - wallStarts[0]!);
+    const elapsedOffsets = elapsedStarts.map((value) => Math.round(value - elapsedStarts[0]!));
+    t.diagnostic(
+      `request offsets wall=${JSON.stringify(wallOffsets)} ms elapsed=${JSON.stringify(elapsedOffsets)} ms; max in flight ${maxActive}`,
+    );
+    assert.equal(elapsedStarts.length, 3);
+    for (let i = 1; i < elapsedStarts.length; i++) {
+      assert.ok(
+        elapsedStarts[i]! - elapsedStarts[i - 1]! >= 8000,
+        `monotonic request gap ${elapsedStarts[i]! - elapsedStarts[i - 1]!}ms must be >=8000ms; wall offsets ${JSON.stringify(wallOffsets)}`,
+      );
+    }
     assert.equal(maxActive, 1);
   } finally {
     setFetchImplForTests(null);
