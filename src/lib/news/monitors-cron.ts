@@ -3,6 +3,8 @@ import { runDueMonitors, type FetchFn } from "./investigate.ts";
 import { drainQueuedJobs } from "./jobs.ts";
 import { purgeAllOldTrash } from "./trash-store.ts";
 import { audit } from "./ops.ts";
+import { ensurePageWatchSchema, tickManualPageWatches } from "./page-watch.ts";
+import type { FetchOutcome } from "./fetch-outcome.ts";
 
 /**
  * Recheck due monitors, finish waiting desk jobs, and expire old trash. Does
@@ -21,6 +23,7 @@ export async function tickAllDueMonitors(opts?: { fetch?: FetchFn }): Promise<{
   purged: number;
   purgeError: string | null;
 }> {
+  await ensurePageWatchSchema();
   const sql = await getSql();
   // Grouped by (user_id, newsroom_id), not user_id alone (0.6.18, closes
   // the 0.6.11 STOP) -- source_monitors is newsroom-scoped now, and a user
@@ -47,6 +50,16 @@ export async function tickAllDueMonitors(opts?: { fetch?: FetchFn }): Promise<{
       /* one desk failing must not stop the others */
     }
   }
+  const manual = await tickManualPageWatches({
+    fetch: opts?.fetch ? async (url) => {
+      const doc = await opts.fetch!(url);
+      return { ...doc, outcome: (doc.outcome ?? (doc.ok ? "fetched" : "fetch-failed")) as FetchOutcome,
+        contentType: doc.contentType ?? "", needsOcr: doc.needsOcr ?? false,
+        redirectChain: doc.redirectChain ?? [], extractionMethod: doc.extractionMethod ?? "",
+        pages: doc.pages ?? [], notices: [] };
+    } : undefined,
+  });
+  checked += manual.checked;
   let jobs = 0;
   try {
     jobs = (await drainQueuedJobs()).ran;

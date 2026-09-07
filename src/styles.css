@@ -599,11 +599,13 @@
 .desk-ltr .leave-yes:disabled,
 .desk-ltr .leave-no:disabled {opacity:.5;cursor:wait}
 .desk-ltr .mast-date {flex:1;text-align:center;font-size:calc(0.875rem * var(--ts));font-style:italic;color:var(--mut)}
-.desk-ltr .mast-tools {display:flex;align-items:center;gap:16px}
+.desk-ltr .mast-tools {display:flex;align-items:center;gap:16px;flex-wrap:wrap;min-width:0;max-width:100%}
 .desk-ltr .mast-link {font-size:calc(0.875rem * var(--ts));color:var(--mut);cursor:pointer}
 .desk-ltr .mast-link:hover {color:var(--fg)}
 .desk-ltr .mast-user {display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--fg);border-radius:50%;font-family:var(--fd);font-weight:600;font-size:calc(0.875rem * var(--ts));cursor:default}
-.desk-ltr .mast-account {display:inline-flex;align-items:center;gap:10px}
+.desk-ltr .mast-account {display:inline-flex;align-items:center;gap:10px;min-width:0;max-width:100%}
+.desk-ltr .mast-account > div {flex-wrap:wrap;min-width:0}
+.desk-ltr .mast-account > div > span {overflow-wrap:anywhere}
 .desk-ltr .mast-ver {font-size:calc(0.875rem * var(--ts));letter-spacing:.08em;color:var(--mut)}
 .desk-ltr .rule2 {margin-top:10px;height:5px;border-top:3px solid var(--fg);border-bottom:1px solid var(--fg)}
 .desk-ltr .rule1 {border-bottom:1px solid var(--fg)}

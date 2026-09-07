@@ -280,7 +280,7 @@ found (null, or {text, source_urls, locators} for something TownReporter itself 
 unanswered (array),
 claims (array of {fact, url, kind} — every load-bearing number, name, date, quote. kind is primary | record | news. A claim with no URL does not belong here; it belongs in unanswered.),
 reporting_trail (array of {title, organization, document_date, url, role}).
-topic must be one of: council, budget, housing, utilities, schools, planning, infrastructure, elections, about.
+Keep the exact Topic key supplied with this lead. It is the editor's configured newspaper section; do not invent or rename it.
 Body: markdown paragraphs, no h1, not JSON. Do not print the claims list in the body.`;
 }
 /** The shipped default, for tests and for any caller that has no config in hand. */
@@ -1549,6 +1549,9 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
         }
       }
     }
+    // Filing belongs to the editor. Both writer and polishing passes may
+    // propose a topic, but neither can change the lead's selected section.
+    coerced.topic = opts.lead.topic;
     return { coerced, parsed, body: passBody };
   };
 

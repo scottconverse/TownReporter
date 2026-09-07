@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { getSql } from "../db.ts";
 import { ensureJobsSchema, enqueueJob } from "./jobs.ts";
 import { ensureNewsroomSchema, requireEditor } from "./membership.ts";
@@ -101,6 +102,17 @@ async function ensureCommitBoundarySchema() {
       error text
     )
   `);
+  // Section filing guards require their actual sources/article dependencies,
+  // plus the topic and queued-snapshot columns absent from this older fixture.
+  const core = await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8");
+  for (const table of ["sources", "articles"]) {
+    const ddl = core.match(new RegExp(`create table if not exists ${table} \\([\\s\\S]*?\\);`));
+    assert.ok(ddl, `missing migration-owned ${table} definition`);
+    await sql.query(ddl[0]);
+    await sql.query(`alter table ${table} add column if not exists newsroom_id integer not null default 1`);
+  }
+  await sql.query("alter table drafts add column if not exists topic text not null default 'council'");
+  await sql.query("alter table scan_runs add column if not exists section_snapshot text");
   return sql;
 }
 

@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.24**.
+Repository documentation version: **0.6.25**.
 
 These are **Halo-local operator deployment notes**, not instructions to treat a
 remote development machine as production. The paper is hosted at

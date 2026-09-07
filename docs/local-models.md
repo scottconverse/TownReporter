@@ -296,7 +296,7 @@ for using it.
 
 ---
 
-## Zero-config discovery, and picking the model (current 0.6.24)
+## Zero-config discovery, and picking the model (current 0.6.25)
 
 TownReporter probes LM Studio, Ollama and llama.cpp on their default ports
 on the app server. A responsive compatible server can appear without config. Pick

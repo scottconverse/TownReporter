@@ -9,7 +9,7 @@ import {
   publishEditorial,
   saveEditorialDraft,
 } from "@/lib/news/opinion";
-import { TOPICS } from "@/lib/paper";
+import { useEditorSections } from "@/lib/use-sections";
 
 export const Route = createFileRoute("/desk/story/draft/$draftId")({
   head: () => ({ meta: [{ title: "Editorial — TownReporter" }] }),
@@ -31,6 +31,8 @@ export const Route = createFileRoute("/desk/story/draft/$draftId")({
  * are what an editor checks the piece against.
  */
 function EditorialPage() {
+  const { sections } = useEditorSections();
+  const TOPICS = sections.map(s=>s.key);
   const { draftId } = Route.useParams();
   const id = Number(draftId);
   const qc = useQueryClient();
@@ -222,7 +224,7 @@ function EditorialPage() {
             <option value="opinion">opinion</option>
             {TOPICS.filter((t) => t !== "about" && t !== "opinion").map((t) => (
               <option key={t} value={t}>
-                {t}
+                {sections.find(s=>s.key===t)?.name??t}
               </option>
             ))}
           </select>

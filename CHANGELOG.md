@@ -1,7 +1,15 @@
 # Changelog
 
-Current release: **0.6.24**.
+Current release: **0.6.25**.
 
+## 0.6.25 — 2026-09-07
+
+- The owner can add, name, order, hide and retire newspaper sections from Paper setup. Preview and Cancel do not save; retirement explicitly reassigns existing records while preserving story URLs and old section links. Stale edits are refused without losing input.
+- Section scans retain the chosen brief, instructions and accepted-source assignments from enqueue time. Late filing follows retired aliases; newsroom boundaries and Opinion/About remain protected.
+- Dark Desk can watch a page without a dig, with daily checks, an OCR model choice, dated capture history and comparison with the last readable record. Failed, blocked, moved and unsupported responses remain distinct from unchanged text. Pause and Stop preserve history.
+- A readable watched capture can be attached to an investigation or become an explicitly unverified lead in a chosen section. Destination links and stored-copy downloads remain available; repeated actions are idempotent and removed targets are disclosed.
+- Migrations0045–0046 are additive. Runtime readiness refuses missing filing guards, snapshots or watch history objects instead of claiming successful setup. Existing disabled automatic monitors explicitly become active daily watches when converted by the editor.
+- Manuals, setup, landing page, TODO, current handoff and version fields describe these workflows. GitHub publication does not imply promotion on Halo; legal removal and investigative settings remain separate development work.
 ## 0.6.24 — 2026-09-07
 
 Corrective release following the remote takeover review. A repository release

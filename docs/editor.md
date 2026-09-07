@@ -1,8 +1,8 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.6.24](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.24).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.25](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.25).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
-Queue, workbench, Opinion and Paper setup images show development examples.
+The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
 **Leave as editor** header link is now **Give up the desk** on the Server page.
 
@@ -30,9 +30,20 @@ establish PDF page order: new OCR records identify images, not PDF pages.
 Historical stored OCR page labels require re-ingest or operator review if cited. Unsupported fax-style scans, failed
 transcription and partial reads are reported rather than treated as complete.
 
-Configurable sections, manual investigative page watching and legal removal
-are still open at this documentation baseline; normal Sources and Delete do
-not implement them. [The canonical queue](../TODO.md) records current work.
+Configurable sections are available in Paper setup (see Newspaper sections below).
+Manual investigative page watching is available in Dark Desk; see the workflow below. Legal removal remains separate open work; normal Delete does not implement it. [The canonical queue](../TODO.md) records current work.
+
+## Newspaper sections
+
+The owner manages sections in **Server → Newspaper sections**, below Paper setup. Add a name and permanent key, rename a display label, move sections up or down, or hide them from the newspaper's section navigation. Keys cannot change after saving: existing story and section links stay valid. Hiding does not delete stories or prevent filing.
+
+For reporting sections, enter a reporting brief and scan instructions, then select accepted Sources. **Scan → Scan scope** offers General or a section. A section run uses only its assigned accepted sources and saves the guidance and source IDs with the queued run. Later configuration edits do not change that run; a source dropped before execution is excluded. A section without accepted sources cannot start. General retains all accepted sources.
+
+**Preview changes** shows proposed navigation and retirement impact without saving. **Cancel changes** discards the proposal. **Apply changes** saves, confirms the result and links to the newspaper. If another owner tab saved first, the stale save is refused and your edits remain visible; **Reload saved configuration** explicitly replaces them with the saved version.
+
+Retire a section only into an active reporting section. Review the count of affected leads, drafts and articles, then use **Confirm retirement and apply**. Their section changes; their identities, article URLs and text remain. Old section links follow the replacement, including later retirements. Opinion and About remain reserved page routes: they cannot retire and do not run section scans. Their section-list labels and visibility do not remove the permanent page links.
+
+Editors can use configured sections when filing and scanning; only the owner changes their configuration. Existing legacy topic keys are preserved during migration. These changes require a normal release and local-operator promotion; this repository does not establish the deployed version.
 
 ## Two rooms
 
@@ -76,7 +87,7 @@ Notes:
 
 This is the loop. Skip steps that have nothing in them.
 
-1. **The desk** — the line under the heading says what needs you. If it is empty, you are done.
+1. **The desk** — follow any **Needs you** links, then review the queue and Follow-ups. An empty alert strip does not mean all editorial work is finished.
 2. **Sources** — is the watch list still the right list?
 3. **Scan** — one pass over accepted sources. Files leads. This is the expensive click.
 4. **Queue** — read what came in. Hold, kill, or open.
@@ -734,3 +745,11 @@ How we report, in public: `/how-we-report`.
 - It will not invent a city's sources. The owner supplies them in Paper setup and can maintain them under Sources.
 
 You are the publisher. The software is the library, the tape machine, and a very fast intern who still has to be edited.
+
+### Watch a specific page in Dark Desk
+
+Open **Dark Desk → Watch a page / view watches**. Enter a public URL, a name and why it matters. Optionally select an investigation: its readable captures will be attached there automatically. Choose the model used if a scanned PDF needs OCR, then **Save watch and capture page**. The watch is saved before the first check; a pending check is not a captured record. An already-watched URL opens the existing watch without renaming it or moving its investigation.
+
+Daily checks require the existing local scheduler. **Check now** uses the same guarded fetch and capture path. History distinguishes a first capture, unchanged text, changed text, a moved page, source blocking, unavailable pages, failed checks and unreadable or refused files. Redirects show their trail and whether text also changed. A failure never replaces the last readable comparison baseline. The readable diff is a bounded text comparison, not a claim that every visual or structural page change was found. Open the stored text, download its complete current or previous copy, or follow **Open original** to inspect the source.
+
+For a readable capture, choose an active reporting section and **Create unverified lead**, or choose a file and **Attach captured record**. Feedback links to the lead or investigation; the capture's history keeps that outcome after a refresh. **Dismiss change** retains the capture. A removed handoff target is reported as removed instead of being silently recreated. No check automatically creates a lead, drafts or publishes. **Pause**, **Resume** and **Stop watching** retain history; paused and stopped watches do not run checks. An interrupted check can be retried after its 30-minute lease expires. These investigative watches are separate from accepting an ordinary source for story scanning.
