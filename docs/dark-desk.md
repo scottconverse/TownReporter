@@ -135,7 +135,7 @@ where the planner falls short:
   press, then community.
 - **Location-scoped by default** — the city, and the county where the record
   is actually held. An unscoped query returns a national explainer.
-- **A 90-day search preference by default.** The editor can choose 1–3650 lookback days or an inclusive calendar range. The same resolved date hints reach discovery and adversarial queries and their model packs. A provider may ignore date operators; returned records still need their dates checked.
+- **A 90-day search preference by default.** The editor can choose 1–3650 UTC calendar days of lookback, including the current UTC date, or an inclusive calendar range. The lookback changes at UTC midnight; the paper's display timezone does not change that boundary. The same resolved date hints reach discovery and adversarial queries and their model packs. A provider may ignore date operators; returned records still need their dates checked.
 - The tier that answered is recorded on every search.
 
 ## The newsworthiness gate
