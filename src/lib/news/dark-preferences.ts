@@ -58,7 +58,7 @@ export function resolveResearchPreferences(raw: unknown, now = new Date()): Rese
     today = now.toISOString().slice(0, 10);
   return {
     ...p,
-    startDate: p.mode === "range" ? p.startDate! : shifted(today, -p.lookbackDays),
+    startDate: p.mode === "range" ? p.startDate! : shifted(today, 1 - p.lookbackDays),
     endDate: p.mode === "range" ? p.endDate! : today,
     capturedAt: now.toISOString(),
   };

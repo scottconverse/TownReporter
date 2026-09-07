@@ -8,9 +8,9 @@ import {
 test("defaults resolve a 90-day preference and six verification attempts", () => {
   const p = resolveResearchPreferences(undefined, new Date("2026-09-07T12:00:00Z"));
   assert.equal(p.verificationLimit, 6);
-  assert.equal(p.startDate, "2026-06-09");
+  assert.equal(p.startDate, "2026-06-10");
   assert.equal(p.endDate, "2026-09-07");
-  assert.match(queryWithResearchWindow("school choir", p), /after:2026-06-08 before:2026-09-08/);
+  assert.match(queryWithResearchWindow("school choir", p), /after:2026-06-09 before:2026-09-08/);
 });
 test("validates bounds and real calendar ranges without changing unrelated settings", () => {
   for (const raw of [
@@ -33,3 +33,12 @@ test("validates bounds and real calendar ranges without changing unrelated setti
 });
 
 test('explicit null or malformed stored fields never become default preferences',()=>{for(const value of [null,{mode:null},{verificationLimit:null},{lookbackDays:null}])assert.throws(()=>validateResearchPreferences(value));});
+
+test("lookback counts exactly the selected number of inclusive calendar dates", () => {
+  const today = new Date("2024-03-01T12:00:00Z");
+  const one = resolveResearchPreferences({ lookbackDays: 1 }, today);
+  assert.equal(one.startDate, "2024-03-01");
+  assert.equal(one.endDate, "2024-03-01");
+  const two = resolveResearchPreferences({ lookbackDays: 2 }, today);
+  assert.equal(two.startDate, "2024-02-29");
+});
