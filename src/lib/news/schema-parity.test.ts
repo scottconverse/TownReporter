@@ -1,6 +1,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Client } from "pg";
+import { readFile } from "node:fs/promises";
 import {
   integrationRequested,
   probePostgres,
@@ -138,11 +139,39 @@ if (dbProbe.ok) {
     await investigate.ensureInvestigateSchema();
     await views.ensureViewsSchema();
     await followUps.ensureFollowUpsSchema();
-    // section_sources references the migrations-owned sources table. Provide
-    // only its key in this ensure-only fixture; sources remains explicitly
-    // excluded from column parity, while every new section table is compared.
-    await (await db.getSql()).query("create table if not exists sources (id serial primary key)");
+    // Sections depend on the actual migrations-owned newsroom tables, not a
+    // sources(id) stand-in: verify the snapshot column and all filing triggers.
+    const sectionSql = await db.getSql();
+    await sectionSql.query(await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8"));
+    for (const table of ["sources", "leads", "drafts", "articles", "scan_runs"]) {
+      await sectionSql.query(`alter table ${table} add column if not exists newsroom_id integer not null default 1`);
+    }
     await sections.ensureSectionsSchema();
+    const sectionTriggers = await sectionSql<{ tgname: string }>`
+      select tgname from pg_trigger where tgname in
+        ('leads_resolve_section','drafts_resolve_section','articles_resolve_section') and tgenabled <> 'D'
+    `;
+    assert.equal(sectionTriggers.length, 3, "all runtime filing guards must exist");
+    const snapshotColumn = await sectionSql`select column_name from information_schema.columns
+      where table_schema='public' and table_name='scan_runs' and column_name='section_snapshot'`;
+    assert.equal(snapshotColumn.length, 1, "queued scans must store their section snapshot");
+    const ownSections = await sections.getSections(8801);
+    const foreignSections = await sections.getSections(8802);
+    await sections.saveSections(8801, {
+      ...ownSections,
+      sections: ownSections.sections.map((section) => section.key === "budget"
+        ? { ...section, replacementKey: "council" } : section),
+    });
+    const [filed] = await sectionSql<{ topic: string }>`insert into leads
+      (user_id,newsroom_id,headline,why,topic) values ('pg-section-proof',8801,'Example','Reason','budget') returning topic`;
+    assert.equal(filed.topic, "council", "real Postgres resolves a retired key on filing");
+    await assert.rejects(sectionSql`insert into leads
+      (user_id,newsroom_id,headline,why,topic) values ('pg-section-proof',8801,'Example','Reason','unknown-section')`,
+      /Section not found in this newsroom/);
+    const [foreignFiled] = await sectionSql<{ topic: string }>`insert into leads
+      (user_id,newsroom_id,headline,why,topic) values ('pg-section-proof',8802,'Example','Reason','budget') returning topic`;
+    assert.equal(foreignFiled.topic, "budget", "another newsroom keeps its own active section");
+    assert.deepEqual(await sections.getSections(8802), foreignSections);
     // desk_rate / audit_events: no ensure*Schema name, but the same
     // create-table-if-not-exists-on-every-call shape (ENG-09) -- a real call
     // each creates the table.

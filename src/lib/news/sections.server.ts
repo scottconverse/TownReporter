@@ -59,6 +59,26 @@ export const SECTION_SCHEMA = [
 export async function ensureSectionsSchema() {
   const sql = await getSql();
   await ensureSchemaOnce(sql, "sections", SECTION_SCHEMA);
+  // The shared legacy ensure helper tolerates DDL failures. Sections cannot:
+  // missing filing guards would silently revive retired keys or lose snapshots.
+  const [ready] = await sql<{ ready: boolean }>`
+    select
+      (select count(*) from information_schema.tables where table_schema='public'
+        and table_name in ('section_config','newsroom_sections','section_sources')) = 3
+      and exists(select 1 from information_schema.columns where table_schema='public'
+        and table_name='scan_runs' and column_name='section_snapshot')
+      and (select count(*) from information_schema.columns where table_schema='public'
+        and table_name in ('leads','drafts','articles') and column_name in ('newsroom_id','topic')) = 6
+      and (select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid
+        join pg_namespace n on n.oid=c.relnamespace
+        where n.nspname='public' and t.tgenabled <> 'D' and not t.tgisinternal
+        and t.tgname=c.relname || '_resolve_section'
+        and c.relname in ('leads','drafts','articles')) = 3 as ready
+  `;
+  if (!ready?.ready) {
+    await sql`delete from _schema_ensure_state where name='sections'`;
+    throw new Error("Section schema is incomplete. Apply migrations and retry; no section changes were accepted.");
+  }
 }
 
 async function seed(sql: Sql, newsroomId: number) {
