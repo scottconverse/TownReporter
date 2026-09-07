@@ -1,8 +1,10 @@
 # Changelog
 
-Current release: **0.6.28**.
+Current release: **0.6.29**.
 
 ## Unreleased
+
+## 0.6.29 — 2026-09-07
 
 - Saving story edits refreshes finding-review controls without a page reload. Judgments stay disabled during a replacement draft or a pending evidence decision. The workbench follows the actual draft job through completion and lost-response recovery instead of mistaking a recently saved old draft for its replacement.
 

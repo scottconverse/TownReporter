@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Current release: [0.6.28](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.28).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.29](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.29).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
@@ -568,7 +568,7 @@ happen. Legacy task ownership must be configured as described in
 
 Every available maintenance action explains its effect before you run it.
 
-The daily scan controls on Server are an owner-only, pending-release feature.
+The daily scan controls on Server are available to the owner.
 They start disabled. The owner chooses a local time in the paper's configured
 timezone, selects as many as 12 accepted sources from any reporting beat, and
 chooses one explicit runtime: the already selected local model, Claude Code
@@ -587,8 +587,7 @@ or final result writes. A subscription quota error pauses the schedule until
 the owner resumes it manually; the desk does not invent a reset time. Use
 **Open scan history** to inspect scheduled scan results and **Open the queue**
 to review any leads. A daily scan files leads only: it does not draft, publish
-or send digests. This behavior is implemented in the current candidate and
-still awaits its normal CI and release path.
+or send digests.
 
 Owners also have:
 
