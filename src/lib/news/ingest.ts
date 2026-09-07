@@ -6,7 +6,7 @@ import { storableText } from "./storable-text.ts";
 import { needsRenderedFetch } from "./render-detect.ts";
 import { ingestYoutube, isYoutubeUrl, type YoutubeIngest } from "./youtube.ts";
 import { ingestPrimeGov } from "./primegov.ts";
-import { limitFor, readBodyCapped } from "./body-limit.ts";
+import { FetchResponseRefusal, limitFor, readBodyCapped } from "./body-limit.ts";
 
 /** Archive cap. Planner context is sliced at retrieval, never here. */
 export const ARCHIVE_TEXT_CAP = 2_000_000;
@@ -101,7 +101,14 @@ export function extractPdfText(buf: Uint8Array): string {
   return chunks.join(" ").replace(/\s+/g, " ").trim().slice(0, ARCHIVE_TEXT_CAP);
 }
 
-export type PdfPage = { page: number; text: string; confidence?: number };
+export type PdfPage = {
+  /** Null when extraction cannot associate this text with an actual PDF page. */
+  page: number | null;
+  /** Extraction sequence, not PDF page order. Used for embedded-image OCR. */
+  imageIndex?: number;
+  text: string;
+  confidence?: number;
+};
 export type PdfExtract = {
   text: string;
   method: "unpdf" | "tj-regex" | "ocr" | "none";
@@ -139,7 +146,10 @@ export type OcrOptions = {
   adapters?: Partial<
     Record<
       string,
-      (image: { bytes: Uint8Array; mime: "image/jpeg" | "image/png" }, timeoutMs: number) => Promise<string>
+      (
+        image: { bytes: Uint8Array; mime: "image/jpeg" | "image/png" },
+        timeoutMs: number,
+      ) => Promise<string>
     >
   >;
 };
@@ -179,10 +189,12 @@ export async function extractPdfBetter(
   impl: OcrImpl | undefined | null = undefined,
   opts?: OcrOptions,
 ): Promise<PdfExtract> {
-  const ocr = impl === undefined ? ocrImpl ?? (await loadDefaultOcr()) : impl;
+  const ocr = impl === undefined ? (ocrImpl ?? (await loadDefaultOcr())) : impl;
   try {
     const { extractText } = await import("unpdf");
-    const result = await extractText(buf, { mergePages: false });
+    // PDF.js transfers (detaches) this array's buffer to its worker. Preserve
+    // the original for regex/OCR fallback and the captured raw-byte receipt.
+    const result = await extractText(Uint8Array.from(buf), { mergePages: false });
     const pagesRaw = Array.isArray(result.text) ? result.text : [String(result.text ?? "")];
     const pages: PdfPage[] = pagesRaw.map((t, i) => ({
       page: i + 1,
@@ -207,7 +219,7 @@ export async function extractPdfBetter(
       text: fallback.slice(0, ARCHIVE_TEXT_CAP),
       method: "tj-regex",
       needsOcr: false,
-      pages: [{ page: 1, text: fallback.slice(0, ARCHIVE_TEXT_CAP) }],
+      pages: [{ page: null, text: fallback.slice(0, ARCHIVE_TEXT_CAP) }],
     };
   }
   if (ocr) {
@@ -220,7 +232,7 @@ export async function extractPdfBetter(
           needsOcr: false,
           pages: ocrResult.pages.length
             ? ocrResult.pages
-            : [{ page: 1, text: ocrResult.text.slice(0, ARCHIVE_TEXT_CAP) }],
+            : [{ page: null, text: ocrResult.text.slice(0, ARCHIVE_TEXT_CAP) }],
           ocrProvider: ocrResult.provider,
           ocrPagesRead: ocrResult.pagesRead,
           ocrPagesTotal: ocrResult.pagesTotal,
@@ -292,12 +304,19 @@ export function chunksFromEvidence(text: string, pages?: PdfPage[]): TextChunk[]
     for (const p of pages) {
       const body = p.text.trim();
       if (!body) continue;
+      const locator =
+        p.imageIndex != null
+          ? `image:${p.imageIndex}`
+          : p.page != null
+            ? `page:${p.page}`
+            : "extracted-text";
+      const pageNumber = p.imageIndex != null ? null : p.page;
       if (body.length <= CHUNK_SIZE) {
         out.push({
           index: idx++,
           excerpt: body,
-          locator: `page:${p.page}`,
-          page_number: p.page,
+          locator,
+          page_number: pageNumber,
           section: "",
         });
       } else {
@@ -305,8 +324,8 @@ export function chunksFromEvidence(text: string, pages?: PdfPage[]): TextChunk[]
           out.push({
             ...c,
             index: idx++,
-            page_number: p.page,
-            locator: `page:${p.page}:${c.locator}`,
+            page_number: pageNumber,
+            locator: `${locator}:${c.locator}`,
           });
         }
       }
@@ -329,7 +348,11 @@ export function parseRssItems(xml: string): { title: string; link: string; summa
       block.match(/<link[^>]*href=["']([^"']+)["']/i)?.[1] ??
       block.match(/<link[^>]*>([\s\S]*?)<\/link>/i)?.[1]?.trim() ??
       "";
-    const summary = (block.match(/<(?:description|summary|content)[^>]*>([\s\S]*?)<\/(?:description|summary|content)>/i)?.[1] ?? "")
+    const summary = (
+      block.match(
+        /<(?:description|summary|content)[^>]*>([\s\S]*?)<\/(?:description|summary|content)>/i,
+      )?.[1] ?? ""
+    )
       .replace(/<!\[CDATA\[|\]\]>/g, "")
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
@@ -350,11 +373,13 @@ export function discoverDocLinks(html: string, base: URL): string[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
     const href = m[1]!;
-    if (href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:")) continue;
+    if (href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:"))
+      continue;
     try {
       const abs = new URL(href, base);
       if (abs.protocol !== "http:" && abs.protocol !== "https:") continue;
-      if (!DOC_HREF.test(abs.pathname + abs.search) && !abs.pathname.toLowerCase().endsWith(".pdf")) continue;
+      if (!DOC_HREF.test(abs.pathname + abs.search) && !abs.pathname.toLowerCase().endsWith(".pdf"))
+        continue;
       const key = abs.toString();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -370,7 +395,11 @@ export function discoverDocLinks(html: string, base: URL): string[] {
 export function looksLikeArticlePath(pathname: string): boolean {
   const path = pathname.replace(/\/+$/, "") || "/";
   if (path === "/") return false;
-  if (/^\/(local-news|local|news|newsroom|stories|latest|section|category|tag|topics?)(\/)?$/i.test(path)) {
+  if (
+    /^\/(local-news|local|news|newsroom|stories|latest|section|category|tag|topics?)(\/)?$/i.test(
+      path,
+    )
+  ) {
     return false;
   }
   const parts = path.split("/").filter(Boolean);
@@ -388,7 +417,8 @@ export function discoverStoryLinks(html: string, base: URL): string[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
     const href = m[1]!;
-    if (href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:")) continue;
+    if (href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:"))
+      continue;
     try {
       const abs = new URL(href, base);
       if (abs.protocol !== "http:" && abs.protocol !== "https:") continue;
@@ -502,11 +532,15 @@ function clean(doc: IngestDocument): IngestDocument {
   };
 }
 
-export async function ingestDocument(raw: string, ocrOptions?: OcrOptions): Promise<IngestDocument> {
+export async function ingestDocument(
+  raw: string,
+  ocrOptions?: OcrOptions,
+): Promise<IngestDocument> {
   return clean(await ingestDocumentRaw(raw, ocrOptions));
 }
 
 async function ingestDocumentRaw(raw: string, ocrOptions?: OcrOptions): Promise<IngestDocument> {
+  let responseChain: string[] = [];
   const empty = (over: Partial<IngestDocument>): IngestDocument => ({
     ok: false,
     status: 0,
@@ -573,6 +607,7 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: OcrOptions): Promise<
       });
     }
     const tracked = await fetchPublicHttpTracked(url);
+    responseChain = tracked.chain;
     const res = tracked.response;
     const status = res.status;
     const ctype = (res.headers.get("content-type") ?? "").toLowerCase();
@@ -606,8 +641,7 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: OcrOptions): Promise<
     const path = url.pathname.toLowerCase();
 
     if (!res.ok) {
-      const outcome: FetchOutcome =
-        status === 404 || status === 410 ? "not-found" : "fetch-failed";
+      const outcome: FetchOutcome = status === 404 || status === 410 ? "not-found" : "fetch-failed";
       const why =
         status === 429
           ? "The site returned 429 Too Many Requests. No article was captured."
@@ -670,7 +704,11 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: OcrOptions): Promise<
     const body = new TextDecoder("utf-8", { fatal: false }).decode(buf);
     const titleMatch = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
     const title = titleMatch
-      ? titleMatch[1]!.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().slice(0, 140)
+      ? titleMatch[1]!
+          .replace(/<[^>]+>/g, "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 140)
       : url.hostname;
     const text = htmlToPlainText(body).slice(0, ARCHIVE_TEXT_CAP);
     if (looksLikeSoft404(title, text)) {
@@ -729,6 +767,16 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: OcrOptions): Promise<
       rawBytes: buf.byteLength <= 4_000_000 ? buf : undefined,
     });
   } catch (err) {
+    if (err instanceof FetchResponseRefusal) {
+      return empty({
+        status: err.status,
+        text: err.message,
+        title: err.url,
+        contentType: err.contentType,
+        redirectChain: responseChain.length ? responseChain : err.redirectChain,
+        extractionMethod: err.reason,
+      });
+    }
     const msg = err instanceof Error ? err.message : "fetch failed";
     const timeout = /timeout|aborted/i.test(msg);
     return empty({
@@ -753,16 +801,18 @@ export async function ingestUrl(raw: string): Promise<IngestResult> {
   const ctype = (res.headers.get("content-type") ?? "").toLowerCase();
   const capped = await readBodyCapped(res, limitFor(url.toString(), ctype));
   if (!capped.ok) {
-    throw new Error(
-      `Response too large to read (${capped.declared ?? capped.read} bytes)`,
-    );
+    throw new Error(`Response too large to read (${capped.declared ?? capped.read} bytes)`);
   }
   const buf = capped.bytes;
 
   if (ctype.includes("pdf") || path.endsWith(".pdf")) {
     const pdf = await extractPdfBetter(buf);
     if (pdf.needsOcr || pdf.text.length < 40) throw new Error("PDF had no extractable text");
-    return { text: `PDF ${url.toString()}\n\n${pdf.text.slice(0, 40000)}`, titleHint: url.pathname.split("/").pop() ?? "pdf", extras: [] };
+    return {
+      text: `PDF ${url.toString()}\n\n${pdf.text.slice(0, 40000)}`,
+      titleHint: url.pathname.split("/").pop() ?? "pdf",
+      extras: [],
+    };
   }
 
   const body = new TextDecoder("utf-8", { fatal: false }).decode(buf);
@@ -783,7 +833,11 @@ export async function ingestUrl(raw: string): Promise<IngestResult> {
 
   const titleMatch = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const titleHint = titleMatch
-    ? titleMatch[1]!.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().slice(0, 140)
+    ? titleMatch[1]!
+        .replace(/<[^>]+>/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 140)
     : url.hostname;
   const text = body
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -794,7 +848,9 @@ export async function ingestUrl(raw: string): Promise<IngestResult> {
     .slice(0, 14000);
   if (text.length < 40) throw new Error("Page had almost no readable text");
   const extras = mergePageExtras(body, url);
-  const alt = body.match(/rel=["']alternate["'][^>]*type=["']application\/(rss|atom)\+xml["'][^>]*href=["']([^"']+)/i);
+  const alt = body.match(
+    /rel=["']alternate["'][^>]*type=["']application\/(rss|atom)\+xml["'][^>]*href=["']([^"']+)/i,
+  );
   if (alt?.[2]) {
     try {
       extras.unshift(new URL(alt[2], url).toString());

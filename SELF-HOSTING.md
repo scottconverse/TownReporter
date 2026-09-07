@@ -1,11 +1,20 @@
 # TownReporter — how this is actually running
 
-Live at **https://townreporter.org**, served from a Node process on this
-machine through a Cloudflare Tunnel. No hosting bill, no ports open on the
-router.
+Repository documentation version: **0.6.24**.
 
-The live-deployment notes below record the established setup as of the
-tagged **v0.6.23** build, which is what the production checkout runs.
+These are **Halo-local operator deployment notes**, not instructions to treat a
+remote development machine as production. The paper is hosted at
+**https://townreporter.org** on the Halo box in Longmont, through a Cloudflare
+Tunnel. “This machine” below refers to Halo.
+
+The latest preserved operator receipt reports **v0.6.23** promoted on
+2026-09-06, with served-version checks and 30 published stories preserved.
+See [the dated receipt](HANDOFF-SESSION-2026-09-04.md). This remote takeover
+has not independently checked the running deployment. A newer repository
+version, GitHub tag or release does not establish production version.
+
+Current development boundaries and queue: [handoff](HANDOFF-NEXT-AGENT.md),
+[TODO](TODO.md). Staging and promotion below require a Halo-local operator.
 
 ---
 
@@ -182,16 +191,16 @@ prompts. Without it your developer instructions get prepended to every story.
 If quota bites, restore the Claude login/quota, or pick another provider for
 the run.
 
-### Provider rules, per desk action (v0.5.7)
+### Provider rules, per desk action
 
 | Desk work           | Provider rule                                                                                                | Recovery                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| Scan and Dark Desk  | configured `LLM_*`, Anthropic/Claude Code, or Grok path                                                      | repair the configured endpoint/key or sign back into Claude Code                                              |
+| Scan and Dark Desk  | per-run picker; Automatic uses configured gateway or readiness ladder                                                      | repair the configured endpoint/key or sign back into Claude Code                                              |
 | Story — Automatic   | configured `LLM_*` exclusively when present; otherwise Claude Opus → Codex Terra readiness ladder            | repair the provider named on the failed job; a run stays pinned to one provider                               |
 | Story — explicit    | Codex Terra, Codex Sol, Claude Opus, or Local model; no fallback                                             | open and sign into the named CLI, or set `LLM_BASE_URL` for Local model                                        |
 | Opinion             | Claude Opus or Local model, through the signed-in Claude Code session for Claude; Codex is not offered for editorials | open Claude Code and renew its login; the completed row records the provider that delivered              |
 
-Codex reuses the signed-in user's native configuration and full available
+For ordinary Story calls, Codex reuses the signed-in user's native configuration and full available
 Windows access. TownReporter does not disable search, shell/files,
 browser/computer tools, apps, plugins, hooks, skills, user rules, repository
 instructions, or multi-agent capability, and it launches with

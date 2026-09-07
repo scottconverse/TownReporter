@@ -264,7 +264,7 @@
       }
 
       .hero {
-        padding: 64px 0 56px;
+        padding-block: 64px 56px;
         border-top: none;
       }
       .hero-grid {
@@ -610,7 +610,7 @@
         >
         <div class="nav-links">
           <a href="#shots">Screenshots</a>
-          <a href="#new">New in 0.6.8</a>
+          <a href="#new">Capabilities</a>
           <a href="#idea">The idea</a>
           <a href="#rooms">Two rooms</a>
           <a href="#how">How it works</a>
@@ -622,7 +622,7 @@
           <summary aria-label="Menu">Menu</summary>
           <div class="menu-panel">
             <a href="#shots">Screenshots</a>
-            <a href="#new">New in 0.6.8</a>
+            <a href="#new">Capabilities</a>
             <a href="#idea">The idea</a>
             <a href="#rooms">Two rooms</a>
             <a href="#how">How it works</a>
@@ -646,8 +646,8 @@
               or doesn’t add up. A human still decides what prints.
             </p>
             <p class="cap">
-              Current release: <b>0.6.23</b>, the build the live paper runs. Everything described
-              here is on it.
+              Repository release: <b>0.6.24</b>. Deployment is a separate operator step;
+              current capabilities and remaining work are distinguished below.
             </p>
             <div class="cta-row">
               <a class="btn" href="#start">Run it yourself</a>
@@ -706,7 +706,9 @@
         <h2>A paper on the front, a working desk behind it</h2>
         <div class="prose">
           <p>
-            These are real product screenshots, not mockups. The workbench and Paper setup show
+            These are real product screenshots, not mockups. They predate the Fable Direction A
+            layout: the current desk has a main queue column and a Dark Desk, Follow-ups and wire
+            rail. The workbench and Paper setup show
             development examples; the other images are historical Longmont screens from 29 August.
             Their old Leave as editor header link now lives as Give up the desk on the Server page.
           </p>
@@ -779,7 +781,7 @@
       </section>
 
       <section id="new" class="wrap">
-        <p class="eyebrow">New in 0.6.8</p>
+        <p class="eyebrow">Capabilities</p>
         <h2>Pick the model everywhere, and the desk stays readable</h2>
         <div class="grid-3">
           <div class="panel">
@@ -796,7 +798,7 @@
             <h3>Readable for real eyes</h3>
             <p class="cap" style="margin: 0 0 10px">Dark mode, fixed</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              Every informational text token in both themes now meets WCAG AA contrast, and
+              The desk has checked theme-token contrast, and
               nothing on the desk renders below a 14px floor. A new Text: Normal / Large toggle
               sits next to Light/Dark in the header for anyone who wants it bigger still.
             </p>
@@ -1011,7 +1013,8 @@ npm run dev
                 <strong>Pick per story.</strong> Every Queue row and the story workbench put a model
                 picker beside <b>Draft with AI</b>. Automatic uses your configured gateway when set;
                 otherwise it tries Claude Opus, then Codex Terra, before the job starts, then keeps
-                that provider for every pass. Named choices never fall back.
+                that provider for every pass unless Automatic moves to the next ready provider
+                after an eligible failure. Named choices never fall back.
               </p>
               <p>
                 <b>Set up a writing model</b> opens help under every Queue, workbench and Opinion
@@ -1028,9 +1031,9 @@ npm run dev
               </p>
               <p>
                 Zen MiMo and Local Qwen were removed from the picker (2026-09-02). 0.6.10
-                brought a local model back as a named pick, &ldquo;Local model&rdquo;: whatever
-                <code>LLM_BASE_URL</code> already points at, on every picker once that variable
-                is set. Codex and Claude reuse their signed-in CLI sessions and check readiness
+                brought back Local model. The desk now discovers individual models on LM Studio,
+                Ollama and llama.cpp; a configured <code>LLM_BASE_URL</code> is also supported.
+                Codex and Claude reuse their signed-in CLI sessions and check readiness
                 before enqueue.
               </p>
               <p>
@@ -1043,7 +1046,7 @@ npm run dev
                 Opinion offers Claude and the local model. Automatic and Claude Opus both mean
                 Claude Opus through your signed-in Claude Code session, which reads the editorial
                 voice by file path and keeps its tool-free writing boundary; Local model is
-                offered too, once <code>LLM_BASE_URL</code> is set. Codex is not offered for editorials:
+                offered too, through local discovery or configured <code>LLM_BASE_URL</code>. Codex is not offered for editorials:
                 its model declines to write a piece that takes a position on a local policy
                 question, so it stays on the Story picker. A refusal, assistant note, implausible
                 headline or incomplete body is marked failed and never becomes a draft.
@@ -1125,7 +1128,8 @@ npm run dev
             <b>Setup needs real sources.</b> TownReporter cannot infer the right agenda portal,
             meeting channels or local title vocabulary from a city name. The owner supplies them.
           </li>
-          <li><b>Dark Desk has no publish button.</b> That is not a missing feature.</li>
+          <li><b>Dark Desk has no publish button.</b> Its speculative signals and structured verification still require editorial judgment. Five live investigations remain an acceptance exercise.</li>
+          <li><b>Still being built:</b> configurable sections, manual investigative page watching and legal removal. Ordinary source watching and deletion are not those workflows. See <a href="https://github.com/scottconverse/TownReporter/blob/main/TODO.md">the current backlog</a>.</li>
         </ul>
       </section>
 

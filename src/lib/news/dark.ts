@@ -8,11 +8,7 @@ import {
   probeProvider,
   type EffectiveProviderChoice,
 } from "./ai.ts";
-import {
-  effectiveStoryModelChoice,
-  modelChoiceLabel,
-  storyModelChoice,
-} from "./model-choice.ts";
+import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import { planAutomaticFailover, failoverReasonPhrase } from "./automatic-failover.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
@@ -149,6 +145,7 @@ export type DarkSignalRow = {
   /** 'unverified' until all four gates are answered. Never assumed. */
   verification_status?: string | null;
   gates_missing?: string | null;
+  gate_missing_context?: string | null;
   adversarial_json?: string | null;
   newsworthiness_json?: string | null;
   newsworthiness_decision?: string | null;
@@ -655,10 +652,11 @@ export const getInvestigation = createServerFn({ method: "GET" })
       state: string | null;
       provider: string | null;
       generated_json: string | null;
+      selected_json: string | null;
       tier: string | null;
       strategy: string | null;
     }>`
-      select hop, query, state, provider, generated_json, tier, strategy from search_log
+      select hop, query, state, provider, generated_json, selected_json, tier, strategy from search_log
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 40
     `;
@@ -706,7 +704,13 @@ export const getInvestigation = createServerFn({ method: "GET" })
       } catch {
         newsworthiness = null;
       }
-      return { ...s, stageChip: words.chip, stageSentence: words.sentence, adversarial, newsworthiness };
+      return {
+        ...s,
+        stageChip: words.chip,
+        stageSentence: words.sentence,
+        adversarial,
+        newsworthiness,
+      };
     });
     const briefRow = await sql<{ brief_json: string }>`
       select brief_json from investigation_briefs where investigation_id = ${id} limit 1
@@ -788,6 +792,93 @@ export const getArtifact = createServerFn({ method: "GET" })
     return rows[0] ?? null;
   });
 
+export async function buildDarkSynthesisPack(
+  investigationId: number,
+  paste: string,
+  newsroomId: number,
+): Promise<string> {
+  const sql = await getSql();
+  const sources = await sql<SourceRow>`
+    select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
+    from sources where newsroom_id = ${newsroomId} order by id asc
+  `;
+  const arts = await sql<{ title: string; url: string; full_text: string }>`
+    select title, url, full_text from artifacts
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId}
+    order by id desc limit 12
+  `;
+  const frontier = await sql<{ label: string; kind: string; why: string }>`
+    select label, kind, why from frontier_items
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} and status in ('open', 'investigating', 'reopened')
+    order by priority desc limit 16
+  `;
+  const rels = await sql<{ from_name: string; to_name: string; kind: string }>`
+    select from_name, to_name, kind from relationships
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} limit 20
+  `;
+  const claims = await sql<{ body: string; kind: string }>`
+    select body, kind from claims
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} order by id desc limit 12
+  `;
+  const hyps = await sql<{ body: string; status: string }>`
+    select body, status from hypotheses
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} order by id desc limit 12
+  `;
+  const anoms = await sql<{ kind: string; summary: string }>`
+    select kind, summary from anomalies
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} order by id desc limit 10
+  `;
+  const leads = await sql<{
+    headline: string;
+    why: string;
+    topic: string;
+    status: string;
+    resurfaced_count: number;
+  }>`
+    select headline, why, topic, status, resurfaced_count from leads
+    where newsroom_id = ${newsroomId} order by created_at desc limit 8
+  `;
+  const articles = await sql<Pick<ArticleRow, "headline" | "topic" | "published_at">>`
+    select headline, topic, published_at from articles
+    where newsroom_id = ${newsroomId} and status = 'published' order by published_at desc limit 6
+  `;
+  const memory = await sql<MemoryRow>`
+    select entity, last_angle from beat_memory where newsroom_id = ${newsroomId} order by updated_at desc limit 12
+  `;
+  const searches = await sql<{ query: string }>`
+    select query from search_log where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} order by id desc limit 20
+  `;
+
+  const { place } = await readDarkPlace(newsroomId);
+  const pack = [
+    `CITY: ${place.city}, ${place.state}. Investigation ${investigationId}. Watch list is a start, not a boundary.`,
+    `WATCH LIST:\n${sources.map((s) => `${s.tier} ${s.status} ${s.title} ${s.url}`).join("\n") || "(empty)"}`,
+    `SEARCHES RUN:\n${searches.map((s) => s.query).join("\n") || "(none)"}`,
+    `FRONTIER:\n${frontier.map((f) => `${f.kind}: ${f.label} — ${f.why}`).join("\n") || "(none)"}`,
+    `RELATIONSHIPS:\n${rels.map((r) => `${r.from_name} -[${r.kind}]-> ${r.to_name}`).join("\n") || "(none)"}`,
+    `CLAIMS:\n${claims.map((c) => `${c.kind}: ${c.body}`).join("\n") || "(none)"}`,
+    `HYPOTHESES:\n${hyps.map((h) => `[${h.status}] ${h.body}`).join("\n") || "(none)"}`,
+    `ANOMALIES:\n${anoms.map((a) => `${a.kind}: ${a.summary}`).join("\n") || "(none)"}`,
+    `ARTIFACTS:\n${arts.map((s) => `### ${s.title}\n${s.url}\n${s.full_text.slice(0, 1600)}`).join("\n\n") || "(none)"}`,
+    `OPEN LEADS:\n${
+      leads
+        .map((l) => {
+          const resurfaced =
+            l.status === "killed" && l.resurfaced_count > 0
+              ? ` (killed, resurfaced ×${l.resurfaced_count})`
+              : "";
+          return `${l.status} ${l.topic}: ${l.headline}${resurfaced}`;
+        })
+        .join("\n") || "(none)"
+    }`,
+    `PUBLISHED:\n${articles.map((a) => `${a.topic}: ${a.headline}`).join("\n") || "(none)"}`,
+    `BEAT MEMORY:\n${memory.map((m) => `${m.entity}: ${m.last_angle}`).join("\n") || "(none)"}`,
+    paste ? `EDITOR PASTE:\n${paste.slice(0, 8000)}` : "EDITOR PASTE: (none)",
+  ].join("\n\n");
+
+  return pack;
+}
+
 async function synthesizeSignals(
   userId: string,
   runId: number,
@@ -805,77 +896,7 @@ async function synthesizeSignals(
   newsroomId: number = DEFAULT_NEWSROOM_ID,
 ) {
   const sql = await getSql();
-  const sources = await sql<SourceRow>`
-    select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
-    from sources where newsroom_id = ${DEFAULT_NEWSROOM_ID} order by id asc
-  `;
-  const arts = await sql<{ title: string; url: string; full_text: string }>`
-    select title, url, full_text from artifacts
-    where investigation_id = ${investigationId}
-    order by id desc limit 12
-  `;
-  const frontier = await sql<{ label: string; kind: string; why: string }>`
-    select label, kind, why from frontier_items
-    where investigation_id = ${investigationId} and status in ('open', 'investigating', 'reopened')
-    order by priority desc limit 16
-  `;
-  const rels = await sql<{ from_name: string; to_name: string; kind: string }>`
-    select from_name, to_name, kind from relationships
-    where investigation_id = ${investigationId} limit 20
-  `;
-  const claims = await sql<{ body: string; kind: string }>`
-    select body, kind from claims
-    where investigation_id = ${investigationId} order by id desc limit 12
-  `;
-  const hyps = await sql<{ body: string; status: string }>`
-    select body, status from hypotheses
-    where investigation_id = ${investigationId} order by id desc limit 12
-  `;
-  const anoms = await sql<{ kind: string; summary: string }>`
-    select kind, summary from anomalies
-    where investigation_id = ${investigationId} order by id desc limit 10
-  `;
-  const leads = await sql<{
-    headline: string;
-    why: string;
-    topic: string;
-    status: string;
-    resurfaced_count: number;
-  }>`
-    select headline, why, topic, status, resurfaced_count from leads
-    where newsroom_id = ${DEFAULT_NEWSROOM_ID} order by created_at desc limit 8
-  `;
-  const articles = await sql<Pick<ArticleRow, "headline" | "topic" | "published_at">>`
-    select headline, topic, published_at from articles
-    where newsroom_id = ${DEFAULT_NEWSROOM_ID} and status = 'published' order by published_at desc limit 6
-  `;
-  const memory = await sql<MemoryRow>`
-    select entity, last_angle from beat_memory where newsroom_id = ${DEFAULT_NEWSROOM_ID} order by updated_at desc limit 12
-  `;
-  const searches = await sql<{ query: string }>`
-    select query from search_log where investigation_id = ${investigationId} order by id desc limit 20
-  `;
-
-  const pack = [
-    `CITY: Longmont, Colorado. Investigation ${investigationId}. Watch list is a start, not a boundary.`,
-    `WATCH LIST:\n${sources.map((s) => `${s.tier} ${s.status} ${s.title} ${s.url}`).join("\n") || "(empty)"}`,
-    `SEARCHES RUN:\n${searches.map((s) => s.query).join("\n") || "(none)"}`,
-    `FRONTIER:\n${frontier.map((f) => `${f.kind}: ${f.label} — ${f.why}`).join("\n") || "(none)"}`,
-    `RELATIONSHIPS:\n${rels.map((r) => `${r.from_name} -[${r.kind}]-> ${r.to_name}`).join("\n") || "(none)"}`,
-    `CLAIMS:\n${claims.map((c) => `${c.kind}: ${c.body}`).join("\n") || "(none)"}`,
-    `HYPOTHESES:\n${hyps.map((h) => `[${h.status}] ${h.body}`).join("\n") || "(none)"}`,
-    `ANOMALIES:\n${anoms.map((a) => `${a.kind}: ${a.summary}`).join("\n") || "(none)"}`,
-    `ARTIFACTS:\n${arts.map((s) => `### ${s.title}\n${s.url}\n${s.full_text.slice(0, 1600)}`).join("\n\n") || "(none)"}`,
-    `OPEN LEADS:\n${leads
-      .map((l) => {
-        const resurfaced = l.status === "killed" && l.resurfaced_count > 0 ? ` (killed, resurfaced ×${l.resurfaced_count})` : "";
-        return `${l.status} ${l.topic}: ${l.headline}${resurfaced}`;
-      })
-      .join("\n") || "(none)"}`,
-    `PUBLISHED:\n${articles.map((a) => `${a.topic}: ${a.headline}`).join("\n") || "(none)"}`,
-    `BEAT MEMORY:\n${memory.map((m) => `${m.entity}: ${m.last_angle}`).join("\n") || "(none)"}`,
-    paste ? `EDITOR PASTE:\n${paste.slice(0, 8000)}` : "EDITOR PASTE: (none)",
-  ].join("\n\n");
+  const pack = await buildDarkSynthesisPack(investigationId, paste, newsroomId);
 
   /*
     The prompt is built from the dials, not fixed.
@@ -1124,7 +1145,7 @@ async function executeDarkRun(
 
     // Same setting as a continued round: an editor who turned the desk up
     // expects the file they open next to dig that hard too.
-    const dials = await readDarkDials(DEFAULT_NEWSROOM_ID);
+    const dials = await readDarkDials(newsroomId);
     const budget = budgetFor(dials);
     // Location scoping and domain tiers come from the paper's own settings,
     // so the loop's searches name this town and the run record can say which
@@ -1175,7 +1196,7 @@ async function executeDarkRun(
       `
     ).map((n) => n.name);
     await resurfaceDeadEnds(userId, investigationId, names, { foreignOnly: true });
-    const revived = await matchDeadEnds(userId, names);
+    const revived = await matchDeadEnds(userId, names, newsroomId);
 
     const header = [
       loop.summary,
@@ -1236,9 +1257,7 @@ async function executeDarkRun(
 
 export const runDarkDesk = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator(
-    (input: { paste: string; investigationId?: number; modelChoice?: string }) => input,
-  )
+  .validator((input: { paste: string; investigationId?: number; modelChoice?: string }) => input)
   .handler(async ({ context, data }) => {
     /*
       The editor's pick decides which provider is probed, and an unresolvable
@@ -1301,7 +1320,12 @@ export const findSomethingToDigInto = createServerFn({ method: "POST" })
       },
       owned(context),
     );
-    await audit(context.userId, "dark", `open inv ${opened.investigationId} from worth-a-look`, owned(context));
+    await audit(
+      context.userId,
+      "dark",
+      `open inv ${opened.investigationId} from worth-a-look`,
+      owned(context),
+    );
     return opened;
   });
 
@@ -1559,7 +1583,7 @@ export async function performDarkRound(job: DeskJob) {
       `
     ).map((n) => n.name);
     await resurfaceDeadEnds(context.userId, id, names, { foreignOnly: true });
-    const revived = await matchDeadEnds(context.userId, names);
+    const revived = await matchDeadEnds(context.userId, names, owned(context));
     const header = [
       loop.summary,
       synth.summary,
@@ -1645,7 +1669,7 @@ export async function sendDarkSignalToQueueFor(
     select id, run_id, investigation_id, name, posture, signal_type, strength, confidence,
       observation, pattern, linkage_map, alternatives, counter_narrative,
       what_would_kill, pathway, privacy_review, handoff, created_at,
-      stage, verification_status, gates_missing, newsworthiness_json, newsworthiness_decision
+      stage, verification_status, gates_missing, gate_missing_context, newsworthiness_json, newsworthiness_decision
     from dark_signals where id = ${id} and newsroom_id = ${newsroomId} limit 1
   `;
   const sig = rows[0];
@@ -1693,6 +1717,8 @@ export async function sendDarkSignalToQueueFor(
     `Stage: ${words.chip}. ${words.sentence}`,
     `Newsworthiness gate: ${newsworthinessWords(news)}`,
     verified ? "" : "Sent unverified, at the editor's direction. Treat it as a tip, not a finding.",
+    `Opposing account: ${(sig.counter_narrative || "Not established.").slice(0, 800)}`,
+    `Missing context: ${(sig.gate_missing_context || "Not assessed.").slice(0, 800)}`,
     sig.observation,
     `Linkage: ${sig.linkage_map}`,
     `Alternatives: ${sig.alternatives}`,
@@ -1771,7 +1797,12 @@ export async function queueInvestigationFor(
            count(*) filter (where verification_status = 'verified')::int as verified
     from dark_signals
     where investigation_id = ${id} and newsroom_id = ${newsroomId}
-  `.catch(() => [] as { total: number; verified: number }[]);
+  `.catch(() => null);
+  if (!gate?.[0])
+    return {
+      ok: false as const,
+      error: "Could not read the file verification status. Nothing was sent; retry the handoff.",
+    };
   const total = Number(gate[0]?.total ?? 0);
   const verifiedCount = Number(gate[0]?.verified ?? 0);
   if (total > 0 && verifiedCount === 0 && !opts.asTip) {
@@ -1780,7 +1811,7 @@ export async function queueInvestigationFor(
       blocked: "unverified" as const,
       error:
         total === 1
-          ? "The one signal on this file has not passed the four gates yet — the desk has not shown that it tried to disprove it. Tick \"send unverified, as a tip\" to put it on the queue anyway."
+          ? 'The one signal on this file has not passed the four gates yet — the desk has not shown that it tried to disprove it. Tick "send unverified, as a tip" to put it on the queue anyway.'
           : `None of the ${total} signals on this file have passed the four gates yet — the desk has not shown that it tried to disprove them. Tick "send unverified, as a tip" to put the file on the queue anyway.`,
     };
   }
@@ -1800,17 +1831,52 @@ export async function queueInvestigationFor(
   `;
   const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
   const topic = topicFromText(`${inv[0].title}\n${inv[0].summary}`);
+  // Keep uncertainty ahead of the summary: a long brief must not crowd out
+  // the opposing account when a whole file becomes a lead.
+  const signalNotes = await sql<{
+    name: string;
+    verification_status: string;
+    counter_narrative: string;
+    gate_missing_context: string | null;
+    what_would_kill: string;
+  }>`
+    select name, verification_status, counter_narrative, gate_missing_context, what_would_kill
+    from dark_signals where investigation_id = ${id} and newsroom_id = ${newsroomId}
+    order by id asc limit 3
+  `;
+  const shorten = (value: string, limit: number) =>
+    value.length > limit ? `${value.slice(0, limit - 13)} [shortened]` : value;
+  const handoff = [
+    "DARK DESK notes. Publication is a separate human action.",
+    opts.asTip
+      ? "Sent unverified, at the editor's direction. Treat it as a tip, not a finding."
+      : `${verifiedCount} of ${total} filed signals passed verification; other signals remain unverified.`,
+    signalNotes.length
+      ? `Signal notes: showing ${signalNotes.length} of ${total}. Open investigation for the complete file and unabridged accounts.`
+      : "",
+    ...signalNotes.map((signal) =>
+      [
+        `${shorten(signal.name, 80)} — ${signal.verification_status === "verified" ? "verified" : "unverified"}`,
+        `Opposing account: ${shorten(signal.counter_narrative || "Not established.", 320)}`,
+        `Missing context: ${shorten(signal.gate_missing_context || "Not assessed.", 320)}`,
+        `What would disprove it: ${shorten(signal.what_would_kill || "Not established.", 160)}`,
+      ].join("\n"),
+    ),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const evidence = `${handoff}\n\nFile summary: ${shorten(inv[0].summary, Math.max(0, 4000 - handoff.length - 16))}`;
   const created = await sql<{ id: number }>`
     insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
     values (
       ${userId},
       ${newsroomId},
       ${inv[0].title.slice(0, 240)},
-      ${`DARK DESK notes. Publication is a separate human action.\n\n${inv[0].summary}`.slice(0, 4000)},
+      ${evidence},
       ${topic},
       'new',
       ${urls},
-      ${inv[0].summary.slice(0, 4000)},
+      ${evidence},
       ${12},
       ${id}
     )
@@ -1931,7 +1997,12 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       filedUrls.add(post.url);
     }
 
-    await audit(context.userId, "reddit", `r/${sub} read ${sweep.posts.length} filed ${filed}`, owned(context));
+    await audit(
+      context.userId,
+      "reddit",
+      `r/${sub} read ${sweep.posts.length} filed ${filed}`,
+      owned(context),
+    );
 
     // Every post read, not only the ones filed, so a near miss stays visible
     // to the editor instead of vanishing along with the sweep. Split at the
@@ -1958,8 +2029,14 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       log: sweep.log,
       // Which of the rotating searches ran this check, newest-posts first.
       searched,
-      topScores: classified.filter((p) => p.score >= 6).slice(0, 12).map(asCard),
-      nearMisses: classified.filter((p) => p.score >= 3 && p.score < 6).slice(0, 5).map(asCard),
+      topScores: classified
+        .filter((p) => p.score >= 6)
+        .slice(0, 12)
+        .map(asCard),
+      nearMisses: classified
+        .filter((p) => p.score >= 3 && p.score < 6)
+        .slice(0, 5)
+        .map(asCard),
     };
   });
 
@@ -2064,7 +2141,12 @@ export const saveDarkDials = createServerFn({ method: "POST" })
         set dig = excluded.dig, nerve = excluded.nerve, scope = excluded.scope,
             updated_at = now()
     `;
-    await audit(context.userId, "dark-dials", `dig ${d.dig} nerve ${d.nerve} scope ${d.scope}`, owned(context));
+    await audit(
+      context.userId,
+      "dark-dials",
+      `dig ${d.dig} nerve ${d.nerve} scope ${d.scope}`,
+      owned(context),
+    );
     return {
       ok: true as const,
       dials: d,

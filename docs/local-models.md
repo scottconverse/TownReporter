@@ -296,9 +296,10 @@ for using it.
 
 ---
 
-## Zero-config discovery, and picking the model (0.6.19)
+## Zero-config discovery, and picking the model (current 0.6.24)
 
-If LM Studio or Ollama is running on this machine, TownReporter finds it. Pick
+TownReporter probes LM Studio, Ollama and llama.cpp on their default ports
+on the app server. A responsive compatible server can appear without config. Pick
 the model in any Writing model picker — Command Center, a Queue row, the
 Story page, Dark Desk, Opinion, or the Server page's Writing models section.
 Nothing needs to be typed in for this to work.
@@ -307,7 +308,7 @@ The config lines below are optional overrides, not requirements:
 
 ```
 # Point at a specific server/model instead of discovering one. Also makes
-# "Local model" ready even if LM Studio/Ollama are not on their default ports.
+# "Local model" ready even if LM Studio/Ollama/llama.cpp are not on their default ports.
 LLM_BASE_URL=http://127.0.0.1:11434/v1     # Ollama's default
 # LLM_BASE_URL=http://127.0.0.1:1234/v1    # LM Studio's default
 LLM_MODEL=gemma4:12b
@@ -316,14 +317,15 @@ LLM_MODEL=gemma4:12b
 # Force thinking off/on for a model, instead of the automatic guess:
 # LLM_REASONING_EFFORT=none                # none | low | medium | high
 
-# Turn off probing the two default ports entirely (LLM_BASE_URL, if set,
+# Turn off probing the three default ports entirely (LLM_BASE_URL, if set,
 # is still tried):
 # TOWNREPORTER_LOCAL_DISCOVERY=0
 ```
 
 **How discovery works.** `src/lib/news/local-models.ts` asks
-`http://127.0.0.1:1234/v1/models` (LM Studio) and
-`http://127.0.0.1:11434/v1/models` (Ollama) for their model lists, with a
+`http://127.0.0.1:1234/v1/models` (LM Studio),
+`http://127.0.0.1:11434/v1/models` (Ollama), and
+`http://127.0.0.1:8080/v1/models` (llama.cpp) for their model lists, with a
 1.5-second timeout each, and drops anything that does not answer with the
 expected `{"data":[{"id":...}]}` shape — a server that is not there, slow, or
 serving something unrelated (an unrelated web app on the same machine that
@@ -336,6 +338,11 @@ models break the app silently" above) — that is where each option's
 cached 20 seconds and refreshed in the background every 60 seconds, so
 picker loads do not re-probe on every render; the picker's own Refresh
 button forces an immediate re-check.
+
+llama.cpp does not report load state through this endpoint. Its vision label
+is inferred from the model name, not a successful image-read test. Also,
+TownReporter and llama.cpp both default to port 8080: if both run on the same
+server, move one to a free port and set `LLM_BASE_URL` for a moved model server.
 
 **The default.** With nothing configured, "Local model" defaults to the
 first model already **loaded** on LM Studio, then Ollama, then whatever
@@ -371,15 +378,15 @@ is no per-page provider logic to keep in sync.
 
 A council packet with no text layer — a fax-quality scan of a paper agenda —
 cannot be read by extracting text that was never stored in the file. This
-desk reads it the way a person would: it pulls the page images the scan
-already embeds and asks the model you picked to look at them and transcribe
-what they say (`src/lib/news/ocr.ts`). The Anthropic API, the Codex CLI, and
-the Claude Code CLI can all do this. A **local** model can only do it if it
+desk extracts supported embedded JPEG/PNG images and asks the selected
+vision-capable provider to transcribe them (`src/lib/news/ocr.ts`). The Anthropic API, Codex CLI and
+Claude Code CLI provide vision paths when their prerequisites are met. This
+does not guarantee that a particular scan will be readable. A **local** model can only do it if it
 was built to accept images at all — an ordinary text-only local model
 cannot, no matter how good it is at writing.
 
 The picker marks which local models can: an entry with **`· vision`** after
-its name can read images; one without it cannot. LM Studio reports this
+its name is identified as image-capable; the label is not a completed OCR test. LM Studio reports this
 itself; for Ollama, TownReporter asks each model directly (`ollama pull` a
 vision model such as `qwen2.5vl` or `llama3.2-vision` to get one). The Server
 page's local-model table also has a **Vision** column, for the same answer
@@ -389,6 +396,13 @@ Pick "Local model" for a scan without a vision-marked model selected, and the
 desk says so honestly rather than guessing at the page's contents: *"the
 chosen local model cannot read images — pick a vision model (marked ·
 vision in the picker)."* A PDF whose scanner used CCITT/JBIG2 fax
-compression (no embedded JPEG or PNG page image at all — most scanners do
-embed one or the other) cannot be read by any provider yet; the desk says
+compression (no supported embedded JPEG or PNG image) cannot be read by any provider yet; the desk says
 that plainly too, rather than returning empty text with no explanation.
+
+OCR attempts at most 12 extracted images, at most 2 MiB each. The extractor
+does not establish PDF page order or an image-to-page mapping. New OCR
+references therefore use image indices (`image:N`) with no PDF page number;
+they are not evidence that the first 12 pages were read. The reader names
+the provider and image coverage. Historical stored OCR page labels are not
+automatically corrected: re-ingest or operator review is needed before
+relying on them as page citations. Native text PDF page references are unchanged.

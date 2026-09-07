@@ -28,7 +28,11 @@ async function bootInv(user: string, title: string) {
   return { sql, id: rows[0]!.id };
 }
 
-const fetchOk = (text: string, title: string, extras: string[] = []): Awaited<ReturnType<FetchFn>> => ({
+const fetchOk = (
+  text: string,
+  title: string,
+  extras: string[] = [],
+): Awaited<ReturnType<FetchFn>> => ({
   ok: true,
   status: 200,
   text,
@@ -39,7 +43,10 @@ const fetchOk = (text: string, title: string, extras: string[] = []): Awaited<Re
 describe("quote in document", () => {
   it("does not treat a paraphrase or a short string as a quote", () => {
     const body = "Packet A awards a sidewalk contract to Civic Paving LLC.";
-    assert.equal(evidenceAppearsInText("Packet A awards a sidewalk contract to Civic Paving LLC.", body), true);
+    assert.equal(
+      evidenceAppearsInText("Packet A awards a sidewalk contract to Civic Paving LLC.", body),
+      true,
+    );
     assert.equal(evidenceAppearsInText("Packet A awards the contract", body), false);
     assert.equal(evidenceAppearsInText("no locator", body), false);
   });
@@ -105,7 +112,9 @@ describe("forensic chronology", { timeout: 120000 }, () => {
     assert.equal(events[2]!.content_hash, hashA);
     assert.equal(events[3]!.content_hash, hashB);
     assert.ok(
-      events[4]!.fetch_outcome === "removed" || events[4]!.http_status === 404 || events[4]!.content_hash === "missing",
+      events[4]!.fetch_outcome === "removed" ||
+        events[4]!.http_status === 404 ||
+        events[4]!.content_hash === "missing",
       JSON.stringify(events[4]),
     );
     assert.equal(events[5]!.content_hash, hashC);
@@ -237,7 +246,11 @@ describe("exact provenance", { timeout: 120000 }, () => {
     assert.equal(noQuote.provenance_status, "unresolved");
     assert.equal(noQuote.version_id, verA.id);
 
-    const rels = await sql<{ from_name: string; version_id: number | null; provenance_status: string | null }>`
+    const rels = await sql<{
+      from_name: string;
+      version_id: number | null;
+      provenance_status: string | null;
+    }>`
       select from_name, version_id, provenance_status from relationships
       where investigation_id = ${id} and user_id = ${user} order by id
     `;
@@ -281,7 +294,11 @@ describe("investigation-scoped entities", { timeout: 120000 }, () => {
       { name: "Jane Smith", kind: "person", why: "Registered agent in investigation A only" },
     ]);
     await runEntities(b, [
-      { name: "Peak Range Holdings Inc", kind: "company", why: "Similar name in investigation B — do not merge" },
+      {
+        name: "Peak Range Holdings Inc",
+        kind: "company",
+        why: "Similar name in investigation B — do not merge",
+      },
     ]);
 
     const packA = await retrievePack(user, a, ["Peak", "Jane"]);
@@ -304,13 +321,19 @@ describe("investigation-scoped entities", { timeout: 120000 }, () => {
       where ie.investigation_id = ${b} and ie.user_id = ${user}
     `;
     assert.ok(entsA.some((e) => e.name === "Jane Smith"));
-    assert.equal(entsB.some((e) => e.name === "Jane Smith"), false);
+    assert.equal(
+      entsB.some((e) => e.name === "Jane Smith"),
+      false,
+    );
     assert.ok(entsB.some((e) => /Peak Range Holdings Inc/i.test(e.name)));
     const matches = await sql<{ verdict: string }>`
       select verdict from entity_matches where user_id = ${user}
     `;
     assert.ok(matches.length >= 1);
-    assert.equal(matches.some((m) => m.verdict === "same" || m.verdict === "confirmed-same"), false);
+    assert.equal(
+      matches.some((m) => m.verdict === "same" || m.verdict === "confirmed-same"),
+      false,
+    );
   });
 });
 
@@ -354,7 +377,11 @@ describe("search exhaustion", { timeout: 120000 }, () => {
       archives: async () => [],
     });
 
-    const item = await sql<{ status: string; search_zero_count: number | null; strategies_tried: string | null }>`
+    const item = await sql<{
+      status: string;
+      search_zero_count: number | null;
+      strategies_tried: string | null;
+    }>`
       select status, search_zero_count, strategies_tried from frontier_items
       where investigation_id = ${id} and user_id = ${user} and label = ${"Acme Holdings LLC"}
       limit 1
@@ -382,7 +409,10 @@ describe("autonomous monitoring", { timeout: 120000 }, () => {
     const user = `forensic-mon-${Date.now()}`;
     const { sql, id } = await bootInv(user, "Monitor");
     const url = "https://longmontcolorado.gov/water/water-report.pdf";
-    const body = "City of Longmont Water Quality Report. Nitrate at the treatment plant was 0.4 mg/L. ".repeat(5);
+    const body =
+      "City of Longmont Water Quality Report. Nitrate at the treatment plant was 0.4 mg/L. ".repeat(
+        5,
+      );
     await researchLoop({
       userId: user,
       investigationId: id,
@@ -431,7 +461,9 @@ describe("autonomous monitoring", { timeout: 120000 }, () => {
       investigationId: id,
       url: url2,
       title: "Monthly water quality",
-      text: "City of Longmont monthly drinking water quality summary. Chlorine residual 1.1 mg/L. ".repeat(3),
+      text: "City of Longmont monthly drinking water quality summary. Chlorine residual 1.1 mg/L. ".repeat(
+        3,
+      ),
       hash: await sha256("monthly-ok"),
       status: 200,
       outcome: "fetched",
@@ -529,7 +561,11 @@ describe("long document evidence", { timeout: 120000 }, () => {
     const pack = await retrievePack(user, id, ["KEYFACT_PAGE247"]);
     assert.ok(pack.length < body.length, "planner context stays bounded");
     assert.match(pack, /KEYFACT_PAGE247/);
-    const claim = await sql<{ locator: string | null; version_id: number | null; provenance_status: string | null }>`
+    const claim = await sql<{
+      locator: string | null;
+      version_id: number | null;
+      provenance_status: string | null;
+    }>`
       select locator, version_id, provenance_status from claims
       where investigation_id = ${id} and user_id = ${user} limit 1
     `;
@@ -540,25 +576,101 @@ describe("long document evidence", { timeout: 120000 }, () => {
 });
 
 describe("scanned PDF OCR", { timeout: 120000 }, () => {
+  it("isolates identical URL and raw hash versions between newsrooms", async () => {
+    const user = `forensic-version-scope-${Date.now()}`;
+    const { sql, id } = await bootInv(user, "Scoped versions");
+    const url = `https://example.org/${user}/same.pdf`;
+    for (const newsroomId of [71, 72]) {
+      const text = `ONLY_ROOM_${newsroomId} private extraction notes`;
+      await rememberCapture({
+        userId: user,
+        newsroomId,
+        investigationId: id,
+        url,
+        title: "Packet",
+        text,
+        hash: "same-raw-document",
+        status: 200,
+        outcome: "fetched",
+        pages: [{ page: 1, text }],
+      });
+    }
+    const versions = await sql<{ id: number; newsroom_id: number; full_text: string }>`
+      select id, newsroom_id, full_text from artifact_versions where url = ${url} order by newsroom_id
+    `;
+    assert.equal(versions.length, 2);
+    assert.deepEqual(
+      versions.map((v) => v.newsroom_id),
+      [71, 72],
+    );
+    for (const version of versions) {
+      assert.equal(version.full_text, `ONLY_ROOM_${version.newsroom_id} private extraction notes`);
+      const chunks = await sql<{
+        newsroom_id: number;
+        excerpt: string;
+      }>`select newsroom_id, excerpt from artifact_chunks where version_id=${version.id}`;
+      assert.ok(chunks.length > 0);
+      assert.ok(
+        chunks.every(
+          (c) => c.newsroom_id === version.newsroom_id && c.excerpt === version.full_text,
+        ),
+      );
+    }
+  });
+
+  it("persists image-only captures without a fabricated PDF page count", async () => {
+    const user = `forensic-image-count-${Date.now()}`;
+    const { sql, id } = await bootInv(user, "Image count");
+    for (const imageOnly of [true, false]) {
+      const text = `Unique ${user} ${imageOnly} capture text`;
+      const url = `https://example.org/${user}/${imageOnly}.pdf`;
+      await rememberCapture({
+        userId: user,
+        investigationId: id,
+        url,
+        title: "Packet",
+        text,
+        hash: await sha256(text),
+        status: 200,
+        outcome: "fetched",
+        extractionMethod: imageOnly ? "ocr:Claude:2/2" : "unpdf",
+        pages: imageOnly
+          ? [
+              { page: null, imageIndex: 1, text },
+              { page: null, imageIndex: 2, text },
+            ]
+          : [
+              { page: 1, text },
+              { page: 2, text },
+            ],
+      });
+      const rows = await sql<{ page_count: number | null }>`
+        select page_count from artifact_versions where user_id = ${user} and url = ${url}
+      `;
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]!.page_count, imageOnly ? null : 2);
+    }
+  });
+
   it("runs OCR when native extraction fails and stores page provenance", async () => {
     const ocrText = "SCANNED Longmont water quality nitrate 0.4 mg/L page one";
     const imageOnly = new Uint8Array([
-        ...new TextEncoder().encode("%PDF-1.4\n1 0 obj<<>>endobj\n"),
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-      ]);
-      const pdf = await extractPdfBetter(imageOnly, async () => ({
-        text: ocrText,
-        pages: [{ page: 1, text: ocrText, confidence: 0.91 }],
-      }));
-      assert.equal(pdf.method, "ocr");
-      assert.equal(pdf.needsOcr, false);
-      assert.match(pdf.text, /nitrate/);
-      assert.equal(pdf.pages[0]?.page, 1);
+      ...new TextEncoder().encode("%PDF-1.4\n1 0 obj<<>>endobj\n"),
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+    ]);
+    const pdf = await extractPdfBetter(imageOnly, async () => ({
+      text: ocrText,
+      pages: [{ page: 1, text: ocrText, confidence: 0.91 }],
+    }));
+    assert.equal(pdf.method, "ocr");
+    assert.equal(pdf.needsOcr, false);
+    assert.match(pdf.text, /nitrate/);
+    assert.equal(pdf.pages[0]?.page, 1);
 
     const user = `forensic-ocr-${Date.now()}`;
     const { sql, id } = await bootInv(user, "OCR packet");

@@ -52,7 +52,10 @@ describe("queueInvestigationFor", { timeout: 60000 }, () => {
     const user = `dark-queue-new-${Date.now()}`;
     const opened = await openInvestigationForEditor(
       user,
-      { paste: "https://assets.bouldercounty.gov/example.pdf\nA council rezoning vote.", title: "Rezoning vote" },
+      {
+        paste: "https://assets.bouldercounty.gov/example.pdf\nA council rezoning vote.",
+        title: "Rezoning vote",
+      },
       DEFAULT_NEWSROOM_ID,
     );
 
@@ -76,7 +79,10 @@ describe("queueInvestigationFor", { timeout: 60000 }, () => {
     const user = `dark-queue-again-${Date.now()}`;
     const opened = await openInvestigationForEditor(
       user,
-      { paste: "https://assets.bouldercounty.gov/example.pdf\nA second lead test.", title: "Second lead test" },
+      {
+        paste: "https://assets.bouldercounty.gov/example.pdf\nA second lead test.",
+        title: "Second lead test",
+      },
       DEFAULT_NEWSROOM_ID,
     );
 
@@ -111,7 +117,10 @@ describe("queueInvestigationFor", { timeout: 60000 }, () => {
     const otherNewsroom = DEFAULT_NEWSROOM_ID + 5000;
     const opened = await openInvestigationForEditor(
       user,
-      { paste: "https://assets.bouldercounty.gov/example.pdf\nCross-newsroom isolation.", title: "Isolation check" },
+      {
+        paste: "https://assets.bouldercounty.gov/example.pdf\nCross-newsroom isolation.",
+        title: "Isolation check",
+      },
       otherNewsroom,
     );
 
@@ -120,3 +129,47 @@ describe("queueInvestigationFor", { timeout: 60000 }, () => {
     assert.equal(res.ok, false, "an investigation filed under a different newsroom must not queue");
   });
 });
+
+it(
+  "whole-file handoff carries opposing accounts and missing context before a long summary",
+  { timeout: 60000 },
+  async () => {
+    await ensureInvestigateSchema();
+    await ensureLeadsTable();
+    const user = "qa-whole-file-context";
+    const opened = await openInvestigationForEditor(
+      user,
+      { paste: "A procurement question", title: "Procurement context" },
+      1,
+    );
+    await queueInvestigationFor(user, 1, 9_999_998); // ensure the real Dark Desk schema
+    const sql = await getSql();
+    await sql`update investigations set summary = ${"One-sided summary. ".repeat(500)} where id = ${opened.investigationId}`;
+    for (let n = 0; n < 4; n++)
+      await sql`
+    insert into dark_signals(user_id, newsroom_id, investigation_id, name, posture, signal_type, counter_narrative, gate_missing_context, what_would_kill)
+    values(${user}, 1, ${opened.investigationId}, ${`Question ${n}`}, 'whisper', 'pattern', ${`Emergency exemption ${n}. ${"Long opposing account. ".repeat(80)}`}, ${`Missing signed procurement file ${n}. ${"Missing detail. ".repeat(80)}`}, 'A signed exception disproves the allegation.')
+  `;
+    await sql`
+    insert into dark_signals(user_id, newsroom_id, investigation_id, name, posture, signal_type, counter_narrative)
+    values(${user}, 2, ${opened.investigationId}, 'Other newsroom', 'whisper', 'pattern', 'FOREIGN_CONTEXT_MUST_NOT_LEAK')
+  `;
+    const result = await queueInvestigationFor(user, 1, opened.investigationId, { asTip: true });
+    assert.ok(result.ok);
+    const rows = await sql<{
+      why: string;
+      evidence: string;
+    }>`select why, evidence from leads where id = ${result.leadId}`;
+    for (const text of [rows[0]!.why, rows[0]!.evidence]) {
+      assert.match(text, /Sent unverified/);
+      assert.match(text, /Emergency exemption 0/);
+      assert.match(text, /Missing signed procurement file 0/);
+      assert.match(text, /A signed exception disproves/);
+      assert.match(text, /3 of 4/);
+      assert.match(text, /\[shortened\]/);
+      assert.match(text, /Open investigation/);
+      assert.doesNotMatch(text, /FOREIGN_CONTEXT/);
+      assert.ok(text.length <= 4000);
+    }
+  },
+);

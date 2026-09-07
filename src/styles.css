@@ -1069,6 +1069,7 @@
 .desk-ltr .of-stop b {font-family:var(--fd)}
 .desk-ltr .of-stop.err {color:var(--warn);border-left:3px solid var(--warn);padding-left:10px}
 .desk-ltr .of-grid {display:grid;grid-template-columns:1.4fr 1fr;gap:32px}
+.desk-ltr .of-grid > * {min-width:0;overflow-wrap:anywhere}
 .desk-ltr .of-grid .sechead {margin-top:20px}
 .desk-ltr .of-reads {margin-top:2px}
 .desk-ltr .reader {margin-top:4px}

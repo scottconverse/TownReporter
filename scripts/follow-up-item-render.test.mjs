@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
@@ -42,32 +42,9 @@ const deskChromeStub = inlineModule(`
   }
 `);
 
-// Reimplements the two pure functions from src/lib/news/desk-copy.ts (the
-// real logic under test lives there and has its own direct unit test,
-// scripts/follow-up-due-label.test.mjs) -- inlined here the same way the
-// other render tests stub formatAge/formatShortDate, because desk-copy.ts's
-// relative imports ("./preflight.ts" etc.) cannot resolve from a data: URL
-// module.
-const deskCopyStub = inlineModule(`
-  export function followUpDueLabel(dueOn, today = new Date()) {
-    if (!dueOn) return "";
-    const due = new Date(dueOn + "T00:00:00");
-    if (Number.isNaN(due.getTime())) return "";
-    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const startOfDue = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-    const diffDays = Math.round((startOfDue.getTime() - startOfToday.getTime()) / 86400000);
-    if (diffDays < 0) {
-      const days = Math.abs(diffDays);
-      return "Overdue " + days + " day" + (days === 1 ? "" : "s");
-    }
-    if (diffDays === 0) return "due today";
-    const formatted = due.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-    return "due " + formatted;
-  }
-  export function followUpIsOverdue(dueOn, today = new Date()) {
-    return followUpDueLabel(dueOn, today).startsWith("Overdue");
-  }
-`);
+// An absolute file URL lets Node resolve desk-copy's relative imports, so the
+// real component exercises the real due-date functions rather than a copy.
+const deskCopyUrl = new URL("../src/lib/news/desk-copy.ts", import.meta.url).href;
 
 const { FollowUpItem } = await import(
   moduleUrl(
@@ -76,7 +53,7 @@ const { FollowUpItem } = await import(
     {
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
-      "@/lib/news/desk-copy": deskCopyStub,
+      "@/lib/news/desk-copy": deskCopyUrl,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },
@@ -84,6 +61,10 @@ const { FollowUpItem } = await import(
 );
 
 const TODAY = new Date("2026-09-06T12:00:00");
+
+beforeEach((t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: TODAY });
+});
 
 function baseItem(overrides = {}) {
   return {
@@ -104,19 +85,34 @@ function baseItem(overrides = {}) {
 }
 
 test("an overdue follow-up states 'Overdue N days' in words, styled with text-warn", () => {
-  const html = renderToStaticMarkup(createElement(FollowUpItem, { item: baseItem({ due_on: "2026-09-03" }) }));
+  const html = renderToStaticMarkup(
+    createElement(FollowUpItem, { item: baseItem({ due_on: "2026-09-03" }) }),
+  );
   assert.match(html, /Overdue 3 days/);
   assert.match(html, /class="text-warn"/);
 });
 
 test("a follow-up due today reads 'due today'", () => {
-  const html = renderToStaticMarkup(createElement(FollowUpItem, { item: baseItem({ due_on: "2026-09-06" }) }));
+  const html = renderToStaticMarkup(
+    createElement(FollowUpItem, { item: baseItem({ due_on: "2026-09-06" }) }),
+  );
   assert.match(html, />due today</);
   assert.doesNotMatch(html, /text-warn/);
 });
 
+test("the same follow-up becomes overdue after the fixture clock advances a day", (t) => {
+  const item = baseItem({ due_on: "2026-09-06" });
+  assert.match(renderToStaticMarkup(createElement(FollowUpItem, { item })), />due today</);
+  t.mock.timers.setTime(new Date("2026-09-07T12:00:00").getTime());
+  const html = renderToStaticMarkup(createElement(FollowUpItem, { item }));
+  assert.match(html, /Overdue 1 day/);
+  assert.match(html, /class="text-warn"/);
+});
+
 test("a follow-up due later shows the weekday and date", () => {
-  const html = renderToStaticMarkup(createElement(FollowUpItem, { item: baseItem({ due_on: "2026-09-09" }) }));
+  const html = renderToStaticMarkup(
+    createElement(FollowUpItem, { item: baseItem({ due_on: "2026-09-09" }) }),
+  );
   assert.match(html, /due Wed, Sep 9/);
 });
 
@@ -130,13 +126,17 @@ test("who, what and the linked story render; the story link points at the lead's
 
 test("an answered follow-up shows the reply instead of the action row", () => {
   const html = renderToStaticMarkup(
-    createElement(FollowUpItem, { item: baseItem({ status: "answered", reply_text: "It was a severed line." }) }),
+    createElement(FollowUpItem, {
+      item: baseItem({ status: "answered", reply_text: "It was a severed line." }),
+    }),
   );
   assert.match(html, /Answered: It was a severed line\./);
   assert.doesNotMatch(html, /Record reply/);
 });
 
 test("a dropped follow-up shows 'Dropped.'", () => {
-  const html = renderToStaticMarkup(createElement(FollowUpItem, { item: baseItem({ status: "dropped" }) }));
+  const html = renderToStaticMarkup(
+    createElement(FollowUpItem, { item: baseItem({ status: "dropped" }) }),
+  );
   assert.match(html, /Dropped\./);
 });

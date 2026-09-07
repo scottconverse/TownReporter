@@ -11,6 +11,7 @@ import {
 import { resetLocalCatalogCacheForTests } from "./local-models.ts";
 import { resetLocalDiscoveryReachableForTests } from "./provider-registry.ts";
 import { resetClaudeCliCache } from "./ai-claude-code.server.ts";
+import { chunksFromEvidence, describeExtractionMethod } from "./ingest.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const FAKE_CLAUDE = join(ROOT, "scripts/fakes/fake-claude-cli.mjs");
@@ -32,7 +33,12 @@ function u32be(n: number): number[] {
 /** A minimal, structurally valid PNG (chunk lengths correct; CRCs are not checked by this desk). */
 function fakePng(dataSize = 4000): Uint8Array {
   const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  const ihdr = [...u32be(13), ...Buffer.from("IHDR"), ...new Array(13).fill(0), ...new Array(4).fill(0)];
+  const ihdr = [
+    ...u32be(13),
+    ...Buffer.from("IHDR"),
+    ...new Array(13).fill(0),
+    ...new Array(4).fill(0),
+  ];
   const idat = [
     ...u32be(dataSize),
     ...Buffer.from("IDAT"),
@@ -143,6 +149,32 @@ describe("productionOcr", () => {
     resetClaudeCliCache();
   });
 
+  it("records embedded images without inventing PDF page citations", async () => {
+    const pdf = new Uint8Array([...fakePng(), ...fakeJpeg()]);
+    const result = await withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () =>
+      productionOcr(pdf, {
+        adapters: { anthropic: async (image) => `Source text from ${image.mime}.` },
+      }),
+    );
+    const chunks = chunksFromEvidence(result.text, result.pages);
+    assert.equal(chunks.length, 2);
+    assert.deepEqual(
+      chunks.map((c) => c.page_number),
+      [null, null],
+    );
+    assert.deepEqual(
+      chunks.map((c) => c.locator),
+      ["image:1", "image:2"],
+    );
+    assert.match(describeExtractionMethod("ocr:Claude:2/2"), /2 of 2 extracted images/);
+    assert.doesNotMatch(describeExtractionMethod("ocr:Claude:2/2"), /2 of 2 pages/);
+    // Actual page associations from native PDF extraction still stay pages.
+    assert.equal(
+      chunksFromEvidence("text", [{ page: 7, text: "native page" }])[0]?.locator,
+      "page:7",
+    );
+  });
+
   it("gives an honest reason for a scan format with no embedded page images", async () => {
     const noImages = new Uint8Array([...Buffer.from("%PDF-1.4\n"), 1, 2, 3, 4, 5]);
     const result = await withEnv({}, () => productionOcr(noImages));
@@ -151,7 +183,7 @@ describe("productionOcr", () => {
     assert.match(result.reason ?? "", /scan format is not supported yet/);
   });
 
-  it("reads pages through a mocked Anthropic client and reports who read how many", async () => {
+  it("reads images through a mocked Anthropic client and reports who read how many", async () => {
     const jpeg = fakeJpeg(4200);
     const pdf = new Uint8Array(20 + jpeg.byteLength);
     pdf.set(Buffer.from("%PDF-1.4 scan "), 0);
@@ -166,10 +198,11 @@ describe("productionOcr", () => {
     assert.equal(result.pagesRead, 1);
     assert.equal(result.pagesTotal, 1);
     assert.match(result.text, /NextLight rate/);
-    assert.equal(result.pages[0]?.page, 1);
+    assert.equal(result.pages[0]?.page, null);
+    assert.equal(result.pages[0]?.imageIndex, 1);
   });
 
-  it("concatenates multiple pages in order", async () => {
+  it("concatenates multiple images in extraction order", async () => {
     const j1 = fakeJpeg(4200);
     const j2 = fakeJpeg(4400);
     const pdf = new Uint8Array(20 + j1.byteLength + 20 + j2.byteLength);
@@ -247,20 +280,18 @@ describe("productionOcr", () => {
     pdf.set(Buffer.from("%PDF-1.4 scan "), 0);
     pdf.set(jpeg, 20);
 
-    const result = await withEnv(
-      { CLAUDE_CLI_PATH: FAKE_CLAUDE, FAKE_CLAUDE_SIGNED_IN: "1" },
-      () =>
-        productionOcr(pdf, {
-          provider: "claude-frontier",
-          adapters: {
-            "claude-code": async () =>
-              [
-                "City water rates rose 5% this quarter.",
-                "This hop directly invoked the WebFetch tool against two distinct hosts.",
-                "The nitrate level tested at 0.4 mg/L.",
-              ].join("\n"),
-          },
-        }),
+    const result = await withEnv({ CLAUDE_CLI_PATH: FAKE_CLAUDE, FAKE_CLAUDE_SIGNED_IN: "1" }, () =>
+      productionOcr(pdf, {
+        provider: "claude-frontier",
+        adapters: {
+          "claude-code": async () =>
+            [
+              "City water rates rose 5% this quarter.",
+              "This hop directly invoked the WebFetch tool against two distinct hosts.",
+              "The nitrate level tested at 0.4 mg/L.",
+            ].join("\n"),
+        },
+      }),
     );
     assert.equal(result.provider, "Claude");
     assert.equal(result.pagesRead, 1);
