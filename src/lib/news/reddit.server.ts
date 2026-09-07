@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { fetchPublicHttpOnce } from "./fetch-url.ts";
 import { htmlToPlainText } from "./html-text.ts";
 import { isRedditUrl, isRedditThreadUrl, parseRedditFeed, threadFeed, type RedditPost } from "./reddit.ts";
@@ -38,14 +39,21 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 function scheduleRedditRequest(send: () => Promise<Response>): Promise<Response> {
   const request = requestQueue.then(async () => {
     let wait: number;
-    while ((wait = Math.max(lastRequestAt + gapMs, cooldownUntil) - Date.now()) > 0) {
+    while ((wait = Math.max(lastRequestAt + gapMs, cooldownUntil) - performance.now()) > 0) {
       await sleep(wait);
     }
-    lastRequestAt = Date.now();
-    const res = await send();
+    let pendingResponse: Promise<Response>;
+    try {
+      pendingResponse = send();
+    } finally {
+      // `send` starts the transport synchronously. Measure from that boundary,
+      // after per-request setup, so setup variance cannot shorten the gap.
+      lastRequestAt = performance.now();
+    }
+    const res = await pendingResponse;
     if (res.status === 429) {
       gapMs = Math.min(gapMs * 2, RATE_LIMIT_PAUSE_MS);
-      cooldownUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
+      cooldownUntil = performance.now() + RATE_LIMIT_PAUSE_MS;
     }
     // Buffer inside the queue: fetch resolves at headers, before the network
     // body finishes. Return a fresh readable response to existing consumers.

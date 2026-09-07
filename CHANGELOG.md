@@ -1,8 +1,10 @@
 # Changelog
 
-Current release: **0.6.27**.
+Current release: **0.6.28**.
 
-## Unreleased
+## 0.6.28 — 2026-09-07
+
+- Reddit pacing measures elapsed time with a monotonic clock and records the interval after transport setup. Clock adjustments and variable request setup cannot shorten the required eight-second gap; requests remain serialized and 429 cooldowns are preserved.
 
 - Corrections can attach only to published articles in the editor's newsroom. An unavailable selected article is refused without writing a correction or audit event, instead of attaching to another newsroom or silently saving an unattached note.
 

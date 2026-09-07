@@ -8,7 +8,7 @@ questions, and the evidence it gathered while asking them.
 
 It runs in **two stages**, and the split is the whole point.
 
-Documentation baseline: 0.6.27, reviewed from repository code on 2026-09-07.
+Last full guide review: 0.6.27 (2026-09-07). This retained review baseline is separate from the [current release](../README.md).
 This describes software behavior, not independent confirmation of a reporting
 conclusion or the current production deployment. See [the takeover handoff](../HANDOFF-NEXT-AGENT.md).
 

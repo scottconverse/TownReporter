@@ -20,7 +20,20 @@ Deliverable language: **merged to main, CI green, ready for a local operator to 
 
 ## Locked product decisions
 
-- A local non-profit newspaper one person can run; coverage includes community life, business, schools, housing, health and arts as well as government. AI assists; an editor decides what prints.
+### Owner extension mandate — 2026-09-07
+
+The owner explicitly asked the coordinator to manage completion of TownReporter as a single-editor community newspaper: own research, comparisons, planning, bounded delegation, implementation, verification, documentation and releases; continue unblocked work and bring only consequential choices back. Do not make the owner direct individual development steps. This remains continuous development, not a claim that the project is finished.
+
+Confirmed operating targets:
+
+- Hybrid **existing subscription-based cloud tools and local models**. The owner did not approve a new metered API budget. Preserve existing optional provider support, but do not enable paid API fallback or add paid services under this mandate. Local inference has no per-token charge; compute capacity and subscription limits still constrain throughput.
+- Approximately **60 minutes of normal-day editor work**, with **3–5 useful items total** when evidence and newsworthiness warrant them. These are acceptance targets to measure, not output guarantees or a reason to manufacture filler. Investigations and interviews require separate time.
+- Owner approved the recommended automatic-publication starting set on 2026-09-07: library notices, parks/recreation notices, verified community/arts events, routine registration deadlines, waste/recycling schedules and public-meeting logistics. These may feed Today in town, This weekend and Deadlines approaching. Each newspaper explicitly approves its sources for the eligible formats. Other reporting requires editor review. Existing released code still requires human publication; do not imply the future exception has shipped or use model confidence alone as publication permission.
+- Fable Direction A, Windows-first installation, newsroom isolation, correction history, and the remote/Halo boundary remain in force.
+
+Current implementation unit: daily scheduled ordinary scans, isolated branch `codex/daily-scan-automation`. It is unmerged and failed its first independent review and browser acceptance; result-write fences, malformed requests and repeated settings saves require fixes and behavioral proof. It must not be described as delivered. Correction newsroom ownership and the strict Reddit elapsed-time fix merged in [PR15](https://github.com/scottconverse/TownReporter/pull/15); its candidate `c10fbc4` passed 14 application CI jobs and both Windows checks with 1,701 tests passed, zero failed and 46 explicit skips. Version 0.6.28 is the bounded corrective release; publication and production deployment remain separate from implementation.
+
+- A local non-profit newspaper one person can run; coverage includes community life, business, schools, housing, health and arts as well as government. Released behavior requires editor publication; the owner-approved future exception for selected low-risk formats is described above and is not implemented yet.
 - **Fable Direction A** is the design foundation: queue main column, Dark Desk/Follow-ups/wire rail, newsroom vocabulary, scores, Open/Hold/Kill and matched-story context. Rust on cream; black background and white text on Dark Desk. No teal sidebar redesign or marketing banner on the editor's first screen.
 - Nothing informational below 14px; Large scales headlines and reading panes; no meaning conveyed by quiet color alone; destructive actions must differ from Cancel. Every action needs pending/success/empty/error feedback and a path to its result.
 - The editor selects a model wherever AI acts. Readiness, interrupted work and failover must be described honestly.
