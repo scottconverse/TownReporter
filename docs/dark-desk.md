@@ -6,7 +6,7 @@ questions, and the evidence it gathered while asking them.
 
 It runs in **two stages**, and the split is the whole point.
 
-Documentation baseline: 0.6.25, reviewed from repository code on 2026-09-07.
+Documentation baseline: 0.6.26, reviewed from repository code on 2026-09-07.
 This describes software behavior, not independent confirmation of a reporting
 conclusion or the current production deployment. See [the takeover handoff](../HANDOFF-NEXT-AGENT.md).
 

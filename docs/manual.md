@@ -1,6 +1,6 @@
 # TownReporter — the manual
 
-**Version 0.6.25 · 7 September 2026**
+**Version 0.6.26 · 7 September 2026**
 
 **Documentation scope:** The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from
