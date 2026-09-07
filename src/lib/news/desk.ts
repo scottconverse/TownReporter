@@ -534,6 +534,14 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       limit 1
     `;
   const reread = previousScanNeedsReread(prevRuns[0] ?? null);
+  // last_hash is newsroom-wide, not evidence that this editorial scope has
+  // evaluated the source. Once section scans share it (including overlapping
+  // jobs), General cannot safely recover that provenance from one prior run.
+  const [scopeHistory] = await sql<{ has_section_scans: boolean }>`
+    select exists(select 1 from scan_runs where newsroom_id = ${owned(context)}
+      and section_snapshot is not null) as has_section_scans
+  `;
+  const expandForScope = sectionSnapshot !== null || scopeHistory.has_section_scans;
 
   await mapLimit(watchSlice, 6, async (src) => {
     try {
@@ -598,8 +606,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const PAYLOAD_BUDGET = 48000;
   let payload = "";
   for (const f of ranked) {
-    const excerpt = f.text.slice(0, reread || f.changed ? 2800 : 800);
-    const changedLine = reread
+    const excerpt = f.text.slice(0, expandForScope || reread || f.changed ? 2800 : 800);
+    const changedLine = expandForScope
+      ? f.changed
+        ? "yes; expanded excerpt for this scan scope"
+        : "no; re-read for this scan scope (source hashes are shared across section scans)"
+      : reread
       ? "re-read (previous scan fetched this but filed no leads)"
       : f.changed
         ? "yes"
