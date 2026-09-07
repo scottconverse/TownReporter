@@ -1,3 +1,4 @@
+import { evidenceNeedsReview, type EvidenceDecision } from "@/lib/news/draft-evidence";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -63,11 +64,17 @@ function EditorialPage() {
   }, [q.data, loaded]);
 
   const onPaper = Boolean(q.data?.published_slug);
+  const evidenceStale = q.data ? evidenceNeedsReview(q.data, body) : false;
+  const review = useMutation({
+    mutationFn: (decision: EvidenceDecision) => saveEditorialDraft({ data: {draftId:id,headline,dek,body,topic,evidenceDecision:decision,evidenceToken:q.data?.evidenceToken} }),
+    onSuccess: () => { setMsg("Evidence review saved."); void qc.invalidateQueries({queryKey:["editorial-draft",id]}); },
+    onError: (e) => setMsg(e instanceof Error ? e.message : "Evidence review did not save."),
+  });
 
   const save = useMutation({
     mutationFn: () => saveEditorialDraft({ data: { draftId: id, headline, dek, body, topic } }),
     onSuccess: (r) => {
-      setMsg(r?.ok ? "Saved." : (r?.error ?? "That did not save."));
+      setMsg(r?.ok ? "Saved." : "That did not save.");
       void qc.invalidateQueries({ queryKey: ["editorial-draft", id] });
     },
     onError: (e) => setMsg(e instanceof Error ? e.message : "That did not save."),
@@ -152,6 +159,13 @@ function EditorialPage() {
         </Link>
       </p>
 
+      {evidenceStale && !onPaper ? <div className="note publish-blocked" role="status">
+        <strong>The story changed. Review its retained evidence before publishing.</strong>
+        <p>Check these sources against the edited body. Removing evidence keeps the original privately.</p>
+        <pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{[q.data.source_urls,q.data.provenance_json,q.data.found_note,q.data.unanswered].filter(value => value && !["[]","{}"].includes(value)).join("\n\n")}</pre>
+        <InkButton disabled={review.isPending} onClick={() => review.mutate("keep")}>I checked: keep this evidence</InkButton>
+        <InkButton tone="ghost" disabled={review.isPending} onClick={() => review.mutate("remove")}>Remove old evidence from public story</InkButton>
+      </div> : null}
       <div className="work-bar">
         {!onPaper ? (
           <>
@@ -159,7 +173,7 @@ function EditorialPage() {
               {save.isPending ? "Saving…" : "Save edits"}
             </InkButton>
             <InkButton
-              disabled={publish.isPending || !headline.trim() || !body.trim()}
+              disabled={publish.isPending || evidenceStale || review.isPending || !headline.trim() || !body.trim()}
               onClick={() => publish.mutate()}
             >
               {publish.isPending ? "Publishing…" : "Publish to the paper"}

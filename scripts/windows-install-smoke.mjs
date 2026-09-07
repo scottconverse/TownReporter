@@ -51,13 +51,16 @@ async function powershell(args, expectedFailure = false) {
 async function sockets(config) {
   const result = await powershell([
     "-Command",
-    `$rows = @(Get-NetTCPConnection -State Listen -LocalPort ${config.Port},${config.PgPort} -ErrorAction SilentlyContinue | ForEach-Object { $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.OwningProcess); [pscustomobject]@{ Address=$_.LocalAddress; Port=$_.LocalPort; Executable=$owner.ExecutablePath } }); ConvertTo-Json -InputObject $rows -Compress`,
+    `$rows = @(Get-NetTCPConnection -State Listen -LocalPort ${config.Port},${config.PgPort} -ErrorAction SilentlyContinue | ForEach-Object { $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.OwningProcess); [pscustomobject]@{ Address=$_.LocalAddress; Port=$_.LocalPort; ProcessId=$_.OwningProcess; Executable=$owner.ExecutablePath } }); ConvertTo-Json -InputObject $rows -Compress`,
   ]);
   return JSON.parse(result.stdout);
 }
 
 async function assertListening(config) {
   const listeners = await sockets(config);
+  const state = JSON.parse(
+    (await readFile(join(config.DataRoot, "app-process.json"), "utf8")).replace(/^\uFEFF/, ""),
+  );
   for (const [port, binary] of [
     [config.Port, config.NodeExe],
     [config.PgPort, join(config.PgBin, "postgres.exe")],
@@ -66,6 +69,12 @@ async function assertListening(config) {
     assert.ok(selected.length > 0, `No listener on configured port ${port}`);
     for (const listener of selected) {
       assert.equal(listener.Address, "127.0.0.1", `Port ${port} was exposed beyond IPv4 loopback`);
+      if (port === config.Port)
+        assert.equal(
+          listener.ProcessId,
+          state.ProcessId,
+          "HTTP listener must be the recorded owned application process",
+        );
       assert.equal(
         listener.Executable.toLowerCase(),
         binary.toLowerCase(),
@@ -141,15 +150,23 @@ async function main() {
     await lifecycle("Start");
     await assertListening(config);
     const base = `http://127.0.0.1:${config.Port}`;
-    const identityResponse = await fetch(`${base}/.well-known/townreporter-instance.json`, {
+    const newspaperResponse = await fetch(`${base}/`, {
       signal: AbortSignal.timeout(10_000),
     });
-    assert.equal(identityResponse.status, 200);
-    const identity = await identityResponse.json();
-    assert.equal(identity.instanceId, config.InstanceId);
-    assert.equal(identity.version, receipt.version);
-    assert.equal(identity.sourceHash, JSON.parse(manifest).sourceHash);
-    receipt.checks.push("Served instance/version/source hash matches the packaged build manifest");
+    assert.equal(newspaperResponse.status, 200);
+    assert.ok(
+      (await newspaperResponse.text()).includes(receipt.version),
+      "Actual rendered newspaper must display the compiled version",
+    );
+    const runningState = JSON.parse(
+      (await readFile(join(config.DataRoot, "app-process.json"), "utf8")).replace(/^\uFEFF/, ""),
+    );
+    assert.equal(runningState.Version, receipt.version);
+    assert.equal(runningState.SourceHash, JSON.parse(manifest).sourceHash);
+    await lifecycle("Health");
+    receipt.checks.push(
+      "Owned listener PID, recorded running build, verified source/output and rendered newspaper version agree",
+    );
     process.env.PLAYWRIGHT_BROWSERS_PATH = join(config.DataRoot, "browsers");
     const { chromium } = await import("playwright");
     browser = await chromium.launch();

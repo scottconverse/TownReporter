@@ -53,6 +53,15 @@ function Read-InstallConfig {
 function Assert-PortFree([int]$Port) {
   if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) { throw "Port $Port is occupied. Choose another port during Install. No process was stopped." }
 }
+function Assert-OwnedListener([int]$Port, [int]$ExpectedProcessId) {
+  $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+  if (!$listeners.Count) { throw "No listener on this installation's port $Port." }
+  foreach ($listener in $listeners) {
+    if ($listener.LocalAddress -ne '127.0.0.1' -or $listener.OwningProcess -ne $ExpectedProcessId) {
+      throw "Port $Port is not a loopback listener owned by this installation process."
+    }
+  }
+}
 function Protect-LocalPath([string]$Path) {
   # Construct only the replacement DACL. Reusing Get-Acl can make PowerShell 5.1
   # attempt to persist owner/SACL sections on retry, requiring SeSecurityPrivilege.

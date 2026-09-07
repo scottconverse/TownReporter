@@ -17,15 +17,12 @@ if (!(Get-OwnedApp)) {
   Set-Location -LiteralPath $AppRoot
   & $config.NodeExe (Join-Path $AppRoot 'scripts\migrate.mjs') *> (Join-Path $DataRoot 'migrate.log')
   if ($LASTEXITCODE -ne 0) { throw "Migration failed. No app was started. Read $DataRoot\migrate.log." }
-  $identityDir = Join-Path $AppRoot '.output\public\.well-known'
-  New-Item -ItemType Directory -Force -Path $identityDir | Out-Null
   $manifest = Get-Content -LiteralPath (Join-Path $AppRoot '.output\install-build.json') -Raw | ConvertFrom-Json
-  [IO.File]::WriteAllText((Join-Path $identityDir 'townreporter-instance.json'), (@{ instanceId=$config.InstanceId; sourceHash=$manifest.sourceHash; version=$manifest.version } | ConvertTo-Json))
   $entry = Join-Path $AppRoot '.output\server\index.mjs'
   $process = Start-Process -FilePath $config.NodeExe -ArgumentList @(('"'+$entry+'"')) -WindowStyle Hidden -WorkingDirectory $AppRoot -RedirectStandardOutput (Join-Path $DataRoot 'app.out.log') -RedirectStandardError (Join-Path $DataRoot 'app.err.log') -PassThru
   $observed = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)"
   if (!$observed) { throw "Server exited before startup. Read $DataRoot\app.err.log." }
-  @{ ProcessId=$process.Id; Created=$observed.CreationDate.ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $DataRoot 'app-process.json')
+  @{ ProcessId=$process.Id; Created=$observed.CreationDate.ToUniversalTime().ToString('o'); SourceHash=$manifest.sourceHash; Version=$manifest.version } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $DataRoot 'app-process.json')
 }
 $ready = Wait-InstallReadiness (Join-Path $PSScriptRoot 'Health.ps1')
 if (!$ready) { throw "Server did not become ready in 120 seconds. It may still be starting; run Health.ps1 or read $DataRoot\app.err.log." }

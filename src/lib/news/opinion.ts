@@ -1,3 +1,4 @@
+import { evidenceReviewToken, type EvidenceDecision } from "./draft-evidence.ts";
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
@@ -117,7 +118,7 @@ export const getEditorial = createServerFn({ method: "GET" })
              e.fact_sheet, e.image_prompt, e.source_kind, e.source_ref
       from drafts d
       left join editorial_extras e on e.draft_id = d.id
-      where d.id = ${draftId} and d.newsroom_id = ${owned(context)}
+      where d.id = ${draftId} and d.newsroom_id = ${owned(context)} and d.form = 'editorial' and d.lead_id is null
       limit 1
     `;
     return rows[0] ?? null;
@@ -161,6 +162,7 @@ export const startEditorial = createServerFn({ method: "POST" })
  * These are the same three verbs the reported-story desk has, keyed by draft.
  */
 export type EditorialDraft = {
+  source_urls: string; provenance_json: string; found_note: string; unanswered: string; research_json: string; evidenceToken: string;
   id: number;
   headline: string;
   dek: string;
@@ -180,7 +182,7 @@ export const getEditorialDraft = createServerFn({ method: "GET" })
     await ensureEditorialSchema();
     const sql = await getSql();
     const rows = await sql<EditorialDraft>`
-      select d.id, d.headline, d.dek, d.body, d.topic, d.form,
+      select d.*,
              coalesce(e.fact_sheet, '') as fact_sheet,
              coalesce(e.image_prompt, '') as image_prompt,
              (select a.slug from articles a
@@ -189,32 +191,18 @@ export const getEditorialDraft = createServerFn({ method: "GET" })
                limit 1) as published_slug
       from drafts d
       left join editorial_extras e on e.draft_id = d.id
-      where d.id = ${draftId} and d.newsroom_id = ${owned(context)}
+      where d.id = ${draftId} and d.newsroom_id = ${owned(context)} and d.form = 'editorial' and d.lead_id is null
       limit 1
     `;
-    return rows[0] ?? null;
+    return rows[0] ? { ...rows[0], evidenceToken: evidenceReviewToken(rows[0]) } : null;
   });
 
 export const saveEditorialDraft = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator(
-    (input: { draftId: number; headline: string; dek: string; body: string; topic: string }) =>
-      input,
-  )
+  .validator((input: { draftId: number; headline: string; dek: string; body: string; topic: string; evidenceDecision?: EvidenceDecision; evidenceToken?: string }) => input)
   .handler(async ({ context, data }) => {
-    const sql = await getSql();
-    const done = await sql<{ id: number }>`
-      update drafts
-      set headline = ${data.headline.slice(0, 300)},
-          dek = ${data.dek.slice(0, 600)},
-          body = ${data.body},
-          topic = ${data.topic.slice(0, 40)},
-          updated_at = now()
-      where id = ${data.draftId} and newsroom_id = ${owned(context)}
-      returning id
-    `;
-    if (!done[0]) return { ok: false as const, error: "That draft is gone." };
-    return { ok: true as const };
+    const { saveOpinionDraft } = await import("./opinion-draft.server.ts");
+    return saveOpinionDraft(owned(context), data);
   });
 
 /**
@@ -233,22 +221,9 @@ export const publishEditorial = createServerFn({ method: "POST" })
   .validator((draftId: number) => draftId)
   .handler(async ({ context, data: draftId }) => {
     const { slugify } = await import("@/lib/paper");
-    const { withTransaction } = await import("@/lib/db");
-    const sql = await getSql();
-
-    const rows = await sql<{
-      headline: string;
-      dek: string;
-      body: string;
-      topic: string;
-      source_urls: string;
-      form: string;
-    }>`
-      select headline, dek, body, topic, source_urls, form
-      from drafts where id = ${draftId} and newsroom_id = ${owned(context)} limit 1
-    `;
-    const d = rows[0];
-    if (!d) return { ok: false as const, error: "That draft is gone." };
+    const { withEditorialDraft, assertOpinionEvidenceReady } = await import("./opinion-draft.server.ts");
+    const result = await withEditorialDraft(owned(context), draftId, async (sql, d) => {
+    assertOpinionEvidenceReady(d);
     if (!d.headline.trim() || !d.body.trim()) {
       return { ok: false as const, error: "An editorial needs a headline and a body." };
     }
@@ -261,7 +236,8 @@ export const publishEditorial = createServerFn({ method: "POST" })
     if (already[0]) return { ok: true as const, slug: already[0].slug };
 
     const baseSlug = slugify(d.headline);
-    const printed = await withTransaction(async (tx) => {
+    const printed = await (async () => {
+      const tx = sql;
       let candidate = baseSlug;
       for (let n = 0; n < 50; n += 1) {
         const clash = await tx<{
@@ -282,10 +258,12 @@ export const publishEditorial = createServerFn({ method: "POST" })
         ) returning id
       `;
       return {slug:candidate,id:article.id};
-    });
+    })();
 
-    await audit(context.userId, "publish-editorial", `Article ${printed.id}`, owned(context), {kind:"articles",id:printed.id});
-    return { ok: true as const, slug:printed.slug };
+    return { ok: true as const, slug:printed.slug, articleId:printed.id };
+    });
+    if (result.ok && typeof result.articleId === "number") await audit(context.userId, "publish-editorial", `Article ${result.articleId}`, owned(context), {kind:"articles",id:result.articleId});
+    return result;
   });
 
 /**
@@ -305,6 +283,8 @@ export const deleteEditorial = createServerFn({ method: "POST" })
   .handler(async ({ context, data: draftId }) => {
     const sql = await getSql();
     const { keepACopy, snapshotDraft } = await import("./trash");
+    const [ownedEditorial] = await sql<{id:number}>`select id from drafts where id=${draftId} and newsroom_id=${owned(context)} and form='editorial' and lead_id is null`;
+    if (!ownedEditorial) return { ok: false as const, error: "That standalone editorial is gone." };
     const snapshot = await snapshotDraft(sql, draftId);
     if (!snapshot) return { ok: false as const, error: "That draft is already gone." };
 

@@ -30,11 +30,7 @@ export function sourceDigest(root) {
   ]);
 }
 export function outputDigest(root) {
-  return treeDigest(
-    root,
-    [".output/server", ".output/public"],
-    [".output/public/.well-known/townreporter-instance.json"],
-  );
+  return treeDigest(root, [".output/server", ".output/public"]);
 }
 export function verifyBuild(root) {
   const manifest = JSON.parse(readFileSync(join(root, ".output", "install-build.json"), "utf8"));

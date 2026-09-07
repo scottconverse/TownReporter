@@ -31,6 +31,20 @@ foreach ($rule in (Get-Acl -LiteralPath $dummy).Access) {
   if ($rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin $allowed) { throw 'Unexpected identity has access to newly created credentials.' }
 }
 Write-Output 'PASS private credentials exclude pre-existing Everyone access.'
+Invoke-Expression (Read-Function (Join-Path $AppRoot 'installer\Common.ps1') 'Assert-OwnedListener')
+$script:mockListener = [pscustomobject]@{ LocalAddress='127.0.0.1'; OwningProcess=42 }
+function Get-NetTCPConnection { return $script:mockListener }
+Assert-OwnedListener 4390 42
+$script:mockListener.OwningProcess = 43
+$rejectedListener = $false
+try { Assert-OwnedListener 4390 42 } catch { $rejectedListener = $true }
+if (!$rejectedListener) { throw 'An unrelated listener process was accepted as this application.' }
+$script:mockListener.OwningProcess = 42
+$script:mockListener.LocalAddress = '0.0.0.0'
+$rejectedExposure = $false
+try { Assert-OwnedListener 4390 42 } catch { $rejectedExposure = $true }
+if (!$rejectedExposure) { throw 'An externally exposed listener was accepted.' }
+Write-Output 'PASS listener identity requires the owned PID and IPv4 loopback address.'
 $toolsRoot = $reviewRoot
 $archive = Join-Path $toolsRoot 'node.zip'
 Set-Content -LiteralPath $archive -Value 'checksum-valid mock archive'
