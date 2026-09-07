@@ -20,6 +20,11 @@
  */
 
 import { getSql } from "../db.ts";
+import {
+  describeResearchWindow,
+  queryWithResearchWindow,
+  type ResearchSnapshot,
+} from "./dark-preferences.ts";
 import { grokChat, parseJsonBlock, providerBudget, type EffectiveProviderChoice } from "./ai.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { searchWithFallback } from "./search-web.ts";
@@ -81,7 +86,11 @@ export async function verifyRunSignals(opts: {
   choice?: EffectiveProviderChoice;
   overrides?: ProviderOverrides | null;
   deps?: VerifyDeps;
+  preferences?: ResearchSnapshot;
 }): Promise<{
+  eligible: number | null;
+  deferred: number;
+  failed: number;
   checked: number;
   verified: number;
   unverified: number;
@@ -101,11 +110,13 @@ export async function verifyRunSignals(opts: {
     where run_id = ${opts.runId} and newsroom_id = ${opts.newsroomId}
       and coalesce(stage, 'black-desk') = 'black-desk'
     order by strength desc, id desc
-    limit ${VERIFY_PER_ROUND}
   `.catch(() => null);
   if (!rows)
     return {
       checked: 0,
+      eligible: null,
+      deferred: 0,
+      failed: 0,
       verified: 0,
       unverified: 0,
       searches: [],
@@ -116,9 +127,16 @@ export async function verifyRunSignals(opts: {
   let verified = 0;
   let unverified = 0;
   let unsaved = 0;
+  let failed = 0;
+  const limit = opts.preferences?.verificationLimit ?? VERIFY_PER_ROUND;
+  const selected = rows.slice(0, limit);
+  const deferred = rows.length - selected.length;
 
-  for (const sig of rows) {
-    const plan = adversarialQueries(sig, opts.place, official);
+  for (const sig of selected) {
+    const plan = adversarialQueries(sig, opts.place, official).map((q) => ({
+      ...q,
+      query: queryWithResearchWindow(q.query, opts.preferences),
+    }));
     const records: AdversarialRecord[] = [];
 
     const evidence: string[] = [];
@@ -194,6 +212,7 @@ export async function verifyRunSignals(opts: {
     }
 
     const pack = [
+      opts.preferences ? describeResearchWindow(opts.preferences) : "",
       `SIGNAL: ${sig.name}`,
       `OBSERVATION: ${sig.observation.slice(0, 1000)}`,
       `PATTERN: ${sig.pattern.slice(0, 1000)}`,
@@ -275,11 +294,20 @@ export async function verifyRunSignals(opts: {
     if (saved && verdict.status === "verified") verified += 1;
     else unverified += 1;
     if (!saved) unsaved += 1;
+    if (
+      !saved ||
+      !trailSaved ||
+      !text ||
+      !Object.keys(parsed).length ||
+      records.some((r) => !r.state?.startsWith("SEARCH_SUCCESS"))
+    )
+      failed += 1;
   }
 
   const runSaved = await sql`
     update dark_runs
     set searches_json = ${JSON.stringify(allSearches)},
+        verification_counts_json = ${JSON.stringify({ eligible: rows.length, attempted: selected.length, verified, unverified, failed, deferred })},
         stage = ${"dark-signal-desk"}
     where id = ${opts.runId} and newsroom_id = ${opts.newsroomId}
     returning id
@@ -288,11 +316,14 @@ export async function verifyRunSignals(opts: {
     .catch(() => false);
 
   const summary = rows.length
-    ? `Verification: ${rows.length} signal(s) put through the four gates with ${allSearches.length} adversarial searches — ${verified} verified, ${unverified} left unverified.`
+    ? `Verification: ${verified} of ${rows.length} eligible signal(s) verified. Attempted ${selected.length} through the four gates with ${allSearches.length} adversarial searches; ${unverified} left unverified (${failed} encountered failures). ${deferred} deferred by the ${limit}-signal round limit.`
     : "Verification: no new signals to check this round.";
 
   return {
-    checked: rows.length,
+    checked: selected.length,
+    eligible: rows.length,
+    deferred,
+    failed,
     verified,
     unverified,
     searches: allSearches,
