@@ -56,6 +56,7 @@ import type { WorthSeed } from "@/lib/news/worth-a-look";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 import { ModelPicker } from "@/components/model-picker";
+import { PageWatchPanel } from "@/components/page-watch-panel";
 import { darkModelChoice, modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/dark")({
@@ -619,6 +620,7 @@ function DarkPage() {
           </p>
         ) : null}
       </form>
+      <PageWatchPanel files={investigations.data ?? []} onOpenFile={rememberOpen} />
 
       {notice && noticeAt === "work" && openId == null && !redditResult ? (
         <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
