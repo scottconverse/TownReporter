@@ -43,8 +43,12 @@ if (probe.ok) {
       await s.query(readFileSync(resolve(migrationDir, name), "utf8"));
     }
     await s.query(
-      "update paper_settings set timezone='America/Denver' where newsroom_id=1; delete from newsroom_members where newsroom_id=1; insert into newsroom_members(user_id,role,newsroom_id) values('owner-91','owner',1); insert into sources(user_id,newsroom_id,url,title,kind,tier,status) values('owner-91',1,'https://example.test','Town','official','A','accepted'); insert into daily_scan_policies(newsroom_id,enabled,paused,local_time,runtime,source_cap,selected_source_ids,revision,configured_by_user_id) select 1,true,false,'06:00','codex-terra',12,jsonb_build_array(id),1,'owner-91' from sources where newsroom_id=1 and url='https://example.test'",
+      "insert into paper_settings(newsroom_id,timezone) values(1,'America/Denver') on conflict(newsroom_id) do update set timezone=excluded.timezone; delete from newsroom_members where newsroom_id=1; insert into newsroom_members(user_id,role,newsroom_id) values('owner-91','owner',1); insert into sources(user_id,newsroom_id,url,title,kind,tier,status) values('owner-91',1,'https://example.test','Town','official','A','accepted'); insert into daily_scan_policies(newsroom_id,enabled,paused,local_time,runtime,source_cap,selected_source_ids,revision,configured_by_user_id) select 1,true,false,'06:00','codex-terra',12,jsonb_build_array(id),1,'owner-91' from sources where newsroom_id=1 and url='https://example.test'",
     );
+    const [fixture] = await s.query<{ settings: number; owners: number; policies: number }>(
+      "select (select count(*)::int from paper_settings where newsroom_id=1) settings,(select count(*)::int from newsroom_members where newsroom_id=1 and user_id='owner-91' and role='owner') owners,(select count(*)::int from daily_scan_policies where newsroom_id=1 and configured_by_user_id='owner-91') policies",
+    );
+    assert.deepEqual(fixture, { settings: 1, owners: 1, policies: 1 });
   });
   after(async () => {
     await db?.closePoolForTests();
