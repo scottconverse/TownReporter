@@ -46,6 +46,7 @@ import {
 import { ProviderTimeField } from "@/components/provider-time-field";
 import { editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
 import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
+import { DailyScanSettings } from "@/components/daily-scan-settings";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -148,12 +149,14 @@ function OpsPage() {
       lede={
         <>
           Everything this machine is doing to keep the paper online, and the few buttons worth
-          having. Checks show what responds from this machine; they do not prove that a reader
-          in another town can reach your paper.
+          having. Checks show what responds from this machine; they do not prove that a reader in
+          another town can reach your paper.
         </>
       }
     >
       <WritingModels />
+
+      <DailyScanSettings />
 
       <section className="mt-12">
         <SecHead

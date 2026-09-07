@@ -43,7 +43,7 @@ export type DeskJob = {
   subject_id: number;
   model_choice: string;
   research_scope?: "public" | "supplied";
-  model_choice_source: "editor" | "auto";
+  model_choice_source: "editor" | "auto" | "scheduled";
   lane: JobLane;
   status: JobStatus;
   stage: string;
@@ -53,6 +53,7 @@ export type DeskJob = {
   updated_at: string;
   started_at: string | null;
   finished_at: string | null;
+  claim_token?: string | null;
 };
 
 /**
@@ -162,6 +163,16 @@ function mintClaimToken(): string {
   return globalThis.crypto.randomUUID();
 }
 
+export function scanDispatchMode(
+  job: Pick<DeskJob, "model_choice_source">,
+  hasDailyReservation: boolean,
+): "scheduled" | "manual" {
+  if (hasDailyReservation) return "scheduled";
+  if (job.model_choice_source === "scheduled")
+    throw new Error("Scheduled scan reservation is missing; refusing unguarded execution.");
+  return "manual";
+}
+
 /**
  * The real work behind each job kind, dispatched by dynamic import exactly as
  * before lanes existed -- moved here, unchanged, so `executeJob` can go
@@ -172,8 +183,13 @@ async function realWork(job: DeskJob): Promise<void> {
     const { performDraftWork } = await import("./desk.ts");
     await performDraftWork(job);
   } else if (job.kind === "scan") {
-    const { performScanWork } = await import("./desk.ts");
-    await performScanWork(job);
+    const daily = await import("./daily-scan.server.ts");
+    const mode = scanDispatchMode(job, await daily.isDailyScanJob(job));
+    if (mode === "scheduled") await daily.performDailyScanWork(job);
+    else {
+      const { performScanWork } = await import("./desk.ts");
+      await performScanWork(job);
+    }
   } else if (job.kind === "dark") {
     const { performDarkRound } = await import("./dark.ts");
     await performDarkRound(job);
@@ -489,7 +505,7 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
   (beat as unknown as { unref?: () => void }).unref?.();
 
   try {
-    await runWork(job);
+    await runWork({ ...job, claim_token: token });
     // `claim_token` guard: if we were declared stale and someone else took the
     // job, this write must not clobber their result.
     await sql`

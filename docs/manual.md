@@ -195,6 +195,25 @@ One press reads every watched source, hashes it against the last snapshot, and
 files what changed as leads. It is a button, not a loop: it runs when you ask.
 Previous scans are listed underneath with what each one found.
 
+The current candidate also adds an owner-configured daily ordinary scan on the
+Server page; it remains pending normal CI and release. It starts disabled. The
+owner selects up to 12 accepted sources from any reporting beat, a local time
+in the paper's timezone, and one explicit runtime: the selected local model,
+Claude Code subscription CLI, Codex Terra subscription CLI or Codex Sol
+subscription CLI. Scheduled scans have no metered API-key or configured-gateway
+fallback and do not switch providers. They read bounded source excerpts rather
+than claiming complete coverage of each site.
+
+Only one daily reservation is made for a local calendar day and only one may
+remain queued or working. When the app was off at the scheduled time, its next
+tick that same day catches up once; missed days are not replayed. The owner can
+pause or resume the schedule. Disabling it, changing its revision, removing the
+owner's role or losing the job lease prevents older work from making further
+external calls or saving final results. A subscription quota error pauses the
+schedule for manual resume without promising a reset time. Server links to the
+scan history and queue, where the owner reviews filed leads. This path does not
+draft, publish or send digests.
+
 ## The queue
 
 `/desk/queue` — everything that might be news, scored and sorted.

@@ -169,7 +169,10 @@ function ScanPage() {
         <div className="scan-hist">
           {history.map((s) => (
             <div key={s.id} className="scan-row">
-              <p className="meta">{formatDateTime(s.started_at)}</p>
+              <p className="meta">
+                {formatDateTime(s.started_at)} ·{" "}
+                {s.execution_origin === "scheduled" ? "Scheduled daily scan" : "Manual scan"}
+              </p>
               <p className="scan-line">
                 {scanCountsLine({
                   sources_fetched: s.sources_fetched,

@@ -55,7 +55,7 @@ type GrokChatFn = (
 export type ScanJobForFailover = {
   id: number;
   model_choice: string;
-  model_choice_source: "editor" | "auto";
+  model_choice_source: "editor" | "auto" | "scheduled";
 };
 
 export type RunScanChatWithFailoverInput = {

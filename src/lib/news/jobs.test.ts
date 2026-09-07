@@ -14,6 +14,7 @@ import {
   HEARTBEAT_MS,
   __setJobWorkForTest,
   setJobFailoverNote,
+  scanDispatchMode,
   type DeskJob,
 } from "./jobs.ts";
 import { getSql } from "../db.ts";
@@ -39,6 +40,14 @@ function fakeJob(over: Partial<DeskJob>): DeskJob {
 }
 
 describe("desk jobs", () => {
+  it("refuses a scheduled scan whose reservation metadata is missing", () => {
+    assert.throws(
+      () => scanDispatchMode({ model_choice_source: "scheduled" }, false),
+      /reservation is missing/,
+    );
+    assert.equal(scanDispatchMode({ model_choice_source: "editor" }, false), "manual");
+    assert.equal(scanDispatchMode({ model_choice_source: "scheduled" }, true), "scheduled");
+  });
   it("keeps supplied-material scope when another enqueue races with a broader scope", async () => {
     const request = { userId: "scope-race", newsroomId: 91009, kind: "draft" as const, subjectId: 71717, kick: false };
     const first = await enqueueJob({ ...request, researchScope: "supplied" });
