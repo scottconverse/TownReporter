@@ -48,6 +48,25 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Lifecycle concurrency guard failed.' }
 } finally { $held.ReleaseMutex(); $held.Dispose() }
 Write-Output 'PASS concurrent process refused; same-thread installer/start nesting accepted.'
+Invoke-Expression (Read-Function (Join-Path $AppRoot 'installer\Common.ps1') 'Invoke-PgControl')
+$fakeControl = Join-Path $reviewRoot 'pg_ctl.exe'
+Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\cmd.exe') -Destination $fakeControl
+$config = [pscustomobject]@{ PgBin=$reviewRoot }
+Invoke-PgControl @('/c', 'exit', '0')
+$failed = $false
+try { Invoke-PgControl @('/c', 'exit', '7') } catch { $failed = $true }
+if (!$failed) { throw 'Failed native control command was incorrectly reported successful.' }
+Write-Output 'PASS native process success and failure exit codes remain available after waiting.'
+Invoke-Expression (Read-Function (Join-Path $AppRoot 'installer\Common.ps1') 'Invoke-LoggedNative')
+$nativeLog = Join-Path $reviewRoot 'native.log'
+if ((Invoke-LoggedNative $fakeControl @('/c', 'echo nonfatal-warning 1>&2 & exit /b 0') $nativeLog) -ne 0) { throw 'Native stderr warning changed a successful exit status.' }
+if ((Get-Content -LiteralPath $nativeLog -Raw) -notmatch 'nonfatal-warning') { throw 'Native warning was discarded instead of recorded.' }
+if ((Invoke-LoggedNative $fakeControl @('/c', 'echo real-failure 1>&2 & exit /b 7') $nativeLog) -ne 7) { throw 'Nonzero native failure was swallowed.' }
+Write-Output 'PASS native warnings preserved without swallowing failure exit codes.'
+Remove-Item -LiteralPath $nativeLog
+Remove-Item -LiteralPath $fakeControl
+Remove-Item -LiteralPath (Join-Path $reviewRoot 'pg-control.out.log')
+Remove-Item -LiteralPath (Join-Path $reviewRoot 'pg-control.err.log')
 Remove-Item -LiteralPath $dummy
 Remove-Item -LiteralPath $archive
 Remove-Item -LiteralPath $target

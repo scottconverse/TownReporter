@@ -132,14 +132,14 @@ $env:DATABASE_URL = ''
 $env:NODE_ENV = 'development'
 Set-Location -LiteralPath $AppRoot
 Write-Host 'Installing locked application dependencies...'
-& (Join-Path $nodeRoot 'npm.cmd') ci *> (Join-Path $DataRoot 'dependencies.log')
-if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed. Read $DataRoot\dependencies.log. Check your internet connection and free disk space." }
+$nativeExit = Invoke-LoggedNative (Join-Path $nodeRoot 'npm.cmd') @('ci') (Join-Path $DataRoot 'dependencies.log')
+if ($nativeExit -ne 0) { throw "Dependency installation failed. Read $DataRoot\dependencies.log. Check your internet connection and free disk space." }
 Write-Host 'Installing browser retrieval support...'
-& $nodeExe (Join-Path $AppRoot 'node_modules\playwright\cli.js') install chromium *> (Join-Path $DataRoot 'browser-install.log')
-if ($LASTEXITCODE -ne 0) { throw "Chromium installation failed. Read $DataRoot\browser-install.log; rerun Install to resume." }
+$nativeExit = Invoke-LoggedNative $nodeExe @((Join-Path $AppRoot 'node_modules\playwright\cli.js'), 'install', 'chromium') (Join-Path $DataRoot 'browser-install.log')
+if ($nativeExit -ne 0) { throw "Chromium installation failed. Read $DataRoot\browser-install.log; rerun Install to resume." }
 Write-Host 'Building TownReporter. This can take several minutes...'
-& (Join-Path $nodeRoot 'npm.cmd') run build *> (Join-Path $DataRoot 'build.log')
-if ($LASTEXITCODE -ne 0) { throw "Build failed. No new app was started. Read $DataRoot\build.log." }
+$nativeExit = Invoke-LoggedNative (Join-Path $nodeRoot 'npm.cmd') @('run', 'build') (Join-Path $DataRoot 'build.log')
+if ($nativeExit -ne 0) { throw "Build failed. No new app was started. Read $DataRoot\build.log." }
 & $nodeExe (Join-Path $AppRoot 'scripts\install-build-manifest.mjs') write $AppRoot
 if ($LASTEXITCODE -ne 0) { throw 'Build identity could not be recorded.' }
 & "$PSScriptRoot\Start.ps1" -DataRoot $DataRoot -NoBrowser:$NoBrowser

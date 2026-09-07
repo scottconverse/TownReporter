@@ -65,8 +65,25 @@ function Protect-LocalPath([string]$Path) {
 }
 function Invoke-PgControl([string[]]$Arguments) {
   $run = Start-Process -FilePath (Join-Path $config.PgBin 'pg_ctl.exe') -ArgumentList $Arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $DataRoot 'pg-control.out.log') -RedirectStandardError (Join-Path $DataRoot 'pg-control.err.log')
-  $run.WaitForExit()
-  if ($run.ExitCode -ne 0) { throw "Postgres control failed. Read $DataRoot\pg-control.err.log." }
+  try {
+    # Cache the process handle before waiting: PowerShell 5.1 otherwise loses ExitCode.
+    $null = $run.Handle
+    $run.WaitForExit()
+    if ($null -eq $run.ExitCode -or $run.ExitCode -ne 0) { throw "Postgres control failed. Read $DataRoot\pg-control.err.log." }
+  } finally { $run.Dispose() }
+}
+function Invoke-LoggedNative([string]$Executable, [string[]]$Arguments, [string]$LogFile) {
+  # PowerShell 5.1 turns redirected native stderr warnings into ErrorRecords.
+  # Preserve them in the log, but let the process exit status determine success.
+  $priorPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    $LASTEXITCODE = $null
+    & $Executable @Arguments *> $LogFile
+    $nativeExit = $LASTEXITCODE
+  } finally { $ErrorActionPreference = $priorPreference }
+  if ($null -eq $nativeExit) { throw "Native command did not return an exit code. Read $LogFile." }
+  return $nativeExit
 }
 function Get-OwnedPostgres {
   $pgData = Join-Path $DataRoot 'pgdata'
