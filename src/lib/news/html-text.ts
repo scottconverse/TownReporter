@@ -120,6 +120,7 @@ export function captureBatchStats(
     status?: number | null;
     outcome?: string | null;
     title?: string | null;
+    extractionMethod?: string | null;
   }>,
 ): {
   total: number;

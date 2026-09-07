@@ -53,11 +53,12 @@ Update current README/manual/editor/setup/landing/version/changelog together whe
 
 ## Next work and external dependency
 
-The 0.6.24 corrective candidate closes reproduced failed-search verification,
+The 0.6.24 corrective implementation closes reproduced failed-search verification,
 missing evidence context, false saved-result counts, investigative newsroom leaks,
 and PDF/OCR provenance defects. It also adds bounded HTTP responses and usable
-search/refusal feedback. Exact candidate CI and publication receipts must be recorded
-before calling this release ready. Historical records incorrectly assigned to
+search/refusal feedback. [PR #7](https://github.com/scottconverse/TownReporter/pull/7)
+records exact candidate checks; use the matching GitHub release for publication
+identity. Historical records incorrectly assigned to
 newsroom 1, or carrying invented OCR page references, are not automatically repaired:
 an operator must review or re-ingest them. Entity-alias/match uniqueness still uses
 older user-based keys; a same-user cross-newsroom collision is refused rather than

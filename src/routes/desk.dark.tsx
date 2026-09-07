@@ -1588,6 +1588,7 @@ function OpenedRecords({
       status: a.fetch_status,
       outcome: a.fetch_outcome,
       title: a.title,
+      extractionMethod: a.extraction_method,
     });
   }
   function firstReadableId(list: typeof ordered) {
