@@ -85,6 +85,7 @@ export type ScanRow = {
   sources_proposed: number;
   summary: string | null;
   error: string | null;
+  execution_origin?: "manual" | "scheduled";
   /**
    * Set only on the most recent row by `listScans` -- true when the run
    * looks open (no finished_at, no error) but the desk_jobs heartbeat behind

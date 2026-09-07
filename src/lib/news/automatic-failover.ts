@@ -41,7 +41,7 @@ import { modelChoiceLabel, storyModelChoice, type StoryModelChoice } from "./mod
 
 export type AutomaticFailoverInput = {
   /** Whether the editor left this job on Automatic, or chose a model explicitly. */
-  source: "editor" | "auto";
+  source: "editor" | "auto" | "scheduled";
   /** The concrete choice the job is currently running (or just failed) on. */
   current: string;
   /** The provider's own error text from the failed attempt. */

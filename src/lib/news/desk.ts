@@ -1,7 +1,7 @@
 import { ensureNewsroomSources as ensureSeeds } from "./source-seeds.server.ts";
 import { selectedScanSources } from "./section-types.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { getSql } from "@/lib/db";
+import { getSql, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig } from "./paper-settings";
@@ -412,7 +412,7 @@ export const listScans = createServerFn({ method: "GET" })
     kickJobs();
     const sql = await getSql();
     const rows = await sql<ScanRow>`
-      select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed, summary, error
+      select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed, summary, error, execution_origin
       from scan_runs
       where newsroom_id = ${owned(context)}
       order by started_at desc
@@ -471,6 +471,11 @@ export type PerformScanWorkDeps = {
   probe?: typeof probeProvider;
   setJobModelChoice?: typeof setJobModelChoice;
   setJobStage?: typeof setJobStage;
+  ingestUrl?: typeof ingestUrl;
+  scheduledGuard?: () => Promise<unknown>;
+  scheduledSnapshot?: { model: { localModel?: { baseUrl: string; id: string } }; sources: SourceRow[] };
+  beforeScheduledCommit?: () => Promise<void>;
+  scheduledCommit?: <T>(write: (sql: Sql) => Promise<T>) => Promise<T>;
 };
 
 /*
@@ -492,6 +497,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const probe = deps.probe ?? probeProvider;
   const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
   const setStage = deps.setJobStage ?? setJobStage;
+  const fetchUrl = deps.ingestUrl ?? ingestUrl;
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const paperConfig = await getPaperConfig(owned(context));
   await ensureSeeds(context.userId, owned(context));
@@ -515,7 +521,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const [scanRun]=await sql<{section_snapshot:string|null}>`select section_snapshot from scan_runs where id=${runId} and newsroom_id=${owned(context)}`;
   const sectionSnapshot=scanRun?.section_snapshot?JSON.parse(scanRun.section_snapshot) as import("./section-types.ts").SectionScanSnapshot:null;
   const allowedTopics=sectionSnapshot?[sectionSnapshot.key]:sectionConfig.sections.filter(s=>!s.replacementKey&&!["about","opinion"].includes(s.key)).map(s=>s.key);
-  const allSources = await sql<SourceRow>`
+  const allSources = deps.scheduledSnapshot?.sources ?? await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
       from sources
       where newsroom_id = ${owned(context)} and status = 'accepted'
@@ -526,6 +532,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
 
   const fetched: { title: string; url: string; text: string; changed: boolean }[] = [];
   const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
+  const pendingSourceTouches: { id: number; error: string | null }[] = [];
+  const pendingDisappeared: { title: string; url: string; error: string }[] = [];
   let fetchedCount = 0;
   const SCAN_WATCH_CAP = 200;
   const watchSlice = sources.slice(0, SCAN_WATCH_CAP);
@@ -548,14 +556,23 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const expandForScope = sectionSnapshot !== null || scopeHistory.has_section_scans;
 
   await mapLimit(watchSlice, 6, async (src) => {
+    await deps.scheduledGuard?.();
     try {
-      const bundle = await withRetry(() => ingestUrl(src.url));
+      const bundle = await withRetry(async () => {
+        await deps.scheduledGuard?.();
+        return fetchUrl(src.url);
+      });
       const extras: { url: string; text: string }[] = [];
       for (const extra of bundle.extras.slice(0, 4)) {
+        await deps.scheduledGuard?.();
         try {
-          const doc = await withRetry(() => ingestUrl(extra));
+          const doc = await withRetry(async () => {
+            await deps.scheduledGuard?.();
+            return fetchUrl(extra);
+          });
           extras.push({ url: extra, text: doc.text });
-        } catch {
+        } catch (err) {
+          if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(String(err))) throw err;
           /* skip a bad packet */
         }
       }
@@ -563,11 +580,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       const text = extraBits.length ? `${bundle.text}\n\n${extraBits.join("\n\n")}` : bundle.text;
       const hash = await sha256(text);
       const changed = hash !== src.last_hash;
-      await sql`
-          update sources
-          set last_fetched_at = now(), last_error = null
-          where id = ${src.id} and newsroom_id = ${owned(context)}
-        `;
+      if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: null });
+      else await sql`
+        update sources set last_fetched_at = now(), last_error = null
+        where id = ${src.id} and newsroom_id = ${owned(context)}
+      `;
       pendingHashes.push({ id: src.id, hash, text, changed });
       fetchedCount += 1;
       fetched.push({
@@ -578,12 +595,15 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "fetch failed";
-      await sql`
-          update sources set last_error = ${msg}, last_fetched_at = now()
-          where id = ${src.id} and newsroom_id = ${owned(context)}
-        `;
+      if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(msg)) throw err;
+      if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: msg });
+      else await sql`
+        update sources set last_error = ${msg}, last_fetched_at = now()
+        where id = ${src.id} and newsroom_id = ${owned(context)}
+      `;
       if (src.last_hash && /404|410|not found|had almost no/i.test(msg)) {
-        await sql
+        if (deps.scheduledCommit) pendingDisappeared.push({ title: src.title, url: src.url, error: msg });
+        else await sql
           .query(
             `insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
              values ($1, $2, $3, $4, $5, $6)`,
@@ -644,6 +664,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     over. Pulled into its own module so the retry decision is unit-testable
     without desk.ts's `@/lib/db` alias import.
   */
+  await deps.scheduledGuard?.();
   const ai = await runScanChatWithFailover({
     job,
     system: scanSystem({ name: paperConfig.name, city: paperConfig.city, state: paperConfig.state }),
@@ -661,18 +682,19 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     setStage,
   });
   if (!ai.ok) {
-    await sql`
+    if (!deps.scheduledCommit) await sql`
         update scan_runs
         set finished_at = now(), sources_fetched = ${fetchedCount}, error = ${ai.error}
         where id = ${runId} and newsroom_id = ${owned(context)}
       `;
     throw new Error(ai.error);
   }
+  await deps.scheduledGuard?.();
 
   const raw = parseJsonBlock<unknown>(ai.text);
   const data = parseScanResult(raw,allowedTopics);
   if (!shouldCommitFetchHashes({ aiOk: true, parseError: data.parseError })) {
-    await sql`
+    if (!deps.scheduledCommit) await sql`
         update scan_runs
         set finished_at = now(), sources_fetched = ${fetchedCount}, error = ${data.parseError}
         where id = ${runId} and newsroom_id = ${owned(context)}
@@ -680,78 +702,70 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     throw new Error(data.parseError ?? "Writing pass returned no usable JSON.");
   }
 
-  for (const p of pendingHashes) {
-    await sql`
+  const commitResults = async (writeSql: Sql) => {
+    for (const touch of pendingSourceTouches) {
+      await writeSql`
+        update sources set last_error = ${touch.error}, last_fetched_at = now()
+        where id = ${touch.id} and newsroom_id = ${owned(context)}
+      `;
+    }
+    for (const gone of pendingDisappeared) {
+      await writeSql`
+        insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
+        values (${context.userId}, ${owned(context)}, 'disappeared', ${`Watched source failed after previously succeeding: ${gone.title}`}, ${gone.url}, ${gone.error})
+      `;
+    }
+    for (const p of pendingHashes) {
+      await writeSql`
         update sources
         set last_hash = ${p.hash}
         where id = ${p.id} and newsroom_id = ${owned(context)}
       `;
-    if (p.changed) {
-      await sql`
+      if (p.changed) {
+        await writeSql`
           insert into snapshots (user_id, newsroom_id, source_id, content_hash, excerpt)
           values (${context.userId}, ${owned(context)}, ${p.id}, ${p.hash}, ${p.text.slice(0, 32000)})
         `;
+      }
     }
-  }
 
-  // Loaded once, not fed to the AI: matching happens in code (findMatchingLead)
-  // so a killed lead that resurfaces gets stamped instead of refiled without
-  // spending a single extra token. Never 'published' -- a fresh development
-  // on a published story is real news and should file as a new lead.
-  const existingLeadsRaw = await sql<{ id: number; status: string; headline: string; source_urls: string; created_at: string }>`
+    // Loaded once, not fed to the AI: matching happens in code (findMatchingLead).
+    const existingLeadsRaw = await writeSql<{ id: number; status: string; headline: string; source_urls: string; created_at: string }>`
       select id, status, headline, source_urls, created_at
       from leads
       where newsroom_id = ${owned(context)}
         and status <> 'published'
         and created_at >= now() - (${MATCH_LOOKBACK_DAYS} || ' days')::interval
     `;
-  const existingLeads: MatchCandidateLead[] = existingLeadsRaw.map((l) => ({
-    id: l.id,
-    status: l.status,
-    headline: l.headline,
-    source_urls: parseLeadSourceUrls(l.source_urls),
-    created_at: l.created_at,
-  }));
+    const existingLeads: MatchCandidateLead[] = existingLeadsRaw.map((l) => ({
+      id: l.id, status: l.status, headline: l.headline,
+      source_urls: parseLeadSourceUrls(l.source_urls), created_at: l.created_at,
+    }));
 
-  const { leadsCreated, resurfacedKilled, resurfacedOpen, possibleMatched, firstDiscardedHeadline } =
-    await fileScanLeads(sql, context, owned(context), runId, data.leads, existingLeads);
+    const { leadsCreated, resurfacedKilled, resurfacedOpen, possibleMatched, firstDiscardedHeadline } =
+      await fileScanLeads(writeSql, context, owned(context), runId, data.leads, existingLeads);
 
-  let proposed = 0;
-  for (const p of data.proposed_sources) {
-    if (!p.url) continue;
-    let url: URL;
-    try {
-      url = assertHttpUrl(p.url);
-    } catch {
-      continue;
-    }
-    await sql`
+    let proposed = 0;
+    for (const p of data.proposed_sources) {
+      if (!p.url) continue;
+      let url: URL;
+      try { url = assertHttpUrl(p.url); } catch { continue; }
+      await writeSql`
         insert into sources (user_id, newsroom_id, url, title, kind, tier, status)
         values (${context.userId}, ${owned(context)}, ${url.toString()}, ${p.title || url.hostname}, 'discovered', 'unclassified', 'proposed')
-
         on conflict (user_id, url) do nothing
       `;
-    proposed += 1;
-  }
+      proposed += 1;
+    }
 
-  let summary = String(data.editor_summary ?? "").slice(0, 1200);
-  if (leadsCreated === 0 && !summary) {
-    summary = composeZeroLeadSummary({
-      fetched: fetchedCount,
-      changed: pendingHashes.filter((p) => p.changed).length,
+    let summary = String(data.editor_summary ?? "").slice(0, 1200);
+    if (leadsCreated === 0 && !summary) summary = composeZeroLeadSummary({
+      fetched: fetchedCount, changed: pendingHashes.filter((p) => p.changed).length,
     });
-  }
-  const resurfacedSentence = resurfacedSummarySentence({
-    resurfacedKilled,
-    resurfacedOpen,
-    possibleMatched,
-    filedNew: leadsCreated - possibleMatched,
-    firstDiscardedHeadline,
-  });
-  if (resurfacedSentence) {
-    summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;
-  }
-  await sql`
+    const resurfacedSentence = resurfacedSummarySentence({ resurfacedKilled, resurfacedOpen,
+      possibleMatched, filedNew: leadsCreated - possibleMatched, firstDiscardedHeadline });
+    if (resurfacedSentence) summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;
+    await writeSql`
       update scan_runs
       set finished_at = now(),
           sources_fetched = ${fetchedCount},
@@ -760,8 +774,20 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           summary = ${summary}
       where id = ${runId} and newsroom_id = ${owned(context)}
     `;
+    if (deps.scheduledCommit) {
+      await writeSql`
+        insert into audit_events (user_id, action, detail, newsroom_id)
+        values (${context.userId}, 'scan', ${`run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`}, ${owned(context)})
+      `;
+    }
+    return { leadsCreated };
+  };
 
-  await audit(context.userId, "scan", `run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`, owned(context));
+  await deps.beforeScheduledCommit?.();
+  const committed = deps.scheduledCommit
+    ? await deps.scheduledCommit(commitResults)
+    : await commitResults(sql);
+  if (!deps.scheduledCommit) await audit(context.userId, "scan", `run ${runId} fetched ${fetchedCount} leads ${committed.leadsCreated}`, owned(context));
 });
 
 // PerformDraftWorkDeps, failOverAndRetry, and its DraftInput/ReportedDraftResult

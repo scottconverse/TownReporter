@@ -21,6 +21,9 @@
  *   SCAN_DESK_BASE_URL=http://127.0.0.1:3420 node scripts/scan-desk-e2e.mjs
  */
 import { chromium } from "playwright";
+import { expect } from "playwright/test";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
 
@@ -38,6 +41,8 @@ const base = checkedUrl(
 const stamp = Date.now();
 const email = `scandesk-${stamp}@townreporter.test`;
 const password = "scan-desk-e2e-pass";
+const dailySettings = process.env.DAILY_SCAN_E2E === "1";
+const evidenceDir = resolve(process.env.DAILY_SCAN_E2E_ARTIFACT_DIR || "../daily-scan-evidence");
 
 let page;
 const done = [];
@@ -56,6 +61,15 @@ async function dump(err) {
     text = ((await page?.locator("body").innerText()) ?? "").slice(0, 1500);
   } catch {
     /* page already gone */
+  }
+  if (dailySettings) {
+    try {
+      mkdirSync(evidenceDir, { recursive: true });
+      writeFileSync(join(evidenceDir, "daily-scan-failure-dom.txt"), text);
+      await page?.screenshot({ path: join(evidenceDir, "daily-scan-failure.png"), fullPage: true });
+    } catch {
+      /* Preserve the original test failure even if evidence capture fails. */
+    }
   }
   console.error(JSON.stringify({ ok: false, error: message, url, text, completed: done }, null, 2));
   process.exit(1);
@@ -120,6 +134,142 @@ async function theScreenRenders() {
   step("the previous-scans count reads 0 before any scan has run");
 }
 
+function futureDenverTime() {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Denver",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(Date.now() + 6 * 60 * 60 * 1000));
+}
+
+async function addAcceptedSource() {
+  const sourceUrl = `https://daily-settings-${stamp}.example.test/agenda`;
+  await page.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
+  await page.getByLabel("URL", { exact: true }).fill(sourceUrl);
+  await page.getByLabel("Name", { exact: true }).fill("Daily settings source");
+  await page.getByRole("button", { name: "Add source" }).click();
+  await page.getByText("On watch: Daily settings source").waitFor();
+  step("an accepted source is available without fetching it");
+}
+
+async function dailySettingsJourney(context, observePage) {
+  await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  const panel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
+  await panel.getByRole("heading", { name: "Daily scan", exact: true }).waitFor();
+  const enabled = panel.getByRole("checkbox", { name: /Run once each day/ });
+  if (await enabled.isChecked()) throw new Error("daily scan must start disabled");
+  await panel.getByText("Timezone: America/Denver").waitFor();
+  const runtime = panel.getByLabel("Runtime");
+  const labels = await runtime.locator("option").allTextContents();
+  const expected = ["Local model", "Claude Code subscription", "Codex Terra subscription", "Codex Sol subscription"];
+  if (JSON.stringify(labels) !== JSON.stringify(expected)) {
+    throw new Error(`daily runtime labels differ: ${JSON.stringify(labels)}`);
+  }
+  const historyHref = await panel.getByRole("link", { name: "Open scan history" }).getAttribute("href");
+  if (!historyHref?.includes("/desk/scan")) {
+    throw new Error("daily scan history link is missing");
+  }
+  const queueHref = await panel.getByRole("link", { name: "Open the queue" }).getAttribute("href");
+  if (!queueHref?.includes("/desk/queue")) {
+    throw new Error("daily queue link is missing");
+  }
+  await panel.getByText(/Accepted community sources \(0\)/).waitFor();
+  step("owner sees disabled daily settings, timezone, exact runtimes, and queue/history links");
+  for (const [name, href] of [["history", historyHref], ["queue", queueHref]]) {
+    const linked = await context.newPage();
+    observePage(linked, `daily-${name}-link`);
+    await linked.goto(`${base}${href}`, { waitUntil: "domcontentloaded" });
+    const originalPage = page;
+    page = linked;
+    await linked
+      .getByRole("heading", { level: 1, name: name === "history" ? "Scan" : "The queue", exact: true })
+      .waitFor();
+    page = originalPage;
+    await linked.close();
+  }
+  step("daily settings history and queue links open their real desk routes");
+
+  await addAcceptedSource();
+  await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  const freshPanel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
+  await freshPanel.getByText(/Accepted community sources \(1\)/).waitFor();
+  await freshPanel.getByRole("checkbox", { name: /Daily settings source/ }).check();
+  const cap = freshPanel.getByLabel("Daily source limit");
+  await cap.fill("13");
+  if (!(await freshPanel.getByRole("button", { name: "Save daily scan" }).isDisabled())) {
+    throw new Error("source cap above 12 did not disable Save");
+  }
+  await freshPanel.getByText(/selected \/ 13 daily limit/).waitFor();
+  step("source count and over-cap validation are visible without silently dropping a source");
+
+  await cap.fill("1");
+  const time = freshPanel.getByLabel("Local time");
+  await time.fill("");
+  await freshPanel.getByRole("button", { name: "Save daily scan" }).click();
+  await freshPanel.getByText("Choose a valid time, runtime, and source limit from 1 to 12.").waitFor();
+  step("an invalid local time returns actionable server feedback");
+
+  const future = futureDenverTime();
+  await time.fill(future);
+  await runtime.selectOption("claude-cli");
+  await freshPanel.getByRole("button", { name: "Save daily scan" }).click();
+  await freshPanel.getByText("Daily scan settings saved.").waitFor();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const persistedPanel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
+  if ((await persistedPanel.getByLabel("Local time").inputValue()) !== future) throw new Error("saved local time did not persist");
+  if ((await persistedPanel.getByLabel("Runtime").inputValue()) !== "claude-cli") throw new Error("saved runtime did not persist");
+  if (!(await persistedPanel.getByRole("checkbox", { name: /Daily settings source/ }).isChecked())) throw new Error("saved source selection did not persist");
+  step("disabled future schedule saves and survives a real reload");
+
+  const other = await context.newPage();
+  observePage(other, "daily-second-tab");
+  other.setDefaultTimeout(45_000);
+  await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  const otherPanel = other.locator("section", { has: other.getByRole("heading", { name: "Daily scan", exact: true }) });
+  await otherPanel.getByRole("heading", { name: "Daily scan", exact: true }).waitFor();
+  await otherPanel.getByLabel("Daily source limit").fill("3");
+  await persistedPanel.getByLabel("Daily source limit").fill("2");
+  await persistedPanel.getByRole("button", { name: "Save daily scan" }).click();
+  await persistedPanel.getByText("Daily scan settings saved.").waitFor();
+  page = other;
+  await otherPanel.getByRole("button", { name: "Save daily scan" }).click();
+  await otherPanel.getByText("The schedule changed in another window. Refresh and try again.").waitFor();
+  await otherPanel.getByRole("button", { name: "Reload latest settings" }).click();
+  await otherPanel.getByText("Latest settings reloaded.").waitFor();
+  await expect.poll(() => otherPanel.getByLabel("Daily source limit").inputValue(), { timeout: 10_000 }).toBe("2");
+  step("a stale second tab gets an explicit conflict and reload path");
+
+  await otherPanel.getByLabel("Daily source limit").fill("13");
+  await otherPanel.getByRole("button", { name: "Pause daily scan" }).click();
+  await otherPanel.getByText("Daily scan paused. Unsaved edits retained.").waitFor();
+  if ((await otherPanel.getByLabel("Daily source limit").inputValue()) !== "13") throw new Error("pause discarded dirty edits");
+  step("pause works with invalid dirty edits and retains them");
+
+  mkdirSync(evidenceDir, { recursive: true });
+  await otherPanel.screenshot({ path: join(evidenceDir, "daily-scan-settings-desktop.png") });
+  await other.setViewportSize({ width: 390, height: 844 });
+  if (!(await other.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
+    throw new Error("daily scan panel has horizontal overflow at 390px");
+  }
+  await otherPanel.screenshot({ path: join(evidenceDir, "daily-scan-settings-mobile.png") });
+  await other.getByRole("button", { name: "Dark", exact: true }).click();
+  await other.getByRole("button", { name: "Large", exact: true }).click();
+  if (!(await other.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
+    throw new Error("daily scan panel has horizontal overflow at 390px in dark large-text mode");
+  }
+  await otherPanel.screenshot({ path: join(evidenceDir, "daily-scan-settings-mobile-dark-large.png") });
+  await other.reload({ waitUntil: "domcontentloaded" });
+  const cleanupPanel = other.locator("section", { has: other.getByRole("heading", { name: "Daily scan", exact: true }) });
+  await cleanupPanel.getByRole("button", { name: "Resume daily scan" }).click();
+  await cleanupPanel.getByText("Daily scan resumed.").waitFor();
+  if (await cleanupPanel.getByRole("checkbox", { name: /Run once each day/ }).isChecked()) {
+    throw new Error("cleanup unexpectedly enabled the daily schedule");
+  }
+  await other.close();
+  step("cleanup leaves the future schedule disabled, so no automatic scan can become due");
+}
+
 async function main() {
   const browser = await chromium.launch({ args: ["--no-sandbox", "--disable-dev-shm-usage"] });
   const context = await browser.newContext();
@@ -129,14 +279,23 @@ async function main() {
   const consoleErrors = [];
   const note = (text) =>
     consoleErrors.push(`[after: ${done[done.length - 1] ?? "start"} | ${page.url()}] ${text}`);
-  page.on("pageerror", (e) => note(String(e.message ?? e).slice(0, 200)));
-  page.on("console", (m) => {
-    if (m.type() === "error") note(m.text().slice(0, 200));
-  });
+  const observePage = (target, label) => {
+    target.on("pageerror", (e) => note(`${label}: ${String(e.message ?? e).slice(0, 200)}`));
+    target.on("console", (m) => {
+      if (m.type() === "error") note(`${label}: ${m.text().slice(0, 200)}`);
+    });
+  };
+  observePage(page, "daily-first-tab");
 
   console.log(`scan desk: ${base}`);
+  if (dailySettings) {
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(join(evidenceDir, "daily-scan-test-owner.json"), JSON.stringify({ email }, null, 2));
+    console.log(`daily settings test owner: ${email}`);
+  }
   await ownTheDesk();
   await theScreenRenders();
+  if (dailySettings) await dailySettingsJourney(context, observePage);
 
   await browser.close();
   if (consoleErrors.length) {
