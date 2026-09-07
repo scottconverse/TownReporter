@@ -12,10 +12,20 @@ export type LegalPreview = {
   fingerprint: string;
   articles: { id: number; headline: string }[];
   counts: Record<string, number>;
-  candidates: { kind: "draftIds" | "memoryIds" | "auditIds" | "trashIds"; id: number; label: string }[];
+  candidates: {
+    kind: "draftIds" | "memoryIds" | "auditIds" | "trashIds";
+    id: number;
+    label: string;
+  }[];
+  selectedHistorical: LegalPreview["candidates"];
   capturedCopies: { table: string; id: number }[];
   sharedInvestigationIds: number[];
   blockers: string[];
   reviewPending: boolean;
 };
-export type LegalRemovalInput = { selection: LegalSelection; fingerprint: string; policy: "retain" | "destroy"; caseRef: string };
+export type LegalRemovalInput = {
+  selection: LegalSelection;
+  fingerprint: string;
+  policy: "retain" | "destroy";
+  caseRef: string;
+};

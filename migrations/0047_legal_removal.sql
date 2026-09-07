@@ -30,6 +30,30 @@ create table if not exists legal_removal_events(id serial primary key, case_id t
 create table if not exists legal_removal_backups(id serial primary key, case_id text not null references legal_removals(id),
     identifier text not null, confirmed_by text, confirmed_at timestamptz, created_at timestamptz not null default now());
 
+create or replace function legal_article_url_identity(value text) returns text language plpgsql immutable as $$
+   declare clean text; parts text[]; authority text;
+   begin
+    clean:=rtrim(regexp_replace(btrim(value),'[?#].*$',''),'/');
+    if clean ~ '^/articles/[^/]+$' then return clean; end if;
+    parts:=regexp_match(clean,'^(https?)://([^/]+)(/articles/[^/]+)$','i');
+    if parts is null then return null; end if;
+    authority:=lower(parts[2]);
+    if lower(parts[1])='https' then authority:=regexp_replace(authority,':443$','');
+    else authority:=regexp_replace(authority,':80$',''); end if;
+    return lower(parts[1])||'://'||authority||parts[3];
+   end $$;
+
+create or replace function legal_search_article_urls(value jsonb) returns setof text language plpgsql immutable as $$
+   declare field text; payload jsonb;
+   begin
+    foreach field in array array['results_json','selected_json','fetched_json','generated_json'] loop
+      begin payload:=coalesce(value->>field,'[]')::jsonb;
+      exception when invalid_text_representation then continue; end;
+      return query select distinct legal_article_url_identity(v #>> '{}') from jsonb_path_query(payload,'$.**') v
+        where jsonb_typeof(v)='string' and legal_article_url_identity(v #>> '{}') is not null;
+    end loop;
+   end $$;
+
 create or replace function prevent_legal_resurrection() returns trigger language plpgsql as $$
    declare row_json jsonb; room integer; candidate jsonb; part jsonb;
    begin
@@ -53,10 +77,18 @@ create or replace function prevent_legal_resurrection() returns trigger language
     then raise exception 'This editorial source was legally removed. Choose reviewed sources.'; end if;
     if TG_TABLE_NAME in ('artifacts','artifact_versions','artifact_chunks','artifact_blobs','capture_events','snapshots')
       and exists(select 1 from legal_removal_urls u where u.newsroom_id=room and (
-        u.url_hash=md5(row_json->>'url') or u.url_hash=md5(row_json->>'original_url') or u.url_hash=md5(row_json->>'source_url')
-        or exists(select 1 from artifact_versions v where v.newsroom_id=room and v.id=(row_json->>'version_id')::integer and md5(v.url)=u.url_hash)
-        or exists(select 1 from sources s where s.newsroom_id=room and s.id=(row_json->>'source_id')::integer and md5(s.url)=u.url_hash)))
+        u.url_hash=md5(legal_article_url_identity(row_json->>'url')) or u.url_hash=md5(legal_article_url_identity(row_json->>'original_url')) or u.url_hash=md5(legal_article_url_identity(row_json->>'source_url'))
+        or exists(select 1 from artifact_versions v where v.newsroom_id=room and v.id=(row_json->>'version_id')::integer and md5(legal_article_url_identity(v.url))=u.url_hash)
+        or exists(select 1 from sources s where s.newsroom_id=room and s.id=(row_json->>'source_id')::integer and md5(legal_article_url_identity(s.url))=u.url_hash)))
     then raise exception 'This captured article address is covered by a legal removal.'; end if;
+    if TG_TABLE_NAME='search_log' and exists(select 1 from legal_search_article_urls(row_json) hit
+      join legal_removal_urls u on u.newsroom_id=room and u.url_hash=md5(hit))
+    then raise exception 'These search results are covered by a legal removal.'; end if;
+    if TG_TABLE_NAME='frontier_items' and exists(select 1 from legal_removal_urls u where u.newsroom_id=room and (
+      u.url_hash=md5(legal_article_url_identity(row_json->>'label')) or u.url_hash=md5(legal_article_url_identity(row_json->>'evidence'))
+      or exists(select 1 from search_log l cross join lateral legal_search_article_urls(to_jsonb(l)) hit
+        where l.newsroom_id=room and l.frontier_id=(row_json->>'id')::integer and md5(hit)=u.url_hash)))
+    then raise exception 'This frontier reference is covered by a legal removal.'; end if;
     if TG_TABLE_NAME='deleted_items' then
       candidate := (row_json->>'payload')::jsonb;
       if exists(select 1 from legal_removal_targets where newsroom_id=room
@@ -138,3 +170,11 @@ create trigger capture_events_legal_guard before insert or update on capture_eve
 drop trigger if exists snapshots_legal_guard on snapshots;
 
 create trigger snapshots_legal_guard before insert or update on snapshots for each row execute function prevent_legal_resurrection();
+
+drop trigger if exists search_log_legal_guard on search_log;
+
+create trigger search_log_legal_guard before insert or update on search_log for each row execute function prevent_legal_resurrection();
+
+drop trigger if exists frontier_items_legal_guard on frontier_items;
+
+create trigger frontier_items_legal_guard before insert or update on frontier_items for each row execute function prevent_legal_resurrection();
