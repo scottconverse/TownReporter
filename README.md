@@ -341,6 +341,10 @@ top of this file, not there.
 
 ---
 
+## Owner-only legal removal
+
+Published stories have a separate [legal-removal workflow](docs/editor.md#legal-removal-owner-workflow): review connected and historical copies, choose 12-calendar-month owner-only retention or an explicit no-retention destruction policy, and follow the result to an audited case. Known shared captured copies block destruction. Backup cleanup remains an operator task with attributed attestations; retained copies have owner access controls, not encryption. Ordinary Delete remains 30-day trash. Candidate and deployment status are tracked in [TODO.md](TODO.md).
+
 ## Frequently asked questions
 
 **Is this a newspaper?**

@@ -1406,16 +1406,16 @@ export async function performPublish(
       if (!clash[0]) break;
       slug = n === 0 ? `${baseSlug}-${leadId}` : `${baseSlug}-${leadId}-${n + 1}`;
     }
-    await sql`
+    const [printed] = await sql<{id:number}>`
       insert into articles (
         user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
-        provenance_json, form, found_note, unanswered
+        provenance_json, form, found_note, unanswered, origin_draft_id
       )
       values (
         ${context.userId}, ${owned(context)}, ${leadId}, ${slug}, ${draft.headline}, ${draft.dek},
         ${draft.body}, ${draft.topic}, ${draft.source_urls}, 'published', now(),
-        ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}
-      )
+        ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}, ${row.id}
+      ) returning id
     `;
     await sql`
       update leads set status = 'published' where id = ${leadId} and newsroom_id = ${owned(context)}
@@ -1423,15 +1423,15 @@ export async function performPublish(
     const entities = [draft.topic, ...draft.headline.split(/[:,—-]/).slice(0, 2)];
     for (const entity of entities.map((e) => e.trim()).filter((e) => e.length > 2)) {
       await sql`
-        insert into beat_memory (user_id, newsroom_id, entity, last_angle)
-        values (${context.userId}, ${owned(context)}, ${entity.slice(0, 80)}, ${draft.dek.slice(0, 200)})
+        insert into beat_memory (user_id, newsroom_id, entity, last_angle, article_id)
+        values (${context.userId}, ${owned(context)}, ${entity.slice(0, 80)}, ${draft.dek.slice(0, 200)}, ${printed.id})
       `;
     }
-    return slug;
+    return {slug,id:printed.id};
   });
 
-  await audit(context.userId, "publish", published, owned(context));
-  return { ok: true as const, slug: published };
+  await audit(context.userId, "publish", `Article ${published.id}`, owned(context), {kind:"articles",id:published.id});
+  return { ok: true as const, slug: published.slug };
 }
 
 export const publishLead = createServerFn({ method: "POST" })

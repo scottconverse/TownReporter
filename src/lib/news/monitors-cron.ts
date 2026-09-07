@@ -1,8 +1,10 @@
-import { getSql } from "../db.ts";
+import { getSql, withTransaction } from "../db.ts";
 import { runDueMonitors, type FetchFn } from "./investigate.ts";
 import { drainQueuedJobs } from "./jobs.ts";
 import { purgeAllOldTrash } from "./trash-store.ts";
 import { audit } from "./ops.ts";
+import { ensureLegalSchema } from "./legal-removal-schema.ts";
+import { expireLegalCopies } from "./legal-removal-store.ts";
 import { ensurePageWatchSchema, tickManualPageWatches } from "./page-watch.ts";
 import type { FetchOutcome } from "./fetch-outcome.ts";
 
@@ -22,7 +24,18 @@ export async function tickAllDueMonitors(opts?: { fetch?: FetchFn }): Promise<{
   jobs: number;
   purged: number;
   purgeError: string | null;
+  legalPurged: number;
+  legalPurgeError: string | null;
 }> {
+  let legalPurged = 0;
+  let legalPurgeError: string | null = null;
+  try {
+    await ensureLegalSchema();
+    legalPurged = await withTransaction(tx => expireLegalCopies(tx));
+  } catch {
+    legalPurgeError = "Legal retention cleanup failed; expired text remains inaccessible. Check database readiness.";
+    await audit("system", "legal-retention-failed", legalPurgeError).catch(() => undefined);
+  }
   await ensurePageWatchSchema();
   const sql = await getSql();
   // Grouped by (user_id, newsroom_id), not user_id alone (0.6.18, closes
@@ -86,5 +99,5 @@ export async function tickAllDueMonitors(opts?: { fetch?: FetchFn }): Promise<{
     await audit("system", "trash-purge-failed", purgeError).catch(() => undefined);
   }
   const distinctUsers = new Set(groups.map((g) => g.user_id)).size;
-  return { users: distinctUsers, checked, anomalies, jobs, purged, purgeError };
+  return { users: distinctUsers, checked, anomalies, jobs, purged, purgeError, legalPurged, legalPurgeError };
 }

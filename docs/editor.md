@@ -31,7 +31,7 @@ Historical stored OCR page labels require re-ingest or operator review if cited.
 transcription and partial reads are reported rather than treated as complete.
 
 Configurable sections are available in Paper setup (see Newspaper sections below).
-Manual investigative page watching is available in Dark Desk; see the workflow below. Legal removal remains separate open work; normal Delete does not implement it. [The canonical queue](../TODO.md) records current work.
+Manual investigative page watching is available in Dark Desk; see the workflow below. The owner-only legal-removal workflow is documented below; ordinary Delete does not implement it. [The canonical queue](../TODO.md) records current work.
 
 ## Newspaper sections
 
@@ -662,7 +662,21 @@ Nothing you delete disappears immediately.
 - **Delete for good** on that list is the one with nothing behind it. It says so.
 - After 30 days it goes on its own.
 
-**Delete for good** removes the application's trash copy. It does not scrub existing database backups. The distinct legal-removal workflow is still planned; do not treat ordinary deletion as proof that all retained copies are gone.
+**Delete for good** removes the application's trash copy. It does not scrub existing database backups. Use the separate owner-only legal-removal workflow below for its reviewed scope and retention policy; ordinary deletion is not proof that all retained copies are gone.
+
+---
+
+## Legal removal: owner workflow
+
+Open **Published → Legal removal** beside a story, or **Published → Legal removal cases** to revisit a case. Editors cannot use this process. Ordinary Delete still uses 30-day trash; legal removal has no Undo.
+
+1. Select the affected stories and **Review connected copies**. All stories sharing a lead must be selected before its reporting records can be removed. Review the counts and historical candidates. Old drafts, memory, audit labels and trash do not always carry article IDs; select only the records in scope. Selected entries remain visible and can be unchecked. Mixed trash requires explicit whole-snapshot selection. Changed records require a fresh preview.
+2. Review independent evidence. Known same-paper URL copies and references in captures, chunks, original blobs, source snapshots, search results, associated frontier records, source/monitor descriptors and watch history are listed but **not automatically deleted**. These known copies block court destruction even with the evidence checkbox checked. Retained application removal may proceed with review explicitly pending. A local operator must resolve unsupported captured-copy cleanup; a checkbox does not establish erasure.
+3. Choose the policy. **Keep an owner-only copy for 12 calendar months** uses the calendar anniversary, with February 29 clamped to February 28 in a non-leap year. This is owner access control, not encryption. The existing scheduled tick and case-list reads purge expired copies. Expired text cannot be opened even if cleanup has failed. **Explicit court destruction** never inserts removed text into the retained-copy table and requires the historical/evidence scope to be resolved first.
+4. Enter a case identifier without story text, type **REMOVE**, and confirm. The transaction removes selected application copies, scrubs exact linked editorial source descriptors and blocks stale filing/restoration. Independent editorial drafts remain for review; interrupted writing must be restarted with reviewed sources. Foreign-newsroom relationships refuse removal rather than cascading into another paper. Matching automatic watches are paused and ordinary sources are excluded from scans, preserving their evidence for review. Stop remains available; resuming a removed article's watch is refused.
+5. The result opens its case. **Open owner-only retained text (audited)** is available until expiry under the retention policy. There is no restore button. Record affected backup identifiers and operator cleanup attestations here. An attestation records what an operator reports; it is not independently verified erasure.
+
+Fresh public article/feed/sitemap reads stop returning removed stories. Existing browser caches, downloads, external search caches, provider history, database logs and backups are outside the application's erasure proof. An older database restore can reintroduce removed content; the local operator must reconcile removal cases before serving restored data. Exact known URL checks include query/fragment/trailing-slash and percent-encoded slug aliases. Unlinked prose, malformed historical records, old deployment origins and unknown external copies still need owner/operator review. Do not treat this workflow as proof that no copy exists anywhere.
 
 ---
 

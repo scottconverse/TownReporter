@@ -215,8 +215,8 @@ export async function fileEditorial(
   const headline = opinionHeadline(ed.headline);
   return withTransaction(async (sql) => {
     if (input.completion) {
-      const [request] = await sql<{ draft_id: number | null; model_choice: string }>`
-        select draft_id, model_choice from editorial_requests
+      const [request] = await sql<{ draft_id: number | null; model_choice: string; source_kind: string }>`
+        select draft_id, model_choice, source_kind from editorial_requests
         where id = ${input.completion.requestId} and newsroom_id = ${input.newsroomId}
         for update
       `;
@@ -224,6 +224,10 @@ export async function fileEditorial(
         throw new Error(
           `Editorial request ${input.completion.requestId} was not found during filing.`,
         );
+      }
+
+      if (request.source_kind === "legal-removed") {
+        throw new Error("The request's source was legally removed. Review sources and start a new request; stale output was not filed.");
       }
 
       if (request.draft_id !== null) {
@@ -356,6 +360,10 @@ export async function performEditorialWork(
   `;
   const req = rows[0];
   if (!req) throw new Error("Editorial request not found");
+
+  if (req.source_kind === "legal-removed") {
+    throw new Error("The request's source was legally removed. Review sources and start a new request.");
+  }
 
   if (req.draft_id !== null) {
     const reused = await withTransaction(async (tx) => {
