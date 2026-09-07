@@ -812,7 +812,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   job: DeskJob,
   deps: PerformDraftWorkDeps = {},
 ) {
-  const { withLeadDraftLock } = await import("./draft-order.server.ts");
+  const { withClaimedLeadDraftLock } = await import("./draft-order.server.ts");
   const runReport = deps.reportAndDraft ?? reportAndDraft;
   const probe = deps.probe ?? probeProvider;
   const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
@@ -967,7 +967,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   };
   const notesJson = packNotes(nextNotes);
 
-  await withLeadDraftLock({ newsroomId: owned(context) }, leadId, async (sql) => {
+  await withClaimedLeadDraftLock(job, leadId, async (sql) => {
   await sql`
     insert into drafts (
       user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
@@ -984,8 +984,11 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     update leads set status = 'drafted', notes_json = ${notesJson}
     where id = ${leadId} and newsroom_id = ${owned(context)}
   `;
+  await sql`
+    insert into audit_events (user_id, action, detail, newsroom_id)
+    values (${context.userId}, 'draft', ${String(leadId)}, ${owned(context)})
+  `;
   });
-  await audit(context.userId, "draft", String(leadId), owned(context));
 });
 
 export const draftLead = createServerFn({ method: "POST" })
