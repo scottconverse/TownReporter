@@ -901,8 +901,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     ),
   );
   const notes = reported.integrity_notes;
-  const provenanceJson = JSON.stringify(reported.provenance).slice(0, 8000);
-  const unansweredJson = JSON.stringify(reported.unanswered).slice(0, 2000);
+  const provenanceJson = JSON.stringify(reported.provenance);
+  const unansweredJson = JSON.stringify(reported.unanswered);
   const researchJson = JSON.stringify({ ...reported.research_memo, researchScope: draftInput.researchScope });
   const yours = keepHumanTodos(prevNotes);
   /*
@@ -976,7 +976,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     values (
       ${context.userId}, ${owned(context)}, ${leadId}, ${reported.headline}, ${reported.dek}, ${reported.body},
       ${reported.topic}, ${sourceUrls}, ${notes},
-      ${provenanceJson}, ${reported.form}, ${reported.found_note.slice(0, 8000)}, ${unansweredJson},
+      ${provenanceJson}, ${reported.form}, ${reported.found_note}, ${unansweredJson},
       ${researchJson}
     )
   `;
