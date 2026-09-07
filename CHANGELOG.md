@@ -4,6 +4,8 @@ Current release: **0.6.28**.
 
 ## Unreleased
 
+- The story workbench can review recorded findings against private captured text, distinguish missing/mismatched/newer records, and save explicit editor judgments. Stale draft/evidence views refuse saves; failed reloads retain unsaved judgments. Malformed historical structured findings are disclosed as unreadable. This is not exhaustive claim coverage, independent fact-checking or automatic publication permission.
+
 - Multi-source drafting preserves complete structured provenance, findings and unanswered questions through saving and publication. Raw character truncation no longer corrupts their JSON. Previously damaged records are not guessed or rewritten.
 
 - Background drafting refuses final saves after its job claim or editor permission is lost. Draft, lead status/notes, audit and job completion now commit together; audit failure rolls the whole save back. A waiting recovery worker cannot reclaim an already committed draft job.

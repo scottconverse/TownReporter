@@ -41,6 +41,7 @@ import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
+import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
@@ -683,6 +684,13 @@ function StoryPage() {
                 : "No draft yet. Draft with AI writes a first pass from the lead and its sources; you edit, then publish."}
             </p>
           )}
+          {data.draft ? (
+            <FindingEvidenceReviewPanel
+              leadId={id}
+              currentDraft={{ headline, dek, body, topic }}
+              disabled={locked || onPaper || save.isPending}
+            />
+          ) : null}
         </section>
       </div>
     </DeskShell>
