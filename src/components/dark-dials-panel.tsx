@@ -97,7 +97,7 @@ export function DarkDialsPanel() {
         Saved search preference:{" "}
         {q.data?.preferences.mode === "range"
           ? `${q.data.preferences.startDate} through ${q.data.preferences.endDate}`
-          : `last ${q.data?.preferences.lookbackDays ?? 90} days`}
+          : `last ${q.data?.preferences.lookbackDays ?? 90} UTC calendar days`}
         . Verify up to {q.data?.preferences.verificationLimit ?? 6} signals per round. Dates guide
         searches; they do not certify source dates or completeness.
       </p>
@@ -179,15 +179,15 @@ export function DarkDialsPanel() {
                   setPreference({ mode: e.target.value as ResearchPreferences["mode"] })
                 }
               >
-                <option value="lookback">Look back a number of days</option>
+                <option value="lookback">Look back a number of UTC calendar days</option>
                 <option value="range">Use a date range</option>
               </select>
             </label>
             {preferences.mode === "lookback" ? (
               <label className="f mt-3">
-                <span>Lookback days (1–3650)</span>
+                <span>Lookback (1–3650 UTC calendar days)</span>
                 <input
-                  aria-label="Lookback days"
+                  aria-label="Lookback in UTC calendar days"
                   type="number"
                   min={1}
                   max={3650}
