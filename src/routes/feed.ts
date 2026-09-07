@@ -108,7 +108,7 @@ export const Route = createFileRoute("/feed")({
         return new Response(xml, {
           headers: {
             "content-type": "application/rss+xml; charset=utf-8",
-            "cache-control": "public, max-age=300",
+            "cache-control": "no-store",
           },
         });
       },

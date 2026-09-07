@@ -261,7 +261,7 @@ export const publishEditorial = createServerFn({ method: "POST" })
     if (already[0]) return { ok: true as const, slug: already[0].slug };
 
     const baseSlug = slugify(d.headline);
-    const slug = await withTransaction(async (tx) => {
+    const printed = await withTransaction(async (tx) => {
       let candidate = baseSlug;
       for (let n = 0; n < 50; n += 1) {
         const clash = await tx<{
@@ -270,22 +270,22 @@ export const publishEditorial = createServerFn({ method: "POST" })
         if (!clash[0]) break;
         candidate = n === 0 ? `${baseSlug}-${draftId}` : `${baseSlug}-${draftId}-${n + 1}`;
       }
-      await tx`
+      const [article] = await tx<{id:number}>`
         insert into articles (
           user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status,
-          published_at, form
+          published_at, form, origin_draft_id
         )
         values (
           ${context.userId}, ${owned(context)}, ${null}, ${candidate}, ${d.headline}, ${d.dek}, ${d.body},
           ${d.topic || "opinion"}, ${d.source_urls || "[]"}, 'published', now(),
-          ${d.form || "editorial"}
-        )
+          ${d.form || "editorial"}, ${draftId}
+        ) returning id
       `;
-      return candidate;
+      return {slug:candidate,id:article.id};
     });
 
-    await audit(context.userId, "publish-editorial", slug, owned(context));
-    return { ok: true as const, slug };
+    await audit(context.userId, "publish-editorial", `Article ${printed.id}`, owned(context), {kind:"articles",id:printed.id});
+    return { ok: true as const, slug:printed.slug };
   });
 
 /**

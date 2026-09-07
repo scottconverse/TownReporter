@@ -77,6 +77,7 @@ export async function audit(
   action: string,
   detail: string,
   newsroomId: number = DEFAULT_NEWSROOM_ID,
+  subject?: { kind: string; id: number },
 ) {
   const sql = await getSql();
   await sql.query(`
@@ -93,8 +94,10 @@ export async function audit(
   await sql.query(
     `alter table audit_events add column if not exists newsroom_id integer not null default 1`,
   );
+  await sql.query("alter table audit_events add column if not exists subject_kind text");
+  await sql.query("alter table audit_events add column if not exists subject_id integer");
   await sql`
-    insert into audit_events (user_id, action, detail, newsroom_id)
-    values (${userId}, ${action}, ${detail.slice(0, 500)}, ${newsroomId})
+    insert into audit_events (user_id, action, detail, newsroom_id, subject_kind, subject_id)
+    values (${userId}, ${action}, ${detail.slice(0, 500)}, ${newsroomId}, ${subject?.kind ?? null}, ${subject?.id ?? null})
   `;
 }
