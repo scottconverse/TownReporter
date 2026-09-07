@@ -7,13 +7,15 @@ import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteLead, draftLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { nearDuplicate, openLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
-import { TOPICS } from "@/lib/paper";
+import { useEditorSections } from "@/lib/use-sections";
 import { usePaper } from "@/lib/paper-context";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
 
 function QueuePage() {
+  const { sections } = useEditorSections();
+  const TOPICS = sections.map(s=>s.key);
   const PAPER = usePaper();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -187,7 +189,7 @@ function QueuePage() {
               <select value={topic} onChange={(e) => setTopic(e.target.value)}>
                 {TOPICS.filter((t) => t !== "about").map((t) => (
                   <option key={t} value={t}>
-                    {t}
+                    {sections.find(s=>s.key===t)?.name??t}
                   </option>
                 ))}
               </select>

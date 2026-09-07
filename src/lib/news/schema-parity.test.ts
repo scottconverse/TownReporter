@@ -122,6 +122,7 @@ if (dbProbe.ok) {
     const followUps = await import("./follow-ups.ts");
     const ops = await import("./ops.ts");
     const views = await import("./views.ts");
+    const sections = await import("./sections.server.ts");
     const db = await import("../db.ts");
     closePoolForTests = db.closePoolForTests;
 
@@ -137,6 +138,11 @@ if (dbProbe.ok) {
     await investigate.ensureInvestigateSchema();
     await views.ensureViewsSchema();
     await followUps.ensureFollowUpsSchema();
+    // section_sources references the migrations-owned sources table. Provide
+    // only its key in this ensure-only fixture; sources remains explicitly
+    // excluded from column parity, while every new section table is compared.
+    await (await db.getSql()).query("create table if not exists sources (id serial primary key)");
+    await sections.ensureSectionsSchema();
     // desk_rate / audit_events: no ensure*Schema name, but the same
     // create-table-if-not-exists-on-every-call shape (ENG-09) -- a real call
     // each creates the table.

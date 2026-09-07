@@ -18,7 +18,9 @@ export function looksLikeJsonDraft(text: string): boolean {
 
 function asTopic(value: unknown, fallback: string): string {
   const s = String(value ?? fallback).trim();
-  return (TOPICS as readonly string[]).includes(s) ? s : fallback;
+  // A configured custom section is carried by the trusted lead fallback.
+  // Server filing validates it again against this newsroom's current config.
+  return s === fallback || (TOPICS as readonly string[]).includes(s) ? s : fallback;
 }
 
 /** Pull a JSON string field even when the model left inner quotes unescaped. */
@@ -115,5 +117,7 @@ export function unpackStoredDraft<T extends { headline: string; dek: string; bod
     topic: draft.topic,
   });
   if (!c.body) return draft;
-  return { ...draft, headline: c.headline, dek: c.dek, body: c.body, topic: c.topic };
+  // The saved topic is authoritative after editor filing or section retirement.
+  // Legacy JSON is decoded for text only; it cannot revive an old section key.
+  return { ...draft, headline: c.headline, dek: c.dek, body: c.body };
 }

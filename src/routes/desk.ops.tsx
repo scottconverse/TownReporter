@@ -19,6 +19,7 @@ import { TRASH_DAYS, listTrash, purgeTrashItem, restoreTrashItem } from "@/lib/n
 import { inviteEditor, myDesk } from "@/lib/news/claim";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { PaperSetupForm } from "@/components/paper-setup-form";
+import { SectionsSetup } from "@/components/sections-setup";
 import { getPaperConfigForEditor } from "@/lib/news/paper-settings";
 import { getDarkCounty, saveDarkCounty } from "@/lib/news/dark";
 import {
@@ -918,6 +919,7 @@ function PaperSetup() {
         visit.
       </p>
       {current.isPending ? null : <PaperSetupForm initial={current.data} submitLabel="Save" />}
+      <SectionsSetup />
       {me.data?.role === "owner" ? <DarkDeskCounty /> : null}
     </section>
   );

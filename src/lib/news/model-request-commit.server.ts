@@ -15,6 +15,7 @@ import {
 } from "./model-choice.ts";
 import { parseWriteStoryInput } from "./write-story.ts";
 import { appendScratch, packNotes, parseNotes } from "./notes.ts";
+import { sectionScanSnapshot, ensureSectionsSchema } from "./sections.server.ts";
 
 export type AuthenticatedEditorContext = {
   userId: string;
@@ -135,6 +136,7 @@ export async function commitScanForAuthenticatedEditor(
   input: {
     context: AuthenticatedEditorContext;
     modelChoice: StoryModelChoice;
+    sectionKey?: string;
   },
   deps: ScanCommitDeps = {},
 ) {
@@ -151,11 +153,19 @@ export async function commitScanForAuthenticatedEditor(
   }
 
   const effectiveChoice = providerProbe.ok ? providerProbe.choice : input.modelChoice;
+  let sectionSnapshot;
+  try {sectionSnapshot=await sectionScanSnapshot(input.context.newsroomId,input.sectionKey);}
+  catch(error) {return {ok:false as const,error:error instanceof Error?error.message:"Invalid section.",detail:"Open Paper setup to review the section and its assigned sources.",retryable:true};}
+  await ensureSectionsSchema();
   const open = await (deps.findOpenJob ?? findOpenJob)({
     newsroomId: input.context.newsroomId,
     kind: "scan",
   });
   if (open) {
+    const scanSql=await (deps.getSql??getSql)();
+    const [existing]=await scanSql<{section_snapshot:string|null}>`select section_snapshot from scan_runs where id=${open.subject_id} and newsroom_id=${input.context.newsroomId}`;
+    const existingKey=existing?.section_snapshot?JSON.parse(existing.section_snapshot).key:null;
+    if(existingKey!==(sectionSnapshot?.key??null)) return {ok:false as const,error:"A scan with a different section scope is already running. Wait for it to finish before starting this scan.",detail:"Open the current scan below.",retryable:true};
     const persistedChoice = effectiveStoryModelChoice(open.model_choice);
     if (persistedChoice !== effectiveChoice) {
       return {
@@ -178,7 +188,7 @@ export async function commitScanForAuthenticatedEditor(
   await (deps.assertRate ?? assertRate)(input.context.userId, "scan");
   const sql = await (deps.getSql ?? getSql)();
   const runRows = await sql<{ id: number }>`
-    insert into scan_runs (user_id, newsroom_id) values (${input.context.userId}, ${input.context.newsroomId}) returning id
+    insert into scan_runs (user_id, newsroom_id, section_snapshot) values (${input.context.userId}, ${input.context.newsroomId}, ${sectionSnapshot?JSON.stringify(sectionSnapshot):null}) returning id
   `;
   const runId = runRows[0]!.id;
   const job = await (deps.enqueueJob ?? enqueueJob)({
@@ -189,6 +199,12 @@ export async function commitScanForAuthenticatedEditor(
     modelChoice: effectiveChoice,
     modelChoiceSource: input.modelChoice === "auto" ? "auto" : "editor",
   });
+  if (job.subject_id !== runId) {
+    await sql`update scan_runs set finished_at=now(),error='Another scan was queued first. This request did not run.' where id=${runId} and newsroom_id=${input.context.newsroomId}`;
+    const [existing]=await sql<{section_snapshot:string|null}>`select section_snapshot from scan_runs where id=${job.subject_id} and newsroom_id=${input.context.newsroomId}`;
+    const existingKey=existing?.section_snapshot?JSON.parse(existing.section_snapshot).key:null;
+    if(existingKey!==(sectionSnapshot?.key??null)) return {ok:false as const,error:"A scan with a different section scope was queued first. Wait for it to finish before starting this scan.",detail:"Your requested section scan did not run.",retryable:true};
+  }
   const persistedChoice = effectiveStoryModelChoice(job.model_choice);
   if (persistedChoice !== effectiveChoice) {
     return {

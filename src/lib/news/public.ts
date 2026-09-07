@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { resolveSectionKey } from "./sections.server.ts";
 import { getSql } from "../db.ts";
 import type { ArticleRow, CorrectionRow } from "./types.ts";
 import { unpackStoredDraft } from "./coerce-draft.ts";
@@ -90,6 +91,7 @@ export const listPublishedByTopic = createServerFn({ method: "GET" })
   .handler(async ({ data: topic }) => {
     if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as ArticleRow[];
     try {
+      topic = await resolveSectionKey(DEFAULT_NEWSROOM_ID, topic);
       const sql = await getSql();
       return sql<ArticleRow>`
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,

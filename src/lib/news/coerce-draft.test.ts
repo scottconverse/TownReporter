@@ -58,6 +58,11 @@ describe("coerceDraft", () => {
 });
 
 describe("unpackStoredDraft", () => {
+  it("keeps the saved section when legacy JSON contains a retired topic",()=>{
+    const unpacked=unpackStoredDraft({headline:"Library expansion",dek:"",topic:"schools",body:JSON.stringify({headline:"Library expansion",body:"Original reporting",topic:"housing"})});
+    assert.equal(unpacked.topic,"schools");
+    assert.equal(unpacked.body,"Original reporting");
+  });
   it("unpacks a draft that stored the whole JSON in body", () => {
     const body = `{
   "headline": "City roundup cites Vision Zero, rec center closure among recent items",

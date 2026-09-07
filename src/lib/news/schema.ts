@@ -53,7 +53,7 @@ export const ScanResultSchema = z.object({
     .default([]),
 });
 
-export type ParsedScanLead = z.infer<typeof ScanLeadSchema>;
+export type ParsedScanLead = Omit<z.infer<typeof ScanLeadSchema>, "topic"> & { topic: string };
 
 export type ParsedScanResult = {
   editor_summary: string;
@@ -63,7 +63,7 @@ export type ParsedScanResult = {
 };
 
 /** One bad lead must not dump the whole scan. */
-export function parseScanResult(raw: unknown): ParsedScanResult {
+export function parseScanResult(raw: unknown, allowedTopics: readonly string[] = TOPICS): ParsedScanResult {
   const empty: ParsedScanResult = {
     editor_summary: "",
     leads: [],
@@ -81,7 +81,11 @@ export function parseScanResult(raw: unknown): ParsedScanResult {
   const leads: ParsedScanLead[] = [];
   for (const item of leadsIn) {
     const parsed = ScanLeadSchema.safeParse(item);
-    if (parsed.success) leads.push(parsed.data);
+    if (parsed.success) {
+      const rawTopic = item && typeof item === "object" && "topic" in item ? String(item.topic).trim().toLowerCase() : "";
+      const topic = allowedTopics.includes(rawTopic) ? rawTopic : allowedTopics.includes(parsed.data.topic) ? parsed.data.topic : allowedTopics[0];
+      if (topic) leads.push({...parsed.data,topic});
+    }
     if (leads.length >= 12) break;
   }
   if (leadsIn.length > 0 && leads.length === 0) {

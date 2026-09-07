@@ -171,7 +171,7 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
 
     let probeCalls = 0;
     const result = await reportAndDraft(
-      { userId: "pipeline-test", lead, urls: [ANNOUNCE], memory: [], modelChoice: "auto" },
+      { userId: "pipeline-test", lead: {...lead,topic:"community-life"}, urls: [ANNOUNCE], memory: [], modelChoice: "auto" },
       {
         probe: async () => {
           probeCalls += 1;
@@ -208,6 +208,7 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
     if ("error" in result) return;
 
     assert.match(result.headline, /\$2\.4 million|Group 2/i);
+    assert.equal(result.topic,"community-life","the writer cannot replace the editor-selected section with its own default topic");
     assert.match(result.body, /Hover Street/);
     assert.match(result.body, /\$2\.4 million/);
     assert.match(result.body, /valve shortage/);
