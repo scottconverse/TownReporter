@@ -87,7 +87,7 @@ Notes:
 
 This is the loop. Skip steps that have nothing in them.
 
-1. **The desk** — the line under the heading says what needs you. If it is empty, you are done.
+1. **The desk** — follow any **Needs you** links, then review the queue and Follow-ups. An empty alert strip does not mean all editorial work is finished.
 2. **Sources** — is the watch list still the right list?
 3. **Scan** — one pass over accepted sources. Files leads. This is the expensive click.
 4. **Queue** — read what came in. Hold, kill, or open.

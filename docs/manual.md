@@ -178,9 +178,7 @@ required.
 
 ![The desk](images/04-desk.png)
 
-The current development image shows the queue in the main column and Dark Desk, Follow-ups and wire in the rail. The status line summarizes outstanding work, for example _2 drafts
-ready to publish, 14 proposed sources await review, 1 Dark Desk file ready for
-another round_. If that line is empty there is nothing for you to do.
+The current development image shows the queue in the main column and Dark Desk, Follow-ups and wire in the rail. When present, **Needs you** links flag outstanding actions such as drafts and proposed sources. Review the queue and Follow-ups even when no alert is shown.
 As of 0.6.21 the desk is one main column (composer, then the queue) with a right rail: Dark Desk, Follow-ups, The wire.
 
 ## Scan
