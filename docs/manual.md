@@ -1,6 +1,8 @@
 # TownReporter — the manual
 
-**Version 0.6.26 · 7 September 2026**
+Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
+
+**Version 0.6.27 · 7 September 2026**
 
 **Documentation scope:** The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from
@@ -20,6 +22,8 @@ at your own city.
 ---
 
 ## Contents
+
+**Installing on Windows?** Start with the [Windows installation guide](windows-install.md): download, provider setup, persistent database, start/stop and your first editorial workflow. The source setup remains available for Windows, macOS and Linux.
 
 - [Part 1 — What it is](#part-1--what-it-is)
 - [Part 2 — The desk, screen by screen](#part-2--the-desk-screen-by-screen)
@@ -399,6 +403,12 @@ Low-level configured-provider precedence is below. Per-run explicit choices on S
 | `ANTHROPIC_API_KEY`                             | Claude, billed to that key                                        |
 | _nothing_                                       | **Claude, through your Claude Code login**                        |
 | `XAI_API_KEY`                                   | Grok                                                              |
+
+### Drafting scope and evidence review
+
+**Write a story** and the story workbench offer **Research public sources** or **Use only supplied material**. The latter opens only explicitly supplied URLs and reads the supplied text; it skips discovery and external searches. Its queued scope survives retries and provider selection. Choose Claude or a local/API model for supplied-only work; Codex is refused because its native tools cannot enforce that boundary. Instructions pasted inside source material do not replace this control.
+
+After a body edit, drafts with reporting evidence require an explicit evidence review before publishing. Keep the evidence only after checking it against the revised text, or remove the old public evidence. Removal preserves the original private draft archive and does not remove body links. An evidence-review decision is refused if its saved draft has changed, and these actions remain scoped to the editor's newsroom. See [the workbench instructions](editor.md#draft).
 
 ### Which feature uses which provider
 

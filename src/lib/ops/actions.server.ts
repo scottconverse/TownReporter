@@ -1,9 +1,36 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { findOpsAction, type OpsActionId } from "./actions";
+import { unavailableOpsReason } from "./install-policy";
+import { ownsManagedInstall } from "./managed-identity";
 
 const run = promisify(execFile);
+
+export async function managedInstallRoot(root = process.cwd()): Promise<string | null> {
+  const dataRoot = process.env.TOWNREPORTER_DATA_ROOT;
+  if (!dataRoot) return null;
+  try {
+    const text = await readFile(join(dataRoot, "config.json"), "utf8");
+    return ownsManagedInstall(text, resolve(root), process.env.TOWNREPORTER_INSTANCE_ID)
+      ? dataRoot
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function opsAvailability(root = process.cwd()): Promise<Record<string, string>> {
+  const managed = Boolean(await managedInstallRoot(root));
+  return Object.fromEntries(
+    Object.keys(SPECS).flatMap((id) => {
+      const reason = unavailableOpsReason(id, managed, process.env.TOWNREPORTER_LEGACY_OPS === "1");
+      return reason ? [[id, reason]] : [];
+    }),
+  );
+}
 
 /**
  * Running the allowlisted ops actions.
@@ -21,8 +48,6 @@ type Spec = {
 };
 
 const PS = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"];
-/** For the one action that hands work to Windows rather than running it. */
-const PS_CMD = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"];
 
 const SPECS: Record<OpsActionId, Spec> = {
   watchdog: {
@@ -41,11 +66,7 @@ const SPECS: Record<OpsActionId, Spec> = {
   */
   "restart-tunnel": {
     exe: "powershell",
-    args: () => [
-      ...PS_CMD,
-      "Start-ScheduledTask -TaskName 'TownReporter Tunnel Restart'; " +
-        "'Handed to Windows. The tunnel drops in about 4 seconds and is back within 20.'",
-    ],
+    args: (root) => [...PS, join(root, "ops", "request-restart.ps1"), "-Target", "tunnel"],
     timeoutMs: 30_000,
   },
   /*
@@ -66,11 +87,7 @@ const SPECS: Record<OpsActionId, Spec> = {
   */
   "restart-app": {
     exe: "powershell",
-    args: () => [
-      ...PS_CMD,
-      "Start-ScheduledTask -TaskName 'TownReporter Restart'; " +
-        "'Handed to Windows. The paper stops and starts again within about 20 seconds.'",
-    ],
+    args: (root) => [...PS, join(root, "ops", "request-restart.ps1"), "-Target", "app"],
     timeoutMs: 30_000,
   },
   "rotate-logs": {
@@ -103,6 +120,13 @@ export async function runOpsActionById(
   const action = findOpsAction(id);
   const spec = SPECS[id];
   if (!action || !spec) return { ok: false, id, output: "Unknown action." };
+  const managedRoot = await managedInstallRoot(root);
+  const unavailable = unavailableOpsReason(
+    id,
+    Boolean(managedRoot),
+    process.env.TOWNREPORTER_LEGACY_OPS === "1",
+  );
+  if (unavailable) return { ok: false, id, output: unavailable };
 
   // Refused here, not just hidden in the UI: a dev install's Server page was
   // one click from restarting the LIVE paper's tunnel, because cloudflared
@@ -117,7 +141,15 @@ export async function runOpsActionById(
   }
 
   const exe = spec.exe === "node" ? process.execPath : "powershell.exe";
-  const args = spec.args(root);
+  const args =
+    managedRoot && (id === "watchdog" || id === "restart-app")
+      ? [
+          ...PS,
+          join(root, "installer", id === "watchdog" ? "Health.ps1" : "Restart.ps1"),
+          "-DataRoot",
+          managedRoot,
+        ]
+      : spec.args(root);
 
   try {
     const { stdout, stderr } = await run(exe, args, {

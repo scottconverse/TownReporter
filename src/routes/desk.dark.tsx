@@ -18,6 +18,7 @@ import {
   refreshBrief,
   reopenParkedInvestigation,
   scanTipSubreddit,
+  getTipSubreddit,
   type InvestigationRow,
 } from "@/lib/news/dark";
 import {
@@ -143,6 +144,8 @@ function DarkPage() {
     setCardPhase("");
   }
 
+  const tipSubreddit = useQuery({queryKey:["tip-subreddit"],queryFn:()=>getTipSubreddit()});
+  const redditLabel = tipSubreddit.data?.subreddit ? `r/${tipSubreddit.data.subreddit}` : "configured subreddit";
   const worth = useQuery({ queryKey: ["worth-a-look"], queryFn: () => listWorthALook() });
   const investigations = useQuery({
     queryKey: ["investigations"],
@@ -506,14 +509,14 @@ function DarkPage() {
     if (!reddit.isPending) return;
     redditStartRef.current = Date.now();
     setRedditElapsed(0);
-    setRedditAnnounce("Reading r/longmont. Four feeds, paced about a minute.");
+    setRedditAnnounce(`Reading ${redditLabel}. Four feeds, paced about a minute.`);
     const id = setInterval(() => {
       if (redditStartRef.current != null) {
         setRedditElapsed(Math.floor((Date.now() - redditStartRef.current) / 1000));
       }
     }, 1000);
     return () => clearInterval(id);
-  }, [reddit.isPending]);
+  }, [reddit.isPending, redditLabel]);
 
   const writeBrief = useMutation({
     mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice } }),
@@ -728,15 +731,16 @@ function DarkPage() {
             <InkButton
               tone="quiet"
               small
-              disabled={busyStart || digging || reddit.isPending}
+              disabled={busyStart || digging || reddit.isPending || !tipSubreddit.data?.subreddit}
               onClick={() => reddit.mutate()}
             >
-              {reddit.isPending ? "Reading r/longmont…" : "Check r/longmont"}
+              {reddit.isPending ? `Reading ${redditLabel}…` : tipSubreddit.data?.subreddit ? `Check ${redditLabel}` : "Reddit unavailable"}
             </InkButton>
           </div>
+          {!tipSubreddit.isPending && !tipSubreddit.data?.subreddit ? <p className="note">{tipSubreddit.isError ? "Could not read the configured Reddit source." : "Reddit check needs one unambiguous subreddit URL in Sources; no subreddit is guessed from the town name."} <Link to="/desk/sources" className="inline-link">Review Sources</Link></p> : null}
           {reddit.isPending ? (
             <div className="reddit-progress">
-              <p className="worth-t">Reading r/longmont</p>
+              <p className="worth-t">Reading {redditLabel}</p>
               <p className="reddit-sub">
                 Four feeds, read 8 seconds apart so Reddit does not block this paper. About a
                 minute.

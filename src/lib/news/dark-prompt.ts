@@ -1,3 +1,4 @@
+import { isLongmont, LONGMONT_PLACE, type NewsroomPlace } from "./dark-place.ts";
 import { budgetFor, clampDials, jurisdictionsFor, stanceFor, type DarkDials } from "./dark-dials.ts";
 import { taxonomyPrompt } from "./dark-taxonomy.ts";
 import { CLAIM_HYGIENE_RULES } from "./claim-hygiene.ts";
@@ -145,11 +146,14 @@ Return ONLY JSON:
  *
  * What the dials add is depth, appetite and map.
  */
-export function darkSystemFor(dials: DarkDials): string {
+export function darkPlannerFor(place: NewsroomPlace = LONGMONT_PLACE): string {
+ return DARK_PLANNER.replace("Longmont, Colorado",`${place.city}, ${place.state}`);
+}
+export function darkSystemFor(dials: DarkDials, place: NewsroomPlace = LONGMONT_PLACE): string {
   const d = clampDials(dials);
   const budget = budgetFor(d);
   const stance = stanceFor(d);
-  const places = jurisdictionsFor(d.scope);
+  const places = jurisdictionsFor(d.scope, place);
 
   const depth = `DEPTH THIS RUN — dig ${d.dig}/10
 Up to ${budget.hops} hop${budget.hops === 1 ? "" : "s"}. About ${budget.searchesPerHop} searches and ${budget.fetchesPerHop} fetches per hop, and up to ${budget.entityHops} entity hops (person → company → agent → parcel → contract).
@@ -167,7 +171,8 @@ Nothing here relaxes RULE 1, RULE 2 or RULE 3, and nothing here publishes. This 
 
   const scope = `MAP THIS RUN — ${d.scope}
 In scope: ${places.join(", ")}.
-${d.scope === "city" ? "A trail that leaves Longmont may be noted, but do not spend hops on it." : "Follow a trail across a boundary when the effect lands on Longmont residents. Name the jurisdiction that actually holds the record."}`;
+${d.scope === "city" ? `A trail that leaves ${place.city} may be noted, but do not spend hops on it.` : `Follow a trail across a boundary when the effect lands on ${place.city} residents. Name the jurisdiction that actually holds the record.`}`;
 
-  return [DARK_SYSTEM, depth, nerve, scope, taxonomyPrompt(d.nerve)].join("\n\n");
+  const taxonomy = isLongmont(place) ? taxonomyPrompt(d.nerve) : taxonomyPrompt(d.nerve).replace("A decision in Erie, Firestone, Mead or a county that lands on Longmont residents without Longmont being a party to it.",`A decision by a neighbouring jurisdiction that affects ${place.city} residents without ${place.city} being a party to it.`);
+  return [DARK_SYSTEM.replace("Longmont, Colorado",`${place.city}, ${place.state}`), depth, nerve, scope, taxonomy].join("\n\n");
 }

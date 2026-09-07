@@ -115,3 +115,18 @@ describe("worth-a-look card text (UX-003)", () => {
     assert.ok(card!.why.length > 10);
   });
 });
+
+describe("monitor change outcomes", () => {
+  for (const outcome of ["fetched", "unchanged", "failed", "change-check-failed", "not-changed", "changed-error"]) {
+    it(`does not announce a change for ${outcome}`, () => {
+      assert.equal(rankWorthItems({monitors:[{url:"https://example.gov/record",title:"Local record",last_outcome:outcome}]}).length,0);
+    });
+  }
+  it("announces only the valid changed outcome", () => {
+    const [card]=rankWorthItems({monitors:[{url:"https://example.gov/record",title:"Local record",last_outcome:"changed"}]});
+    assert.equal(card.kind,"changed");
+  });
+  it("an initial capture followed by an identical check creates no changed rail card", () => {
+    for (const last_outcome of ["fetched","unchanged"]) assert.deepEqual(rankWorthItems({monitors:[{url:"https://example.gov/record",title:"Local record",last_outcome}]}),[]);
+  });
+});

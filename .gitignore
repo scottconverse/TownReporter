@@ -55,3 +55,6 @@ artifacts/**
 
 # Claude Code session worktrees and local settings are never part of the paper
 .claude/
+
+# Per-install pointer (persistent secrets/data live outside the source tree).
+.townreporter-install.json

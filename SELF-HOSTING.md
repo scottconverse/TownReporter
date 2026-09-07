@@ -1,6 +1,10 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.26**.
+Repository documentation version: **0.6.27**.
+
+**New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
+
+**Legacy operator migration for 0.6.27:** maintenance scripts now refuse guessed machine ownership. Before using an existing Halo-style installation's scripts, its local operator must configure `TOWNREPORTER_LEGACY_OPS=1`, `TOWNREPORTER_LEGACY_ROOT` as that checkout's absolute path, its actual `PORT` and loopback `DATABASE_URL`, and absolute `TOWNREPORTER_PG_BIN` / `TOWNREPORTER_PG_DATA` paths for the database it owns. Verify those paths locally; do not copy values from another machine. Packaged installations use their own launcher and refuse the legacy path even if that flag is set. This document is not an instruction for the remote developer to access Halo.
 
 These are **Halo-local operator deployment notes**, not instructions to treat a
 remote development machine as production. The paper is hosted at

@@ -39,6 +39,16 @@ function fakeJob(over: Partial<DeskJob>): DeskJob {
 }
 
 describe("desk jobs", () => {
+  it("keeps supplied-material scope when another enqueue races with a broader scope", async () => {
+    const request = { userId: "scope-race", newsroomId: 91009, kind: "draft" as const, subjectId: 71717, kick: false };
+    const first = await enqueueJob({ ...request, researchScope: "supplied" });
+    const second = await enqueueJob({ ...request, researchScope: "public" });
+    assert.equal(second.id, first.id);
+    assert.equal(second.research_scope, "supplied");
+    assert.equal((await latestJob(request))?.research_scope, "supplied");
+    const sql = await getSql();
+    await sql`delete from desk_jobs where id = ${first.id} and newsroom_id = 91009`;
+  });
   it("persists the editor's model choice on the queued job", async () => {
     const newsroomId = 91000;
     const enqueueWithModel = enqueueJob as unknown as (

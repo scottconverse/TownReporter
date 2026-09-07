@@ -72,6 +72,13 @@ try {
   await page.getByText(/Saved/i).first().waitFor({ timeout: 20_000 });
   step("wrote and saved the story by hand");
 
+  const publishButton = page.getByRole("button", { name: "Publish to the paper" }).first();
+  if (!(await publishButton.isDisabled())) throw new Error("Changed body did not require evidence review");
+  const confirmEvidence = page.getByRole("button", { name: "I checked: keep this evidence" });
+  await confirmEvidence.waitFor({ state: "visible" });
+  await confirmEvidence.click();
+  await page.waitForFunction(() => [...document.querySelectorAll("button")].some(button => button.textContent?.trim() === "Publish to the paper" && !button.disabled));
+  step("confirmed retained evidence after body edit; publication was blocked until review");
   await page.getByRole("button", { name: "Publish to the paper" }).first().click();
   // Publishing confirms before it prints; see lifecycle-e2e.mjs for why.
   await page.getByRole("button", { name: "Yes, print it" }).click();

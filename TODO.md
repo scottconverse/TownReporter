@@ -16,6 +16,21 @@ Legend: [x] implemented · [~] in progress · [ ] open · **external** requires 
 
 ## Implementation queue and remaining acceptance
 
+### Windows installation and local-test findings — active, 2026-09-07
+
+Owner acceptance: a new Windows user can download the repository's installation package, install it, configure an available AI provider, and complete a first editorial workflow in under an hour. Mac/Linux source setup remains available; native installers for those systems are outside this release.
+
+- [x] Replace machine-specific startup assumptions with installation-owned database, secrets, ports and process control. Server maintenance must never repair or stop another installation.
+- [x] Package prerequisite installation, persistent storage, actionable failures and start/stop instructions. Verify real HTTP readiness and reject stale compiled output.
+- [x] Make supplied-material drafting an explicit choice; prevent unrelated research from replacing the editor's material. Require review of public evidence when a body changes, retaining private historical evidence.
+- [x] Reproduce and correct the page-watch trailing-slash redirect false alarm while preserving meaningful redirect and private-address safeguards.
+- [x] Correct newcomer runtime findings: configured-town investigative prompts, accepted-source Reddit selection, unchanged-watch card classification, and accurate local Server maintenance/log descriptions. Final packaged browser checks remain part of the gate below.
+- [x] Exercise timed fresh-package Windows installation, prerequisite downloads, first-owner onboarding, manual article publication and restart persistence. The candidate browser journey completed in 593 seconds on a fresh Windows Server 2025 runner; a subsequent native contract found the hidden-AppData defect, which was corrected with a sensitive regression. Final candidate and published-asset checks, exact hashes and timing belong to [the 0.6.27 release receipt](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.27). AI is disabled in this CI exercise.
+- [x] Separately verify real supplied-material drafting on the local packaged installation: Claude completed the test draft in 51 seconds using an already available provider. This does not measure first-time AI account setup, a real source scan, or the complete fresh-install-to-AI-publication journey; the owner's full acceptance target above remains broader than these individual checks.
+- [x] Reconcile installer, README, setup/manual, landing-page and release instructions against the package. Publication remains gated on applicable exact-candidate checks; the release receipt records the final result separately from this implementation checklist.
+
+The local test newsroom on this travel machine is authorized to use its own persistent PostgreSQL cluster. Unit tests and builds still use an empty `DATABASE_URL`; no Halo staging, production data, tunnel or operator tasks are in scope.
+
 1. [x] **Dark Desk corrective review (0.6.24).** Reproduced failures in search verification, model evidence context, saved-result reporting, newsroom isolation and PDF/OCR provenance were corrected. Both signal and whole-file queue handoffs preserve uncertainty. Real investigative quality remains the separate five-run acceptance exercise below.
 2. [x] **Fetch safeguards (0.6.24).** Shared guarded HTTP responses have streamed size and declared content-type caps, with visible refusal reasons. Chromium resources and direct provider transports remain outside these caps.
 3. [x] **Sections — dynamic, editor-owned (0.6.25).** The owner can add, rename, reorder, hide and retire sections. Editors can file and scan within that configured set. Preserve existing stories and provide explicit reassignment when retiring a section. Per-section reporting briefs, accepted-source assignments and scanning instructions remain part of this work, with preview before applying changes. No fixed section list is awaited.

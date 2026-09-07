@@ -10,6 +10,8 @@
   still there when something goes wrong.
 #>
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib-ownership.ps1")
+Assert-TownReporterLegacyOwnership
 $app = Split-Path -Parent $PSScriptRoot
 $logDir = Join-Path $app "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null

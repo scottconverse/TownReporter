@@ -3,6 +3,8 @@ import { promisify } from "node:util";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import os from "node:os";
+import { managedInstallRoot, opsAvailability } from "./actions.server";
+import { installLogFiles, siteProbeDescription } from "./install-display";
 import { getDbSource, getSql } from "@/lib/db";
 import { APP_VERSION } from "@/lib/version";
 import { DEFAULT_NEWSROOM_ID } from "@/lib/news/membership";
@@ -135,7 +137,13 @@ async function checkJobs(): Promise<HealthCheck[]> {
       it may be waiting on is the `default` lane's own concurrency (2 at a
       time). This is what turns a bare "Queued" into a reason.
     */
-    const rows = await sql<{ lane: string; status: string; kind: string; n: number; oldest: string | null }>`
+    const rows = await sql<{
+      lane: string;
+      status: string;
+      kind: string;
+      n: number;
+      oldest: string | null;
+    }>`
       select coalesce(lane, 'default') as lane, status, kind, count(*)::int as n,
              min(created_at)::text as oldest
       from desk_jobs
@@ -172,7 +180,10 @@ async function checkJobs(): Promise<HealthCheck[]> {
         label: "Work queue",
         state: jobsState(running, failed, oldestMs),
         value: `${running} running · ${queued} queued · ${failed} failed`,
-        note: [running && oldestRunning ? `oldest started ${formatAgo(oldestRunning)}` : "", ...waitNotes]
+        note: [
+          running && oldestRunning ? `oldest started ${formatAgo(oldestRunning)}` : "",
+          ...waitNotes,
+        ]
           .filter(Boolean)
           .join(" · "),
       },
@@ -236,6 +247,28 @@ async function checkTunnel(): Promise<HealthCheck[]> {
 }
 
 async function checkWatchdog(): Promise<HealthCheck[]> {
+  if (await managedInstallRoot()) {
+    return [
+      {
+        id: "watchdog",
+        label: "Local launcher",
+        state: "ok",
+        value: "managed local installation",
+        note: "Health check inspects this app and database. Restart uses only this installation's launcher. Automatic recovery is not enabled.",
+      },
+    ];
+  }
+  if (process.env.TOWNREPORTER_LEGACY_OPS !== "1") {
+    return [
+      {
+        id: "watchdog",
+        label: "Watchdog",
+        state: "unknown",
+        value: "not managed by this install",
+        note: "Machine-wide tasks are not inspected or controlled.",
+      },
+    ];
+  }
   if (!isWindows) {
     return [{ id: "watchdog", label: "Watchdog", state: "unknown", value: "not a Windows host" }];
   }
@@ -295,14 +328,16 @@ async function checkDisk(): Promise<HealthCheck[]> {
 /**
  * Does the paper answer on its public address?
  *
- * Measured from this machine, so it proves the tunnel and Cloudflare are
- * routing — it does not prove a reader in another town can reach it, and the
- * dashboard says so rather than implying more than it knows.
+ * Measured from this machine. Loopback proves only local response; even an
+ * external address does not establish every reader's reachability or route.
  */
 async function checkPublic(): Promise<HealthCheck[]> {
   const site = (process.env.PUBLIC_SITE_URL || process.env.BETTER_AUTH_URL || "").trim();
+  const presentation = siteProbeDescription(site);
   if (!site) {
-    return [{ id: "public", label: "Public site", state: "unknown", value: "no address configured" }];
+    return [
+      { id: "public", label: "Public site", state: "unknown", value: "no address configured" },
+    ];
   }
   const started = Date.now();
   try {
@@ -314,17 +349,17 @@ async function checkPublic(): Promise<HealthCheck[]> {
     return [
       {
         id: "public",
-        label: "Public site",
+        label: presentation.label,
         state: publicState(res.status, ""),
         value: `${site} answered ${res.status} in ${ms}ms`,
-        note: "Checked from this machine, so it proves the tunnel is routing — not that every reader can reach it.",
+        note: presentation.note,
       },
     ];
   } catch (err) {
     return [
       {
         id: "public",
-        label: "Public site",
+        label: presentation.label,
         state: "down",
         value: `${site} did not answer`,
         note: err instanceof Error ? err.message.slice(0, 160) : "",
@@ -362,13 +397,9 @@ export type LogTail = { name: string; path: string; lines: string[]; error?: str
 
 /** The last few lines of the logs an operator actually reads. */
 export async function readLogs(perFile = 12): Promise<LogTail[]> {
-  const dir = join(appRoot(), "logs");
-  const wanted = [
-    { name: "Watchdog", file: "watchdog.log" },
-    { name: "Paper (errors)", file: "app.err.log" },
-    { name: "Paper (output)", file: "app.out.log" },
-    { name: "Tunnel", file: "cloudflared.err.log" },
-  ];
+  const ownedRoot = await managedInstallRoot();
+  const dir = ownedRoot || join(appRoot(), "logs");
+  const wanted = installLogFiles(Boolean(ownedRoot));
   const out: LogTail[] = [];
   for (const w of wanted) {
     const path = join(dir, w.file);
@@ -385,6 +416,8 @@ export async function readLogs(perFile = 12): Promise<LogTail[]> {
 }
 
 export type OpsHealth = {
+  managedInstall: boolean;
+  unavailableActions: Record<string, string>;
   checks: HealthCheck[];
   logs: LogTail[];
   host: string;
@@ -404,6 +437,8 @@ export async function collectHealth(): Promise<OpsHealth> {
     checkDisk(),
   ]);
   return {
+    managedInstall: Boolean(await managedInstallRoot()),
+    unavailableActions: await opsAvailability(),
     checks: groups.flat(),
     logs: await readLogs(),
     host: os.hostname(),

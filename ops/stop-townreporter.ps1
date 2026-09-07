@@ -15,6 +15,8 @@
 #>
 [CmdletBinding()]
 param([switch]$IncludeDatabase)
+. (Join-Path $PSScriptRoot "lib-ownership.ps1")
+Assert-TownReporterLegacyOwnership
 
 $app = Split-Path -Parent $PSScriptRoot
 
@@ -46,7 +48,7 @@ foreach ($owner in $owners) {
   if (-not $proc) { continue }
   # Belt and braces: the port says which install, this says it is our server
   # and not something unrelated that happens to have taken the socket.
-  if ($proc.Name -ne 'node.exe' -or $proc.CommandLine -notlike "*.output/server/index.mjs*") {
+  if ($proc.Name -ne 'node.exe' -or !($proc.CommandLine -replace '/', '\').Contains((Join-Path $app '.output\server\index.mjs'))) {
     Write-Host "port $port is held by PID $owner ($($proc.Name)), which is not this app -- leaving it alone"
     continue
   }
@@ -54,11 +56,11 @@ foreach ($owner in $owners) {
   Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
 }
 
-$bin  = "$env:USERPROFILE\scoop\apps\postgresql\current\bin"
-$data = "$env:USERPROFILE\scoop\persist\postgresql\data"
+$bin  = $OwnedPgBin
+$data = $OwnedPgData
 if (-not $IncludeDatabase) {
   Write-Host "leaving Postgres running (shared with the development copy); pass -IncludeDatabase to stop it too"
-} elseif (Get-NetTCPConnection -LocalPort 5433 -State Listen -ErrorAction SilentlyContinue) {
+} elseif (Get-NetTCPConnection -LocalPort $OwnedPgPort -State Listen -ErrorAction SilentlyContinue) {
   Write-Host "stopping Postgres on 5433"
   & "$bin\pg_ctl.exe" -D $data stop -m fast
 }

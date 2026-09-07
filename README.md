@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.26](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.26)** — 7 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.27](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.27)** — 7 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -45,7 +45,13 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ---
 
-## Run it (about five minutes)
+## Install on Windows
+
+Download the Windows installation ZIP from [Releases](https://github.com/scottconverse/TownReporter/releases/latest), extract it, and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
+
+Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first editorial workflow within an hour with working internet and an available AI account or endpoint; release evidence records the measured result and its limits. Public hosting is separate from this local installation.
+
+## Run from source (Windows, macOS or Linux)
 
 You need **Node 22+**. Story drafting uses an existing Codex or Claude login,
 or a configured `LLM_BASE_URL` gateway; API keys are optional, but going without one relies on a
@@ -86,6 +92,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.27** — Windows installation package, installation-owned maintenance and build/readiness checks, supplied-material drafting and evidence review, and the page-watch trailing-slash correction.
 - **0.6.26** — owner-only legal removal with retention, expiry, copy-scope refusals and an external-backup trail; saved investigative search windows and verification limits with honest full-denominator summaries.
 
 - **0.6.25** — owner-configurable newspaper sections, section-specific scanning instructions and source assignments, and manual Dark Desk page watching with dated captures, honest failure states and explicit handoffs to a file or unverified lead.
@@ -143,7 +150,7 @@ Current development status and remaining features: [TODO.md](TODO.md). Remote ta
 - **Dark Desk has two dials.** _Dig_ — how far it chases. _Nerve_ — how speculative it may be. The panel says in plain words what the current setting will do.
 - **Dark Desk's planner had never run.** Its budget was 45 seconds against a call that needs 150, and every failure fell back to keyword matching in silence. The database held zero entities, claims or hypotheses.
 - **Confidence is capped by the label in code**, not requested in a prompt, and a FACT with no citation is downgraded.
-- **r/longmont is a tip line** — scored, paced, and filed as unverified tips that can never be mistaken for reporting.
+- **Reddit is a tip line** — one unambiguous accepted subreddit source enables the paced check. Posts are filed as unverified tips, never as reporting; a new town does not silently inherit r/longmont.
 - **Search works.** Exa runs first, and a PULL no longer answers a Longmont question with three California school-district PDFs.
 - **Nothing scrolls sideways.** The navigation rails wrap.
 

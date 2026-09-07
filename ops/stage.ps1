@@ -42,6 +42,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib-ownership.ps1")
+Assert-TownReporterLegacyOwnership
 
 $ops = $PSScriptRoot
 $app = Split-Path -Parent $ops

@@ -13,6 +13,8 @@
 #>
 
 . (Join-Path $PSScriptRoot "lib-port.ps1")
+. (Join-Path $PSScriptRoot "lib-ownership.ps1")
+Assert-TownReporterLegacyOwnership
 $ErrorActionPreference = "Stop"
 $app = Split-Path -Parent $PSScriptRoot
 $logDir = Join-Path $app "logs"
@@ -27,12 +29,13 @@ function Write-Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $m" | Add-C
 Start-Sleep -Seconds 2
 Write-Log "restart requested"
 
-Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.CommandLine -like "*.output/server/index.mjs*" } |
-  ForEach-Object {
-    Write-Log "  stopping PID $($_.ProcessId)"
-    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-  }
+foreach ($owner in (Get-TownReporterPortOwner $port)) {
+  $process = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue
+  $entry = Join-Path $app '.output\server\index.mjs'
+  if (!$process -or $process.Name -ne 'node.exe' -or !($process.CommandLine -replace '/', '\').Contains($entry)) { throw 'Port owner does not identify this exact checkout; refusing restart.' }
+  Write-Log "  stopping owned PID $owner"
+  Stop-Process -Id $owner -Force -ErrorAction Stop
+}
 
 Start-Sleep -Seconds 2
 

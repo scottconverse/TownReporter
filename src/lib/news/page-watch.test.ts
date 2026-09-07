@@ -78,6 +78,106 @@ const input = (suffix: string) => ({
   reason: "Track the public record",
   modelChoice: "auto",
 });
+test("slash-only watch redirects preserve first, unchanged and changed capture history", async () => {
+  const { setFetchImplForTests } = await import("./fetch-url.ts");
+  const { ingestDocument } = await import("./ingest.ts");
+  const address = "https://93.184.216.34/library/";
+  const created = await createPageWatchFor(identity, { ...input("slash"), url: address });
+  assert.ok(created.ok);
+  const requested: string[] = [];
+  let content = "The library opens at nine and hosts the community reading group on Tuesday.";
+  setFetchImplForTests(async (url) => {
+    requested.push(url.href);
+    return url.pathname.endsWith("/")
+      ? new Response(
+          `<html><title>Library hours</title><main><h1>Library hours</h1><p>${content}</p></main></html>`,
+          { headers: { "content-type": "text/html" } },
+        )
+      : new Response(null, { status: 301, headers: { location: "/library/" } });
+  });
+  try {
+    const first = await checkPageWatchFor(identity, created.id, { fetch: ingestDocument });
+    assert.equal(first.state, "first-capture");
+    assert.equal(
+      (await checkPageWatchFor(identity, created.id, { fetch: ingestDocument })).state,
+      "unchanged",
+    );
+    content = "The library now opens at ten and hosts the community reading group on Thursday.";
+    assert.equal(
+      (await checkPageWatchFor(identity, created.id, { fetch: ingestDocument })).state,
+      "changed",
+    );
+    const detail = await pageWatchDetailFor(identity, created.id);
+    assert.ok(detail);
+    assert.deepEqual(
+      detail.history.map((capture) => capture.state),
+      ["changed", "unchanged", "first-capture"],
+    );
+    assert.deepEqual(JSON.parse(detail.history[0]!.redirect_chain), [
+      address.slice(0, -1),
+      address,
+    ]);
+    assert.match(detail.history[0]!.previous_text!, /opens at nine/);
+    assert.match(detail.history[0]!.full_text, /opens at ten/);
+    assert.deepEqual(
+      requested,
+      Array(3)
+        .fill([address.slice(0, -1), address])
+        .flat(),
+    );
+  } finally {
+    setFetchImplForTests(null);
+  }
+});
+
+test("watch slash equivalence never hides meaningful redirect hops", () => {
+  const base = "https://example.test/library";
+  for (const chain of [
+    [base, `${base}/`],
+    [`${base}/`, base],
+    [`${base}?branch=main`, `${base}/?branch=main`],
+  ]) {
+    assert.equal(
+      watchOutcome(doc("Current library hours", { redirectChain: chain }), null),
+      "first-capture",
+    );
+  }
+  for (const chain of [
+    [base, "https://other.test/library/"],
+    [base, "https://www.example.test/library/"],
+    [base, "http://example.test/library/"],
+    [base, "https://example.test:8443/library/"],
+    [base, `${base}/?branch=other`],
+    [base, "https://example.test/new-library/"],
+    [base, "https://other.test/library", `${base}/`],
+    [base, "https://example.test/new-library", `${base}/`],
+    [base, "not a URL"],
+  ]) {
+    assert.equal(
+      watchOutcome(doc("Current library hours", { redirectChain: chain }), null),
+      "moved",
+      chain.join(" -> "),
+    );
+  }
+});
+
+test("watch canonical redirects still refuse private destinations before transport", async () => {
+  const { setFetchImplForTests } = await import("./fetch-url.ts");
+  const { ingestDocument } = await import("./ingest.ts");
+  const requested: string[] = [];
+  setFetchImplForTests(async (url) => {
+    requested.push(url.href);
+    return new Response(null, { status: 301, headers: { location: "http://127.0.0.1/library/" } });
+  });
+  try {
+    const result = await ingestDocument("https://93.184.216.34/library");
+    assert.equal(result.ok, false);
+    assert.equal(watchOutcome(result, null), "failed");
+    assert.deepEqual(requested, ["https://93.184.216.34/library"]);
+  } finally {
+    setFetchImplForTests(null);
+  }
+});
 test(
   "manual watch retains readable baseline and honest history across failed checks",
   { timeout: 60000 },

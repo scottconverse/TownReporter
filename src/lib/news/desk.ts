@@ -1,7 +1,7 @@
 import { ensureNewsroomSources as ensureSeeds } from "./source-seeds.server.ts";
 import { selectedScanSources } from "./section-types.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { getSql, withTransaction } from "@/lib/db";
+import { getSql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig } from "./paper-settings";
@@ -19,6 +19,8 @@ import {
   shouldCommitFetchHashes,
 } from "./schema";
 import { reportAndDraft } from "./report";
+import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
+import { evidenceNeedsReview, evidenceReviewToken, mayInheritLeadSources } from "./draft-evidence.ts";
 import { webSearch } from "./search-web";
 import { dropListingUrls, namedSubjects, preferPrimaryUrls } from "./extract";
 import {
@@ -295,7 +297,7 @@ export const fileLead = createServerFn({ method: "POST" })
         return { ok: false as const, error: "That source URL is not a public http(s) address." };
       }
     }
-    return insertLeadWithDraft(context, { headline, why, topic, urls });
+    return insertLeadWithDraft(context, { headline, why, topic, urls, notesJson: packNotes({ ...parseNotes(null), suppliedUrls: urls }) });
   });
 
 export const getLead = createServerFn({ method: "GET" })
@@ -315,14 +317,15 @@ export const getLead = createServerFn({ method: "GET" })
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
              provenance_json, form, found_note, unanswered, research_json
       from drafts where lead_id = ${id} and newsroom_id = ${owned(context)}
-      order by updated_at desc limit 1
+      order by updated_at desc, id desc limit 1
     `;
     const live = await sql<{ slug: string }>`
       select slug from articles
       where lead_id = ${id} and newsroom_id = ${owned(context)} and status = 'published'
       limit 1
     `;
-    const draft = drafts[0] ? unpackStoredDraft(drafts[0]) : null;
+    const evidenceToken = drafts[0] ? evidenceReviewToken(drafts[0]) : "";
+    const draft = drafts[0] ? unpackStoredDraft({ ...drafts[0] }) : null;
     if (draft?.body) draft.body = stripReporterNotebook(draft.body);
     let notes = parseNotes(lead.notes_json);
     if (!notes.todo.length && draft?.unanswered) {
@@ -366,6 +369,7 @@ export const getLead = createServerFn({ method: "GET" })
     return {
       lead,
       draft,
+      evidenceToken,
       articleSlug: live[0]?.slug ?? null,
       openedExtractionByUrl: extractionByUrl,
       job,
@@ -782,6 +786,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   job: DeskJob,
   deps: PerformDraftWorkDeps = {},
 ) {
+  const { withLeadDraftLock } = await import("./draft-order.server.ts");
   const runReport = deps.reportAndDraft ?? reportAndDraft;
   const probe = deps.probe ?? probeProvider;
   const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
@@ -812,14 +817,16 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   `;
 
   const prevNotes = parseNotes(lead.notes_json);
-  const moreUrls = prevNotes.opened.map((o) => o.url);
+  const researchScope = job.research_scope ?? prevNotes.researchScope ?? "public";
+  const sourceInput = draftSourceInputs(urls, prevNotes, researchScope);
   const draftInput = {
     userId: context.userId,
     lead,
-    urls: [...urls, ...moreUrls],
+    urls: sourceInput.urls,
     memory,
     extraEvidence: prevNotes.scratch,
-    extraUrls: moreUrls,
+    researchScope,
+    extraUrls: sourceInput.extraUrls,
     /*
       The paper's own time budgets (0.6.2). Read once, here, and carried in
       `draftInput` so the Automatic failover retry below is sized by the same
@@ -860,7 +867,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const watched = await sql<{ url: string }>`
     select url from sources where newsroom_id = ${owned(context)}
   `;
-  const cited = reported.source_urls.length ? reported.source_urls : urls;
+  const cited = reported.source_urls.length ? reported.source_urls : draftInput.urls;
   const sourceUrls = JSON.stringify(
     dropListingUrls(
       cited,
@@ -870,7 +877,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const notes = reported.integrity_notes;
   const provenanceJson = JSON.stringify(reported.provenance).slice(0, 8000);
   const unansweredJson = JSON.stringify(reported.unanswered).slice(0, 2000);
-  const researchJson = JSON.stringify(reported.research_memo ?? {}).slice(0, 8000);
+  const researchJson = JSON.stringify({ ...reported.research_memo, researchScope: draftInput.researchScope });
   const yours = keepHumanTodos(prevNotes);
   /*
     Claims of absence, as checkboxes the editor must tick before Publish.
@@ -929,9 +936,12 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     verify: reported.integrity_notes ? [reported.integrity_notes] : [],
     opened,
     scratch: prevNotes.scratch,
+    researchScope: draftInput.researchScope,
+    suppliedUrls: prevNotes.suppliedUrls,
   };
   const notesJson = packNotes(nextNotes);
 
+  await withLeadDraftLock({ newsroomId: owned(context) }, leadId, async (sql) => {
   await sql`
     insert into drafts (
       user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
@@ -948,12 +958,13 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     update leads set status = 'drafted', notes_json = ${notesJson}
     where id = ${leadId} and newsroom_id = ${owned(context)}
   `;
+  });
   await audit(context.userId, "draft", String(leadId), owned(context));
 });
 
 export const draftLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { leadId: number; modelChoice?: string }) => input)
+  .validator((input: number | { leadId: number; modelChoice?: string; researchScope?: "public" | "supplied" }) => input)
   .handler(async ({ context, data }) => {
     const leadId = typeof data === "number" ? data : data.leadId;
     const modelChoice = storyModelChoice(typeof data === "number" ? "auto" : data.modelChoice);
@@ -963,6 +974,7 @@ export const draftLead = createServerFn({ method: "POST" })
       context: { userId: context.userId, newsroomId: owned(context) },
       leadId,
       modelChoice,
+      researchScope: typeof data === "number" ? undefined : data.researchScope,
     });
   });
 
@@ -977,7 +989,7 @@ export const draftLead = createServerFn({ method: "POST" })
  */
 export const writeStoryFromInput = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { text: string; modelChoice?: string }) => input)
+  .validator((input: { text: string; modelChoice?: string; researchScope?: "public" | "supplied" }) => input)
   .handler(async ({ context, data }) => {
     const { writeStoryForAuthenticatedEditor } =
       await import("./model-request-commit.server.ts");
@@ -985,6 +997,7 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
       context: { userId: context.userId, newsroomId: owned(context) },
       text: data.text,
       modelChoice: data.modelChoice,
+      researchScope: data.researchScope,
     });
   });
 
@@ -996,6 +1009,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       add?: string;
       toggle?: number;
       scratch?: string;
+      researchScope?: "public" | "supplied";
       todos?: NoteTodo[];
     }) => input,
   )
@@ -1012,6 +1026,8 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       add: data.add,
       scratch: data.scratch,
     });
+    if (data.researchScope === "supplied" || data.researchScope === "public") notes.researchScope = data.researchScope;
+    if (typeof data.scratch === "string") notes.suppliedUrls = sanitizePublicUrls([...(notes.suppliedUrls ?? []), ...suppliedUrlsFromText(data.scratch)]).slice(0, 8);
     const json = packNotes(notes);
     await sql`
       update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
@@ -1197,31 +1213,10 @@ export const pullTodo = createServerFn({ method: "POST" })
 
 export const saveDraft = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator(
-    (input: { leadId: number; headline: string; dek: string; body: string; topic: string }) =>
-      input,
-  )
+  .validator((input: import("./draft-edit.server.ts").DraftEditInput) => input)
   .handler(async ({ context, data }) => {
-    const sql = await getSql();
-    const existing = await sql<{ id: number }>`
-      select id from drafts where lead_id = ${data.leadId} and newsroom_id = ${owned(context)}
-      order by updated_at desc limit 1
-    `;
-    const body = stripReporterNotebook(data.body);
-    if (existing[0]) {
-      await sql`
-        update drafts
-        set headline = ${data.headline}, dek = ${data.dek}, body = ${body},
-            topic = ${data.topic}, updated_at = now()
-        where id = ${existing[0].id} and newsroom_id = ${owned(context)}
-      `;
-    } else {
-      await sql`
-        insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic)
-        values (${context.userId}, ${owned(context)}, ${data.leadId}, ${data.headline}, ${data.dek}, ${body}, ${data.topic})
-      `;
-    }
-    return { ok: true as const };
+    const { saveDraftForEditor } = await import("./draft-edit.server.ts");
+    return saveDraftForEditor({ userId: context.userId, newsroomId: owned(context) }, data);
   });
 
 export const setLeadStatus = createServerFn({ method: "POST" })
@@ -1291,10 +1286,11 @@ export const dropFollowUp = createServerFn({ method: "POST" })
   .validator((input: { id: number }) => input)
   .handler(async ({ context, data }) => _performDropFollowUp(context, data.id));
 
-export async function performPublish(
+export const performPublish = createServerOnlyFn(async function performPublish(
   context: { userId: string; newsroomId?: number },
   leadId: number,
 ): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
+  const { withCurrentDraftForPublish } = await import("./draft-order.server.ts");
   const already = await getSql().then(
     (sql) =>
       sql<{ slug: string }>`
@@ -1354,14 +1350,15 @@ export async function performPublish(
     (sql) =>
       sql<DraftRow>`
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
-             provenance_json, form, found_note, unanswered
+             provenance_json, form, found_note, unanswered, research_json
       from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
-      order by updated_at desc limit 1
+      order by updated_at desc, id desc limit 1
     `,
   );
   const row = drafts[0];
   if (!row) return { ok: false as const, error: "Draft this lead before publishing." };
-  const draft = unpackStoredDraft(row);
+  if (evidenceNeedsReview(row, row.body)) return { ok: false as const, error: "The story changed after its evidence was gathered. Review the evidence in the workbench before publishing." };
+  const draft = unpackStoredDraft({ ...row });
   draft.body = stripReporterNotebook(draft.body);
 
   /*
@@ -1372,7 +1369,7 @@ export async function performPublish(
     are exactly the stories an operator has in flight right now. Publishing
     one of them would print an article with no sources and no warning.
   */
-  if (parseUrlList(draft.source_urls).length === 0) {
+  if (parseUrlList(draft.source_urls).length === 0 && mayInheritLeadSources(row)) {
     const fromLead = await getSql().then(
       (sql) =>
         sql<{ source_urls: string }>`
@@ -1392,7 +1389,7 @@ export async function performPublish(
   const baseSlug = slugify(draft.headline);
   let slug = baseSlug;
 
-  const published = await withTransaction(async (sql) => {
+  const published = await withCurrentDraftForPublish({ newsroomId: owned(context) }, leadId, row, async (sql) => {
     // `articles.slug` is UNIQUE. The old code checked once and, on a clash,
     // appended the lead id without re-checking — so a second collision (a
     // headline that slugifies to an existing "<base>-<leadId>", or a
@@ -1432,7 +1429,7 @@ export async function performPublish(
 
   await audit(context.userId, "publish", `Article ${published.id}`, owned(context), {kind:"articles",id:published.id});
   return { ok: true as const, slug: published.slug };
-}
+});
 
 export const publishLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])

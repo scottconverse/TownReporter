@@ -1,3 +1,4 @@
+import { subredditFromSources } from "./dark-place.ts";
 import { describeResearchWindow, validateResearchPreferences, type ResearchPreferences, type ResearchSnapshot } from './dark-preferences.ts';
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql } from "../db.ts";
@@ -43,7 +44,7 @@ import { titlesOverlap, topicFromText } from "./desk-copy.ts";
 import { officialDomains, pressDomains as pressDomainsOf } from "./absence-gate.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
-import { TIP_SUBREDDIT, TIP_SUBREDDIT_QUERY_GROUPS } from "../paper.ts";
+import { TIP_SUBREDDIT_QUERY_GROUPS } from "../paper.ts";
 import {
   BRIEF_SYSTEM,
   briefIsUseful,
@@ -53,7 +54,7 @@ import {
 } from "./dark-brief.ts";
 import {
   PRESETS,
-  SCOPE_LABEL,
+  scopeLabelsFor,
   budgetFor,
   clampDials,
   describeDials,
@@ -928,7 +929,8 @@ async function synthesizeSignals(
     default — while `providerBudget()` allows 150 for this provider. Run 1 of
     the dark desk failed with "Claude Code request timed out" for exactly this.
   */
-  const ai = await grokChat(darkSystemFor(dials), pack.slice(0, 28000), 3200, {
+  const { place } = await readDarkPlace(newsroomId);
+  const ai = await grokChat(darkSystemFor(dials, place), pack.slice(0, 28000), 3200, {
     timeoutMs: providerBudget(choice, overrides).callMs,
     choice,
     localModel: overrides?.["local-model"]?.localModel,
@@ -1033,7 +1035,7 @@ export async function readDarkPlace(newsroomId: number): Promise<{
   press: string[];
 }> {
   const sql = await getSql();
-  const cfg = await getPaperConfig(newsroomId).catch(() => null);
+  const cfg = await getPaperConfig(newsroomId);
   const county = await sql<{ county: string | null }>`
     select county from dark_settings where newsroom_id = ${newsroomId} limit 1
   `.catch(() => [] as { county: string | null }[]);
@@ -1978,6 +1980,15 @@ export const reopenParkedInvestigation = createServerFn({ method: "POST" })
  * is new. Rate-limited harder than the rest of the desk because the budget it
  * spends is Reddit's, shared with everything else on this machine.
  */
+export async function readTipSubreddit(newsroomId: number): Promise<string | null> {
+  const sql = await getSql();
+  const rows = await sql<{url:string}>`select url from sources where newsroom_id=${newsroomId} and status='accepted'`;
+  return subredditFromSources(rows.map(row=>row.url));
+}
+export const getTipSubreddit = createServerFn({method:"GET"})
+  .middleware([deskMiddleware])
+  .handler(async ({context}) => ({subreddit:await readTipSubreddit(owned(context))}));
+
 export const scanTipSubreddit = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
@@ -1992,7 +2003,8 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       classifyRedditPosts,
       selectRotatingQueryGroups,
     } = await import("./reddit.ts");
-    const sub = TIP_SUBREDDIT;
+    const sub = await readTipSubreddit(owned(context));
+    if (!sub) throw new Error("Reddit check unavailable: add one unambiguous subreddit URL to Sources. No subreddit was guessed from the town name.");
 
     // Rotate by hour so successive checks sweep different ground instead of
     // asking the same three questions of the subreddit every time.
@@ -2100,7 +2112,7 @@ export async function fileRedditTipFor(
   const { redditAnomaly } = await import("./reddit.ts");
   const a = redditAnomaly(
     { title: data.title, url: data.url, updated: "", author: "", excerpt: data.excerpt ?? "" },
-    TIP_SUBREDDIT,
+    subredditFromSources([data.url]) ?? "reddit",
   );
   await sql`
     insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
@@ -2131,15 +2143,17 @@ export const getDarkDials = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await ensureDarkSchema();
     const {dials,preferences} = await readDarkSettingsFor(owned(context));
+    const {place} = await readDarkPlace(owned(context));
     return {
       dials,
       preferences,
       budget: budgetFor(dials),
       stance: stanceFor(dials),
-      description: describeDials(dials),
+      place,
+      description: describeDials(dials, place),
       minutes: estimateMinutes(dials),
       presets: PRESETS,
-      scopeLabel: SCOPE_LABEL,
+      scopeLabel: scopeLabelsFor(place),
     };
   });
 
@@ -2170,7 +2184,7 @@ export const saveDarkDials = createServerFn({ method: "POST" })
       ok: true as const,
       dials: saved.dials,
       preferences: saved.preferences,
-      description: describeDials(saved.dials),
+      description: describeDials(saved.dials, (await readDarkPlace(owned(context))).place),
       minutes: estimateMinutes(d),
     };
   });

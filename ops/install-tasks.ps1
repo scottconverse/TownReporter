@@ -33,6 +33,8 @@
 param()
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib-ownership.ps1")
+Assert-TownReporterLegacyOwnership
 
 $ops  = $PSScriptRoot
 $app  = Split-Path -Parent $ops
@@ -99,7 +101,7 @@ foreach ($t in $tasks) {
   $ex = Get-ScheduledTask -TaskName $t.Name -ErrorAction SilentlyContinue
   if (-not $ex) { continue }
   $existingArgs = ($ex.Actions | ForEach-Object { $_.Arguments }) -join " "
-  if ($existingArgs -and $existingArgs -notlike "*$ops*") {
+  if (@($ex.Actions).Count -ne 1 -or $existingArgs -cne $t.Action.Arguments -or $ex.Actions[0].Execute -ine $t.Action.Execute) {
     $conflict += "  $($t.Name)`n    now: $existingArgs"
   }
 }

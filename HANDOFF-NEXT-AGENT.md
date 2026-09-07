@@ -53,6 +53,14 @@ Update current README/manual/editor/setup/landing/version/changelog together whe
 
 ## Next work and external dependency
 
+### Active owner request: Windows installation, 2026-09-07
+
+Fix the findings from the travel-machine runtime exercise and deliver a Windows-first installation package that a new user can run in under an hour. Mac/Linux source setup remains supported; native installers for those platforms are outside this release. Track acceptance in TODO.md. The active work covers instance-owned maintenance, private persistent PostgreSQL and prerequisites, build identity/readiness, supplied-material drafting and evidence review, and the manual-watch slash-redirect false alarm. Do not revive the historical implementation queue below as unfinished work.
+
+The 0.6.27 Windows-installation change addresses this request. Local runtime checks have exercised a real Claude supplied-material draft, body/evidence review and publication, manual page captures, owner sign-in, and installation-owned restart. Newcomer testing also found and corrected fixed Longmont instructions, an unchanged/changed card collision and misleading maintenance copy. Resolve the matching release for final exact-source CI, package checksum and timed Windows evidence; these local checks alone do not certify a fresh-machine installation time. Fresh Windows CI exercises installation and a manual editorial workflow with AI disabled. Separate local packaged testing verified a real Claude supplied-material draft in 51 seconds using an already available provider. These are distinct checks; they do not establish fresh-machine AI setup or real source-scan coverage.
+
+The owner authorized a persistent, isolated PostgreSQL testing newsroom on this machine. Ordinary tests and builds still use empty DATABASE_URL. The already-running local copy is separate from the implementation worktree; never build over a served .output. Fresh-package Windows CI and a timed local exercise must record their environment and provider assumptions. A warm development-machine pass is not proof of an arbitrary new user's installation time.
+
 The 0.6.24 corrective implementation closes reproduced failed-search verification,
 missing evidence context, false saved-result counts, investigative newsroom leaks,
 and PDF/OCR provenance defects. It also adds bounded HTTP responses and usable

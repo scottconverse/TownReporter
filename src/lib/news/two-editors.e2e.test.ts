@@ -54,19 +54,17 @@ const PASSWORD = "two-editors-race-pass-1";
 
 const dbProbe = integrationRequested()
   ? await probePostgres(PSQL_ADMIN_URL)
-  : ({
+  : {
       ok: false as const,
       reason:
         "set TEST_POSTGRES_ADMIN_URL to run the integration tests (they build the app and boot a server; the postgres-integration CI job runs them on every push)",
-    });
+    };
 const skip = dbProbe.ok ? false : dbProbe.reason;
 
 async function signUpAndEnter(page: Page, name: string, email: string) {
   await page.goto(`${BASE_URL}/login`, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: /Create the desk|Editor sign-in/ }).waitFor();
-  const heading = await page
-    .getByRole("heading", { name: /Create the desk/ })
-    .count();
+  const heading = await page.getByRole("heading", { name: /Create the desk/ }).count();
   if (heading > 0) {
     await page.getByLabel("Name").fill(name);
     await page.getByLabel("Email").fill(email);
@@ -170,136 +168,177 @@ if (dbProbe.ok) {
 }
 
 describe("two editors on one story", () => {
-  it("save-after-delete loses with a message, not a crash or a silent success", { skip, timeout: 180_000 }, async () => {
-    if (!ownerPage || !editorPage || !db) throw new Error("no session");
-    const storyUrl = await fileLead(ownerPage, "Race story one: delete under an open editor");
-    const leadId = Number(storyUrl.match(/story\/(\d+)/)![1]);
+  it(
+    "save-after-delete loses with a message, not a crash or a silent success",
+    { skip, timeout: 180_000 },
+    async () => {
+      if (!ownerPage || !editorPage || !db) throw new Error("no session");
+      const storyUrl = await fileLead(ownerPage, "Race story one: delete under an open editor");
+      const leadId = Number(storyUrl.match(/story\/(\d+)/)![1]);
 
-    // Owner has the workbench open and types a body.
-    await ownerPage.getByLabel("Body").fill("The body the owner is still writing.");
+      // Owner has the workbench open and types a body.
+      await ownerPage.getByLabel("Body").fill("The body the owner is still writing.");
 
-    // The editor deletes the lead out from under them, from THEIR queue --
-    // the exact two-click pattern desk-flows-e2e already proves.
-    await editorPage.goto(`${BASE_URL}/desk/queue`, { waitUntil: "domcontentloaded" });
-    const row = editorPage.locator(".lead-row", { hasText: "Race story one" }).first();
-    await row.getByRole("button", { name: "Delete", exact: true }).click();
-    await row.getByRole("button", { name: /Yes, delete/ }).click();
-    await editorPage.getByText(/Deleted, and kept for 30 days/).waitFor({ timeout: 20_000 });
+      // The editor deletes the lead out from under them, from THEIR queue --
+      // the exact two-click pattern desk-flows-e2e already proves.
+      await editorPage.goto(`${BASE_URL}/desk/queue`, { waitUntil: "domcontentloaded" });
+      const row = editorPage.locator(".lead-row", { hasText: "Race story one" }).first();
+      await row.getByRole("button", { name: "Delete", exact: true }).click();
+      await row.getByRole("button", { name: /Yes, delete/ }).click();
+      await editorPage.getByText(/Deleted, and kept for 30 days/).waitFor({ timeout: 20_000 });
 
-    // Owner saves into the void.
-    const errors: string[] = [];
-    ownerPage.on("pageerror", (e) => errors.push(String(e)));
-    await ownerPage.getByRole("button", { name: "Save edits" }).click();
-    await ownerPage.waitForTimeout(2000);
+      // Owner saves into the void.
+      const errors: string[] = [];
+      ownerPage.on("pageerror", (e) => errors.push(String(e)));
+      await ownerPage.getByRole("button", { name: "Save edits" }).click();
+      await ownerPage.waitForTimeout(2000);
 
-    const bodyText = (await ownerPage.textContent("body")) ?? "";
-    assert.ok(
-      !/Saved\.\s*$/m.test(bodyText) || /not|gone|deleted|no longer/i.test(bodyText),
-      "a save against a deleted lead must not report plain success",
-    );
-    assert.equal(errors.length, 0, `the page must not crash: ${errors.join(" | ")}`);
+      const bodyText = (await ownerPage.textContent("body")) ?? "";
+      assert.ok(
+        !/Saved\.\s*$/m.test(bodyText) || /not|gone|deleted|no longer/i.test(bodyText),
+        "a save against a deleted lead must not report plain success",
+      );
+      assert.equal(errors.length, 0, `the page must not crash: ${errors.join(" | ")}`);
 
-    // Database: the lead is out of the live table; no article was created.
-    const live = await db.query(`select count(*)::int as c from leads where id = $1`, [leadId]);
-    const arts = await db.query(
-      `select count(*)::int as c from articles where headline like 'Race story one%'`,
-    );
-    assert.equal(live.rows[0].c, 0, "the deleted lead must stay deleted");
-    assert.equal(arts.rows[0].c, 0, "no article may appear for a story that never published");
-  });
+      // Database: the lead is out of the live table; no article was created.
+      const live = await db.query(`select count(*)::int as c from leads where id = $1`, [leadId]);
+      const arts = await db.query(
+        `select count(*)::int as c from articles where headline like 'Race story one%'`,
+      );
+      assert.equal(live.rows[0].c, 0, "the deleted lead must stay deleted");
+      assert.equal(arts.rows[0].c, 0, "no article may appear for a story that never published");
+    },
+  );
 
-  it("double-save is last-write-wins with one whole body, never an interleaving", { skip, timeout: 180_000 }, async () => {
-    if (!ownerPage || !editorPage || !db) throw new Error("no session");
-    const storyUrl = await fileLead(ownerPage, "Race story two: both hands on the keyboard");
-    const leadId = Number(storyUrl.match(/story\/(\d+)/)![1]);
+  it(
+    "double-save is last-write-wins with one whole body, never an interleaving",
+    { skip, timeout: 180_000 },
+    async () => {
+      if (!ownerPage || !editorPage || !db) throw new Error("no session");
+      const storyUrl = await fileLead(ownerPage, "Race story two: both hands on the keyboard");
+      const leadId = Number(storyUrl.match(/story\/(\d+)/)![1]);
 
-    await editorPage.goto(storyUrl, { waitUntil: "domcontentloaded" });
-    await editorPage.getByLabel("Body").waitFor();
+      await editorPage.goto(storyUrl, { waitUntil: "domcontentloaded" });
+      await editorPage.getByLabel("Body").waitFor();
 
-    const BODY_A = "Body A: the owner's complete paragraph, written first.";
-    const BODY_B = "Body B: the editor's complete paragraph, written second.";
-    await ownerPage.getByLabel("Body").fill(BODY_A);
-    await editorPage.getByLabel("Body").fill(BODY_B);
+      const BODY_A = "Body A: the owner's complete paragraph, written first.";
+      const BODY_B = "Body B: the editor's complete paragraph, written second.";
+      await ownerPage.getByLabel("Body").fill(BODY_A);
+      await editorPage.getByLabel("Body").fill(BODY_B);
 
-    // Fire both saves as close together as two real clicks get.
-    await Promise.all([
-      ownerPage.getByRole("button", { name: "Save edits" }).click(),
-      editorPage.getByRole("button", { name: "Save edits" }).click(),
-    ]);
-    await ownerPage.waitForTimeout(2500);
+      // Fire both saves as close together as two real clicks get.
+      await Promise.all([
+        ownerPage.getByRole("button", { name: "Save edits" }).click(),
+        editorPage.getByRole("button", { name: "Save edits" }).click(),
+      ]);
+      await ownerPage.waitForTimeout(2500);
 
-    const rows = await db.query(
-      `select body from drafts where lead_id = $1 order by updated_at desc limit 1`,
-      [leadId],
-    );
-    const body = rows.rows[0]?.body ?? "";
-    assert.ok(
-      body === BODY_A || body === BODY_B,
-      `the surviving body must be one editor's whole text, got: ${body.slice(0, 80)}`,
-    );
-  });
+      const rows = await db.query(
+        `select body from drafts where lead_id = $1 order by updated_at desc limit 1`,
+        [leadId],
+      );
+      const body = rows.rows[0]?.body ?? "";
+      assert.ok(
+        body === BODY_A || body === BODY_B,
+        `the surviving body must be one editor's whole text, got: ${body.slice(0, 80)}`,
+      );
+    },
+  );
 
-  it("double-publish yields exactly one article on the paper", { skip, timeout: 180_000 }, async () => {
-    if (!ownerPage || !editorPage || !db) throw new Error("no session");
-    const storyUrl = await fileLead(ownerPage, "Race story three: published twice at once");
+  it(
+    "double-publish yields exactly one article on the paper",
+    { skip, timeout: 180_000 },
+    async () => {
+      if (!ownerPage || !editorPage || !db) throw new Error("no session");
+      const storyUrl = await fileLead(ownerPage, "Race story three: published twice at once");
 
-    await ownerPage.getByLabel("Body").fill("A body long enough to publish, written for the race.");
-    await ownerPage.getByRole("button", { name: "Save edits" }).click();
-    await ownerPage.waitForTimeout(1200);
+      await ownerPage
+        .getByLabel("Body")
+        .fill("A body long enough to publish, written for the race.");
+      await ownerPage.getByRole("button", { name: "Save edits" }).click();
+      await ownerPage.waitForTimeout(1200);
 
-    await editorPage.goto(storyUrl, { waitUntil: "domcontentloaded" });
-    await editorPage.getByLabel("Body").waitFor();
+      await editorPage.goto(storyUrl, { waitUntil: "domcontentloaded" });
+      await editorPage.getByLabel("Body").waitFor();
 
-    /*
+      /*
       Publish is deliberately two-step (arm, then confirm) -- one unconfirmed
       click must never print. So each editor arms first, and then the two
       CONFIRMS race. The first run of this test clicked once per editor: both
       armed, neither printed, and the assertion read 0 articles -- which was
       the product being right and the test being wrong.
     */
-    await ownerPage.getByRole("button", { name: "Publish to the paper" }).click();
-    await editorPage.getByRole("button", { name: "Publish to the paper" }).click();
-    await ownerPage.waitForTimeout(400);
-    await Promise.all([
-      ownerPage.getByRole("button", { name: "Yes, print it" }).click(),
-      editorPage.getByRole("button", { name: "Yes, print it" }).click(),
-    ]);
-    await ownerPage.waitForTimeout(3000);
+      await ownerPage.getByRole("button", { name: "Publish to the paper" }).click();
+      await editorPage.getByRole("button", { name: "Publish to the paper" }).click();
+      await ownerPage.waitForTimeout(400);
+      await Promise.all([
+        ownerPage.getByRole("button", { name: "Yes, print it" }).click(),
+        editorPage.getByRole("button", { name: "Yes, print it" }).click(),
+      ]);
+      await ownerPage.waitForTimeout(3000);
 
-    const arts = await db.query(
-      `select count(*)::int as c from articles where headline like 'Race story three%'`,
-    );
-    assert.equal(arts.rows[0].c, 1, "two simultaneous publishes must print exactly one article");
-  });
+      const arts = await db.query(
+        `select count(*)::int as c from articles where headline like 'Race story three%'`,
+      );
+      assert.equal(arts.rows[0].c, 1, "two simultaneous publishes must print exactly one article");
+    },
+  );
 
-  it("an invited editor's own session is refused by the ops server fns, not just hidden from them (ENG-01)", { skip, timeout: 60_000 }, async () => {
-    if (!editorPage) throw new Error("no session");
+  it(
+    "an invited editor's own session is refused by the ops server fns, not just hidden from them (ENG-01)",
+    { skip, timeout: 60_000 },
+    async () => {
+      if (!editorPage || !ownerPage) throw new Error("no session");
 
-    /*
+      /*
       Before the ENG-01 fix, `getOpsHealth` and `runOpsAction` carried only
       `deskMiddleware` (signed-in + newsroom member), and the owner check lived
       solely in this page's React (`isOwner` hiding the panel). This proves the
       refusal now happens on the SERVER, for a real editor session with a real
       cookie -- not merely that the UI declines to render the button.
     */
-    await editorPage.goto(`${BASE_URL}/desk/ops`, { waitUntil: "domcontentloaded" });
+      await editorPage.goto(`${BASE_URL}/desk/ops`, { waitUntil: "domcontentloaded" });
 
-    // getOpsHealth: the Health section's own query has no role gate in the
-    // React tree (it fires for every desk member), so an editor session must
-    // see the query itself fail, not silently render an owner's data.
-    await editorPage
-      .getByText(/Could not read the server\..*Only the owner/i)
-      .waitFor({ timeout: 20_000 });
+      // getOpsHealth: the Health section's own query has no role gate in the
+      // React tree (it fires for every desk member), so an editor session must
+      // see the query itself fail, not silently render an owner's data.
+      await editorPage
+        .getByText(/Could not read the server\..*Only the owner/i)
+        .waitFor({ timeout: 20_000 });
 
-    // runOpsAction: click a non-interrupting action's Run button. If the
-    // server-side guard were missing, this would actually rotate the log
-    // files on the operator's machine; because `assertOwner` is the first
-    // line of the handler, it refuses before the allowlist -- let alone the
-    // action -- is ever reached.
-    const row = editorPage.locator("li", { hasText: "Rotate the logs" });
-    await row.getByRole("button", { name: "Run" }).click();
-    await editorPage
-      .getByText(/Only the owner/i)
-      .waitFor({ timeout: 20_000 });
-  });
+      // Controls are now correctly disabled when health/ownership is unavailable.
+      // Obtain a real owner-generated RPC for an available action, then replay it
+      // with the editor's own cookie jar. Migrations target only this disposable DB.
+      await ownerPage.goto(`${BASE_URL}/desk/ops`, { waitUntil: "domcontentloaded" });
+      const row = ownerPage.locator("li", { hasText: "Apply database migrations" });
+      const pending = ownerPage.waitForRequest(
+        (request) =>
+          request.method() === "POST" && Boolean(request.postData()?.includes("migrate")),
+      );
+      await row.getByRole("button", { name: "Run", exact: true }).click();
+      const ownerRequest = await pending;
+      const headers = Object.fromEntries(
+        Object.entries(ownerRequest.headers()).filter(
+          ([name]) => name === "content-type" || name.startsWith("x-tsr"),
+        ),
+      );
+      const refusal = await editorPage.evaluate(
+        async ({ url, body, headers }) => {
+          const response = await fetch(url, {
+            method: "POST",
+            body,
+            headers,
+            credentials: "same-origin",
+          });
+          return response.text();
+        },
+        { url: ownerRequest.url(), body: ownerRequest.postData(), headers },
+      );
+      assert.match(
+        refusal,
+        /Only the owner/i,
+        "the actual RPC must reject the invited editor's session",
+      );
+    },
+  );
 });
