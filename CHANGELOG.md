@@ -4,6 +4,8 @@ Current release: **0.6.28**.
 
 ## Unreleased
 
+- Multi-source drafting preserves complete structured provenance, findings and unanswered questions through saving and publication. Raw character truncation no longer corrupts their JSON. Previously damaged records are not guessed or rewritten.
+
 - Background drafting refuses final saves after its job claim or editor permission is lost. Draft, lead status/notes, audit and job completion now commit together; audit failure rolls the whole save back. A waiting recovery worker cannot reclaim an already committed draft job.
 
 - Owners can configure a disabled-by-default daily scan of up to 12 accepted sources, using one selected local model or existing Claude/Codex subscription. Daily reservations and result writes are fenced against duplicate work, stale settings and lost permission; Server shows pause/resume and links to scan history and the review queue. This files leads only and does not draft or publish.
