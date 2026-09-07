@@ -298,6 +298,8 @@ Choose an editor judgment of **Supports**, **Does not support**, **Contradicts**
 
 **View cited captured version** opens the stored text privately inside the workbench. **Review newer capture** opens the newer stored version for comparison; it does not automatically change your judgment. A failed reload keeps your unsaved judgment and reason. A successful explicit reload discards those unsaved edits.
 
+After **Save edits**, the review refreshes for the saved draft without reloading the page. Judgment controls remain unavailable while a replacement draft is queued or running, or while a draft-wide evidence decision is saving. When the replacement job completes, the workbench loads its draft and review together.
+
 If an older record contains incomplete or unreadable structured findings, the panel says so and offers no judgment controls. Review the original material or generate a replacement draft; retrying does not repair the saved record.
 
 ### Reporting notes (do not print)

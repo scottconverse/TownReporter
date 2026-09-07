@@ -64,10 +64,12 @@ function draftsFrom(review: FindingEvidenceReview): Record<string, JudgmentDraft
 
 export function FindingEvidenceReviewPanel({
   leadId,
+  reviewRevision,
   currentDraft,
   disabled = false,
 }: {
   leadId: number;
+  reviewRevision: string;
   currentDraft: CurrentDraft;
   disabled?: boolean;
 }) {
@@ -84,11 +86,12 @@ export function FindingEvidenceReviewPanel({
   const discardOnReload = useRef(false);
   const appliedToken = useRef("");
   const reviewQuery = useQuery({
-    queryKey: ["finding-evidence-review", leadId],
+    queryKey: ["finding-evidence-review", leadId, reviewRevision],
     queryFn: () => getFindingEvidenceReview({ data: { leadId } }),
     retry: false,
   });
   const review = reviewQuery.data?.ok ? reviewQuery.data.review : null;
+  const reviewApplied = Boolean(review && appliedToken.current === review.evidenceToken);
   const localDraftChanged = review ? !sameDraft(currentDraft, review) : false;
 
   useEffect(() => {
@@ -205,7 +208,7 @@ export function FindingEvidenceReviewPanel({
           return JSON.stringify(before) === JSON.stringify(after);
         }),
       );
-      qc.setQueryData(["finding-evidence-review", leadId], result);
+      qc.setQueryData(["finding-evidence-review", leadId, reviewRevision], result);
       appliedToken.current = result.review.evidenceToken;
       if (peerKeys.length > 0 && peersUnchanged) {
         setDrafts((current) => {
@@ -258,7 +261,7 @@ export function FindingEvidenceReviewPanel({
 
   return (
     <section
-      id="evidence-review"
+      id="finding-evidence-review"
       className="mt-8 border-t border-rule pt-5"
       aria-labelledby="finding-evidence-review-heading"
     >
@@ -383,7 +386,8 @@ export function FindingEvidenceReviewPanel({
             captures.findIndex((candidate) => candidate.versionId === capture.versionId) ===
               captureIndex,
         );
-        const maySave = !disabled && !localDraftChanged && !reloadRequired && !save.isPending;
+        const maySave =
+          reviewApplied && !disabled && !localDraftChanged && !reloadRequired && !save.isPending;
         return (
           <article key={row.key} className="mt-5 border border-rule bg-paper p-4 sm:p-5">
             <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
@@ -476,7 +480,7 @@ export function FindingEvidenceReviewPanel({
                 id={`finding-judgment-${index}`}
                 className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
                 value={judgment.value}
-                disabled={disabled || save.isPending}
+                disabled={disabled || save.isPending || !reviewApplied}
                 onChange={(event) =>
                   updateDraft(row.key, {
                     value: event.target.value as FindingJudgment,
@@ -503,7 +507,7 @@ export function FindingEvidenceReviewPanel({
                 className="mt-1 min-h-24 w-full border border-rule bg-paper p-3 text-sm"
                 value={judgment.reason}
                 maxLength={2000}
-                disabled={disabled || save.isPending}
+                disabled={disabled || save.isPending || !reviewApplied}
                 onChange={(event) => updateDraft(row.key, { reason: event.target.value })}
               />
               {judgment.value === "contradicts" ? (
@@ -518,7 +522,7 @@ export function FindingEvidenceReviewPanel({
                     id={`finding-contrary-${index}`}
                     className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
                     value={judgment.contraryVersionId ?? ""}
-                    disabled={disabled || save.isPending}
+                    disabled={disabled || save.isPending || !reviewApplied}
                     onChange={(event) =>
                       updateDraft(row.key, {
                         contraryVersionId: event.target.value ? Number(event.target.value) : null,

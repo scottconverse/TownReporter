@@ -69,13 +69,24 @@ try {
     "The water board posted the Kimbark packet on Tuesday. A hearing follows on the 14th.",
   );
   await page.getByRole("button", { name: /^Save/ }).first().click();
-  await page.getByText(/Saved/i).first().waitFor({ timeout: 20_000 });
+  await page.getByText("Saved.", { exact: true }).waitFor({ timeout: 20_000 });
   step("wrote and saved the story by hand");
 
   const publishButton = page.getByRole("button", { name: "Publish to the paper" }).first();
   if (!(await publishButton.isDisabled())) throw new Error("Changed body did not require evidence review");
   const confirmEvidence = page.getByRole("button", { name: "I checked: keep this evidence" });
   await confirmEvidence.waitFor({ state: "visible" });
+  const originalViewport = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("link", { name: "Review claims and sources" }).click();
+  const reportingNotesTarget = page.locator("#evidence-review");
+  if (
+    (await reportingNotesTarget.count()) !== 1 ||
+    new URL(page.url()).hash !== "#evidence-review" ||
+    !(await reportingNotesTarget.isVisible()) ||
+    !(await reportingNotesTarget.evaluate((node) => node.closest("details")?.open === true))
+  ) throw new Error("the evidence-review link did not target the original reporting notes");
+  if (originalViewport) await page.setViewportSize(originalViewport);
   await confirmEvidence.click();
   await page.waitForFunction(() => [...document.querySelectorAll("button")].some(button => button.textContent?.trim() === "Publish to the paper" && !button.disabled));
   step("confirmed retained evidence after body edit; publication was blocked until review");

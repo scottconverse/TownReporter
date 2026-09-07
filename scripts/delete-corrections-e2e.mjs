@@ -457,7 +457,7 @@ async function main() {
     userId: owner.rows[0].user_id,
   });
   await page.goto(`${base}/desk/story/${findingFixture.leadId}`, { waitUntil: "networkidle" });
-  const review = page.locator("section#evidence-review");
+  const review = page.locator("#finding-evidence-review");
   await review
     .getByText("TEST FIXTURE: The library board approved the recreation room update")
     .waitFor();
@@ -486,6 +486,79 @@ async function main() {
   const panels = review.locator("article");
   const firstFinding = panels.nth(0);
   const secondFinding = panels.nth(1);
+  const savedRevisionBody = `TEST FIXTURE body: saved revision before judgments ${stamp}.`;
+  await page.getByLabel("Body").fill(savedRevisionBody);
+  if (!(await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled()))
+    throw new Error("unsaved draft revision did not disable finding judgments");
+  await page.getByRole("button", { name: "Save edits" }).click();
+  await page.getByText("Saved.", { exact: true }).waitFor();
+  await review
+    .getByText("Save the current headline, dek, body, and section before recording a judgment.")
+    .waitFor({ state: "detached" });
+  if (await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled())
+    throw new Error("saved draft revision left finding judgments disabled");
+  step("saving a draft revision refreshes the finding review without a page reload");
+  let releaseEvidenceDecision;
+  const evidenceDecisionReleased = new Promise((resolve) => {
+    releaseEvidenceDecision = resolve;
+  });
+  let markEvidenceDecisionHeld;
+  const evidenceDecisionHeld = new Promise((resolve) => {
+    markEvidenceDecisionHeld = resolve;
+  });
+  const holdEvidenceDecision = async (route) => {
+    if (
+      route.request().method() === "POST" &&
+      route.request().headers()["x-tsr-serverfn"] === "true"
+    ) {
+      markEvidenceDecisionHeld();
+      await evidenceDecisionReleased;
+      await route.continue();
+      return;
+    }
+    await route.continue();
+  };
+  await page.route("**/*", holdEvidenceDecision);
+  const evidenceDecisionResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.request().headers()["x-tsr-serverfn"] === "true",
+  );
+  const keepEvidence = page.getByRole("button", { name: "I checked: keep this evidence" });
+  await keepEvidence.click({ noWaitAfter: true });
+  await evidenceDecisionHeld;
+  if (!(await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled()))
+    throw new Error("pending keep/remove evidence decision left finding judgments enabled");
+  const refreshedReviewAfterDecision = page.waitForResponse(
+    async (response) => {
+      if (
+        response.request().method() !== "GET" ||
+        response.request().headers()["x-tsr-serverfn"] !== "true" ||
+        !response.ok()
+      ) return false;
+      const body = await response.text().catch(() => "");
+      return (
+        body.includes("canonicalDraft") &&
+        body.includes("evidenceToken") &&
+        body.includes(`TEST FIXTURE — Library recreation center update ${stamp}`)
+      );
+    },
+  );
+  releaseEvidenceDecision();
+  await evidenceDecisionResponse;
+  await page.unroute("**/*", holdEvidenceDecision);
+  await keepEvidence.waitFor({ state: "detached" });
+  await refreshedReviewAfterDecision;
+  await page.waitForFunction(() => {
+    const button = [...document.querySelectorAll("#finding-evidence-review article button")]
+      .find((candidate) => candidate.textContent?.trim() === "Save judgment");
+    return button instanceof HTMLButtonElement && !button.disabled;
+  });
+  await page.waitForFunction(() => {
+    const input = document.querySelector("#finding-evidence-review article select");
+    return input instanceof HTMLSelectElement && !input.disabled;
+  });
+  step("a pending evidence keep/remove decision disables finding judgments until refresh");
   await firstFinding.getByLabel("Judgment").selectOption("supports");
   await secondFinding.getByLabel("Judgment").selectOption("needs-reporting");
   await secondFinding
@@ -493,12 +566,14 @@ async function main() {
     .fill("TEST FIXTURE: seek the library's written statement.");
   await firstFinding.getByRole("button", { name: "Save judgment" }).click();
   await review.getByText("Unsaved edits to another finding were retained.").waitFor();
+  step("finding A saves while retaining finding B's unsaved judgment");
   if ((await secondFinding.getByLabel("Judgment").inputValue()) !== "needs-reporting")
     throw new Error("saving finding A discarded typed finding B");
   await secondFinding.getByRole("button", { name: "Save judgment" }).click();
   await review.getByText("Evidence judgment saved.").waitFor();
+  step("finding B saves after finding A without a stale-token conflict");
   await page.reload({ waitUntil: "networkidle" });
-  const reloadedReview = page.locator("section#evidence-review");
+  const reloadedReview = page.locator("#finding-evidence-review");
   if (
     (await reloadedReview.locator("article").nth(0).getByLabel("Judgment").inputValue()) !==
       "supports" ||
@@ -526,7 +601,8 @@ async function main() {
     throw new Error("unsaved draft did not disable judgment save");
   await page
     .getByLabel("Body")
-    .fill(`TEST FIXTURE body: the library board considered a recreation center update ${stamp}.`);
+    .fill(savedRevisionBody);
+  step("restored the exact saved draft before stale-review conflict checks");
   const secondTab = await context.newPage();
   const initialReviewResponse = secondTab.waitForResponse(
     async (response) => {
@@ -542,7 +618,7 @@ async function main() {
   );
   await secondTab.goto(`${base}/desk/story/${findingFixture.leadId}`, { waitUntil: "networkidle" });
   const reviewRpcPath = new URL((await initialReviewResponse).url()).pathname;
-  const secondReview = secondTab.locator("section#evidence-review");
+  const secondReview = secondTab.locator("#finding-evidence-review");
   await secondReview
     .locator("article")
     .nth(0)
@@ -631,7 +707,7 @@ async function main() {
   await laterReviewRefetch;
   await secondTab.waitForFunction(
     (expectedReason) => {
-      const firstFinding = document.querySelector("section#evidence-review article");
+      const firstFinding = document.querySelector("#finding-evidence-review article");
       const reason = firstFinding?.querySelector("textarea");
       return reason instanceof HTMLTextAreaElement && reason.value === expectedReason;
     },
@@ -652,7 +728,7 @@ async function main() {
   await page.goto(`${base}/desk/story/${findingFixture.malformedLeadId}`, {
     waitUntil: "networkidle",
   });
-  const malformedReview = page.locator("section#evidence-review");
+  const malformedReview = page.locator("#finding-evidence-review");
   await malformedReview
     .getByText(
       "Stored findings are incomplete or unreadable. Review the original material or generate a replacement before recording judgments.",
@@ -667,7 +743,7 @@ async function main() {
   mkdirSync(evidenceArtifactDir, { recursive: true });
   const originalViewport = page.viewportSize();
   await page
-    .locator("section#evidence-review")
+    .locator("#finding-evidence-review")
     .screenshot({ path: join(evidenceArtifactDir, "finding-evidence-review-desktop.png") });
   await page.getByRole("button", { name: "Dark", exact: true }).click();
   await page.getByRole("button", { name: "Large", exact: true }).click();
@@ -675,13 +751,45 @@ async function main() {
   if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)))
     throw new Error("finding evidence review overflows at 390px dark large text");
   await page
-    .locator("section#evidence-review")
+    .locator("#finding-evidence-review")
     .screenshot({
       path: join(evidenceArtifactDir, "finding-evidence-review-mobile-dark-large.png"),
     });
   await page.getByRole("button", { name: "Light", exact: true }).click();
   await page.getByRole("button", { name: "Text: Normal", exact: true }).click();
   if (originalViewport) await page.setViewportSize(originalViewport);
+  const queuedDraftJob = await pool.query(
+    `insert into desk_jobs(newsroom_id,user_id,kind,subject_id,status,stage,claim_token,started_at,updated_at)
+     values($1,$2,'draft',$3,'running','drafting',$4,now(),now()) returning id`,
+    [newsroomId, owner.rows[0].user_id, findingFixture.leadId, `fixture-running-${stamp}`],
+  );
+  await page.reload({ waitUntil: "networkidle" });
+  const queuedReview = page.locator("#finding-evidence-review");
+  await page.getByRole("button", { name: "Drafting…", exact: true }).waitFor();
+  if (!(await queuedReview.getByRole("button", { name: "Save judgment" }).first().isDisabled()))
+    throw new Error("running replacement draft did not disable finding judgments");
+  await pool.query(
+    `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,provenance_json,found_note,unanswered,research_json,updated_at)
+     select user_id,newsroom_id,lead_id,headline,dek,body || ' Replacement landed.',topic,source_urls,provenance_json,found_note,unanswered,research_json,now()+interval '1 second'
+       from drafts where lead_id=$1 and newsroom_id=$2 order by updated_at desc,id desc limit 1`,
+    [findingFixture.leadId, newsroomId],
+  );
+  await pool.query(
+    `update desk_jobs set status='completed',stage='done',finished_at=now(),updated_at=now()
+      where id=$1 and newsroom_id=$2`,
+    [queuedDraftJob.rows[0].id, newsroomId],
+  );
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("textarea")].some((field) =>
+      field instanceof HTMLTextAreaElement && field.value.includes("Replacement landed."),
+    ),
+  );
+  await page.waitForFunction(() => {
+    const button = [...document.querySelectorAll("#finding-evidence-review article button")]
+      .find((candidate) => candidate.textContent?.trim() === "Save judgment");
+    return button instanceof HTMLButtonElement && !button.disabled;
+  });
+  step("running replacement disables judgments and the naturally polled replacement loads a fresh review");
   step(
     "recorded finding judgments save sequentially, conflict honestly, and remain readable on a narrow dark large-text desk",
   );
