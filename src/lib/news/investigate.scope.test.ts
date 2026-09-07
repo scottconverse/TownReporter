@@ -37,6 +37,62 @@ async function run(room: number, id: number, plan: HopPlan) {
 }
 
 test(
+  "the same editor can persist the same possible identity pair in two newsrooms",
+  { timeout: 120000 },
+  async () => {
+    const first = await investigation(165);
+    const second = await investigation(166);
+    for (const room of [165, 166])
+      await first.sql`
+    insert into entities(user_id,newsroom_id,canonical,name,kind,why)
+    values('scope-editor',${room},'shared identity holdings llc','Shared Identity Holdings LLC','company',${`KNOWN_ROOM_${room}`})`;
+    for (const [room, id] of [
+      [165, first.id],
+      [166, second.id],
+    ]) {
+      const plan = emptyPlan();
+      plan.entities = [
+        { name: "Shared Identity Holdings Inc", kind: "company", why: `PRIVATE_ROOM_${room}` },
+      ];
+      await run(room!, id!, plan);
+    }
+    for (const table of ["entity_aliases", "entity_matches"]) {
+      const rows = await first.sql.query<{ newsroom_id: number; evidence: string }>(
+        `select newsroom_id,evidence from ${table} where user_id=$1 and newsroom_id in (165,166) order by newsroom_id`,
+        ["scope-editor"],
+      );
+      assert.deepEqual(
+        rows,
+        [
+          { newsroom_id: 165, evidence: "PRIVATE_ROOM_165" },
+          { newsroom_id: 166, evidence: "PRIVATE_ROOM_166" },
+        ],
+        `${table} must retain both newsroom records for the same user and names`,
+      );
+    }
+    const repeat = emptyPlan();
+    repeat.entities = [
+      { name: "Shared Identity Holdings Inc", kind: "company", why: "PRIVATE_ROOM_166" },
+    ];
+    await run(166, second.id, repeat);
+    for (const table of ["entity_aliases", "entity_matches"]) {
+      const rows = await first.sql.query<{ newsroom_id: number; count: number }>(
+        `select newsroom_id,count(*)::integer as count from ${table} where user_id=$1 and newsroom_id in (165,166) group by newsroom_id order by newsroom_id`,
+        ["scope-editor"],
+      );
+      assert.deepEqual(
+        rows,
+        [
+          { newsroom_id: 165, count: 1 },
+          { newsroom_id: 166, count: 1 },
+        ],
+        `${table} retries stay idempotent within each newsroom`,
+      );
+    }
+  },
+);
+
+test(
   "plan writes and model history stay inside the owning newsroom",
   { timeout: 120000 },
   async () => {

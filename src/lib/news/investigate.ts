@@ -494,6 +494,14 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
   `alter table entities drop constraint if exists entities_user_id_canonical_key`,
   `drop index if exists entities_user_id_canonical_key`,
   `create unique index if not exists entities_newsroom_canonical on entities (newsroom_id, canonical)`,
+  // Migration 0044 adds the room to the existing per-editor identity keys.
+  // No historical rows are deleted or assigned to a different newsroom.
+  `create unique index if not exists entity_aliases_newsroom_user_names on entity_aliases (newsroom_id, user_id, canonical, alias)`,
+  `alter table entity_aliases drop constraint if exists entity_aliases_user_id_canonical_alias_key`,
+  `drop index if exists entity_aliases_user_id_canonical_alias_key`,
+  `create unique index if not exists entity_matches_newsroom_user_names on entity_matches (newsroom_id, user_id, left_canonical, right_canonical)`,
+  `alter table entity_matches drop constraint if exists entity_matches_user_id_left_canonical_right_canonical_key`,
+  `drop index if exists entity_matches_user_id_left_canonical_right_canonical_key`,
   `alter table source_monitors drop constraint if exists source_monitors_user_id_url_key`,
   `drop index if exists source_monitors_user_id_url_key`,
   `create unique index if not exists source_monitors_newsroom_url on source_monitors (newsroom_id, url)`,
@@ -2795,7 +2803,7 @@ async function persistPlan(
         await sql`
           insert into entity_aliases (user_id, newsroom_id, canonical, alias, verdict, evidence)
           values (${userId}, ${newsroomId}, ${resolved.canonical}, ${e.name.slice(0, 200)}, ${verdict}, ${e.why.slice(0, 400)})
-          on conflict (user_id, canonical, alias) do update set verdict = excluded.verdict where entity_aliases.newsroom_id = excluded.newsroom_id
+          on conflict (newsroom_id, user_id, canonical, alias) do update set verdict = excluded.verdict
         `;
       } catch {
         /* alias already recorded */
@@ -2805,7 +2813,7 @@ async function persistPlan(
         await sql`
           insert into entity_matches (user_id, newsroom_id, left_canonical, right_canonical, verdict, evidence, investigation_id)
           values (${userId}, ${newsroomId}, ${left}, ${right}, ${verdict}, ${e.why.slice(0, 400)}, ${investigationId})
-          on conflict (user_id, left_canonical, right_canonical) do update set verdict = excluded.verdict where entity_matches.newsroom_id = excluded.newsroom_id
+          on conflict (newsroom_id, user_id, left_canonical, right_canonical) do update set verdict = excluded.verdict
         `;
       } catch {
         /* match already recorded */

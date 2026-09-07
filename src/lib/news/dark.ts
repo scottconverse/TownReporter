@@ -1831,17 +1831,52 @@ export async function queueInvestigationFor(
   `;
   const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
   const topic = topicFromText(`${inv[0].title}\n${inv[0].summary}`);
+  // Keep uncertainty ahead of the summary: a long brief must not crowd out
+  // the opposing account when a whole file becomes a lead.
+  const signalNotes = await sql<{
+    name: string;
+    verification_status: string;
+    counter_narrative: string;
+    gate_missing_context: string | null;
+    what_would_kill: string;
+  }>`
+    select name, verification_status, counter_narrative, gate_missing_context, what_would_kill
+    from dark_signals where investigation_id = ${id} and newsroom_id = ${newsroomId}
+    order by id asc limit 3
+  `;
+  const shorten = (value: string, limit: number) =>
+    value.length > limit ? `${value.slice(0, limit - 13)} [shortened]` : value;
+  const handoff = [
+    "DARK DESK notes. Publication is a separate human action.",
+    opts.asTip
+      ? "Sent unverified, at the editor's direction. Treat it as a tip, not a finding."
+      : `${verifiedCount} of ${total} filed signals passed verification; other signals remain unverified.`,
+    signalNotes.length
+      ? `Signal notes: showing ${signalNotes.length} of ${total}. Open investigation for the complete file and unabridged accounts.`
+      : "",
+    ...signalNotes.map((signal) =>
+      [
+        `${shorten(signal.name, 80)} — ${signal.verification_status === "verified" ? "verified" : "unverified"}`,
+        `Opposing account: ${shorten(signal.counter_narrative || "Not established.", 320)}`,
+        `Missing context: ${shorten(signal.gate_missing_context || "Not assessed.", 320)}`,
+        `What would disprove it: ${shorten(signal.what_would_kill || "Not established.", 160)}`,
+      ].join("\n"),
+    ),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const evidence = `${handoff}\n\nFile summary: ${shorten(inv[0].summary, Math.max(0, 4000 - handoff.length - 16))}`;
   const created = await sql<{ id: number }>`
     insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
     values (
       ${userId},
       ${newsroomId},
       ${inv[0].title.slice(0, 240)},
-      ${`DARK DESK notes. Publication is a separate human action.\n${opts.asTip ? "Sent unverified, at the editor's direction. Treat it as a tip, not a finding." : `${verifiedCount} of ${total} filed signals passed verification; other signals remain unverified.`}\n\n${inv[0].summary}`.slice(0, 4000)},
+      ${evidence},
       ${topic},
       'new',
       ${urls},
-      ${inv[0].summary.slice(0, 4000)},
+      ${evidence},
       ${12},
       ${id}
     )

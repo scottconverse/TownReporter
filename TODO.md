@@ -10,13 +10,14 @@ Legend: [x] implemented · [~] in progress · [ ] open · **external** requires 
 ## In flight
 
 - [~] **Continuous development takeover**, authorized by the owner 2026-09-06: reconcile docs, review Dark Desk/OCR/newsroom boundaries, run focused local verification, fix material defects, then work the queue below. Release finished green work on GitHub; no production promotion from this machine.
-- [~] Reconcile README, manuals, landing page, versioning and release records. Preserve dated operator receipts as attributed history.
-- [~] **0.6.24 corrective candidate:** reproduced verification, newsroom isolation, PDF/OCR provenance and editor-feedback defects corrected; fetch safeguards implemented. Final exact-candidate checks and GitHub publication remain pending. Configurable sections has a separate development worktree and is not part of this corrective release.
+- [x] Reconcile README, manuals, landing page and versioning. Dated operator receipts remain attributed history. Seventeen missing historical source releases were restored with exact-commit CI links; v0.5.0 was excluded because its code CI failed, and its tag remains untouched.
+- [~] **Configurable sections:** implementation has a separate development worktree and is not part of 0.6.24. Manual page watching follows in its own bounded unit.
+- **0.6.24:** corrective implementation is complete; [release and publication evidence](https://github.com/scottconverse/TownReporter/pull/7) records the checks and promotion boundary. GitHub publication never implies deployment on Halo.
 
 ## Open queue — implementation order
 
-1. [ ] **Dark Desk verification review and defects first.** Trace speculative discovery → adversarial search → verification → queue handoff; test unavailable/failed/empty search, malformed model answers, interrupted work, confidence cap and newsroom isolation. Review OCR limits. A green test suite does not establish real investigative quality.
-2. [ ] **Fetch safeguards.** Add response-size and content-type caps to the existing guarded fetching paths, with visible reasons for refused documents.
+1. [x] **Dark Desk corrective review (0.6.24).** Reproduced failures in search verification, model evidence context, saved-result reporting, newsroom isolation and PDF/OCR provenance were corrected. Both signal and whole-file queue handoffs preserve uncertainty. Real investigative quality remains the separate five-run acceptance exercise below.
+2. [x] **Fetch safeguards (0.6.24).** Shared guarded HTTP responses have streamed size and declared content-type caps, with visible refusal reasons. Chromium resources and direct provider transports remain outside these caps.
 3. [ ] **Sections — dynamic, editor-owned.** Ship a starting set the editor can add to, rename, reorder, hide and retire. Preserve existing stories and provide explicit reassignment when retiring a section. Per-section reporting briefs, accepted-source assignments and scanning instructions remain part of this work, with preview before applying changes. No fixed section list is awaited.
 4. [ ] **Manual “watch this page” for Dark Desk.** An editor can add a page to investigative monitors without first running a dig. Keep it distinct from ordinary accepted-source scanning; explain first capture, changes, failed checks, pause/stop and where evidence or a lead went.
 5. [ ] **Legal removal.** Distinct from normal 30-day trash. Owner policy of 2026-09-06: a sealed, owner-only copy of removed text expires automatically after 12 months; an explicit court order to destroy means keep nothing. Audit and backup handling must respect that exception. Track affected backups and incomplete operator cleanup honestly; ordinary Delete is not this feature.
@@ -39,7 +40,7 @@ Legend: [x] implemented · [~] in progress · [ ] open · **external** requires 
 - The baseline verification checks completeness of structured answers; it is not independent fact-checking. Search/evidence failure behavior is under review.
 - OCR supports extracted JPEG/PNG images with bounded processing and no established PDF page mapping; unsupported scans and incomplete reads must remain visible. Vision capability is not a guarantee of accurate transcription.
 - URL canonicalization of historical records is distinct from guards on new writes. Production cleanup is an operator action.
-- Historical records with incorrect newsroom assignment or OCR page references need operator review or re-ingestion; this release does not infer ownership or rewrite old citations. Older entity-alias/match uniqueness can omit a same-user cross-newsroom duplicate instead of overwriting another newsroom's metadata; a future scoped schema correction can remove that limitation.
+- Historical records with incorrect newsroom assignment or OCR page references need operator review or re-ingestion; this release does not infer ownership or rewrite old citations. Migration 0044 corrects entity-alias/match uniqueness for future same-user cross-newsroom records while preserving existing rows.
 
 ## Completed release history — prior operator reports
 - [x] 0.6.7 — Automatic fails over to Codex on a timeout, not only a sign-in lapse.

@@ -217,7 +217,7 @@ export function blockedDigBannerText(stats: {
     blocked: "blocked by the site (403/401)",
     "not-found": "gone or not found (404)",
     empty: "opening but returning no readable text — likely an app-shell page",
-    other: "failing to load",
+    other: "not readable",
   };
   const why = reasonText[stats.dominantReason ?? "other"] ?? reasonText.other;
   return `This dig is mostly hitting walls: ${failing} of ${stats.total} opened pages were ${why}. That is the source or the fetcher, not evidence there is nothing here. Click Keep digging to try different pages, or open a record directly to check by hand.`;
