@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.23](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.23)** — 6 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.24](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.24)** — 7 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -86,10 +86,16 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.24** — corrective release: failed adversarial searches stay unverified, verification reads returned evidence and context, guarded HTTP fetches enforce size/type limits, OCR page images reach the selected provider, and takeover documentation separates repository releases from deployment receipts.
+
+- **0.6.23** — two-stage Dark Desk with structured adversarial checks, broader community Reddit discovery, bounded scanned-PDF OCR, llama.cpp discovery, county setting and Opinion copy controls. These are implemented capabilities, not a certification of investigative conclusions.
+
+Current development status and remaining features: [TODO.md](TODO.md). Remote takeover and deployment evidence: [HANDOFF-NEXT-AGENT.md](HANDOFF-NEXT-AGENT.md).
+
 - **0.6.22** — the story page aligned to the redesign: a 380px column for the lead, its sources and the reporting notes, the draft on the right, one column below 1024px, no overflow at any width; the local model row under the picker reads as a plain second row.
 - **0.6.21** — the redesigned Command Center (direction A): the queue is the lead column, Dark Desk, Follow-ups and the wire sit in a right rail, queue rows breathe, and the desk lays out cleanly from 1440 down to a phone. New: Follow-ups — who you asked, for what, and when it is due.
 - **0.6.20** — desk readability release from the design audit: nothing informational under 14px, Large text now scales headlines and reading panes, one button family, destructive buttons look destructive, Held and set-aside leads have their own chips.
-- **0.6.19** — the desk in dark mode is black on white; local models are found automatically (LM Studio, Ollama) and picked per model in every picker; a claims-of-absence gate stops a story from saying something does not exist until the paper has searched the city's own site and the editor has confirmed; Check r/longmont shows its progress and every scored post.
+- **0.6.19** — the desk in dark mode is white text on black; local models are found automatically (LM Studio, Ollama) and picked per model in every picker; a claims-of-absence gate stops a story from saying something does not exist until the paper has searched the city's own site and the editor has confirmed; Check r/longmont shows its progress and every scored post.
 - **0.6.18** — bug-fix release: interrupted drafts show one honest "recovering" state; promote refuses to restart under a running job; Dark Desk monitors record the real newsroom; the ≈ PRINTED chip names and links the story it matched; About page and fresh-install welcome say non-profit; subreddit/user/search pages fetch via real .rss feeds.
 - **0.6.17** — Reddit fetching is now strictly one-at-a-time and paced, shared across the tip scan and digs, fixing a concurrency bug that could trigger rate limits; redd.it short links now resolve.
 - **0.6.16** — Dark Desk actions now confirm clearly: "Send to the queue" shows where the lead went and links to it; every action gives visible feedback.
@@ -159,7 +165,7 @@ Full detail, including the newsletter and rate-limiter fixes, is in [CHANGELOG.m
 - **Mapped IPv6 loopback is blocked.** `http://[::ffff:7f00:1]/` is 127.0.0.1.
 - **Dark hops belong to the file.** A later editor continues the same trail.
 - **Jobs wake up.** Scan / Draft / Keep digging persist, then finish in this process or on the monitors ping (`CRON_SECRET`).
-- **Honest OCR.** Image-only PDFs are unread. There is no JPEG-as-chat OCR.
+- **Historical OCR behavior (0.4.x).** Image-only PDFs were unread. Since 0.6.23, supported embedded JPEG/PNG scan images can be transcribed by a vision-capable provider; unsupported formats and partial reads remain explicit.
 
 Also in 0.3.3–0.3.8: Mountain Time masthead, overlapping printed headlines collapse, Draft with AI paints without a reload, Redraft survives the cookie glitch, Start digging keeps the card on a failed open.
 
@@ -209,11 +215,9 @@ model** to force that provider for one run. Explicit choices never fall
 back, at enqueue or mid-run. The endpoint/model compatibility overrides are
 listed in [docs/setup.md](docs/setup.md#per-run-picker).
 
-Zen MiMo and Local Qwen were removed from the picker (2026-09-02). 0.6.10
-brought a local model back as a named pick, "Local model" -- generic this
-time: whatever `LLM_BASE_URL` (plus `LLM_MODEL` / `LLM_API_KEY`) already
-points at, with its own longer, editable timeouts, shown in every picker
-once that variable is set. See [docs/local-models.md](docs/local-models.md).
+Local model supports individual models discovered on LM Studio, Ollama and
+llama.cpp, or a configured `LLM_BASE_URL` with `LLM_MODEL` and optional
+`LLM_API_KEY`. It has its own longer, editable timeouts. See [docs/local-models.md](docs/local-models.md).
 
 Codex and Claude use the operator's existing signed-in CLI/OAuth sessions; no
 API key is required. Readiness is checked before enqueueing. If a login expires,
@@ -232,7 +236,7 @@ Claude Code remains the separate CLI path: its own `CLAUDE.md`, skills and
 plugins are not loaded into news prompts because that adapter passes
 `--setting-sources ""`.
 
-For **Scan and Dark Desk**, configured-provider precedence is:
+For **Automatic**, a configured gateway wins; named choices in Story, Scan and Dark Desk override the low-level configured-provider chain below:
 
 | Set this                                        | What runs                                                                   |
 | ----------------------------------------------- | --------------------------------------------------------------------------- |
@@ -244,7 +248,7 @@ For **Scan and Dark Desk**, configured-provider precedence is:
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
 **Opinion offers Claude and the local model.** The picker offers Automatic,
-Claude Opus, and Local model (once `LLM_BASE_URL` is set). Claude Code runs
+Claude Opus, and Local model (through discovery or configured `LLM_BASE_URL`). Claude Code runs
 its own research pass, then loads the editorial voice by file path for the
 writing pass. Codex is not offered for editorials: its model declines to
 write a piece that takes a position on a local policy question, so it stays
@@ -386,7 +390,7 @@ _Dig_ is how far it chases — hops, searches, whether it leaves the watch list.
 The first signed-in user is owner. Under **Server → Invite an editor**, the owner enters an email and copies a one-time link. It expires in seven days, works only for that address, and creates an editor seat without sharing the owner login. See [docs/setup.md](docs/setup.md#a-second-editor).
 
 **What does a run cost?**
-Scan, draft, and Dark Desk each call the model. A Longmont-sized scan is the expensive click; drafting one story is cheaper; a Dark Desk round is five short passes. Set a spending limit on the provider. Exact dollars depend on the model you point at.
+Scan, draft, and Dark Desk each call the model. A Longmont-sized scan is the expensive click; drafting one story is cheaper; a Dark Desk round can include planning, synthesis and several verification calls. Set a spending limit on the provider. Exact dollars depend on the model you point at.
 
 **Does GitHub Pages run the newsroom?**
 No. [docs/index.html](docs/index.html) is a static landing page. The app is Node. Clone it, or deploy to a host that can run Node 22, Playwright Chromium, and Postgres.

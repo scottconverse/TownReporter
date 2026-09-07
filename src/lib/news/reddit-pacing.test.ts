@@ -61,11 +61,17 @@ describe("TR-001 shared Reddit request queue", () => {
       active++;
       maxActive = Math.max(maxActive, active);
       await pause(headerMs);
+      let cancelled = false;
       const body = new ReadableStream<Uint8Array>({
         async start(controller) {
           await pause(bodyMs);
+          if (cancelled) return;
           controller.enqueue(new TextEncoder().encode(XML));
           controller.close();
+          active--;
+        },
+        cancel() {
+          cancelled = true;
           active--;
         },
       });
@@ -318,10 +324,26 @@ describe("TR-001 shared Reddit request queue", () => {
     `</feed>`;
 
   for (const c of [
-    { name: "subreddit front page", page: "https://www.reddit.com/r/longmont/", feed: "https://www.reddit.com/r/longmont/.rss" },
-    { name: "subreddit new", page: "https://www.reddit.com/r/longmont/new", feed: "https://www.reddit.com/r/longmont/new/.rss" },
-    { name: "subreddit hot", page: "https://www.reddit.com/r/longmont/hot", feed: "https://www.reddit.com/r/longmont/hot/.rss" },
-    { name: "subreddit rising", page: "https://www.reddit.com/r/longmont/rising", feed: "https://www.reddit.com/r/longmont/rising/.rss" },
+    {
+      name: "subreddit front page",
+      page: "https://www.reddit.com/r/longmont/",
+      feed: "https://www.reddit.com/r/longmont/.rss",
+    },
+    {
+      name: "subreddit new",
+      page: "https://www.reddit.com/r/longmont/new",
+      feed: "https://www.reddit.com/r/longmont/new/.rss",
+    },
+    {
+      name: "subreddit hot",
+      page: "https://www.reddit.com/r/longmont/hot",
+      feed: "https://www.reddit.com/r/longmont/hot/.rss",
+    },
+    {
+      name: "subreddit rising",
+      page: "https://www.reddit.com/r/longmont/rising",
+      feed: "https://www.reddit.com/r/longmont/rising/.rss",
+    },
     {
       name: "subreddit top with t= carried",
       page: "https://www.reddit.com/r/longmont/top?t=week",
@@ -365,11 +387,16 @@ describe("TR-001 shared Reddit request queue", () => {
     const calls: string[] = [];
     setFetchImplForTests(async (url) => {
       calls.push(url.toString());
-      return new Response("<html><title>wiki</title><body>rules go here, long enough text</body></html>", {
-        status: 200,
-      });
+      return new Response(
+        "<html><title>wiki</title><body>rules go here, long enough text</body></html>",
+        {
+          status: 200,
+        },
+      );
     });
-    const doc = await finish(fetchRedditDocument(new URL("https://www.reddit.com/r/longmont/wiki/rules")));
+    const doc = await finish(
+      fetchRedditDocument(new URL("https://www.reddit.com/r/longmont/wiki/rules")),
+    );
     assert.deepEqual(calls, ["https://old.reddit.com/r/longmont/wiki/rules"]);
     assert.equal(doc.extractionMethod, "reddit-old");
   });

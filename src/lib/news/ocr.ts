@@ -74,8 +74,7 @@ export function extractEmbeddedPngs(buf: Uint8Array, max = 12): Uint8Array[] {
     let j = i + 8;
     let end = -1;
     while (j + 8 <= buf.length) {
-      const len =
-        ((buf[j]! << 24) | (buf[j + 1]! << 16) | (buf[j + 2]! << 8) | buf[j + 3]!) >>> 0;
+      const len = ((buf[j]! << 24) | (buf[j + 1]! << 16) | (buf[j + 2]! << 8) | buf[j + 3]!) >>> 0;
       const type = String.fromCharCode(buf[j + 4]!, buf[j + 5]!, buf[j + 6]!, buf[j + 7]!);
       const chunkEnd = j + 8 + len + 4;
       if (!/^[A-Za-z]{4}$/.test(type) || chunkEnd <= j || chunkEnd > buf.length) break;
@@ -96,9 +95,12 @@ export function extractEmbeddedPngs(buf: Uint8Array, max = 12): Uint8Array[] {
 
 export type PageImage = { bytes: Uint8Array; mime: "image/jpeg" | "image/png" };
 
-/** Every page image this PDF has embedded, JPEGs first, capped at `max` total. */
+/** Extractable embedded images, JPEGs first, capped at `max`. No PDF page association or order is established. */
 export function extractEmbeddedPageImages(buf: Uint8Array, max = 12): PageImage[] {
-  const jpegs = extractEmbeddedJpegs(buf, max).map((bytes) => ({ bytes, mime: "image/jpeg" as const }));
+  const jpegs = extractEmbeddedJpegs(buf, max).map((bytes) => ({
+    bytes,
+    mime: "image/jpeg" as const,
+  }));
   if (jpegs.length >= max) return jpegs.slice(0, max);
   const pngs = extractEmbeddedPngs(buf, max - jpegs.length).map((bytes) => ({
     bytes,
@@ -109,12 +111,13 @@ export function extractEmbeddedPageImages(buf: Uint8Array, max = 12): PageImage[
 
 /*
   Caps, stated once and honoured everywhere below:
-    - at most 12 pages read, in order, whichever the PDF has fewer of;
-    - at most 2 MB per page image (a page over that is skipped, not failed);
+    - at most 12 extracted images read, JPEGs first (not PDF page order);
+    - at most 2 MiB per image (an image over that is skipped, not failed);
     - at most 10 minutes wall clock for the whole read, checked before every
-      page so a slow provider stops taking pages rather than blowing past it.
+      image so a slow provider stops taking images rather than blowing past it.
 */
 export const OCR_MAX_PAGES = 12;
+// Historical API name retained; this is an extracted-image cap, not a PDF page count.
 export const OCR_MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 export const OCR_TOTAL_BUDGET_MS = 10 * 60 * 1000;
 const OCR_MIN_CALL_MS = 15_000;
@@ -157,12 +160,15 @@ async function resolveVisionLocal(
   if (override?.baseUrl && override.id) {
     const server = catalog.servers.find((s) => s.baseUrl === override.baseUrl && s.reachable);
     const model = server?.models.find((m) => m.id === override.id);
-    return model?.vision ? { kind: "local", baseUrl: override.baseUrl, model: override.id, apiKey } : null;
+    return model?.vision
+      ? { kind: "local", baseUrl: override.baseUrl, model: override.id, apiKey }
+      : null;
   }
   for (const server of catalog.servers) {
     if (!server.reachable) continue;
     const visionModel = server.models.find((m) => m.vision);
-    if (visionModel) return { kind: "local", baseUrl: server.baseUrl, model: visionModel.id, apiKey };
+    if (visionModel)
+      return { kind: "local", baseUrl: server.baseUrl, model: visionModel.id, apiKey };
   }
   return null;
 }
@@ -178,10 +184,12 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
     // vision-capable local default -> needs-ocr. Mirrors ai.ts's Automatic
     // ladder (the operator's own signed-in providers before a local guess).
     const apiKey = env("ANTHROPIC_API_KEY");
-    if (apiKey) return { kind: "anthropic", apiKey, model: env("ANTHROPIC_MODEL") || "claude-opus-5" };
+    if (apiKey)
+      return { kind: "anthropic", apiKey, model: env("ANTHROPIC_MODEL") || "claude-opus-5" };
     const { probeCodex } = await import("./ai-codex.server.ts");
     const codex = await probeCodex();
-    if (codex.ok) return { kind: "codex", model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra" };
+    if (codex.ok)
+      return { kind: "codex", model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra" };
     const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
     const claude = await probeClaudeCode();
     if (claude.ok) return { kind: "claude-code", model: env("ANTHROPIC_MODEL") || "claude-opus-5" };
@@ -201,7 +209,8 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
     if (claude.ok) return { kind: "claude-code", model: providerModel(entry) };
     return {
       needsOcr: true,
-      reason: "Claude is not set up on this machine (no ANTHROPIC_API_KEY and no signed-in Claude Code CLI).",
+      reason:
+        "Claude is not set up on this machine (no ANTHROPIC_API_KEY and no signed-in Claude Code CLI).",
     };
   }
   if (entry.kind === "codex") {
@@ -215,7 +224,8 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
     if (local) return local;
     return {
       needsOcr: true,
-      reason: "the chosen local model cannot read images — pick a vision model (marked · vision in the picker).",
+      reason:
+        "the chosen local model cannot read images — pick a vision model (marked · vision in the picker).",
     };
   }
   return { needsOcr: true, reason: `${entry.label} cannot read images.` };
@@ -262,7 +272,10 @@ async function anthropicTranscribePage(
       {
         role: "user",
         content: [
-          { type: "image", source: { type: "base64", media_type: image.mime, data: b64(image.bytes) } },
+          {
+            type: "image",
+            source: { type: "base64", media_type: image.mime, data: b64(image.bytes) },
+          },
           { type: "text", text: TRANSCRIBE_INSTRUCTION },
         ],
       },
@@ -275,7 +288,11 @@ async function anthropicTranscribePage(
     .trim();
 }
 
-async function codexTranscribePage(image: PageImage, model: string, timeoutMs: number): Promise<string> {
+async function codexTranscribePage(
+  image: PageImage,
+  model: string,
+  timeoutMs: number,
+): Promise<string> {
   return withTempImageFile(image, async (filePath) => {
     const { codexChat } = await import("./ai-codex.server.ts");
     const result = await codexChat({
@@ -297,7 +314,12 @@ async function claudeCodeTranscribePage(
 ): Promise<string> {
   return withTempImageFile(image, async (filePath) => {
     const { claudeCodeReadChat } = await import("./ai-claude-code.server.ts");
-    const result = await claudeCodeReadChat({ prompt: TRANSCRIBE_INSTRUCTION, filePath, model, timeoutMs });
+    const result = await claudeCodeReadChat({
+      prompt: TRANSCRIBE_INSTRUCTION,
+      filePath,
+      model,
+      timeoutMs,
+    });
     if (!result.ok) throw new Error(result.error);
     return result.text;
   });
@@ -347,7 +369,8 @@ async function transcribePage(
 ): Promise<string> {
   const adapter = adapters?.[plan.kind];
   if (adapter) return adapter(image, timeoutMs);
-  if (plan.kind === "anthropic") return anthropicTranscribePage(image, plan.apiKey, plan.model, timeoutMs);
+  if (plan.kind === "anthropic")
+    return anthropicTranscribePage(image, plan.apiKey, plan.model, timeoutMs);
   if (plan.kind === "codex") return codexTranscribePage(image, plan.model, timeoutMs);
   if (plan.kind === "claude-code") return claudeCodeTranscribePage(image, plan.model, timeoutMs);
   return localTranscribePage(image, plan.baseUrl, plan.apiKey, plan.model, timeoutMs);
@@ -413,17 +436,22 @@ export const productionOcr: OcrImpl = async (buf, opts = {}) => {
     }
     const cleaned = stripNarration(raw);
     if (cleaned) {
-      pages.push({ page: i + 1, text: cleaned });
+      pages.push({ page: null, imageIndex: i + 1, text: cleaned });
       pagesRead++;
     }
   }
 
-  const text = pages.map((p) => p.text).join("\n\n").trim();
+  const text = pages
+    .map((p) => p.text)
+    .join("\n\n")
+    .trim();
   return {
     text,
     pages,
     provider: planLabel(plan),
     pagesRead,
+    // Historical field names retained for stored extraction-method compatibility.
+    // This is the capped extracted-image inventory, never the PDF's page count.
     pagesTotal: images.length,
   };
 };

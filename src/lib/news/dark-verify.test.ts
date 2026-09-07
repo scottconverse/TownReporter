@@ -67,7 +67,8 @@ const MISSING_GATE_ANSWER = JSON.stringify({
 
 const WATCH_ANSWER = JSON.stringify({
   gates: {
-    disproof_attempted: "The routine explanation is simply that this is the annual schedule posting.",
+    disproof_attempted:
+      "The routine explanation is simply that this is the annual schedule posting.",
     source_independence: "Only the city's own calendar mentions it; there is one origin.",
     missing_context: "Nothing a reader would need is missing; there is nothing here.",
     self_referential: false,
@@ -190,7 +191,10 @@ describe("Dark Signal Desk — stage 2", { timeout: 60000 }, () => {
       where investigation_id = ${seeded.investigationId} and strategy like 'adversarial%'
     `;
     assert.ok(logged.length >= 4, `only ${logged.length} adversarial rows in search_log`);
-    assert.ok(logged.every((r) => r.tier), "a search_log row with no tier recorded");
+    assert.ok(
+      logged.every((r) => r.tier),
+      "a search_log row with no tier recorded",
+    );
     assert.ok(
       logged.some((r) => r.selected_json.includes("longmontcolorado.gov")),
       "no URL was written to the run record",
@@ -376,4 +380,176 @@ describe("the queue gate", { timeout: 60000 }, () => {
     const ok = await queueInvestigationFor(user, DEFAULT_NEWSROOM_ID, bare[0]!.id);
     assert.equal(ok.ok, true);
   });
+});
+
+describe("verification evidence integrity", { timeout: 60000 }, () => {
+  for (const mode of ["failed", "empty", "blocked"] as const) {
+    it(`does not verify an always-positive model after ${mode} searches`, async () => {
+      const seeded = await seedSignal(`integrity-${mode}`);
+      const out = await verifyRunSignals({
+        userId: "integrity",
+        newsroomId: 1,
+        runId: seeded.runId,
+        investigationId: seeded.investigationId,
+        place: PLACE,
+        deps: {
+          search: async () => {
+            if (mode === "failed") throw new Error("network unavailable");
+            if (mode === "blocked")
+              return { state: "SEARCH_BLOCKED", hits: [], provider: "fixture" };
+            return [];
+          },
+          model: async () => FULL_ANSWER,
+        },
+      });
+      assert.equal(out.verified, 0);
+      assert.equal((await readSignal(seeded.signalId)).verification_status, "unverified");
+      if (mode === "failed") {
+        const sql = await getSql();
+        const logs = await sql<{
+          state: string;
+        }>`select state from search_log where investigation_id=${seeded.investigationId}`;
+        assert.ok(logs.every((r) => !r.state.startsWith("SEARCH_SUCCESS")));
+      }
+    });
+  }
+  it("gives the gate model actual bounded search evidence", async () => {
+    const seeded = await seedSignal("integrity-evidence");
+    let pack = "";
+    const out = await verifyRunSignals({
+      userId: "integrity",
+      newsroomId: 1,
+      runId: seeded.runId,
+      investigationId: seeded.investigationId,
+      place: PLACE,
+      deps: {
+        search: async (q) =>
+          defaultHits(q).map((url) => ({
+            url,
+            title: "EXCULPATORY_TITLE",
+            snippet: "Survey published yesterday EVIDENCE_MARKER",
+          })),
+        model: async (_system, p) => {
+          pack = p;
+          return FULL_ANSWER;
+        },
+      },
+    });
+    assert.match(pack, /EXCULPATORY_TITLE/);
+    assert.match(pack, /EVIDENCE_MARKER/);
+    assert.match(pack, /search snippets/i);
+    assert.equal(out.verified, 1);
+  });
+});
+
+it("does not report verification that could not be saved", { timeout: 60000 }, async () => {
+  const seeded = await seedSignal("integrity-save");
+  const sql = await getSql();
+  await sql.query(
+    `alter table dark_signals add constraint proof_refuse_verification check (id <> ${seeded.signalId} or verification_status <> 'verified')`,
+  );
+  try {
+    const out = await verifyRunSignals({
+      userId: "integrity-save",
+      newsroomId: 1,
+      runId: seeded.runId,
+      investigationId: seeded.investigationId,
+      place: PLACE,
+      deps: { search: fakeSearch().fn, model: async () => FULL_ANSWER },
+    });
+    assert.equal(out.verified, 0);
+    assert.match(out.summary, /not saved|could not.*save/i);
+    assert.equal((await readSignal(seeded.signalId)).verification_status, "unverified");
+  } finally {
+    await sql.query("alter table dark_signals drop constraint proof_refuse_verification");
+  }
+});
+
+it(
+  "preserves the opposing account and missing context when handing off a verified signal",
+  { timeout: 60000 },
+  async () => {
+    await ensureLeadsTable();
+    const seeded = await seedSignal("integrity-handoff");
+    await verifyRunSignals({
+      userId: "integrity-handoff",
+      newsroomId: 1,
+      runId: seeded.runId,
+      investigationId: seeded.investigationId,
+      place: PLACE,
+      deps: { search: fakeSearch().fn, model: async () => FULL_ANSWER },
+    });
+    const out = await sendDarkSignalToQueueFor("integrity-handoff", 1, seeded.signalId);
+    assert.equal(out.ok, true);
+    if (!out.ok) return;
+    const sql = await getSql();
+    const row = (await sql<{ why: string }>`select why from leads where id=${out.leadId}`)[0]!;
+    assert.match(row.why, /delayed pending a vendor contract/);
+    assert.match(row.why, /Nobody has asked the housing division/);
+  },
+);
+it("labels a whole investigation sent as a tip unverified", { timeout: 60000 }, async () => {
+  await ensureLeadsTable();
+  const seeded = await seedSignal("integrity-filetip");
+  const out = await queueInvestigationFor("integrity-filetip", 1, seeded.investigationId, {
+    asTip: true,
+  });
+  assert.equal(out.ok, true);
+  if (!out.ok) return;
+  const sql = await getSql();
+  const row = (await sql<{ why: string }>`select why from leads where id=${out.leadId}`)[0]!;
+  assert.match(row.why, /Sent unverified/);
+});
+
+it(
+  "keeps verification unverified when its search trail cannot be saved",
+  { timeout: 60000 },
+  async () => {
+    const seeded = await seedSignal("integrity-log");
+    const sql = await getSql();
+    await sql.query(
+      `alter table search_log add constraint proof_refuse_log check (investigation_id <> ${seeded.investigationId})`,
+    );
+    try {
+      const out = await verifyRunSignals({
+        userId: "integrity-log",
+        newsroomId: 1,
+        runId: seeded.runId,
+        investigationId: seeded.investigationId,
+        place: PLACE,
+        deps: { search: fakeSearch().fn, model: async () => FULL_ANSWER },
+      });
+      assert.equal(out.verified, 0);
+      assert.match(
+        (await readSignal(seeded.signalId)).gates_missing ?? "",
+        /saved adversarial search trail/,
+      );
+    } finally {
+      await sql.query("alter table search_log drop constraint proof_refuse_log");
+    }
+  },
+);
+it("stores valid JSON for large search results", { timeout: 60000 }, async () => {
+  const seeded = await seedSignal("integrity-json");
+  const sql = await getSql();
+  await verifyRunSignals({
+    userId: "integrity-json",
+    newsroomId: 1,
+    runId: seeded.runId,
+    investigationId: seeded.investigationId,
+    place: PLACE,
+    deps: {
+      search: async (q) =>
+        Array.from({ length: 6 }, () => ({
+          url: defaultHits(q)[0]! + "?" + "x".repeat(900),
+          title: "x".repeat(300),
+          snippet: "x".repeat(800),
+        })),
+      model: async () => FULL_ANSWER,
+    },
+  });
+  const rows = await sql<{
+    results_json: string;
+  }>`select results_json from search_log where investigation_id=${seeded.investigationId}`;
+  for (const row of rows) assert.equal(JSON.parse(row.results_json).length, 6);
 });

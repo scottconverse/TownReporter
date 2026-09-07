@@ -5,9 +5,9 @@ import { BlockedAddressError, guardedLookup, resolveFetch } from "./fetch-url.ts
 
 function lookupOnce(host: string): Promise<{ err: Error | null; address: unknown }> {
   return new Promise((resolve) => {
-    void guardedLookup(host, {}, (err, address) =>
-      resolve({ err: err ?? null, address }),
-    ).catch((err: Error) => resolve({ err, address: null }));
+    void guardedLookup(host, {}, (err, address) => resolve({ err: err ?? null, address })).catch(
+      (err: Error) => resolve({ err, address: null }),
+    );
   });
 }
 
@@ -24,10 +24,13 @@ describe("guardedLookup", () => {
     assert.match(err!.message, /127\.0\.0\.1|::1/);
   });
 
-  it("passes a hostname that does not resolve to a private range", async () => {
+  it("passes a hostname that does not resolve to a private range", async (t) => {
     const { err, address } = await lookupOnce("example.com");
     // Resolving a real public name needs DNS; skip rather than fail offline.
-    if (err && /ENOTFOUND|EAI_AGAIN|ETIMEDOUT/i.test(err.message)) return;
+    if (err && /ENOTFOUND|EAI_AGAIN|ETIMEDOUT/i.test(err.message)) {
+      t.skip("public DNS unavailable; public-address acceptance was not checked");
+      return;
+    }
     assert.equal(err, null);
     assert.ok(address);
   });

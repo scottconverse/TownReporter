@@ -1,5 +1,6 @@
 import { assertHttpUrl, isBlockedAddress, isIP } from "./url-guard.ts";
 import { htmlToPlainText } from "./html-text.ts";
+import { capFetchResponse, FetchResponseRefusal } from "./body-limit.ts";
 
 export { assertHttpUrl, isBlockedAddress, sha256, sha256Bytes } from "./url-guard.ts";
 
@@ -136,10 +137,13 @@ async function buildGuardedFetch(): Promise<FetchLike | null> {
  * by `assertPublicHttpUrl`, just without the rebinding protection.
  */
 export async function resolveFetch(): Promise<FetchLike> {
-  if (fetchOverride) return fetchOverride;
-  if (typeof window !== "undefined") return (u, i) => fetch(u, i);
-  if (guardedFetchImpl === undefined) guardedFetchImpl = await buildGuardedFetch();
-  return guardedFetchImpl ?? ((u, i) => fetch(u, i));
+  let transport = fetchOverride;
+  if (!transport && typeof window === "undefined") {
+    if (guardedFetchImpl === undefined) guardedFetchImpl = await buildGuardedFetch();
+    transport = guardedFetchImpl ?? null;
+  }
+  const send: FetchLike = transport ?? ((u, i) => fetch(u, i));
+  return async (url, init) => capFetchResponse(await send(url, init), url);
 }
 
 /** One guarded HTTP hop. A scheduler can own the send and body lifetime. */
@@ -177,8 +181,13 @@ export async function fetchPublicHttpTracked(url: URL, hops = 4): Promise<Tracke
     }
     return res;
   }
-  const response = await go(url, hops);
-  return { response, chain, finalUrl: chain[chain.length - 1]! };
+  try {
+    const response = await go(url, hops);
+    return { response, chain, finalUrl: chain[chain.length - 1]! };
+  } catch (error) {
+    if (error instanceof FetchResponseRefusal) error.redirectChain = [...chain];
+    throw error;
+  }
 }
 
 export async function fetchPublicHttp(url: URL, hops = 4): Promise<Response> {

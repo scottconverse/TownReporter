@@ -1,6 +1,6 @@
 # TownReporter — the manual
 
-**Version 0.6.23 · 6 September 2026**
+**Version 0.6.24 · 7 September 2026**
 
 **Documentation scope:** Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from
@@ -31,6 +31,30 @@ at your own city.
 ---
 
 # Part 1 — What it is
+
+## Current capabilities and remaining work
+
+The Command Center uses Fable Direction A: composer and queue in the main
+column; Dark Desk, Follow-ups and wire in the rail. Follow-ups record who was
+asked, what is due and when; replies can be added to story reporting notes.
+The story workbench stacks below 1024px. Historical screenshots elsewhere in
+this guide illustrate workflows, not the current layout.
+
+Dark Desk now separates speculative Black Desk signals (confidence ≤0.5) from
+structured Dark Signal verification. See [the doctrine and its limits](dark-desk.md).
+The verified label is a completed software protocol, not a substitute for
+checking sources. The five-topic live acceptance exercise remains outstanding.
+
+Local models can be discovered on LM Studio, Ollama or llama.cpp and selected
+individually. Scanned PDF OCR supports embedded JPEG/PNG images, with limits of
+12 extracted images, 2 MiB each and 10 minutes total. The extractor does not
+establish PDF page order: new OCR records identify images, not PDF pages.
+Historical stored OCR page labels require re-ingest or operator review if cited. Unsupported fax-style scans, failed
+transcription and partial reads are reported rather than treated as complete.
+
+Configurable sections, manual investigative page watching and legal removal
+are still open at this documentation baseline; normal Sources and Delete do
+not implement them. [The canonical queue](../TODO.md) records current work.
 
 ## Two rooms
 
@@ -69,7 +93,7 @@ the same order the software performs it.
    publish is a person. Every material claim should be checkable against a
    document the paper shows you.
 
-Corrections are public. A published story is never quietly edited; a correction
+Corrections are public. Editorial policy is to correct a published story openly; a correction
 runs as a dated note above it.
 
 **Delete is always available**, before or after printing — a lead filed against
@@ -143,8 +167,7 @@ required.
 
 ![The desk](images/04-desk.png)
 
-Three columns: the queue on the left, Dark Desk in the middle, the wire on the
-right. The line under the heading is the whole point of the page — _2 drafts
+The historical image shows the former three-column desk. The current layout has the queue in the main column and Dark Desk, Follow-ups and wire in the rail. The line under the heading is the whole point of the page — _2 drafts
 ready to publish, 14 proposed sources await review, 1 Dark Desk file ready for
 another round_. If that line is empty there is nothing for you to do.
 As of 0.6.21 the desk is one main column (composer, then the queue) with a right rail: Dark Desk, Follow-ups, The wire.
@@ -238,7 +261,7 @@ the headline and there is no byline, because an unsigned editorial is the
 paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
 
-Opinion shows Automatic and Claude Opus, and both mean Claude Opus. Codex is
+Opinion shows Automatic and Claude Opus (both use Claude Opus), plus Local model. Codex is
 not offered here: its model declines to write an editorial that takes a
 position on a local policy question, so it stays on the Story picker. Claude
 Code reads the voice by file path for the writing pass. The page
@@ -247,8 +270,9 @@ disabled while readiness is unknown.
 
 A successful process exit is not enough to file a piece. TownReporter rejects
 provider refusals, assistant notes, implausible headlines, and incomplete
-bodies before draft storage. Automatic starts the next provider from a fresh
-research pass. An explicit choice reports the failure without switching. A
+bodies before draft storage. Automatic currently uses Claude only; a failed
+run reports the failure without switching to Local model. An explicit choice
+also never switches providers. A
 failed row has no Read, Edit, or Publish action; a finished row shows the
 provider that actually delivered it.
 
@@ -260,7 +284,9 @@ It fetches records before it writes. Historical runs took **ten to forty
 minutes** — two finished at 9m53s and 24m06s, and one was still going at 30.
 Those are observations, not a deadline: `EDITORIAL_TIMEOUT_MS` now applies to
 each research or writing pass, with a default of 45 minutes per pass. A pair
-can take about 90 minutes; Automatic can try two pairs. The page shows a
+can take about 90 minutes. Automatic currently runs the Claude pair only.
+Explicit Local model performs one writing call using the supplied material;
+it does not run the frontier research pass. The page shows a
 running clock and checks every twenty seconds. Editorials remain drafts until
 you publish one.
 
@@ -356,7 +382,7 @@ db:migrate`.
 
 ## The model
 
-Configured-provider precedence for Dark Desk is:
+Low-level configured-provider precedence is below. Per-run explicit choices on Story, Scan and Dark Desk override this chain; Automatic uses the configured gateway when present, otherwise the readiness ladder.
 
 | Set this                                        | What runs                                                         |
 | ----------------------------------------------- | ----------------------------------------------------------------- |
@@ -377,7 +403,7 @@ All four pickers are generated from one registry,
 `src/lib/news/provider-registry.ts`. An entry there carries the label, the
 model identifier, the environment variable that overrides it, the off switch,
 the time budgets, and which pickers offer it. Adding a provider is one entry;
-nothing else in the codebase names providers.
+the registry is the canonical picker definition; provider adapters still implement their transports.
 
 | Feature                       | Provider                                                                                                                                       | Model                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
@@ -395,10 +421,10 @@ model carries no such refusal, so Opinion's picker offers Automatic,
 Claude Opus, and Local model. (Zen MiMo and the earlier, model-specific
 Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
 brought a generic local pick back.) Claude Code
-receives the voice by file path. Codex receives the validated voice text over
-stdin, never argv, after its separate research pass finishes. Both Codex passes
-retain native search and the signed-in Windows user's full available machine
-capabilities. Claude's writing pass keeps its separate tool-free boundary.
+receives the voice by file path, and its writing pass is tool-free. The
+explicit Local model path sends validated voice text as a system message to
+the selected model server. It uses supplied material without a separate
+research pass; the writing pack records that no gathering pass ran.
 
 **The planner split.** Planning on Haiku costs about a quarter of planning on
 Opus for the same output, so the desk substitutes it — but only within the
@@ -412,8 +438,7 @@ whatever the machine's own precedence would have chosen.
 
 Each provider ships with a per-call ceiling: 150 seconds on the Claude Code
 and Codex CLIs (they spawn a process and reload a large preamble every call),
-180 on Automatic and a configured gateway, and 600 reserved for the local
-model entry that has not landed yet.
+180 on Automatic and a configured gateway, and 600 for the local model entry.
 
 The owner can change the per-call number for any provider on the **Server**
 page, under Writing models: **Time per call**, in seconds, with the shipped
@@ -429,11 +454,11 @@ failure every time.
 
 Pointing `LLM_BASE_URL` at a local model sends Scan, Dark Desk, and Story
 Automatic to that gateway. An explicit Story choice still forces its named
-provider. Opinion is always Claude Opus.
+provider. Opinion offers Claude Opus or Local model.
 What that actually costs in quality was measured on this machine:
 [docs/local-models.md](local-models.md).
 
-The CLI path spends no API money at all. It is slower than an HTTP API because
+Signed-in CLI paths use the operator's subscription/quota; API-key paths can incur API charges. It is slower than an HTTP API because
 it reloads a fixed preamble on every call, so a draft takes minutes rather than
 seconds; the time budgets adjust on their own.
 
@@ -453,10 +478,9 @@ TOWNREPORTER_VOICE_FILE=C:/Users/you/.townreporter/voice/your-voice.md
 ```
 
 The file is deliberately outside the repository, and the app refuses a path
-inside it. On Claude, only the **path** reaches the CLI. On Codex, TownReporter
-reads the validated file and sends its text to OpenAI over stdin for the native
-full-capability writing pass. It never becomes a command-line argument or log
-entry.
+inside it. On Claude, only the **path** reaches the CLI. For explicit Local
+model, TownReporter reads the validated file and sends its text as a system
+message to the selected model server. The voice is not a command-line argument.
 Without the file, the Opinion desk says so and spends nothing.
 
 ## Serving it publicly
@@ -518,7 +542,7 @@ fields remain blank; they do not inherit Longmont's values.
 | Styling   | Tailwind 4                                                                   |                                                                                                         |
 | Fetching  | `undici`, with a connect-time SSRF guard                                     | The address approved is the address connected to                                                        |
 | Rendering | Playwright Chromium                                                          | JS-heavy civic portals and YouTube "Show transcript"                                                    |
-| PDFs      | `unpdf`                                                                      | Text extraction; image-only PDFs are honestly reported as unread                                        |
+| PDFs      | `unpdf`                                                                      | Text extraction plus bounded vision OCR for supported scan images; unsupported or failed reads remain explicit                                        |
 | Model     | Codex/Claude CLIs, Anthropic SDK, or any OpenAI-compatible URL              | Provider is resolved before enqueue and stored on each Story job                                        |
 
 ## Server functions and the desk boundary
@@ -536,7 +560,8 @@ the owner under **Server → Invite an editor**.
 ## Jobs
 
 Anything that can take minutes is a row in `desk_jobs`, not a held-open request.
-Four kinds: `scan`, `draft`, `dark`, `editorial`.
+Five kinds: `scan`, `draft`, `dark`, `editorial`, `brief`. The brief job refreshes
+an investigation's read-me-first summary without holding open the request.
 
 A job is claimed with a token and heartbeats while it runs. This is not
 decoration: jobs used to run **twice**, because nothing refreshed the liveness
@@ -545,7 +570,7 @@ alongside the original.
 
 ## Evidence maturity
 
-Everything Dark Desk writes down carries a label, and the label caps the
+Extracted claims carry evidence-maturity labels, and each label caps the
 confidence **in code** — not by asking a prompt nicely:
 
 | Label       | Ceiling |
@@ -557,7 +582,7 @@ confidence **in code** — not by asking a prompt nicely:
 | HYPOTHESIS  | 0.5     |
 | UNKNOWN     | 0.3     |
 
-A claim labelled FACT with no citation is downgraded rather than trusted. Claims
+The separate Stage 1 signal confidence is always capped at 0.5, regardless of the claim-label table above. A claim labelled FACT with no citation is downgraded rather than trusted. Claims
 about the desk's own digging — "twelve hops found no contract" — are dropped
 instead of filed as findings about the world.
 
@@ -568,7 +593,7 @@ Measured over five runs each, planning on Haiku produced the same output quality
 as Opus at about a quarter of the cost. On the **Claude Dark Desk path**, Haiku
 plans and the configured Claude model synthesises. Non-Claude providers keep
 their configured model instead of receiving a Claude model name. Opinion is a
-separate two-pass path and is always Claude Opus.
+separate path offering Claude Opus or Local model.
 
 ## Tests
 
@@ -710,7 +735,14 @@ flowchart TB
     STOP -->|no| PLAN
     STOP -->|yes| PARK["Stop, say what is unread"]
     PARK --> KEEP["Keep digging"] --> PLAN
-    BRIEF --> QUEUE["Send to the queue"]
+    BRIEF --> SPEC["Black Desk signal<br/>confidence at most 0.5"]
+    SPEC --> ADV["App adversarial searches<br/>four kinds, three source tiers"]
+    ADV --> VER["Dark Signal gate answers<br/>disproof, independence, context, self-reference"]
+    VER --> DEC{"Verified and newsworthy?"}
+    DEC -->|yes| QUEUE["Send finding to queue"]
+    DEC -->|no| WATCH["Keep investigating or watch"]
+    WATCH --> TIP["Editor explicitly sends unverified tip"]
+    TIP --> QUEUE
 
     style DROP fill:#3a2a2a,color:#fff
     style QUEUE fill:#7a2d2d,color:#fff
@@ -746,10 +778,10 @@ flowchart LR
     style VOICE fill:#7a2d2d,color:#fff
 ```
 
-On Claude, the voice file is never read into the app's memory and never becomes
-inline prompt text. On Codex, the app reads the validated voice and sends it to
-OpenAI over stdin while retaining native full machine capabilities. Neither
-path places it in argv. A relative path, or any path inside the public
+The diagram shows the Claude path. Claude receives the voice file by path.
+The explicit Local model alternative reads the validated voice into a system
+message for the selected model server and uses the supplied material without
+a separate research pass. Neither path places the voice text in argv. A relative path, or any path inside the public
 repository, is rejected.
 
 ## Keeping it online
@@ -803,8 +835,7 @@ erDiagram
 
 ```mermaid
 flowchart TB
-    CALL["A model-backed desk action"] --> KIND{"Story/Scan picker?"}
-    KIND -->|no: Dark| CFG["Configured precedence<br/>LLM gateway → Anthropic key → Claude CLI → Grok"]
+    CALL["A model-backed desk action"] --> KIND{"Story/Scan/Dark picker?"}
     KIND -->|yes: Automatic| Q1{"LLM_* configured?"}
     Q1 -->|yes| OAI["Use that gateway only"]
     Q1 -->|no| READY["First ready<br/>Claude Opus → Codex Terra"]
@@ -812,8 +843,8 @@ flowchart TB
     OAI --> SAVE["Persist effective provider on job"]
     READY --> SAVE
     ONE --> SAVE
-    SAVE --> RUN["Story/Scan pass runs on that provider"]
-    RUN -->|login lapses mid-run, Automatic only| NEXT["Next ladder rung, if ready<br/>(once per job)"]
+    SAVE --> RUN["Selected run uses that provider"]
+    RUN -->|login lapses or timeout, Automatic only| NEXT["Next ladder rung, if ready<br/>(once per job)"]
     RUN -->|otherwise, or a named choice| SAME["Same provider for the rest of the run"]
 
     style SAVE fill:#1c1a17,color:#fff
@@ -876,6 +907,7 @@ comment on each, is [`.env.example`](../.env.example).
 | `scan`      | Scan page                          | minutes                                                              |
 | `draft`     | Queue or workbench                 | minutes                                                              |
 | `dark`      | Dark Desk — start, or Keep digging | minutes per round                                                    |
+| `brief`     | Refresh the investigation brief    | a model call to update the file's read-me-first summary              |
 | `editorial` | Opinion desk                       | Historical runs: 10–40 minutes; up to 45 minutes per pass by default |
 
 ## Commands

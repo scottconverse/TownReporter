@@ -4,8 +4,7 @@ import { test } from "node:test";
 // followUpDueLabel/followUpIsOverdue (src/lib/news/desk-copy.ts) -- the
 // Follow-ups object's due-date copy. Direct unit test of the real
 // functions (scripts/follow-up-item-render.test.mjs covers the same logic
-// as rendered rail-item markup, with an inlined copy since desk-copy.ts's
-// relative imports can't resolve from a data: URL module).
+// as rendered rail-item markup, importing these same real functions).
 const { followUpDueLabel, followUpIsOverdue } = await import("../src/lib/news/desk-copy.ts");
 
 const TODAY = new Date("2026-09-06T12:00:00");

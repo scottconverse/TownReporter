@@ -13,7 +13,10 @@ export function htmlToPlainText(html: string): string {
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, "\n")
     .replace(/<!--[\s\S]*?-->/g, "\n")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/?(p|div|h[1-6]|li|tr|td|th|section|article|header|footer|blockquote|pre|ul|ol|table|hr)[^>]*>/gi, "\n")
+    .replace(
+      /<\/?(p|div|h[1-6]|li|tr|td|th|section|article|header|footer|blockquote|pre|ul|ol|table|hr)[^>]*>/gi,
+      "\n",
+    )
     .replace(/<li[^>]*>/gi, "\n• ")
     .replace(/<[^>]+>/g, " ");
   s = s
@@ -39,19 +42,34 @@ export function htmlToPlainText(html: string): string {
     .trim();
 }
 
+export function captureRefusalLabel(method?: string | null): string | null {
+  if (method === "refused-too-large") return "Source too large to read";
+  if (method === "refused-content-type") return "Unsupported source file type";
+  return null;
+}
+
 export function readableCapture(input: {
   text: string;
+  extractionMethod?: string | null;
   status?: number | null;
   outcome?: string | null;
   title?: string | null;
 }): { kind: "ok" | "blocked" | "empty"; body: string; note: string | null } {
+  const refused = captureRefusalLabel(input.extractionMethod);
+  if (refused)
+    return {
+      kind: "blocked",
+      body: "",
+      note: `${refused}. Nothing from this response was treated as article text. Use Open original to inspect the source.`,
+    };
   const raw = input.text ?? "";
   const title = input.title ?? "";
   const status = input.status ?? 0;
   const outcome = input.outcome ?? "";
   const cleaned = looksLikeHtml(raw) ? htmlToPlainText(raw) : raw.trim();
   const blob = `${title}\n${cleaned.slice(0, 400)}\n${raw.slice(0, 400)}`.toLowerCase();
-  const rateLimited = status === 429 || (looksLikeHtml(raw) && /too many requests|\b429\b/.test(blob));
+  const rateLimited =
+    status === 429 || (looksLikeHtml(raw) && /too many requests|\b429\b/.test(blob));
 
   if (rateLimited) {
     return {

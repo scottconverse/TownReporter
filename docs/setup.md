@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.23](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.23).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.6.24](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.24).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
 | **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
-| **A model**                 | Story can use a configured OpenAI-compatible gateway or signed-in Codex/Claude CLIs. Scan and Dig use the configured provider below. Opinion uses signed-in Claude only.     |
+| **A model**                 | Story, Scan and Dark Desk offer per-run provider choices, including configured gateways and signed-in Codex/Claude CLIs. Opinion offers signed-in Claude or Local model.     |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 
@@ -45,7 +45,7 @@ on an editor's action:
 
 | What               | Triggered by                                      | Where it goes                                                                                                                                                                                                                                                                                    |
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Scan/Dark use the configured provider. Story Automatic uses configured `LLM_*` exclusively when present; otherwise it tries Claude Opus, then Codex Terra, before enqueue. Opinion is Claude Opus or Local model; Codex is not offered for editorials.              |
+| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Story, Scan and Dark Desk use their per-run choices. Automatic uses configured `LLM_*` exclusively when present; otherwise it tries Claude Opus, then Codex Terra, before enqueue. Opinion is Claude Opus or Local model; Codex is not offered for editorials.              |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
 | **Searches**       | The research pass, PULL, and every Dark Desk hop  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key, and there is currently no setting to keep a search on this machine — the chain is unconditional. |
 
@@ -115,7 +115,7 @@ All of these are documented in [`.env.example`](../.env.example).
 
 ### Model
 
-Configured-provider resolution for **Scan and Dark Desk**, first match wins:
+The following is the low-level configured-provider resolution. Story, Scan and Dark Desk also have per-run pickers: explicit choices override this chain, and Automatic uses the configured gateway when present, otherwise the readiness ladder described below.
 
 | #   | Set this                                      | What runs                                                                   |
 | --- | --------------------------------------------- | --------------------------------------------------------------------------- |
@@ -243,7 +243,7 @@ running on their default ports. See
 | Codex Terra | `gpt-5.6-terra`   | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token.   |
 | Codex Sol   | `gpt-5.6-sol`     | Same Codex login; frontier Story override.                                                       |
 | Claude Opus | `claude-opus-5`   | Signed-in Claude Code, or `ANTHROPIC_API_KEY`.                                                   |
-| Local model | whatever `LLM_MODEL` names | `LLM_BASE_URL` set (plus `LLM_MODEL`, and `LLM_API_KEY` if the server wants one). `TOWNREPORTER_LOCAL=0` takes it out of the pickers. |
+| Local model | whatever `LLM_MODEL` names | Discovered LM Studio/Ollama/llama.cpp model, or `LLM_BASE_URL` set (plus `LLM_MODEL`, and `LLM_API_KEY` if the server wants one). `TOWNREPORTER_LOCAL=0` takes it out of the pickers. |
 
 Compatibility overrides:
 
@@ -261,17 +261,20 @@ multi-agent capabilities remain available. TownReporter launches Codex with
 the signed-in account can reach. The newsroom prompt still travels over stdin,
 and its task remains the scope of the requested run.
 
-Opinion displays Automatic and Claude Opus, and both mean Claude Opus. Codex
+Opinion displays Automatic and Claude Opus (both use Claude Opus), plus an explicit Local model choice. Codex
 is not offered for editorials: its model declines to write a piece that takes
 a position on a local policy question, so it stays on the Story picker. An
 invalid delivery -- a refusal, an assistant note, an incomplete piece --
 creates no draft. The completed request and job store the provider that
 finished.
 
-**Scanned PDFs** (a council packet with no text layer) are read by whichever
+**Scanned PDFs** (a council packet with no text layer) can be transcribed by whichever
 model you picked, the same way a person would: the model looks directly at
-the scanned page images and transcribes them (`src/lib/news/ocr.ts`). Claude
-Opus (API or CLI) and Codex can always do this. A local model can only do it
+the extracted images and transcribes them (`src/lib/news/ocr.ts`). These are
+image indices, not verified PDF page numbers or page order. The display names
+that limitation; historical stored OCR page labels need re-ingest or operator
+review before being relied on as citations. Claude
+Opus (API or CLI) and Codex provide vision paths when their prerequisites are met; a reachable provider is not a guarantee that a particular scan can be read. A local model can only do it
 if it is a *vision* model -- pick one marked **`· vision`** in the picker (or
 in the Server page's local-model table). See
 [local-models.md](local-models.md#scanned-pdfs-and-why-they-need-a-vision-model)
@@ -292,9 +295,9 @@ Rules the app enforces, not conventions:
 - A path **inside this repository** is refused. The voice is meant to stay out
   of version control.
 - On Claude, only the path reaches the CLI; Claude Code reads the file.
-- On Codex, TownReporter reads the validated file and sends its text to OpenAI
-  over stdin for the native full-capability writing pass. It never enters argv
-  or logs.
+- For explicit Local model, TownReporter reads the validated file and sends
+  its text as a system message to the selected model server. It does not enter
+  command-line arguments. Codex is not an Opinion choice.
 - A path long enough to look like an inlined prompt is refused outright.
 
 Without the variable, the Opinion desk says so and spends nothing. Everything
@@ -315,13 +318,28 @@ voice researches before it writes. Three measured runs:
 
 `EDITORIAL_TIMEOUT_MS` sets a ceiling **per research or writing pass**, not per
 editorial, and defaults to 45 minutes. A complete provider pair can therefore
-take about 90 minutes. Automatic may run two pairs, for up to roughly three
-hours plus orchestration overhead if every pass approaches its ceiling. The
+take about 90 minutes plus orchestration overhead. Automatic currently uses
+only the Claude pair; it does not fall back to Local model. Explicit Local
+model makes one writing call from supplied material, with no separate research
+pass. The
 historical timings above are not a current maximum. The desk enqueues a job and
 returns at once; the page does not wait on the model. This is the most expensive
 workflow the newsroom makes — set a spending limit at the provider.
 
 ---
+
+### Fetch limits
+
+The shared guarded HTTP fetch reads at most **5,000,000 bytes** for web/text,
+feeds and JSON, or **25,000,000 bytes** for PDF. It checks both declared length
+and streamed bytes and cancels an oversized response. Supported types are
+HTML/XHTML, plain text, XML/RSS/Atom, JSON, SSE, CSV and PDF. Explicit unsupported
+types are rejected. A missing type remains size-bounded; octet-stream is accepted
+only for a PDF path. Redirect/error bodies are discarded while status is retained.
+
+These limits do **not** cover Chromium's renderer network resources or direct
+AI/provider transports. OCR has its own image and time limits. A refused fetch
+is unavailable evidence, not evidence that a record does not exist.
 
 ### Keeping it online
 
@@ -384,7 +402,7 @@ Background monitors tick in dev on an interval, and on demand:
 GET /api/cron/monitors
 ```
 
-If `CRON_SECRET` is set, send `Authorization: Bearer <CRON_SECRET>`. Point an external cron (or Vercel Cron) at that URL so missing packets still get noticed **and** Scan / Draft / Keep digging finish after the click even if this program went to sleep. One ping does both. This long-lived preview drains jobs on its own; a host that freezes after the request needs the ping.
+Send `Authorization: Bearer <CRON_SECRET>`. The endpoint refuses unauthenticated calls; with `CRON_SECRET` unset it returns 503 and does no work. Point an external cron (or Vercel Cron) at that URL so missing packets still get noticed **and** Scan / Draft / Keep digging finish after the click even if this program went to sleep. One ping does both. This long-lived preview drains jobs on its own; a host that freezes after the request needs the ping.
 
 ---
 
@@ -454,9 +472,10 @@ Two things stop working there, both by design:
 
 Also note there is normally no Codex or Claude Code CLI on a serverless host —
 set `ANTHROPIC_API_KEY` or the `LLM_*` trio for Scan, Dark Desk, and Story
-instead. Opinion is unavailable unless that host actually provides a signed-in
-Codex or Claude Code CLI, because its frontier voice paths use those native
-clients.
+instead. Opinion Automatic requires a signed-in Claude Code CLI and the
+configured voice file. Explicit Local model can use a reachable model server
+and that voice file, but has no separate research pass. Codex is not offered
+for Opinion. These provider options do not remove serverless job-lifetime limits.
 
 Scan, Draft, and Dark Keep digging persist a job and return. This long-lived process drains waiting jobs. A Vercel serverless invocation may freeze after the click returns — those jobs finish when the monitors ping (`GET /api/cron/monitors` with `CRON_SECRET`) hits. The paper and a typed draft still deploy without that ping; Scan / Draft / Keep digging need it on a host that sleeps.
 
@@ -521,7 +540,7 @@ If the city uses Legistar, Granicus, CivicClerk, BoardDocs, or Municode instead,
 
 ### 5. Topics
 
-`TOPICS` in `paper.ts` is the paper’s section list (council, budget, housing, …). Change it if your beat list is different. The queue’s “file a lead” dropdown reads this array.
+The built-in `TOPICS` list in `src/lib/paper.ts` still supplies the topic choices at this baseline. Editor-owned configurable sections are [planned work](../TODO.md), not yet a Paper setup control. A code change to the constant is not a substitute for that workflow.
 
 ### What city setup does **not** do
 

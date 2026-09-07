@@ -19,6 +19,9 @@ const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 
 test("package.json, APP_VERSION, CHANGELOG, and doc headers name one version", () => {
   const pkg = JSON.parse(read("package.json")).version;
+  const lock = JSON.parse(read("package-lock.json"));
+  assert.equal(lock.version, pkg, "package-lock.json root version");
+  assert.equal(lock.packages[""].version, pkg, "package-lock.json package entry version");
   const claims = [
     ["src/lib/version.ts", /APP_VERSION = "([^"]+)"/],
     ["CHANGELOG.md", /Current release: \*\*([^*]+)\*\*/],
@@ -26,6 +29,8 @@ test("package.json, APP_VERSION, CHANGELOG, and doc headers name one version", (
     ["docs/setup.md", /Current release: \[([^\]]+)\]/],
     ["docs/editor.md", /Current release: \[([^\]]+)\]/],
     ["docs/manual.md", /\*\*Version ([0-9.]+) ·/],
+    ["SELF-HOSTING.md", /Repository documentation version: \*\*([0-9.]+)\*\*/],
+    ["docs/index.html", /Repository release: <b>([0-9.]+)<\/b>/],
   ];
   const offenders = [];
   for (const [file, re] of claims) {

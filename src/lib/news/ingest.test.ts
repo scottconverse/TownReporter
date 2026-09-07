@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   describeExtractionMethod,
+  chunksFromEvidence,
   discoverDocLinks,
   discoverStoryLinks,
   encodeOcrExtractionMethod,
@@ -23,6 +24,34 @@ describe("extractPdfText", () => {
 });
 
 describe("extractPdfBetter", () => {
+  it("preserves the original Uint8Array for OCR after native parsing fails", async () => {
+    const input = new Uint8Array([...Buffer.from("%PDF-invalid scanned image"), 1, 2, 3]);
+    const expected = Uint8Array.from(input);
+    let received = 0;
+    await extractPdfBetter(input, async (bytes) => {
+      received = bytes.byteLength;
+      assert.deepEqual(bytes, expected);
+      return {
+        text: "A sufficiently long OCR transcription from the preserved original scan.",
+        pages: [],
+      };
+    });
+    assert.equal(received, expected.byteLength);
+    assert.deepEqual(input, expected);
+  });
+
+  it("does not invent a page citation for regex-only PDF text", async () => {
+    const extracted = await extractPdfBetter(
+      Buffer.from(
+        "%PDF-invalid\nBT (A complete unpaged council contract record with enough text for extraction.) Tj ET",
+      ),
+      null,
+    );
+    assert.equal(extracted.method, "tj-regex");
+    assert.equal(chunksFromEvidence(extracted.text, extracted.pages)[0]?.page_number, null);
+    assert.doesNotMatch(chunksFromEvidence(extracted.text, extracted.pages)[0]!.locator, /page:/);
+  });
+
   it("prefers a real parser, then Tj regex, and flags scans that need OCR", async () => {
     const civic = Buffer.from(
       "%PDF-1.4\nBT /F1 12 Tf (City Council voted 5-2 on the NextLight rate) Tj ET\n",
@@ -41,7 +70,9 @@ describe("extractPdfBetter", () => {
   it("runs injectable OCR only when native extraction is unusable", async () => {
     const scanned = await extractPdfBetter(new Uint8Array([0, 1, 2, 3, 4]), async () => ({
       text: "OCR recovered the scanned council packet award",
-      pages: [{ page: 1, text: "OCR recovered the scanned council packet award", confidence: 0.88 }],
+      pages: [
+        { page: 1, text: "OCR recovered the scanned council packet award", confidence: 0.88 },
+      ],
     }));
     assert.equal(scanned.method, "ocr");
     assert.equal(scanned.needsOcr, false);
@@ -66,7 +97,8 @@ describe("extractPdfBetter", () => {
     const scanned = await extractPdfBetter(new Uint8Array([0, 1, 2, 3, 4]), async () => ({
       text: "",
       pages: [],
-      reason: "the chosen local model cannot read images — pick a vision model (marked · vision in the picker).",
+      reason:
+        "the chosen local model cannot read images — pick a vision model (marked · vision in the picker).",
     }));
     assert.equal(scanned.needsOcr, true);
     assert.equal(scanned.method, "none");
@@ -78,13 +110,19 @@ describe("encodeOcrExtractionMethod / describeExtractionMethod", () => {
   it("round-trips a stored OCR extraction method into the editor-facing sentence", () => {
     const stored = encodeOcrExtractionMethod("Claude", 3, 5);
     assert.equal(stored, "ocr:Claude:3/5");
-    assert.equal(describeExtractionMethod(stored), "Read by OCR · Claude · 3 of 5 pages");
+    assert.equal(
+      describeExtractionMethod(stored),
+      "Read by OCR · Claude · 3 of 5 extracted images · PDF page order not established",
+    );
   });
 
   it("defaults a missing provider/page count without throwing", () => {
     const stored = encodeOcrExtractionMethod(undefined, undefined, undefined);
     assert.equal(stored, "ocr:unknown:0/0");
-    assert.equal(describeExtractionMethod(stored), "Read by OCR · unknown · 0 of 0 pages");
+    assert.equal(
+      describeExtractionMethod(stored),
+      "Read by OCR · unknown · 0 of 0 extracted images · PDF page order not established",
+    );
   });
 
   it("passes a non-OCR method through unchanged", () => {
@@ -121,7 +159,10 @@ describe("discoverDocLinks", () => {
     assert.ok(found.includes("https://www.longmontcolorado.gov/government/agendas/packet.pdf"));
     assert.ok(found.includes("https://www.longmontcolorado.gov/minutes.html"));
     assert.ok(found.includes("https://civicclerk.example/agenda.pdf"));
-    assert.equal(found.some((u) => u.startsWith("javascript:")), false);
+    assert.equal(
+      found.some((u) => u.startsWith("javascript:")),
+      false,
+    );
   });
 });
 
@@ -145,7 +186,10 @@ describe("discoverStoryLinks", () => {
       found.some((u) => u === "https://www.longmontleader.com/local-news"),
       false,
     );
-    assert.equal(found.some((u) => u.includes("timescall.com")), false);
+    assert.equal(
+      found.some((u) => u.includes("timescall.com")),
+      false,
+    );
   });
 });
 

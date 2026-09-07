@@ -26,7 +26,12 @@ describe("readableCapture", () => {
 
   it("strips leftover HTML on an otherwise good capture", () => {
     const html = `<article><h1>BVSD closure</h1><p>The school board meets Sept. 22 on the closure recommendations.</p></article>`;
-    const r = readableCapture({ text: html, status: 200, outcome: "fetched", title: "BVSD closure" });
+    const r = readableCapture({
+      text: html,
+      status: 200,
+      outcome: "fetched",
+      title: "BVSD closure",
+    });
     assert.equal(r.kind, "ok");
     assert.match(r.body, /school board meets Sept\. 22/);
     assert.doesNotMatch(r.body, /<article/);
@@ -52,18 +57,47 @@ describe("captureBatchStats (Dark Desk F6 — real-vs-blocked counts)", () => {
     const stats = captureBatchStats([
       { text: "<html><body>Too Many Requests</body></html>", status: 429 },
       { text: "<html><body>Too Many Requests</body></html>", status: 429 },
-      { text: "Real article text goes here, long enough to pass.", status: 200, outcome: "fetched" },
+      {
+        text: "Real article text goes here, long enough to pass.",
+        status: 200,
+        outcome: "fetched",
+      },
     ]);
     assert.equal(stats.dominantReason, "rate-limited");
   });
 
   it("returns an all-ok batch with zero blocked and no dominant reason", () => {
     const stats = captureBatchStats([
-      { text: "First real article, plenty of readable text here.", status: 200, outcome: "fetched" },
-      { text: "Second real article, also plenty of readable text.", status: 200, outcome: "fetched" },
+      {
+        text: "First real article, plenty of readable text here.",
+        status: 200,
+        outcome: "fetched",
+      },
+      {
+        text: "Second real article, also plenty of readable text.",
+        status: 200,
+        outcome: "fetched",
+      },
     ]);
     assert.equal(stats.blocked, 0);
     assert.equal(stats.blockedRatio, 0);
     assert.equal(stats.dominantReason, null);
   });
+});
+
+it("explains safe fetch refusals even when HTTP status is 200", () => {
+  for (const [method, message] of [
+    ["refused-too-large", "too large"],
+    ["refused-content-type", "file type"],
+  ]) {
+    const result = readableCapture({
+      text: "PRIVATE_RESPONSE_DO_NOT_DISPLAY",
+      status: 200,
+      outcome: "fetch-failed",
+      extractionMethod: method,
+    } as Parameters<typeof readableCapture>[0]);
+    assert.match(result.note ?? "", new RegExp(message, "i"));
+    assert.equal(result.body, "");
+    assert.doesNotMatch(result.note ?? "", /200|PRIVATE_RESPONSE/);
+  }
 });
