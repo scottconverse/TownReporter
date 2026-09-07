@@ -30,8 +30,9 @@ network (`0.0.0.0:8080`) for phone/LAN testing.
 The **built** server (`npm start`, `.output/server/index.mjs`) is the one that
 honours `PORT` (default `3000`) and `HOST` (default every interface — set
 `HOST=127.0.0.1` when a tunnel or reverse proxy fronts it).
-Only IPv4 listeners on the paper's port count; another program's IPv6-only
-listener does not block a start.
+The legacy operator scripts identify the paper by its IPv4 listener. The Windows
+package also refuses occupied ports and checks that Windows permits an exclusive
+loopback bind before starting.
 
 ---
 
@@ -345,7 +346,13 @@ is unavailable evidence, not evidence that a record does not exist.
 
 ### Keeping it online
 
-The `ops/` directory holds the scripts the working edition runs on Windows:
+This section is for **separately configured legacy installations**, including
+Halo. Before using these scripts, the local operator must establish the
+[legacy ownership configuration](../SELF-HOSTING.md). The Windows package uses
+its own launchers and health/restart controls; it installs no scheduled tasks,
+watchdog or tunnel and refuses these legacy operations.
+
+The `ops/` directory holds the legacy scripts:
 
 | Script                   | What it does                                                                                                          |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
@@ -355,7 +362,7 @@ The `ops/` directory holds the scripts the working edition runs on Windows:
 | `ops/restart-tunnel.ps1` | Stop and start the tunnel                                                                                             |
 | `ops/rotate-logs.ps1`    | Keep `logs/` bounded                                                                                                  |
 
-Register the watchdog and the two restarts as **scheduled tasks**, not as child
+For that legacy installation, register the watchdog and the two restarts as **scheduled tasks**, not as child
 processes of the app. Two reasons learned the hard way: a process cannot restart
 itself, and a tunnel restart cannot deliver its own result over the tunnel it
 just killed. The Server page at `/desk/ops` triggers the tasks and reads the
