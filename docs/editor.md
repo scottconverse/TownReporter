@@ -30,9 +30,20 @@ establish PDF page order: new OCR records identify images, not PDF pages.
 Historical stored OCR page labels require re-ingest or operator review if cited. Unsupported fax-style scans, failed
 transcription and partial reads are reported rather than treated as complete.
 
-Configurable sections, manual investigative page watching and legal removal
-are still open at this documentation baseline; normal Sources and Delete do
-not implement them. [The canonical queue](../TODO.md) records current work.
+Configurable sections are implemented in this candidate (see Newspaper sections below).
+Manual investigative page watching and legal removal remain separate open work; normal Sources and Delete do not implement them. [The canonical queue](../TODO.md) records current work.
+
+## Newspaper sections
+
+The owner manages sections in **Server → Newspaper sections**, below Paper setup. Add a name and permanent key, rename a display label, move sections up or down, or hide them from the newspaper's section navigation. Keys cannot change after saving: existing story and section links stay valid. Hiding does not delete stories or prevent filing.
+
+For reporting sections, enter a reporting brief and scan instructions, then select accepted Sources. **Scan → Scan scope** offers General or a section. A section run uses only its assigned accepted sources and saves the guidance and source IDs with the queued run. Later configuration edits do not change that run; a source dropped before execution is excluded. A section without accepted sources cannot start. General retains all accepted sources.
+
+**Preview changes** shows proposed navigation and retirement impact without saving. **Cancel changes** discards the proposal. **Apply changes** saves, confirms the result and links to the newspaper. If another owner tab saved first, the stale save is refused and your edits remain visible; **Reload saved configuration** explicitly replaces them with the saved version.
+
+Retire a section only into an active reporting section. Review the count of affected leads, drafts and articles, then use **Confirm retirement and apply**. Their section changes; their identities, article URLs and text remain. Old section links follow the replacement, including later retirements. Opinion and About remain reserved page routes: they cannot retire and do not run section scans. Their section-list labels and visibility do not remove the permanent page links.
+
+Editors can use configured sections when filing and scanning; only the owner changes their configuration. Existing legacy topic keys are preserved during migration. These changes require a normal release and local-operator promotion; this repository does not establish the deployed version.
 
 ## Two rooms
 
