@@ -4,6 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { getSql, getPglite } from "../db.ts";
 import { LEGAL_SCHEMA, ensureLegalSchema } from "./legal-removal-schema.ts";
 import { previewLegalRemoval, removeLegally, getLegalCase, readLegalCopy, expireLegalCopies, recordBackupAction } from "./legal-removal-store.ts";
+import { tickAllDueMonitors } from "./monitors-cron.ts";
 import { fileEditorial } from "./editorial.server.ts";
 import type { LegalSelection } from "./legal-removal-types.ts";
 
@@ -195,4 +196,22 @@ it('an explicitly selected historical draft snapshot removes its detached reques
   await removeLegally(f.user,{selection,fingerprint:p.fingerprint,policy:'destroy',caseRef:'HISTORICAL-DRAFT'});
   assert.deepEqual(await f.sql`select id from editorial_requests where id=${request.id}`,[]);
   await assert.rejects(f.sql`insert into drafts(id,user_id,newsroom_id,headline,body,topic) values(876543,${f.user},${f.room},'restored',${f.secret},'opinion')`,/legal removal/);
+});
+
+it('the actual scheduled tick expires retained copies and reports a failed purge honestly',async()=>{
+  const f=await fixture();const p=await previewLegalRemoval(f.user,f.selection);
+  const {caseId}=await removeLegally(f.user,{selection:f.selection,fingerprint:p.fingerprint,policy:'retain',caseRef:'SCHEDULED'});
+  await f.sql`update legal_removals set expires_at=now()-interval '1 second' where id=${caseId}`;
+  // No model work or live transport is needed for retention. Dispose fixture jobs.
+  await f.sql`update desk_jobs set status='failed' where status in ('queued','running')`;
+  await f.sql.query("create function test_fail_legal_purge() returns trigger language plpgsql as $$ begin raise exception 'Injected purge failure'; end $$");
+  await f.sql.query('create trigger test_fail_legal_purge before delete on legal_removal_copies for each row execute function test_fail_legal_purge()');
+  try {
+    const failed=await tickAllDueMonitors({fetch:async()=>{throw new Error('No network is allowed');}});
+    assert.equal(failed.legalPurged,0);assert.match(failed.legalPurgeError??'',/cleanup failed/);
+    await assert.rejects(readLegalCopy(f.user,caseId),/past its retention deadline/);
+  } finally {await f.sql.query('drop trigger test_fail_legal_purge on legal_removal_copies');}
+  const done=await tickAllDueMonitors({fetch:async()=>{throw new Error('No network is allowed');}});
+  assert.equal(done.legalPurged,1);assert.equal(done.legalPurgeError,null);
+  assert.deepEqual(await f.sql`select case_id from legal_removal_copies where case_id=${caseId}`,[]);
 });

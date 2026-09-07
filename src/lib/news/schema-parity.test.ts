@@ -144,9 +144,11 @@ if (dbProbe.ok) {
     // sources(id) stand-in: verify the snapshot column and all filing triggers.
     const sectionSql = await db.getSql();
     await sectionSql.query(await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8"));
-    for (const table of ["sources", "leads", "drafts", "articles", "scan_runs"]) {
+    for (const table of ["sources", "snapshots", "leads", "drafts", "articles", "scan_runs", "beat_memory", "corrections"]) {
       await sectionSql.query(`alter table ${table} add column if not exists newsroom_id integer not null default 1`);
     }
+    await sectionSql.query('alter table snapshots add column if not exists url text');
+    await sectionSql.query(await readFile(new URL("../../../migrations/0016_trash.sql",import.meta.url),"utf8"));
     await sections.ensureSectionsSchema();
     await pageWatch.ensurePageWatchSchema();
     const sectionTriggers = await sectionSql<{ tgname: string }>`
@@ -179,6 +181,22 @@ if (dbProbe.ok) {
     // each creates the table.
     await ops.assertRate("schema-parity-smoke-user", "scan");
     await ops.audit("schema-parity-smoke-user", "smoke", "schema-parity test");
+    const legalSchema=await import("./legal-removal-schema.ts");
+    const legal=await import("./legal-removal-store.ts");
+    await legalSchema.ensureLegalSchema();
+    await sectionSql`insert into newsroom_members(user_id,newsroom_id,role) values ('pg-legal-owner',8810,'owner')`;
+    const [legalArticle]=await sectionSql<{id:number}>`insert into articles(user_id,newsroom_id,slug,headline,body,topic)
+      values ('pg-legal-owner',8810,'pg-legal-proof','Private test title','Private test body','council') returning id`;
+    const legalSelection={articleIds:[legalArticle.id],draftIds:[],memoryIds:[],auditIds:[],trashIds:[],reviewedLegacy:true,reviewedEvidence:true};
+    const legalPreview=await legal.previewLegalRemoval('pg-legal-owner',legalSelection);
+    const removal=await legal.removeLegally('pg-legal-owner',{selection:legalSelection,fingerprint:legalPreview.fingerprint,policy:'destroy',caseRef:'PG-LEGAL-PROOF'});
+    assert.deepEqual(await sectionSql`select case_id from legal_removal_copies where case_id=${removal.caseId}`,[]);
+    await assert.rejects(sectionSql`insert into articles(user_id,newsroom_id,slug,headline,body,topic)
+      values ('pg-legal-owner',8810,'pg-legal-proof','Stale output','Stale text','council')`,/legal removal/);
+    await sectionSql`insert into articles(user_id,newsroom_id,slug,headline,body,topic)
+      values ('pg-legal-other',8811,'pg-legal-proof','Independent paper','Independent text','council')`;
+    await assert.rejects(sectionSql`insert into artifact_versions(user_id,newsroom_id,url,content_hash,full_text)
+      values ('pg-legal-owner',8810,'/articles/pg-legal-proof','stale-proof','Stale text')`,/legal removal/);
   }, 60_000);
 
   after(async () => {
