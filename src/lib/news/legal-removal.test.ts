@@ -559,6 +559,7 @@ it("own article query, fragment, host case and trailing-slash variants cannot es
     for (const variant of [
       base + "?view=reader",
       base + "#body",
+      base.replace("legal-", "%6cegal%2D"),
       base + "/",
       base.replace("https://paper.example", "HTTPS://PAPER.EXAMPLE:443"),
     ]) {
@@ -682,5 +683,53 @@ it("missing critical retention columns fail visibly without deleting application
       await ensureLegalSchema();
     }
     assert.equal((await f.sql`select id from articles where id=${f.article.id}`).length, 1);
+  }
+});
+
+it("own-article source and monitor descriptors are explicit unresolved capture scope", async () => {
+  const f = await fixture();
+  const url = "/articles/legal-" + f.room;
+  await f.sql`insert into sources(user_id,newsroom_id,url,title) values(${f.user},${f.room},${url},${f.secret})`;
+  await f.sql`insert into source_monitors(user_id,newsroom_id,url,title,enabled) values(${f.user},${f.room},${url},${f.secret},false)`;
+  await f.sql`insert into recurring_baselines(user_id,newsroom_id,key,kind,typical_url,typical_title) values(${f.user},${f.room},'own-story','article',${url},${f.secret})`;
+  const p = await previewLegalRemoval(f.user, f.selection);
+  assert.deepEqual(p.capturedCopies.map((r) => r.table).sort(), [
+    "recurring_baselines",
+    "source_monitors",
+    "sources",
+  ]);
+  await assert.rejects(
+    removeLegally(f.user, {
+      selection: f.selection,
+      fingerprint: p.fingerprint,
+      policy: "destroy",
+      caseRef: "DESCRIPTORS",
+    }),
+    /captured copies/,
+  );
+});
+it("encoded URL regression is sensitive to removing path decoding", async () => {
+  const f = await fixture();
+  const p = await previewLegalRemoval(f.user, f.selection);
+  await removeLegally(f.user, {
+    selection: f.selection,
+    fingerprint: p.fingerprint,
+    policy: "destroy",
+    caseRef: "ENCODED-CONTROL",
+  });
+  const corrected = LEGAL_SCHEMA.find((s) =>
+    s.startsWith("create or replace function legal_article_url_identity"),
+  )!;
+  await f.sql.query(
+    corrected
+      .replace("legal_decode_url_path(clean)", "clean")
+      .replace("legal_decode_url_path(parts[3])", "parts[3]"),
+  );
+  try {
+    const inserted =
+      await f.sql`insert into artifact_versions(user_id,newsroom_id,url,content_hash,full_text) values(${f.user},${f.room},${"/articles/%6cegal%2D" + f.room},'old-identity',${f.secret}) returning id`;
+    assert.equal(inserted.length, 1, "the pre-fix identity permits the encoded alias");
+  } finally {
+    await f.sql.query(corrected);
   }
 });

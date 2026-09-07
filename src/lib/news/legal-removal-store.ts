@@ -327,6 +327,13 @@ async function impact(sql: Sql, room: number, input: LegalSelection, lockParents
   const captureFingerprints: Row[] = [];
   for (const [table, condition] of [
     ["artifacts", "legal_article_url_identity(t.url)=any($2::text[])"],
+    ["sources", "legal_article_url_identity(t.url)=any($2::text[])"],
+    ["source_monitors", "legal_article_url_identity(t.url)=any($2::text[])"],
+    ["recurring_baselines", "legal_article_url_identity(t.typical_url)=any($2::text[])"],
+    [
+      "manual_watch_checks",
+      "t.monitor_id in (select id from source_monitors where newsroom_id=$1 and legal_article_url_identity(url)=any($2::text[])) or t.capture_event_id in (select id from capture_events where newsroom_id=$1 and legal_article_url_identity(source_url)=any($2::text[])) or t.previous_version_id in (select id from artifact_versions where newsroom_id=$1 and legal_article_url_identity(url)=any($2::text[]))",
+    ],
     ["artifact_versions", "legal_article_url_identity(t.url)=any($2::text[])"],
     [
       "artifact_chunks",

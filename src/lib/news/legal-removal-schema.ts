@@ -21,6 +21,10 @@ const GUARDED_TABLES = [
   "snapshots",
   "search_log",
   "frontier_items",
+  "sources",
+  "source_monitors",
+  "recurring_baselines",
+  "manual_watch_checks",
 ];
 export const LEGAL_SCHEMA = [
   `alter table articles add column if not exists origin_draft_id integer`,
@@ -44,17 +48,31 @@ export const LEGAL_SCHEMA = [
     actor text not null, action text not null, created_at timestamptz not null default now())`,
   `create table if not exists legal_removal_backups(id serial primary key, case_id text not null references legal_removals(id),
     identifier text not null, confirmed_by text, confirmed_at timestamptz, created_at timestamptz not null default now())`,
+  `create or replace function legal_decode_url_path(value text) returns text language plpgsql immutable as $$
+   declare result bytea := ''::bytea; at integer := 1; token text;
+   begin
+    while at<=length(value) loop
+      token:=substr(value,at,1);
+      if token='%' then
+        token:=substr(value,at+1,2);
+        if length(token)<>2 or token !~ '^[0-9A-Fa-f]{2}$' then return null; end if;
+        result:=result||decode(token,'hex'); at:=at+3;
+      else result:=result||convert_to(token,'UTF8'); at:=at+1; end if;
+    end loop;
+    return convert_from(result,'UTF8');
+   exception when character_not_in_repertoire or untranslatable_character then return null;
+   end $$`,
   `create or replace function legal_article_url_identity(value text) returns text language plpgsql immutable as $$
    declare clean text; parts text[]; authority text;
    begin
     clean:=rtrim(regexp_replace(btrim(value),'[?#].*$',''),'/');
-    if clean ~ '^/articles/[^/]+$' then return clean; end if;
+    if clean ~ '^/articles/[^/]+$' then return legal_decode_url_path(clean); end if;
     parts:=regexp_match(clean,'^(https?)://([^/]+)(/articles/[^/]+)$','i');
     if parts is null then return null; end if;
     authority:=lower(parts[2]);
     if lower(parts[1])='https' then authority:=regexp_replace(authority,':443$','');
     else authority:=regexp_replace(authority,':80$',''); end if;
-    return lower(parts[1])||'://'||authority||parts[3];
+    return lower(parts[1])||'://'||authority||legal_decode_url_path(parts[3]);
    end $$`,
   `create or replace function legal_search_article_urls(value jsonb) returns setof text language plpgsql immutable as $$
    declare field text; payload jsonb;
@@ -87,11 +105,13 @@ export const LEGAL_SCHEMA = [
     if TG_TABLE_NAME='editorial_requests' and row_json->>'source_kind'='article'
       and exists(select 1 from legal_removal_slugs where newsroom_id=room and slug_hash=md5(row_json->>'source_ref'))
     then raise exception 'This editorial source was legally removed. Choose reviewed sources.'; end if;
-    if TG_TABLE_NAME in ('artifacts','artifact_versions','artifact_chunks','artifact_blobs','capture_events','snapshots')
+    if TG_TABLE_NAME in ('artifacts','artifact_versions','artifact_chunks','artifact_blobs','capture_events','snapshots','sources','source_monitors','recurring_baselines','manual_watch_checks')
       and exists(select 1 from legal_removal_urls u where u.newsroom_id=room and (
-        u.url_hash=md5(legal_article_url_identity(row_json->>'url')) or u.url_hash=md5(legal_article_url_identity(row_json->>'original_url')) or u.url_hash=md5(legal_article_url_identity(row_json->>'source_url'))
+        u.url_hash=md5(legal_article_url_identity(row_json->>'url')) or u.url_hash=md5(legal_article_url_identity(row_json->>'original_url')) or u.url_hash=md5(legal_article_url_identity(row_json->>'source_url')) or u.url_hash=md5(legal_article_url_identity(row_json->>'typical_url'))
         or exists(select 1 from artifact_versions v where v.newsroom_id=room and v.id=(row_json->>'version_id')::integer and md5(legal_article_url_identity(v.url))=u.url_hash)
-        or exists(select 1 from sources s where s.newsroom_id=room and s.id=(row_json->>'source_id')::integer and md5(legal_article_url_identity(s.url))=u.url_hash)))
+        or exists(select 1 from sources s where s.newsroom_id=room and s.id=(row_json->>'source_id')::integer and md5(legal_article_url_identity(s.url))=u.url_hash)
+        or exists(select 1 from source_monitors m where m.newsroom_id=room and m.id=(row_json->>'monitor_id')::integer and md5(legal_article_url_identity(m.url))=u.url_hash)
+        or exists(select 1 from capture_events e where e.newsroom_id=room and e.id=(row_json->>'capture_event_id')::integer and md5(legal_article_url_identity(e.source_url))=u.url_hash)))
     then raise exception 'This captured article address is covered by a legal removal.'; end if;
     if TG_TABLE_NAME='search_log' and exists(select 1 from legal_search_article_urls(row_json) hit
       join legal_removal_urls u on u.newsroom_id=room and u.url_hash=md5(hit))
