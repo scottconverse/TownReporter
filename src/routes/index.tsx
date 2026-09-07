@@ -11,7 +11,7 @@ import {
   listPublishedByTopic,
   searchPublished,
 } from "@/lib/news/public";
-import { TOPICS } from "@/lib/paper";
+import { usePublicSections } from "@/lib/use-sections";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context";
 
 type Search = { topic?: string; q?: string };
@@ -31,6 +31,8 @@ export const Route = createFileRoute("/")({
 });
 
 function Home() {
+  const {sections}=usePublicSections();
+  const TOPICS=sections.filter(s=>s.visible).map(s=>s.key);
   const PAPER = usePaper();
   const { formatShortDate } = usePaperDateFormatters();
   const { topic, q } = Route.useSearch();
@@ -169,7 +171,7 @@ function Home() {
         <div className={dimming ? "is-fetching" : undefined}>
           <article className="stagger-in mt-6 border-b border-ink pb-10">
             <p className="text-[11px] tracking-[0.16em] text-rust uppercase">
-              {featured.topic} · {formatShortDate(featured.published_at)}
+              {sections.find(s=>s.key===featured.topic)?.name??featured.topic} · {formatShortDate(featured.published_at)}
             </p>
             <h2 className="mt-2 font-display text-3xl font-semibold leading-tight sm:text-5xl">
               <Link
@@ -207,7 +209,7 @@ function Home() {
               {rest.map((a) => (
                 <article key={a.id} className="border-t border-rule pt-4">
                   <p className="text-[11px] tracking-[0.16em] text-muted uppercase">
-                    {a.topic} · {formatShortDate(a.published_at)}
+                    {sections.find(s=>s.key===a.topic)?.name??a.topic} · {formatShortDate(a.published_at)}
                   </p>
                   <h3 className="mt-1 font-display text-2xl font-semibold leading-snug">
                     <Link

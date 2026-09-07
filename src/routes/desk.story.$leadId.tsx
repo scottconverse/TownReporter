@@ -18,7 +18,8 @@ import {
 } from "@/lib/news/desk";
 import { FollowUpItem } from "@/components/follow-up-item";
 import { uncreditedOutlets } from "@/lib/news/report";
-import { parseUrlList, TOPICS } from "@/lib/paper";
+import { parseUrlList } from "@/lib/paper";
+import { useEditorSections } from "@/lib/use-sections";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import {
   applyTodoPatch,
@@ -64,6 +65,8 @@ function answered<T>(res: T | undefined | null): res is T {
 }
 
 function StoryPage() {
+  const { sections } = useEditorSections();
+  const TOPICS = sections.map(s=>s.key);
   const { formatShortDate } = usePaperDateFormatters();
   const { leadId } = Route.useParams();
   const id = Number(leadId);
@@ -617,7 +620,7 @@ function StoryPage() {
                 <select value={topic} onChange={(e) => setTopic(e.target.value)} disabled={onPaper}>
                   {TOPICS.filter((t) => t !== "about").map((t) => (
                     <option key={t} value={t}>
-                      {t}
+                      {sections.find(s=>s.key===t)?.name??t}
                     </option>
                   ))}
                   {topic && !TOPICS.includes(topic as (typeof TOPICS)[number]) ? (
