@@ -85,6 +85,17 @@ jobs:
           & $config.NodeExe "$env:INSTALL_APP_ROOT\scripts\windows-install-smoke.mjs" *> "$env:INSTALL_EVIDENCE_DIR\smoke.log"
           if ($LASTEXITCODE -ne 0) { Get-Content "$env:INSTALL_EVIDENCE_DIR\smoke.log"; throw 'Packaged installation acceptance failed.' }
           Get-Content "$env:INSTALL_EVIDENCE_DIR\receipt.json"
+      - name: Gate native ownership, credential ACL and lifecycle contracts
+        shell: pwsh
+        run: |
+          $config = Get-Content -LiteralPath "$env:INSTALL_DATA_ROOT\config.json" -Raw | ConvertFrom-Json
+          $env:DATABASE_URL = ''
+          Push-Location -LiteralPath $env:INSTALL_APP_ROOT
+          try {
+            & $config.NodeExe --test scripts/windows-installer.test.mjs *> "$env:INSTALL_EVIDENCE_DIR\native-contracts.log"
+            if ($LASTEXITCODE -ne 0) { Get-Content "$env:INSTALL_EVIDENCE_DIR\native-contracts.log"; throw 'Native installation contracts failed.' }
+            Get-Content "$env:INSTALL_EVIDENCE_DIR\native-contracts.log"
+          } finally { Pop-Location }
       - name: Stop the owned installation and record elapsed time
         if: always()
         shell: pwsh
