@@ -150,7 +150,7 @@ Current development status and remaining features: [TODO.md](TODO.md). Remote ta
 - **Dark Desk has two dials.** _Dig_ — how far it chases. _Nerve_ — how speculative it may be. The panel says in plain words what the current setting will do.
 - **Dark Desk's planner had never run.** Its budget was 45 seconds against a call that needs 150, and every failure fell back to keyword matching in silence. The database held zero entities, claims or hypotheses.
 - **Confidence is capped by the label in code**, not requested in a prompt, and a FACT with no citation is downgraded.
-- **r/longmont is a tip line** — scored, paced, and filed as unverified tips that can never be mistaken for reporting.
+- **Reddit is a tip line** — one unambiguous accepted subreddit source enables the paced check. Posts are filed as unverified tips, never as reporting; a new town does not silently inherit r/longmont.
 - **Search works.** Exa runs first, and a PULL no longer answers a Longmont question with three California school-district PDFs.
 - **Nothing scrolls sideways.** The navigation rails wrap.
 

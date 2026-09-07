@@ -14,6 +14,7 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { ListSkeleton } from "@/components/states";
 import { getOpsHealth, runOpsAction } from "@/lib/ops/dashboard";
 import { OPS_ACTIONS, type OpsActionId } from "@/lib/ops/actions";
+import { installAction } from "@/lib/ops/install-display";
 import { formatAgo, overallState, type HealthState } from "@/lib/ops/health";
 import { TRASH_DAYS, listTrash, purgeTrashItem, restoreTrashItem } from "@/lib/news/trash";
 import { inviteEditor, myDesk } from "@/lib/news/claim";
@@ -201,7 +202,8 @@ function OpsPage() {
           sub="Each one says what it does before it does it. The two that interrupt the paper ask twice."
         />
         <ul className="mt-4 space-y-3">
-          {OPS_ACTIONS.map((a) => {
+          {OPS_ACTIONS.map((rawAction) => {
+            const a = installAction(rawAction, Boolean(health.data?.managedInstall));
             const unavailable = health.data?.unavailableActions?.[a.id];
             const isConfirming = confirming === a.id;
             const isRunning = running === a.id;
@@ -278,9 +280,9 @@ function OpsPage() {
       </section>
 
       <p className="mt-12 max-w-2xl text-sm text-muted">
-        This page runs inside the paper, so it cannot report on itself when the paper is down. That
-        is what the watchdog is for: it runs from Windows every five minutes and restarts whatever
-        has stopped. Its log is above.
+        {health.data?.managedInstall
+          ? "This page runs inside the paper. If the server is down, use Start TownReporter.cmd and the logs in your private data folder. This local installation has no automatic Windows watchdog or startup task."
+          : "This page runs inside the paper, so it cannot report when the server is down. Use your installation's external controls. Automatic recovery is available only when its operator has separately configured and verified it."}
       </p>
 
       <PaperSetup />

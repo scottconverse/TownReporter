@@ -1,3 +1,4 @@
+import { isLongmont, LONGMONT_PLACE, type NewsroomPlace } from "./dark-place.ts";
 /**
  * How hard the dark desk digs, and how far it is willing to lean.
  *
@@ -145,7 +146,17 @@ export const SCOPE_LABEL: Record<DarkScope, string> = {
 };
 
 /** The jurisdictions a run may follow a trail into. */
-export function jurisdictionsFor(scope: DarkScope): string[] {
+export function scopeLabelsFor(place: NewsroomPlace): Record<DarkScope,string> {
+ if(isLongmont(place)) return SCOPE_LABEL;
+ return {city:`${place.city} only`,county:place.county ? `${place.city} and ${place.county} County` : `${place.city} — county not configured`,region:`${place.city} and regional agencies in ${place.state}`,adjacent:`Neighbouring jurisdictions affecting ${place.city} residents`};
+}
+export function jurisdictionsFor(scope: DarkScope, place: NewsroomPlace = LONGMONT_PLACE): string[] {
+ if(!isLongmont(place)) {
+  const city=[`City of ${place.city}`];
+  const county=place.county ? [...city,`${place.county} County`] : city;
+  const region=[...county,`State of ${place.state} agencies with a local effect`];
+  return {city,county,region,adjacent:[...region,`Neighbouring jurisdictions and special districts serving ${place.city} residents; establish the actual jurisdiction from evidence`]}[scope];
+ }
   const city = ["City of Longmont"];
   const county = [...city, "Boulder County"];
   const region = [...county, "Weld County", "Larimer County", "State of Colorado agencies"];
@@ -195,7 +206,7 @@ export const PRESETS: { id: string; name: string; blurb: string; dials: DarkDial
  * Written out rather than shown as two numbers, because "dig 7, nerve 8" tells
  * nobody what is about to happen to their evening.
  */
-export function describeDials(dials: DarkDials): string {
+export function describeDials(dials: DarkDials, place: NewsroomPlace = LONGMONT_PLACE): string {
   const d = clampDials(dials);
   const b = budgetFor(d);
   const s = stanceFor(d);
@@ -215,7 +226,7 @@ export function describeDials(dials: DarkDials): string {
   const voice = s.provisionalNarrative
     ? "It will say what it thinks is happening, marked unverified, with what would kill the theory."
     : "It asks questions rather than proposing answers.";
-  return `${depth} ${lean} ${voice} Looking at: ${SCOPE_LABEL[d.scope]}.`;
+  return `${depth} ${lean} ${voice} Looking at: ${scopeLabelsFor(place)[d.scope]}.`;
 }
 
 /**

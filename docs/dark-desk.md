@@ -1,5 +1,7 @@
 # The Dark Desk
 
+Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
+
 The Dark Desk is the part of TownReporter that goes looking for the things
 nobody has written down yet. It does not publish. It hands the editor
 questions, and the evidence it gathered while asking them.

@@ -211,7 +211,7 @@ function StoryPage() {
   const draft = useMutation({
     mutationFn: async () => {
       await saveReportingNotes({
-        data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo },
+        data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
       return draftLead({ data: { leadId: id, modelChoice, researchScope } });
     },
@@ -271,7 +271,7 @@ function StoryPage() {
   const save = useMutation({
     mutationFn: async () => {
       await saveReportingNotes({
-        data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo },
+        data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
       return saveDraft({ data: { leadId: id, headline, dek, body, topic } });
     },
@@ -290,7 +290,7 @@ function StoryPage() {
   const publish = useMutation({
     mutationFn: async () => {
       await saveReportingNotes({
-        data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo },
+        data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
       await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
       return publishLead({ data: id });

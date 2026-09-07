@@ -10,7 +10,7 @@ import {
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { isSelfReferential, labelAfterCitationCheck } from "./claim-hygiene.ts";
 import { readableCapture } from "./html-text.ts";
-import { DARK_PLANNER } from "./dark-prompt.ts";
+import { darkPlannerFor } from "./dark-prompt.ts";
 import { enforceSearchMinimums, tierForQuery, tierForUrl, type Place } from "./dark-gates.ts";
 import {
   classifyClaimKind,
@@ -749,6 +749,7 @@ export async function grokPlanner(
   pack: string,
   choice?: EffectiveProviderChoice,
   overrides?: ProviderOverrides | null,
+  place?: Place,
 ): Promise<HopPlan> {
   /*
     The provider's own per-call budget, not the 45-second default.
@@ -770,7 +771,7 @@ export async function grokPlanner(
     for this round. A round pinned to Codex would be budgeted and planned as
     if it were Claude. See `plannerModel` for the substitution rule.
   */
-  const ai = await grokChat(DARK_PLANNER, pack.slice(0, 24000), 2200, {
+  const ai = await grokChat(darkPlannerFor(place), pack.slice(0, 24000), 2200, {
     timeoutMs: callMs,
     model: plannerModel(choice),
     choice,
@@ -985,7 +986,7 @@ export async function persistDiscovery(
           0,
           800,
         );
-      const reopenNext = (item.query || `"${label}" Longmont`).slice(0, 800);
+      const reopenNext = (item.query || `"${label}" ${(await getPaperConfig(newsroomId)).city}`).slice(0, 800);
       await sql`
         update frontier_items
         set status = ${"reopened"},
@@ -1927,7 +1928,7 @@ export async function researchLoop(opts: {
   const sql = await getSql();
   const { describeResearchWindow, queryWithResearchWindow } = await import("./dark-preferences.ts");
   const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
-  const place: Place = opts.place ?? { city: "Longmont", state: "Colorado" };
+  const place: Place = opts.place ?? await getPaperConfig(newsroomId);
   await investigationNewsroom(opts.investigationId, newsroomId);
   const officialDomainList = opts.officialDomains ?? [];
   const pressDomainList = opts.pressDomains ?? [];
@@ -1999,7 +2000,7 @@ export async function researchLoop(opts: {
     const graph = await retrievePack(opts.userId, opts.investigationId, terms);
     const pack = [
       opts.preferences ? describeResearchWindow(opts.preferences) : "",
-      `INVESTIGATION ${opts.investigationId}. Hop ${hop + 1}. Longmont, Colorado.`,
+      `INVESTIGATION ${opts.investigationId}. Hop ${hop + 1}. ${place.city}, ${place.state}.`,
       graph,
       `QUERIES ALREADY TRIED:\n${[...tried].slice(-40).join("\n") || "(none)"}`,
       `Generate the NEXT searches and fetches. Follow names, companies, contracts, parcels. Search contradictions. A failed search is not "nothing found." Do not stop after one hop. Cite capture and version IDs from artifacts when making claims.`,
@@ -2008,7 +2009,7 @@ export async function researchLoop(opts: {
     let plan: HopPlan;
     if (planner) plan = await planner(pack);
     else {
-      const grok = await grokPlanner(pack, opts.choice, opts.providerOverrides);
+      const grok = await grokPlanner(pack, opts.choice, opts.providerOverrides, place);
       const heur = heuristicPlan(graph, tried);
       plan = grok.searches.length || grok.fetch_urls.length ? grok : heur;
       if (grok.planner_error) plan.planner_error = grok.planner_error;
@@ -2357,7 +2358,7 @@ export async function researchLoop(opts: {
           `;
           const follow = [
             `"${url}" (wayback OR archive.org OR relocated OR moved)`,
-            `${(got.title || "document").slice(0, 80)} Longmont (replacement OR "no longer" OR cancelled)`,
+            `${(got.title || "document").slice(0, 80)} ${place.city} (replacement OR "no longer" OR cancelled)`,
           ];
           for (const q of follow) {
             await persistDiscovery(opts.userId, opts.investigationId, {
@@ -2827,7 +2828,7 @@ async function persistPlan(
         why: `Unresolved identity vs ${resolved.matched} (${verdict}) — keep both possibilities alive`,
         evidence: e.why,
         priority: 8,
-        query: `"${e.name}" Longmont`,
+        query: `"${e.name}" ${(await getPaperConfig(newsroomId)).city}`,
       });
       await persistDiscovery(userId, investigationId, {
         kind: e.kind || "unknown",
@@ -2835,7 +2836,7 @@ async function persistPlan(
         why: `Unresolved identity vs ${e.name} (${verdict}) — keep both possibilities alive`,
         evidence: e.why,
         priority: 8,
-        query: `"${resolved.matched}" Longmont`,
+        query: `"${resolved.matched}" ${(await getPaperConfig(newsroomId)).city}`,
       });
     }
     known.push({ canonical: c, name: e.name });
@@ -3136,7 +3137,7 @@ export async function resurfaceDeadEnds(
               reopened_at = now(),
               reopened_from = ${names.join(", ").slice(0, 400)},
               closed_reason = ${"New evidence revived this dead end"},
-              next_steps = ${`"${label}" Longmont`},
+              next_steps = ${`"${label}" ${(await getPaperConfig(newsroomId)).city}`},
               priority = ${REVIVED_DEAD_END_PRIORITY}
           where id = ${existing[0].id}
         `;

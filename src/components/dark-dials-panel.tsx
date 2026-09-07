@@ -5,7 +5,7 @@ import { getDarkDials, saveDarkDials } from "@/lib/news/dark";
 import { type ResearchPreferences } from "@/lib/news/dark-preferences";
 import {
   PRESETS,
-  SCOPE_LABEL,
+  scopeLabelsFor,
   describeDials,
   estimateMinutes,
   stanceFor,
@@ -74,7 +74,7 @@ export function DarkDialsPanel() {
         <InkButton onClick={() => void q.refetch()}>Retry settings</InkButton>
       </section>
     );
-  if (!d || !preferences) return null;
+  if (!d || !preferences || !q.data) return null;
 
   const set = (patch: Partial<DarkDials>) => setDraft({ ...d, ...patch });
   const setPreference = (patch: Partial<ResearchPreferences>) => {
@@ -91,7 +91,7 @@ export function DarkDialsPanel() {
             {open ? "Hide" : "Change"}
           </InkButton>
         }
-        sub={describeDials(q.data?.dials ?? d)}
+        sub={describeDials(q.data?.dials ?? d, q.data?.place)}
       />
       <p className="mt-2 text-sm">
         Saved search preference:{" "}
@@ -166,7 +166,7 @@ export function DarkDialsPanel() {
                 </InkButton>
               ))}
             </div>
-            <p className="mt-1 text-sm text-muted">{SCOPE_LABEL[d.scope]}</p>
+            <p className="mt-1 text-sm text-muted">{scopeLabelsFor(q.data.place)[d.scope]}</p>
           </div>
 
           <div>
@@ -255,7 +255,7 @@ export function DarkDialsPanel() {
           </div>
 
           <div className="border-t border-rule pt-4">
-            <p className="text-ink-2">{describeDials(d)}</p>
+            <p className="text-ink-2">{describeDials(d, q.data?.place)}</p>
             <p className="mt-1 text-sm text-muted">
               A round at this setting takes roughly {estimateMinutes(d)} minute
               {estimateMinutes(d) === 1 ? "" : "s"}.

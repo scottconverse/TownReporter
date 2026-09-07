@@ -57,6 +57,8 @@ Update current README/manual/editor/setup/landing/version/changelog together whe
 
 Fix the findings from the travel-machine runtime exercise and deliver a Windows-first installation package that a new user can run in under an hour. Mac/Linux source setup remains supported; native installers for those platforms are outside this release. Track acceptance in TODO.md. The active work covers instance-owned maintenance, private persistent PostgreSQL and prerequisites, build identity/readiness, supplied-material drafting and evidence review, and the manual-watch slash-redirect false alarm. Do not revive the historical implementation queue below as unfinished work.
 
+Implementation is on the Windows-installation PR. Local runtime checks have exercised a real Claude supplied-material draft, body/evidence review and publication, manual page captures, owner sign-in, and installation-owned restart. Newcomer testing also found and corrected fixed Longmont instructions, an unchanged/changed card collision and misleading maintenance copy. Resolve the matching release for final exact-source CI, package checksum and timed Windows evidence; these local checks alone do not certify a fresh-machine installation time.
+
 The owner authorized a persistent, isolated PostgreSQL testing newsroom on this machine. Ordinary tests and builds still use empty DATABASE_URL. The already-running local copy is separate from the implementation worktree; never build over a served .output. Fresh-package Windows CI and a timed local exercise must record their environment and provider assumptions. A warm development-machine pass is not proof of an arbitrary new user's installation time.
 
 The 0.6.24 corrective implementation closes reproduced failed-search verification,

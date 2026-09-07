@@ -1,5 +1,7 @@
 # TownReporter — the manual
 
+Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
+
 **Version 0.6.27 · 7 September 2026**
 
 **Documentation scope:** The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images are

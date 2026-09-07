@@ -4,6 +4,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import os from "node:os";
 import { managedInstallRoot, opsAvailability } from "./actions.server";
+import { installLogFiles, siteProbeDescription } from "./install-display";
 import { getDbSource, getSql } from "@/lib/db";
 import { APP_VERSION } from "@/lib/version";
 import { DEFAULT_NEWSROOM_ID } from "@/lib/news/membership";
@@ -327,12 +328,12 @@ async function checkDisk(): Promise<HealthCheck[]> {
 /**
  * Does the paper answer on its public address?
  *
- * Measured from this machine, so it proves the tunnel and Cloudflare are
- * routing — it does not prove a reader in another town can reach it, and the
- * dashboard says so rather than implying more than it knows.
+ * Measured from this machine. Loopback proves only local response; even an
+ * external address does not establish every reader's reachability or route.
  */
 async function checkPublic(): Promise<HealthCheck[]> {
   const site = (process.env.PUBLIC_SITE_URL || process.env.BETTER_AUTH_URL || "").trim();
+  const presentation = siteProbeDescription(site);
   if (!site) {
     return [
       { id: "public", label: "Public site", state: "unknown", value: "no address configured" },
@@ -348,17 +349,17 @@ async function checkPublic(): Promise<HealthCheck[]> {
     return [
       {
         id: "public",
-        label: "Public site",
+        label: presentation.label,
         state: publicState(res.status, ""),
         value: `${site} answered ${res.status} in ${ms}ms`,
-        note: "Checked from this machine, so it proves the tunnel is routing — not that every reader can reach it.",
+        note: presentation.note,
       },
     ];
   } catch (err) {
     return [
       {
         id: "public",
-        label: "Public site",
+        label: presentation.label,
         state: "down",
         value: `${site} did not answer`,
         note: err instanceof Error ? err.message.slice(0, 160) : "",
@@ -396,13 +397,9 @@ export type LogTail = { name: string; path: string; lines: string[]; error?: str
 
 /** The last few lines of the logs an operator actually reads. */
 export async function readLogs(perFile = 12): Promise<LogTail[]> {
-  const dir = join(appRoot(), "logs");
-  const wanted = [
-    { name: "Watchdog", file: "watchdog.log" },
-    { name: "Paper (errors)", file: "app.err.log" },
-    { name: "Paper (output)", file: "app.out.log" },
-    { name: "Tunnel", file: "cloudflared.err.log" },
-  ];
+  const ownedRoot = await managedInstallRoot();
+  const dir = ownedRoot || join(appRoot(), "logs");
+  const wanted = installLogFiles(Boolean(ownedRoot));
   const out: LogTail[] = [];
   for (const w of wanted) {
     const path = join(dir, w.file);
@@ -419,6 +416,7 @@ export async function readLogs(perFile = 12): Promise<LogTail[]> {
 }
 
 export type OpsHealth = {
+  managedInstall: boolean;
   unavailableActions: Record<string, string>;
   checks: HealthCheck[];
   logs: LogTail[];
@@ -439,6 +437,7 @@ export async function collectHealth(): Promise<OpsHealth> {
     checkDisk(),
   ]);
   return {
+    managedInstall: Boolean(await managedInstallRoot()),
     unavailableActions: await opsAvailability(),
     checks: groups.flat(),
     logs: await readLogs(),

@@ -24,12 +24,29 @@ function inside(parent, child) {
 }
 
 async function powershell(args, expectedFailure = false) {
+  const commandId = ++sequence;
+  const stdoutPath = join(evidence, `command-${commandId}.out.log`);
+  const stderrPath = join(evidence, `command-${commandId}.err.log`);
+  const literal = (value) => `'${value.replaceAll("'", "''")}'`;
+  const quoteArgument = (value) => `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
+  const nativeArgs = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", ...args].map(quoteArgument).join(" ");
+  // An ordinary execFile pipe can remain open after Start exits because its
+  // server inherited the runner's handles. The hidden shell boundary severs
+  // those handles; wait for the actual lifecycle process and preserve its exit.
+  const wrapper = `$ErrorActionPreference='Stop'; try {
+    $child=Start-Process powershell.exe -ArgumentList ${literal(nativeArgs)} -WindowStyle Hidden -PassThru -RedirectStandardOutput ${literal(stdoutPath)} -RedirectStandardError ${literal(stderrPath)};
+    $null=$child.Handle;
+    if(!$child.WaitForExit(280000)){$child.Kill();exit 124};
+    $child.Refresh();if($null -eq $child.ExitCode){exit 125};exit $child.ExitCode
+  } catch { $_ | Out-String | Add-Content -LiteralPath ${literal(stderrPath)}; exit 1 }`;
+  const encoded = Buffer.from(wrapper, "utf16le").toString("base64");
+  const launcher = `$p=[Diagnostics.ProcessStartInfo]::new('powershell.exe');$p.UseShellExecute=$true;$p.WindowStyle=[Diagnostics.ProcessWindowStyle]::Hidden;$p.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}';$child=[Diagnostics.Process]::Start($p);$null=$child.Handle;if(!$child.WaitForExit(290000)){$child.Kill();exit 124};$child.Refresh();if($null -eq $child.ExitCode){exit 125};exit $child.ExitCode`;
   let result;
   try {
     result = {
       ...(await execute(
         "powershell.exe",
-        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", ...args],
+        ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(launcher, "utf16le").toString("base64")],
         { cwd: root, timeout: 300_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
       )),
       code: 0,
@@ -38,13 +55,16 @@ async function powershell(args, expectedFailure = false) {
     if (error.killed || !Number.isInteger(error.code)) throw error;
     result = { code: error.code, stdout: error.stdout || "", stderr: error.stderr || "" };
   }
+  result.stdout = await readFile(stdoutPath, "utf8").catch(() => result.stdout || "");
+  result.stderr = await readFile(stderrPath, "utf8").catch(() => result.stderr || "");
   await writeFile(
-    join(evidence, `command-${++sequence}.log`),
+    join(evidence, `command-${commandId}.log`),
     `${result.stdout}\n${result.stderr}\nexit=${result.code}\n`,
   );
-  if (expectedFailure)
-    assert.notEqual(result.code, 0, "A stale source build was incorrectly accepted");
-  else assert.equal(result.code, 0, `PowerShell failed: ${result.stderr || result.stdout}`);
+  if (expectedFailure) {
+    assert.equal(result.code, 1, "Stale-build rejection must be exit 1, not a timeout or unknown exit");
+    assert.match(`${result.stdout}\n${result.stderr}`, /source changed|build identity is not current|build.*match/i, "Expected a stale-build error");
+  } else assert.equal(result.code, 0, `PowerShell failed: ${result.stderr || result.stdout}`);
   return result;
 }
 

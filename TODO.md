@@ -20,10 +20,11 @@ Legend: [x] implemented · [~] in progress · [ ] open · **external** requires 
 
 Owner acceptance: a new Windows user can download the repository's installation package, install it, configure an available AI provider, and complete a first editorial workflow in under an hour. Mac/Linux source setup remains available; native installers for those systems are outside this release.
 
-- [~] Replace machine-specific startup assumptions with installation-owned database, secrets, ports and process control. Server maintenance must never repair or stop another installation.
-- [~] Package prerequisite installation, persistent storage, actionable failures and start/stop instructions. Verify real HTTP readiness and reject stale compiled output.
-- [~] Make supplied-material drafting an explicit choice; prevent unrelated research from replacing the editor's material. Require review of public evidence when a body changes, retaining private historical evidence.
-- [~] Reproduce and correct the page-watch trailing-slash redirect false alarm while preserving meaningful redirect and private-address safeguards.
+- [x] Replace machine-specific startup assumptions with installation-owned database, secrets, ports and process control. Server maintenance must never repair or stop another installation.
+- [x] Package prerequisite installation, persistent storage, actionable failures and start/stop instructions. Verify real HTTP readiness and reject stale compiled output.
+- [x] Make supplied-material drafting an explicit choice; prevent unrelated research from replacing the editor's material. Require review of public evidence when a body changes, retaining private historical evidence.
+- [x] Reproduce and correct the page-watch trailing-slash redirect false alarm while preserving meaningful redirect and private-address safeguards.
+- [x] Correct newcomer runtime findings: configured-town investigative prompts, accepted-source Reddit selection, unchanged-watch card classification, and accurate local Server maintenance/log descriptions. Final packaged browser checks remain part of the gate below.
 - [ ] Run a timed fresh-package Windows acceptance exercise, including provider setup, editor onboarding, scan/draft, publication and restart persistence. Record platform, prerequisites, network assumptions, exact artifact identity and actual elapsed time; warm-machine testing alone is not a clean-machine claim.
 - [ ] Reconcile installer, README, setup/manual, landing-page and release instructions against the tested package; publish only after applicable exact-candidate checks pass.
 

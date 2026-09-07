@@ -129,7 +129,7 @@ export function rankWorthItems(input: {
 
   for (const m of input.monitors ?? []) {
     const gone = /removed|not-found|soft-404|disappeared/i.test(m.last_outcome ?? "");
-    const changed = /changed/i.test(m.last_outcome ?? "");
+    const changed = m.last_outcome === "changed";
     if (!gone && !changed) continue;
     const kind = gone ? "disappeared" : "changed";
     out.push({
