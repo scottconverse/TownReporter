@@ -4,6 +4,8 @@ Current release: **0.6.28**.
 
 ## Unreleased
 
+- Completed jobs keep their successful status if redundant completion bookkeeping or a late worker error occurs. Ordinary running jobs still report success or failure, and replaced claims remain protected.
+
 - The story workbench can review recorded findings against private captured text, distinguish missing/mismatched/newer records, and save explicit editor judgments. Stale draft/evidence views refuse saves; failed reloads retain unsaved judgments. Malformed historical structured findings are disclosed as unreadable. This is not exhaustive claim coverage, independent fact-checking or automatic publication permission.
 
 - Multi-source drafting preserves complete structured provenance, findings and unanswered questions through saving and publication. Raw character truncation no longer corrupts their JSON. Previously damaged records are not guessed or rewritten.

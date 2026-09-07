@@ -511,14 +511,14 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
     await sql`
       update desk_jobs
       set status = ${"completed"}, stage = ${"Done"}, error = null, finished_at = now(), updated_at = now()
-      where id = ${job.id} and claim_token = ${token}
+      where id = ${job.id} and status = ${"running"} and claim_token = ${token}
     `;
   } catch (err) {
     const raw = err instanceof Error ? err.message : "Job failed";
     await sql`
       update desk_jobs
       set status = ${"failed"}, error = ${raw.slice(0, 800)}, finished_at = now(), updated_at = now()
-      where id = ${job.id} and claim_token = ${token}
+      where id = ${job.id} and status = ${"running"} and claim_token = ${token}
     `;
   } finally {
     clearInterval(beat);
