@@ -21,8 +21,11 @@ $everyone = New-Object Security.Principal.SecurityIdentifier('S-1-1-0')
 $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($everyone,'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow')))
 Set-Acl -LiteralPath $reviewRoot -AclObject $acl
 Protect-LocalPath $reviewRoot
+Protect-LocalPath $reviewRoot
 $dummy = Join-Path $reviewRoot 'dummy-secret.txt'
 Set-Content -LiteralPath $dummy -Value 'nonsecret-fixture'
+Protect-LocalPath $dummy
+Protect-LocalPath $dummy
 $allowed = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18')
 foreach ($rule in (Get-Acl -LiteralPath $dummy).Access) {
   if ($rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin $allowed) { throw 'Unexpected identity has access to newly created credentials.' }

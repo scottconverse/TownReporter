@@ -54,14 +54,19 @@ function Assert-PortFree([int]$Port) {
   if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) { throw "Port $Port is occupied. Choose another port during Install. No process was stopped." }
 }
 function Protect-LocalPath([string]$Path) {
-  $acl = Get-Acl -LiteralPath $Path
+  # Construct only the replacement DACL. Reusing Get-Acl can make PowerShell 5.1
+  # attempt to persist owner/SACL sections on retry, requiring SeSecurityPrivilege.
+  $isDirectory = (Get-Item -LiteralPath $Path).PSIsContainer
+  $acl = if ($isDirectory) { New-Object Security.AccessControl.DirectorySecurity } else { New-Object Security.AccessControl.FileSecurity }
   $acl.SetAccessRuleProtection($true, $false)
-  foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRuleSpecific($rule) }
-  $inherit = if ((Get-Item -LiteralPath $Path).PSIsContainer) { 'ContainerInherit,ObjectInherit' } else { 'None' }
+  $inherit = if ($isDirectory) { 'ContainerInherit,ObjectInherit' } else { 'None' }
   foreach ($identity in @([Security.Principal.WindowsIdentity]::GetCurrent().User, 'SYSTEM')) {
     $acl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($identity, 'FullControl', $inherit, 'None', 'Allow')))
   }
-  Set-Acl -LiteralPath $Path -AclObject $acl
+  if ($PSVersionTable.PSVersion.Major -lt 6) {
+    if ($isDirectory) { [IO.Directory]::SetAccessControl($Path, $acl) }
+    else { [IO.File]::SetAccessControl($Path, $acl) }
+  } else { Set-Acl -LiteralPath $Path -AclObject $acl }
 }
 function Invoke-PgControl([string[]]$Arguments) {
   $run = Start-Process -FilePath (Join-Path $config.PgBin 'pg_ctl.exe') -ArgumentList $Arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $DataRoot 'pg-control.out.log') -RedirectStandardError (Join-Path $DataRoot 'pg-control.err.log')
@@ -78,7 +83,7 @@ function Invoke-LoggedNative([string]$Executable, [string[]]$Arguments, [string]
   $priorPreference = $ErrorActionPreference
   try {
     $ErrorActionPreference = 'Continue'
-    $LASTEXITCODE = $null
+    $global:LASTEXITCODE = $null
     & $Executable @Arguments *> $LogFile
     $nativeExit = $LASTEXITCODE
   } finally { $ErrorActionPreference = $priorPreference }
