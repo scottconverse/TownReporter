@@ -653,6 +653,8 @@ dev server on every push.
 
 ## System context
 
+This diagram shows the legacy Halo topology; the Windows package has no tunnel or watchdog, and Reddit checks use the configured accepted subreddit rather than a fixed town.
+
 ```mermaid
 flowchart TB
     subgraph outside["The city, on the public web"]
@@ -744,6 +746,8 @@ sequenceDiagram
 ```
 
 ## Dark Desk, one round
+
+The model names in this diagram illustrate the Claude path; other selected providers use their own planner and writer models as described above.
 
 ```mermaid
 flowchart TB
