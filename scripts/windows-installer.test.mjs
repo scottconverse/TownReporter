@@ -74,6 +74,7 @@ test(
       ],
       { encoding: "utf8", stdio: "pipe" },
     );
+    assert.match(output, /PASS bind preflight/);
     assert.match(output, /PASS private credentials/);
     assert.match(output, /PASS incomplete runtime/);
     assert.match(output, /PASS concurrent process/);

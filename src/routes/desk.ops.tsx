@@ -148,8 +148,8 @@ function OpsPage() {
       lede={
         <>
           Everything this machine is doing to keep the paper online, and the few buttons worth
-          having. Read from this machine, so it can tell you the tunnel is routing but not that a
-          reader in another town can reach you.
+          having. Checks show what responds from this machine; they do not prove that a reader
+          in another town can reach your paper.
         </>
       }
     >
@@ -243,7 +243,9 @@ function OpsPage() {
                     </InkButton>
                   )}
                 </div>
-                <p className="mt-2 max-w-2xl text-ink-2">{a.detail}</p>
+                <p className="mt-2 max-w-2xl text-ink-2">
+                  {health.data ? a.detail : "Checking installation ownership…"}
+                </p>
                 {unavailable ? <p className="mt-2 text-sm">Unavailable: {unavailable}</p> : null}
                 <p className="mt-1 text-sm text-muted">Takes about {a.expectSeconds} seconds.</p>
               </li>

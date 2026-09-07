@@ -5,6 +5,38 @@ function Read-Function([string]$Path, [string]$Name) {
   $ast = [Management.Automation.Language.Parser]::ParseInput((Get-Content -LiteralPath $Path -Raw), [ref]$null, [ref]$null)
   return $ast.Find({param($a) $a -is [Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq $Name}, $true).Extent.Text
 }
+Invoke-Expression (Read-Function (Join-Path $AppRoot 'installer\Common.ps1') 'Assert-PortFree')
+& {
+  # An empty listener inventory does not prove Windows permits a bind.
+  function Get-NetTCPConnection { return @() }
+  $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+  $listener.Server.ExclusiveAddressUse = $true
+  $listener.Start()
+  $fixturePort = $listener.LocalEndpoint.Port
+  try {
+    $message = ''
+    try { Assert-PortFree $fixturePort } catch { $message = $_.Exception.Message }
+    if ($message -notmatch 'cannot be bound') { throw 'Bind preflight accepted an unavailable loopback port despite an empty listener inventory.' }
+  } finally { $listener.Stop() }
+  Assert-PortFree $fixturePort
+  # A successful preflight must release its temporary listener.
+  $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $fixturePort)
+  $listener.Start(); $listener.Stop()
+  $script:reservationProbeStopped = $false
+  function New-Object {
+    param($TypeName, $ArgumentList)
+    if ($TypeName -ne 'Net.Sockets.TcpListener') { throw 'Unexpected constructor in bind probe.' }
+    $fake = [pscustomobject]@{ Server = [pscustomobject]@{ ExclusiveAddressUse = $false } }
+    $fake | Add-Member ScriptMethod Start { throw [Net.Sockets.SocketException]::new(10013) }
+    $fake | Add-Member ScriptMethod Stop { $script:reservationProbeStopped = $true }
+    return $fake
+  }
+  $message = ''
+  try { Assert-PortFree $fixturePort } catch { $message = $_.Exception.Message }
+  if ($message -notmatch 'Windows may reserve' -or $message -notmatch 'Choose another port') { throw 'Reserved port refusal was missing actionable guidance.' }
+  if (!$script:reservationProbeStopped) { throw 'Failed bind probe did not release its socket.' }
+  Write-Output 'PASS bind preflight rejects occupied and Windows-denied ports, accepts free ports and releases probes.'
+}
 Invoke-Expression (Read-Function (Join-Path $AppRoot 'installer\Common.ps1') 'Enter-InstallLifecycle')
 if ($CheckBusy) {
   try { $unexpected = Enter-InstallLifecycle }

@@ -52,6 +52,14 @@ function Read-InstallConfig {
 }
 function Assert-PortFree([int]$Port) {
   if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) { throw "Port $Port is occupied. Choose another port during Install. No process was stopped." }
+  # Windows exclusions can deny bind even when no listening process exists.
+  $probe = New-Object Net.Sockets.TcpListener -ArgumentList @([Net.IPAddress]::Loopback, $Port)
+  try {
+    $probe.Server.ExclusiveAddressUse = $true
+    $probe.Start()
+  } catch {
+    throw "Port $Port cannot be bound on 127.0.0.1. Windows may reserve or deny this port even when no program is listening. Choose another port during Install (-Port for the app, -PgPort for the database). No process or Windows network setting was changed."
+  } finally { $probe.Stop() }
 }
 function Assert-OwnedListener([int]$Port, [int]$ExpectedProcessId) {
   $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)

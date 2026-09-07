@@ -21,10 +21,10 @@ The target is to finish installation and a first editorial workflow in under an 
 
 If the installer reports a missing Microsoft Visual C++ runtime, follow its official Microsoft link, install that prerequisite, and run the installer again. Do not download replacement DLLs from third-party sites.
 
-If the default ports are occupied, open PowerShell in the extracted application folder and choose two unused ports, for example:
+The default private database port is **15432**. Existing installations keep their saved ports. If a port is occupied or Windows refuses to bind it, open PowerShell in the extracted application folder and choose two unused ports, for example:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer\Install.ps1 -Port 4390 -PgPort 55434
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer\Install.ps1 -Port 4390 -PgPort 15434
 ```
 
 The saved configuration remembers those ports. Later starts use them automatically. An interrupted download or build can be retried from the same extracted folder; keep the data folder and read any recovery message before moving or removing files.
@@ -47,7 +47,7 @@ The packaged server listens only on this computer. It does not register global W
 
 ## If something fails
 
-- **Port already in use:** leave the other program alone. Choose unused ports with the installer's PowerShell options; app and database ports must differ.
+- **Port already in use or reserved by Windows:** leave the other program alone. Choose unused ports with the installer's PowerShell options; app and database ports must differ.
 - **Missing or stale build:** stop this instance and rerun its installation/build step. Do not build over a running server or copy an old `.output` directory into a new source release.
 - **No AI provider:** configure a key or endpoint, or sign in to a supported CLI under the Windows account running TownReporter. Retry a real draft after the provider becomes available.
 - **Cannot open the desk:** read the printed log location and readiness error. A process merely starting is not a successful installation.

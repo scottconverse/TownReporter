@@ -1,4 +1,4 @@
-param([string]$DataRoot, [int]$Port = 4388, [int]$PgPort = 55432, [string]$DownloadCache, [switch]$NoBrowser)
+param([string]$DataRoot, [int]$Port = 4388, [int]$PgPort = 15432, [string]$DownloadCache, [switch]$NoBrowser)
 $ErrorActionPreference = 'Stop'
 if (![Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { throw 'This package supports Windows x64. ARM64 is not yet tested.' }
 $app = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
