@@ -40,7 +40,7 @@ Legend: [x] implemented · [~] in progress · [ ] open · **external** requires 
 - The baseline verification checks completeness of structured answers; it is not independent fact-checking. Search/evidence failure behavior is under review.
 - OCR supports extracted JPEG/PNG images with bounded processing and no established PDF page mapping; unsupported scans and incomplete reads must remain visible. Vision capability is not a guarantee of accurate transcription.
 - URL canonicalization of historical records is distinct from guards on new writes. Production cleanup is an operator action.
-- Historical records with incorrect newsroom assignment or OCR page references need operator review or re-ingestion; this release does not infer ownership or rewrite old citations. Older entity-alias/match uniqueness can omit a same-user cross-newsroom duplicate instead of overwriting another newsroom's metadata; a future scoped schema correction can remove that limitation.
+- Historical records with incorrect newsroom assignment or OCR page references need operator review or re-ingestion; this release does not infer ownership or rewrite old citations. Migration 0044 corrects entity-alias/match uniqueness for future same-user cross-newsroom records while preserving existing rows.
 
 ## Completed release history — prior operator reports
 - [x] 0.6.7 — Automatic fails over to Codex on a timeout, not only a sign-in lapse.

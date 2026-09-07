@@ -60,8 +60,9 @@ search/refusal feedback. [PR #7](https://github.com/scottconverse/TownReporter/p
 records exact candidate checks; use the matching GitHub release for publication
 identity. Historical records incorrectly assigned to
 newsroom 1, or carrying invented OCR page references, are not automatically repaired:
-an operator must review or re-ingest them. Entity-alias/match uniqueness still uses
-older user-based keys; a same-user cross-newsroom collision is refused rather than
-overwriting the other newsroom's metadata.
+an operator must review or re-ingest them. Migration 0044 adds the newsroom to
+entity-alias/match uniqueness so the same editor can retain identical names in
+different newsrooms without overwriting or silently dropping the other record.
+It preserves existing rows and does not infer historical ownership.
 
 The ordered units are in [TODO.md](TODO.md): review/fix the restored engine, fetch caps, sections, manual watching, legal removal and investigative settings. Five live runs and real-data staging require Halo-local execution; their absence cannot be turned into a passing result. Local mocked checks may proceed independently.
