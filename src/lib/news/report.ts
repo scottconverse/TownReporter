@@ -28,6 +28,7 @@ import { webSearch } from "./search-web.ts";
 import { getSql } from "../db.ts";
 import { PAPER } from "../paper.ts";
 import { getPaperConfig } from "./paper-settings.ts";
+import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import type { LeadRow, MemoryRow } from "./types.ts";
 import type { EffectiveProviderChoice } from "./ai.ts";
@@ -860,7 +861,7 @@ function parseTrail(raw: unknown): Partial<ProvenanceItem>[] {
   return out;
 }
 
-async function defaultCapture(userId: string, doc: FetchedDoc) {
+async function defaultCapture(userId: string, newsroomId: number, doc: FetchedDoc) {
   try {
     const hash = await sha256(doc.text || doc.url);
     const rec = await rememberCapture({
@@ -875,6 +876,7 @@ async function defaultCapture(userId: string, doc: FetchedDoc) {
       classification: "discovered",
       triggerKind: "draft",
       pages: doc.pages,
+      newsroomId,
     });
     return { version_id: rec.versionId, capture_event_id: rec.captureEventId };
   } catch {
@@ -882,7 +884,11 @@ async function defaultCapture(userId: string, doc: FetchedDoc) {
   }
 }
 
-async function hydrateCaptures(userId: string, urls: string[]): Promise<Partial<ProvenanceItem>[]> {
+async function hydrateCaptures(
+  userId: string,
+  newsroomId: number,
+  urls: string[],
+): Promise<Partial<ProvenanceItem>[]> {
   if (!urls.length) return [];
   try {
     const sql = await getSql();
@@ -896,13 +902,15 @@ async function hydrateCaptures(userId: string, urls: string[]): Promise<Partial<
         fetch_outcome: string | null;
         versions: number | null;
       }>`
-        select av.title, ce.observed_at::text as captured_at, ce.version_id, ce.id as capture_event_id,
+        select av.title, ce.observed_at::text as captured_at, av.id as version_id, ce.id as capture_event_id,
           ce.fetch_outcome,
           (select count(*)::int from artifact_versions av2
-            where av2.user_id = ${userId} and av2.url = ${url}) as versions
+            where av2.newsroom_id = ${newsroomId} and av2.url = ${url}) as versions
         from capture_events ce
         left join artifact_versions av on av.id = ce.version_id
-        where ce.user_id = ${userId} and ce.source_url = ${url}
+          and av.newsroom_id = ce.newsroom_id and av.url = ce.source_url
+        where ce.newsroom_id = ${newsroomId} and ce.user_id = ${userId} and ce.source_url = ${url}
+          and (ce.version_id is null or av.id is not null)
         order by ce.observed_at desc, ce.id desc
         limit 1
       `;
@@ -1132,8 +1140,8 @@ export function chooseStoryForm(input: {
   return form;
 }
 
-async function configuredPaper(): Promise<PaperIdentityForPrompts> {
-  const cfg = await getPaperConfig();
+async function configuredPaper(newsroomId: number): Promise<PaperIdentityForPrompts> {
+  const cfg = await getPaperConfig(newsroomId);
   return {
     name: cfg.name,
     city: cfg.city,
@@ -1168,6 +1176,8 @@ export function discoveredDocumentMatches(text: string, anchor: string): boolean
 export async function reportAndDraft(
   opts: {
     userId: string;
+    /** Authoritative newsroom for paper configuration and private capture provenance. */
+    newsroomId?: number;
     lead: LeadRow;
     urls: string[];
     memory: Pick<MemoryRow, "entity" | "last_angle">[];
@@ -1187,7 +1197,8 @@ export async function reportAndDraft(
   deps: ReportDeps = {},
 ): Promise<ReportedDraft | { error: string }> {
   const started = Date.now();
-  const paper = await (deps.paper ?? configuredPaper)();
+  const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
+  const paper = await (deps.paper ?? (() => configuredPaper(newsroomId)))();
   let effectiveModelChoice: EffectiveProviderChoice | undefined = opts.modelChoice;
   if (effectiveModelChoice === "auto") {
     const probe =
@@ -1211,8 +1222,8 @@ export async function reportAndDraft(
   const canFollow = () => !suppliedOnly && timeLeft() > reserve + 4_000;
   const ingest = deps.ingest ?? defaultIngest;
   const search = suppliedOnly ? async (_q: string) => [] : deps.search ?? (async (q: string) => webSearch(q));
-  const capture = deps.capture ?? defaultCapture;
-  const hydrate = deps.hydrate ?? hydrateCaptures;
+  const capture = deps.capture ?? ((userId, doc) => defaultCapture(userId, newsroomId, doc));
+  const hydrate = deps.hydrate ?? ((userId, urls) => hydrateCaptures(userId, newsroomId, urls));
   const providerChat: ReportChat =
     deps.chat ??
     (async (system, user, maxTokens) => {
