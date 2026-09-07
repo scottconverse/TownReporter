@@ -536,25 +536,25 @@ sent to attack had never been missing at all.
 
 ![Server](images/11-server.png)
 
-Historical 0.5.1 screen: the status row shown here was removed. The current
-health rows are described below; outside requests are checked by the
-operator's browser smoke test, not this page.
+Historical 0.5.1 screen: it illustrates the older operator-managed installation,
+not the controls available in a new Windows package.
 
-Everything this machine is doing to keep the paper online, and the few buttons
-worth having.
+For the **Windows installation package**, Server reports this installation's
+version, work queue, private database and local HTTP readiness. **Run health
+check** is read-only: it does not repair anything. **Restart the paper** asks for
+confirmation and restarts only this installation. Local readiness does not prove
+that a public address or tunnel works. The package installs no tunnel, watchdog,
+scheduled tasks or automatic five-minute repair; unavailable maintenance actions
+stay disabled. Use its own Start/Stop launchers if the desk cannot be reached.
 
-The **Health** list is read from this machine, so it can tell you the tunnel is
-routing — not that a reader in another town can reach you. Rows worth knowing:
+For a **separately configured legacy installation**, the Health list can also
+report the operator's public URL, Cloudflare tunnel and watchdog task. Those
+checks run from the server machine, not from a reader in another town. A missing
+or stale watchdog result needs operator investigation; do not assume repair will
+happen. Legacy task ownership must be configured as described in
+[SELF-HOSTING.md](../SELF-HOSTING.md) before those controls are available.
 
-| Row                   | What a bad reading means                                             |
-| --------------------- | -------------------------------------------------------------------- |
-| **Public site**       | The paper is not answering. Try Restart the tunnel.                  |
-| **Cloudflare tunnel** | No tunnel process. The watchdog should fix this within five minutes. |
-| **Work queue**        | Something failed, or one job has been running a long time.           |
-| **Watchdog**          | If it has not run recently, the scheduled task is off.               |
-
-Every button says what it will do before it does it. The two that interrupt the
-paper ask twice.
+Every available maintenance action explains its effect before you run it.
 
 Owners also have:
 
@@ -766,7 +766,7 @@ How we report, in public: `/how-we-report`.
 | Second person gets 403                      | They signed up without a valid invite, or used the wrong email                          | Owner: create a fresh link under Server → Invite an editor and have them use the exact invited address.                                                                  |
 | Editorial says Failed with a timeout        | The piece ran past the writer's limit                                                   | Ask again. If it repeats, the operator can raise `EDITORIAL_TIMEOUT_MS`. Nothing is lost but the run.                                                                    |
 | Editorial never starts, says no voice       | `TOWNREPORTER_VOICE_FILE` is unset or points nowhere                                    | Operator: set it to an absolute path outside the repo                                                                                                                    |
-| The paper is down and the desk still works  | The tunnel, not the app                                                                 | Server page → Restart the tunnel. The watchdog also does this within five minutes.                                                                                       |
+| A public address is down but the local desk works | Public hosting or routing may have failed | Ask the operator to check the public host/tunnel. The Windows package has no tunnel or automatic repair; legacy controls require configured ownership. |
 | An editorial has no Edit button             | It has not finished, or it failed                                                       | Only a finished piece can be edited. A failed row can still be deleted.                                                                                                  |
 | Desk wants sign-in again                    | Session expired                                                                         | `/login`                                                                                                                                                                 |
 | Notebook language on the paper              | Strip failed or you pasted it                                                           | Edit the story. Kill if needed. Tell the operator.                                                                                                                       |

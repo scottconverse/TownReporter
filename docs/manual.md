@@ -316,12 +316,17 @@ of its own. Budget for a piece, not for a paragraph.
 Historical 0.5.1 screen: the status row pictured here no longer exists under
 that name. A browser smoke test checks the same thing now.
 
-Version, uptime, memory, the public URL as answered from this machine, tunnel
-processes, database size, what the paper holds, queue depth, the last watchdog
-run, and free disk.
+The Windows installation package reports version, work queue, private database
+and local HTTP readiness. Run health check is read-only; Restart the paper asks for
+confirmation and restarts only this installation. It installs no tunnel,
+watchdog or scheduled tasks, and does not promise automatic repair. Local
+readiness does not prove public access. Unavailable maintenance actions stay
+disabled; its Start/Stop launchers remain available when the desk cannot open.
 
-The buttons are few and each says what it will do before it does it. The two
-that interrupt the paper ask twice.
+Separately configured legacy installations can also report their public URL,
+tunnel and watchdog task. Those checks run from the server, not from a reader's
+computer. See [the editor guide](editor.md#server-deskops) and
+[legacy ownership requirements](../SELF-HOSTING.md) before using those controls.
 
 The owner also sees **Paper setup**, with the same fields used on first run, and
 **Invite an editor**, which creates a one-time, email-bound link that expires
@@ -353,7 +358,7 @@ nothing new to show until it recovers. Scoped to your newsroom. See
 
 # Part 3 — Running it
 
-## Five minutes, on your own machine
+## Run from source on your own machine
 
 You need **Node 22+**. API keys are optional: Story can use an
 existing Codex/Claude login. Signed-in Codex and
@@ -504,8 +509,11 @@ Without the file, the Opinion desk says so and spends nothing.
 
 ## Serving it publicly
 
-The working edition runs on one Windows machine behind a Cloudflare Tunnel. The
-`ops/` directory holds the scripts that keep it up:
+The following describes the **legacy Halo installation**, not the Windows
+installation package. Its local operator must first establish the
+[legacy ownership configuration](../SELF-HOSTING.md). The package does not
+install these tasks or a tunnel and refuses these legacy operations.
+The `ops/` directory holds that installation's scripts:
 
 | Script                         | What it does                                                                                                        |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
@@ -519,7 +527,7 @@ The working edition runs on one Windows machine behind a Cloudflare Tunnel. The
 | `ops/run-hidden.vbs`           | Runs the five-minute tasks with no console window                                                                   |
 | `ops/install-tasks.ps1`        | Registers all six scheduled tasks. Idempotent, `-WhatIf` supported, and refuses to repoint another install's tasks. |
 
-Restart and tunnel-restart run as Windows scheduled tasks rather than as child
+In that legacy installation, restart and tunnel-restart run as Windows scheduled tasks rather than as child
 processes of the app — a restart cannot be performed by the process being
 restarted, and a tunnel restart cannot report its result over the tunnel it just
 killed.
@@ -645,6 +653,8 @@ dev server on every push.
 
 ## System context
 
+This diagram shows the legacy Halo topology; the Windows package has no tunnel or watchdog, and Reddit checks use the configured accepted subreddit rather than a fixed town.
+
 ```mermaid
 flowchart TB
     subgraph outside["The city, on the public web"]
@@ -737,6 +747,8 @@ sequenceDiagram
 
 ## Dark Desk, one round
 
+The model names in this diagram illustrate the Claude path; other selected providers use their own planner and writer models as described above.
+
 ```mermaid
 flowchart TB
     OPEN["Open a file<br/>URL · person · LLC · rumour"] --> PLAN
@@ -804,6 +816,9 @@ a separate research pass. Neither path places the voice text in argv. A relative
 repository, is rejected.
 
 ## Keeping it online
+
+This diagram describes the separately configured legacy watchdog, not the
+Windows installation package, which has no automatic repair task.
 
 ```mermaid
 flowchart TB

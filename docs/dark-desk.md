@@ -8,7 +8,7 @@ questions, and the evidence it gathered while asking them.
 
 It runs in **two stages**, and the split is the whole point.
 
-Documentation baseline: 0.6.26, reviewed from repository code on 2026-09-07.
+Documentation baseline: 0.6.27, reviewed from repository code on 2026-09-07.
 This describes software behavior, not independent confirmation of a reporting
 conclusion or the current production deployment. See [the takeover handoff](../HANDOFF-NEXT-AGENT.md).
 
@@ -71,7 +71,7 @@ Before any signal may be shown as verified or sent to the queue as a finding,
 **the application runs the adversarial searches itself** and the model answers
 four gates.
 
-In the next candidate, Stage 2 defaults to the **six strongest new signals per round**; the editor can choose 1–24 in **How hard to dig → Change**. The round summary uses every eligible signal as its denominator, separately showing attempted, verified, unverified (including failures) and deferred by the cap. Deferred signals remain speculative. The separate newsworthiness decision determines whether a verified signal is eligible as a finding; publication still requires a human.
+Stage 2 defaults to the **six strongest new signals per round**; the editor can choose 1–24 in **How hard to dig → Change**. The round summary uses every eligible signal as its denominator, separately showing attempted, verified, unverified (including failures) and deferred by the cap. Deferred signals remain speculative. The separate newsworthiness decision determines whether a verified signal is eligible as a finding; publication still requires a human.
 
 ### The searches the app runs
 
