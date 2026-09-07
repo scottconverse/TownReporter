@@ -1440,24 +1440,11 @@ export const addCorrection = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: { articleSlug?: string; body: string }) => input)
   .handler(async ({ context, data }) => {
-    const body = data.body.trim();
-    if (body.length < 8) return { ok: false as const, error: "Write the correction." };
-    const sql = await getSql();
-    let articleId: number | null = null;
-    if (data.articleSlug) {
-      const rows = await sql<{ id: number }>`
-        select id from articles
-        where slug = ${data.articleSlug} and status = 'published'
-        limit 1
-      `;
-      articleId = rows[0]?.id ?? null;
-    }
-    await sql`
-      insert into corrections (user_id, newsroom_id, article_id, body)
-      values (${context.userId}, ${owned(context)}, ${articleId}, ${body})
-    `;
-    await audit(context.userId, "correction", data.articleSlug ?? "unspecified", owned(context));
-    return { ok: true as const };
+    const { performAddCorrection } = await import("./corrections.ts");
+    return performAddCorrection(
+      { userId: context.userId, newsroomId: owned(context) },
+      data,
+    );
   });
 
 export type DeskPublishedRow = {

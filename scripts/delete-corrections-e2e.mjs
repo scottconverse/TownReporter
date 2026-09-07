@@ -32,6 +32,7 @@
  */
 import { chromium } from "playwright";
 import pg from "pg";
+import { fromCrossJSON, toJSONAsync } from "seroval";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
 
@@ -61,14 +62,36 @@ const findingText = `TownReporter listened to the Aug. 18 meeting recording ${st
 const ghostHeadline = `Draft that never printed ${stamp}`;
 const ghostSlug = `ghost-draft-${stamp}`;
 const ghostCorrection = `This correction must never reach a reader ${stamp}.`;
+const foreignSlug = `foreign-published-${stamp}`;
+const unpublishedSlug = `own-unpublished-${stamp}`;
+const missingSlug = `missing-${stamp}`;
+const foreignNewsroomId = 820_003;
 
 let page;
+let addCorrectionUrl;
 const done = [];
 const pool = new pg.Pool({ connectionString: databaseUrl });
 
 function step(name) {
   done.push(name);
   console.log(`  ok    ${name}`);
+}
+
+async function callObservedAddCorrection(data) {
+  if (!addCorrectionUrl) throw new Error("the correction server-function request was not observed");
+  const body = JSON.stringify(await toJSONAsync({ data }));
+  const response = await page.evaluate(async ({ url, body }) => {
+    const res = await fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { accept: "application/json", "content-type": "application/json", "x-tsr-serverFn": "true" },
+      body,
+    });
+    return { status: res.status, serialized: res.headers.has("x-tss-serialized"), body: await res.json() };
+  }, { url: addCorrectionUrl, body });
+  if (response.status !== 200) throw new Error(`correction server function returned HTTP ${response.status}`);
+  const decoded = response.serialized ? fromCrossJSON(response.body, {}) : response.body;
+  return decoded?.result ?? decoded;
 }
 
 async function dump(err) {
@@ -236,7 +259,11 @@ async function main() {
   // waits for too.
   const publishBtn = pubRow.getByRole("button", { name: "Publish correction" });
   await publishBtn.waitFor({ state: "visible", timeout: 10_000 });
+  const correctionRequest = page.waitForRequest(
+    (request) => request.method() === "POST" && request.url().includes("/_serverFn/"),
+  );
   await publishBtn.click();
+  addCorrectionUrl = (await correctionRequest).url();
   /*
     Not `pubRow.getByText(correctionText)`. A <textarea>'s current value is
     text Playwright's getByText will happily match — so that locator was
@@ -251,8 +278,50 @@ async function main() {
   await pubRow.locator(".pub-corr").getByText(correctionText).waitFor({ timeout: 20_000 });
   step("a correction can be posted from the desk");
 
+  const owner = await pool.query(
+    `select m.newsroom_id, m.user_id from newsroom_members m join "user" u on u.id = m.user_id where u.email = $1`,
+    [email],
+  );
+  const newsroomId = owner.rows[0].newsroom_id;
+  await pool.query(`insert into newsrooms (id, name) values ($1, $2)`, [
+    foreignNewsroomId,
+    `Foreign paper ${stamp}`,
+  ]);
+  await pool.query(
+    `insert into articles (user_id, newsroom_id, slug, headline, dek, body, topic, status, published_at)
+     values ('foreign-editor', $1, $2, 'Foreign story', '', 'Foreign body.', 'council', 'published', now()),
+            ($3, $4, $5, 'Own draft', '', 'Own unpublished body.', 'council', 'drafted', now())`,
+    [foreignNewsroomId, foreignSlug, owner.rows[0].user_id, newsroomId, unpublishedSlug],
+  );
+  const attacks = [
+    [foreignSlug, `Rejected foreign correction ${stamp}.`],
+    [unpublishedSlug, `Rejected unpublished correction ${stamp}.`],
+    [missingSlug, `Rejected missing correction ${stamp}.`],
+  ];
+  for (const [attackSlug, attackBody] of attacks) {
+    const result = await callObservedAddCorrection({ articleSlug: attackSlug, body: attackBody });
+    if (result?.ok !== false || result?.error !== "That published story is not available in this newsroom.") {
+      throw new Error(`correction target ${attackSlug} was not generically refused: ${JSON.stringify(result)}`);
+    }
+  }
+  const leakedWrites = await pool.query(
+    `select
+       (select count(*)::int from corrections where body = any($1::text[])) as corrections,
+       (select count(*)::int from audit_events where action = 'correction' and detail = any($2::text[])) as audits`,
+    [attacks.map(([, attackBody]) => attackBody), attacks.map(([attackSlug]) => attackSlug)],
+  );
+  if (leakedWrites.rows[0].corrections !== 0 || leakedWrites.rows[0].audits !== 0) {
+    throw new Error(`a refused correction mutated storage: ${JSON.stringify(leakedWrites.rows[0])}`);
+  }
+  step("foreign, unpublished, and missing correction targets share one refusal and write nothing");
+
   await page.goto(`${base}/corrections`, { waitUntil: "networkidle" });
   await page.getByText(correctionText).waitFor({ timeout: 20_000 });
+  for (const [, attackBody] of attacks) {
+    if ((await page.getByText(attackBody, { exact: true }).count()) !== 0) {
+      throw new Error(`a refused correction reached the public feed: ${attackBody}`);
+    }
+  }
   step("the correction reached the public corrections feed");
 
   // ── Delete the story ────────────────────────────────────────────────────

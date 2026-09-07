@@ -710,6 +710,8 @@ What is live on the paper, with its corrections.
 
 If you got it wrong: open the story here, write the correction in the open, post it. It appears on `/corrections` and with the article. Do not silently rewrite a published piece and hope nobody notices. We would rather look careful than look first.
 
+A correction can attach only to a published story in your newsroom. If the selected story is no longer available, the desk refuses the correction instead of saving an unattached note. Return to Published and select the current story before posting again.
+
 ---
 
 ## What never prints
