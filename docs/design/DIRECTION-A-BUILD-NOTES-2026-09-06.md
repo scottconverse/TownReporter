@@ -1,5 +1,7 @@
 # Direction A — build notes (2026-09-06)
 
+> **Implementation history, reconciled 2026-09-07.** The Command Center and story stages below were implemented in 0.6.21–0.6.22. These notes preserve the approved direction; they do not restart that work or authorize another redesign. Dark Desk's color rule means **black background and white text**. Prototype-package paths below are historical references; the repository retains [Main.dc.html](prototype/Main.dc.html). The [current handoff](../../HANDOFF-NEXT-AGENT.md) governs remote development and the separate Halo-local promotion boundary.
+
 The design is the clickable prototype (`prototype/editors-desk-redesign.html` in the audit package; artboard `Main.dc.html`). Build that. This note covers only what the prototype does not show.
 
 Auditor's verdict (2026-09-05): use this system; take from the Codex prototype only **more air in the queue** and a **Follow-ups list on the rail**. Nothing else changes hands.
