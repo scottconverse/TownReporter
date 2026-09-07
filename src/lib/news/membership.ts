@@ -31,14 +31,12 @@ export class ForbiddenError extends Error {
   }
 }
 
-
 export type EditorRole = "owner" | "editor";
 
 export type EditorContext = {
   role: EditorRole;
   newsroomId: number;
 };
-
 
 export function isGrokPreviewHost(host: string | undefined | null): boolean {
   const h = (host ?? "").toLowerCase();
@@ -54,16 +52,20 @@ export async function ensureNewsroomSchema() {
       created_at timestamptz not null default now()
     )
   `);
-  await sql.query(`
+  await sql
+    .query(
+      `
     insert into newsrooms (id, name)
     values (1, 'TownReporter Longmont')
     on conflict (id) do nothing
-  `).catch(async () => {
-    const existing = await sql<{ c: number }>`select count(*)::int as c from newsrooms`;
-    if ((existing[0]?.c ?? 0) === 0) {
-      await sql`insert into newsrooms (name) values (${"TownReporter Longmont"})`;
-    }
-  });
+  `,
+    )
+    .catch(async () => {
+      const existing = await sql<{ c: number }>`select count(*)::int as c from newsrooms`;
+      if ((existing[0]?.c ?? 0) === 0) {
+        await sql`insert into newsrooms (name) values (${"TownReporter Longmont"})`;
+      }
+    });
   await sql.query(`
     create table if not exists newsroom_members (
       user_id text primary key,
@@ -72,7 +74,9 @@ export async function ensureNewsroomSchema() {
       created_at timestamptz not null default now()
     )
   `);
-  await sql.query(`alter table newsroom_members add column if not exists newsroom_id integer not null default 1`);
+  await sql.query(
+    `alter table newsroom_members add column if not exists newsroom_id integer not null default 1`,
+  );
   try {
     await sql.query(`
       create unique index if not exists newsroom_members_one_owner
@@ -104,14 +108,15 @@ export async function requireEditor(userId: string): Promise<EditorContext> {
       `;
       return { role: "owner", newsroomId: DEFAULT_NEWSROOM_ID };
     } catch {
-      const again = await sql<{ role: string; newsroom_id: number }>`
-        select role, newsroom_id from newsroom_members where user_id = ${userId} limit 1
-      `;
-      if (again[0]?.role === "owner" || again[0]?.role === "editor") {
-        return { role: again[0].role, newsroomId: again[0].newsroom_id ?? DEFAULT_NEWSROOM_ID };
-      }
-      throw new ForbiddenError();
+      // Another request may have claimed the same owner, or a different owner.
+      // The database uniqueness constraint decides; re-read this identity below.
     }
+  }
+  const again = await sql<{ role: string; newsroom_id: number }>`
+    select role, newsroom_id from newsroom_members where user_id = ${userId} limit 1
+  `;
+  if (again[0]?.role === "owner" || again[0]?.role === "editor") {
+    return { role: again[0].role, newsroomId: again[0].newsroom_id ?? DEFAULT_NEWSROOM_ID };
   }
   throw new ForbiddenError();
 }
@@ -201,9 +206,7 @@ export async function createInvite(ownerUserId: string, email: string): Promise<
   return token;
 }
 
-export type InviteCheck =
-  | { ok: true; email: string }
-  | { ok: false; reason: string };
+export type InviteCheck = { ok: true; email: string } | { ok: false; reason: string };
 
 /** Is this token a live invite? Never reveals whether an ADDRESS was invited. */
 export async function checkInvite(token: string): Promise<InviteCheck> {
@@ -291,25 +294,27 @@ export async function leaveAsEditor(userId: string): Promise<void> {
  * index on the owner row means a concurrent second claim loses.
  */
 export async function claimOwner(userId: string): Promise<EditorContext> {
+  return requireEditor(userId);
+}
+
+/** One statement gives the role and claimed flag the same database snapshot. */
+export async function readMyDesk(userId: string) {
   await ensureNewsroomSchema();
   const sql = await getSql();
-  const mine = await sql<{ role: string; newsroom_id: number }>`
-    select role, newsroom_id from newsroom_members where user_id = ${userId} limit 1
+  const rows = await sql<{ role: string | null; newsroom_id: number | null; claimed: boolean }>`
+    select m.role, m.newsroom_id,
+      exists(select 1 from newsroom_members where newsroom_id = ${DEFAULT_NEWSROOM_ID}) as claimed
+    from (select 1) as seed
+    left join newsroom_members m on m.user_id = ${userId}
   `;
-  if (mine[0]?.role === "owner" || mine[0]?.role === "editor") {
-    return { role: mine[0].role, newsroomId: mine[0].newsroom_id ?? DEFAULT_NEWSROOM_ID };
+  const me = rows[0];
+  if (me?.role === "owner" || me?.role === "editor") {
+    return {
+      ok: true as const,
+      role: me.role,
+      newsroomId: me.newsroom_id ?? DEFAULT_NEWSROOM_ID,
+      claimed: true,
+    };
   }
-  const n = await sql<{ c: number }>`
-    select count(*)::int as c from newsroom_members where newsroom_id = ${DEFAULT_NEWSROOM_ID}
-  `;
-  if ((n[0]?.c ?? 0) > 0) throw new ForbiddenError();
-  try {
-    await sql`
-      insert into newsroom_members (user_id, role, newsroom_id)
-      values (${userId}, 'owner', ${DEFAULT_NEWSROOM_ID})
-    `;
-    return { role: "owner", newsroomId: DEFAULT_NEWSROOM_ID };
-  } catch {
-    throw new ForbiddenError();
-  }
+  return { ok: false as const, role: null, newsroomId: null, claimed: me?.claimed ?? false };
 }
