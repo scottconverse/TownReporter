@@ -448,6 +448,21 @@ down a weaker thought — **and say that it is weak**.
 
 ---
 
+### Watch a specific page in Dark Desk
+
+Open **Dark Desk → Watch a page / view watches**. Enter a public URL, a name and why it matters. Optionally select an investigation: its readable captures will be attached there automatically. Choose the model used if a scanned PDF needs OCR, then **Save watch and capture page**. The watch is saved before the first check; a pending check is not a captured record. An already-watched URL opens the existing watch without renaming it or moving its investigation.
+
+Daily checks require the existing local scheduler. **Check now** uses the same guarded fetch and capture path. History distinguishes a first capture, unchanged text, changed text, a moved page, source blocking, unavailable pages, failed checks and unreadable or refused files. Redirects show their trail and whether text also changed. A failure never replaces the last readable comparison baseline. The readable diff is a bounded text comparison, not a claim that every visual or structural page change was found. Open the stored text, download its complete current or previous copy, or follow **Open original** to inspect the source.
+
+For a readable capture, choose an active reporting section and **Create unverified lead**, or choose a file and **Attach captured record**. Feedback links to the lead or investigation; the capture's history keeps that outcome after a refresh. **Dismiss change** retains the capture. A removed handoff target is reported as removed instead of being silently recreated. No check automatically creates a lead, drafts or publishes. **Pause**, **Resume** and **Stop watching** retain history; paused and stopped watches do not run checks. An interrupted check can be retried after its 30-minute lease expires. These investigative watches are separate from accepting an ordinary source for story scanning.
+
+
+### Choose an investigative search window and verification limit
+
+On Dark Desk, open **How hard to dig → Change**. Choose a lookback of 1–3650 inclusive UTC calendar days (default90; one day means today in UTC) or an inclusive start/end UTC calendar range, then choose 1–24 signals to verify per round (default6). **Save** confirms the stored settings; reload to verify a save whose response failed. A validation error explains the rejected value. A settings-read failure offers **Retry settings** instead of showing invented defaults.
+
+These controls are independent of dig, nerve, map and county. Presets retain your date/count choices. Each new round saves a snapshot before work starts, so a mid-round edit affects later rounds. More attempted signals can cost more model calls and time. The round summary shows verified out of all eligible signals, attempted, unverified (including failures), and deferred. Every attempted signal still faces the four gates. Search dates guide queries and providers; always check dates in the captured evidence.
+
 ## Opinion (`/desk/opinion`)
 
 ![Opinion](images/10-opinion.png)
@@ -760,18 +775,3 @@ How we report, in public: `/how-we-report`.
 - It will not invent a city's sources. The owner supplies them in Paper setup and can maintain them under Sources.
 
 You are the publisher. The software is the library, the tape machine, and a very fast intern who still has to be edited.
-
-### Watch a specific page in Dark Desk
-
-Open **Dark Desk → Watch a page / view watches**. Enter a public URL, a name and why it matters. Optionally select an investigation: its readable captures will be attached there automatically. Choose the model used if a scanned PDF needs OCR, then **Save watch and capture page**. The watch is saved before the first check; a pending check is not a captured record. An already-watched URL opens the existing watch without renaming it or moving its investigation.
-
-Daily checks require the existing local scheduler. **Check now** uses the same guarded fetch and capture path. History distinguishes a first capture, unchanged text, changed text, a moved page, source blocking, unavailable pages, failed checks and unreadable or refused files. Redirects show their trail and whether text also changed. A failure never replaces the last readable comparison baseline. The readable diff is a bounded text comparison, not a claim that every visual or structural page change was found. Open the stored text, download its complete current or previous copy, or follow **Open original** to inspect the source.
-
-For a readable capture, choose an active reporting section and **Create unverified lead**, or choose a file and **Attach captured record**. Feedback links to the lead or investigation; the capture's history keeps that outcome after a refresh. **Dismiss change** retains the capture. A removed handoff target is reported as removed instead of being silently recreated. No check automatically creates a lead, drafts or publishes. **Pause**, **Resume** and **Stop watching** retain history; paused and stopped watches do not run checks. An interrupted check can be retried after its 30-minute lease expires. These investigative watches are separate from accepting an ordinary source for story scanning.
-
-
-### Choose an investigative search window and verification limit
-
-On Dark Desk, open **How hard to dig → Change**. Choose a lookback of 1–3650 inclusive UTC calendar days (default90; one day means today in UTC) or an inclusive start/end UTC calendar range, then choose 1–24 signals to verify per round (default6). **Save** confirms the stored settings; reload to verify a save whose response failed. A validation error explains the rejected value. A settings-read failure offers **Retry settings** instead of showing invented defaults.
-
-These controls are independent of dig, nerve, map and county. Presets retain your date/count choices. Each new round saves a snapshot before work starts, so a mid-round edit affects later rounds. More attempted signals can cost more model calls and time. The round summary shows verified out of all eligible signals, attempted, unverified (including failures), and deferred. Every attempted signal still faces the four gates. Search dates guide queries and providers; always check dates in the captured evidence.
