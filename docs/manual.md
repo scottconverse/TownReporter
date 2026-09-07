@@ -1,8 +1,8 @@
 # TownReporter — the manual
 
-**Version 0.6.24 · 7 September 2026**
+**Version 0.6.25 · 7 September 2026**
 
-**Documentation scope:** Queue, workbench, Opinion and Paper setup images are
+**Documentation scope:** The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from
 29 August. Their old **Leave as editor** header link now lives as **Give up
 the desk** on the Server page.
@@ -52,8 +52,8 @@ establish PDF page order: new OCR records identify images, not PDF pages.
 Historical stored OCR page labels require re-ingest or operator review if cited. Unsupported fax-style scans, failed
 transcription and partial reads are reported rather than treated as complete.
 
-Configurable sections are implemented in this candidate (see Newspaper sections below).
-Manual investigative page watching and legal removal remain separate open work; normal Sources and Delete do not implement them. [The canonical queue](../TODO.md) records current work.
+Configurable sections are available in Paper setup (see Newspaper sections below).
+Manual investigative page watching is available in Dark Desk. Legal removal remains open work; normal Delete does not implement it. [The canonical queue](../TODO.md) records current work.
 
 ## Newspaper sections
 
@@ -178,7 +178,7 @@ required.
 
 ![The desk](images/04-desk.png)
 
-The historical image shows the former three-column desk. The current layout has the queue in the main column and Dark Desk, Follow-ups and wire in the rail. The line under the heading is the whole point of the page — _2 drafts
+The current development image shows the queue in the main column and Dark Desk, Follow-ups and wire in the rail. The status line summarizes outstanding work, for example _2 drafts
 ready to publish, 14 proposed sources await review, 1 Dark Desk file ready for
 another round_. If that line is empty there is nothing for you to do.
 As of 0.6.21 the desk is one main column (composer, then the queue) with a right rail: Dark Desk, Follow-ups, The wire.
@@ -934,6 +934,12 @@ npm run db:migrate
 npx playwright install chromium
 ```
 
+## Manual investigative page watches
+
+Dark Desk's **Watched pages** panel records a named public URL and the editor's reason for watching it. It uses the existing source-monitor scheduler, guarded capture engine and dated capture versions, independently of accepted-source scanning. See [the editor workflow](editor.md#watch-a-specific-page-in-dark-desk) for first captures, readable differences, failed checks, OCR selection, explicit lead/record actions and pause/stop behavior.
+
+Migration 0046 adds watch state, a per-check lease and action history to the existing monitor/capture system. A transaction locks and verifies the lease before capture, history, baseline and optional file attachment writes. Failed checks keep the last readable baseline. Scheduler and manual checks share this path; an expired worker cannot overwrite a newer lease's result. The editor chooses an active configured reporting section when explicitly creating a lead. Stored captures and action targets remain newsroom scoped. Capture history and complete stored-text downloads preserve evidence; they are not legal-removal or backup-management features.
+
 ## Documents
 
 | Audience                                            | Document                                        |
@@ -948,9 +954,3 @@ npx playwright install chromium
 ---
 
 MIT licensed. Copyright (c) 2026 Scott Converse.
-
-## Manual investigative page watches
-
-Dark Desk's **Watched pages** panel records a named public URL and the editor's reason for watching it. It uses the existing source-monitor scheduler, guarded capture engine and dated capture versions, independently of accepted-source scanning. See [the editor workflow](editor.md#watch-a-specific-page-in-dark-desk) for first captures, readable differences, failed checks, OCR selection, explicit lead/record actions and pause/stop behavior.
-
-Migration 0046 adds watch state, a per-check lease and action history to the existing monitor/capture system. A transaction locks and verifies the lease before capture, history, baseline and optional file attachment writes. Failed checks keep the last readable baseline. Scheduler and manual checks share this path; an expired worker cannot overwrite a newer lease's result. The editor chooses an active configured reporting section when explicitly creating a lead. Stored captures and action targets remain newsroom scoped. Capture history and complete stored-text downloads preserve evidence; they are not legal-removal or backup-management features.

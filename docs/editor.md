@@ -1,8 +1,8 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.6.24](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.24).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.25](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.25).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
-Queue, workbench, Opinion and Paper setup images show development examples.
+The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
 **Leave as editor** header link is now **Give up the desk** on the Server page.
 
@@ -30,8 +30,8 @@ establish PDF page order: new OCR records identify images, not PDF pages.
 Historical stored OCR page labels require re-ingest or operator review if cited. Unsupported fax-style scans, failed
 transcription and partial reads are reported rather than treated as complete.
 
-Configurable sections are implemented in this candidate (see Newspaper sections below).
-Manual investigative page watching is implemented in the next candidate; see the workflow below. Legal removal remains separate open work; normal Delete does not implement it. [The canonical queue](../TODO.md) records current work.
+Configurable sections are available in Paper setup (see Newspaper sections below).
+Manual investigative page watching is available in Dark Desk; see the workflow below. Legal removal remains separate open work; normal Delete does not implement it. [The canonical queue](../TODO.md) records current work.
 
 ## Newspaper sections
 

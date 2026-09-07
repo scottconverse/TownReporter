@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.24](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.24)** — 7 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.25](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.25)** — 7 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -85,6 +85,8 @@ Same six moves the paper itself describes at `/how-we-report`:
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
 ### Recent releases
+
+- **0.6.25** — owner-configurable newspaper sections, section-specific scanning instructions and source assignments, and manual Dark Desk page watching with dated captures, honest failure states and explicit handoffs to a file or unverified lead.
 
 - **0.6.24** — corrective release: failed adversarial searches stay unverified, verification reads returned evidence and context, guarded HTTP fetches enforce size/type limits, OCR page images reach the selected provider, and takeover documentation separates repository releases from deployment receipts.
 
