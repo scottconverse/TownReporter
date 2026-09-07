@@ -885,6 +885,10 @@ flowchart TB
 | `/desk/story/draft/:id`                      | The editorial workbench, opened by draft — an editorial has no lead                        |
 | `/desk/published`                            | Live stories and corrections                                                               |
 | `/desk/dark`                                 | Dark Desk. Investigates, never prints.                                                     |
+| `/desk/page-watches`                        | Manual investigative page watches and capture history                                     |
+| `/desk/legal-removals`                       | Owner-only legal-removal cases, retained copies and backup attestations                     |
+| `/desk/follow-ups`                           | Reporting requests and due dates                                                           |
+| `/desk/stats`                                | Newsroom activity and coverage                                                             |
 | `/desk/opinion`                              | Opinion. Unsigned editorials.                                                              |
 | `/desk/ops`                                  | Server. Health, Paper setup, editor invites and the few operational buttons worth having.  |
 

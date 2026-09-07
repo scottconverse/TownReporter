@@ -488,8 +488,8 @@ The desk checks that the delivery is actually an editorial before it files
 anything. A provider refusal, limitation note, neutral-summary substitute,
 implausible headline, or incomplete body makes the row **Failed** and creates no
 draft. There is then no Read, Edit, or Publish action to mistake for success.
-With Automatic, the second provider starts its own fresh research-and-writing
-pair; with a named choice, the visible error stays with that provider. A
+Automatic currently uses Claude only; a failed run does not switch to Local
+model. A named choice also stays with that provider. A
 finished row names the provider that actually delivered the piece.
 
 **Edit** opens the piece in its own editor. That is where you change the
@@ -498,8 +498,9 @@ prompt sit under the piece there, marked _does not print_.
 
 Earlier measured runs took **ten to forty minutes**; that is an observation,
 not a deadline. The current research and writing passes each have a default
-45-minute ceiling. One provider pair can therefore take about 90 minutes, and
-Automatic can take longer if it starts the second provider's pair. The row
+45-minute ceiling. The Claude pair can therefore take about 90 minutes.
+Explicit Local model makes one writing call using the supplied material; it
+does not run the frontier research pass. The row
 shows a clock counting up and a moving rule; at 3:40 that is normal, not stuck.
 The page rechecks every twenty seconds.
 
@@ -652,7 +653,7 @@ someone it should not have been.
 
 ### It is not gone yet
 
-Nothing you delete disappears immediately.
+Ordinary **Delete** sends work to Trash first. The owner-only legal-removal process below has a separate, irreversible policy.
 
 - An **Undo** link appears right where you deleted it. One click and it is back.
 - After that, it waits **30 days** under **Recently deleted** on the Server
@@ -731,7 +732,7 @@ How we report, in public: `/how-we-report`.
 | Automatic says no model is ready            | Configured gateway failed, or every Automatic provider failed readiness                 | Fix the configured gateway; otherwise sign in to Codex, or sign in/configure Claude ([setup.md](setup.md#per-run-picker))                                                |
 | Codex is missing or signed out              | Codex CLI/OAuth is unavailable on the server machine                                    | Install/open Codex, sign in, and try again; check `CODEX_CLI_PATH` / `CODEX_HOME` only for unusual layouts                                                               |
 | Claude is missing or signed out             | Claude Code CLI login is unavailable                                                    | Install/open Claude Code and sign in, or configure the Claude API path                                                                                                   |
-| An Opinion row says Failed with no draft    | The provider errored, declined, or returned something that was not a complete editorial | Read the error on the row. Retry Automatic for its full ladder, or deliberately choose another provider; nothing was filed or published                                  |
+| An Opinion row says Failed with no draft    | The provider errored, declined, or returned something that was not a complete editorial | Read the error on the row. Retry Claude after fixing its error, or explicitly choose Local model; nothing was filed or published                                  |
 | Scan fetched, filed nothing                 | Nothing new, or the model declined                                                      | Read the summary. Not automatically a bug.                                                                                                                               |
 | Draft with AI ran, form still empty         | The click died; the writing pass may still be finishing                                 | Stay on the page. It fills when the draft lands. Reload only if you left.                                                                                                |
 | Redraft shows a sign-in / setCookie error   | Cookie helper threw even though you are signed in                                       | Click Redraft again. Fixed in 0.3.7.                                                                                                                                     |
@@ -771,6 +772,6 @@ For a readable capture, choose an active reporting section and **Create unverifi
 
 ### Choose an investigative search window and verification limit
 
-On Dark Desk, open **How hard to dig → Change**. Choose a lookback of 1–3650 days (default90) or a start/end calendar range, then choose 1–24 signals to verify per round (default6). **Save** confirms the stored settings; reload to verify a save whose response failed. A validation error explains the rejected value. A settings-read failure offers **Retry settings** instead of showing invented defaults.
+On Dark Desk, open **How hard to dig → Change**. Choose a lookback of 1–3650 inclusive UTC calendar days (default90; one day means today in UTC) or an inclusive start/end UTC calendar range, then choose 1–24 signals to verify per round (default6). **Save** confirms the stored settings; reload to verify a save whose response failed. A validation error explains the rejected value. A settings-read failure offers **Retry settings** instead of showing invented defaults.
 
 These controls are independent of dig, nerve, map and county. Presets retain your date/count choices. Each new round saves a snapshot before work starts, so a mid-round edit affects later rounds. More attempted signals can cost more model calls and time. The round summary shows verified out of all eligible signals, attempted, unverified (including failures), and deferred. Every attempted signal still faces the four gates. Search dates guide queries and providers; always check dates in the captured evidence.
