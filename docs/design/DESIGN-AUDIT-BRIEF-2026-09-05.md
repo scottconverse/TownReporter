@@ -1,5 +1,7 @@
 # TownReporter editor's desk — design audit package
 
+> **Historical design snapshot, reconciled 2026-09-07.** The “as built” descriptions and known problems below record the 0.6.19-era audit, not the current interface. The five readability/control defects were addressed in 0.6.20; Direction A's Command Center and story workbench followed in 0.6.21–0.6.22. Preserve this document as the design rationale. Use the [current handoff](../../HANDOFF-NEXT-AGENT.md) and [editor guide](../editor.md) for current behavior and verification limits. Paths to `screens/` and `prototype/editors-desk-redesign.html` refer to the original external audit package; the retained repository artboard is [Main.dc.html](prototype/Main.dc.html).
+
 Prepared 2026-09-05 for an outside designer. Everything here is either lifted from the running code (marked *as built*) or the owner's stated rule (marked *rule*). Nothing in this package needs access to the repository or the owner's machine.
 
 ## 1. What this is

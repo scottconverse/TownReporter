@@ -4,6 +4,7 @@ import { useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { addCorrection, deleteArticle, listMemory, listPublishedDesk } from "@/lib/news/desk";
+import { myDesk } from "@/lib/news/claim";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 
@@ -12,6 +13,7 @@ export const Route = createFileRoute("/desk/published")({ component: PublishedPa
 function PublishedPage() {
   const { formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
+  const deskRole = useQuery({queryKey:["my-desk"],queryFn:()=>myDesk()});
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
   const { isError: pubIsError, error: pubError, refetch: pubRefetch, isRefetching: pubRefetching } = published;
   const memory = useQuery({ queryKey: ["memory"], queryFn: () => listMemory() });
@@ -100,6 +102,7 @@ function PublishedPage() {
 
   return (
     <DeskShell title="Published" kicker="The record">
+      {deskRole.data?.role==="owner"&&<p className="mb-4"><Link to="/desk/legal-removals" search={{article:undefined,case:undefined}} className="underline">Legal removal cases</Link> — retained-copy access and external cleanup records.</p>}
       <p className="lede">
         What is live on the paper, with its corrections. Corrections are public.
       </p>
@@ -190,6 +193,7 @@ function PublishedPage() {
                 <Link to="/articles/$slug" params={{ slug: p.slug }} className="btn quiet small">
                   Read on the paper
                 </Link>
+                {deskRole.data?.ok && deskRole.data.role === "owner" && <a className="btn quiet small" href={`/desk/legal-removals?article=${p.id}`}>Legal removal</a>}
                 <InkButton tone="quiet" small onClick={() => setCorrFor(p.slug)}>
                   Post correction
                 </InkButton>

@@ -6,7 +6,7 @@ questions, and the evidence it gathered while asking them.
 
 It runs in **two stages**, and the split is the whole point.
 
-Documentation baseline: 0.6.25, reviewed from repository code on 2026-09-07.
+Documentation baseline: 0.6.26, reviewed from repository code on 2026-09-07.
 This describes software behavior, not independent confirmation of a reporting
 conclusion or the current production deployment. See [the takeover handoff](../HANDOFF-NEXT-AGENT.md).
 
@@ -69,10 +69,7 @@ Before any signal may be shown as verified or sent to the queue as a finding,
 **the application runs the adversarial searches itself** and the model answers
 four gates.
 
-At this baseline Stage 2 selects at most the **six strongest new signals per
-round**. Other signals remain speculative. Six is currently a code constant,
-not an editor control. The separate newsworthiness decision determines whether
-a verified signal is eligible as a finding; publication still requires a human.
+In the next candidate, Stage 2 defaults to the **six strongest new signals per round**; the editor can choose 1–24 in **How hard to dig → Change**. The round summary uses every eligible signal as its denominator, separately showing attempted, verified, unverified (including failures) and deferred by the cap. Deferred signals remain speculative. The separate newsworthiness decision determines whether a verified signal is eligible as a finding; publication still requires a human.
 
 ### The searches the app runs
 
@@ -138,7 +135,7 @@ where the planner falls short:
   press, then community.
 - **Location-scoped by default** — the city, and the county where the record
   is actually held. An unscoped query returns a national explainer.
-- **A 90-day preference** unless the trail is explicitly historical.
+- **A 90-day search preference by default.** The editor can choose 1–3650 UTC calendar days of lookback, including the current UTC date, or an inclusive calendar range. The lookback changes at UTC midnight; the paper's display timezone does not change that boundary. The same resolved date hints reach discovery and adversarial queries and their model packs. A provider may ignore date operators; returned records still need their dates checked.
 - The tier that answered is recorded on every search.
 
 ## The newsworthiness gate
@@ -236,3 +233,9 @@ unavailability may make reporting inconclusive while still proving correct
 failure handling. Aggregate the five records, list defects separately from
 editorial unknowns, and retain the operator's observations as attributed
 evidence. Mocked local tests cannot replace these records.
+
+## Saved investigative preferences
+
+**How hard to dig → Change** keeps search dates and the verification count independent of dig, nerve and map. Presets change only the original dials. Save applies the whole visible configuration; validation errors leave it unsaved, and an unconfirmed response tells the editor to reload rather than promising which write reached the server. A failed settings read shows a retry state and never substitutes defaults for a saved configuration.
+
+Migration0048 stores per-newsroom preferences and a snapshot on each round. The snapshot is recorded before research begins and is reused through planning, synthesis, verification and automatic model failover. Editing settings during a round changes later rounds only. Search dates express a preference, not a factual date filter or completeness claim. Verification counts are saved on the round; failed searches, invalid model replies and failed signal-result writes stay unverified.

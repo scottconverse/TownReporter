@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.6.25](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.25).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.26](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.26).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
@@ -31,7 +31,7 @@ Historical stored OCR page labels require re-ingest or operator review if cited.
 transcription and partial reads are reported rather than treated as complete.
 
 Configurable sections are available in Paper setup (see Newspaper sections below).
-Manual investigative page watching is available in Dark Desk; see the workflow below. Legal removal remains separate open work; normal Delete does not implement it. [The canonical queue](../TODO.md) records current work.
+Manual investigative page watching is available in Dark Desk; see the workflow below. The owner-only legal-removal workflow is documented below; ordinary Delete does not implement it. [The canonical queue](../TODO.md) records current work.
 
 ## Newspaper sections
 
@@ -488,8 +488,8 @@ The desk checks that the delivery is actually an editorial before it files
 anything. A provider refusal, limitation note, neutral-summary substitute,
 implausible headline, or incomplete body makes the row **Failed** and creates no
 draft. There is then no Read, Edit, or Publish action to mistake for success.
-With Automatic, the second provider starts its own fresh research-and-writing
-pair; with a named choice, the visible error stays with that provider. A
+Automatic currently uses Claude only; a failed run does not switch to Local
+model. A named choice also stays with that provider. A
 finished row names the provider that actually delivered the piece.
 
 **Edit** opens the piece in its own editor. That is where you change the
@@ -498,8 +498,9 @@ prompt sit under the piece there, marked _does not print_.
 
 Earlier measured runs took **ten to forty minutes**; that is an observation,
 not a deadline. The current research and writing passes each have a default
-45-minute ceiling. One provider pair can therefore take about 90 minutes, and
-Automatic can take longer if it starts the second provider's pair. The row
+45-minute ceiling. The Claude pair can therefore take about 90 minutes.
+Explicit Local model makes one writing call using the supplied material; it
+does not run the frontier research pass. The row
 shows a clock counting up and a moving rule; at 3:40 that is normal, not stuck.
 The page rechecks every twenty seconds.
 
@@ -652,7 +653,7 @@ someone it should not have been.
 
 ### It is not gone yet
 
-Nothing you delete disappears immediately.
+Ordinary **Delete** sends work to Trash first. The owner-only legal-removal process below has a separate, irreversible policy.
 
 - An **Undo** link appears right where you deleted it. One click and it is back.
 - After that, it waits **30 days** under **Recently deleted** on the Server
@@ -662,7 +663,21 @@ Nothing you delete disappears immediately.
 - **Delete for good** on that list is the one with nothing behind it. It says so.
 - After 30 days it goes on its own.
 
-**Delete for good** removes the application's trash copy. It does not scrub existing database backups. The distinct legal-removal workflow is still planned; do not treat ordinary deletion as proof that all retained copies are gone.
+**Delete for good** removes the application's trash copy. It does not scrub existing database backups. Use the separate owner-only legal-removal workflow below for its reviewed scope and retention policy; ordinary deletion is not proof that all retained copies are gone.
+
+---
+
+## Legal removal: owner workflow
+
+Open **Published → Legal removal** beside a story, or **Published → Legal removal cases** to revisit a case. Editors cannot use this process. Ordinary Delete still uses 30-day trash; legal removal has no Undo.
+
+1. Select the affected stories and **Review connected copies**. All stories sharing a lead must be selected before its reporting records can be removed. Review the counts and historical candidates. Old drafts, memory, audit labels and trash do not always carry article IDs; select only the records in scope. Selected entries remain visible and can be unchecked. Mixed trash requires explicit whole-snapshot selection. Changed records require a fresh preview.
+2. Review independent evidence. Known same-paper URL copies and references in captures, chunks, original blobs, source snapshots, search results, associated frontier records, source/monitor descriptors and watch history are listed but **not automatically deleted**. These known copies block court destruction even with the evidence checkbox checked. Retained application removal may proceed with review explicitly pending. A local operator must resolve unsupported captured-copy cleanup; a checkbox does not establish erasure.
+3. Choose the policy. **Keep an owner-only copy for 12 calendar months** uses the calendar anniversary, with February 29 clamped to February 28 in a non-leap year. This is owner access control, not encryption. The existing scheduled tick and case-list reads purge expired copies. Expired text cannot be opened even if cleanup has failed. **Explicit court destruction** never inserts removed text into the retained-copy table and requires the historical/evidence scope to be resolved first.
+4. Enter a case identifier without story text, type **REMOVE**, and confirm. The transaction removes selected application copies, scrubs exact linked editorial source descriptors and blocks stale filing/restoration. Independent editorial drafts remain for review; interrupted writing must be restarted with reviewed sources. Foreign-newsroom relationships refuse removal rather than cascading into another paper. Matching automatic watches are paused and ordinary sources are excluded from scans, preserving their evidence for review. Stop remains available; resuming a removed article's watch is refused.
+5. The result opens its case. **Open owner-only retained text (audited)** is available until expiry under the retention policy. There is no restore button. Record affected backup identifiers and operator cleanup attestations here. An attestation records what an operator reports; it is not independently verified erasure.
+
+Fresh public article/feed/sitemap reads stop returning removed stories. Existing browser caches, downloads, external search caches, provider history, database logs and backups are outside the application's erasure proof. An older database restore can reintroduce removed content; the local operator must reconcile removal cases before serving restored data. Exact known URL checks include query/fragment/trailing-slash and percent-encoded slug aliases. Unlinked prose, malformed historical records, old deployment origins and unknown external copies still need owner/operator review. Do not treat this workflow as proof that no copy exists anywhere.
 
 ---
 
@@ -717,7 +732,7 @@ How we report, in public: `/how-we-report`.
 | Automatic says no model is ready            | Configured gateway failed, or every Automatic provider failed readiness                 | Fix the configured gateway; otherwise sign in to Codex, or sign in/configure Claude ([setup.md](setup.md#per-run-picker))                                                |
 | Codex is missing or signed out              | Codex CLI/OAuth is unavailable on the server machine                                    | Install/open Codex, sign in, and try again; check `CODEX_CLI_PATH` / `CODEX_HOME` only for unusual layouts                                                               |
 | Claude is missing or signed out             | Claude Code CLI login is unavailable                                                    | Install/open Claude Code and sign in, or configure the Claude API path                                                                                                   |
-| An Opinion row says Failed with no draft    | The provider errored, declined, or returned something that was not a complete editorial | Read the error on the row. Retry Automatic for its full ladder, or deliberately choose another provider; nothing was filed or published                                  |
+| An Opinion row says Failed with no draft    | The provider errored, declined, or returned something that was not a complete editorial | Read the error on the row. Retry Claude after fixing its error, or explicitly choose Local model; nothing was filed or published                                  |
 | Scan fetched, filed nothing                 | Nothing new, or the model declined                                                      | Read the summary. Not automatically a bug.                                                                                                                               |
 | Draft with AI ran, form still empty         | The click died; the writing pass may still be finishing                                 | Stay on the page. It fills when the draft lands. Reload only if you left.                                                                                                |
 | Redraft shows a sign-in / setCookie error   | Cookie helper threw even though you are signed in                                       | Click Redraft again. Fixed in 0.3.7.                                                                                                                                     |
@@ -753,3 +768,10 @@ Open **Dark Desk → Watch a page / view watches**. Enter a public URL, a name a
 Daily checks require the existing local scheduler. **Check now** uses the same guarded fetch and capture path. History distinguishes a first capture, unchanged text, changed text, a moved page, source blocking, unavailable pages, failed checks and unreadable or refused files. Redirects show their trail and whether text also changed. A failure never replaces the last readable comparison baseline. The readable diff is a bounded text comparison, not a claim that every visual or structural page change was found. Open the stored text, download its complete current or previous copy, or follow **Open original** to inspect the source.
 
 For a readable capture, choose an active reporting section and **Create unverified lead**, or choose a file and **Attach captured record**. Feedback links to the lead or investigation; the capture's history keeps that outcome after a refresh. **Dismiss change** retains the capture. A removed handoff target is reported as removed instead of being silently recreated. No check automatically creates a lead, drafts or publishes. **Pause**, **Resume** and **Stop watching** retain history; paused and stopped watches do not run checks. An interrupted check can be retried after its 30-minute lease expires. These investigative watches are separate from accepting an ordinary source for story scanning.
+
+
+### Choose an investigative search window and verification limit
+
+On Dark Desk, open **How hard to dig → Change**. Choose a lookback of 1–3650 inclusive UTC calendar days (default90; one day means today in UTC) or an inclusive start/end UTC calendar range, then choose 1–24 signals to verify per round (default6). **Save** confirms the stored settings; reload to verify a save whose response failed. A validation error explains the rejected value. A settings-read failure offers **Retry settings** instead of showing invented defaults.
+
+These controls are independent of dig, nerve, map and county. Presets retain your date/count choices. Each new round saves a snapshot before work starts, so a mid-round edit affects later rounds. More attempted signals can cost more model calls and time. The round summary shows verified out of all eligible signals, attempted, unverified (including failures), and deferred. Every attempted signal still faces the four gates. Search dates guide queries and providers; always check dates in the captured evidence.

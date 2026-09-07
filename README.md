@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.25](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.25)** — 7 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.26](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.26)** — 7 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -85,6 +85,8 @@ Same six moves the paper itself describes at `/how-we-report`:
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
 ### Recent releases
+
+- **0.6.26** — owner-only legal removal with retention, expiry, copy-scope refusals and an external-backup trail; saved investigative search windows and verification limits with honest full-denominator summaries.
 
 - **0.6.25** — owner-configurable newspaper sections, section-specific scanning instructions and source assignments, and manual Dark Desk page watching with dated captures, honest failure states and explicit handoffs to a file or unverified lead.
 
@@ -341,6 +343,10 @@ top of this file, not there.
 
 ---
 
+## Owner-only legal removal
+
+Published stories have a separate [legal-removal workflow](docs/editor.md#legal-removal-owner-workflow): review connected and historical copies, choose 12-calendar-month owner-only retention or an explicit no-retention destruction policy, and follow the result to an audited case. Known shared captured copies block destruction. Backup cleanup remains an operator task with attributed attestations; retained copies have owner access controls, not encryption. Ordinary Delete remains 30-day trash. Candidate and deployment status are tracked in [TODO.md](TODO.md).
+
 ## Frequently asked questions
 
 **Is this a newspaper?**
@@ -364,7 +370,7 @@ configured-provider features.
 No. Captions are a map of the tape. Minutes and the packet are the official record. Names in captions are often wrong. Dark Desk is told this; drafts still need a human check.
 
 **What’s Dark Desk?**
-The investigative lane. An editor points it at a person, document, URL, rumor, or gap. It searches, fetches, captures copies, and follows names and attachments. Remaining pages stay on the file. It has no publish button. Editor UI: [docs/dark-desk-editor.md](docs/dark-desk-editor.md) and [docs/editor.md](docs/editor.md#dark-desk).
+The investigative lane. An editor points it at a person, document, URL, rumor, or gap. It searches, fetches, captures copies, and follows names and attachments. Remaining pages stay on the file. It has no publish button. Editor UI: [docs/dark-desk-editor.md](docs/dark-desk-editor.md) and [docs/editor.md](docs/editor.md#dark-desk-deskdark).
 
 **What's the Opinion desk?**
 Give it a subject, a sentence, or a URL and it asks the selected provider for an unsigned editorial — OPINION in the headline, no byline, because an unsigned editorial is the paper's own position. Claims and sources run in an appendix at the end. It is a draft until you publish it. If a provider declines or returns an assistant message instead of a real piece, the run is marked Failed and no draft, Read/Edit action, or Publish button is created. The writing voice is a file on disk that you point at with `TOWNREPORTER_VOICE_FILE`; it is not in this repository, and only its path ever reaches a command line.

@@ -1,6 +1,15 @@
 # Changelog
 
-Current release: **0.6.25**.
+Current release: **0.6.26**.
+
+## 0.6.26 — 2026-09-07
+
+- Published has a separate owner-only legal-removal workflow: preview connected and historical records, choose twelve-calendar-month retention or explicit destruction, then follow the result to an audited case. Retained text is access-controlled, not encrypted; expired text cannot be opened. Destruction never inserts a retained payload.
+- Removal refuses known shared captured/search copies and cross-newsroom foreign-key references. Article URL variants, late filing and restoration are guarded. Matching watches pause and sources leave scanning; evidence remains available for the required operator review. External backup attestations never claim independently verified erasure.
+- Retention cleanup runs independently before unrelated scheduled watch work. Expiry failures remain explicit; no production database, backup or filesystem cleanup is implied.
+- How hard to dig saves an investigative lookback or date range and verification limit. Defaults are 90 inclusive UTC calendar days and six signals. Each round keeps one immutable settings snapshot across research and failover. Date operators are search hints, not proof of source dates or completeness.
+- Verification reports the full eligible denominator, attempted/verified/unverified/failed counts, and signals deferred by the round limit. Failed preference reads never silently become defaults; all four verification gates remain required.
+- Migrations 0047–0048, current manuals, README, landing page, TODO and handoff are reconciled. Dated design proposals are marked as historical and point to current decisions. GitHub source publication and Halo promotion remain separate.
 
 ## 0.6.25 — 2026-09-07
 

@@ -1,4 +1,5 @@
-import { createServerFn } from "@tanstack/react-start";
+import { describeResearchWindow, validateResearchPreferences, type ResearchPreferences, type ResearchSnapshot } from './dark-preferences.ts';
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import {
@@ -73,6 +74,17 @@ import {
 function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
 }
+
+const readDarkSettingsFor = createServerOnlyFn(async (newsroomId: number) =>
+  (await import("./dark-preferences.server.ts")).readDarkSettingsFor(newsroomId),
+);
+const saveDarkSettingsFor = createServerOnlyFn(async (
+  newsroomId: number,
+  input: { dials?: Partial<DarkDials>; preferences?: ResearchPreferences },
+) => (await import("./dark-preferences.server.ts")).saveDarkSettingsFor(newsroomId, input));
+const snapshotDarkSettingsFor = createServerOnlyFn(async (newsroomId: number, runId: number) =>
+  (await import("./dark-preferences.server.ts")).snapshotDarkSettingsFor(newsroomId, runId),
+);
 
 /**
  * Same question Scan asks before it spends anything: is a model actually
@@ -352,6 +364,9 @@ export const DARK_SCHEMA_STATEMENTS: readonly string[] = [
   `alter table dark_runs add column if not exists searches_json text`,
   `alter table dark_runs add column if not exists stage text`,
   `alter table dark_settings add column if not exists county text`,
+  `alter table dark_settings add column if not exists research_preferences text not null default '{}'`,
+  `alter table dark_runs add column if not exists research_preferences_json text`,
+  `alter table dark_runs add column if not exists verification_counts_json text`,
 ];
 
 export async function ensureDarkSchema() {
@@ -894,9 +909,11 @@ async function synthesizeSignals(
   choice?: EffectiveProviderChoice,
   overrides?: ProviderOverrides | null,
   newsroomId: number = DEFAULT_NEWSROOM_ID,
+  preferences?: ResearchSnapshot,
 ) {
   const sql = await getSql();
-  const pack = await buildDarkSynthesisPack(investigationId, paste, newsroomId);
+  const sourcePack = await buildDarkSynthesisPack(investigationId, paste, newsroomId);
+  const pack = (preferences ? describeResearchWindow(preferences)+"\n\n" : "") + sourcePack;
 
   /*
     The prompt is built from the dials, not fixed.
@@ -1055,6 +1072,7 @@ async function runVerificationStage(
   investigationId: number,
   choice?: EffectiveProviderChoice,
   overrides?: ProviderOverrides | null,
+  preferences?: ResearchSnapshot,
 ): Promise<string> {
   try {
     const { place, official, press } = await readDarkPlace(newsroomId);
@@ -1068,6 +1086,7 @@ async function runVerificationStage(
       pressDomains: press,
       choice,
       overrides,
+      preferences,
     });
     return out.summary;
   } catch (err) {
@@ -1140,12 +1159,13 @@ async function executeDarkRun(
   }
 
   try {
+    const snapshot = await snapshotDarkSettingsFor(newsroomId, runId);
     await checkBaselines(userId, investigationId, new Date(), newsroomId);
     await runDueMonitors({ userId, newsroomId });
 
     // Same setting as a continued round: an editor who turned the desk up
     // expects the file they open next to dig that hard too.
-    const dials = await readDarkDials(newsroomId);
+    const dials = snapshot.dials;
     const budget = budgetFor(dials);
     // Location scoping and domain tiers come from the paper's own settings,
     // so the loop's searches name this town and the run record can say which
@@ -1161,6 +1181,7 @@ async function executeDarkRun(
       place: where?.place,
       officialDomains: where?.official,
       pressDomains: where?.press,
+      preferences: snapshot.preferences,
     });
 
     const synth = await synthesizeSignals(
@@ -1172,6 +1193,7 @@ async function executeDarkRun(
       choice,
       overrides,
       newsroomId,
+      snapshot.preferences,
     );
     /*
       Stage 2. Nothing this round filed may be shown as finalized until the
@@ -1185,6 +1207,7 @@ async function executeDarkRun(
       investigationId,
       choice,
       overrides,
+      snapshot.preferences,
     );
     await rememberLastModelChoice(investigationId, choice);
     const names = (
@@ -1202,6 +1225,7 @@ async function executeDarkRun(
       loop.summary,
       synth.summary,
       verifySummary,
+      describeResearchWindow(snapshot.preferences),
       `Hops ${loop.hops} of ${budget.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
       `Setting: dig ${dials.dig}/10, nerve ${dials.nerve}/10 (${stanceFor(dials).label}), scope ${dials.scope}.`,
       revived.length
@@ -1500,6 +1524,7 @@ export async function performDarkRound(job: DeskJob) {
   `;
   const runId = runRows[0]!.id;
   try {
+    const snapshot = await snapshotDarkSettingsFor(owned(context), runId);
     await checkBaselines(context.userId, id, new Date(), owned(context));
     await runDueMonitors({ userId: context.userId, newsroomId: owned(context) });
     /*
@@ -1509,7 +1534,7 @@ export async function performDarkRound(job: DeskJob) {
       and whatever the editor wanted. The machinery underneath could always
       chase a trail; nothing could ask it to.
     */
-    const dials = await readDarkDials(owned(context));
+    const dials = snapshot.dials;
     const budget = budgetFor(dials);
     const where = await readDarkPlace(owned(context)).catch(() => null);
     const runOnce = async (on: EffectiveProviderChoice) => {
@@ -1523,6 +1548,7 @@ export async function performDarkRound(job: DeskJob) {
         place: where?.place,
         officialDomains: where?.official,
         pressDomains: where?.press,
+      preferences: snapshot.preferences,
       });
       const signals = await synthesizeSignals(
         context.userId,
@@ -1533,6 +1559,7 @@ export async function performDarkRound(job: DeskJob) {
         on,
         overrides,
         owned(context),
+        snapshot.preferences,
       );
       return { loop: ran, synth: signals };
     };
@@ -1572,6 +1599,7 @@ export async function performDarkRound(job: DeskJob) {
       id,
       choice,
       overrides,
+      snapshot.preferences,
     );
     await rememberLastModelChoice(id, choice);
     const names = (
@@ -1588,6 +1616,7 @@ export async function performDarkRound(job: DeskJob) {
       loop.summary,
       synth.summary,
       verifySummary,
+      describeResearchWindow(snapshot.preferences),
       `Hops ${loop.hops} of ${budget.hops}. Artifacts ${loop.artifacts}. Open frontier ${loop.frontier}.`,
       `Setting: dig ${dials.dig}/10, nerve ${dials.nerve}/10 (${stanceFor(dials).label}), scope ${dials.scope}.`,
       revived.length
@@ -2094,20 +2123,17 @@ export const fileRedditTip = createServerFn({ method: "POST" })
  * investigation they happen to start.
  */
 export async function readDarkDials(newsroomId: number): Promise<DarkDials> {
-  const sql = await getSql();
-  const rows = await sql<{ dig: number; nerve: number; scope: string }>`
-    select dig, nerve, scope from dark_settings where newsroom_id = ${newsroomId} limit 1
-  `.catch(() => []);
-  return clampDials(rows[0] as Partial<DarkDials> | undefined);
+ return (await readDarkSettingsFor(newsroomId)).dials;
 }
 
 export const getDarkDials = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
     await ensureDarkSchema();
-    const dials = await readDarkDials(owned(context));
+    const {dials,preferences} = await readDarkSettingsFor(owned(context));
     return {
       dials,
+      preferences,
       budget: budgetFor(dials),
       stance: stanceFor(dials),
       description: describeDials(dials),
@@ -2127,20 +2153,13 @@ export const getDarkCounty = createServerFn({ method: "GET" })
 
 export const saveDarkDials = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { dig: number; nerve: number; scope: string }) => input)
+  .validator((input: { dig: number; nerve: number; scope: string; preferences?: ResearchPreferences }) => ({...input, preferences: input.preferences === undefined ? undefined : validateResearchPreferences(input.preferences)}))
   .handler(async ({ context, data }) => {
     await ensureDarkSchema();
     // Clamped on the way in as well as on the way out: a stored 40 would be a
     // very expensive typo.
     const d = clampDials(data as Partial<DarkDials>);
-    const sql = await getSql();
-    await sql`
-      insert into dark_settings (newsroom_id, dig, nerve, scope, updated_at)
-      values (${owned(context)}, ${d.dig}, ${d.nerve}, ${d.scope}, now())
-      on conflict (newsroom_id) do update
-        set dig = excluded.dig, nerve = excluded.nerve, scope = excluded.scope,
-            updated_at = now()
-    `;
+    const saved = await saveDarkSettingsFor(owned(context), {dials:d,preferences:data.preferences});
     await audit(
       context.userId,
       "dark-dials",
@@ -2149,8 +2168,9 @@ export const saveDarkDials = createServerFn({ method: "POST" })
     );
     return {
       ok: true as const,
-      dials: d,
-      description: describeDials(d),
+      dials: saved.dials,
+      preferences: saved.preferences,
+      description: describeDials(saved.dials),
       minutes: estimateMinutes(d),
     };
   });

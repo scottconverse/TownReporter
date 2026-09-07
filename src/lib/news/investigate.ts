@@ -1915,6 +1915,7 @@ export async function researchLoop(opts: {
   /** The paper's own official domains, so the loop can record which tier answered. */
   officialDomains?: string[];
   pressDomains?: string[];
+  preferences?: import("./dark-preferences.ts").ResearchSnapshot;
 }): Promise<{
   hops: number;
   artifacts: number;
@@ -1924,6 +1925,7 @@ export async function researchLoop(opts: {
   plannerFailures: number;
 }> {
   const sql = await getSql();
+  const { describeResearchWindow, queryWithResearchWindow } = await import("./dark-preferences.ts");
   const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
   const place: Place = opts.place ?? { city: "Longmont", state: "Colorado" };
   await investigationNewsroom(opts.investigationId, newsroomId);
@@ -1996,6 +1998,7 @@ export async function researchLoop(opts: {
     const terms = openFrontier.map((f) => f.label);
     const graph = await retrievePack(opts.userId, opts.investigationId, terms);
     const pack = [
+      opts.preferences ? describeResearchWindow(opts.preferences) : "",
       `INVESTIGATION ${opts.investigationId}. Hop ${hop + 1}. Longmont, Colorado.`,
       graph,
       `QUERIES ALREADY TRIED:\n${[...tried].slice(-40).join("\n") || "(none)"}`,
@@ -2102,7 +2105,7 @@ export async function researchLoop(opts: {
       plan.hypotheses.map((h) => h.text).filter(Boolean),
       place,
     ).filter((q) => !tried.has(queryFingerprint(q)));
-    const queries = [...withMinimums, ...fill].slice(0, SEARCHES_PER_HOP);
+    const queries = [...withMinimums, ...fill].map((q) => queryWithResearchWindow(q, opts.preferences)).filter((q) => !tried.has(queryFingerprint(q))).slice(0, SEARCHES_PER_HOP);
     const selectedThisHop: string[] = [];
     const fetchedThisHop: string[] = [];
     const thisHopEvidenceNames: string[] = [];

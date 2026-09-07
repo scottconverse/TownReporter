@@ -81,7 +81,7 @@ ${entries
         return new Response(body, {
           headers: {
             "content-type": "application/xml; charset=utf-8",
-            "cache-control": "public, max-age=600",
+            "cache-control": "no-store",
           },
         });
       },

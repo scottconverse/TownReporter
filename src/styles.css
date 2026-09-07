@@ -1309,3 +1309,6 @@
 [data-stranded] [data-awaiting-session]:not([data-session-hydrated]) [data-stranded-signin][hidden] {
   display: block;
 }
+
+/* Legal action descriptions remain readable with Large text on narrow screens. */
+.desk-ltr .legal-removal-flow .btn {max-width:100%;white-space:normal}

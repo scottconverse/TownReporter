@@ -1,5 +1,7 @@
 # Four workflows — owner's product spec (2026-09-05)
 
+> **Original proposal, reconciled 2026-09-07.** Later owner decisions supersede two parts of this dated spec: sections are configurable by the owner without waiting for a fixed section list, and legal removal normally retains an owner-only copy for 12 calendar months with automatic expiry; explicit court destruction keeps no removed text in that retained-copy store. Known application copies and external backup cleanup must remain honestly distinguished. The [canonical TODO](../../TODO.md) records implementation and pending gates; the [editor guide](../editor.md) describes current experiences. Preserve the proposal below as history, not as an alternative queue or a production-execution instruction.
+
 Each workflow must answer three questions clearly on every screen: what am I asking the system to do, what happened, and what do I do next. These are proposed behaviors, not existing features.
 
 ## 1. Manual Dark Desk page watching

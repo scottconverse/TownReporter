@@ -67,10 +67,22 @@ It preserves existing rows and does not infer historical ownership.
 
 The ordered units are in [TODO.md](TODO.md): review/fix the restored engine, fetch caps, sections, manual watching, legal removal and investigative settings. Five live runs and real-data staging require Halo-local execution; their absence cannot be turned into a passing result. Local mocked checks may proceed independently.
 
-## 0.6.25 implementation checkpoint
+## 0.6.25 implementation checkpoint (historical)
 
 Sections and manual investigative watches are implemented together; resolve the release tag and exact CI before calling the candidate published. Migration0045 preserves permanent section keys and story URLs while explicit retirement maps late filing through replacement aliases. Scan runs store immutable section guidance/source snapshots. Migration0046 extends existing monitors/captures with daily manual watches, history, lease fencing and idempotent file/lead actions. Readiness checks fail closed when required objects are missing.
 
 Current Command Center and Dark Desk screenshots use disposable local fixtures. Older public-paper and other tour screenshots remain attributed historical examples. The first-owner concurrency defect found during0.6.24 verification was corrected in PR#8; no timeout or assertion was weakened.
 
 Legal removal and investigative settings are the next in-progress units. Legal inventory includes ambiguous historical editorial drafts and beat-memory/audit copies: no fuzzy auto-deletion or universal-erasure claim is permitted. Explicitly review shared references; owner-only retained payloads expire after12 calendar months, while destruction must never store removed text. External backup attestations cannot prove cleanup by themselves. Settings must snapshot once per round and show deferred signals in the denominator. Five Halo investigations and promotion remain external.
+
+## 0.6.26 implementation checkpoint
+
+Legal removal and investigative settings are implemented. Resolve the matching release tag and exact CI before treating this candidate as published; a version field alone is not release evidence. Sections and page watching were merged through PR #9, including a sensitive fix for shared source hashes truncating evidence for a different section. The overall 48,000-character scan budget remains unchanged.
+
+Legal removal is a separate owner-only Published workflow, with impact preview, explicit historical selections, retention/destruction policy and a case destination. It retains an access-controlled database payload for twelve calendar months, not an encrypted archive. Expired text cannot be opened; the existing scheduler sweeps it before unrelated watch work. Explicit destruction never inserts a retained payload. Known structured search/capture copies cause refusal; foreign-room incoming references cannot be silently cascaded away. URL aliases, late writes and ordinary restoration are guarded. Matching watches pause and sources leave scanning, while evidence review remains explicit. External backup cleanup is only an operator attestation, never a remote erasure claim. See the [owner workflow](docs/editor.md#legal-removal-owner-workflow).
+
+Investigative preferences live in How hard to dig. Defaults are 90 inclusive UTC calendar days and six signals; an explicit date range and a limit of 1–24 are supported. One immutable per-round snapshot controls discovery, synthesis, verification and failover. Full eligible/attempted/verified/unverified/failed/deferred counts prevent an attempted subset from masquerading as complete verification. Date operators are search hints, not factual-date or completeness guarantees. Preference read errors do not become defaults. Existing four-gate and publication rules remain intact.
+
+Migration 0047 supplies removal metadata and guards; 0048 supplies investigative snapshots/counts. The source release requires the applicable full suite, typecheck/lint/build, independent review, built UI and real-Postgres checks on its exact candidate. Resolve [the 0.6.26 release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.26) for the published SHA and final gate results rather than copying older counts. Historical design documents now carry explicit status notices; their superseded sections/retention proposals are not alternate instructions.
+
+The local implementation queue is complete; source publication is established only by the release evidence above. Five real investigations (including three still-to-be-selected topics), real-data staging/promotion, historical-record cleanup and further owner design feedback remain external. Do not invent completed investigations or restart a redesign to fill that gap.
