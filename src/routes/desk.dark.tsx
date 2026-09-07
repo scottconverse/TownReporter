@@ -48,11 +48,9 @@ import {
 type RedditScanResult = Awaited<ReturnType<typeof scanTipSubreddit>>;
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
-import {
-  InvestigationBriefCard,
-  SectionTldr,
-} from "@/components/investigation-brief";
-import { captureBatchStats, readableCapture } from "@/lib/news/html-text";
+import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-brief";
+import { SearchTrailEntry } from "@/components/search-trail-entry";
+import { captureBatchStats, readableCapture, captureRefusalLabel } from "@/lib/news/html-text";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
@@ -74,9 +72,11 @@ function DarkPage() {
   const [noticeOk, setNoticeOk] = useState(false);
   const [noticeAt, setNoticeAt] = useState<"paste" | "work">("work");
   const [openId, setOpenId] = useState<number | null>(null);
-  const [queued, setQueued] = useState<
-    { leadId: number; invId: number; alreadyQueued: boolean } | null
-  >(null);
+  const [queued, setQueued] = useState<{
+    leadId: number;
+    invId: number;
+    alreadyQueued: boolean;
+  } | null>(null);
   const [queueError, setQueueError] = useState<{ invId: number; message: string } | null>(null);
   const [pendingCard, setPendingCard] = useState<string | null>(null);
   const [cardError, setCardError] = useState<{ id: string; message: string } | null>(null);
@@ -276,7 +276,8 @@ function DarkPage() {
       afterOpen(res.investigationId, item.id);
     },
     onError: (err, item) => {
-      const msg = editorError(err instanceof Error ? err.message : "Could not start") || "Could not start";
+      const msg =
+        editorError(err instanceof Error ? err.message : "Could not start") || "Could not start";
       setCardError({ id: item.id, message: msg });
       setPendingCard(null);
       clearPhase();
@@ -374,7 +375,9 @@ function DarkPage() {
       afterOpen(res.investigationId, seed.title);
     },
     onError: (err) => {
-      showWorkNotice(editorError(err instanceof Error ? err.message : "Could not follow that lead"));
+      showWorkNotice(
+        editorError(err instanceof Error ? err.message : "Could not follow that lead"),
+      );
       clearPhase();
     },
   });
@@ -450,7 +453,8 @@ function DarkPage() {
   });
 
   const fileTip = useMutation({
-    mutationFn: (post: { url: string; title: string; excerpt: string }) => fileRedditTip({ data: post }),
+    mutationFn: (post: { url: string; title: string; excerpt: string }) =>
+      fileRedditTip({ data: post }),
     onSuccess: (res, post) => {
       if (!res?.ok) return;
       if (res.filed) {
@@ -507,7 +511,8 @@ function DarkPage() {
       showWorkNotice(err instanceof Error ? err.message : "Could not write the brief."),
   });
 
-  const starting = openFromCard.isPending || openPaste.isPending || find.isPending || followLead.isPending;
+  const starting =
+    openFromCard.isPending || openPaste.isPending || find.isPending || followLead.isPending;
   const digging = advance.isPending;
   const busyStart = starting;
 
@@ -556,8 +561,8 @@ function DarkPage() {
       kicker="Investigative desk"
       lede={
         <>
-          Three piles. <b>To look at</b> is new. <b>On the desk</b> is started.{" "}
-          <b>Set aside</b> is parked — nothing is deleted. It digs; it never prints.
+          Three piles. <b>To look at</b> is new. <b>On the desk</b> is started. <b>Set aside</b> is
+          parked — nothing is deleted. It digs; it never prints.
         </>
       }
     >
@@ -601,11 +606,7 @@ function DarkPage() {
             disabled={busyStart || digging}
             compact
           />
-          <InkButton
-            small
-            type="submit"
-            disabled={busyStart || digging || !paste.trim()}
-          >
+          <InkButton small type="submit" disabled={busyStart || digging || !paste.trim()}>
             {openPaste.isPending ? "Starting…" : "Start digging"}
           </InkButton>
         </div>
@@ -668,14 +669,18 @@ function DarkPage() {
           {worth.isError && !worth.data ? (
             <ScreenError
               night
-              message={worth.error instanceof Error ? worth.error.message : "Could not load new material."}
+              message={
+                worth.error instanceof Error ? worth.error.message : "Could not load new material."
+              }
               onRetry={() => void worth.refetch()}
               retrying={worth.isRefetching}
             />
           ) : worth.isPending && !inbox.length ? (
             <ListSkeleton rows={3} night />
           ) : inbox.length === 0 ? (
-            <p className="meta">Nothing new tonight — everything interesting is already on the desk.</p>
+            <p className="meta">
+              Nothing new tonight — everything interesting is already on the desk.
+            </p>
           ) : (
             inbox.map((item) => (
               <WorthCard
@@ -690,7 +695,12 @@ function DarkPage() {
           )}
           <DarkDialsPanel />
           <div className="np-acts">
-            <InkButton tone="quiet" small disabled={busyStart || digging} onClick={() => find.mutate()}>
+            <InkButton
+              tone="quiet"
+              small
+              disabled={busyStart || digging}
+              onClick={() => find.mutate()}
+            >
               {find.isPending ? "Starting…" : "Pick one for me"}
             </InkButton>
             <InkButton
@@ -727,8 +737,8 @@ function DarkPage() {
             />
           ) : (
             <p className="mt-2 text-sm text-muted">
-              Tips from the subreddit arrive here as unverified cards. They are a
-              reason to go looking for the record, never a source to cite.
+              Tips from the subreddit arrive here as unverified cards. They are a reason to go
+              looking for the record, never a source to cite.
             </p>
           )}
         </section>
@@ -792,13 +802,18 @@ function DarkPage() {
               <div key={row.id} className="deskfile dim">
                 <p className="worth-t">{row.title || `File ${row.id}`}</p>
                 <p className="np-meta">
-                  {Number(row.records ?? 0)} records · last touched {formatShortDate(row.updated_at)}
+                  {Number(row.records ?? 0)} records · last touched{" "}
+                  {formatShortDate(row.updated_at)}
                 </p>
                 {!looksLikeInternalSummary(row.summary) && row.summary ? (
                   <p className="np-meta">{plainEditorText(row.summary)}</p>
                 ) : null}
                 <div className="np-acts">
-                  <InkButton small disabled={pullBack.isPending} onClick={() => pullBack.mutate(row.id)}>
+                  <InkButton
+                    small
+                    disabled={pullBack.isPending}
+                    onClick={() => pullBack.mutate(row.id)}
+                  >
                     {pullBack.isPending ? "Pulling back…" : "Pull back"}
                   </InkButton>
                   <InkButton tone="quiet" small onClick={() => rememberOpen(row.id)}>
@@ -832,9 +847,7 @@ function DarkPage() {
                       ) : null}
                     </p>
                   ) : null}
-                  {r.summary ? (
-                    <p className="side-item">{plainEditorText(r.summary)}</p>
-                  ) : null}
+                  {r.summary ? <p className="side-item">{plainEditorText(r.summary)}</p> : null}
                 </div>
               ))}
             </details>
@@ -871,7 +884,8 @@ function DeskFileCard({
       <p className="worth-t">{row.title || `File ${row.id}`}</p>
       <p className="np-meta">
         {records} records on file
-        {still > 0 ? ` · ${still} still to open` : ""} · last touched {formatShortDate(row.updated_at)}
+        {still > 0 ? ` · ${still} still to open` : ""} · last touched{" "}
+        {formatShortDate(row.updated_at)}
       </p>
       <div className="np-acts">
         <InkButton small onClick={onOpen}>
@@ -973,8 +987,8 @@ function RedditResultPanel({
       ) : null}
       {result.read > 0 && result.civic === 0 ? (
         <p className="reddit-empty">
-          None of these scored 6 or more on the civic word test. Posts that came close are
-          listed so you can file one by hand.
+          None of these scored 6 or more on the civic word test. Posts that came close are listed so
+          you can file one by hand.
         </p>
       ) : null}
       {result.topScores.length > 0 ? (
@@ -984,14 +998,16 @@ function RedditResultPanel({
         <div className="reddit-near-misses">
           <p className="worth-t">Near misses — scored 3-5</p>
           <p className="reddit-sub">
-            Not civic enough to file automatically, but close. Worth a glance before they scroll
-            off the feed.
+            Not civic enough to file automatically, but close. Worth a glance before they scroll off
+            the feed.
           </p>
           <RedditTipRows posts={result.nearMisses} onFileTip={onFileTip} filingUrl={filingUrl} />
         </div>
       ) : null}
       <details className="of-trail">
-        <summary>What was read — {result.log.length} feed{result.log.length === 1 ? "" : "s"}</summary>
+        <summary>
+          What was read — {result.log.length} feed{result.log.length === 1 ? "" : "s"}
+        </summary>
         {result.log.map((entry, i) => {
           const status = redditFeedStatusLabel(entry);
           const bad = !entry.ok;
@@ -1131,6 +1147,7 @@ function InvestigationWorkspace({
       status: a.fetch_status,
       outcome: a.fetch_outcome,
       title: a.title,
+      extractionMethod: a.extraction_method,
     })),
   );
   const readableLabel =
@@ -1203,9 +1220,7 @@ function InvestigationWorkspace({
       .filter((f) => f.text),
   ];
   const tests = hyps.map((h) => plainEditorText(h.body)).filter(Boolean);
-  const next = frontier.filter((f) =>
-    ["open", "investigating", "reopened"].includes(f.status),
-  );
+  const next = frontier.filter((f) => ["open", "investigating", "reopened"].includes(f.status));
   // The raw row list can hold the same lead under several labels; dedupe by
   // its displayed text so the pile shows what's actually left to open, not
   // duplicate rows counted as separate work (Dark Desk F6).
@@ -1413,8 +1428,8 @@ function InvestigationWorkspace({
               ) : null}
               {Number(inv?.still_open ?? leftover) > nextDeduped.length ? (
                 <p className="meta">
-                  {Number(inv?.still_open ?? leftover) - nextDeduped.length} more were mentioned but not
-                  yet named. They surface as rounds read them.
+                  {Number(inv?.still_open ?? leftover) - nextDeduped.length} more were mentioned but
+                  not yet named. They surface as rounds read them.
                 </p>
               ) : null}
             </>
@@ -1439,7 +1454,10 @@ function InvestigationWorkspace({
                   {f.sourceNote ? (
                     <span className="meta"> — {f.sourceNote}</span>
                   ) : (
-                    <span className="meta evidence-weak"> — pattern-level, not tied to one source</span>
+                    <span className="meta evidence-weak">
+                      {" "}
+                      — pattern-level, not tied to one source
+                    </span>
                   )}
                 </p>
               ))}
@@ -1501,9 +1519,7 @@ function InvestigationWorkspace({
                         Searches this round — {s.adversarial.length} run against this signal
                       </summary>
                       {s.adversarial.map((a, i) => (
-                        <p key={i} className="side-item">
-                          “{a.query}” · {a.tier} · {a.outcome}
-                        </p>
+                        <SearchTrailEntry key={i} record={a} />
                       ))}
                     </details>
                   ) : null}
@@ -1514,16 +1530,7 @@ function InvestigationWorkspace({
           <details className="of-trail">
             <summary>Searches this round — {searches.length}</summary>
             {searches.length ? (
-              searches.map((s, i) => (
-                <p key={`${s.hop}-${i}`} className="side-item">
-                  “{s.query}” · {s.tier || "unrecorded tier"} ·{" "}
-                  {s.state === "SEARCH_SUCCESS_RESULTS"
-                    ? "results"
-                    : s.state === "SEARCH_SUCCESS_ZERO_RESULTS"
-                      ? "no results found"
-                      : s.state || "outcome not recorded"}
-                </p>
-              ))
+              searches.map((s, i) => <SearchTrailEntry key={`${s.hop}-${i}`} record={s} />)
             ) : (
               <p className="side-item">No searches logged yet.</p>
             )}
@@ -1550,6 +1557,8 @@ function InvestigationWorkspace({
  * something an editor needs to see on every row.
  */
 function ocrStatusLine(method: string | null | undefined): string | null {
+  const refusal = captureRefusalLabel(method);
+  if (refusal) return refusal;
   const raw = (method ?? "").trim();
   if (!/^(ocr|needs-ocr):/.test(raw)) return null;
   return describeExtractionMethod(raw);
@@ -1579,6 +1588,7 @@ function OpenedRecords({
       status: a.fetch_status,
       outcome: a.fetch_outcome,
       title: a.title,
+      extractionMethod: a.extraction_method,
     });
   }
   function firstReadableId(list: typeof ordered) {
@@ -1616,13 +1626,15 @@ function OpenedRecords({
         status: body.data?.fetch_status ?? selected.fetch_status,
         outcome: body.data?.fetch_outcome ?? selected.fetch_outcome,
         title: selected.title,
+        extractionMethod: selected.extraction_method,
       })
     : null;
   const title = selected
     ? cap?.kind === "blocked"
-      ? selected.fetch_status === 429
-        ? "Too many requests — not the article"
-        : "Capture failed — not the article"
+      ? (captureRefusalLabel(selected.extraction_method) ??
+        (selected.fetch_status === 429
+          ? "Too many requests — not the article"
+          : "Capture failed — not the article"))
       : selected.title && !/^https?:/i.test(selected.title)
         ? selected.title
         : headlineFromUrl(selected.url) || selected.title || selected.url
@@ -1637,9 +1649,10 @@ function OpenedRecords({
           const preview = previewOf(a);
           const rowTitle =
             preview.kind === "blocked"
-              ? a.fetch_status === 429
-                ? "Too many requests — not the article"
-                : `Capture failed${a.fetch_status ? ` (${a.fetch_status})` : ""} — not the article`
+              ? (captureRefusalLabel(a.extraction_method) ??
+                (a.fetch_status === 429
+                  ? "Too many requests — not the article"
+                  : `Capture failed${a.fetch_status ? ` (${a.fetch_status})` : ""} — not the article`))
               : a.title && !/^https?:/i.test(a.title)
                 ? a.title
                 : headlineFromUrl(a.url) || a.title || a.url;
@@ -1675,8 +1688,7 @@ function OpenedRecords({
       {selected ? (
         <article className="reader-doc">
           <p className="read-kind">
-            Reading {idx + 1} of {ordered.length} ·{" "}
-            {cap?.kind === "blocked" ? "Blocked" : kind}
+            Reading {idx + 1} of {ordered.length} · {cap?.kind === "blocked" ? "Blocked" : kind}
             {org ? ` · ${org}` : ""}
             {selected.created_at ? ` · captured ${formatShortDate(selected.created_at)}` : ""}
           </p>
@@ -1687,7 +1699,12 @@ function OpenedRecords({
                 Open original
               </a>
             ) : null}
-            <button type="button" className="inline-link" disabled={idx <= 0} onClick={() => go(-1)}>
+            <button
+              type="button"
+              className="inline-link"
+              disabled={idx <= 0}
+              onClick={() => go(-1)}
+            >
               Previous
             </button>
             <button

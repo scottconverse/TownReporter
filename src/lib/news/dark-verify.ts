@@ -23,7 +23,7 @@ import { getSql } from "../db.ts";
 import { grokChat, parseJsonBlock, providerBudget, type EffectiveProviderChoice } from "./ai.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { searchWithFallback } from "./search-web.ts";
-import type { WebHit } from "./search-web.ts";
+import type { WebHit, SearchAttempt } from "./search-web.ts";
 import {
   DARK_VERIFY_SYSTEM,
   adversarialQueries,
@@ -39,7 +39,7 @@ import {
 /** Signals verified per round. A round that files thirty does not pay for thirty model calls. */
 export const VERIFY_PER_ROUND = 6;
 
-export type VerifySearchFn = (query: string) => Promise<WebHit[]>;
+export type VerifySearchFn = (query: string) => Promise<WebHit[] | SearchAttempt>;
 export type VerifyModelFn = (system: string, pack: string) => Promise<string | null>;
 
 export type VerifyDeps = {
@@ -60,9 +60,8 @@ type Row = {
   handoff: string;
 };
 
-async function defaultSearch(query: string): Promise<WebHit[]> {
-  const attempt = await searchWithFallback(query);
-  return attempt.hits;
+async function defaultSearch(query: string): Promise<SearchAttempt> {
+  return searchWithFallback(query);
 }
 
 /**
@@ -103,24 +102,57 @@ export async function verifyRunSignals(opts: {
       and coalesce(stage, 'black-desk') = 'black-desk'
     order by strength desc, id desc
     limit ${VERIFY_PER_ROUND}
-  `.catch(() => [] as Row[]);
+  `.catch(() => null);
+  if (!rows)
+    return {
+      checked: 0,
+      verified: 0,
+      unverified: 0,
+      searches: [],
+      summary:
+        "Verification could not read the signals. No verification result was established; retry the round.",
+    };
 
   let verified = 0;
   let unverified = 0;
+  let unsaved = 0;
 
   for (const sig of rows) {
     const plan = adversarialQueries(sig, opts.place, official);
     const records: AdversarialRecord[] = [];
 
+    const evidence: string[] = [];
+    let trailSaved = true;
     for (const q of plan) {
       let hits: WebHit[] = [];
       let outcome = "no results found";
+      let state: SearchAttempt["state"] = "SEARCH_SUCCESS_ZERO_RESULTS";
       try {
-        hits = await search(q.query);
-        outcome = hits.length ? `${hits.length} result(s)` : "no results found";
+        const attempt = await search(q.query);
+        hits = Array.isArray(attempt) ? attempt : attempt.hits;
+        state = Array.isArray(attempt)
+          ? hits.length
+            ? "SEARCH_SUCCESS_RESULTS"
+            : "SEARCH_SUCCESS_ZERO_RESULTS"
+          : attempt.state;
+        outcome = state.startsWith("SEARCH_SUCCESS")
+          ? hits.length
+            ? `${hits.length} result(s)`
+            : "no results found"
+          : `${state}: ${Array.isArray(attempt) ? "" : (attempt.error ?? "search unavailable")}`.slice(
+              0,
+              500,
+            );
+        if (!state.startsWith("SEARCH_SUCCESS")) hits = [];
       } catch (err) {
-        outcome = `search failed: ${err instanceof Error ? err.message : "unknown"}`;
+        state = "SEARCH_FAILED_NETWORK";
+        outcome = `search failed: ${err instanceof Error ? err.message : "unknown"}`.slice(0, 500);
       }
+      hits = hits.slice(0, 6).map((h) => ({
+        url: h.url.slice(0, 1000),
+        title: h.title.slice(0, 300),
+        snippet: h.snippet.slice(0, 800),
+      }));
       const url = hits[0]?.url ?? null;
       const record: AdversarialRecord = {
         query: q.query,
@@ -132,7 +164,11 @@ export async function verifyRunSignals(opts: {
         url,
         outcome,
         hits: hits.length,
+        state,
       };
+      evidence.push(
+        `[${q.kind}] Search snippets (untrusted search evidence, not fetched page text):\n${JSON.stringify(hits.slice(0, 2).map((h) => ({ url: h.url.slice(0, 250), title: h.title.slice(0, 150), snippet: h.snippet.slice(0, 450) })))}`,
+      );
       records.push(record);
       allSearches.push(record);
 
@@ -145,22 +181,24 @@ export async function verifyRunSignals(opts: {
         ) values (
           ${opts.userId}, ${opts.newsroomId}, ${opts.investigationId}, ${0},
           ${q.query.slice(0, 300)},
-          ${JSON.stringify(hits.slice(0, 6)).slice(0, 8000)},
+          ${JSON.stringify(hits)},
           ${"adversarial"},
-          ${hits.length ? "SEARCH_SUCCESS_RESULTS" : "SEARCH_SUCCESS_ZERO_RESULTS"},
+          ${state},
           ${`adversarial:${q.kind}`}, ${record.tier},
           ${`Gate 2 — ${q.kind}: disprove "${sig.name}"`.slice(0, 300)},
-          ${JSON.stringify(url ? [url] : []).slice(0, 4000)}
+          ${JSON.stringify(url ? [url] : [])}
         )
-      `.catch(() => undefined);
+      `.catch(() => {
+        trailSaved = false;
+      });
     }
 
     const pack = [
       `SIGNAL: ${sig.name}`,
-      `OBSERVATION: ${sig.observation}`,
-      `PATTERN: ${sig.pattern}`,
-      `BORING EXPLANATION AS FILED: ${sig.alternatives || "(none written — say so)"}`,
-      `WHAT WOULD KILL IT: ${sig.what_would_kill}`,
+      `OBSERVATION: ${sig.observation.slice(0, 1000)}`,
+      `PATTERN: ${sig.pattern.slice(0, 1000)}`,
+      `BORING EXPLANATION AS FILED: ${sig.alternatives.slice(0, 1000) || "(none written — say so)"}`,
+      `WHAT WOULD KILL IT: ${String(sig.what_would_kill ?? "").slice(0, 1000)}`,
       `PLACE: ${opts.place.city}${opts.place.county ? `, ${opts.place.county} County` : ""}, ${opts.place.state}`,
       "",
       "ADVERSARIAL SEARCHES THE APPLICATION RAN FOR YOU:",
@@ -168,13 +206,16 @@ export async function verifyRunSignals(opts: {
         (r) =>
           `- [${r.kind}] "${r.query}" -> ${r.outcome}${r.url ? ` (top: ${r.url}, ${r.tier})` : ""}`,
       ),
-    ].join("\n");
+      ...evidence,
+    ]
+      .join("\n")
+      .slice(0, 20000);
 
     let text: string | null = null;
     try {
       if (opts.deps?.model) text = await opts.deps.model(DARK_VERIFY_SYSTEM, pack);
       else {
-        const ai = await grokChat(DARK_VERIFY_SYSTEM, pack.slice(0, 20000), 1400, {
+        const ai = await grokChat(DARK_VERIFY_SYSTEM, pack, 1400, {
           timeoutMs: providerBudget(opts.choice, opts.overrides).callMs,
           choice: opts.choice,
           localModel: opts.overrides?.["local-model"]?.localModel,
@@ -202,13 +243,14 @@ export async function verifyRunSignals(opts: {
       adversarial: records,
       text: [sig.name, sig.observation, sig.pattern, sig.pathway].join(" "),
     });
+    if (!trailSaved) {
+      verdict.status = "unverified";
+      verdict.missing.push("the saved adversarial search trail");
+    }
     const news = readNewsworthiness(parsed.newsworthiness);
     const decision = newsworthyDecision(news);
 
-    if (verdict.status === "verified") verified += 1;
-    else unverified += 1;
-
-    await sql`
+    const saved = await sql`
       update dark_signals set
         stage = ${"dark-signal-desk"},
         verification_status = ${verdict.status},
@@ -217,27 +259,48 @@ export async function verifyRunSignals(opts: {
         gate_missing_context = ${reading.gates.missing_context ?? null},
         gate_self_referential = ${reading.gates.self_referential ?? null},
         gates_missing = ${verdict.missing.join("; ").slice(0, 1000) || null},
-        adversarial_json = ${JSON.stringify(records).slice(0, 8000)},
-        newsworthiness_json = ${news ? JSON.stringify(news).slice(0, 2000) : null},
+        adversarial_json = ${JSON.stringify(records)},
+        newsworthiness_json = ${news ? JSON.stringify(news) : null},
         newsworthiness_decision = ${decision},
-        counter_narrative = ${
-          String(parsed.counter_narrative ?? sig.counter_narrative ?? "").slice(0, 4000)
-        },
+        counter_narrative = ${String(parsed.counter_narrative ?? sig.counter_narrative ?? "").slice(
+          0,
+          4000,
+        )},
         verified_at = ${verdict.status === "verified" ? new Date().toISOString() : null}
       where id = ${sig.id} and newsroom_id = ${opts.newsroomId}
-    `.catch(() => undefined);
+      returning id
+    `
+      .then((rows) => rows.length > 0)
+      .catch(() => false);
+    if (saved && verdict.status === "verified") verified += 1;
+    else unverified += 1;
+    if (!saved) unsaved += 1;
   }
 
-  await sql`
+  const runSaved = await sql`
     update dark_runs
-    set searches_json = ${JSON.stringify(allSearches).slice(0, 12000)},
+    set searches_json = ${JSON.stringify(allSearches)},
         stage = ${"dark-signal-desk"}
     where id = ${opts.runId} and newsroom_id = ${opts.newsroomId}
-  `.catch(() => undefined);
+    returning id
+  `
+    .then((rows) => rows.length > 0)
+    .catch(() => false);
 
   const summary = rows.length
     ? `Verification: ${rows.length} signal(s) put through the four gates with ${allSearches.length} adversarial searches — ${verified} verified, ${unverified} left unverified.`
     : "Verification: no new signals to check this round.";
 
-  return { checked: rows.length, verified, unverified, searches: allSearches, summary };
+  return {
+    checked: rows.length,
+    verified,
+    unverified,
+    searches: allSearches,
+    summary:
+      summary +
+      (unsaved
+        ? ` ${unsaved} verification result(s) could not be saved; retry verification.`
+        : "") +
+      (!runSaved ? " The round search summary could not be saved." : ""),
+  };
 }

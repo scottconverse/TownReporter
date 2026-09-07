@@ -51,7 +51,8 @@ export type StoryModelChoice = "auto" | PickerProviderId;
 export type EffectiveStoryModelChoice = StoryModelChoice | "configured";
 
 /*
-  Opinion offers Claude only. Decided 2026-09-02.
+  Opinion Automatic uses Claude; an explicit Local model is also offered.
+  The 2026-09-02 decision below removed Codex, not subsequent local support.
 
   Codex was offered here too, and its model refuses the job: asked for an
   editorial that takes a position on a local policy question, gpt-5.6-sol
@@ -134,10 +135,7 @@ function ladderSentence(): string {
  * actually tried, read from the registry, so removing or reordering a rung
  * cannot leave the help text describing a ladder that no longer exists.
  */
-export function modelChoiceHelp(
-  value: unknown,
-  scope: ProviderSurface = "story",
-): string {
+export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"): string {
   const options =
     scope === "opinion"
       ? OPINION_MODEL_CHOICES
@@ -201,7 +199,11 @@ export function localModelOptionLabel(model: {
   thinking: boolean;
   vision: boolean;
 }): string {
-  const suffix = [model.loaded ? "loaded" : null, model.thinking ? "thinking off" : null, model.vision ? "vision" : null]
+  const suffix = [
+    model.loaded ? "loaded" : null,
+    model.thinking ? "thinking off" : null,
+    model.vision ? "vision" : null,
+  ]
     .filter(Boolean)
     .join(" · ");
   return suffix ? `${model.id} · ${suffix}` : model.id;

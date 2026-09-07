@@ -6,6 +6,10 @@ questions, and the evidence it gathered while asking them.
 
 It runs in **two stages**, and the split is the whole point.
 
+Documentation baseline: 0.6.24, reviewed from repository code on 2026-09-07.
+This describes software behavior, not independent confirmation of a reporting
+conclusion or the current production deployment. See [the takeover handoff](../HANDOFF-NEXT-AGENT.md).
+
 ## Where this came from
 
 This desk is a restoration, not an invention. Its doctrine is the owner's own
@@ -65,6 +69,11 @@ Before any signal may be shown as verified or sent to the queue as a finding,
 **the application runs the adversarial searches itself** and the model answers
 four gates.
 
+At this baseline Stage 2 selects at most the **six strongest new signals per
+round**. Other signals remain speculative. Six is currently a code constant,
+not an editor control. The separate newsworthiness decision determines whether
+a verified signal is eligible as a finding; publication still requires a human.
+
 ### The searches the app runs
 
 At least four queries per signal, aimed at at least three different kinds of
@@ -82,7 +91,21 @@ answered, the URL and the outcome — including the ones that came back with
 nothing. The open file shows this as "Searches this round", so the editor can
 see the sniffing rather than be told it happened.
 
+In 0.6.24, a failed or blocked search cannot satisfy verification. A successful
+search returning zero results stays in the record, but does not count as a
+returned source tier: the three-tier requirement needs actual returned results.
+The verification model receives bounded result titles and snippets plus signal
+context, not fetched full document text. The editor still needs to open and
+read the originals. If the search trail or signal result cannot be saved, the
+run must not report a successfully persisted verified result.
+
 ### The four gates
+
+These are the four stored answers. The prompt's numbered headings instead
+introduce contestation, disproof, independence plus missing context, and
+self-reference. There is no separate persisted contestation answer. Do not
+substitute newsworthiness, claims-of-absence or city-data validation for this
+list: those are different checks.
 
 1. **What was tried to disprove it** (`disproof_attempted`) — the boring
    explanation first, then the searches and what they returned.
@@ -98,6 +121,10 @@ see the sniffing rather than be told it happened.
 
 A signal with **any** gate unanswered stays **unverified**, and the desk says
 which gate is missing, in words. A one-word shrug counts as unanswered.
+
+The first three answers are checked for minimum length, not independently
+proven true by the code. The editor must read the cited records and challenge
+the reasoning. A “verified” label is a protocol result, not fact-checking.
 
 ## Search minimums
 
@@ -151,3 +178,57 @@ unverified" in its own notes rather than pretending otherwise.
 | The dig loop, search minimums, tier recording | `src/lib/news/investigate.ts` |
 | The screen | `src/routes/desk.dark.tsx` |
 | Schema | `migrations/0043_dark_gates.sql` |
+
+## Five live investigations — acceptance exercise
+
+**Pending Halo-local execution.** This plan is not a report that the runs
+happened. The remote developer prepares regression checks and the report
+format; a local operator executes against the live installation only when the
+owner directs it. Do not publish automatically or manufacture a queue item to
+make a run appear successful.
+
+The first two topics are the owner's wording and hypotheses, not established
+facts:
+
+1. “Did a second Democrat in the 2025 mayoral race split the vote against
+   Shakeel Dalal?” Check candidate identities, affiliations and certified
+   results first; numerical vote arithmetic alone does not establish how
+   voters would have behaved in a different field. Record the historical
+   window rather than treating 90-day search preference as sufficient.
+2. “What is the city not telling us about the 2027 budget?” Establish what
+   budget documents exist, their dates and publication schedule before
+   treating an absent document as concealment. Seek routine explanations and
+   responses, including evidence against the premise.
+3. A specific local business or employment change, selected before the run.
+4. A specific school, housing or health/service question, selected before the run.
+5. A community, nonprofit or arts question, selected before the run.
+
+Topics 3–5 are proposed coverage categories, not invented owner assignments.
+The operator records the exact question and owner selection before starting.
+Include at least one case where “no finding / watch / still unknown” is a
+reasonable result. Do not deliberately break or interrupt production to test
+failure recovery; use local fixtures for those states.
+
+For each run, fill this record:
+
+| Field | Required evidence |
+| --- | --- |
+| Identity | Run/file identifier, exact repo SHA, served version, operator and timestamp |
+| Question and scope | Exact question, city/county, historical interval if relevant, model and settings |
+| Stage reached | Speculative signals filed, number eligible/selected for verification, completed or interrupted state |
+| Searches | Every query and kind, intended tier versus returned tier, provider, outcome, exact returned URLs; distinguish failed search from successful zero results |
+| Reading | Captured documents with dates and source links, unread/blocked records, OCR method and partial-read status |
+| Gates | Each stored answer, missing reasons, contrary evidence, ordinary explanation and independence assessment |
+| Newsworthiness | Life changes / new / checkable record, with rationale; watch is a valid outcome |
+| Handoff | What reached the queue and a lead link; finding versus explicitly unverified tip; uncertainty retained |
+| Editor experience | Pending/success/error feedback, readable result destination, what required manual work |
+| Verdict | Pass / defect / inconclusive with supporting record; what remains unknown and the next reporting action |
+
+Pass requires honest states, traceable evidence and preserved uncertainty,
+not a minimum number of findings. A failed search shown as successful, an
+unsupported verified conclusion, an unlabelled speculative queue handoff, a
+cross-newsroom record or unread OCR called complete is a defect. Provider
+unavailability may make reporting inconclusive while still proving correct
+failure handling. Aggregate the five records, list defects separately from
+editorial unknowns, and retain the operator's observations as attributed
+evidence. Mocked local tests cannot replace these records.

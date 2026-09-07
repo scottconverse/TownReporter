@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.6.23](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.23).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.24](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.24).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
@@ -9,6 +9,30 @@ Other images are historical Longmont screens from 29 August; their old
 Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). The whole system, including how it is built, is [manual.md](manual.md). This page is the newsroom, in the order you use it.
 
 ---
+
+## Current capabilities and remaining work
+
+The Command Center uses Fable Direction A: composer and queue in the main
+column; Dark Desk, Follow-ups and wire in the rail. Follow-ups record who was
+asked, what is due and when; replies can be added to story reporting notes.
+The story workbench stacks below 1024px. Historical screenshots elsewhere in
+this guide illustrate workflows, not the current layout.
+
+Dark Desk now separates speculative Black Desk signals (confidence ≤0.5) from
+structured Dark Signal verification. See [the doctrine and its limits](dark-desk.md).
+The verified label is a completed software protocol, not a substitute for
+checking sources. The five-topic live acceptance exercise remains outstanding.
+
+Local models can be discovered on LM Studio, Ollama or llama.cpp and selected
+individually. Scanned PDF OCR supports embedded JPEG/PNG images, with limits of
+12 extracted images, 2 MiB each and 10 minutes total. The extractor does not
+establish PDF page order: new OCR records identify images, not PDF pages.
+Historical stored OCR page labels require re-ingest or operator review if cited. Unsupported fax-style scans, failed
+transcription and partial reads are reported rather than treated as complete.
+
+Configurable sections, manual investigative page watching and legal removal
+are still open at this documentation baseline; normal Sources and Delete do
+not implement them. [The canonical queue](../TODO.md) records current work.
 
 ## Two rooms
 
@@ -28,7 +52,7 @@ A draft, a reporting note, a research memo, a Dark Desk file — none of that is
 
 Top right of every desk page, next to **View paper**: a **Light / Dark** toggle and a **Text: Normal / Large** toggle. Both remember your choice (browser local storage) and default to Light and Normal for a new browser. Dark Desk is always dark and does not offer the Light/Dark toggle, but Text size still applies there.
 
-Large bumps the desk's body, meta-line, chip and label text; headings are unchanged. Every chip, date, "from the scanner" note and Server-page table label meets WCAG AA contrast (4.5:1, or 3:1 for large/bold text) in both themes, and nothing informational renders below 14px (13px for the small uppercase letter-spaced labels, which stay at full contrast). `scripts/contrast-audit.mjs` checks this and fails the build if a token drops below it.
+Large scales body text, meta-lines, chips, labels, headlines and reading panes. The informational-text floor is 14px. The theme-token contrast check in `scripts/contrast-audit.mjs` covers those tokens; it is not certification of every rendered state.
 
 ---
 
@@ -233,10 +257,7 @@ for every reporting and writing pass. Choose a named model to force only
 Codex Terra, frontier Codex Sol, frontier Claude Opus, or Local model.
 Explicit choices never fall back. Redraft has the same picker.
 
-Zen MiMo and Local Qwen were removed from the picker (2026-09-02). 0.6.10
-brought a local model back as a named pick, "Local model": whatever
-`LLM_BASE_URL` already points at, shown on every picker once that variable
-is set. See [local-models.md](local-models.md).
+Choose **Local model**, then the individual model found on LM Studio, Ollama or llama.cpp. A configured `LLM_BASE_URL` is also supported. Availability means the server can be reached, not that every model can finish your task. See [local-models.md](local-models.md).
 
 Stay on the page. If the click dies before the reply comes back, the workbench
 keeps looking until the draft is on the lead, then fills the form. You should
@@ -268,6 +289,11 @@ Write like a reporter talking to yourself. None of this is copy.
 
 ### Publish
 
+Claims that a record does not exist have a separate publication safeguard. The
+application searches before asking for confirmation; review the actual records
+and the visible check rather than confirming an absence because one fetch
+failed. Tool-status language is not a report about the town.
+
 **Publish** saves, then puts the story on the paper. After that it has a public URL under `/articles/…`. Provenance (source title, organization, document date, exact URL, capture time) goes with it when the records resolve.
 
 Before you hit it:
@@ -279,6 +305,19 @@ Before you hit it:
 Hold or kill from the queue if it is not ready. There is no shame in a held lead.
 
 ---
+
+## Follow-ups
+
+Use the story workbench to record who you asked, what answer is needed and
+when it is due. The desk rail shows outstanding requests; **All follow-ups**
+opens the full list at `/desk/follow-ups`, with Open, Answered and Dropped
+filters. It is reached from the rail and story, not a separate main navigation tab.
+
+**Record reply** keeps the response and adds it to the linked story's reporting
+notes. **Nudge** records that you followed up; it does not send an email or
+message. **Drop** stops tracking the request without pretending it was answered.
+Check the linked story before drafting from a reply; a response is attributed
+reporting material, not automatically a proven fact.
 
 ## Meetings and tapes
 
@@ -408,8 +447,8 @@ Type a subject, a sentence, or paste a URL, and press **Write an editorial**. A
 pasted link gets opened and read before anything is written.
 
 Choose **Automatic** or **Claude Opus** first; both mean Claude Opus through
-your signed-in Claude Code session. **Local model** is offered too, once an
-operator has pointed `LLM_BASE_URL` at a server. Codex is not offered for
+your signed-in Claude Code session. **Local model** is offered too, through discovery or a configured
+`LLM_BASE_URL`. Codex is not offered for
 editorials -- its model declines to write a piece that takes a position --
 so it stays on the Story picker.
 Readiness lists every missing prerequisite — voice file, installation, or
@@ -417,7 +456,7 @@ login — before the button is enabled, and the server checks again when you
 click. If OAuth expires, open the named provider on this machine and sign in;
 nothing is queued or spent until the next readiness check succeeds.
 
-The Codex path uses the same native configuration and full machine capabilities
+For Story runs, the Codex path uses the same native configuration and full machine capabilities
 as the signed-in Windows user, including search and every accessible `C:\`
 path; TownReporter does not replace them with a read-only or tool-disabled
 mode. Claude keeps its separate research-tools/voice-writing boundary.
@@ -612,7 +651,7 @@ Nothing you delete disappears immediately.
 - **Delete for good** on that list is the one with nothing behind it. It says so.
 - After 30 days it goes on its own.
 
-So the only truly final button in the newsroom is _Delete for good_.
+**Delete for good** removes the application's trash copy. It does not scrub existing database backups. The distinct legal-removal workflow is still planned; do not treat ordinary deletion as proof that all retained copies are gone.
 
 ---
 

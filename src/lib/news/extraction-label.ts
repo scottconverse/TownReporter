@@ -13,7 +13,7 @@ export function describeExtractionMethod(method: string | undefined | null): str
   const ocr = /^ocr:([^:]*):(\d+)\/(\d+)$/.exec(raw);
   if (ocr) {
     const [, provider, read, total] = ocr;
-    return `Read by OCR · ${provider} · ${read} of ${total} pages`;
+    return `Read by OCR · ${provider} · ${read} of ${total} extracted images · PDF page order not established`;
   }
   const needsOcr = /^needs-ocr:([\s\S]*)$/.exec(raw);
   if (needsOcr) {

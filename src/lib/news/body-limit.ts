@@ -92,7 +92,118 @@ export async function readBodyCapped(res: Response, limit: number): Promise<Capp
 
 /** Which ceiling applies, from the URL and what the server claims it sent. */
 export function limitFor(url: string, contentType: string): number {
-  const isPdf =
-    /\.pdf(\?|#|$)/i.test(url) || contentType.toLowerCase().includes("application/pdf");
+  const isPdf = /\.pdf(\?|#|$)/i.test(url) || contentType.toLowerCase().includes("application/pdf");
   return isPdf ? BODY_LIMIT.pdf : BODY_LIMIT.html;
+}
+
+const READABLE_TYPES = new Set([
+  "text/html",
+  "application/xhtml+xml",
+  "text/plain",
+  "text/xml",
+  "application/xml",
+  "application/rss+xml",
+  "application/atom+xml",
+  "application/json",
+  "text/event-stream",
+  "text/csv",
+  "application/pdf",
+]);
+
+export class FetchResponseRefusal extends Error {
+  readonly status: number;
+  readonly contentType: string;
+  readonly url: string;
+  redirectChain: string[];
+  readonly reason: "refused-too-large" | "refused-content-type";
+  constructor(
+    message: string,
+    reason: "refused-too-large" | "refused-content-type",
+    res: Response,
+    url: URL,
+  ) {
+    super(message);
+    this.reason = reason;
+    this.name = "FetchResponseRefusal";
+    this.status = res.status;
+    this.contentType = res.headers.get("content-type") ?? "";
+    this.url = url.toString();
+    this.redirectChain = [this.url];
+  }
+}
+
+/** Apply the same limits before any consumer can buffer an outbound response.
+ * Missing MIME is tolerated for older civic servers, with the byte ceiling still
+ * enforced. An explicitly binary type is refused; octet-stream PDFs are allowed
+ * only on a .pdf path. This validates declared formats, not the truth of a MIME label.
+ */
+export async function capFetchResponse(res: Response, url: URL): Promise<Response> {
+  const init = { status: res.status, statusText: res.statusText, headers: res.headers };
+  // Consumers use the status/Location, never error bodies as reporting evidence.
+  // Preserve 429 so the Reddit scheduler can apply its cooldown before retrying.
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => undefined);
+    return new Response(null, init);
+  }
+  const mime = (res.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+  const octetPdf = mime === "application/octet-stream" && /\.pdf$/i.test(url.pathname);
+  if (mime && !READABLE_TYPES.has(mime) && !octetPdf) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new FetchResponseRefusal(
+      `Unsupported content type: ${mime}. This desk reads web pages, feeds, text and PDFs.`,
+      "refused-content-type",
+      res,
+      url,
+    );
+  }
+  const limit = limitFor(url.toString(), mime);
+  const tooLarge = () =>
+    new FetchResponseRefusal(
+      `The response was larger than this desk will read (${limit} byte limit).`,
+      "refused-too-large",
+      res,
+      url,
+    );
+  const declared = res.headers.get("content-length");
+  if (declared !== null && /^\d+$/.test(declared) && Number(declared) > limit) {
+    await res.body?.cancel().catch(() => undefined);
+    throw tooLarge();
+  }
+  if (!res.body) return res;
+  const reader = res.body.getReader();
+  let read = 0;
+  const body = new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        try {
+          const { done, value } = await reader.read();
+          if (done) {
+            reader.releaseLock();
+            controller.close();
+            return;
+          }
+          read += value.byteLength;
+          if (read > limit) {
+            await reader.cancel().catch(() => undefined);
+            reader.releaseLock();
+            controller.error(tooLarge());
+            return;
+          }
+          controller.enqueue(value);
+        } catch (error) {
+          reader.releaseLock();
+          controller.error(error);
+        }
+      },
+      async cancel(reason) {
+        try {
+          await reader.cancel(reason);
+        } finally {
+          reader.releaseLock();
+        }
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  return new Response(body, init);
 }

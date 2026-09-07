@@ -59,11 +59,7 @@ export function capSpeculativeConfidence(raw: unknown): number {
  * rhymes" and "The web" — and a whole RULE existed only to keep the invented
  * Chorus posture from becoming an accusation. Both are gone.
  */
-export const POSTURES = [
-  "Dog That Didn't Bark",
-  "Whisper",
-  "Fiscal Fray",
-] as const;
+export const POSTURES = ["Dog That Didn't Bark", "Whisper", "Fiscal Fray"] as const;
 
 export type Posture = (typeof POSTURES)[number];
 
@@ -135,11 +131,7 @@ function hostOf(url: string): string | null {
  * community; everything else falls to local press, which is the tier that
  * cannot be the sole basis for publication anyway.
  */
-export function tierForUrl(
-  url: string,
-  official: string[] = [],
-  press: string[] = [],
-): SearchTier {
+export function tierForUrl(url: string, official: string[] = [], press: string[] = []): SearchTier {
   const host = hostOf(url);
   if (!host) return "community";
   const on = (list: string[]) => list.some((d) => d && (host === d || host.endsWith(`.${d}`)));
@@ -152,7 +144,11 @@ export function tierForUrl(
 /** The tier a query is *aimed* at, before any result comes back. */
 export function tierForQuery(query: string, official: string[] = []): SearchTier {
   const q = query.toLowerCase();
-  if (/site:\S*\.gov|\bagenda\b|\bminutes\b|\bordinance\b|\bbudget\b|\bpermit\b|\bresolution\b/.test(q))
+  if (
+    /site:\S*\.gov|\bagenda\b|\bminutes\b|\bordinance\b|\bbudget\b|\bpermit\b|\bresolution\b/.test(
+      q,
+    )
+  )
     return "official";
   if (official.some((d) => d && q.includes(`site:${d}`))) return "official";
   if (/reddit|nextdoor|facebook|youtube|forum|comments/.test(q)) return "community";
@@ -200,7 +196,9 @@ export function queryVariations(hypothesis: string, place: Place): string[] {
     `${stem} ${county} agenda OR minutes OR ordinance`.trim(),
     `${stem} ${city} (reddit OR nextdoor OR "residents say")`.trim(),
   ];
-  return out.filter((q, i, a) => q && a.indexOf(q) === i).slice(0, Math.max(MIN_QUERY_VARIATIONS, 3));
+  return out
+    .filter((q, i, a) => q && a.indexOf(q) === i)
+    .slice(0, Math.max(MIN_QUERY_VARIATIONS, 3));
 }
 
 /**
@@ -245,12 +243,7 @@ export function enforceSearchMinimums(
  */
 export type AdversarialKind = "ordinary" | "official" | "press" | "counter";
 
-export const ADVERSARIAL_KINDS: AdversarialKind[] = [
-  "ordinary",
-  "official",
-  "press",
-  "counter",
-];
+export const ADVERSARIAL_KINDS: AdversarialKind[] = ["ordinary", "official", "press", "counter"];
 
 export const KIND_WORDS: Record<AdversarialKind, string> = {
   ordinary: "the ordinary explanation",
@@ -277,8 +270,15 @@ export function adversarialQueries(
   place: Place,
   officialDomainList: string[] = [],
 ): AdversarialQuery[] {
-  const subject = String(signal.name ?? "").replace(/\s+/g, " ").trim().slice(0, 90) ||
-    String(signal.observation ?? "").replace(/\s+/g, " ").trim().slice(0, 90);
+  const subject =
+    String(signal.name ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 90) ||
+    String(signal.observation ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 90);
   if (!subject) return [];
   const city = place.city || "";
   const county = place.county ? `${place.county} County` : city;
@@ -316,16 +316,25 @@ export type AdversarialRecord = {
   url: string | null;
   outcome: string;
   hits: number;
+  state?: import("./fetch-outcome.ts").SearchState;
 };
 
 export function platformsCovered(records: AdversarialRecord[]): SearchTier[] {
   const seen = new Set<SearchTier>();
-  for (const r of records) seen.add(r.tier);
+  for (const r of records) {
+    if (r.hits > 0 && r.url && (!r.state || r.state === "SEARCH_SUCCESS_RESULTS")) seen.add(r.tier);
+  }
   return SEARCH_TIERS.filter((t) => seen.has(t));
 }
 
 export function adversarialComplete(records: AdversarialRecord[]): boolean {
   if (records.length < ADVERSARIAL_KINDS.length) return false;
+  if (
+    records.some((r) =>
+      r.state ? !r.state.startsWith("SEARCH_SUCCESS") : /failed|blocked|timeout/i.test(r.outcome),
+    )
+  )
+    return false;
   const kinds = new Set(records.map((r) => r.kind));
   if (!ADVERSARIAL_KINDS.every((k) => kinds.has(k))) return false;
   return platformsCovered(records).length >= MIN_PLATFORMS;
@@ -501,12 +510,7 @@ export function readNewsworthiness(raw: unknown): Newsworthiness | null {
   const src = raw as Record<string, unknown>;
   const bool = (v: unknown) =>
     typeof v === "boolean" ? v : typeof v === "string" ? /^(true|yes)$/i.test(v.trim()) : false;
-  if (
-    !("life_changes" in src) &&
-    !("is_new" in src) &&
-    !("has_record" in src)
-  )
-    return null;
+  if (!("life_changes" in src) && !("is_new" in src) && !("has_record" in src)) return null;
   return {
     life_changes: bool(src.life_changes),
     is_new: bool(src.is_new),

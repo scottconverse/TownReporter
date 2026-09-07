@@ -1,6 +1,22 @@
 # Changelog
 
-Current release: **0.6.23**.
+Current release: **0.6.24**.
+
+## 0.6.24 — 2026-09-07
+
+Corrective release following the remote takeover review. A repository release
+does not establish what is deployed on Halo; the last operator receipt remains
+separately attributed in SELF-HOSTING.md.
+
+- **Verification failures remain failures.** Unavailable and failed adversarial searches leave a signal unverified. Verification receives returned evidence and signal context instead of only query counts and top links. Queue handoff preserves speculative status and uncertainty.
+- **Investigative records stay with their newsroom.** Capture versions, extracted chunks, entities, baselines, prior dead ends and model evidence references use the investigation's newsroom. Model-supplied record IDs cannot select another newsroom's evidence. Historical incorrectly scoped records are not reassigned by guesswork; review or re-ingest them before relying on their provenance.
+- Migration 0044 adds newsroom-aware uniqueness for entity aliases and matches. The same editor can retain the same names in two newsrooms; existing rows and evidence remain intact.
+- **The search trail is usable.** Returned sources have links, failed searches have plain-language labels, and oversized or unsupported documents show a deliberate refusal instead of a misleading HTTP 200 failure.
+- **Guarded HTTP fetches are bounded.** The shared HTTP reader checks declared and streamed length (5,000,000 bytes for web/text/feed/JSON; 25,000,000 for PDF), refuses unsupported explicit content types, and discards redirect/error bodies. These caps do not cover Chromium network resources or direct provider transports.
+- **OCR describes extracted images honestly.** Images are supplied to the selected vision provider. The extractor does not establish PDF page order, so new OCR chunks identify extracted images instead of inventing page numbers. The desk says “N of M extracted images · PDF page order not established.” Supported JPEG/PNG images remain limited to 12, 2 MiB each and the existing total time budget; unsupported scans stay unread. Older stored OCR page labels require re-ingest or operator review if used as citations.
+- **Documentation is reconciled.** One current takeover handoff and canonical TODO replace contradictory queues, gate/posture definitions, local-model and deployment claims. Dated operator receipts are preserved. Fable remains the design foundation. The five live investigative runs have an explicit acceptance exercise and remain pending a Halo-local operator.
+- PDF parsing receives its own byte copy so a parser that consumes the input cannot leave OCR an empty buffer. Regex extraction also leaves page references unknown, and image-only extraction no longer stores an invented PDF page count.
+- **Tests survive a new day.** Follow-up component tests use the real due-date functions and an explicit fixture clock; advancing the clock proves that a due-today item becomes overdue. Version checks now also cover both lockfile version fields, the landing page and the repository-version statement in deployment notes.
 
 ## 0.6.23 — 2026-09-06
 The investigative desk goes back to the owner's own doctrine, and the paper can read what it captures.

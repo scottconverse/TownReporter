@@ -11,12 +11,7 @@ import type { ProviderOverrides } from "./provider-registry.ts";
 import { isSelfReferential, labelAfterCitationCheck } from "./claim-hygiene.ts";
 import { readableCapture } from "./html-text.ts";
 import { DARK_PLANNER } from "./dark-prompt.ts";
-import {
-  enforceSearchMinimums,
-  tierForQuery,
-  tierForUrl,
-  type Place,
-} from "./dark-gates.ts";
+import { enforceSearchMinimums, tierForQuery, tierForUrl, type Place } from "./dark-gates.ts";
 import {
   classifyClaimKind,
   detectMissingCadence,
@@ -499,6 +494,14 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
   `alter table entities drop constraint if exists entities_user_id_canonical_key`,
   `drop index if exists entities_user_id_canonical_key`,
   `create unique index if not exists entities_newsroom_canonical on entities (newsroom_id, canonical)`,
+  // Migration 0044 adds the room to the existing per-editor identity keys.
+  // No historical rows are deleted or assigned to a different newsroom.
+  `create unique index if not exists entity_aliases_newsroom_user_names on entity_aliases (newsroom_id, user_id, canonical, alias)`,
+  `alter table entity_aliases drop constraint if exists entity_aliases_user_id_canonical_alias_key`,
+  `drop index if exists entity_aliases_user_id_canonical_alias_key`,
+  `create unique index if not exists entity_matches_newsroom_user_names on entity_matches (newsroom_id, user_id, left_canonical, right_canonical)`,
+  `alter table entity_matches drop constraint if exists entity_matches_user_id_left_canonical_right_canonical_key`,
+  `drop index if exists entity_matches_user_id_left_canonical_right_canonical_key`,
   `alter table source_monitors drop constraint if exists source_monitors_user_id_url_key`,
   `drop index if exists source_monitors_user_id_url_key`,
   `create unique index if not exists source_monitors_newsroom_url on source_monitors (newsroom_id, url)`,
@@ -543,6 +546,18 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
 export async function ensureInvestigateSchema() {
   const sql = await getSql();
   await ensureSchemaOnce(sql, "investigate", INVESTIGATE_SCHEMA_STATEMENTS);
+}
+
+/** Investigation IDs come from authorized callers; model hints never select a newsroom. */
+async function investigationNewsroom(investigationId: number, expected?: number): Promise<number> {
+  const sql = await getSql();
+  const rows = await sql<{
+    newsroom_id: number;
+  }>`select newsroom_id from investigations where id=${investigationId}`;
+  const room = rows[0]?.newsroom_id;
+  if (room == null || (expected != null && room !== expected))
+    throw new Error("Investigation not found in this newsroom");
+  return room;
 }
 
 export function emptyPlan(): HopPlan {
@@ -720,7 +735,8 @@ export function parsePlan(raw: unknown): HopPlan {
     }
   }
   for (const d of arr<Record<string, unknown>>("dead_ends")) {
-    if (d?.hypothesis && isSelfReferential(`${String(d.hypothesis)} ${String(d.reason ?? "")}`)) continue;
+    if (d?.hypothesis && isSelfReferential(`${String(d.hypothesis)} ${String(d.reason ?? "")}`))
+      continue;
     if (d?.hypothesis) {
       plan.dead_ends.push({ hypothesis: String(d.hypothesis), reason: String(d.reason ?? "") });
     }
@@ -940,6 +956,7 @@ export async function persistDiscovery(
   },
 ) {
   const sql = await getSql();
+  const newsroomId = await investigationNewsroom(investigationId);
   const { label: canonLabel, norm } = frontierDedupKey(item.kind, item.label);
   const label = canonLabel.slice(0, 240);
   if (!label) return;
@@ -1024,10 +1041,10 @@ export async function persistDiscovery(
   try {
     const created = await sql<{ id: number }>`
       insert into frontier_items (
-        user_id, investigation_id, kind, label, label_norm, why, evidence, priority, next_steps, queries_tried,
+        user_id, newsroom_id, investigation_id, kind, label, label_norm, why, evidence, priority, next_steps, queries_tried,
         strategies_tried, strategies_budget, search_zero_count
       ) values (
-        ${userId}, ${investigationId}, ${kindVal}, ${label}, ${norm},
+        ${userId}, ${newsroomId}, ${investigationId}, ${kindVal}, ${label}, ${norm},
         ${whyVal}, ${evidenceVal},
         ${priorityVal}, ${next},
         ${queriesTriedJson},
@@ -1053,10 +1070,10 @@ export async function persistDiscovery(
   }
   await sql`
     insert into frontier_items (
-      user_id, investigation_id, kind, label, label_norm, why, evidence, priority, next_steps, queries_tried,
+      user_id, newsroom_id, investigation_id, kind, label, label_norm, why, evidence, priority, next_steps, queries_tried,
       strategies_tried, strategies_budget, search_zero_count
     ) values (
-      ${userId}, ${investigationId}, ${kindVal}, ${label}, ${norm},
+      ${userId}, ${newsroomId}, ${investigationId}, ${kindVal}, ${label}, ${norm},
       ${whyVal}, ${evidenceVal},
       ${priorityVal}, ${next},
       ${queriesTriedJson},
@@ -1162,16 +1179,9 @@ export async function rememberCapture(opts: {
    * "Known caveats" line about `runDueMonitors`'s prior-capture lookup
    * defaulting to newsroom 1: that lookup reads `capture_events`, so
    * scoping the write is what makes scoping the read mean anything -- see
-   * `runDueMonitors` below). `artifact_versions` in this same function
-   * deliberately keeps the `DEFAULT_NEWSROOM_ID` constant: it is not among
-   * the tables that release claimed fixed, and scoping it is out of scope
-   * for this change (see `scripts/newsroom-scoped-inserts.test.mjs`'s
-   * docstring for the acknowledged file-wide carve-out). `capture_events`
-   * rows still join to `artifact_versions` by `version_id`, not by
-   * newsroom, so that carve-out doesn't undermine the fix here: the right
-   * version's `full_text` is found either way, because `version_id` on
-   * the capture event already points at the exact version created for
-   * that fetch.
+   * `runDueMonitors` below). Version deduplication and extracted chunks now
+   * use this same newsroom: matching URL/hash is not permission to share
+   * another newsroom's extraction or provenance.
    */
   newsroomId?: number;
 }): Promise<CaptureRecord> {
@@ -1188,9 +1198,15 @@ export async function rememberCapture(opts: {
   const rawHash =
     opts.rawBytes && opts.rawBytes.byteLength > 0 ? await sha256Bytes(opts.rawBytes) : null;
   const versionHash = rawHash ?? extractedHash;
+  // Embedded-image OCR has no PDF page association. Do not persist its image
+  // inventory as a page count; native extraction retains its actual pages.
+  const pageCount =
+    opts.pages?.length && opts.pages.every((p) => p.page != null && p.imageIndex == null)
+      ? opts.pages.length
+      : null;
   const existing = await sql<{ id: number }>`
     select id from artifact_versions
-    where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url} and content_hash = ${versionHash}
+    where newsroom_id = ${newsroomId} and url = ${url} and content_hash = ${versionHash}
     limit 1
   `;
   let versionId = existing[0]?.id ?? null;
@@ -1202,10 +1218,10 @@ export async function rememberCapture(opts: {
           user_id, newsroom_id, url, content_hash, title, full_text, fetch_status, fetch_outcome,
           content_type, extraction_method, page_count
         ) values (
-          ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${url}, ${versionHash}, ${opts.title.slice(0, 200)},
+          ${opts.userId}, ${newsroomId}, ${url}, ${versionHash}, ${opts.title.slice(0, 200)},
           ${fullText}, ${opts.status}, ${opts.outcome},
           ${opts.contentType ?? "html"}, ${opts.extractionMethod ?? ""},
-          ${opts.pages?.length ?? null}
+          ${pageCount}
         )
         on conflict (newsroom_id, url, content_hash) do update set title = excluded.title
         returning id
@@ -1215,7 +1231,7 @@ export async function rememberCapture(opts: {
     } catch {
       const again = await sql<{ id: number }>`
         select id from artifact_versions
-        where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url} and content_hash = ${versionHash}
+        where newsroom_id = ${newsroomId} and url = ${url} and content_hash = ${versionHash}
         limit 1
       `;
       versionId = again[0]?.id ?? null;
@@ -1224,7 +1240,7 @@ export async function rememberCapture(opts: {
           insert into artifact_versions (
             user_id, newsroom_id, url, content_hash, title, full_text, fetch_status, fetch_outcome
           ) values (
-            ${opts.userId}, ${DEFAULT_NEWSROOM_ID}, ${url}, ${versionHash}, ${opts.title.slice(0, 200)},
+            ${opts.userId}, ${newsroomId}, ${url}, ${versionHash}, ${opts.title.slice(0, 200)},
             ${fullText}, ${opts.status}, ${opts.outcome}
           )
           returning id
@@ -1239,7 +1255,7 @@ export async function rememberCapture(opts: {
       await sql`
         update artifact_versions
         set extracted_sha256 = ${extractedHash}, raw_sha256 = ${rawHash}
-        where id = ${versionId}
+        where id = ${versionId} and newsroom_id = ${newsroomId}
       `;
     } catch {
       /* columns may not exist yet */
@@ -1247,15 +1263,15 @@ export async function rememberCapture(opts: {
   }
   if (versionId && (createdVersion || !existing[0]) && fullText) {
     const already = await sql<{ c: number }>`
-      select count(*)::int as c from artifact_chunks where version_id = ${versionId}
+      select count(*)::int as c from artifact_chunks where version_id = ${versionId} and newsroom_id = ${newsroomId}
     `;
     if ((already[0]?.c ?? 0) === 0) {
       const chunks = chunksFromEvidence(fullText, opts.pages);
       for (const c of chunks) {
         await sql`
-          insert into artifact_chunks (version_id, user_id, chunk_index, page_number, section, excerpt, locator)
+          insert into artifact_chunks (version_id, user_id, newsroom_id, chunk_index, page_number, section, excerpt, locator)
           values (
-            ${versionId}, ${opts.userId}, ${c.index}, ${c.page_number},
+            ${versionId}, ${opts.userId}, ${newsroomId}, ${c.index}, ${c.page_number},
             ${c.section}, ${c.excerpt}, ${c.locator}
           )
         `;
@@ -1480,10 +1496,11 @@ export async function observeBaseline(
   title: string,
   at?: Date,
   extras: string[] = [],
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
 ) {
   const spec = baselineSpec(url, title);
   if (!spec) return;
-  const paperConfig = await getPaperConfig(DEFAULT_NEWSROOM_ID);
+  const paperConfig = await getPaperConfig(newsroomId);
   const sql = await getSql();
   const prev = await sql<{
     last_seen: string | null;
@@ -1496,7 +1513,7 @@ export async function observeBaseline(
   }>`
     select last_seen::text as last_seen, sightings, cadence_days, usual_nth_weekday,
            usual_attachment_count, usual_lead_hours, typical_structure_json
-    from recurring_baselines where newsroom_id = ${DEFAULT_NEWSROOM_ID} and key = ${spec.key} limit 1
+    from recurring_baselines where newsroom_id = ${newsroomId} and key = ${spec.key} limit 1
   `;
   const now = at ?? new Date();
   let cadence = prev[0]?.cadence_days ?? 30;
@@ -1507,7 +1524,10 @@ export async function observeBaseline(
       cadence = Math.round(((prev[0].cadence_days || 30) + gap) / 2);
     }
   }
-  const weekday = now.toLocaleDateString("en-US", { weekday: "long", timeZone: paperConfig.timezone });
+  const weekday = now.toLocaleDateString("en-US", {
+    weekday: "long",
+    timeZone: paperConfig.timezone,
+  });
   const nth = nthWeekday(now, paperConfig.timezone);
   const snap = structureSnapshot(title, "", extras);
   const meeting = extractMeetingInstant(title);
@@ -1524,7 +1544,7 @@ export async function observeBaseline(
           cadence_days = ${cadence}, sightings = ${sightings}, usual_weekday = ${weekday},
           usual_nth_weekday = ${nth}, usual_attachment_count = ${snap.attachmentCount},
           usual_lead_hours = ${lead}, typical_structure_json = ${JSON.stringify(snap)}
-      where newsroom_id = ${DEFAULT_NEWSROOM_ID} and key = ${spec.key}
+      where newsroom_id = ${newsroomId} and key = ${spec.key}
     `;
   } else {
     await sql`
@@ -1532,7 +1552,7 @@ export async function observeBaseline(
         user_id, newsroom_id, key, kind, cadence_days, last_seen, typical_title, typical_url, sightings,
         usual_weekday, usual_nth_weekday, usual_attachment_count, usual_lead_hours, typical_structure_json
       ) values (
-        ${userId}, ${DEFAULT_NEWSROOM_ID}, ${spec.key}, ${spec.kind}, ${cadence}, ${seen}::timestamptz,
+        ${userId}, ${newsroomId}, ${spec.key}, ${spec.kind}, ${cadence}, ${seen}::timestamptz,
         ${title.slice(0, 200)}, ${url.slice(0, 500)}, ${1}, ${weekday}, ${nth},
         ${snap.attachmentCount}, ${lead}, ${JSON.stringify(snap)}
       )
@@ -1566,7 +1586,7 @@ async function flagPatternAnomalies(opts: {
       usual_lead_hours: number | null;
     }>`
       select usual_nth_weekday, usual_attachment_count, usual_lead_hours
-      from recurring_baselines where newsroom_id = ${DEFAULT_NEWSROOM_ID} and key = ${spec.key} limit 1
+      from recurring_baselines where newsroom_id = ${newsroomId} and key = ${spec.key} limit 1
     `;
     usualNth = b[0]?.usual_nth_weekday ?? null;
     usualAtt = b[0]?.usual_attachment_count ?? null;
@@ -1602,6 +1622,7 @@ export async function retrievePack(
   terms: string[],
 ): Promise<string> {
   const sql = await getSql();
+  const newsroomId = await investigationNewsroom(investigationId);
   const seedsRaw = await sql<{
     url: string;
     title: string;
@@ -1610,7 +1631,7 @@ export async function retrievePack(
     fetch_outcome: string | null;
   }>`
     select url, title, full_text, fetch_status, fetch_outcome from artifacts
-    where investigation_id = ${investigationId} and classification = 'watch'
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} and classification = 'watch'
     order by id asc limit 3
   `;
   const recentRaw = await sql<{
@@ -1626,7 +1647,7 @@ export async function retrievePack(
     select url, title, full_text, version_id, capture_event_id, content_hash,
       fetch_status, fetch_outcome
     from artifacts
-    where investigation_id = ${investigationId}
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId}
     order by id desc limit 40
   `;
   // Keep failed captures out of the synthesis pool: a blocked/empty page's
@@ -1675,9 +1696,9 @@ export async function retrievePack(
             av.fetch_status, av.fetch_outcome, av.title
           from artifact_chunks c
           join artifact_versions av on av.id = c.version_id
-          where exists (
+          where av.newsroom_id = ${newsroomId} and c.newsroom_id = ${newsroomId} and exists (
               select 1 from artifacts a
-              where a.version_id = av.id and a.investigation_id = ${investigationId}
+              where a.newsroom_id = ${newsroomId} and a.version_id = av.id and a.investigation_id = ${investigationId}
             )
           order by c.id desc
           limit 80
@@ -1707,7 +1728,7 @@ export async function retrievePack(
     status: string;
   }>`
     select label, kind, why, priority, next_steps, status from frontier_items
-    where investigation_id = ${investigationId}
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId}
     order by priority desc, id asc limit 16
   `;
   const hyps = await sql<{
@@ -1717,14 +1738,14 @@ export async function retrievePack(
     contradicting: string;
   }>`
     select body, status, supporting, contradicting from hypotheses
-    where investigation_id = ${investigationId}
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId}
     order by id desc limit 12
   `;
   const ents = await sql<{ name: string; kind: string; why: string; canonical: string }>`
     select e.name, e.kind, e.why, e.canonical
     from investigation_entities ie
     join entities e on e.id = ie.entity_id
-    where ie.investigation_id = ${investigationId}
+    where ie.newsroom_id = ${newsroomId} and e.newsroom_id = ${newsroomId} and ie.investigation_id = ${investigationId}
     order by ie.id desc limit 20
   `;
   const historical = await sql<{
@@ -1737,26 +1758,26 @@ export async function retrievePack(
     select e.name, e.kind, e.why, ie.investigation_id, m.verdict
     from entities e
     join investigation_entities ie on ie.entity_id = e.id
-    left join entity_matches m on m.newsroom_id = ${DEFAULT_NEWSROOM_ID}
+    left join entity_matches m on m.newsroom_id = ${newsroomId}
       and (
         (m.left_canonical = e.canonical and m.right_canonical in (
           select e2.canonical from investigation_entities x
           join entities e2 on e2.id = x.entity_id
-          where x.investigation_id = ${investigationId}
+          where x.newsroom_id = ${newsroomId} and e2.newsroom_id = ${newsroomId} and x.investigation_id = ${investigationId}
         ))
         or (m.right_canonical = e.canonical and m.left_canonical in (
           select e2.canonical from investigation_entities x
           join entities e2 on e2.id = x.entity_id
-          where x.investigation_id = ${investigationId}
+          where x.newsroom_id = ${newsroomId} and e2.newsroom_id = ${newsroomId} and x.investigation_id = ${investigationId}
         ))
       )
-    where e.newsroom_id = ${DEFAULT_NEWSROOM_ID}
-      and ie.investigation_id <> ${investigationId}
+    where e.newsroom_id = ${newsroomId}
+      and ie.newsroom_id = ${newsroomId} and ie.investigation_id <> ${investigationId}
       and (
         e.canonical in (
           select e2.canonical from investigation_entities x
           join entities e2 on e2.id = x.entity_id
-          where x.investigation_id = ${investigationId}
+          where x.newsroom_id = ${newsroomId} and e2.newsroom_id = ${newsroomId} and x.investigation_id = ${investigationId}
         )
         or m.id is not null
       )
@@ -1765,23 +1786,23 @@ export async function retrievePack(
   `;
   const rels = await sql<{ from_name: string; to_name: string; kind: string; evidence: string }>`
     select from_name, to_name, kind, evidence from relationships
-    where investigation_id = ${investigationId} limit 16
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} limit 16
   `;
   const claims = await sql<{ body: string; kind: string; evidence: string }>`
     select body, kind, evidence from claims
-    where investigation_id = ${investigationId} order by id desc limit 12
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} order by id desc limit 12
   `;
   const anoms = await sql<{ kind: string; summary: string }>`
     select kind, summary from anomalies
-    where investigation_id = ${investigationId} order by id desc limit 10
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} order by id desc limit 10
   `;
   const dead = await sql<{ hypothesis: string; dismissed_because: string }>`
     select hypothesis, dismissed_because from dead_ends
-    where investigation_id = ${investigationId} order by id desc limit 8
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} order by id desc limit 8
   `;
   const searches = await sql<{ query: string; state: string | null }>`
     select query, state from search_log
-    where investigation_id = ${investigationId} order by id desc limit 24
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} order by id desc limit 24
   `;
   return [
     `FRONTIER:\n${frontier.map((f) => `${f.status} ${f.priority} ${f.kind}: ${f.label} — ${f.why}`).join("\n") || "(empty)"}`,
@@ -1822,16 +1843,22 @@ export async function retrievePack(
   ].join("\n\n");
 }
 
-export async function findEvidenceChunks(userId: string, investigationId: number, needle: string) {
+export async function findEvidenceChunks(
+  userId: string,
+  investigationId: number,
+  needle: string,
+  expectedNewsroom?: number,
+) {
   const sql = await getSql();
+  const newsroomId = await investigationNewsroom(investigationId, expectedNewsroom);
   const n = needle.toLowerCase();
   return sql<{ excerpt: string; locator: string; page_number: number | null; version_id: number }>`
     select c.excerpt, c.locator, c.page_number, c.version_id
     from artifact_chunks c
     join artifact_versions av on av.id = c.version_id
-    where exists (
+    where av.newsroom_id = ${newsroomId} and c.newsroom_id = ${newsroomId} and exists (
         select 1 from artifacts a
-        where a.version_id = av.id and a.investigation_id = ${investigationId}
+        where a.version_id = av.id and a.investigation_id = ${investigationId} and a.newsroom_id = ${newsroomId}
       )
       and lower(c.excerpt) like ${"%" + n + "%"}
     order by c.id asc
@@ -1894,6 +1921,7 @@ export async function researchLoop(opts: {
   const sql = await getSql();
   const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
   const place: Place = opts.place ?? { city: "Longmont", state: "Colorado" };
+  await investigationNewsroom(opts.investigationId, newsroomId);
   const officialDomainList = opts.officialDomains ?? [];
   const pressDomainList = opts.pressDomains ?? [];
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
@@ -2099,11 +2127,11 @@ export async function researchLoop(opts: {
         : tierForQuery(q, officialDomainList);
       const logRows = await sql<{ id: number }>`
         insert into search_log (
-          user_id, investigation_id, hop, query, results_json, provider, state, caused_by,
+          user_id, newsroom_id, investigation_id, hop, query, results_json, provider, state, caused_by,
           frontier_id, strategy, selected_json, query_fingerprint, research_question, tier
         )
         values (
-          ${opts.userId}, ${opts.investigationId}, ${hop + 1}, ${q.slice(0, 300)},
+          ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${hop + 1}, ${q.slice(0, 300)},
           ${JSON.stringify(attempt.hits).slice(0, 8000)},
           ${attempt.provider}, ${attempt.state}, ${plan.summary.slice(0, 200)},
           ${matchedFrontier?.id ?? null}, ${strategy},
@@ -2117,9 +2145,9 @@ export async function researchLoop(opts: {
       for (const step of lineage) {
         await sql`
           insert into search_attempts (
-            user_id, investigation_id, search_log_id, frontier_id, query, provider, state, hits_json, error
+            user_id, newsroom_id, investigation_id, search_log_id, frontier_id, query, provider, state, hits_json, error
           ) values (
-            ${opts.userId}, ${opts.investigationId}, ${logId}, ${matchedFrontier?.id ?? null},
+            ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${logId}, ${matchedFrontier?.id ?? null},
             ${q.slice(0, 300)}, ${step.provider}, ${step.state},
             ${JSON.stringify(step.hits).slice(0, 8000)}, ${step.error ?? null}
           )
@@ -2260,8 +2288,8 @@ export async function researchLoop(opts: {
       }>`
         select ce.content_hash, ce.http_status as fetch_status, av.full_text
         from capture_events ce
-        left join artifact_versions av on av.id = ce.version_id
-        where ce.newsroom_id = ${DEFAULT_NEWSROOM_ID} and ce.source_url = ${url}
+        left join artifact_versions av on av.id = ce.version_id and av.newsroom_id = ce.newsroom_id
+        where ce.newsroom_id = ${newsroomId} and ce.source_url = ${url}
         order by ce.id desc limit 1
       `;
       const prior =
@@ -2269,7 +2297,7 @@ export async function researchLoop(opts: {
         (
           await sql<{ content_hash: string; full_text: string; fetch_status: number | null }>`
             select content_hash, full_text, fetch_status from artifact_versions
-            where newsroom_id = ${DEFAULT_NEWSROOM_ID} and url = ${url}
+            where newsroom_id = ${newsroomId} and url = ${url}
             order by id desc limit 1
           `
         )[0];
@@ -2417,7 +2445,7 @@ export async function researchLoop(opts: {
         });
       }
 
-      await observeBaseline(opts.userId, url, got.title, undefined, got.extras);
+      await observeBaseline(opts.userId, url, got.title, undefined, got.extras, newsroomId);
       await markFrontier(opts.userId, opts.investigationId, url, "resolved", "Fetched");
       for (const extra of got.extras.slice(0, 6)) {
         toFetch.add(extra);
@@ -2522,6 +2550,7 @@ async function resolveProvenance(
   userId: string,
   investigationId: number,
   hint: EvidenceHint,
+  expectedNewsroom: number,
 ): Promise<{
   versionId: number | null;
   captureEventId: number | null;
@@ -2541,6 +2570,12 @@ async function resolveProvenance(
     status: "unresolved" as const,
     locator: hint.locator ?? null,
   };
+  let newsroomId: number;
+  try {
+    newsroomId = await investigationNewsroom(investigationId, expectedNewsroom);
+  } catch {
+    return unresolved;
+  }
 
   async function confirm(hit: {
     versionId: number | null;
@@ -2555,16 +2590,15 @@ async function resolveProvenance(
     let body = "";
     if (hit.versionId) {
       const rows = await sql<{ full_text: string }>`
-        select full_text from artifact_versions where id = ${hit.versionId} limit 1
+        select full_text from artifact_versions where id = ${hit.versionId} and newsroom_id = ${newsroomId} limit 1
       `;
-      body = rows[0]?.full_text ?? "";
+      if (!rows[0]) return unresolved;
+      body = rows[0].full_text;
     }
     if (evidenceAppearsInText(quote, body)) return { ...hit, status: "resolved" as const };
-    const chunks = await findEvidenceChunks(userId, investigationId, quote);
-    const chunk = chunks.find((c) => evidenceAppearsInText(quote, c.excerpt));
-    if (chunk) {
-      return { ...hit, locator: hit.locator ?? chunk.locator, status: "resolved" as const };
-    }
+    // Evidence elsewhere in this file cannot validate the selected source.
+    // Keep the citation unresolved until the planner/editor selects the source
+    // that actually contains the quote; never retain A's ID with B's evidence.
     return { ...hit, status: "unresolved" as const };
   }
 
@@ -2578,7 +2612,7 @@ async function resolveProvenance(
     }>`
       select id, version_id, source_url, content_hash, observed_at::text as observed_at
       from capture_events
-      where id = ${hint.capture_event_id}
+      where id = ${hint.capture_event_id} and newsroom_id = ${newsroomId}
       limit 1
     `;
     if (row[0]) {
@@ -2596,13 +2630,13 @@ async function resolveProvenance(
     const row = await sql<{ id: number; url: string; content_hash: string; captured_at: string }>`
       select id, url, content_hash, captured_at::text as captured_at
       from artifact_versions
-      where id = ${hint.artifact_version_id}
+      where id = ${hint.artifact_version_id} and newsroom_id = ${newsroomId}
       limit 1
     `;
     if (row[0]) {
       const cap = await sql<{ id: number; observed_at: string }>`
         select id, observed_at::text as observed_at from capture_events
-        where version_id = ${row[0].id}
+        where version_id = ${row[0].id} and newsroom_id = ${newsroomId}
           and (investigation_id = ${investigationId} or investigation_id is null)
         order by id desc limit 1
       `;
@@ -2632,7 +2666,7 @@ async function resolveProvenance(
     }>`
       select id, version_id, source_url, content_hash, observed_at::text as observed_at
       from capture_events
-      where investigation_id = ${investigationId} and source_url = ${source}
+      where investigation_id = ${investigationId} and source_url = ${source} and newsroom_id = ${newsroomId}
       order by id desc limit 1
     `;
     if (cap[0]) {
@@ -2652,7 +2686,7 @@ async function resolveProvenance(
       url: string;
     }>`
       select version_id, capture_event_id, content_hash, url from artifacts
-      where investigation_id = ${investigationId} and url = ${source}
+      where investigation_id = ${investigationId} and url = ${source} and newsroom_id = ${newsroomId}
       order by id desc limit 1
     `;
     if (art[0]?.version_id || art[0]?.capture_event_id) {
@@ -2677,7 +2711,7 @@ async function persistPlan(
 ) {
   const sql = await getSql();
   const known = await sql<{ canonical: string; name: string }>`
-    select canonical, name from entities where newsroom_id = ${DEFAULT_NEWSROOM_ID}
+    select canonical, name from entities where newsroom_id = ${newsroomId}
   `;
   for (const e of plan.entities) {
     const resolved = resolveEntityName(e.name, known);
@@ -2689,7 +2723,7 @@ async function persistPlan(
     try {
       const created = await sql<{ id: number }>`
         insert into entities (user_id, newsroom_id, canonical, name, kind, why)
-        values (${userId}, ${DEFAULT_NEWSROOM_ID}, ${c}, ${e.name.slice(0, 200)}, ${e.kind.slice(0, 40)}, ${e.why.slice(0, 800)})
+        values (${userId}, ${newsroomId}, ${c}, ${e.name.slice(0, 200)}, ${e.kind.slice(0, 40)}, ${e.why.slice(0, 800)})
         on conflict (newsroom_id, canonical) do update set why = excluded.why
         returning id
       `;
@@ -2698,17 +2732,17 @@ async function persistPlan(
       try {
         const created = await sql<{ id: number }>`
           insert into entities (user_id, newsroom_id, canonical, name, kind, why)
-          values (${userId}, ${DEFAULT_NEWSROOM_ID}, ${c}, ${e.name.slice(0, 200)}, ${e.kind.slice(0, 40)}, ${e.why.slice(0, 800)})
+          values (${userId}, ${newsroomId}, ${c}, ${e.name.slice(0, 200)}, ${e.kind.slice(0, 40)}, ${e.why.slice(0, 800)})
           returning id
         `;
         entityId = created[0]?.id ?? null;
       } catch {
         await sql`
           update entities set why = ${e.why.slice(0, 800)}
-          where newsroom_id = ${DEFAULT_NEWSROOM_ID} and canonical = ${c}
+          where newsroom_id = ${newsroomId} and canonical = ${c}
         `;
         const found = await sql<{ id: number }>`
-          select id from entities where newsroom_id = ${DEFAULT_NEWSROOM_ID} and canonical = ${c} limit 1
+          select id from entities where newsroom_id = ${newsroomId} and canonical = ${c} limit 1
         `;
         entityId = found[0]?.id ?? null;
       }
@@ -2730,10 +2764,10 @@ async function persistPlan(
       try {
         await sql`
           insert into investigation_entities (
-            user_id, investigation_id, entity_id, first_seen_version_id, first_seen_capture_id,
+            user_id, newsroom_id, investigation_id, entity_id, first_seen_version_id, first_seen_capture_id,
             first_seen_url, relevance, status
           ) values (
-            ${userId}, ${investigationId}, ${entityId},
+            ${userId}, ${newsroomId}, ${investigationId}, ${entityId},
             ${hit[0]?.version_id ?? null}, ${hit[0]?.capture_event_id ?? null},
             ${hit[0]?.url ?? null}, ${"direct"}, ${"active"}
           )
@@ -2762,9 +2796,9 @@ async function persistPlan(
             : resolved.verdict;
       try {
         await sql`
-          insert into entity_aliases (user_id, canonical, alias, verdict, evidence)
-          values (${userId}, ${resolved.canonical}, ${e.name.slice(0, 200)}, ${verdict}, ${e.why.slice(0, 400)})
-          on conflict (user_id, canonical, alias) do update set verdict = excluded.verdict
+          insert into entity_aliases (user_id, newsroom_id, canonical, alias, verdict, evidence)
+          values (${userId}, ${newsroomId}, ${resolved.canonical}, ${e.name.slice(0, 200)}, ${verdict}, ${e.why.slice(0, 400)})
+          on conflict (newsroom_id, user_id, canonical, alias) do update set verdict = excluded.verdict
         `;
       } catch {
         /* alias already recorded */
@@ -2772,9 +2806,9 @@ async function persistPlan(
       const [left, right] = [resolved.canonical, c].sort();
       try {
         await sql`
-          insert into entity_matches (user_id, left_canonical, right_canonical, verdict, evidence, investigation_id)
-          values (${userId}, ${left}, ${right}, ${verdict}, ${e.why.slice(0, 400)}, ${investigationId})
-          on conflict (user_id, left_canonical, right_canonical) do update set verdict = excluded.verdict
+          insert into entity_matches (user_id, newsroom_id, left_canonical, right_canonical, verdict, evidence, investigation_id)
+          values (${userId}, ${newsroomId}, ${left}, ${right}, ${verdict}, ${e.why.slice(0, 400)}, ${investigationId})
+          on conflict (newsroom_id, user_id, left_canonical, right_canonical) do update set verdict = excluded.verdict
         `;
       } catch {
         /* match already recorded */
@@ -2799,20 +2833,25 @@ async function persistPlan(
     known.push({ canonical: c, name: e.name });
   }
   for (const r of plan.relationships) {
-    const prov = await resolveProvenance(userId, investigationId, {
-      source_url: r.source_url,
-      artifact_version_id: r.artifact_version_id,
-      capture_event_id: r.capture_event_id,
-      locator: r.locator,
-      excerpt: r.evidence,
-    });
+    const prov = await resolveProvenance(
+      userId,
+      investigationId,
+      {
+        source_url: r.source_url,
+        artifact_version_id: r.artifact_version_id,
+        capture_event_id: r.capture_event_id,
+        locator: r.locator,
+        excerpt: r.evidence,
+      },
+      newsroomId,
+    );
     await sql`
       insert into relationships (
-        user_id, investigation_id, from_name, to_name, kind, evidence, source_url,
+        user_id, newsroom_id, investigation_id, from_name, to_name, kind, evidence, source_url,
         version_id, excerpt, capture_event_id, capture_hash, provenance_status, locator
       )
       values (
-        ${userId}, ${investigationId}, ${r.from.slice(0, 200)}, ${r.to.slice(0, 200)},
+        ${userId}, ${newsroomId}, ${investigationId}, ${r.from.slice(0, 200)}, ${r.to.slice(0, 200)},
         ${r.kind.slice(0, 80)}, ${r.evidence.slice(0, 2000)}, ${prov.sourceUrl},
         ${prov.versionId}, ${r.evidence.slice(0, 800)}, ${prov.captureEventId},
         ${prov.contentHash}, ${prov.status}, ${prov.locator}
@@ -2850,9 +2889,9 @@ async function persistPlan(
       `;
     } else {
       await sql`
-        insert into hypotheses (user_id, investigation_id, body, supporting, contradicting, status, transition_note)
+        insert into hypotheses (user_id, newsroom_id, investigation_id, body, supporting, contradicting, status, transition_note)
         values (
-          ${userId}, ${investigationId}, ${h.text.slice(0, 2000)},
+          ${userId}, ${newsroomId}, ${investigationId}, ${h.text.slice(0, 2000)},
           ${h.supporting.slice(0, 2000)}, ${h.contradicting.slice(0, 2000)},
           ${status}, ${"opened"}
         )
@@ -2861,20 +2900,25 @@ async function persistPlan(
   }
   for (const c of plan.claims) {
     const conf = c.confidence;
-    const prov = await resolveProvenance(userId, investigationId, {
-      source_url: c.source_url,
-      artifact_version_id: c.artifact_version_id,
-      capture_event_id: c.capture_event_id,
-      locator: c.locator,
-      excerpt: c.evidence,
-    });
+    const prov = await resolveProvenance(
+      userId,
+      investigationId,
+      {
+        source_url: c.source_url,
+        artifact_version_id: c.artifact_version_id,
+        capture_event_id: c.capture_event_id,
+        locator: c.locator,
+        excerpt: c.evidence,
+      },
+      newsroomId,
+    );
     await sql`
       insert into claims (
-        user_id, investigation_id, body, kind, evidence, source_url, confidence,
+        user_id, newsroom_id, investigation_id, body, kind, evidence, source_url, confidence,
         version_id, excerpt, capture_hash, capture_event_id, provenance_status, locator, captured_at
       )
       values (
-        ${userId}, ${investigationId}, ${c.text.slice(0, 2000)}, ${c.kind},
+        ${userId}, ${newsroomId}, ${investigationId}, ${c.text.slice(0, 2000)}, ${c.kind},
         ${c.evidence.slice(0, 2000)}, ${prov.sourceUrl ?? c.source_url ?? null}, ${conf ?? null},
         ${prov.versionId}, ${c.evidence.slice(0, 800)}, ${prov.contentHash},
         ${prov.captureEventId}, ${prov.status}, ${prov.locator},
@@ -2933,8 +2977,8 @@ async function persistPlan(
     */
     try {
       await sql`
-        insert into dead_ends (user_id, investigation_id, hypothesis, dismissed_because, entities, confirmation_count, settled, dedup_key)
-        values (${userId}, ${investigationId}, ${hypothesisVal}, ${reasonVal}, ${blob}, 1, false, ${dedupKey})
+        insert into dead_ends (user_id, newsroom_id, investigation_id, hypothesis, dismissed_because, entities, confirmation_count, settled, dedup_key)
+        values (${userId}, ${newsroomId}, ${investigationId}, ${hypothesisVal}, ${reasonVal}, ${blob}, 1, false, ${dedupKey})
         on conflict (investigation_id, dedup_key) do update
         set confirmation_count = dead_ends.confirmation_count + 1,
             dismissed_because = excluded.dismissed_because,
@@ -2943,8 +2987,8 @@ async function persistPlan(
       `;
     } catch {
       await sql`
-        insert into dead_ends (user_id, investigation_id, hypothesis, dismissed_because, entities, dedup_key)
-        values (${userId}, ${investigationId}, ${hypothesisVal}, ${reasonVal}, ${blob}, ${dedupKey})
+        insert into dead_ends (user_id, newsroom_id, investigation_id, hypothesis, dismissed_because, entities, dedup_key)
+        values (${userId}, ${newsroomId}, ${investigationId}, ${hypothesisVal}, ${reasonVal}, ${blob}, ${dedupKey})
       `;
     }
     await markFrontier(userId, investigationId, d.hypothesis, "dead-end", d.reason);
@@ -2979,9 +3023,29 @@ const REVIVED_DEAD_END_PRIORITY = 6;
  * that reduces to just these doesn't count as "the same name".
  */
 const DEAD_END_MATCH_STOPWORDS = new Set([
-  "the", "and", "for", "with", "from", "this", "that", "were", "have",
-  "been", "into", "during", "after", "before", "about", "city", "county",
-  "council", "board", "meeting", "public", "report", "case",
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "this",
+  "that",
+  "were",
+  "have",
+  "been",
+  "into",
+  "during",
+  "after",
+  "before",
+  "about",
+  "city",
+  "county",
+  "council",
+  "board",
+  "meeting",
+  "public",
+  "report",
+  "case",
 ]);
 
 function escapeRegExpLiteral(s: string): string {
@@ -3011,7 +3075,11 @@ export function meaningfulDeadEndMatch(name: string, blob: string): boolean {
   return new RegExp(`\\b${escapeRegExpLiteral(only)}\\b`, "i").test(blob);
 }
 
-export async function matchDeadEnds(userId: string, names: string[]) {
+export async function matchDeadEnds(
+  userId: string,
+  names: string[],
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
+) {
   const sql = await getSql();
   const rows = await sql<{
     id: number;
@@ -3021,7 +3089,7 @@ export async function matchDeadEnds(userId: string, names: string[]) {
     investigation_id: number | null;
   }>`
     select id, hypothesis, dismissed_because, entities, investigation_id from dead_ends
-    where newsroom_id = ${DEFAULT_NEWSROOM_ID} and settled = false
+    where newsroom_id = ${newsroomId} and settled = false
     order by created_at desc limit 80
   `;
   return rows.filter((r) => {
@@ -3037,7 +3105,8 @@ export async function resurfaceDeadEnds(
   names: string[],
   opts: { foreignOnly?: boolean } = {},
 ): Promise<number> {
-  const hits = await matchDeadEnds(userId, names);
+  const newsroomId = await investigationNewsroom(investigationId);
+  const hits = await matchDeadEnds(userId, names, newsroomId);
   if (!hits.length) return 0;
   const sql = await getSql();
   let n = 0;
@@ -3090,13 +3159,7 @@ export async function checkBaselines(
   investigationId: number,
   now = new Date(),
   /**
-   * The investigation's real newsroom (0.6.13); see `rememberCapture`'s doc
-   * comment. `recurring_baselines` below deliberately stays scoped to
-   * `DEFAULT_NEWSROOM_ID` -- it is not one of the three tables 0.6.11
-   * claimed fixed and is out of scope here (same carve-out as
-   * `source_monitors`) -- but the `anomalies` this function reads for
-   * dedup and then writes belong to THIS investigation, so both now use the
-   * caller's real newsroom.
+   * Baselines and their anomalies use the same caller-authorized newsroom.
    */
   newsroomId: number = DEFAULT_NEWSROOM_ID,
 ) {
@@ -3113,7 +3176,7 @@ export async function checkBaselines(
   }>`
     select key, typical_title, typical_url, cadence_days, last_seen::text as last_seen,
            usual_weekday, usual_nth_weekday, sightings
-    from recurring_baselines where newsroom_id = ${DEFAULT_NEWSROOM_ID}
+    from recurring_baselines where newsroom_id = ${newsroomId}
   `;
   let flagged = 0;
   for (const r of rows) {
@@ -3168,9 +3231,9 @@ export async function checkBaselines(
       const missingLabel = m.title || m.key;
       const missingNorm = frontierDedupKey("missing-record", missingLabel).norm;
       await sql`
-        insert into frontier_items (user_id, investigation_id, kind, label, label_norm, why, priority, next_steps)
+        insert into frontier_items (user_id, newsroom_id, investigation_id, kind, label, label_norm, why, priority, next_steps)
         values (
-          ${userId}, ${investigationId}, ${"missing-record"}, ${missingLabel}, ${missingNorm},
+          ${userId}, ${newsroomId}, ${investigationId}, ${"missing-record"}, ${missingLabel}, ${missingNorm},
           ${"Dog that didn't bark — expected cadence broken"}, ${12},
           ${next.slice(0, 500)}
         )
@@ -3236,7 +3299,7 @@ export async function runDueMonitors(opts: {
     }>`
       select ce.content_hash, ce.http_status as fetch_status, av.full_text, ce.fetch_outcome
       from capture_events ce
-      left join artifact_versions av on av.id = ce.version_id
+      left join artifact_versions av on av.id = ce.version_id and av.newsroom_id = ce.newsroom_id
       -- 0.6.23: scoped to this monitor's own newsroom (closes the TODO.md
       -- "Known caveats" line -- this lookup used to key off the hardcoded
       -- DEFAULT_NEWSROOM_ID, so two newsrooms watching the same url would
@@ -3244,11 +3307,8 @@ export async function runDueMonitors(opts: {
       -- rememberCapture now writes the real newsroom onto capture_events,
       -- so this filter actually isolates rows per newsroom instead of
       -- just matching where they used to all land by accident.
-      -- artifact_versions (joined above for full_text) is still not
-      -- newsroom-scoped -- see rememberCapture's doc comment -- but that
-      -- doesn't matter here: ce.version_id already points at the exact
-      -- version row created for this fetch, so the join finds the right
-      -- text regardless of what newsroom_id sits on the version row.
+      -- The joined version must belong to this newsroom too. Legacy captures
+      -- linked across newsrooms must not import the other paper's text.
       where ce.newsroom_id = ${newsroomId} and ce.source_url = ${url}
       order by ce.id desc limit 1
     `;
@@ -3392,7 +3452,7 @@ export async function runDueMonitors(opts: {
       }
     }
     if (got.ok) {
-      await observeBaseline(opts.userId, url, got.title || m.title, now, got.extras);
+      await observeBaseline(opts.userId, url, got.title || m.title, now, got.extras, newsroomId);
     }
     const hours = m.cadence_hours || 24;
     const next = new Date(now.getTime() + hours * 3600 * 1000).toISOString();
