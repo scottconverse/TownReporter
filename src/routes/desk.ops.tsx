@@ -146,9 +146,9 @@ function OpsPage() {
       kicker="Editor desk"
       lede={
         <>
-          Everything this machine is doing to keep the paper online, and the few
-          buttons worth having. Read from this machine, so it can tell you the
-          tunnel is routing but not that a reader in another town can reach you.
+          Everything this machine is doing to keep the paper online, and the few buttons worth
+          having. Read from this machine, so it can tell you the tunnel is routing but not that a
+          reader in another town can reach you.
         </>
       }
     >
@@ -171,18 +171,14 @@ function OpsPage() {
             </span>
           }
           sub={
-            health.data
-              ? `${health.data.host} · read ${formatAgo(health.data.takenAt)}`
-              : undefined
+            health.data ? `${health.data.host} · read ${formatAgo(health.data.takenAt)}` : undefined
           }
         />
 
         {health.isPending ? (
           <ListSkeleton />
         ) : health.isError ? (
-          <p className="mt-4 text-rust">
-            Could not read the server. {String(health.error)}
-          </p>
+          <p className="mt-4 text-rust">Could not read the server. {String(health.error)}</p>
         ) : (
           <ul className="mt-4 divide-y divide-rule border-y border-rule">
             {checks.map((c) => (
@@ -192,9 +188,7 @@ function OpsPage() {
                 </span>
                 <span className="min-w-0 flex-1 break-words">{c.value}</span>
                 <StateDot state={c.state} />
-                {c.note ? (
-                  <p className="w-full text-sm text-ink-2">{c.note}</p>
-                ) : null}
+                {c.note ? <p className="w-full text-sm text-ink-2">{c.note}</p> : null}
               </li>
             ))}
           </ul>
@@ -208,6 +202,7 @@ function OpsPage() {
         />
         <ul className="mt-4 space-y-3">
           {OPS_ACTIONS.map((a) => {
+            const unavailable = health.data?.unavailableActions?.[a.id];
             const isConfirming = confirming === a.id;
             const isRunning = running === a.id;
             return (
@@ -226,7 +221,7 @@ function OpsPage() {
                       <InkButton
                         tone="danger"
                         small
-                        disabled={isRunning}
+                        disabled={isRunning || Boolean(unavailable) || !health.data}
                         onClick={() => act.mutate(a.id)}
                       >
                         {isRunning ? "Running…" : "Yes, do it"}
@@ -239,19 +234,16 @@ function OpsPage() {
                     <InkButton
                       tone={a.interrupts ? "ghost" : "solid"}
                       small
-                      disabled={Boolean(running)}
-                      onClick={() =>
-                        a.interrupts ? setConfirming(a.id) : act.mutate(a.id)
-                      }
+                      disabled={Boolean(running) || Boolean(unavailable) || !health.data}
+                      onClick={() => (a.interrupts ? setConfirming(a.id) : act.mutate(a.id))}
                     >
                       {isRunning ? "Running…" : "Run"}
                     </InkButton>
                   )}
                 </div>
                 <p className="mt-2 max-w-2xl text-ink-2">{a.detail}</p>
-                <p className="mt-1 text-sm text-muted">
-                  Takes about {a.expectSeconds} seconds.
-                </p>
+                {unavailable ? <p className="mt-2 text-sm">Unavailable: {unavailable}</p> : null}
+                <p className="mt-1 text-sm text-muted">Takes about {a.expectSeconds} seconds.</p>
               </li>
             );
           })}
@@ -270,9 +262,7 @@ function OpsPage() {
         <div className="mt-4 space-y-6">
           {(health.data?.logs ?? []).map((l) => (
             <div key={l.path}>
-              <h3 className="text-sm tracking-[0.14em] text-muted uppercase">
-                {l.name}
-              </h3>
+              <h3 className="text-sm tracking-[0.14em] text-muted uppercase">{l.name}</h3>
               {l.error ? (
                 <p className="mt-1 text-sm text-muted">{l.error}</p>
               ) : l.lines.length === 0 ? (
@@ -288,9 +278,9 @@ function OpsPage() {
       </section>
 
       <p className="mt-12 max-w-2xl text-sm text-muted">
-        This page runs inside the paper, so it cannot report on itself when the
-        paper is down. That is what the watchdog is for: it runs from Windows
-        every five minutes and restarts whatever has stopped. Its log is above.
+        This page runs inside the paper, so it cannot report on itself when the paper is down. That
+        is what the watchdog is for: it runs from Windows every five minutes and restarts whatever
+        has stopped. Its log is above.
       </p>
 
       <PaperSetup />
@@ -422,8 +412,7 @@ function WritingModels() {
       {(times.data ?? [])
         .filter(
           (row) =>
-            !["claude-code", "anthropic", "codex"].includes(row.kind) &&
-            row.availableOnThisMachine,
+            !["claude-code", "anthropic", "codex"].includes(row.kind) && row.availableOnThisMachine,
         )
         .map((row) => (
           <div key={row.providerId} className="mt-3 border border-rule p-4">
@@ -436,9 +425,8 @@ function WritingModels() {
         ))}
       <LocalModelCatalogTable onNote={setNote} />
       <p className="mt-4 max-w-2xl text-sm text-muted">
-        These are the command-line tools TownReporter drafts with. Being signed
-        in to claude.ai in your browser or the Claude desktop app is a separate
-        login and does not count here.
+        These are the command-line tools TownReporter drafts with. Being signed in to claude.ai in
+        your browser or the Claude desktop app is a separate login and does not count here.
       </p>
     </section>
   );
@@ -453,7 +441,10 @@ function WritingModels() {
  */
 function LocalModelCatalogTable({ onNote }: { onNote: (text: string) => void }) {
   const qc = useQueryClient();
-  const catalog = useQuery({ queryKey: ["local-model-catalog"], queryFn: () => localModelCatalog() });
+  const catalog = useQuery({
+    queryKey: ["local-model-catalog"],
+    queryFn: () => localModelCatalog(),
+  });
   const refresh = useMutation({
     mutationFn: () => refreshLocalModelCatalog(),
     onSuccess: (data) => {
@@ -503,7 +494,9 @@ function LocalModelCatalogTable({ onNote }: { onNote: (text: string) => void }) 
                       <td className="py-1 pr-3">
                         {model.loaded === null ? "unknown" : model.loaded ? "yes" : "no"}
                       </td>
-                      <td className="py-1 pr-3">{model.thinking ? "yes (off by default)" : "no"}</td>
+                      <td className="py-1 pr-3">
+                        {model.thinking ? "yes (off by default)" : "no"}
+                      </td>
                       <td className="py-1 pr-3">{model.vision ? "yes" : "no"}</td>
                       <td className="py-1 pr-3">
                         {def && def.baseUrl === server.baseUrl && def.id === model.id ? "★" : ""}
@@ -580,9 +573,7 @@ function ProviderRow({
   }, [open]);
   const anchor = login ? Date.parse(login.updated_at) : 0;
   const left =
-    login && open
-      ? Math.max(0, login.expiresInSeconds - Math.round((now - anchor) / 1000))
-      : 0;
+    login && open ? Math.max(0, login.expiresInSeconds - Math.round((now - anchor) / 1000)) : 0;
 
   const start = useMutation({
     mutationFn: () => startProviderLogin({ data: status.provider }),
@@ -655,12 +646,7 @@ function ProviderRow({
             </InkButton>
           ) : null}
           {status.signedIn ? (
-            <InkButton
-              tone="quiet"
-              small
-              disabled={test.isPending}
-              onClick={() => test.mutate()}
-            >
+            <InkButton tone="quiet" small disabled={test.isPending} onClick={() => test.mutate()}>
               {test.isPending ? "Asking…" : "Test"}
             </InkButton>
           ) : null}
@@ -674,9 +660,7 @@ function ProviderRow({
         <span>{line}</span>
       </p>
       {status.path ? <p className="mt-1 text-sm break-all text-muted">{status.path}</p> : null}
-      {status.detail && !open ? (
-        <p className="mt-1 text-sm text-ink-2">{status.detail}</p>
-      ) : null}
+      {status.detail && !open ? <p className="mt-1 text-sm text-ink-2">{status.detail}</p> : null}
 
       {open ? (
         <div className="mt-3 border border-rule bg-paper-2 p-3">
@@ -724,12 +708,7 @@ function ProviderRow({
               ? `This link runs out in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}.`
               : "This link has run out of time."}
           </p>
-          <InkButton
-            tone="quiet"
-            small
-            disabled={cancel.isPending}
-            onClick={() => cancel.mutate()}
-          >
+          <InkButton tone="quiet" small disabled={cancel.isPending} onClick={() => cancel.mutate()}>
             {cancel.isPending ? "Stopping…" : "Cancel"}
           </InkButton>
         </div>
@@ -824,7 +803,11 @@ function RecentlyDeleted() {
               <div className="flex flex-wrap items-baseline justify-between gap-3">
                 <span className="min-w-0 flex-1">
                   <span className="text-sm tracking-[0.14em] text-rust uppercase">
-                    {r.kind === "article" ? "Was on the paper" : r.kind === "lead" ? "Lead" : "Editorial"}
+                    {r.kind === "article"
+                      ? "Was on the paper"
+                      : r.kind === "lead"
+                        ? "Lead"
+                        : "Editorial"}
                   </span>{" "}
                   <span className="font-display text-lg">{r.label}</span>
                   {r.extra ? <span className="ml-2 text-sm text-muted">with {r.extra}</span> : null}
@@ -873,7 +856,6 @@ function RecentlyDeleted() {
   );
 }
 
-
 /**
  * The one irreversible thing on this page, kept furthest from everything else.
  *
@@ -910,13 +892,11 @@ function PaperSetup() {
         sub="The paper's name, city, state, timezone, tagline and starting watch list. Saving also rewrites the welcome article on the front page to match."
       />
       <p className="mt-2 max-w-2xl text-sm text-muted">
-        What Save does: it writes every field below; rewrites the front-page
-        kicker and deck from the paper's name and city; and rewrites the
-        welcome article. Published stories are not touched. There is no
-        undo, but you can edit again and save over it. The starting watch
-        list is added as real rows on the Sources page, not just stored as
-        a default — each editor gets them added once, the first time they
-        visit.
+        What Save does: it writes every field below; rewrites the front-page kicker and deck from
+        the paper's name and city; and rewrites the welcome article. Published stories are not
+        touched. There is no undo, but you can edit again and save over it. The starting watch list
+        is added as real rows on the Sources page, not just stored as a default — each editor gets
+        them added once, the first time they visit.
       </p>
       {current.isPending ? null : <PaperSetupForm initial={current.data} submitLabel="Save" />}
       <SectionsSetup />
@@ -954,7 +934,9 @@ function DarkDeskCounty() {
       setErr(null);
       setSavedAt(Date.now());
       setTouched(false);
-      announceToDesk(res.county ? "County saved." : "County cleared. Dark Desk searches will use the city only.");
+      announceToDesk(
+        res.county ? "County saved." : "County cleared. Dark Desk searches will use the city only.",
+      );
     },
     onError: (e) => {
       const msg = e instanceof Error ? e.message : "That did not save.";
@@ -1077,8 +1059,7 @@ function InviteAnEditor() {
         sub="A one-time link for one email address. It expires in seven days, and the person sets their own password. Editors can do everything but invite others or give up the desk."
       />
       <p className="mt-2 max-w-2xl text-sm text-muted">
-        You will get a link to send yourself. TownReporter does not send
-        email.
+        You will get a link to send yourself. TownReporter does not send email.
       </p>
       <div className="mt-4 max-w-2xl space-y-3">
         <div className="flex flex-wrap items-end gap-2">
@@ -1092,11 +1073,7 @@ function InviteAnEditor() {
               placeholder="colleague@example.org"
             />
           </label>
-          <InkButton
-            small
-            disabled={mint.isPending || !email.trim()}
-            onClick={() => mint.mutate()}
-          >
+          <InkButton small disabled={mint.isPending || !email.trim()} onClick={() => mint.mutate()}>
             {mint.isPending ? "Minting…" : "Make the invite link"}
           </InkButton>
         </div>
@@ -1136,9 +1113,8 @@ function InviteAnEditor() {
           </div>
         ) : null}
         <p className="text-sm text-muted">
-          What happens next: they click the link, set a password, and appear
-          on this page as an editor. They cannot invite others or give up
-          the desk.
+          What happens next: they click the link, set a password, and appear on this page as an
+          editor. They cannot invite others or give up the desk.
         </p>
       </div>
     </section>
@@ -1161,8 +1137,8 @@ function GiveUpTheDesk() {
           <LeaveEditorControl email={email} />
         ) : (
           <p className="text-sm text-muted">
-            This needs the email address you signed in with, and it could not be
-            read. Reload the page.
+            This needs the email address you signed in with, and it could not be read. Reload the
+            page.
           </p>
         )}
       </div>

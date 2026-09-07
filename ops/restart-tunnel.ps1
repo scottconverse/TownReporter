@@ -5,6 +5,9 @@
   the internet drops, for a few seconds.
 #>
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib-ownership.ps1")
+Assert-TownReporterLegacyOwnership
+Assert-TownReporterTaskOwnership 'TownReporter Tunnel' 'run-tunnel.ps1'
 $app = Split-Path -Parent $PSScriptRoot
 $logDir = Join-Path $app "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null

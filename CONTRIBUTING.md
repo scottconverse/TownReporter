@@ -6,6 +6,8 @@ operator's data.
 
 ## Set up
 
+For a persistent Windows newsroom, use the [installation package](docs/windows-install.md). The steps below are the development/source setup. Installer changes must also pass the fresh-package Windows lane; do not substitute an already-installed development directory for the release ZIP.
+
 1. Install Node 22 or newer and clone the repository.
 2. Run `npm install`.
 3. Run `npx playwright install chromium`.

@@ -59,6 +59,31 @@ async function ensureWriteStorySchema() {
 }
 
 describe("writeStoryForAuthenticatedEditor", () => {
+  it("persists supplied-material scope on both the lead and immutable queued job", async () => {
+    const sql = await ensureWriteStorySchema();
+    const res = await writeStoryForAuthenticatedEditor({ context: { userId: "scope-editor", newsroomId: 811 }, text: "Library hours change Tuesday. Opens at noon.", researchScope: "supplied", modelChoice: "claude-frontier" }, {
+      getSql: async () => sql, audit: async () => {}, assertRate: async () => {},
+      probeProvider: async () => ({ ok: true, choice: "claude-frontier", label: "Claude" }),
+      enqueueJob: (opts) => enqueueJob({ ...opts, kick: false }),
+    });
+    assert.equal(res.ok, true);
+    const [row] = await sql<{notes_json:string}>`select notes_json from leads where newsroom_id = 811`;
+    assert.equal(JSON.parse(row.notes_json).researchScope, "supplied");
+    const [job] = await sql<{research_scope:string}>`select research_scope from desk_jobs where newsroom_id = 811`;
+    assert.equal(job.research_scope, "supplied");
+  });
+  it("refuses a tool-capable Automatic result before enqueue in supplied-material scope", async () => {
+    const sql = await ensureWriteStorySchema();
+    let enqueued = false;
+    const res = await writeStoryForAuthenticatedEditor({ context: { userId: "scope-codex", newsroomId: 812 }, text: "Library hours change Tuesday. Opens at noon.", researchScope: "supplied", modelChoice: "auto" }, {
+      getSql: async () => sql, audit: async () => {}, assertRate: async () => {},
+      probeProvider: async () => ({ ok: true, choice: "codex-balanced", label: "Codex" }),
+      enqueueJob: async (opts) => { enqueued = true; return enqueueJob({ ...opts, kick: false }); },
+    });
+    assert.equal(res.ok, false);
+    assert.equal(enqueued, false);
+    if (!res.ok) assert.match(res.error, /Claude or a local\/API model/);
+  });
   it("refuses without touching the database when the text does not parse into a lead", async () => {
     const sql = await ensureWriteStorySchema();
     const userId = `write-story-refuse-${Date.now()}-${Math.random()}`;

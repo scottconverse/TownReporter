@@ -1,0 +1,104 @@
+name: Windows packaged installation
+
+on:
+  push:
+    branches: [main, codex/installability]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package the exact source candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      source-sha: ${{ steps.identity.outputs.source-sha }}
+      archive-sha256: ${{ steps.identity.outputs.archive-sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Create the downloadable source package
+        run: node scripts/package-windows.mjs "$RUNNER_TEMP/windows-package"
+      - name: Bind the archive to this checkout
+        id: identity
+        shell: bash
+        run: |
+          echo "source-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          node --input-type=module -e 'import {readdirSync,readFileSync,appendFileSync} from "node:fs"; import {join} from "node:path"; import {createHash} from "node:crypto"; const dir=join(process.env.RUNNER_TEMP,"windows-package"); const names=readdirSync(dir).filter(n=>n.endsWith(".zip")); if(names.length!==1) throw Error("Expected one release ZIP"); appendFileSync(process.env.GITHUB_OUTPUT,"archive-sha256="+createHash("sha256").update(readFileSync(join(dir,names[0]))).digest("hex")+"\n");'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-source-package
+          path: ${{ runner.temp }}/windows-package/*
+          if-no-files-found: error
+
+  install:
+    name: Fresh Windows ZIP install and persistent newsroom
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 55
+    env:
+      INSTALL_SOURCE_COMMIT: ${{ needs.package.outputs.source-sha }}
+      INSTALL_SOURCE_SHA256: ${{ needs.package.outputs.archive-sha256 }}
+    steps:
+      # Deliberately no checkout/setup-node: installation and proof execute
+      # from the downloaded ZIP using its privately downloaded runtime.
+      - name: Start the measured installation clock
+        shell: pwsh
+        run: |
+          "INSTALL_ACCEPTANCE_STARTED_AT=$([DateTime]::UtcNow.ToString('o'))" >> $env:GITHUB_ENV
+          "INSTALL_EVIDENCE_DIR=$env:RUNNER_TEMP\install-evidence" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\install-evidence" | Out-Null
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-source-package
+          path: ${{ runner.temp }}/downloaded-package
+      - name: Verify and unpack the downloaded archive
+        shell: pwsh
+        run: |
+          $archives = @(Get-ChildItem "$env:RUNNER_TEMP\downloaded-package" -Filter '*.zip' -File)
+          if ($archives.Count -ne 1) { throw 'Expected exactly one packaged source archive.' }
+          $hash = (Get-FileHash -LiteralPath $archives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:INSTALL_SOURCE_SHA256) { throw 'Downloaded source ZIP checksum mismatch.' }
+          Expand-Archive -LiteralPath $archives[0].FullName -DestinationPath "$env:RUNNER_TEMP\downloaded-source"
+          $entries = @(Get-ChildItem "$env:RUNNER_TEMP\downloaded-source" -Filter 'Install.ps1' -Recurse -File | Where-Object { $_.Directory.Name -eq 'installer' })
+          if ($entries.Count -ne 1) { throw 'Expected exactly one native installer in the ZIP.' }
+          $appRoot = $entries[0].Directory.Parent.FullName
+          "INSTALL_APP_ROOT=$appRoot" >> $env:GITHUB_ENV
+          "INSTALL_SOURCE_ARCHIVE=$($archives[0].FullName)" >> $env:GITHUB_ENV
+          "INSTALL_DATA_ROOT=$env:RUNNER_TEMP\private-newsroom" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\private-newsroom" | Out-Null
+          @{ TOWNREPORTER_CLAUDE_CODE='0'; TOWNREPORTER_CODEX='0'; TOWNREPORTER_LOCAL='0' } | ConvertTo-Json | Set-Content -LiteralPath "$env:RUNNER_TEMP\private-newsroom\providers.json"
+      - name: Run the default native installer with private downloads
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:INSTALL_APP_ROOT\installer\Install.ps1" -DataRoot $env:INSTALL_DATA_ROOT -NoBrowser *> "$env:INSTALL_EVIDENCE_DIR\install.log"
+          if ($LASTEXITCODE -ne 0) { Get-Content "$env:INSTALL_EVIDENCE_DIR\install.log"; throw 'Native installer failed.' }
+      - name: Verify browser workflow, stale-build refusal and restart persistence
+        shell: pwsh
+        run: |
+          $config = Get-Content -LiteralPath "$env:INSTALL_DATA_ROOT\config.json" -Raw | ConvertFrom-Json
+          & $config.NodeExe "$env:INSTALL_APP_ROOT\scripts\windows-install-smoke.mjs" *> "$env:INSTALL_EVIDENCE_DIR\smoke.log"
+          if ($LASTEXITCODE -ne 0) { Get-Content "$env:INSTALL_EVIDENCE_DIR\smoke.log"; throw 'Packaged installation acceptance failed.' }
+          Get-Content "$env:INSTALL_EVIDENCE_DIR\receipt.json"
+      - name: Stop the owned installation and record elapsed time
+        if: always()
+        shell: pwsh
+        run: |
+          $elapsed = ([DateTime]::UtcNow - [DateTime]::Parse($env:INSTALL_ACCEPTANCE_STARTED_AT).ToUniversalTime()).TotalSeconds
+          @{ elapsedSeconds=$elapsed; maximumSeconds=3600; sourceCommit=$env:INSTALL_SOURCE_COMMIT; archiveSha256=$env:INSTALL_SOURCE_SHA256 } | ConvertTo-Json | Set-Content -LiteralPath "$env:INSTALL_EVIDENCE_DIR\elapsed.json"
+          if ($env:INSTALL_APP_ROOT -and (Test-Path -LiteralPath "$env:INSTALL_DATA_ROOT\config.json")) {
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:INSTALL_APP_ROOT\installer\Stop.ps1" -DataRoot $env:INSTALL_DATA_ROOT
+            if ($LASTEXITCODE -ne 0) { throw 'Owned installation cleanup failed.' }
+          }
+          if ($elapsed -ge 3600) { throw 'Installation acceptance exceeded one hour.' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-install-evidence
+          path: ${{ runner.temp }}/install-evidence/*
+          if-no-files-found: error

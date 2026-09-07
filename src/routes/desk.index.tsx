@@ -1,3 +1,4 @@
+import { DraftScopePicker } from "@/components/draft-scope-picker";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -168,6 +169,7 @@ function DeskHome() {
     text kept so the draft reads it as evidence.
   */
   const [storyText, setStoryText] = useState("");
+  const [storyScope, setStoryScope] = useState<"public" | "supplied">("public");
   const [storyModel, setStoryModel] = useState<StoryModelChoice>("auto");
   const [storyNotice, setStoryNotice] = useState<{
     text: string;
@@ -175,7 +177,7 @@ function DeskHome() {
     authDetail?: string | null;
   } | null>(null);
   const writeStory = useMutation({
-    mutationFn: () => writeStoryFromInput({ data: { text: storyText, modelChoice: storyModel } }),
+    mutationFn: () => writeStoryFromInput({ data: { text: storyText, modelChoice: storyModel, researchScope: storyScope } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         const raw = res?.error ?? "That did not file.";
@@ -326,6 +328,7 @@ function DeskHome() {
             reading as narrower than it is; putting Write beside it uses
             that space instead of below it.
           */}
+          <DraftScopePicker value={storyScope} onChange={setStoryScope} disabled={writeStory.isPending} />
           <div className="composer-row">
             <ModelPicker
               scope="story"

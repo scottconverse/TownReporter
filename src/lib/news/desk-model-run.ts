@@ -58,6 +58,7 @@ export async function failOverAndRetry(opts: {
   setFailoverNote: typeof setJobFailoverNote;
 }): Promise<ReportedDraftResult> {
   const { job, error, draftInput, runReport, probe, setModelChoice, setStage, setFailoverNote } = opts;
+  if (draftInput.researchScope === "supplied") return { error: `${error} Supplied-material drafting does not switch to providers with external tools. Choose Claude or a local/API model and retry.` };
   const source = job.model_choice_source ?? "editor";
   const plan = await planAutomaticFailover({
     source,

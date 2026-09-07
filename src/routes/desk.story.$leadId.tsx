@@ -1,3 +1,5 @@
+import { DraftScopePicker } from "@/components/draft-scope-picker";
+import { evidenceNeedsReview, type EvidenceDecision } from "@/lib/news/draft-evidence";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -76,6 +78,7 @@ function StoryPage() {
   const [body, setBody] = useState("");
   const [topic, setTopic] = useState("council");
   const [scratch, setScratch] = useState("");
+  const [researchScope, setResearchScope] = useState<"public" | "supplied">("public");
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   /*
     Publishing is the only irreversible thing on this page, and it was the
@@ -191,6 +194,7 @@ function StoryPage() {
   */
 
   useEffect(() => {
+    setResearchScope(parseNotes(data?.lead.notes_json).researchScope ?? "public");
     const s = parseNotes(data?.lead.notes_json).scratch ?? "";
     if (s) setScratch(s);
   }, [data?.lead.notes_json]);
@@ -207,9 +211,9 @@ function StoryPage() {
   const draft = useMutation({
     mutationFn: async () => {
       await saveReportingNotes({
-        data: { leadId: id, scratch, todos: parseNotes(data?.lead.notes_json).todo },
+        data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo },
       });
-      return draftLead({ data: { leadId: id, modelChoice } });
+      return draftLead({ data: { leadId: id, modelChoice, researchScope } });
     },
     onMutate: () => {
       setMsg("");
@@ -267,20 +271,26 @@ function StoryPage() {
   const save = useMutation({
     mutationFn: async () => {
       await saveReportingNotes({
-        data: { leadId: id, scratch, todos: parseNotes(data?.lead.notes_json).todo },
+        data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo },
       });
       return saveDraft({ data: { leadId: id, headline, dek, body, topic } });
     },
-    onSuccess: () => setMsg("Saved."),
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["lead", id] }); setMsg("Saved."); },
     onError: (err) => {
       setMsg(err instanceof Error ? err.message : "Could not save.");
     },
   });
 
+  const reviewEvidence = useMutation({
+    mutationFn: (decision: EvidenceDecision) => saveDraft({ data: { leadId: id, headline, dek, body, topic, evidenceDecision: decision, evidenceToken: data?.evidenceToken } }),
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["lead", id] }); setMsg("Saved."); },
+    onError: (error) => setMsg(error instanceof Error ? error.message : "Evidence review could not be saved."),
+  });
+
   const publish = useMutation({
     mutationFn: async () => {
       await saveReportingNotes({
-        data: { leadId: id, scratch, todos: parseNotes(data?.lead.notes_json).todo },
+        data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo },
       });
       await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
       return publishLead({ data: id });
@@ -391,6 +401,7 @@ function StoryPage() {
     checkbox; the server refuses to publish while one is unticked, and this
     says so before the editor reaches for the button.
   */
+  const evidenceStale = data.draft ? evidenceNeedsReview(data.draft, body) : false;
   const openClaims = uncheckedGateTodos(notes);
   const blockedReason = openClaims.length
     ? openClaims.length === 1
@@ -462,6 +473,17 @@ function StoryPage() {
         </aside>
 
         <section className="story-work">
+          {!locked && !onPaper ? <DraftScopePicker value={researchScope} onChange={setResearchScope} disabled={waiting} /> : null}
+          {evidenceStale && !onPaper ? <div className="note publish-blocked" role="status">
+            <p>The story changed after its evidence was gathered. The previous reporting remains in private notes; review the sources and claims below before publishing this version.</p>
+            <a href="#evidence-review" className="inline-link" onClick={() => { const details = document.getElementById("evidence-review")?.closest("details"); if (details) details.open = true; }}>Review claims and sources</a>
+            <ul>{parseUrlList(data.draft?.source_urls ?? "[]").map(url => <li key={url}><a href={url} target="_blank" rel="noreferrer" className="inline-link">{url}</a></li>)}</ul>
+            <div className="flex gap-3 mt-2">
+              <InkButton disabled={reviewEvidence.isPending} onClick={() => reviewEvidence.mutate("keep")}>I checked: keep this evidence</InkButton>
+              <InkButton tone="ghost" disabled={reviewEvidence.isPending} onClick={() => reviewEvidence.mutate("remove")}>Remove old evidence from public story</InkButton>
+            </div>
+            <p>Remove clears the old public source list, reporting trail, findings and unanswered questions; it keeps their private audit copy and does not edit your body or its links.</p>
+          </div> : null}
           <div className="work-bar">
             {!locked && !onPaper ? (
               <>
@@ -508,7 +530,7 @@ function StoryPage() {
                         </span>
                       ) : null}
                       <InkButton
-                        disabled={publish.isPending}
+                        disabled={publish.isPending || evidenceStale || reviewEvidence.isPending}
                         onClick={() => {
                           setConfirmingPublish(false);
                           publish.mutate();
@@ -527,7 +549,7 @@ function StoryPage() {
                           publish.isPending ||
                           !headline.trim() ||
                           !body.trim() ||
-                          openClaims.length > 0
+                          openClaims.length > 0 || evidenceStale || reviewEvidence.isPending
                         }
                         onClick={() => setConfirmingPublish(true)}
                       >
@@ -586,7 +608,7 @@ function StoryPage() {
               label={
                 slowWait
                   ? "The click dropped. The writing pass is still finishing — this page is pulling the draft in."
-                  : "Reporting first — following the trail, then drafting. Stay on this page."
+                  : researchScope === "supplied" ? "Drafting from your supplied material. Stay on this page." : "Reporting first — following the trail, then drafting. Stay on this page."
               }
             />
           ) : null}
@@ -918,7 +940,7 @@ function ReportingNotesPane({
     ) : null;
 
   const inner = (
-    <div className="notes">
+    <div className="notes" id="evidence-review">
       {!small ? (
         <div className="notes-head">
           <p className="side-label" style={{ margin: 0 }}>

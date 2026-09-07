@@ -710,6 +710,7 @@ jobs:
       # spare ports on a disposable CI runner, chosen only to avoid colliding
       # with each other or common runner services.
       WATCHDOG_APP_PORT: "3050"
+      WATCHDOG_TEST_MODE: "1"
       WATCHDOG_PG_PORT: "5199"
       WATCHDOG_START_SCRIPT: "scripts/ci-watchdog-start.ps1"
       PUBLIC_SITE_URL: "http://127.0.0.1:3050/"

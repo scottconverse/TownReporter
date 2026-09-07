@@ -570,6 +570,8 @@ export type AbsenceGateInput = {
   /** The paper's own name, for the sentences the gate writes. */
   paperName?: string;
   search: GateSearch;
+  /** Supplied-material drafting cannot perform or claim an external search. */
+  searchAllowed?: boolean;
   /**
    * False on the second pass. One redraft per job: without this cap a search
    * that keeps returning fresh URLs would redraft forever.
@@ -658,9 +660,9 @@ export async function runAbsenceGate(input: AbsenceGateInput): Promise<AbsenceGa
   for (const sentence of absences) {
     if (verdicts.has(sentence)) continue;
     const ask = namedDocument(sentence) ?? sentence;
-    const found = await findAbsenceEvidence(ask, input.domains, input.city, press, input.search, (u) =>
-      known.has(u),
-    );
+    const found = input.searchAllowed === false
+      ? { url: null, query: "", steps: [] }
+      : await findAbsenceEvidence(ask, input.domains, input.city, press, input.search, (u) => known.has(u));
     verdicts.set(sentence, found);
   }
 
@@ -671,6 +673,7 @@ export async function runAbsenceGate(input: AbsenceGateInput): Promise<AbsenceGa
   // <n> is every rung of the ladder after the first, so the editor sees the
   // real count of things the app already tried, not just one search.
   const summaryFor = (found: LadderResult) => {
+    if (input.searchAllowed === false) return "External research was disabled for this draft. Check this claim yourself before publishing.";
     const domain = input.domains[0] ?? "the city's own site";
     const more = Math.max(0, found.steps.length - 1);
     return (
@@ -707,6 +710,7 @@ export async function runAbsenceGate(input: AbsenceGateInput): Promise<AbsenceGa
     });
     const what = namedDocument(sentence) ?? "that document";
     verifyLines.push(
+      input.searchAllowed === false ? `VERIFY BEFORE PRINT — ${what} was not checked externally. Confirm it yourself before publishing.` :
       `VERIFY BEFORE PRINT — the story says ${what} was not found. TownReporter searched ` +
         `${input.domains[0] ?? "the city's own site"} and ${Math.max(0, found.steps.length - 1)} ` +
         `more way${found.steps.length === 2 ? "" : "s"}; open it yourself and confirm before publishing.`,

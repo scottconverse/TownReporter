@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import os from "node:os";
+import { managedInstallRoot, opsAvailability } from "./actions.server";
 import { getDbSource, getSql } from "@/lib/db";
 import { APP_VERSION } from "@/lib/version";
 import { DEFAULT_NEWSROOM_ID } from "@/lib/news/membership";
@@ -135,7 +136,13 @@ async function checkJobs(): Promise<HealthCheck[]> {
       it may be waiting on is the `default` lane's own concurrency (2 at a
       time). This is what turns a bare "Queued" into a reason.
     */
-    const rows = await sql<{ lane: string; status: string; kind: string; n: number; oldest: string | null }>`
+    const rows = await sql<{
+      lane: string;
+      status: string;
+      kind: string;
+      n: number;
+      oldest: string | null;
+    }>`
       select coalesce(lane, 'default') as lane, status, kind, count(*)::int as n,
              min(created_at)::text as oldest
       from desk_jobs
@@ -172,7 +179,10 @@ async function checkJobs(): Promise<HealthCheck[]> {
         label: "Work queue",
         state: jobsState(running, failed, oldestMs),
         value: `${running} running · ${queued} queued · ${failed} failed`,
-        note: [running && oldestRunning ? `oldest started ${formatAgo(oldestRunning)}` : "", ...waitNotes]
+        note: [
+          running && oldestRunning ? `oldest started ${formatAgo(oldestRunning)}` : "",
+          ...waitNotes,
+        ]
           .filter(Boolean)
           .join(" · "),
       },
@@ -236,6 +246,28 @@ async function checkTunnel(): Promise<HealthCheck[]> {
 }
 
 async function checkWatchdog(): Promise<HealthCheck[]> {
+  if (await managedInstallRoot()) {
+    return [
+      {
+        id: "watchdog",
+        label: "Local launcher",
+        state: "ok",
+        value: "managed local installation",
+        note: "Health check inspects this app and database. Restart uses only this installation's launcher. Automatic recovery is not enabled.",
+      },
+    ];
+  }
+  if (process.env.TOWNREPORTER_LEGACY_OPS !== "1") {
+    return [
+      {
+        id: "watchdog",
+        label: "Watchdog",
+        state: "unknown",
+        value: "not managed by this install",
+        note: "Machine-wide tasks are not inspected or controlled.",
+      },
+    ];
+  }
   if (!isWindows) {
     return [{ id: "watchdog", label: "Watchdog", state: "unknown", value: "not a Windows host" }];
   }
@@ -302,7 +334,9 @@ async function checkDisk(): Promise<HealthCheck[]> {
 async function checkPublic(): Promise<HealthCheck[]> {
   const site = (process.env.PUBLIC_SITE_URL || process.env.BETTER_AUTH_URL || "").trim();
   if (!site) {
-    return [{ id: "public", label: "Public site", state: "unknown", value: "no address configured" }];
+    return [
+      { id: "public", label: "Public site", state: "unknown", value: "no address configured" },
+    ];
   }
   const started = Date.now();
   try {
@@ -385,6 +419,7 @@ export async function readLogs(perFile = 12): Promise<LogTail[]> {
 }
 
 export type OpsHealth = {
+  unavailableActions: Record<string, string>;
   checks: HealthCheck[];
   logs: LogTail[];
   host: string;
@@ -404,6 +439,7 @@ export async function collectHealth(): Promise<OpsHealth> {
     checkDisk(),
   ]);
   return {
+    unavailableActions: await opsAvailability(),
     checks: groups.flat(),
     logs: await readLogs(),
     host: os.hostname(),

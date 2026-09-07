@@ -148,9 +148,9 @@ test("both start paths wait long enough for a cold Postgres", () => {
     const text = readFileSync(join(OPS, name), "utf8");
     // watchdog.ps1 checks $pgPort (TEST-003: overridable for CI, defaulting to
     // 5433 -- that default is asserted separately, in the seam test above);
-    // start-townreporter.ps1 has no such override and still checks 5433 literally.
-    const waits = [...text.matchAll(/\$i -lt (\d+) -and -not \(Test-Port (?:5433|\$pgPort)\)/g)];
-    assert.ok(waits.length > 0, `ops/${name}: no wait loop for Postgres on 5433 found`);
+    // start-townreporter.ps1 checks the explicitly configured owned cluster port.
+    const waits = [...text.matchAll(/\$i -lt (\d+) -and -not \(Test-Port (?:\$OwnedPgPort|\$pgPort)\)/g)];
+    assert.ok(waits.length > 0, `ops/${name}: no wait loop for the configured Postgres port found`);
     for (const [, seconds] of waits) {
       assert.ok(
         Number(seconds) >= 120,

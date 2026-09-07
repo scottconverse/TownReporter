@@ -40,9 +40,12 @@
 #>
 
 . (Join-Path $PSScriptRoot "lib-port.ps1")
+. (Join-Path $PSScriptRoot "lib-ownership.ps1")
+Assert-TownReporterLegacyOwnership -Watchdog
 $ErrorActionPreference = "Stop"
 if ($env:WATCHDOG_APP_PORT) { $port = $env:WATCHDOG_APP_PORT }
 $pgPort = if ($env:WATCHDOG_PG_PORT) { $env:WATCHDOG_PG_PORT } else { "5433" }
+if ($OwnedPgPort) { $pgPort = [string]$OwnedPgPort }
 $startScript = if ($env:WATCHDOG_START_SCRIPT) { $env:WATCHDOG_START_SCRIPT } else { Join-Path $PSScriptRoot "start-townreporter.ps1" }
 $app = Split-Path -Parent $PSScriptRoot
 $logDir = Join-Path $app "logs"
@@ -93,10 +96,11 @@ $repaired = @()
 # see the header comment -- production never sets it, so this is 5433 there.)
 $pgUp = Test-Port $pgPort
 if (-not $pgUp) {
+  if ($env:WATCHDOG_TEST_MODE -eq '1') { throw 'Disposable PostgreSQL probe is down. Test mode never starts a real cluster.' }
   Write-Log "postgres: no listener on $pgPort, starting"
-  $bin  = "$env:USERPROFILE\scoop\apps\postgresql\current\bin"
-  $data = "$env:USERPROFILE\scoop\persist\postgresql\data"
-  $pgLog = "$env:USERPROFILE\scoop\persist\postgresql\pg.log"
+  $bin  = $OwnedPgBin
+  $data = $OwnedPgData
+  $pgLog = Join-Path $OwnedPgData 'townreporter-postgres.log'
   try {
     Start-Process -FilePath "$bin\pg_ctl.exe" `
       -ArgumentList "-D", "`"$data`"", "-l", "`"$pgLog`"", "start" -NoNewWindow
@@ -173,6 +177,7 @@ if (-not $appHealthy) {
         Write-Log "app: port $port is held by PID $owner ($($p.Name)), which is not this app -- not touching it"
         continue
       }
+      if ($env:WATCHDOG_TEST_MODE -ne '1' -and !($p.CommandLine -replace '/', '\').Contains((Join-Path $app '.output\server\index.mjs'))) { throw 'Port owner is not this exact checkout; refusing repair.' }
       Write-Log "app: stopping stale PID $owner on port $port"
       Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
     }
@@ -229,9 +234,10 @@ if (-not $appHealthy) {
 # first version tested the raw result and decided the tunnel was down on every
 # single run, restarting a task that was already running.
 $tunnelProcs = @(Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" -ErrorAction SilentlyContinue)
-if ($tunnelProcs.Count -eq 0) {
+if ($tunnelProcs.Count -eq 0 -and $env:WATCHDOG_TEST_MODE -ne '1') {
   Write-Log "tunnel: no cloudflared process, starting task"
   try {
+    Assert-TownReporterTaskOwnership 'TownReporter Tunnel' 'run-tunnel.ps1'
     Start-ScheduledTask -TaskName "TownReporter Tunnel"
     Start-Sleep -Seconds 8
     $now = @(Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" -ErrorAction SilentlyContinue)

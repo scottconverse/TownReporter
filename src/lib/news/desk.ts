@@ -19,6 +19,9 @@ import {
   shouldCommitFetchHashes,
 } from "./schema";
 import { reportAndDraft } from "./report";
+import { draftSourceInputs } from "./draft-input.ts";
+import { withCurrentDraftForPublish } from "./draft-order.server.ts";
+import { evidenceNeedsReview, evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.ts";
 import { webSearch } from "./search-web";
 import { dropListingUrls, namedSubjects, preferPrimaryUrls } from "./extract";
 import {
@@ -322,7 +325,8 @@ export const getLead = createServerFn({ method: "GET" })
       where lead_id = ${id} and newsroom_id = ${owned(context)} and status = 'published'
       limit 1
     `;
-    const draft = drafts[0] ? unpackStoredDraft(drafts[0]) : null;
+    const evidenceToken = drafts[0] ? evidenceReviewToken(drafts[0]) : "";
+    const draft = drafts[0] ? unpackStoredDraft({ ...drafts[0] }) : null;
     if (draft?.body) draft.body = stripReporterNotebook(draft.body);
     let notes = parseNotes(lead.notes_json);
     if (!notes.todo.length && draft?.unanswered) {
@@ -366,6 +370,7 @@ export const getLead = createServerFn({ method: "GET" })
     return {
       lead,
       draft,
+      evidenceToken,
       articleSlug: live[0]?.slug ?? null,
       openedExtractionByUrl: extractionByUrl,
       job,
@@ -812,14 +817,16 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   `;
 
   const prevNotes = parseNotes(lead.notes_json);
-  const moreUrls = prevNotes.opened.map((o) => o.url);
+  const researchScope = job.research_scope ?? prevNotes.researchScope ?? "public";
+  const sourceInput = draftSourceInputs(urls, prevNotes, researchScope);
   const draftInput = {
     userId: context.userId,
     lead,
-    urls: [...urls, ...moreUrls],
+    urls: sourceInput.urls,
     memory,
     extraEvidence: prevNotes.scratch,
-    extraUrls: moreUrls,
+    researchScope,
+    extraUrls: sourceInput.extraUrls,
     /*
       The paper's own time budgets (0.6.2). Read once, here, and carried in
       `draftInput` so the Automatic failover retry below is sized by the same
@@ -929,6 +936,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     verify: reported.integrity_notes ? [reported.integrity_notes] : [],
     opened,
     scratch: prevNotes.scratch,
+    researchScope: draftInput.researchScope,
   };
   const notesJson = packNotes(nextNotes);
 
@@ -953,7 +961,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
 
 export const draftLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { leadId: number; modelChoice?: string }) => input)
+  .validator((input: number | { leadId: number; modelChoice?: string; researchScope?: "public" | "supplied" }) => input)
   .handler(async ({ context, data }) => {
     const leadId = typeof data === "number" ? data : data.leadId;
     const modelChoice = storyModelChoice(typeof data === "number" ? "auto" : data.modelChoice);
@@ -963,6 +971,7 @@ export const draftLead = createServerFn({ method: "POST" })
       context: { userId: context.userId, newsroomId: owned(context) },
       leadId,
       modelChoice,
+      researchScope: typeof data === "number" ? undefined : data.researchScope,
     });
   });
 
@@ -977,7 +986,7 @@ export const draftLead = createServerFn({ method: "POST" })
  */
 export const writeStoryFromInput = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { text: string; modelChoice?: string }) => input)
+  .validator((input: { text: string; modelChoice?: string; researchScope?: "public" | "supplied" }) => input)
   .handler(async ({ context, data }) => {
     const { writeStoryForAuthenticatedEditor } =
       await import("./model-request-commit.server.ts");
@@ -985,6 +994,7 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
       context: { userId: context.userId, newsroomId: owned(context) },
       text: data.text,
       modelChoice: data.modelChoice,
+      researchScope: data.researchScope,
     });
   });
 
@@ -996,6 +1006,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       add?: string;
       toggle?: number;
       scratch?: string;
+      researchScope?: "public" | "supplied";
       todos?: NoteTodo[];
     }) => input,
   )
@@ -1012,6 +1023,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       add: data.add,
       scratch: data.scratch,
     });
+    if (data.researchScope === "supplied" || data.researchScope === "public") notes.researchScope = data.researchScope;
     const json = packNotes(notes);
     await sql`
       update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
@@ -1197,31 +1209,10 @@ export const pullTodo = createServerFn({ method: "POST" })
 
 export const saveDraft = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator(
-    (input: { leadId: number; headline: string; dek: string; body: string; topic: string }) =>
-      input,
-  )
+  .validator((input: import("./draft-edit.server.ts").DraftEditInput) => input)
   .handler(async ({ context, data }) => {
-    const sql = await getSql();
-    const existing = await sql<{ id: number }>`
-      select id from drafts where lead_id = ${data.leadId} and newsroom_id = ${owned(context)}
-      order by updated_at desc limit 1
-    `;
-    const body = stripReporterNotebook(data.body);
-    if (existing[0]) {
-      await sql`
-        update drafts
-        set headline = ${data.headline}, dek = ${data.dek}, body = ${body},
-            topic = ${data.topic}, updated_at = now()
-        where id = ${existing[0].id} and newsroom_id = ${owned(context)}
-      `;
-    } else {
-      await sql`
-        insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic)
-        values (${context.userId}, ${owned(context)}, ${data.leadId}, ${data.headline}, ${data.dek}, ${body}, ${data.topic})
-      `;
-    }
-    return { ok: true as const };
+    const { saveDraftForEditor } = await import("./draft-edit.server.ts");
+    return saveDraftForEditor({ userId: context.userId, newsroomId: owned(context) }, data);
   });
 
 export const setLeadStatus = createServerFn({ method: "POST" })
@@ -1354,14 +1345,15 @@ export async function performPublish(
     (sql) =>
       sql<DraftRow>`
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
-             provenance_json, form, found_note, unanswered
+             provenance_json, form, found_note, unanswered, research_json
       from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
       order by updated_at desc limit 1
     `,
   );
   const row = drafts[0];
   if (!row) return { ok: false as const, error: "Draft this lead before publishing." };
-  const draft = unpackStoredDraft(row);
+  if (evidenceNeedsReview(row, row.body)) return { ok: false as const, error: "The story changed after its evidence was gathered. Review the evidence in the workbench before publishing." };
+  const draft = unpackStoredDraft({ ...row });
   draft.body = stripReporterNotebook(draft.body);
 
   /*
@@ -1372,7 +1364,7 @@ export async function performPublish(
     are exactly the stories an operator has in flight right now. Publishing
     one of them would print an article with no sources and no warning.
   */
-  if (parseUrlList(draft.source_urls).length === 0) {
+  if (parseUrlList(draft.source_urls).length === 0 && !publicEvidenceWasRemoved(row)) {
     const fromLead = await getSql().then(
       (sql) =>
         sql<{ source_urls: string }>`
@@ -1392,7 +1384,7 @@ export async function performPublish(
   const baseSlug = slugify(draft.headline);
   let slug = baseSlug;
 
-  const published = await withTransaction(async (sql) => {
+  const published = await withCurrentDraftForPublish({ newsroomId: owned(context) }, leadId, row, async (sql) => {
     // `articles.slug` is UNIQUE. The old code checked once and, on a clash,
     // appended the lead id without re-checking — so a second collision (a
     // headline that slugifies to an existing "<base>-<leadId>", or a

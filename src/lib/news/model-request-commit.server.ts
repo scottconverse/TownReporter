@@ -39,12 +39,13 @@ export async function commitStoryDraftForAuthenticatedEditor(
     context: AuthenticatedEditorContext;
     leadId: number;
     modelChoice: StoryModelChoice;
+    researchScope?: "public" | "supplied";
   },
   deps: StoryDraftCommitDeps = {},
 ) {
   const sql = await (deps.getSql ?? getSql)();
-  const leads = await sql<{ id: number; status: string }>`
-    select id, status from leads
+  const leads = await sql<{ id: number; status: string; notes_json?: string }>`
+    select id, status, to_jsonb(leads)->>'notes_json' as notes_json from leads
     where id = ${input.leadId} and newsroom_id = ${input.context.newsroomId}
     limit 1
   `;
@@ -53,6 +54,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
     return { ok: false as const, error: "Restore this lead before drafting." };
   }
 
+  const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
   const providerProbe = await (deps.probeProvider ?? probeProvider)(input.modelChoice);
   const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {
@@ -66,6 +68,9 @@ export async function commitStoryDraftForAuthenticatedEditor(
   }
 
   const effectiveChoice = providerProbe.ok ? providerProbe.choice : input.modelChoice;
+  if (researchScope === "supplied" && effectiveChoice.startsWith("codex")) {
+    return { ok: false as const, error: "Use only supplied material requires Claude or a local/API model. Codex has external tools enabled. Choose another model or Research public sources." };
+  }
   const open = await (deps.findOpenJob ?? findOpenJob)({
     newsroomId: input.context.newsroomId,
     kind: "draft",
@@ -73,11 +78,11 @@ export async function commitStoryDraftForAuthenticatedEditor(
   });
   if (open) {
     const persistedChoice = effectiveStoryModelChoice(open.model_choice);
-    if (persistedChoice !== effectiveChoice) {
+    if (persistedChoice !== effectiveChoice || (open.research_scope ?? "public") !== researchScope) {
       return {
         ok: false as const,
         kind: "model-conflict" as const,
-        error: `This lead is already drafting with ${modelChoiceLabel(persistedChoice)}. Open it to watch that run finish before choosing another model.`,
+        error: `This lead is already drafting with ${modelChoiceLabel(persistedChoice)}. Open it to watch that run finish before changing the model or drafting scope.`,
         modelChoice: persistedChoice,
         jobId: open.id,
       };
@@ -96,14 +101,15 @@ export async function commitStoryDraftForAuthenticatedEditor(
     kind: "draft",
     subjectId: input.leadId,
     modelChoice: effectiveChoice,
+    researchScope,
     modelChoiceSource: input.modelChoice === "auto" ? "auto" : "editor",
   });
   const persistedChoice = effectiveStoryModelChoice(job.model_choice);
-  if (persistedChoice !== effectiveChoice) {
+  if (persistedChoice !== effectiveChoice || (job.research_scope ?? "public") !== researchScope) {
     return {
       ok: false as const,
       kind: "model-conflict" as const,
-      error: `This lead is already drafting with ${modelChoiceLabel(persistedChoice)}. Open it to watch that run finish before choosing another model.`,
+      error: `This lead is already drafting with ${modelChoiceLabel(persistedChoice)}. Open it to watch that run finish before changing the model or drafting scope.`,
       modelChoice: persistedChoice,
       jobId: job.id,
     };
@@ -393,6 +399,7 @@ export async function writeStoryForAuthenticatedEditor(
   input: {
     context: AuthenticatedEditorContext;
     text: string;
+    researchScope?: "public" | "supplied";
     modelChoice?: string;
   },
   deps: WriteStoryCommitDeps = {},
@@ -405,7 +412,7 @@ export async function writeStoryForAuthenticatedEditor(
   await sql.query(
     "alter table leads add column if not exists notes_json text not null default '{}'",
   );
-  const notesJson = packNotes(appendScratch(parseNotes(null), scratch));
+  const notesJson = packNotes({ ...appendScratch(parseNotes(null), scratch), researchScope: input.researchScope === "supplied" ? "supplied" : "public" });
   const urlsJson = JSON.stringify(urls);
   const rows = await sql<{ id: number }>`
     insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)
@@ -437,7 +444,7 @@ export async function writeStoryForAuthenticatedEditor(
 
   const modelChoice = storyModelChoice(input.modelChoice);
   const commit = await commitStoryDraftForAuthenticatedEditor(
-    { context: input.context, leadId, modelChoice },
+    { context: input.context, leadId, modelChoice, researchScope: input.researchScope },
     deps,
   );
   return { ...commit, leadId };

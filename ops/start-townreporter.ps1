@@ -10,11 +10,13 @@
 #>
 
 . (Join-Path $PSScriptRoot "lib-port.ps1")
+. (Join-Path $PSScriptRoot "lib-ownership.ps1")
+Assert-TownReporterLegacyOwnership
 $ErrorActionPreference = "Stop"
 $app  = Split-Path -Parent $PSScriptRoot
-$bin  = "$env:USERPROFILE\scoop\apps\postgresql\current\bin"
-$data = "$env:USERPROFILE\scoop\persist\postgresql\data"
-$log  = "$env:USERPROFILE\scoop\persist\postgresql\pg.log"
+$bin  = $OwnedPgBin
+$data = $OwnedPgData
+$log  = Join-Path $OwnedPgData 'townreporter-postgres.log'
 
 function Test-Port($p) {
   # Postgres binds both address families, so an unfiltered check is fine
@@ -22,7 +24,7 @@ function Test-Port($p) {
   [bool](Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)
 }
 
-if (-not (Test-Port 5433)) {
+if (-not (Test-Port $OwnedPgPort)) {
   Start-Process -FilePath "$bin\pg_ctl.exe" `
     -ArgumentList "-D","`"$data`"","-l","`"$log`"","start" -NoNewWindow
   <#
@@ -39,9 +41,9 @@ if (-not (Test-Port 5433)) {
     The loop exits the moment the port answers, so a healthy machine pays
     nothing for the larger number.
   #>
-  for ($i = 0; $i -lt 180 -and -not (Test-Port 5433); $i++) { Start-Sleep -Seconds 1 }
+  for ($i = 0; $i -lt 180 -and -not (Test-Port $OwnedPgPort); $i++) { Start-Sleep -Seconds 1 }
 }
-if (-not (Test-Port 5433)) { throw "Postgres did not come up on 5433" }
+if (-not (Test-Port $OwnedPgPort)) { throw "Postgres did not come up on 5433" }
 
 # Apply any migrations added since the last run, then serve.
 Set-Location $app
@@ -94,7 +96,7 @@ if (-not (Test-TownReporterPort $port)) {
   # a .cmd shim, and this is exactly what `npm start` runs anyway.
   $node = (Get-Command node -ErrorAction Stop).Source
   Start-Process -FilePath $node `
-    -ArgumentList "scripts/with-app-env.mjs","node",".output/server/index.mjs" `
+    -ArgumentList "scripts/with-app-env.mjs","node",('"' + (Join-Path $app '.output\server\index.mjs') + '"') `
     -WorkingDirectory $app `
     -RedirectStandardOutput (Join-Path $logDir "app.out.log") `
     -RedirectStandardError  (Join-Path $logDir "app.err.log") `

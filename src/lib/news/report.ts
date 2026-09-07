@@ -1,4 +1,4 @@
-import { grokChat, parseJsonBlock, providerBudget, type ProviderProbe } from "./ai.ts";
+import { grokChat, parseJsonBlock, providerBudget, resolveProvider, type ProviderProbe } from "./ai.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import {
@@ -1152,12 +1152,26 @@ async function configuredPaper(): Promise<PaperIdentityForPrompts> {
   };
 }
 
+/** Discovery ranking is not relevance: a /press-release URL earns points even
+ * when its subject is unrelated. Require shared subject vocabulary in the
+ * fetched document before admitting it to the writing evidence. Supplied URLs
+ * and attachments directly linked from them retain their explicit provenance. */
+export function discoveredDocumentMatches(text: string, anchor: string): boolean {
+  const stop = new Set("about after also before city colorado could editor from have hours into local longmont more news notice only public release said story supplied that their there these they this through tuesday using were what when which with would your".split(" "));
+  const words = (value: string) => new Set((value.toLowerCase().match(/[a-z][a-z0-9-]{3,}/g) ?? []).filter(w => !stop.has(w)));
+  const wanted = words(anchor);
+  const actual = words(text);
+  const overlap = [...wanted].filter(w => actual.has(w));
+  return overlap.length >= Math.min(2, wanted.size) && overlap.length > 0;
+}
+
 export async function reportAndDraft(
   opts: {
     userId: string;
     lead: LeadRow;
     urls: string[];
     memory: Pick<MemoryRow, "entity" | "last_angle">[];
+    researchScope?: "public" | "supplied";
     extraEvidence?: string;
     extraUrls?: string[];
     modelChoice?: EffectiveProviderChoice;
@@ -1186,13 +1200,17 @@ export async function reportAndDraft(
     if (!ready.ok) return { error: ready.error };
     effectiveModelChoice = ready.choice;
   }
+  const suppliedOnly = opts.researchScope === "supplied";
+  if (suppliedOnly && resolveProvider(effectiveModelChoice)?.kind === "codex") {
+    return { error: "Supplied material requires Claude or a local/API model with tools disabled. Choose one of those models, or choose Research public sources." };
+  }
   const limits = providerBudget(effectiveModelChoice, opts.providerOverrides);
   const budget = deps.budgetMs ?? limits.wallMs;
   const reserve = deps.budgetMs ? DRAFT_WRITE_RESERVE_MS : limits.reserveMs;
   const timeLeft = () => budget - (Date.now() - started);
-  const canFollow = () => timeLeft() > reserve + 4_000;
+  const canFollow = () => !suppliedOnly && timeLeft() > reserve + 4_000;
   const ingest = deps.ingest ?? defaultIngest;
-  const search = deps.search ?? (async (q: string) => webSearch(q));
+  const search = suppliedOnly ? async (_q: string) => [] : deps.search ?? (async (q: string) => webSearch(q));
   const capture = deps.capture ?? defaultCapture;
   const hydrate = deps.hydrate ?? hydrateCaptures;
   const providerChat: ReportChat =
@@ -1205,6 +1223,7 @@ export async function reportAndDraft(
       return grokChat(system, user, maxTokens, {
         timeoutMs: ms,
         choice: effectiveModelChoice,
+        noTools: suppliedOnly,
         localModel: opts.providerOverrides?.["local-model"]?.localModel,
       });
     });
@@ -1215,7 +1234,8 @@ export async function reportAndDraft(
   const docs: FetchedDoc[] = [];
   const seen = new Set<string>();
 
-  const take = async (urls: string[], cap: number, required = false) => {
+  const take = async (urls: string[], cap: number, required = false, checkRelevance = false) => {
+    if (suppliedOnly) urls = urls.filter(u => seedUrls.includes(u));
     if (!required && !canFollow()) return;
     const fresh = urls.filter((u) => !seen.has(u)).slice(0, cap);
     if (!fresh.length) return;
@@ -1223,6 +1243,10 @@ export async function reportAndDraft(
     const got = await fetchDocs(fresh, ingest, perUrl);
     for (const d of got) {
       seen.add(d.url);
+      if (checkRelevance && !seedUrls.includes(d.url) && !discoveredDocumentMatches(
+        `${d.title} ${d.text}`,
+        `${opts.lead.headline} ${opts.lead.why} ${opts.extraEvidence ?? ""} ${docs.filter(x => seedUrls.includes(x.url)).map(x => x.text).join(" ")}`,
+      )) continue;
       if (d.text) {
         const rec = await capture(opts.userId, d);
         d.version_id = rec.version_id;
@@ -1259,7 +1283,7 @@ export async function reportAndDraft(
   await take(rankedStories.slice(0, 2), 2, true);
 
   const primaryUrls: string[] = [];
-  for (const q of primarySourceQueries(opts.lead.headline, subjects).slice(0, 3)) {
+  for (const q of (suppliedOnly ? [] : primarySourceQueries(opts.lead.headline, subjects, paper.city).slice(0, 3))) {
     if (timeLeft() < reserve) break;
     try {
       const hits = await search(q);
@@ -1283,6 +1307,7 @@ export async function reportAndDraft(
       .map((x) => x.u)
       .slice(0, 2),
     2,
+    true,
     true,
   );
   await take(
@@ -1314,7 +1339,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
   let form = asStoryForm(research?.form);
   let challengePromoted = false;
 
-  await take(sanitizePublicUrls(research?.fetch_urls), 4);
+  await take(sanitizePublicUrls(research?.fetch_urls), 4, false, true);
 
   /*
     THE MEMO'S OWN ASKS, CHASED FIRST (2026-09-05).
@@ -1339,7 +1364,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
   );
   const pulls: PullRecord[] = [];
   const askDocs: { ask: string; doc: FetchedDoc }[] = [];
-  if (cityDomains.length) {
+  if (!suppliedOnly && cityDomains.length) {
     for (const ask of documentAsks([
       research?.follow,
       ...stringsFrom(research?.questions),
@@ -1353,7 +1378,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
         pulls.push({ ask, query: found.query, url: null, fetched: "none" });
         continue;
       }
-      await take([found.url], 1, true);
+      await take([found.url], 1, true, true);
       const doc = docs.find((d) => d.url === found.url);
       const got = Boolean(doc?.text);
       pulls.push({ ask, query: found.query, url: found.url, fetched: got ? "ok" : "failed" });
@@ -1369,7 +1394,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
         .map((h) => h.url)
         .filter((u) => !seen.has(u))
         .slice(0, 2);
-      await take(challengeUrls, 2);
+      await take(challengeUrls, 2, false, true);
       const snippets = hits.map((h) => `${h.title} ${h.snippet ?? ""}`).join("\n");
       const challengeEvidence = formatRetrievedEvidence(
         retrieveRelevantChunks(docs, [challengeQ, opts.lead.headline], { budgetChars: 6000 }),
@@ -1416,7 +1441,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
         }
       }
     }
-    await take(searchUrls, form === "brief" ? 1 : 4);
+    await take(searchUrls, form === "brief" ? 1 : 4, false, true);
   }
 
   const writeQueries = [
@@ -1458,6 +1483,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
       retrieveRelevantChunks(docs, writeQueries, { budgetChars: 16000 }),
     );
     const packet = [
+      suppliedOnly ? "EDITOR SCOPE: Use only supplied text and supplied URLs. Do not research, invent sources, or substitute a different subject. State uncertainties honestly." : "",
       `NEWS ANGLE: ${research?.angle || opts.lead.headline}`,
       `ACTUAL NEWS: ${research?.news || opts.lead.headline}`,
       `WHY IT MATTERS: ${research?.why_it_matters || opts.lead.why}`,
@@ -1588,6 +1614,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
       city: paper.city,
       paperName: paper.name,
       search,
+      searchAllowed: !suppliedOnly,
       redraftAllowed,
     });
 
@@ -1631,7 +1658,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
       Array.isArray(coerced.source_urls) && coerced.source_urls.length
         ? coerced.source_urls
         : docs.map((d) => d.url),
-    ),
+    ).filter(u => docs.some(d => d.url === u && Boolean(d.text))),
     docs.map((d) => d.url),
     opts.lead.headline,
   );
@@ -1663,8 +1690,10 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
       `${subjects[0]} press release or newsroom page — the company's or agency's own announcement, not a rewrite of local coverage`,
     );
   }
-  const findings = parseFindings(parsed.found);
-  const claims = parseClaims(parsed.claims);
+  const findings = parseFindings(parsed.found)
+    .map(f => ({ ...f, source_urls: f.source_urls.filter(u => used.includes(u)) }))
+    .filter(f => f.source_urls.length > 0);
+  const claims = parseClaims(parsed.claims).filter(c => used.includes(c.url));
   for (const f of findings) {
     const fromDocs = docs.filter((d) => f.source_urls.includes(d.url));
     if (!f.artifact_version_ids.length) {

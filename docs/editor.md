@@ -1,6 +1,6 @@
 # TownReporter — editor’s manual
 
-**Current release: [0.6.26](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.26).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.27](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.27).** How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
@@ -259,7 +259,11 @@ The lead and the notes are on the left and never print. The draft is on the righ
 
 ### Draft
 
-**Draft with AI** runs a research pass first: the company’s or agency’s own press release and records, then stakeholders, history, and competing accounts. It writes a story into the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
+Before **Draft with AI**, choose **Drafting scope**. **Research public sources** follows supplied links and searches for relevant public evidence. **Use only supplied material** reads your text and opens only URLs you supply; it does not discover sources or run external searches. Use this control to limit research, rather than writing “do not search” inside pasted material. The choice is saved with the queued job, including retries.
+
+Supplied-only drafting supports Claude and local/API models. Codex is refused for this scope because its native tools do not provide that restriction; choose a supported model. The draft fills the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
+
+Changing the body of a draft with reporting evidence requires a new evidence review before publishing. Check the sources against the revised story, then choose **I checked: keep this evidence** or **Remove old evidence from public story**. Removal clears the old public source list and reporting metadata, while retaining the original in the private draft archive. It does not remove links you have written into the body. A concurrent edit invalidates an older review; reload and review the current draft.
 
 The picker beside it controls this run. **Automatic** uses a configured
 `LLM_*` gateway exclusively when present; otherwise it tries Claude Opus,

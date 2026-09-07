@@ -35,6 +35,26 @@ export function watchChangeText(previous: string, current: string): string {
     "Text order or spacing changed. Open both captures to compare."
   );
 }
+function hasMeaningfulWatchRedirect(chain: string[]): boolean {
+  if (chain.length < 2) return false;
+  // Stored monitor identities omit a trailing slash. A server restoring just
+  // that slash has not moved the record. Compare EVERY hop, preserving origin,
+  // query and fragment, so an intermediate move cannot disappear on return.
+  // This classifies already-guarded fetch results; it never authorizes a hop.
+  const withoutTrailingSlash = (raw: string) => {
+    const url = new URL(raw);
+    if (url.pathname.length > 1 && url.pathname.endsWith("/"))
+      url.pathname = url.pathname.slice(0, -1);
+    return url.href;
+  };
+  try {
+    const original = withoutTrailingSlash(chain[0]!);
+    return chain.some((hop) => withoutTrailingSlash(hop) !== original);
+  } catch {
+    return true;
+  }
+}
+
 export function watchOutcome(doc: IngestDocument, previous: string | null): string {
   if (doc.extractionMethod.startsWith("refused-")) return doc.extractionMethod;
   if (doc.needsOcr || doc.outcome === "needs-ocr") return "needs-ocr";
@@ -55,7 +75,7 @@ export function watchOutcome(doc: IngestDocument, previous: string | null): stri
   )
     return "blocked";
   if (!doc.ok || !doc.text.trim()) return "no-readable-text";
-  if (doc.redirectChain.length > 1) return "moved";
+  if (hasMeaningfulWatchRedirect(doc.redirectChain)) return "moved";
   return previous === null ? "first-capture" : previous === doc.text ? "unchanged" : "changed";
 }
 

@@ -1,6 +1,15 @@
 # Changelog
 
-Current release: **0.6.26**.
+Current release: **0.6.27**.
+
+## 0.6.27 — 2026-09-07
+
+- Windows installation package with pinned prerequisite downloads, private persistent PostgreSQL, editor onboarding, provider configuration, and installation-owned start/stop/health controls. Mac/Linux source setup remains available. Installation timing and provider assumptions are recorded with release verification; no universal under-an-hour or public-hosting claim is made.
+- Startup verifies the source and compiled artifact identity and waits for the correct HTTP server. Stale output, an occupied port, or another installation's process cannot be treated as a successful start.
+- Server maintenance is gated by installation ownership. Machine-specific legacy tasks are no longer generic startup or repair instructions; operators must configure their legacy installation explicitly before using those paths.
+- Story drafting can use only supplied material instead of starting public research. Unsupported provider/tool combinations fail visibly rather than silently searching. Public evidence must be reviewed when an edited body no longer has a current evidence review; private historical evidence is retained.
+- Manual page watches treat same-origin trailing-slash redirects as normal captures while preserving the redirect trail. Meaningful destination changes and blocked/private destinations remain distinct outcomes.
+- README, Windows guide, manuals, setup and landing page describe the packaged installation and the limits of its verification. GitHub publication is not deployment on Halo.
 
 ## 0.6.26 — 2026-09-07
 

@@ -168,6 +168,8 @@ unverified" in its own notes rather than pretending otherwise.
 
 The **Watched pages** panel can start a daily investigative watch without opening a dig. It keeps dated captures and compares each readable result with the last readable one; blocked or failed checks remain distinct from unchanged text. A capture becomes a lead only through an explicit **Create unverified lead** action, or can be attached to an investigation. See [the editor workflow](editor.md#watch-a-specific-page-in-dark-desk) for OCR choice, downloads, history, pause and stop. These watches do not accept ordinary scanning sources or implement legal removal.
 
+When a site redirects only to add or remove a trailing slash on the same address, the watch compares the captured text normally instead of reporting **Page moved**. The full redirect trail stays in capture history. A different host, protocol, port, path or query still reports a move; blocked destinations remain blocked by the fetch safeguards.
+
 ## Where this lives in the code
 
 | Piece | File |

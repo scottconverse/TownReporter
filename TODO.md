@@ -16,6 +16,19 @@ Legend: [x] implemented · [~] in progress · [ ] open · **external** requires 
 
 ## Implementation queue and remaining acceptance
 
+### Windows installation and local-test findings — active, 2026-09-07
+
+Owner acceptance: a new Windows user can download the repository's installation package, install it, configure an available AI provider, and complete a first editorial workflow in under an hour. Mac/Linux source setup remains available; native installers for those systems are outside this release.
+
+- [~] Replace machine-specific startup assumptions with installation-owned database, secrets, ports and process control. Server maintenance must never repair or stop another installation.
+- [~] Package prerequisite installation, persistent storage, actionable failures and start/stop instructions. Verify real HTTP readiness and reject stale compiled output.
+- [~] Make supplied-material drafting an explicit choice; prevent unrelated research from replacing the editor's material. Require review of public evidence when a body changes, retaining private historical evidence.
+- [~] Reproduce and correct the page-watch trailing-slash redirect false alarm while preserving meaningful redirect and private-address safeguards.
+- [ ] Run a timed fresh-package Windows acceptance exercise, including provider setup, editor onboarding, scan/draft, publication and restart persistence. Record platform, prerequisites, network assumptions, exact artifact identity and actual elapsed time; warm-machine testing alone is not a clean-machine claim.
+- [ ] Reconcile installer, README, setup/manual, landing-page and release instructions against the tested package; publish only after applicable exact-candidate checks pass.
+
+The local test newsroom on this travel machine is authorized to use its own persistent PostgreSQL cluster. Unit tests and builds still use an empty `DATABASE_URL`; no Halo staging, production data, tunnel or operator tasks are in scope.
+
 1. [x] **Dark Desk corrective review (0.6.24).** Reproduced failures in search verification, model evidence context, saved-result reporting, newsroom isolation and PDF/OCR provenance were corrected. Both signal and whole-file queue handoffs preserve uncertainty. Real investigative quality remains the separate five-run acceptance exercise below.
 2. [x] **Fetch safeguards (0.6.24).** Shared guarded HTTP responses have streamed size and declared content-type caps, with visible refusal reasons. Chromium resources and direct provider transports remain outside these caps.
 3. [x] **Sections — dynamic, editor-owned (0.6.25).** The owner can add, rename, reorder, hide and retire sections. Editors can file and scan within that configured set. Preserve existing stories and provide explicit reassignment when retiring a section. Per-section reporting briefs, accepted-source assignments and scanning instructions remain part of this work, with preview before applying changes. No fixed section list is awaited.

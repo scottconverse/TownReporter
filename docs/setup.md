@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.26](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.26).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.6.27](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.27).** Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite). It is not a desktop installer and not a GitHub Pages app. The landing page in this folder is static marketing; the newsroom is `npm run dev` / `npm run build`.
 
@@ -19,6 +19,8 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 
 Windows, macOS, and Linux all work.
+
+**Windows users:** start with the [Windows installation package](windows-install.md). It provisions private prerequisites and a persistent database; you do not need to follow the manual Node/PostgreSQL setup below. The rest of this guide remains the source-install and public-hosting reference, including macOS and Linux. Do not run machine-specific `ops/` scripts as a generic installer.
 
 `npm run dev` serves on `127.0.0.1:8080` by default (this PC only) — that
 port is hard-coded in `vite.config.ts` (`strictPort: true`) as the
@@ -47,7 +49,7 @@ on an editor's action:
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Story, Scan and Dark Desk use their per-run choices. Automatic uses configured `LLM_*` exclusively when present; otherwise it tries Claude Opus, then Codex Terra, before enqueue. Opinion is Claude Opus or Local model; Codex is not offered for editorials.              |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
-| **Searches**       | The research pass, PULL, and every Dark Desk hop  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key, and there is currently no setting to keep a search on this machine — the chain is unconditional. |
+| **Searches**       | Public-source research, PULL, and Dark Desk hops  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key. Drafting scope **Use only supplied material** skips discovery/search for that draft, but still opens URLs you supply. PULL and Dark Desk remain separate external-research actions. |
 
 The third row is the one to know before you use it: a name, an LLC, a
 contract number, or an unpublished rumour typed into Dark Desk is seen by
