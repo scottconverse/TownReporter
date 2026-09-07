@@ -608,7 +608,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   for (const f of ranked) {
     const excerpt = f.text.slice(0, expandForScope || reread || f.changed ? 2800 : 800);
     const changedLine = expandForScope
-      ? "re-read for this scan scope (source hashes are shared across section scans)"
+      ? f.changed
+        ? "yes; expanded excerpt for this scan scope"
+        : "no; re-read for this scan scope (source hashes are shared across section scans)"
       : reread
       ? "re-read (previous scan fetched this but filed no leads)"
       : f.changed

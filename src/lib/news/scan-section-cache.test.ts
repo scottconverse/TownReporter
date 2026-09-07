@@ -49,7 +49,12 @@ after(() => {
   setFetchImplForTests(null);
   hooks.deregister();
 });
-async function modelPack(section: boolean, priorSection: boolean, priorGeneral = false) {
+async function modelPack(
+  section: boolean,
+  priorSection: boolean,
+  priorGeneral = false,
+  changed = false,
+) {
   const sql = await getSql();
   const room = roomCounter++;
   const user = `scan-scope-${room}`;
@@ -59,7 +64,7 @@ async function modelPack(section: boolean, priorSection: boolean, priorGeneral =
   const [source] = await sql<{
     id: number;
   }>`insert into sources(user_id,newsroom_id,url,title,kind,tier,status,last_hash)
-    values(${user},${room},${url},'Shared report','page','A','accepted',${await sha256(text)}) returning id`;
+    values(${user},${room},${url},'Shared report','page','A','accepted',${changed ? "older-content-hash" : await sha256(text)}) returning id`;
   const snapshot: SectionScanSnapshot = {
     key: "schools",
     name: "Schools",
@@ -117,4 +122,9 @@ it("General cannot trust shared hashes even after a later General run", async ()
 });
 it("General-only newsrooms retain the unchanged-source optimization", async () => {
   assert.ok(!(await modelPack(false, false)).includes(marker));
+});
+it("expanded section excerpts preserve the actual changed-source signal", async () => {
+  const pack = await modelPack(true, false, false, true);
+  assert.match(pack, /CHANGED: yes; expanded excerpt for this scan scope/);
+  assert.ok(pack.includes(marker));
 });
