@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { before, test } from "node:test";
 import assert from "node:assert/strict";
 import { watchChangeText, watchOutcome } from "./page-watch.ts";
 import type { IngestDocument } from "./ingest.ts";
@@ -58,7 +58,19 @@ import {
   setPageWatchStateFor,
   actOnPageWatchFor,
 } from "./page-watch.ts";
-import { getSql } from "../db.ts";
+import { getSql, getPglite } from "../db.ts";
+// Use the real base newsroom schema; Node lacks Vite's migration glob.
+before(async () => {
+  const { readFile } = await import("node:fs/promises");
+  const sql = await getSql();
+  await (
+    await getPglite()
+  ).exec(await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8"));
+  for (const table of ["sources", "articles", "leads", "drafts", "scan_runs"])
+    await sql.query(
+      "alter table " + table + " add column if not exists newsroom_id integer not null default 1",
+    );
+});
 const identity = { userId: "watch-editor", newsroomId: 1 };
 const input = (suffix: string) => ({
   url: `https://example.test/watch-${suffix}`,
@@ -194,6 +206,7 @@ test(
           watchId: other.id,
           checkId: captured.checkId,
           action: "lead",
+          sectionKey: "schools",
         })
       ).ok,
       false,
@@ -202,12 +215,14 @@ test(
       watchId: created.id,
       checkId: captured.checkId,
       action: "lead",
+      sectionKey: "schools",
     });
     assert.ok(a.ok);
     const b = await actOnPageWatchFor(identity, {
       watchId: created.id,
       checkId: captured.checkId,
       action: "lead",
+      sectionKey: "schools",
     });
     assert.equal(b.leadId, a.leadId);
     const lead = await sql`select why from leads where id=${a.leadId}`;
@@ -333,6 +348,7 @@ test(
           watchId: c.id,
           checkId: result.checkId,
           action: "lead",
+          sectionKey: "schools",
         })
       ).ok,
       false,
@@ -467,3 +483,149 @@ test(
     }
   },
 );
+
+test("removed handoff targets remain honest and cannot be recreated on retry", async () => {
+  const created = await createPageWatchFor(identity, input("removed-target"));
+  assert.ok(created.ok);
+  const capture = await checkPageWatchFor(identity, created.id, {
+    fetch: async () => doc("Community record to verify with the source before reporting."),
+  });
+  assert.ok(capture.ok);
+  const detail = await pageWatchDetailFor(identity, created.id);
+  const checkId = detail!.history[0]!.id;
+  const lead = await actOnPageWatchFor(identity, {
+    watchId: created.id,
+    checkId,
+    action: "lead",
+    sectionKey: "schools",
+  });
+  assert.ok(lead.ok && "leadId" in lead);
+  const sql = await getSql();
+  await sql`delete from leads where id=${lead.leadId}`;
+  const refreshed = await pageWatchDetailFor(identity, created.id);
+  assert.equal(refreshed!.history[0]!.actions[0]!.target_exists, false);
+  const retry = await actOnPageWatchFor(identity, {
+    watchId: created.id,
+    checkId,
+    action: "lead",
+    sectionKey: "schools",
+  });
+  assert.equal(retry.ok, false);
+  assert.match("error" in retry ? retry.error : "", /removed/);
+  assert.equal((await sql`select id from leads where id=${lead.leadId}`).length, 0);
+});
+
+test("capture downloads enforce provenance and models persist per newsroom", async () => {
+  const { readPageWatchCaptureFor, setPageWatchModelFor } = await import("./page-watch.ts");
+  const c = await createPageWatchFor(identity, input("download"));
+  assert.ok(c.ok);
+  const full = "A complete captured record. ".repeat(1600);
+  const first = await checkPageWatchFor(identity, c.id, { fetch: async () => doc(full) });
+  assert.ok(first.ok);
+  const second = await checkPageWatchFor(identity, c.id, {
+    fetch: async () => doc(full + "New line"),
+  });
+  assert.ok(second.ok);
+  assert.equal(
+    (await readPageWatchCaptureFor(identity, {
+      watchId: c.id,
+      checkId: second.checkId,
+      previous: true,
+    }))!.full_text,
+    full,
+  );
+  assert.equal(
+    (await readPageWatchCaptureFor(identity, { watchId: c.id, checkId: second.checkId }))!
+      .full_text,
+    full + "New line",
+  );
+  assert.equal(
+    await readPageWatchCaptureFor(
+      { ...identity, newsroomId: 2 },
+      { watchId: c.id, checkId: second.checkId },
+    ),
+    null,
+  );
+  assert.equal((await setPageWatchModelFor(identity, c.id, "claude-frontier")).ok, true);
+  assert.equal(
+    (await setPageWatchModelFor({ ...identity, newsroomId: 2 }, c.id, "auto")).ok,
+    false,
+  );
+  assert.equal(
+    (await pageWatchDetailFor(identity, c.id))!.watch.watch_model_choice,
+    "claude-frontier",
+  );
+  const sql = await getSql();
+  await sql`update capture_events set content_hash='tampered' where id=(select capture_event_id from manual_watch_checks where id=${second.checkId})`;
+  assert.equal(
+    await readPageWatchCaptureFor(identity, { watchId: c.id, checkId: second.checkId }),
+    null,
+  );
+});
+
+test("shared schema ensure recreates watch tables after a database schema reset", async () => {
+  const { ensurePageWatchSchema } = await import("./page-watch.ts");
+  const sql = await getSql();
+  await sql.query("drop table manual_watch_actions,manual_watch_checks,_schema_ensure_state");
+  await ensurePageWatchSchema();
+  const created = await createPageWatchFor(identity, input("rebuilt"));
+  assert.ok(created.ok);
+  const result = await checkPageWatchFor(identity, created.id, {
+    fetch: async () => doc("Readable record after reset"),
+  });
+  assert.ok(result.ok);
+  assert.equal((await pageWatchDetailFor(identity, created.id))!.history.length, 1);
+});
+
+test("watched lead uses the editor selected active section", async () => {
+  const c = await createPageWatchFor(identity, input("section"));
+  assert.ok(c.ok);
+  const cap = await checkPageWatchFor(identity, c.id, {
+    fetch: async () => doc("School choir enrollment changed this term"),
+  });
+  assert.ok(cap.ok);
+  const saved = await actOnPageWatchFor(identity, {
+    watchId: c.id,
+    checkId: cap.checkId,
+    action: "lead",
+    sectionKey: "schools",
+  });
+  assert.ok(saved.ok && "leadId" in saved);
+  const sql = await getSql();
+  assert.equal((await sql`select topic from leads where id=${saved.leadId}`)[0]!.topic, "schools");
+});
+
+test("explicit manual create activates a disabled automatic monitor on a daily schedule", async () => {
+  const { ensurePageWatchSchema } = await import("./page-watch.ts");
+  await ensurePageWatchSchema();
+  const sql = await getSql();
+  const inv = await sql<{
+    id: number;
+  }>`insert into investigations(user_id,newsroom_id,title) values(${identity.userId},1,'Preserve automatic file') returning id`;
+  const [auto] = await sql<{
+    id: number;
+  }>`insert into source_monitors(user_id,newsroom_id,url,title,enabled,cadence_hours,next_check_at,investigation_id) values(${identity.userId},1,${input("convert").url},'Auto',false,168,now()+interval '7 days',${inv[0]!.id}) returning id`;
+  const result = await createPageWatchFor(identity, input("convert"));
+  assert.ok(result.ok);
+  assert.equal(result.id, auto!.id);
+  const [saved] =
+    await sql`select enabled,cadence_hours,watch_state,investigation_id,next_check_at<=now() as due from source_monitors where id=${result.id}`;
+  assert.equal(saved!.enabled, true);
+  assert.equal(saved!.cadence_hours, 24);
+  assert.equal(saved!.due, true);
+  assert.equal(saved!.investigation_id, inv[0]!.id);
+});
+
+test("missing watch schema objects fail closed and clear the readiness fingerprint for repair", async () => {
+  const { ensurePageWatchSchema } = await import("./page-watch.ts");
+  const sql = await getSql();
+  await ensurePageWatchSchema();
+  await sql.query("drop table manual_watch_checks");
+  await assert.rejects(ensurePageWatchSchema());
+  assert.equal(
+    (await sql`select name from _schema_ensure_state where name='manual-page-watch'`).length,
+    0,
+  );
+  await ensurePageWatchSchema();
+  assert.equal((await sql`select id from manual_watch_checks`).length, 0);
+});

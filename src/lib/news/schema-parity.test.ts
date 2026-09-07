@@ -124,6 +124,7 @@ if (dbProbe.ok) {
     const ops = await import("./ops.ts");
     const views = await import("./views.ts");
     const sections = await import("./sections.server.ts");
+    const pageWatch = await import("./page-watch.ts");
     const db = await import("../db.ts");
     closePoolForTests = db.closePoolForTests;
 
@@ -147,6 +148,7 @@ if (dbProbe.ok) {
       await sectionSql.query(`alter table ${table} add column if not exists newsroom_id integer not null default 1`);
     }
     await sections.ensureSectionsSchema();
+    await pageWatch.ensurePageWatchSchema();
     const sectionTriggers = await sectionSql<{ tgname: string }>`
       select tgname from pg_trigger where tgname in
         ('leads_resolve_section','drafts_resolve_section','articles_resolve_section') and tgenabled <> 'D'

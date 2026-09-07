@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "./desk-chrome";
 import { ModelPicker } from "./model-picker";
 import { usePaperDateFormatters } from "@/lib/paper-context";
+import { useEditorSections } from "@/lib/use-sections";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 import {
   listPageWatches,
@@ -37,6 +38,8 @@ export function PageWatchPanel({
 }) {
   const qc = useQueryClient(),
     { formatDateTime } = usePaperDateFormatters();
+  const sections = useEditorSections();
+  const [sectionKey, setSectionKey] = useState("");
   const [expanded, setExpanded] = useState(false),
     [selected, setSelected] = useState<number | null>(null),
     [offset, setOffset] = useState(0);
@@ -160,6 +163,7 @@ export function PageWatchPanel({
           ...input,
           watchId: selected!,
           investigationId: target ? Number(target) : undefined,
+          sectionKey,
         },
       }),
     onSuccess: async (r) => {
@@ -213,7 +217,7 @@ export function PageWatchPanel({
             }}
             className="work-form"
           >
-            <label>
+            <label className="f">
               Page URL
               <input
                 type="url"
@@ -224,7 +228,7 @@ export function PageWatchPanel({
                 placeholder="https://…"
               />
             </label>
-            <label>
+            <label className="f">
               Watch name
               <input
                 required
@@ -233,7 +237,7 @@ export function PageWatchPanel({
                 onChange={(e) => setName(e.target.value)}
               />
             </label>
-            <label>
+            <label className="f">
               Why watch this page?
               <textarea
                 required
@@ -242,9 +246,13 @@ export function PageWatchPanel({
                 onChange={(e) => setReason(e.target.value)}
               />
             </label>
-            <label>
+            <label className="f">
               Investigation (optional)
-              <select value={file} onChange={(e) => setFile(e.target.value)}>
+              <select
+                aria-label="Investigation (optional)"
+                value={file}
+                onChange={(e) => setFile(e.target.value)}
+              >
                 <option value="">No file yet</option>
                 {files.map((f) => (
                   <option key={f.id} value={f.id}>
@@ -415,22 +423,30 @@ export function PageWatchPanel({
                     .filter((a) => a.action === "lead")
                     .map((a) => (
                       <p key={`lead-${a.result_id}`}>
-                        <Link
-                          to="/desk/story/$leadId"
-                          params={{ leadId: String(a.result_id) }}
-                          className="inline-link"
-                        >
-                          Open created lead
-                        </Link>
+                        {a.target_exists ? (
+                          <Link
+                            to="/desk/story/$leadId"
+                            params={{ leadId: String(a.result_id) }}
+                            className="inline-link"
+                          >
+                            Open created lead
+                          </Link>
+                        ) : (
+                          "The created lead was removed. Capture history remains."
+                        )}
                       </p>
                     ))}
                   {h.actions
                     .filter((a) => a.action === "attach")
                     .map((a) => (
                       <p key={`file-${a.target_id}`}>
-                        <button className="inline-link" onClick={() => onOpenFile(a.target_id)}>
-                          Open attached investigation
-                        </button>
+                        {a.target_exists ? (
+                          <button className="inline-link" onClick={() => onOpenFile(a.target_id)}>
+                            Open attached investigation
+                          </button>
+                        ) : (
+                          "The attached record or investigation was removed. Capture history remains."
+                        )}
                       </p>
                     ))}
                   {h.note ? <p>{h.note}</p> : null}
@@ -466,9 +482,26 @@ export function PageWatchPanel({
                     <p className="read-url">Redirect trail: {h.redirect_chain}</p>
                   ) : null}
                   <div className="np-acts">
+                    <label className="f">
+                      Lead section
+                      <select
+                        aria-label="Lead section"
+                        value={sectionKey}
+                        onChange={(e) => setSectionKey(e.target.value)}
+                      >
+                        <option value="">Choose a reporting section</option>
+                        {sections.sections
+                          .filter((s) => !["about", "opinion"].includes(s.key))
+                          .map((s) => (
+                            <option key={s.key} value={s.key}>
+                              {s.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
                     <InkButton
                       small
-                      disabled={busy || !h.full_text}
+                      disabled={busy || !h.full_text || !sectionKey}
                       onClick={() => {
                         clear();
                         action.mutate({ checkId: h.id, action: "lead" });
@@ -488,9 +521,13 @@ export function PageWatchPanel({
                       Dismiss change
                     </InkButton>
                   </div>
-                  <label>
+                  <label className="f">
                     Attach to investigation
-                    <select value={target} onChange={(e) => setTarget(e.target.value)}>
+                    <select
+                      aria-label="Attach to investigation"
+                      value={target}
+                      onChange={(e) => setTarget(e.target.value)}
+                    >
                       <option value="">Choose a file</option>
                       {files.map((f) => (
                         <option key={f.id} value={f.id}>

@@ -53,6 +53,7 @@ export const actOnPageWatch = createServerFn({ method: "POST" })
         watchId: id,
         checkId: id,
         action: z.enum(["lead", "attach", "dismiss"]),
+        sectionKey: z.string().max(80).optional(),
         investigationId: id.optional(),
       })
       .parse(input),

@@ -116,10 +116,40 @@ export async function ensurePageWatchSchema() {
       .filter(Boolean),
   );
   // Do not claim readiness if a schema statement was rejected by an older DB.
-  await sql.query(
-    "select watch_reason,watch_lease,watch_last_readable_version_id from source_monitors limit 0",
-  );
-  await sql.query("select check_id from manual_watch_actions limit 0");
+  try {
+    await sql.query(
+      "select manual_watch,watch_reason,watch_state,watch_lease,watch_check_started_at,watch_last_readable_version_id,watch_model_choice,watch_last_error from source_monitors limit 0",
+    );
+    await sql.query(
+      "select id,newsroom_id,monitor_id,capture_event_id,previous_version_id,state,note,created_at from manual_watch_checks limit 0",
+    );
+    await sql.query(
+      "select newsroom_id,check_id,action,target_id,result_id,created_at from manual_watch_actions limit 0",
+    );
+    const constraints = await sql<{
+      relation: string;
+      kind: string;
+      definition: string;
+    }>`select conrelid::regclass::text as relation,contype as kind,pg_get_constraintdef(oid) as definition from pg_constraint where conrelid in ('manual_watch_checks'::regclass,'manual_watch_actions'::regclass)`;
+    for (const [relation, kind, definition] of [
+      ["manual_watch_checks", "p", "PRIMARY KEY (id)"],
+      ["manual_watch_checks", "u", "UNIQUE (capture_event_id)"],
+      ["manual_watch_actions", "p", "PRIMARY KEY (newsroom_id, check_id, action, target_id)"],
+    ]) {
+      if (
+        !constraints.some(
+          (c) => c.relation === relation && c.kind === kind && c.definition === definition,
+        )
+      )
+        throw new Error(`Watch schema is missing required ${relation} ${definition}.`);
+    }
+    const indexes =
+      await sql`select indexname from pg_indexes where tablename='manual_watch_checks' and indexname='manual_watch_checks_monitor'`;
+    if (!indexes.length) throw new Error("Watch schema is missing its history index.");
+  } catch (error) {
+    await sql`delete from _schema_ensure_state where name='manual-page-watch'`;
+    throw error;
+  }
 }
 async function ownedInvestigation(
   room: number,
@@ -156,7 +186,8 @@ export async function createPageWatchFor(who: WatchIdentity, input: WatchInput) 
  insert into source_monitors(user_id,newsroom_id,url,title,manual_watch,watch_reason,watch_state,watch_model_choice,investigation_id,enabled,cadence_hours,next_check_at)
  values(${who.userId},${who.newsroomId},${url},${input.name.trim().slice(0, 200)},true,${input.reason.trim().slice(0, 2000)},'active',${storyModelChoice(input.modelChoice)},${input.investigationId ?? null},true,24,now())
  on conflict(newsroom_id,url) do update set manual_watch=true,watch_reason=excluded.watch_reason,title=excluded.title,
- watch_model_choice=excluded.watch_model_choice,investigation_id=coalesce(source_monitors.investigation_id,excluded.investigation_id)
+ watch_model_choice=excluded.watch_model_choice,investigation_id=coalesce(source_monitors.investigation_id,excluded.investigation_id),
+ enabled=true,watch_state='active',cadence_hours=24,next_check_at=now()
  where source_monitors.manual_watch=false returning id`;
   if (!rows[0]) {
     const raced = await sql<{
@@ -352,7 +383,8 @@ export async function pageWatchDetailFor(who: WatchIdentity, id: number, offset 
     action: string;
     target_id: number;
     result_id: number;
-  }>`select a.check_id,a.action,a.target_id,a.result_id from manual_watch_actions a join manual_watch_checks c on c.id=a.check_id and c.newsroom_id=a.newsroom_id where c.newsroom_id=${who.newsroomId} and c.monitor_id=${id}`;
+    target_exists: boolean;
+  }>`select a.check_id,a.action,a.target_id,a.result_id,case when a.action='lead' then exists(select 1 from leads l where l.id=a.result_id and l.newsroom_id=a.newsroom_id) when a.action='attach' then exists(select 1 from artifacts r join investigations i on i.id=r.investigation_id and i.newsroom_id=r.newsroom_id where r.id=a.result_id and r.newsroom_id=a.newsroom_id and r.investigation_id=a.target_id) else true end as target_exists from manual_watch_actions a join manual_watch_checks c on c.id=a.check_id and c.newsroom_id=a.newsroom_id where c.newsroom_id=${who.newsroomId} and c.monitor_id=${id}`;
   return {
     watch,
     history: history.map((h) => ({
@@ -373,6 +405,7 @@ export async function actOnPageWatchFor(
     checkId: number;
     action: "lead" | "attach" | "dismiss";
     investigationId?: number;
+    sectionKey?: string;
   },
   transactionSql?: Sql,
 ) {
@@ -454,6 +487,16 @@ export async function actOnPageWatchFor(
   }>`select a.result_id,exists(select 1 from leads l where l.id=a.result_id and l.newsroom_id=a.newsroom_id) as exists from manual_watch_actions a where a.newsroom_id=${who.newsroomId} and a.check_id=${cap.id} and a.action='lead' and a.target_id=0`;
   if (priorLead[0] && !priorLead[0].exists)
     return { ok: false as const, error: "The previous lead was removed. Nothing was recreated." };
+  if (priorLead[0]?.exists) return { ok: true as const, leadId: priorLead[0].result_id };
+  const { getSections } = await import("./sections.server.ts");
+  const chosen = (await getSections(who.newsroomId)).sections.find(
+    (s) => s.key === input.sectionKey && !s.replacementKey && !["about", "opinion"].includes(s.key),
+  );
+  if (!chosen)
+    return {
+      ok: false as const,
+      error: "Choose an active reporting section before creating a lead.",
+    };
   const why =
     `Unverified lead from a watched page. A changed page is a reporting prompt, not proof of wrongdoing.\nWhy watched: ${cap.reason}\nCapture state: ${cap.state}. Open the captured record before drafting.`.slice(
       0,
@@ -464,7 +507,7 @@ export async function actOnPageWatchFor(
   on conflict(newsroom_id,check_id,action,target_id) do update set result_id=manual_watch_actions.result_id returning result_id
  ), saved as (
   insert into leads(id,user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness)
-  select result_id,${who.userId},${who.newsroomId},${cap.title.slice(0, 240)},${why},'council','new',${JSON.stringify([cap.url])},${cap.full_text.slice(0, 4000)},12 from action
+  select result_id,${who.userId},${who.newsroomId},${cap.title.slice(0, 240)},${why},${chosen.key},'new',${JSON.stringify([cap.url])},${cap.full_text.slice(0, 4000)},12 from action
   on conflict(id) do nothing returning id
  ) select result_id as id from action`;
   return { ok: true as const, leadId: rows[0]!.id };
@@ -511,7 +554,7 @@ export async function readPageWatchCaptureFor(
  select av.full_text,av.title from manual_watch_checks c
  join source_monitors m on m.id=c.monitor_id and m.newsroom_id=c.newsroom_id and m.manual_watch=true
  join capture_events ce on ce.id=c.capture_event_id and ce.monitor_id=m.id and ce.newsroom_id=m.newsroom_id
- join artifact_versions av on av.id=case when ${input.previous ?? false} then c.previous_version_id else ce.version_id end and av.newsroom_id=m.newsroom_id and av.url=m.url and ce.source_url=m.url
+ join artifact_versions av on av.id=case when ${input.previous ?? false} then c.previous_version_id else ce.version_id end and av.newsroom_id=m.newsroom_id and av.url=m.url and ce.source_url=m.url and (${input.previous ?? false} or ce.content_hash=av.content_hash)
  where c.id=${input.checkId} and m.id=${input.watchId} and m.newsroom_id=${who.newsroomId}`;
   return rows[0] ?? null;
 }
