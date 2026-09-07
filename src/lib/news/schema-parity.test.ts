@@ -324,3 +324,48 @@ describe("every runtime ensure* schema agrees with migrations/*.sql (ENG-03 caps
     },
   );
 });
+
+it('legal parent locks prevent a foreign FK insert racing the removal scope check', {skip,timeout:20000}, async()=>{
+  const {getSql}=await import('../db.ts');const sql=await getSql();
+  const legal=await import('./legal-removal-store.ts');
+  await sql`insert into newsroom_members(user_id,newsroom_id,role) values ('pg-legal-race',8890,'owner')`;
+  const [lead]=await sql<{id:number}>`insert into leads(user_id,newsroom_id,headline,why,topic) values('pg-legal-race',8890,'Race test','Test','council') returning id`;
+  const [article]=await sql<{id:number}>`insert into articles(user_id,newsroom_id,lead_id,slug,headline,body,topic) values('pg-legal-race',8890,${lead.id},'pg-legal-race','Race test','Test','council') returning id`;
+  const selection={articleIds:[article.id],draftIds:[],memoryIds:[],auditIds:[],trashIds:[],reviewedLegacy:true,reviewedEvidence:true};
+  const preview=await legal.previewLegalRemoval('pg-legal-race',selection);
+  const blocker=new Client({connectionString:withDatabase(PSQL_ADMIN_URL,ensureDbName)});
+  const foreign=new Client({connectionString:withDatabase(PSQL_ADMIN_URL,ensureDbName)});
+  await blocker.connect();await foreign.connect();
+  let removal:Promise<unknown>|undefined;let insert:Promise<{ok:boolean;error?:unknown}>|undefined;
+  async function waitForBlocked(pid?:number) {
+    const until=Date.now()+5000;
+    while(Date.now()<until) {
+      const found=await blocker.query<{waiting:boolean}>(pid
+        ?'select exists(select 1 from pg_locks where pid=$1 and not granted) as waiting'
+        :"select exists(select 1 from pg_locks where locktype='advisory' and objid=889001 and not granted) as waiting",pid?[pid]:[]);
+      if(found.rows[0].waiting)return;
+      await new Promise(resolve=>setTimeout(resolve,10));
+    }
+    throw new Error('Expected competing transaction never reached the database lock');
+  }
+  try {
+    await blocker.query('select pg_advisory_lock(889001)');
+    await sql.query("create function test_pause_legal_delete() returns trigger language plpgsql as $$ begin perform pg_advisory_xact_lock(889001); return OLD; end $$");
+    await sql.query('create trigger test_pause_legal_delete before delete on articles for each row execute function test_pause_legal_delete()');
+    removal=legal.removeLegally('pg-legal-race',{selection,fingerprint:preview.fingerprint,policy:'destroy',caseRef:'PG-RACE'});
+    await waitForBlocked();
+    const pid=(await foreign.query<{pid:number}>('select pg_backend_pid() as pid')).rows[0].pid;
+    insert=foreign.query("insert into drafts(user_id,newsroom_id,lead_id,headline,body,topic) values('other-room',8891,$1,'Foreign','Must survive or refuse','council')",[lead.id]).then(()=>({ok:true}),error=>({ok:false,error}));
+    await waitForBlocked(pid);
+    await blocker.query('select pg_advisory_unlock(889001)');
+    await removal;
+    const outcome=await insert;assert.equal(outcome.ok,false,'foreign insert cannot slip between scope inspection and cascade');
+    assert.match(String(outcome.error),/foreign key constraint/);
+    assert.deepEqual(await sql`select id from drafts where newsroom_id=8891`,[]);
+  } finally {
+    await blocker.query('select pg_advisory_unlock(889001)');
+    await removal?.catch(()=>undefined);await insert;
+    await sql.query('drop trigger if exists test_pause_legal_delete on articles');
+    await blocker.end();await foreign.end();
+  }
+});

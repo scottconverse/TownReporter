@@ -102,7 +102,7 @@ function PublishedPage() {
 
   return (
     <DeskShell title="Published" kicker="The record">
-      {deskRole.data?.role==="owner"&&<p className="mb-4"><Link to="/desk/legal-removals" search={{article:undefined,case:undefined}} className="underline">Legal removal cases</Link> — retained-copy access and external cleanup records.</p>}
+      {deskRole.data?.role==="owner"&&<p className="mb-4"><Link to="/desk/legal-removals" search={{article:undefined,case:undefined}} className="underline">Legal removal cases</Link> â€” retained-copy access and external cleanup records.</p>}
       <p className="lede">
         What is live on the paper, with its corrections. Corrections are public.
       </p>

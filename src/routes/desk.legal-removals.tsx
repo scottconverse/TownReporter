@@ -123,6 +123,14 @@ function LegalRemovalsPage() {
                   <p>Loading published articles…</p>
                 ) : articles.isError ? (
                   <p role="alert">Could not load articles. Reload this page.</p>
+                ) : !articles.data?.length ? (
+                  <p>
+                    No published stories to remove.{" "}
+                    <a className="underline" href="/desk/published">
+                      Back to Published
+                    </a>
+                    .
+                  </p>
                 ) : (
                   articles.data?.map((a) => (
                     <label className="my-2 flex gap-2" key={a.id}>
@@ -178,7 +186,7 @@ function LegalRemovalsPage() {
                   </p>
                   {preview.selectedHistorical.length > 0 && (
                     <fieldset className="border border-rule p-3">
-                      <legend>Selected historical records � uncheck to remove from scope</legend>
+                      <legend>Selected historical records — uncheck to remove from scope</legend>
                       {preview.selectedHistorical.map((c) => (
                         <label className="my-2 flex gap-2" key={`${c.kind}-${c.id}`}>
                           <input
@@ -438,6 +446,10 @@ function CaseDetail({ caseId }: { caseId: string }) {
           </pre>
         </div>
       )}
+      <p>
+        Watches aimed at these article addresses are paused, and matching ordinary sources are
+        excluded from scans. Their independent evidence remains pending review.
+      </p>
       <h3 className="font-display text-xl">External backup cleanup</h3>
       <label className="block">
         Backup location or identifier (no story text)

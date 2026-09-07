@@ -471,6 +471,13 @@ export async function removeLegally(
       throw new Error(
         "Court destruction requires resolving the historical and shared-evidence review first.",
       );
+    // Disable only automatic work aimed at the removed story, preserving its
+    // independent evidence and explaining why it needs operator review.
+    await tx`update source_monitors set enabled=false,watch_state='paused',watch_lease=null,watch_check_started_at=null,
+      watch_last_error='This article was legally removed. Captured evidence needs review; automatic checks are paused.'
+      where newsroom_id=${room} and legal_article_url_identity(url)=any(${urls}::text[])`;
+    await tx`update sources set status='dropped',last_error='This article was legally removed. Source excluded from scans pending review.'
+      where newsroom_id=${room} and legal_article_url_identity(url)=any(${urls}::text[])`;
     const caseId = randomUUID();
     const expiry = input.policy === "retain" ? removalExpiry(new Date()).toISOString() : null;
     await tx`insert into legal_removals(id,newsroom_id,requested_by,case_ref,policy,expires_at,purged_at,review_pending,counts_json)

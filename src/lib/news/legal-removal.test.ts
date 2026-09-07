@@ -11,6 +11,7 @@ import {
   expireLegalCopies,
   recordBackupAction,
 } from "./legal-removal-store.ts";
+import { setPageWatchStateFor } from "./page-watch.ts";
 import { tickAllDueMonitors } from "./monitors-cron.ts";
 import { fileEditorial } from "./editorial.server.ts";
 import type { LegalSelection } from "./legal-removal-types.ts";
@@ -732,4 +733,31 @@ it("encoded URL regression is sensitive to removing path decoding", async () => 
   } finally {
     await f.sql.query(corrected);
   }
+});
+
+it("retained removal pauses matching watches, preserves evidence and permits Stop without permitting Resume", async () => {
+  const f = await fixture();
+  const url = "/articles/legal-" + f.room;
+  const [watch] = await f.sql<{
+    id: number;
+  }>`insert into source_monitors(user_id,newsroom_id,url,title,manual_watch,enabled,watch_state) values(${f.user},${f.room},${url},${f.secret},true,true,'active') returning id`;
+  const p = await previewLegalRemoval(f.user, f.selection);
+  await removeLegally(f.user, {
+    selection: f.selection,
+    fingerprint: p.fingerprint,
+    policy: "retain",
+    caseRef: "PAUSE-WATCH",
+  });
+  assert.deepEqual(
+    await f.sql`select enabled,watch_state,title from source_monitors where id=${watch.id}`,
+    [{ enabled: false, watch_state: "paused", title: f.secret }],
+  );
+  assert.equal(
+    (await setPageWatchStateFor({ userId: f.user, newsroomId: f.room }, watch.id, "stopped")).ok,
+    true,
+  );
+  await assert.rejects(
+    setPageWatchStateFor({ userId: f.user, newsroomId: f.room }, watch.id, "active"),
+    /legal removal/,
+  );
 });

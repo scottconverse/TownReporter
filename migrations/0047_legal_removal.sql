@@ -90,6 +90,8 @@ create or replace function prevent_legal_resurrection() returns trigger language
     if TG_TABLE_NAME='editorial_requests' and row_json->>'source_kind'='article'
       and exists(select 1 from legal_removal_slugs where newsroom_id=room and slug_hash=md5(row_json->>'source_ref'))
     then raise exception 'This editorial source was legally removed. Choose reviewed sources.'; end if;
+    if TG_OP='UPDATE' and TG_TABLE_NAME='source_monitors' and row_json->>'enabled'='false' and row_json->>'watch_state' in ('paused','stopped')
+      and (row_json-array['enabled','watch_state'])=(to_jsonb(OLD)-array['enabled','watch_state']) then return NEW; end if;
     if TG_TABLE_NAME in ('artifacts','artifact_versions','artifact_chunks','artifact_blobs','capture_events','snapshots','sources','source_monitors','recurring_baselines','manual_watch_checks')
       and exists(select 1 from legal_removal_urls u where u.newsroom_id=room and (
         u.url_hash=md5(legal_article_url_identity(row_json->>'url')) or u.url_hash=md5(legal_article_url_identity(row_json->>'original_url')) or u.url_hash=md5(legal_article_url_identity(row_json->>'source_url')) or u.url_hash=md5(legal_article_url_identity(row_json->>'typical_url'))
