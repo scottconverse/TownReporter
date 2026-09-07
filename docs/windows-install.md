@@ -10,6 +10,8 @@ Use this path to run a persistent newsroom on your own Windows computer. The sou
 
 The target is to finish installation and a first editorial workflow in under an hour. Download speed, prerequisite installation, provider access and model response time affect that result. See the release's installation evidence for the measured environment and elapsed time; this is not a guarantee for every computer or connection.
 
+Release evidence separates the timed fresh Windows installation and manual publishing check from real-provider testing on the local packaged installation. The fresh CI check disables AI; the separate Claude draft check uses an already available provider. Neither measures creating an AI account or completing a real source scan on a fresh machine.
+
 ## Download and install
 
 1. Open [TownReporter releases](https://github.com/scottconverse/TownReporter/releases/latest) and download the Windows installation ZIP listed under Assets. Extract the ZIP completely into a folder you intend to keep. Do not run it from inside the ZIP.

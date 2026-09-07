@@ -39,7 +39,7 @@ if (!(Test-Path -LiteralPath $ConfigFile)) {
   @{ AppRoot=$AppRoot; DataRoot=$DataRoot; Owner=$ownerSid } | ConvertTo-Json | Set-Content -LiteralPath $reservationFile -Encoding UTF8
   @{ DataRoot=$DataRoot } | ConvertTo-Json | Set-Content -LiteralPath $pointerFile -Encoding UTF8
 }
-$drive = (Get-Item -LiteralPath $DataRoot).PSDrive
+$drive = (Get-Item -LiteralPath $DataRoot -Force).PSDrive
 if ($null -ne $drive.Free -and $drive.Free -lt 8GB) { throw 'At least 8 GB of free disk space is required for the runtime, browser, build and database. Choose another DataRoot drive or free space.' }
 $dependencies = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'dependencies.json') -Raw | ConvertFrom-Json
 $toolsRoot = Join-Path $DataRoot 'tools'

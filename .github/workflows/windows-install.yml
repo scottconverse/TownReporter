@@ -121,9 +121,10 @@ jobs:
           $appRoot = $entries[0].Directory.Parent.FullName
           "INSTALL_APP_ROOT=$appRoot" >> $env:GITHUB_ENV
           "INSTALL_SOURCE_ARCHIVE=$($archives[0].FullName)" >> $env:GITHUB_ENV
-          "INSTALL_DATA_ROOT=$env:RUNNER_TEMP\private-newsroom" >> $env:GITHUB_ENV
-          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\private-newsroom" | Out-Null
-          @{ TOWNREPORTER_CLAUDE_CODE='0'; TOWNREPORTER_CODEX='0'; TOWNREPORTER_LOCAL='0' } | ConvertTo-Json | Set-Content -LiteralPath "$env:RUNNER_TEMP\private-newsroom\providers.json"
+          $dataRoot = Join-Path $env:LOCALAPPDATA ("TownReporter\ci-" + [guid]::NewGuid().ToString("N"))
+          "INSTALL_DATA_ROOT=$dataRoot" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
+          @{ TOWNREPORTER_CLAUDE_CODE='0'; TOWNREPORTER_CODEX='0'; TOWNREPORTER_LOCAL='0' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'providers.json')
       - name: Run the default native installer with private downloads
         shell: pwsh
         run: |

@@ -13,7 +13,7 @@ $ConfigFile = Join-Path $DataRoot 'config.json'
 function Assert-PlainDirectory([string]$Path) {
   $current = [IO.Path]::GetFullPath($Path)
   while ($current) {
-    if ((Test-Path -LiteralPath $current) -and ((Get-Item -LiteralPath $current).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "Linked paths are not supported: $current" }
+    if ((Test-Path -LiteralPath $current) -and ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "Linked paths are not supported: $current" }
     $parent = [IO.Directory]::GetParent($current)
     if (!$parent) { break }; $current = $parent.FullName
   }
@@ -73,7 +73,7 @@ function Assert-OwnedListener([int]$Port, [int]$ExpectedProcessId) {
 function Protect-LocalPath([string]$Path) {
   # Construct only the replacement DACL. Reusing Get-Acl can make PowerShell 5.1
   # attempt to persist owner/SACL sections on retry, requiring SeSecurityPrivilege.
-  $isDirectory = (Get-Item -LiteralPath $Path).PSIsContainer
+  $isDirectory = (Get-Item -LiteralPath $Path -Force).PSIsContainer
   $acl = if ($isDirectory) { New-Object Security.AccessControl.DirectorySecurity } else { New-Object Security.AccessControl.FileSecurity }
   $acl.SetAccessRuleProtection($true, $false)
   $inherit = if ($isDirectory) { 'ContainerInherit,ObjectInherit' } else { 'None' }

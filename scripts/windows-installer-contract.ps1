@@ -5,6 +5,33 @@ function Read-Function([string]$Path, [string]$Name) {
   $ast = [Management.Automation.Language.Parser]::ParseInput((Get-Content -LiteralPath $Path -Raw), [ref]$null, [ref]$null)
   return $ast.Find({param($a) $a -is [Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq $Name}, $true).Extent.Text
 }
+Invoke-Expression (Read-Function (Join-Path $AppRoot 'installer\Common.ps1') 'Assert-PlainDirectory')
+Invoke-Expression (Read-Function (Join-Path $AppRoot 'installer\Common.ps1') 'Protect-LocalPath')
+& {
+  $fixtureRoot = Join-Path $env:TEMP ('tr-hidden-path-' + [guid]::NewGuid().ToString('N'))
+  $hiddenParent = Join-Path $fixtureRoot 'hidden-parent'
+  $child = Join-Path $hiddenParent 'child'
+  $junction = Join-Path $fixtureRoot 'linked-parent'
+  [IO.Directory]::CreateDirectory($child) | Out-Null
+  try {
+    [IO.File]::SetAttributes($hiddenParent, [IO.FileAttributes]::Directory -bor [IO.FileAttributes]::Hidden)
+    try { Assert-PlainDirectory $child }
+    catch { throw "Plain directory below a hidden ancestor was incorrectly rejected: $($_.Exception.Message)" }
+    Protect-LocalPath $hiddenParent
+    New-Item -ItemType Junction -Path $junction -Target $hiddenParent | Out-Null
+    $message = ''
+    try { Assert-PlainDirectory (Join-Path $junction 'child') } catch { $message = $_.Exception.Message }
+    if ($message -notmatch 'Linked paths are not supported') { throw 'Junction ancestor was not refused.' }
+    Write-Output 'PASS hidden plain ancestors are accepted while junction ancestors remain refused.'
+  } finally {
+    # Remove the link itself, never recurse through its target.
+    if (Test-Path -LiteralPath $junction) { [IO.Directory]::Delete($junction) }
+    [IO.File]::SetAttributes($hiddenParent, [IO.FileAttributes]::Directory)
+    [IO.Directory]::Delete($child)
+    [IO.Directory]::Delete($hiddenParent)
+    [IO.Directory]::Delete($fixtureRoot)
+  }
+}
 Invoke-Expression (Read-Function (Join-Path $AppRoot 'installer\Common.ps1') 'Assert-PortFree')
 & {
   # An empty listener inventory does not prove Windows permits a bind.
