@@ -26,8 +26,13 @@ if (probe.ok) {
     await sql.query(`create table leads(id integer primary key, newsroom_id integer, status text)`);
     await sql.query(`create table drafts(id serial primary key, lead_id integer, newsroom_id integer, headline text, dek text, body text, topic text, source_urls text, updated_at timestamptz default now())`);
     await sql.query(`create table articles(id serial primary key, body text)`);
+    await sql.query(`create table newsroom_members(user_id text primary key, newsroom_id integer, role text)`);
+    await sql.query(`create table desk_jobs(id serial primary key, newsroom_id integer, user_id text, status text, stage text, error text, claim_token text, updated_at timestamptz, finished_at timestamptz)`);
     await sql.query(`insert into leads values(1,81,'drafted')`);
     await sql.query(`insert into drafts(lead_id,newsroom_id,headline,dek,body,topic,source_urls) values(1,81,'Reviewed','','Reviewed draft','community','[]')`);
+    await sql.query(`insert into leads values(2,82,'new')`);
+    await sql.query(`insert into newsroom_members values('draft-worker',82,'editor')`);
+    await sql.query(`insert into desk_jobs(id,newsroom_id,user_id,status,stage,error,claim_token,updated_at) values(22,82,'draft-worker','running','Working',null,'original-claim',now()-interval '10 minutes')`);
   });
   after(async () => {
     await db?.closePoolForTests();
@@ -75,7 +80,7 @@ it("real PostgreSQL parent lock blocks replacement drafts during publication", {
     const deadline=Date.now()+5000;
     let waiting=false;
     while (Date.now()<deadline) {
-      const result=await observer.query<{waiting:boolean}>("select exists(select 1 from pg_stat_activity where datname=current_database() and wait_event_type='Lock' and query like 'select id, to_jsonb(leads)%') as waiting");
+      const result=await observer.query<{waiting:boolean}>("select exists(select 1 from pg_stat_activity where datname=current_database() and wait_event_type='Lock' and query ~ '^[[:space:]]*select[[:space:]]+id,[[:space:]]+to_jsonb\\(leads\\)') as waiting");
       if (result.rows[0].waiting) { waiting=true; break; }
       assert.equal(writerEntered,false,"replacement writer entered before publication released the parent fence");
       await new Promise(r=>setTimeout(r,10));
@@ -94,5 +99,57 @@ it("real PostgreSQL parent lock blocks replacement drafts during publication", {
     await publishing.catch(()=>{});
     await writer;
     await observer.end();
+  }
+});
+
+it("real PostgreSQL cannot reclaim a draft job while its result commits or after that commit", { skip, timeout: 15000 }, async () => {
+  const sql = await db.getSql();
+  const reclaimer = new Client({ connectionString: withDatabase(adminUrl, dbName) });
+  const watcher = new Client({ connectionString: withDatabase(adminUrl, dbName) });
+  await reclaimer.connect();
+  await watcher.connect();
+  let release!: () => void;
+  const pause = new Promise<void>(resolve => { release=resolve; });
+  let entered!: () => void;
+  const ownsJob = new Promise<void>(resolve => { entered=resolve; });
+  const saving = order.withClaimedLeadDraftLock(
+    { id:22,newsroom_id:82,user_id:"draft-worker",claim_token:"original-claim" },
+    2,
+    async tx => {
+      await tx`insert into drafts(lead_id,newsroom_id,headline,dek,body,topic,source_urls) values(2,82,'Current','','Current worker','community','[]')`;
+      entered();
+      await pause;
+    },
+  );
+  void saving.catch(() => {});
+  let reclaim: Promise<import("pg").QueryResult<{id:number}>> | undefined;
+  try {
+    await ownsJob;
+    reclaim=reclaimer.query<{id:number}>(`
+      update desk_jobs set claim_token='replacement-claim',updated_at=now()
+      where id=22 and status='running' and updated_at < now()-interval '2 minutes'
+      returning id
+    `);
+    const deadline=Date.now()+5000;
+    let waiting=false;
+    while (Date.now()<deadline) {
+      const result=await watcher.query<{waiting:boolean}>("select exists(select 1 from pg_stat_activity where datname=current_database() and wait_event_type='Lock' and query ~ '^[[:space:]]*update[[:space:]]+desk_jobs[[:space:]]+set[[:space:]]+claim_token') as waiting");
+      if (result.rows[0].waiting) { waiting=true; break; }
+      await new Promise(resolve=>setTimeout(resolve,10));
+    }
+    assert.equal(waiting,true,"the reclaimer must wait on the result transaction's job lock");
+    release();
+    await saving;
+    const reclaimed=await reclaim;
+    assert.equal(reclaimed.rowCount,0,"a committed draft job must no longer satisfy stale-running reclaim");
+    const [job]=await sql<{status:string;claim_token:string}>`select status,claim_token from desk_jobs where id=22`;
+    assert.deepEqual(job,{status:"completed",claim_token:"original-claim"});
+    assert.equal((await sql<{n:number}>`select count(*)::integer as n from drafts where lead_id=2`)[0].n,1);
+  } finally {
+    release();
+    await saving.catch(()=>{});
+    await reclaim?.catch(()=>{});
+    await reclaimer.end();
+    await watcher.end();
   }
 });

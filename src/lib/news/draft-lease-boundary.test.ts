@@ -177,6 +177,11 @@ it("the current manual draft claim commits the draft, notes, and audit together"
   assert.equal(lead.status, "drafted");
   assert.notEqual(JSON.parse(lead.notes_json).scratch, undefined);
   assert.equal(Number(auditCount), 1);
+  const [completedJob] = await sql.query<{ status: string }>(
+    "select status from desk_jobs where id=$1",
+    [job.id],
+  );
+  assert.equal(completedJob.status, "completed");
 });
 
 it("rolls back the draft and lead update when the final audit insert fails", async () => {
@@ -204,6 +209,11 @@ it("rolls back the draft and lead update when the final audit insert fails", asy
     assert.equal(Number(draftCount), 0);
     assert.equal(lead.status, "new");
     assert.equal(JSON.parse(lead.notes_json).scratch, "Original notes");
+    const [runningJob] = await sql.query<{ status: string; claim_token: string }>(
+      "select status,claim_token from desk_jobs where id=$1",
+      [job.id],
+    );
+    assert.deepEqual(runningJob, { status: "running", claim_token: "old-claim" });
   } finally {
     await sql.query(
       "alter table audit_events drop constraint if exists draft_boundary_reject_audit",

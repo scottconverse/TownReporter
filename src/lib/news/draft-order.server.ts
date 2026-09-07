@@ -40,7 +40,17 @@ export async function withClaimedLeadDraftLock<T>(
     `;
     if (!member) throw new Error("Draft permission was withdrawn before results could be saved.");
     const lead = await lockLeadForDraft(sql, job.newsroom_id, leadId);
-    return run(sql, lead.status);
+    const result = await run(sql, lead.status);
+    const [completed] = await sql<{id:number}>`
+      update desk_jobs
+      set status = 'completed', stage = 'Done', error = null,
+          finished_at = now(), updated_at = now()
+      where id = ${job.id} and newsroom_id = ${job.newsroom_id}
+        and status = 'running' and claim_token = ${job.claim_token}
+      returning id
+    `;
+    if (!completed) throw new Error("Draft job lease was lost before completion could be saved.");
+    return result;
   });
 }
 export async function withCurrentDraftForPublish<T>(context: { newsroomId: number }, leadId: number, expected: DraftRow, run: (sql: Sql) => Promise<T>): Promise<T> {
