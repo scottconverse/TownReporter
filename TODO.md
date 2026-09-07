@@ -16,6 +16,22 @@ Legend: [x] implemented · [~] in progress · [ ] open · **external** requires 
 
 ## Implementation queue and remaining acceptance
 
+### Single-editor completion mandate — 2026-09-07
+
+Owner-confirmed targets: existing subscription-based cloud tools plus local models; approximately 60 minutes of editor work and 3–5 useful items on a normal day; explicitly selected low-risk automatic publication, with other reporting reviewed. No new metered API spending or paid service is approved. See the current handoff for authority and constraints.
+
+The following is the coordinator's **proposed implementation sequence**, not a list of delivered capabilities. Resolve material policy choices before implementing dependent behavior; continue independent correctness work.
+
+1. [~] **Protect correction ownership.** Refuse correction targets outside the editor's newsroom and unavailable explicit targets without correction/audit writes. Preserve legitimate corrections and current no-slug behavior. PGLite regression and authenticated/public-output verification are in progress on `codex/correction-newsroom-boundary`; exact-commit CI is pending.
+2. [ ] **Bound subscription/local automation.** Reuse provider selection, readiness, persisted jobs and narrow failover. Establish concurrency, work-volume, timeout and pause/resume policies; surface subscription exhaustion and local unavailability. Do not silently turn a local/subscription job into a metered API request. Measure throughput and editor effort before choosing production defaults.
+3. [ ] **Assemble a daily review queue.** Extend the existing clock and jobs rather than introducing another scheduler. Plan ordinary scans, select worthwhile leads and draft a bounded daily batch; preserve owner sources, section guidance, duplicate detection, provenance and manual controls. Existing unattended monitoring/job recovery is not a daily production planner.
+4. [ ] **Broaden useful community coverage.** Use configurable sections and approved source families for schools, libraries, events, housing, transport, local businesses, health services, recreation and government. Rank practical resident impact, dates and coverage gaps; do not guarantee every beat every day or treat social posts as verified reporting.
+5. [ ] **Strengthen evidence review at claim level.** Connect material claims to captured evidence and locators, distinguish shared source origins from independent corroboration, expose contrary evidence and reopen review when facts change. A fetched URL, model agreement or completed verification form does not establish truth. Final publication policy must accommodate legitimate single-source routine notices without labeling them independently corroborated.
+6. [ ] **Enable narrowly authorized automatic formats.** Starting formats and approved-source criteria are pending owner selection. Use explicit eligibility, freshness and conflict checks, visible publication/audit history, idempotency and an owner pause control. Investigations, allegations, disputed or ambiguous claims require review. Automatic drafting is distinct from permission to publish.
+7. [ ] **Prove the daily operating target.** Reuse existing test/browser infrastructure for controlled replay and local runtime exercises across contrasting community/source profiles. Measure useful output, claim errors, editor interventions, elapsed editor time, subscription interruptions and local resource use. Report missing evidence honestly; retain five real Halo investigations as a separate external exercise.
+
+Current static assessment: ordinary scans and drafts are editor-triggered; the background clock recaptures monitors and drains already-queued work. Monetary budget features are not the owner's requested cost model. None of the proposed daily planner, work-volume governor or automatic-publication policy is implemented by this documentation checkpoint.
+
 ### Windows installation and local-test findings — active, 2026-09-07
 
 Owner acceptance: a new Windows user can download the repository's installation package, install it, configure an available AI provider, and complete a first editorial workflow in under an hour. Mac/Linux source setup remains available; native installers for those systems are outside this release.

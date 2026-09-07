@@ -20,7 +20,20 @@ Deliverable language: **merged to main, CI green, ready for a local operator to 
 
 ## Locked product decisions
 
-- A local non-profit newspaper one person can run; coverage includes community life, business, schools, housing, health and arts as well as government. AI assists; an editor decides what prints.
+### Owner extension mandate — 2026-09-07
+
+The owner explicitly asked the coordinator to manage completion of TownReporter as a single-editor community newspaper: own research, comparisons, planning, bounded delegation, implementation, verification, documentation and releases; continue unblocked work and bring only consequential choices back. Do not make the owner direct individual development steps. This remains continuous development, not a claim that the project is finished.
+
+Confirmed operating targets:
+
+- Hybrid **existing subscription-based cloud tools and local models**. The owner did not approve a new metered API budget. Preserve existing optional provider support, but do not enable paid API fallback or add paid services under this mandate. Local inference has no per-token charge; compute capacity and subscription limits still constrain throughput.
+- Approximately **60 minutes of normal-day editor work**, with **3–5 useful items total** when evidence and newsworthiness warrant them. These are acceptance targets to measure, not output guarantees or a reason to manufacture filler. Investigations and interviews require separate time.
+- Selected low-risk formats may publish automatically; other reporting requires editor review. The exact starting format/source policy is pending. Existing released code still requires human publication. Do not imply that automatic publication has shipped or enable it based on model confidence alone.
+- Fable Direction A, Windows-first installation, newsroom isolation, correction history, and the remote/Halo boundary remain in force.
+
+Current implementation unit: correction newsroom ownership, isolated branch `codex/correction-newsroom-boundary` from `7421e7e`. The existing correction target lookup lacked newsroom ownership. A minimal fix and regression are under independent verification; neither merge nor release is established by this note. The proposed completion sequence and remaining decisions are in TODO.md.
+
+- A local non-profit newspaper one person can run; coverage includes community life, business, schools, housing, health and arts as well as government. Released behavior requires editor publication; the owner-approved future exception for selected low-risk formats is described above and is not implemented yet.
 - **Fable Direction A** is the design foundation: queue main column, Dark Desk/Follow-ups/wire rail, newsroom vocabulary, scores, Open/Hold/Kill and matched-story context. Rust on cream; black background and white text on Dark Desk. No teal sidebar redesign or marketing banner on the editor's first screen.
 - Nothing informational below 14px; Large scales headlines and reading panes; no meaning conveyed by quiet color alone; destructive actions must differ from Cancel. Every action needs pending/success/empty/error feedback and a path to its result.
 - The editor selects a model wherever AI acts. Readiness, interrupted work and failover must be described honestly.
