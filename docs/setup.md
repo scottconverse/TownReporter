@@ -549,7 +549,7 @@ If the city uses Legistar, Granicus, CivicClerk, BoardDocs, or Municode instead,
 
 ### 5. Newspaper sections
 
-After saving Paper setup, open **Server → Newspaper sections**. The owner can add, rename, reorder, hide and retire sections, assign accepted sources, and write reporting briefs and scan instructions. Preview before applying; retirement requires a replacement and explicit impact confirmation. See [the editor guide](editor.md#newspaper-sections) for the full workflow.
+After saving Paper setup, open **Server → Newspaper sections**. The owner can add, rename, reorder, hide and retire sections, assign accepted sources, and write reporting briefs and scan instructions. Review the unsaved old and new values before confirming; source assignments show names and URLs. Retirement requires a replacement and explicit impact confirmation. See [the editor guide](editor.md#newspaper-sections) for the full workflow.
 
 Migration 0045 preserves existing topic keys and seeds their labels. It does not rename or delete stories. Runtime filing resolves retired keys so queued work cannot restore a retired section. Existing keys are stable URLs; display names can change. Source assignments and section configuration belong to one newsroom.
 
