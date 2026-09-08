@@ -179,6 +179,30 @@ describe("capture chronology", () => {
 });
 
 describe("public capture history publication", { timeout: 60000 }, () => {
+  it("does not publish a default-room record cited only by another newsroom", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const stamp = Date.now();
+    const url = `https://example.com/foreign-publication-${stamp}`;
+    const own = await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_outcome)
+      values (${"public-owner"},${1},${url},${"own-unpublished"},${"Own unpublished"},${"OWN UNPUBLISHED TEXT"},${"fetched"})
+      returning id
+    `;
+    await sql`
+      insert into capture_events(user_id,newsroom_id,source_url,http_status,fetch_outcome,version_id,content_hash,trigger_kind)
+      values (${"public-owner"},${1},${url},${200},${"fetched"},${own[0]!.id},${"own-unpublished"},${"draft"})
+    `;
+    await sql`
+      insert into articles(user_id,newsroom_id,slug,headline,dek,body,topic,source_urls,status,published_at,provenance_json,form,found_note,unanswered)
+      values (${"foreign-publisher"},${2},${`foreign-publication-${stamp}`},${"Foreign publication"},${""},${"Body"},${"council"},${JSON.stringify([url])},${"published"},now(),${"[]"},${"reported"},${"[]"},${"[]"})
+    `;
+
+    assert.equal(await loadPublicEvidence(own[0]!.id), null);
+    assert.deepEqual(await listPublicCaptureHistory(url), []);
+    assert.equal(await comparePublishedEvidence({ url }), null);
+  });
+
   it("does not authorize a foreign-only version merely because its URL is published here", async () => {
     await ensureArticlesSchema();
     const sql = await getSql();
