@@ -149,6 +149,7 @@ if (dbProbe.ok) {
     const sections = await import("./sections.server.ts");
     const pageWatch = await import("./page-watch.ts");
     const routineNoticePolicy = await import("./routine-notice-policy.ts");
+    const routineNoticeChecks = await import("./routine-notice-checks.server.ts");
     const db = await import("../db.ts");
     closePoolForTests = db.closePoolForTests;
 
@@ -178,6 +179,12 @@ if (dbProbe.ok) {
     await sections.ensureSectionsSchema();
     await pageWatch.ensurePageWatchSchema();
     await routineNoticePolicy.ensureRoutineNoticePolicySchema();
+    await routineNoticeChecks.ensureRoutineNoticeCheckSchema();
+    const routineCheckGuards = await sectionSql<{ tgname: string }>`
+      select tgname from pg_trigger
+      where tgname='routine_notice_checks_legal_guard' and tgenabled <> 'D'
+    `;
+    assert.equal(routineCheckGuards.length, 1, "runtime routine-check legal guard must exist");
     const sectionTriggers = await sectionSql<{ tgname: string }>`
       select tgname from pg_trigger where tgname in
         ('leads_resolve_section','drafts_resolve_section','articles_resolve_section') and tgenabled <> 'D'
@@ -224,6 +231,16 @@ if (dbProbe.ok) {
       values ('pg-legal-other',8811,'pg-legal-proof','Independent paper','Independent text','council')`;
     await assert.rejects(sectionSql`insert into artifact_versions(user_id,newsroom_id,url,content_hash,full_text)
       values ('pg-legal-owner',8810,'/articles/pg-legal-proof','stale-proof','Stale text')`,/legal removal/);
+    const [routineSource]=await sectionSql<{id:number}>`insert into sources(user_id,newsroom_id,url,title,status)
+      values ('pg-legal-other',8811,'/articles/routine-removed','Routine source','accepted') returning id`;
+    await sectionSql`insert into legal_removals(id,newsroom_id,requested_by,case_ref,policy)
+      values ('routine-check-legal-proof',8811,'pg-legal-other','ROUTINE-CHECK-PROOF','destroy')`;
+    await sectionSql`insert into legal_removal_urls(newsroom_id,url_hash,case_id)
+      values (8811,md5(legal_article_url_identity('/articles/routine-removed')),'routine-check-legal-proof')`;
+    await assert.rejects(sectionSql`insert into routine_notice_checks
+      (newsroom_id,request_id,source_id,source_url_hash,format_key,policy_revision,adapter_key,adapter_version,state,actor)
+      values (8811,'00000000-0000-4000-8000-000000000881',${routineSource.id},'proof','library-notice',1,
+        'schema-event-jsonld',1,'capture-failed','pg-legal-other')`,/legal removal/);
   }, 60_000);
 
   after(async () => {

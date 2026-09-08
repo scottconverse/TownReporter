@@ -369,6 +369,35 @@ async function impact(sql: Sql, room: number, input: LegalSelection, lockParents
       captureFingerprints.push({ table, ...row });
     }
   }
+  const [routineTables] = await sql.query<{ checks: string | null; refs: string | null }>(
+    "select to_regclass('routine_notice_checks')::text checks,to_regclass('routine_notice_candidate_refs')::text refs",
+  );
+  if (routineTables?.checks && routineTables.refs) {
+    const routineChecks = await sql.query<{ id: number; digest: string }>(
+      `select t.id,md5(to_jsonb(t)::text) as digest from routine_notice_checks t
+        where t.newsroom_id=$1 and (
+          t.source_id in (select id from sources where newsroom_id=$1 and legal_article_url_identity(url)=any($2::text[]))
+          or t.capture_event_id in (select id from capture_events where newsroom_id=$1 and legal_article_url_identity(source_url)=any($2::text[]))
+          or t.artifact_version_id in (select id from artifact_versions where newsroom_id=$1 and legal_article_url_identity(url)=any($2::text[]))
+          or t.artifact_blob_id in (select id from artifact_blobs where newsroom_id=$1 and legal_article_url_identity(original_url)=any($2::text[]))
+        ) order by t.id`,
+      [room, urls],
+    );
+    for (const row of routineChecks) {
+      capturedCopies.push({ table: "routine_notice_checks", id: row.id });
+      captureFingerprints.push({ table: "routine_notice_checks", ...row });
+    }
+    const routineCandidateRefs = await sql.query<{ id: number; digest: string }>(
+      `select r.id,md5(to_jsonb(r)::text) as digest
+         from routine_notice_candidate_refs r join routine_notice_checks c on c.id=r.check_id
+        where c.newsroom_id=$1 and c.id=any($2::int[]) order by r.id`,
+      [room, routineChecks.map((row) => row.id)],
+    );
+    for (const row of routineCandidateRefs) {
+      capturedCopies.push({ table: "routine_notice_candidate_refs", id: row.id });
+      captureFingerprints.push({ table: "routine_notice_candidate_refs", ...row });
+    }
+  }
   blockers.push(...(await foreignReferences(sql, room, copies)));
   const reviewPending =
     capturedCopies.length > 0 ||

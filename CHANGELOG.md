@@ -12,6 +12,8 @@ Current release: **0.6.30**.
 
 - Pure structural contracts cover the six approved routine-notice families without claiming truth, authority, eligibility or publication readiness. Bounded adapters can read saved PrimeGov meeting data and Schema.org Event JSON-LD for library, parks and community-arts logistics; unsupported or ambiguous input is refused explicitly. These adapters do not fetch, store, schedule, draft or publish notices.
 
+- Owners can manually fetch and check approved library, parks/recreation and community/arts sources for Schema.org Event data. Structural results and exact captured HTML stay private and bound to the checked source; they remain unverified and create no monitor, lead, draft, article or publication. The other three approved formats report that their check adapters are unavailable.
+
 - The Queue can start an editor-selected batch of up to five eligible leads
   with one explicit Local model, Claude Code, Codex Terra, or Codex Sol
   runtime. Batch admission is all-or-nothing; once queued, each lead retains

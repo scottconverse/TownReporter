@@ -217,6 +217,16 @@ schedule for manual resume without promising a reset time. Server links to the
 scan history and queue, where the owner reviews filed leads. This path does not
 draft, publish or send digests.
 
+Server also lets the owner manually check an approved library,
+parks/recreation or community/arts source for Schema.org Event data. A check
+stores bounded captured HTML and reports structurally parsed candidates,
+refusals and conflicts. Parsed fields remain unverified: the check does not
+establish the issuer, facts, eligibility, completeness or authority. The other
+three approved notice formats report that their adapters are unavailable.
+These checks create no monitor, lead, draft, article or publication. Only the
+owner can open the exact captured HTML bound to a check; changed, removed or
+repointed evidence is refused.
+
 ## The queue
 
 `/desk/queue` — everything that might be news, scored and sorted.

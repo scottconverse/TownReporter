@@ -158,6 +158,11 @@ export type OcrOptions = {
     >
   >;
 };
+
+export type IngestOptions = OcrOptions & {
+  /** A caller may accept bounded raw HTML without a rendered-page fallback. */
+  acceptRawHtml?: (html: string) => boolean;
+};
 export type OcrResult = {
   text: string;
   pages: PdfPage[];
@@ -539,12 +544,12 @@ function clean(doc: IngestDocument): IngestDocument {
 
 export async function ingestDocument(
   raw: string,
-  ocrOptions?: OcrOptions,
+  ocrOptions?: IngestOptions,
 ): Promise<IngestDocument> {
   return clean(await ingestDocumentRaw(raw, ocrOptions));
 }
 
-async function ingestDocumentRaw(raw: string, ocrOptions?: OcrOptions): Promise<IngestDocument> {
+async function ingestDocumentRaw(raw: string, ocrOptions?: IngestOptions): Promise<IngestDocument> {
   let responseChain: string[] = [];
   const empty = (over: Partial<IngestDocument>): IngestDocument => ({
     ok: false,
@@ -743,7 +748,12 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: OcrOptions): Promise<
     let outText = extracted.text;
     let outTitle = extracted.title || title;
     let method = extracted.method === "readability" ? "readability" : "heuristic";
-    if (needsRenderedFetch(url, text, body, outText.length) && typeof window === "undefined") {
+    const rawHtmlAccepted = ocrOptions?.acceptRawHtml?.(body) === true;
+    if (
+      !rawHtmlAccepted &&
+      needsRenderedFetch(url, text, body, outText.length) &&
+      typeof window === "undefined"
+    ) {
       const { fetchRenderedPage } = await import("./render-fetch.ts");
       const rendered = await fetchRenderedPage(url.toString());
       if (rendered && rendered.text.length > Math.min(outText.length, 400)) {
