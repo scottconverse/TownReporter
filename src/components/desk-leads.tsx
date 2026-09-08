@@ -33,6 +33,9 @@ export function LeadRowView({
   onDraft,
   drafting = false,
   draftNotice = null,
+  batchSelected = false,
+  batchDisabled = false,
+  onBatchSelect,
   roomy = false,
 }: {
   lead: LeadRow;
@@ -52,6 +55,9 @@ export function LeadRowView({
   onDraft?: (modelChoice: StoryModelChoice) => void;
   drafting?: boolean;
   draftNotice?: { kind: "ok" | "err"; text: string } | null;
+  batchSelected?: boolean;
+  batchDisabled?: boolean;
+  onBatchSelect?: (selected: boolean) => void;
   roomy?: boolean;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
@@ -62,6 +68,18 @@ export function LeadRowView({
     <div className={"lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")}>
       <Score v={score} />
       <div className="lead-main">
+        {onBatchSelect ? (
+          <label className="meta">
+            <input
+              type="checkbox"
+              checked={batchSelected}
+              disabled={batchDisabled}
+              aria-label={`Select ${lead.headline} for batch drafting`}
+              onChange={(event) => onBatchSelect(event.target.checked)}
+            />{" "}
+            Select for batch drafting
+          </label>
+        ) : null}
         <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="hl-link">
           {lead.headline}
         </Link>

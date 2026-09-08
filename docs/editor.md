@@ -194,6 +194,21 @@ row and names the provider the server actually queued. **Open** takes you to
 the workbench to watch the draft land and edit it. Nothing prints from this
 list.
 
+### Draft selected leads
+
+The **Draft selected leads** bar prepares up to five eligible Queue leads as
+one atomic batch. Tick the leads, then choose exactly one runtime: **Local
+model**, **Claude Code**, **Codex Terra**, or **Codex Sol**. It deliberately
+does not offer Automatic, a gateway, or an API fallback. Each lead keeps its
+saved research scope. If the selected runtime is unavailable, or one selected
+lead cannot be queued, the batch does not start and the Queue explains why.
+
+After a batch starts, its saved runtime and each lead's queued, running,
+completed, or failed state remain visible with a link to that lead's
+workbench. One failed lead does not rewrite the status of the others. Batch
+drafting creates editable drafts only; opening, checking, and publishing a
+story remain editor actions.
+
 Need to connect a provider? Open **Set up a writing model** under the picker.
 The same help is on the workbench and Opinion form. It links installation and
 operator instructions, explains signing in on the server's account, and tells

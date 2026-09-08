@@ -37,6 +37,23 @@ export type PerformDraftWorkDeps = {
   setJobModelChoice?: typeof setJobModelChoice;
   setJobStage?: typeof setJobStage;
   setJobFailoverNote?: typeof setJobFailoverNote;
+  batchChatAdapters?: {
+    claude: (input: {
+      system: string;
+      user: string;
+      model: string;
+      timeoutMs: number;
+      noTools?: boolean;
+    }) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
+    codex: (input: {
+      system: string;
+      user: string;
+      model: string;
+      timeoutMs: number;
+    }) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
+    local: typeof import("./ai.ts").grokChat;
+  };
+  batchOcrAdapters?: import("./ocr.ts").OcrAdapters;
 };
 
 /**

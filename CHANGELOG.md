@@ -6,6 +6,11 @@ Current release: **0.6.29**.
 
 - Newspaper section changes now require an unsaved review before saving. The review shows navigation, reporting guidance and accepted-source changes; returning to edit or a refused save preserves the draft.
 
+- The Queue can start an editor-selected batch of up to five eligible leads
+  with one explicit Local model, Claude Code, Codex Terra, or Codex Sol
+  runtime. Batch admission is all-or-nothing; once queued, each lead retains
+  its own status and workbench link. Automatic, gateway, and API fallback are
+  excluded. Batch drafting never publishes a story.
 ## 0.6.29 — 2026-09-07
 
 - Draft reporting keeps the originating newsroom's paper identity, captures and provenance. Public captured records, histories and comparisons stay within the public edition; sharing a source URL does not expose another newsroom's evidence. Mismatched capture/version references are excluded. Historical records are not reassigned or rewritten.
