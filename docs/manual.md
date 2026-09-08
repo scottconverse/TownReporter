@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.28 · 7 September 2026**
+**Version 0.6.29 · 7 September 2026**
 
 **Documentation scope:** The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from
@@ -111,17 +111,20 @@ the same order the software performs it.
 Corrections are public. Editorial policy is to correct a published story openly; a correction
 runs as a dated note above it.
 
-**Delete is always available**, before or after printing — a lead filed against
+**Ordinary Delete works before or after printing** — a lead filed against
 the wrong person, a scan that swept up something private, a story that should
 never have run. Kill is not delete: a killed lead stays on the desk under
 Killed. Delete removes the thing. Each one confirms in place and says what it
 costs; taking a story off the paper says plainly that its URL becomes a 404 and
 that a correction is what the paper normally does instead.
 
-**Nothing deleted is gone straight away.** A copy waits 30 days under _Recently
+**Ordinary Delete keeps a recoverable copy for 30 days** under _Recently
 deleted_ on the Server page, and an **Undo** appears where the delete happened.
 Restoring puts the row back with its original id, so an article's corrections
 and an editorial's fact sheet come back attached rather than orphaned.
+
+The separate [owner legal-removal workflow](#legal-removal-owner-workflow) follows
+its selected retention or destruction policy and has no Undo.
 
 ![A published story](images/02-article.png)
 
@@ -195,8 +198,8 @@ One press reads every watched source, hashes it against the last snapshot, and
 files what changed as leads. It is a button, not a loop: it runs when you ask.
 Previous scans are listed underneath with what each one found.
 
-The current candidate also adds an owner-configured daily ordinary scan on the
-Server page; it remains pending normal CI and release. It starts disabled. The
+The owner can also configure a daily ordinary scan on the
+Server page. It starts disabled. The
 owner selects up to 12 accepted sources from any reporting beat, a local time
 in the paper's timezone, and one explicit runtime: the selected local model,
 Claude Code subscription CLI, Codex Terra subscription CLI or Codex Sol
