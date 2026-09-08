@@ -41,6 +41,8 @@ The owner manages sections in **Server → Newspaper sections**, below Paper set
 
 For reporting sections, enter a reporting brief and scan instructions, then select accepted Sources. **Scan → Scan scope** offers General or a section. A section run uses only its assigned accepted sources and saves the guidance and source IDs with the queued run. Later configuration edits do not change that run; a source dropped before execution is excluded. A section without accepted sources cannot start. General retains all accepted sources.
 
+Choose **Review changes** before saving. The unsaved review shows every changed section's name, navigation position, visibility, replacement, reporting brief, scan instructions, and accepted sources with both names and URLs. **Back to editing** preserves the draft; only **Confirm and apply** writes it. A failed or stale save also keeps the draft available for correction.
+
 **Preview changes** shows proposed navigation and retirement impact without saving. **Cancel changes** discards the proposal. **Apply changes** saves, confirms the result and links to the newspaper. If another owner tab saved first, the stale save is refused and your edits remain visible; **Reload saved configuration** explicitly replaces them with the saved version.
 
 Retire a section only into an active reporting section. Review the count of affected leads, drafts and articles, then use **Confirm retirement and apply**. Their section changes; their identities, article URLs and text remain. Old section links follow the replacement, including later retirements. Opinion and About remain reserved page routes: they cannot retire and do not run section scans. Their section-list labels and visibility do not remove the permanent page links.

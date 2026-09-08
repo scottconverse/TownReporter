@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { InkButton, inputClass } from "./desk-chrome";
 import { editorSections, applySections } from "@/lib/news/sections";
-import type { Section, SectionConfig } from "@/lib/news/section-types";
+import { sectionPreviewChanges, type Section, type SectionConfig } from "@/lib/news/section-types";
 
 export function SectionsSetup() {
   const query = useQuery({ queryKey: ["editor-sections"], queryFn: () => editorSections() });
@@ -25,6 +25,7 @@ export function SectionsSetup() {
   const retiring = config.sections.some(
     (s) => s.replacementKey && !query.data!.sections.find((p) => p.key === s.key)?.replacementKey,
   );
+  const previewChanges = draft ? sectionPreviewChanges(query.data, draft, query.data.sources) : [];
   const edit = (key: string, patch: Partial<Section>) => {
     setDraft({
       ...config,
@@ -89,7 +90,7 @@ export function SectionsSetup() {
       ) : null}
       {preview ? (
         <div className="my-5 border-y-2 border-rule py-5">
-          <h4 className="font-display text-xl">Newspaper navigation preview · not saved</h4>
+          <h4 className="font-display text-xl">Review section changes · not saved</h4>
           <div className="mt-3 flex flex-wrap gap-4" aria-label="Preview section order">
             {config.sections
               .filter((s) => s.visible && !s.replacementKey && s.key !== "about")
@@ -98,6 +99,75 @@ export function SectionsSetup() {
                   {s.name}
                 </span>
               ))}
+          </div>
+          <div className="mt-5 space-y-4" aria-label="Unsaved section changes">
+            {previewChanges.map((change) => (
+              <section className="border border-rule p-4" key={change.key}>
+                <h5 className="font-semibold">
+                  {change.nameAfter} · {change.key}
+                </h5>
+                <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <dt className="font-semibold">Name</dt>
+                    <dd>
+                      {change.nameBefore ?? "New section"} → {change.nameAfter}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-semibold">Navigation position</dt>
+                    <dd>
+                      {change.positionBefore ?? "New"} → {change.positionAfter}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-semibold">Visible</dt>
+                    <dd>
+                      {change.visibleBefore == null ? "New" : change.visibleBefore ? "Yes" : "No"} →{" "}
+                      {change.visibleAfter ? "Yes" : "No"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-semibold">Replacement</dt>
+                    <dd>
+                      {change.replacementBefore ?? "None"} → {change.replacementAfter ?? "None"}
+                    </dd>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <dt className="font-semibold">Reporting brief</dt>
+                    <dd className="whitespace-pre-wrap">
+                      {change.briefBefore || "Empty"} → {change.briefAfter || "Empty"}
+                    </dd>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <dt className="font-semibold">Scan instructions</dt>
+                    <dd className="whitespace-pre-wrap">
+                      {change.instructionsBefore || "Empty"} → {change.instructionsAfter || "Empty"}
+                    </dd>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <dt className="font-semibold">Accepted sources</dt>
+                    <dd>
+                      <p className="break-all">
+                        Before:{" "}
+                        {change.sourcesBefore.length
+                          ? change.sourcesBefore
+                              .map((source) => `${source.title} · ${source.url}`)
+                              .join("; ")
+                          : "None"}
+                      </p>
+                      <p className="break-all">
+                        After:{" "}
+                        {change.sourcesAfter.length
+                          ? change.sourcesAfter
+                              .map((source) => `${source.title} · ${source.url}`)
+                              .join("; ")
+                          : "None"}
+                      </p>
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+            ))}
           </div>
           {config.sections
             .filter(
@@ -346,7 +416,7 @@ export function SectionsSetup() {
           tone={retiring && preview ? "danger" : "solid"}
           disabled={busy || !draft}
           onClick={() => {
-            if (retiring && !preview) {
+            if (!preview) {
               setPreview(true);
               return;
             }
@@ -355,11 +425,11 @@ export function SectionsSetup() {
         >
           {busy
             ? "Applying…"
-            : retiring
-              ? preview
+            : preview
+              ? retiring
                 ? "Confirm retirement and apply"
-                : "Review retirement impact"
-              : "Apply changes"}
+                : "Confirm and apply"
+              : "Review changes"}
         </InkButton>
         <InkButton
           tone="ghost"
