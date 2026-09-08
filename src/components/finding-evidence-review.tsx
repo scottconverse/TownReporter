@@ -10,6 +10,7 @@ import {
 } from "@/lib/news/finding-evidence-review";
 import { InkButton } from "@/components/desk-chrome";
 import { BusyLine, Notice } from "@/components/states";
+import { canRebaseDirtyEvidencePeers } from "@/lib/news/finding-evidence-peer";
 
 type JudgmentDraft = {
   value: FindingJudgment;
@@ -198,16 +199,7 @@ export function FindingEvidenceReviewPanel({
       dirtyKeys.current.delete(variables.findingKey);
       const peerKeys = [...dirtyKeys.current];
       const previous = reviewAtDraftStart.current;
-      const peersUnchanged = Boolean(
-        previous &&
-        previous.draftId === result.review.draftId &&
-        previous.contentToken === result.review.contentToken &&
-        peerKeys.every((key) => {
-          const before = previous.rows.find((row) => row.key === key);
-          const after = result.review.rows.find((row) => row.key === key);
-          return JSON.stringify(before) === JSON.stringify(after);
-        }),
-      );
+      const peersUnchanged = canRebaseDirtyEvidencePeers(previous, result.review, peerKeys);
       qc.setQueryData(["finding-evidence-review", leadId, reviewRevision], result);
       appliedToken.current = result.review.evidenceToken;
       if (peerKeys.length > 0 && peersUnchanged) {
@@ -221,7 +213,7 @@ export function FindingEvidenceReviewPanel({
         setReloadRequired(false);
         setFeedback({
           kind: "ok",
-          text: "Evidence judgment saved. Unsaved edits to another finding were retained.",
+          text: "Evidence judgment saved. Unsaved edits to another evidence item were retained.",
         });
       } else if (peerKeys.length > 0) {
         setReloadRequired(true);
