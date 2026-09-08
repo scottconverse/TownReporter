@@ -32,6 +32,8 @@ import {
   titlesOverlap,
   collapsePrintedDuplicates,
   draftHasLanded,
+  expectedDraftJobHasLanded,
+  recoverExpectedDraftJobId,
   workingLeads,
   workingQueueEmptyCopy,
   worthItemOnDesk,
@@ -626,6 +628,108 @@ describe("Worth a Look presentation", () => {
         draft: { body: "old brief", updated_at: "2026-08-27T02:00:10.000Z" },
       }),
       true,
+    );
+  });
+
+  it("does not land a recent unchanged draft until the expected job completes", () => {
+    const input = {
+      expectedJobId: 42,
+      hadBodyAtStart: true,
+      bodyAtStart: "old brief",
+      startedAt: Date.parse("2026-08-27T02:00:04.000Z"),
+      draft: { body: "old brief", updated_at: "2026-08-27T02:00:01.000Z" },
+    };
+    assert.equal(
+      expectedDraftJobHasLanded({ ...input, job: { id: 42, status: "running" } }),
+      false,
+    );
+    assert.equal(
+      expectedDraftJobHasLanded({ ...input, job: { id: 41, status: "completed" } }),
+      false,
+    );
+    assert.equal(
+      expectedDraftJobHasLanded({ ...input, job: { id: 42, status: "completed" } }),
+      true,
+    );
+  });
+
+  it("recovers only a newer open job after acknowledgement is lost", () => {
+    assert.equal(
+      recoverExpectedDraftJobId({
+        expectedJobId: null,
+        priorJobId: 41,
+        priorJobWasOpen: false,
+        attemptInProgress: true,
+        awaitingAcknowledgement: false,
+        job: { id: 41, status: "completed" },
+      }),
+      null,
+    );
+    assert.equal(
+      recoverExpectedDraftJobId({
+        expectedJobId: null,
+        priorJobId: 41,
+        priorJobWasOpen: false,
+        attemptInProgress: true,
+        awaitingAcknowledgement: true,
+        job: { id: 42, status: "running" },
+      }),
+      null,
+    );
+    assert.equal(
+      recoverExpectedDraftJobId({
+        expectedJobId: null,
+        priorJobId: 41,
+        priorJobWasOpen: false,
+        attemptInProgress: true,
+        awaitingAcknowledgement: false,
+        job: { id: 42, status: "running" },
+      }),
+      42,
+    );
+    assert.equal(
+      recoverExpectedDraftJobId({
+        expectedJobId: null,
+        priorJobId: 42,
+        priorJobWasOpen: true,
+        attemptInProgress: true,
+        awaitingAcknowledgement: false,
+        job: { id: 42, status: "completed" },
+      }),
+      42,
+    );
+    assert.equal(
+      recoverExpectedDraftJobId({
+        expectedJobId: null,
+        priorJobId: 41,
+        priorJobWasOpen: false,
+        attemptInProgress: true,
+        awaitingAcknowledgement: false,
+        job: { id: 42, status: "failed" },
+      }),
+      42,
+    );
+    assert.equal(
+      recoverExpectedDraftJobId({
+        expectedJobId: null,
+        priorJobId: null,
+        priorJobWasOpen: false,
+        attemptInProgress: true,
+        awaitingAcknowledgement: false,
+        job: { id: 42, status: "completed" },
+      }),
+      42,
+    );
+    assert.equal(
+      recoverExpectedDraftJobId({
+        expectedJobId: null,
+        priorJobId: null,
+        priorJobWasOpen: false,
+        attemptInProgress: false,
+        awaitingAcknowledgement: false,
+        job: { id: 42, status: "completed" },
+      }),
+      null,
     );
   });
 

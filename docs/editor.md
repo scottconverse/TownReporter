@@ -290,6 +290,20 @@ Draft is allowed to be wrong. Read it against the documents.
 
 Reporter-notebook leftovers (`What is solid`, `Next checks are…`) are stripped from the body so they cannot leak onto the paper. If you need that thinking, put it in notes.
 
+### Recorded finding evidence
+
+Draft reporting uses the originating newsroom's paper settings and captured records. Public evidence links and comparisons expose records from the public newspaper's newsroom only; a matching source URL does not authorize access to another newsroom's captures. Historical capture references that point across newsrooms or to a different source URL are excluded rather than guessed or repaired.
+
+When a draft has recorded findings, **Finding evidence review** lists those findings only; it is not an inventory of every claim in the story. Each row shows the recorded passage and locator, its cited captured record, and mechanical checks for whether that record is available, whether the passage appears there, and whether a newer capture is available. Those checks do not decide whether a finding is true: a passage match only confirms that the recorded words occur in the cited version, a missing record is not a contradiction, and a newer capture does not make the older record false.
+
+Choose an editor judgment of **Supports**, **Does not support**, **Contradicts**, or **Needs reporting**, and optionally record why. **Supports** and **Contradicts** require a readable cited captured version; **Contradicts** also requires a reason. **Does not support** means the cited material is insufficient; it does not assert contrary evidence. Save the draft before saving a judgment. Changes to the draft or cited record can reopen saved judgments. Another editor's save makes an older view refuse; reload the current review before deciding again. This adds no automatic judgment or publication permission, and the existing draft-wide keep/remove decision remains available.
+
+**View cited captured version** opens the stored text privately inside the workbench. **Review newer capture** opens the newer stored version for comparison; it does not automatically change your judgment. A failed reload keeps your unsaved judgment and reason. A successful explicit reload discards those unsaved edits.
+
+After **Save edits**, the review refreshes for the saved draft without reloading the page. Judgment controls remain unavailable while a replacement draft is queued or running, or while a draft-wide evidence decision is saving. When the replacement job completes, the workbench loads its draft and review together.
+
+If an older record contains incomplete or unreadable structured findings, the panel says so and offers no judgment controls. Review the original material or generate a replacement draft; retrying does not repair the saved record.
+
 ### Reporting notes (do not print)
 
 The notes pane is the notebook:

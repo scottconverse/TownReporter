@@ -38,6 +38,7 @@ async function ensureArticlesSchema() {
   await sql.query(`alter table articles add column if not exists form text not null default 'reported'`);
   await sql.query(`alter table articles add column if not exists found_note text not null default ''`);
   await sql.query(`alter table articles add column if not exists unanswered text not null default '[]'`);
+  await sql.query(`alter table articles add column if not exists newsroom_id integer not null default 1`);
 }
 
 describe("public evidence publication", { timeout: 60000 }, () => {
@@ -178,6 +179,150 @@ describe("capture chronology", () => {
 });
 
 describe("public capture history publication", { timeout: 60000 }, () => {
+  it("does not publish a default-room record cited only by another newsroom", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const stamp = Date.now();
+    const url = `https://example.com/foreign-publication-${stamp}`;
+    const own = await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_outcome)
+      values (${"public-owner"},${1},${url},${"own-unpublished"},${"Own unpublished"},${"OWN UNPUBLISHED TEXT"},${"fetched"})
+      returning id
+    `;
+    await sql`
+      insert into capture_events(user_id,newsroom_id,source_url,http_status,fetch_outcome,version_id,content_hash,trigger_kind)
+      values (${"public-owner"},${1},${url},${200},${"fetched"},${own[0]!.id},${"own-unpublished"},${"draft"})
+    `;
+    await sql`
+      insert into articles(user_id,newsroom_id,slug,headline,dek,body,topic,source_urls,status,published_at,provenance_json,form,found_note,unanswered)
+      values (${"foreign-publisher"},${2},${`foreign-publication-${stamp}`},${"Foreign publication"},${""},${"Body"},${"council"},${JSON.stringify([url])},${"published"},now(),${"[]"},${"reported"},${"[]"},${"[]"})
+    `;
+
+    assert.equal(await loadPublicEvidence(own[0]!.id), null);
+    assert.deepEqual(await listPublicCaptureHistory(url), []);
+    assert.equal(await comparePublishedEvidence({ url }), null);
+  });
+
+  it("does not authorize a foreign-only version merely because its URL is published here", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const stamp = Date.now();
+    const url = `https://example.com/foreign-only-${stamp}`;
+    const foreign = await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_outcome)
+      values (${"foreign-only"},${2},${url},${"foreign-only-hash"},${"Foreign only"},${"FOREIGN ONLY TEXT"},${"fetched"})
+      returning id
+    `;
+    await sql`
+      insert into articles(user_id,newsroom_id,slug,headline,dek,body,topic,source_urls,status,published_at,provenance_json,form,found_note,unanswered)
+      values (${"public-owner"},${1},${`foreign-only-${stamp}`},${"Published URL"},${""},${"Body"},${"council"},${JSON.stringify([url])},${"published"},now(),${"[]"},${"reported"},${"[]"},${"[]"})
+    `;
+    assert.equal(await loadPublicEvidence(foreign[0]!.id), null);
+    assert.deepEqual(await listPublicCaptureHistory(url), []);
+  });
+
+  it("keeps the legacy version fallback and explicit compare inside the public newsroom", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const stamp = Date.now();
+    const url = `https://example.com/fallback-boundary-${stamp}`;
+    const own = await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_outcome)
+      values (${"public-owner"},${1},${url},${"own-fallback"},${"Own fallback"},${"OWN FALLBACK TEXT"},${"fetched"})
+      returning id
+    `;
+    const foreign = await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_outcome)
+      values (${"foreign-owner"},${2},${url},${"foreign-fallback"},${"Foreign fallback"},${"FOREIGN FALLBACK TEXT"},${"fetched"})
+      returning id
+    `;
+    await sql`
+      insert into articles(user_id,newsroom_id,slug,headline,dek,body,topic,source_urls,status,published_at,provenance_json,form,found_note,unanswered)
+      values (${"public-owner"},${1},${`fallback-boundary-${stamp}`},${"Fallback boundary"},${""},${"Body"},${"council"},${JSON.stringify([url])},${"published"},now(),${"[]"},${"reported"},${"[]"},${"[]"})
+    `;
+    const history = await listPublicCaptureHistory(url);
+    assert.deepEqual(history.map((row) => row.version_id), [own[0]!.id]);
+    assert.doesNotMatch(JSON.stringify(history), /FOREIGN FALLBACK TEXT/);
+    assert.equal(
+      await comparePublishedEvidence({ a: own[0]!.id, b: foreign[0]!.id }),
+      null,
+    );
+  });
+
+  it("rejects a public-room capture repointed to another URL's version", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const stamp = Date.now();
+    const publishedUrl = `https://example.com/published-repoint-${stamp}`;
+    const privateUrl = `https://example.com/private-repoint-${stamp}`;
+    const own = await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_outcome)
+      values (${"public-owner"},${1},${publishedUrl},${"public-own"},${"Public own"},${"PUBLIC OWN TEXT"},${"fetched"})
+      returning id
+    `;
+    const privateVersion = await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_outcome)
+      values (${"public-owner"},${1},${privateUrl},${"private-hash"},${"Private other URL"},${"PRIVATE OTHER URL TEXT"},${"fetched"})
+      returning id
+    `;
+    await sql`
+      insert into capture_events(user_id,newsroom_id,source_url,http_status,fetch_outcome,version_id,content_hash,trigger_kind)
+      values (${"public-owner"},${1},${publishedUrl},${200},${"fetched"},${own[0]!.id},${"public-own"},${"draft"})
+    `;
+    const repointed = await sql<{ id: number }>`
+      insert into capture_events(user_id,newsroom_id,source_url,http_status,fetch_outcome,version_id,content_hash,trigger_kind)
+      values (${"public-owner"},${1},${publishedUrl},${200},${"fetched"},${privateVersion[0]!.id},${"private-hash"},${"draft"})
+      returning id
+    `;
+    await sql`
+      insert into articles(user_id,newsroom_id,slug,headline,dek,body,topic,source_urls,status,published_at,provenance_json,form,found_note,unanswered)
+      values (${"public-owner"},${1},${`published-repoint-${stamp}`},${"Published repoint"},${""},${"Body"},${"council"},${JSON.stringify([publishedUrl])},${"published"},now(),${"[]"},${"reported"},${"[]"},${"[]"})
+    `;
+    const history = await listPublicCaptureHistory(publishedUrl);
+    assert.deepEqual(history.map((row) => row.version_id), [own[0]!.id]);
+    assert.ok(history.every((row) => row.capture_event_id !== repointed[0]!.id));
+    assert.doesNotMatch(JSON.stringify(history), /private-hash|Private other URL|PRIVATE OTHER URL TEXT/);
+  });
+
+  it("never exposes another newsroom's version or history for a published-edition URL", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const stamp = Date.now();
+    const url = `https://example.com/shared-public-url-${stamp}`;
+    const own = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, newsroom_id, url, content_hash, title, full_text, fetch_outcome)
+      values (${"public-owner"}, ${1}, ${url}, ${"own-hash"}, ${"Public record"}, ${"Public edition text."}, ${"fetched"})
+      returning id
+    `;
+    const foreign = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, newsroom_id, url, content_hash, title, full_text, fetch_outcome)
+      values (${"foreign-owner"}, ${2}, ${url}, ${"foreign-hash"}, ${"Private foreign record"}, ${"FOREIGN NEWSROOM PRIVATE TEXT"}, ${"fetched"})
+      returning id
+    `;
+    await sql`
+      insert into capture_events(user_id,newsroom_id,source_url,http_status,fetch_outcome,version_id,content_hash,trigger_kind)
+      values
+        (${"public-owner"},${1},${url},${200},${"fetched"},${own[0]!.id},${"own-hash"},${"draft"}),
+        (${"foreign-owner"},${2},${url},${200},${"fetched"},${foreign[0]!.id},${"foreign-hash"},${"draft"})
+    `;
+    const repointed = await sql<{ id: number }>`
+      insert into capture_events(user_id,newsroom_id,source_url,http_status,fetch_outcome,version_id,content_hash,trigger_kind)
+      values (${"public-owner"},${1},${url},${200},${"fetched"},${foreign[0]!.id},${"foreign-repoint"},${"draft"})
+      returning id
+    `;
+    await sql`
+      insert into articles(user_id,newsroom_id,slug,headline,dek,body,topic,source_urls,status,published_at,provenance_json,form,found_note,unanswered)
+      values (${"public-owner"},${1},${`public-boundary-${stamp}`},${"Public boundary"},${""},${"Public body"},${"council"},${JSON.stringify([url])},${"published"},now(),${"[]"},${"reported"},${"[]"},${"[]"})
+    `;
+
+    const leaked = await loadPublicEvidence(foreign[0]!.id);
+    assert.equal(leaked, null, "a foreign newsroom version was readable through a public URL");
+    const history = await listPublicCaptureHistory(url);
+    assert.deepEqual(history.map((row) => row.version_id), [own[0]!.id]);
+    assert.ok(history.every((row) => row.capture_event_id !== repointed[0]!.id));
+    assert.doesNotMatch(JSON.stringify(history), /FOREIGN NEWSROOM PRIVATE TEXT/);
+  });
+
   it("returns every observation in capture order and hides unpublished research URLs", async () => {
     await ensureArticlesSchema();
     const sql = await getSql();
