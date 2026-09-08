@@ -102,6 +102,7 @@ export function FindingEvidenceReviewPanel({
   const [recordRelation, setRecordRelation] = useState<ManualClaimReferenceRelation>("corroborating");
   const dirtyKeys = useRef(new Set<string>());
   const draftToken = useRef("");
+  const manualDraftToken = useRef("");
   const reviewAtDraftStart = useRef<FindingEvidenceReview | null>(null);
   const discardOnReload = useRef(false);
   const appliedToken = useRef("");
@@ -113,6 +114,16 @@ export function FindingEvidenceReviewPanel({
   const review = reviewQuery.data?.ok ? reviewQuery.data.review : null;
   const reviewApplied = Boolean(review && appliedToken.current === review.evidenceToken);
   const localDraftChanged = review ? !sameDraft(currentDraft, review) : false;
+
+  function updateManualClaim(update: (current: ManualClaimForm) => ManualClaimForm) {
+    if (!manualDraftToken.current && review) manualDraftToken.current = review.evidenceToken;
+    setManualClaim(update);
+  }
+
+  function resetManualClaim() {
+    manualDraftToken.current = "";
+    setManualClaim(blankManualClaim());
+  }
 
   useEffect(() => {
     if (!review || appliedToken.current === review.evidenceToken) return;
@@ -146,6 +157,7 @@ export function FindingEvidenceReviewPanel({
       dirtyKeys.current.clear();
       draftToken.current = "";
       reviewAtDraftStart.current = null;
+      resetManualClaim();
       discardOnReload.current = false;
       setReloadRequired(false);
       setFeedback({ kind: "ok", text: "Current evidence review loaded." });
@@ -261,14 +273,14 @@ export function FindingEvidenceReviewPanel({
       if (action === "remove") {
         if (!manualClaim.id) throw new Error("Choose a manual claim to remove.");
         return saveManualClaim({
-          data: { leadId, draftId: review.draftId, evidenceToken: review.evidenceToken, action, id: manualClaim.id },
+          data: { leadId, draftId: review.draftId, evidenceToken: manualDraftToken.current || review.evidenceToken, action, id: manualClaim.id },
         });
       }
       return saveManualClaim({
         data: {
           leadId,
           draftId: review.draftId,
-          evidenceToken: review.evidenceToken,
+          evidenceToken: manualDraftToken.current || review.evidenceToken,
           action,
           id: manualClaim.id,
           fact: manualClaim.fact,
@@ -292,7 +304,7 @@ export function FindingEvidenceReviewPanel({
         setDrafts(draftsFrom(result.review));
         setFeedback({ kind: "ok", text: "Manual claim saved." });
       }
-      setManualClaim(blankManualClaim());
+      resetManualClaim();
       setRecordToAdd("");
     },
     onError: (error) => setFeedback({ kind: "err", text: error instanceof Error ? error.message : "Manual claim could not be saved." }),
@@ -405,14 +417,14 @@ export function FindingEvidenceReviewPanel({
       ) : null}
       {review && reloadRequired ? (
         <Notice kind="warn">
-          The saved review changed while this page has unsaved judgment edits.{" "}
+          The saved review changed while this page has unsaved evidence edits.{" "}
           <button
             type="button"
             className="inline-link"
             onClick={() => void reload()}
             disabled={reviewQuery.isRefetching}
           >
-            Reload current review and discard unsaved judgment edits
+            Reload current review and discard unsaved evidence edits
           </button>
         </Notice>
       ) : null}
@@ -780,11 +792,11 @@ export function FindingEvidenceReviewPanel({
             <label className="mt-3 block text-sm font-medium text-ink" htmlFor="manual-claim-fact">Claim text</label>
             <textarea id="manual-claim-fact" className="mt-1 min-h-24 w-full border border-rule bg-paper p-3 text-sm" maxLength={400}
               disabled={disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired}
-              value={manualClaim.fact} onChange={(event) => setManualClaim((current) => ({ ...current, fact: event.target.value }))} />
+              value={manualClaim.fact} onChange={(event) => updateManualClaim((current) => ({ ...current, fact: event.target.value }))} />
             <label className="mt-3 block text-sm font-medium text-ink" htmlFor="manual-claim-kind">Claim kind</label>
             <select id="manual-claim-kind" className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
               disabled={disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired}
-              value={manualClaim.kind} onChange={(event) => setManualClaim((current) => ({ ...current, kind: event.target.value as ManualClaimForm["kind"] }))}>
+              value={manualClaim.kind} onChange={(event) => updateManualClaim((current) => ({ ...current, kind: event.target.value as ManualClaimForm["kind"] }))}>
               <option value="primary">Primary</option><option value="record">Record</option><option value="news">News</option>
             </select>
             <div className="mt-4 border-t border-rule pt-4">
@@ -807,18 +819,18 @@ export function FindingEvidenceReviewPanel({
                   </select>
                 </label>
                 <InkButton small disabled={!recordToAdd || manualClaim.references.length >= 6 || disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired}
-                  onClick={() => { const versionId = Number(recordToAdd); if (!manualClaim.references.some((reference) => reference.versionId === versionId)) setManualClaim((current) => ({ ...current, references: [...current.references, { versionId, relation: recordRelation }] })); setRecordToAdd(""); }}>
+                  onClick={() => { const versionId = Number(recordToAdd); if (!manualClaim.references.some((reference) => reference.versionId === versionId)) updateManualClaim((current) => ({ ...current, references: [...current.references, { versionId, relation: recordRelation }] })); setRecordToAdd(""); }}>
                   Add record
                 </InkButton>
               </div>
               {manualClaim.references.length ? <ul className="mt-3 space-y-2">{manualClaim.references.map((reference) => {
                 const record = review.manualClaimCaptureOptions.find((candidate) => candidate.versionId === reference.versionId);
-                return <li key={reference.versionId} className="flex flex-wrap items-center justify-between gap-2 border-l border-rule pl-3 text-sm"><span>{record?.title ?? `Captured version ${reference.versionId}`} · {reference.relation}</span><button type="button" className="inline-link" disabled={manualSave.isPending} onClick={() => setManualClaim((current) => ({ ...current, references: current.references.filter((candidate) => candidate.versionId !== reference.versionId) }))}>Remove record</button></li>;
+                return <li key={reference.versionId} className="flex flex-wrap items-center justify-between gap-2 border-l border-rule pl-3 text-sm"><span>{record?.title ?? `Captured version ${reference.versionId}`} · {reference.relation}</span><button type="button" className="inline-link" disabled={manualSave.isPending} onClick={() => updateManualClaim((current) => ({ ...current, references: current.references.filter((candidate) => candidate.versionId !== reference.versionId) }))}>Remove record</button></li>;
               })}</ul> : <p className="mt-3 text-sm text-muted">Select at least one exact captured record.</p>}
             </div>
             <div className="mt-4 flex flex-wrap gap-3">
               <InkButton disabled={!manualClaim.fact.trim() || manualClaim.references.length === 0 || disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired} onClick={() => manualSave.mutate("upsert")}>{manualSave.isPending ? "Saving manual claim…" : manualClaim.id ? "Save manual claim" : "Add manual claim"}</InkButton>
-              {manualClaim.id ? <InkButton tone="quiet" disabled={manualSave.isPending} onClick={() => setManualClaim(blankManualClaim())}>Cancel edit</InkButton> : null}
+              {manualClaim.id ? <InkButton tone="quiet" disabled={manualSave.isPending} onClick={resetManualClaim}>Cancel edit</InkButton> : null}
               {manualClaim.id ? <InkButton tone="danger" disabled={manualSave.isPending} onClick={() => manualSave.mutate("remove")}>Remove manual claim</InkButton> : null}
             </div>
           </div>
@@ -831,7 +843,7 @@ export function FindingEvidenceReviewPanel({
               <div className="mt-4 border-t border-rule pt-3"><p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Selected captured records</p><ul className="mt-2 space-y-3">{row.captures.map((capture, captureIndex) => <li key={`${capture.versionId ?? "missing"}-${captureIndex}`} className="border-l border-rule pl-3 text-sm"><p className="font-medium text-ink">{capture.title ?? capture.url ?? "Captured record"} · {capture.relation}</p><p className="mt-1 text-muted">{captureState(capture)}{capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}</p>{capture.viewHref && capture.versionId != null ? <button type="button" className="inline-link mt-1" onClick={() => captureRead.mutate(capture.versionId!)} disabled={captureRead.isPending}>View selected captured version</button> : null}</li>)}</ul></div>
               <div className="mt-5 border-t border-rule pt-4"><p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Editor judgment</p><label className="mt-2 block text-sm font-medium text-ink" htmlFor={`manual-claim-judgment-${index}`}>Judgment</label><select id={`manual-claim-judgment-${index}`} className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm" value={judgment.value} disabled={!reviewApplied || disabled || save.isPending || manualSave.isPending} onChange={(event) => updateDraft(row.key, { value: event.target.value as FindingJudgment, contraryVersionId: event.target.value === "contradicts" ? judgment.contraryVersionId : null })}>{(Object.keys(judgmentLabels) as FindingJudgment[]).map((value) => <option key={value} value={value}>{judgmentLabels[value]}</option>)}</select><label className="mt-3 block text-sm font-medium text-ink" htmlFor={`manual-claim-reason-${index}`}>Reason {judgment.value === "contradicts" ? "(required for contradiction)" : "(optional)"}</label><textarea id={`manual-claim-reason-${index}`} className="mt-1 min-h-24 w-full border border-rule bg-paper p-3 text-sm" value={judgment.reason} maxLength={2000} disabled={!reviewApplied || disabled || save.isPending || manualSave.isPending} onChange={(event) => updateDraft(row.key, { reason: event.target.value })} />
               {judgment.value === "contradicts" ? <><label className="mt-3 block text-sm font-medium text-ink" htmlFor={`manual-claim-contrary-${index}`}>Explicit contrary captured record</label><select id={`manual-claim-contrary-${index}`} className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm" value={judgment.contraryVersionId ?? ""} disabled={!reviewApplied || disabled || save.isPending || manualSave.isPending} onChange={(event) => updateDraft(row.key, { contraryVersionId: event.target.value ? Number(event.target.value) : null })}><option value="">Choose a contrary record</option>{contrary.map((capture) => <option key={capture.versionId} value={capture.versionId!}>{capture.title ?? capture.url ?? `Captured version ${capture.versionId}`}</option>)}</select></> : null}
-              <div className="mt-4 flex flex-wrap gap-3"><InkButton disabled={!maySave} onClick={() => save.mutate({ findingKey: row.key, judgment, hasReadableCapture: corroborating.length > 0 })}>{save.isPending ? "Saving judgment…" : "Save judgment"}</InkButton><InkButton tone="quiet" small disabled={manualSave.isPending} onClick={() => setManualClaim({ id: row.claim.id, fact: row.claim.fact, kind: row.claim.kind, references: row.captures.filter((capture) => capture.versionId != null).map((capture) => ({ versionId: capture.versionId!, relation: capture.relation })) })}>Edit claim</InkButton></div></div>
+              <div className="mt-4 flex flex-wrap gap-3"><InkButton disabled={!maySave} onClick={() => save.mutate({ findingKey: row.key, judgment, hasReadableCapture: corroborating.length > 0 })}>{save.isPending ? "Saving judgment…" : "Save judgment"}</InkButton><InkButton tone="quiet" small disabled={manualSave.isPending} onClick={() => { manualDraftToken.current = review.evidenceToken; setManualClaim({ id: row.claim.id, fact: row.claim.fact, kind: row.claim.kind, references: row.captures.filter((capture) => capture.versionId != null).map((capture) => ({ versionId: capture.versionId!, relation: capture.relation })) }); }}>Edit claim</InkButton></div></div>
             </article>;
           })}
         </div>

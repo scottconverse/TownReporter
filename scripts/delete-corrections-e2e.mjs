@@ -539,6 +539,23 @@ async function main() {
   await manualClaims.getByLabel("Claim text").fill(
     `TEST FIXTURE: The library recreation room meeting starts at 6:30 p.m. ${stamp}.`,
   );
+  const findingWhileManualFormOpen = review.locator("article").first();
+  await findingWhileManualFormOpen.getByLabel("Judgment").selectOption("does-not-support");
+  await findingWhileManualFormOpen.getByLabel(/Reason/).fill("TEST FIXTURE: update the review token while a manual claim form remains open.");
+  await findingWhileManualFormOpen.getByRole("button", { name: "Save judgment" }).click();
+  await review.getByText("Evidence judgment saved.", { exact: true }).waitFor();
+  await manualClaims.getByRole("button", { name: "Save manual claim" }).click();
+  await review.getByRole("button", { name: "Reload current review and discard unsaved evidence edits" }).waitFor();
+  if ((await manualClaims.getByLabel("Claim text").inputValue()).indexOf("6:30 p.m.") < 0)
+    throw new Error("a refresh discarded the manual claim form after its stale save was refused");
+  await review.getByRole("button", { name: "Reload current review and discard unsaved evidence edits" }).click();
+  await review.getByText("Current evidence review loaded.", { exact: true }).waitFor();
+  if (await manualClaims.getByLabel("Claim text").inputValue())
+    throw new Error("successful explicit reload did not discard the stale manual claim form");
+  await manualClaims.locator("article").first().getByRole("button", { name: "Edit claim" }).click();
+  await manualClaims.getByLabel("Claim text").fill(
+    `TEST FIXTURE: The library recreation room meeting starts at 6:30 p.m. ${stamp}.`,
+  );
   await manualClaims.getByRole("button", { name: "Save manual claim" }).click();
   await review.getByText("Manual claim saved.", { exact: true }).waitFor();
   if ((await manualRow.getByLabel("Judgment").inputValue()) !== "unreviewed")
@@ -550,7 +567,7 @@ async function main() {
     .waitFor();
   if ((await persistedManualClaims.locator("article").first().getByLabel("Judgment").inputValue()) !== "unreviewed")
     throw new Error("manual claim judgment did not remain reopened after reload");
-  step("an editor-created claim keeps only an explicit owned captured record and reopens after an edit");
+  step("an editor-created claim keeps only an explicit owned captured record, refuses a stale open form, and reopens after an edit");
   const newerCaptureButtons = review.getByRole("button", { name: /Review newer capture/ });
   if ((await newerCaptureButtons.count()) !== 2)
     throw new Error("expected a newer-capture action for each duplicate cited passage");
@@ -749,7 +766,7 @@ async function main() {
   };
   await secondTab.route("**/*", blockReviewReload);
   await secondReview
-    .getByRole("button", { name: "Reload current review and discard unsaved judgment edits" })
+    .getByRole("button", { name: "Reload current review and discard unsaved evidence edits" })
     .click();
   await secondReview.getByText("Could not reload the evidence review.").waitFor();
   if (failedReloadRequests === 0) throw new Error("failed reload proof intercepted no review request");

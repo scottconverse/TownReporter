@@ -47,6 +47,11 @@ export type ClaimEvidenceRow = {
 };
 
 export type ManualClaimReferenceRelation = "corroborating" | "contrary" | "context";
+const MANUAL_CLAIM_RELATIONS = new Set<ManualClaimReferenceRelation>([
+  "corroborating",
+  "contrary",
+  "context",
+]);
 type StoredManualClaimReference = {
   versionId: number;
   url: string;
@@ -947,6 +952,8 @@ async function resolvedManualReferences(
     throw new ReviewError("invalid-input", "Choose each captured record only once.");
   if (references.some((reference) => !Number.isInteger(reference.versionId) || reference.versionId < 1))
     throw new ReviewError("invalid-input", "Choose valid captured records.");
+  if (references.some((reference) => !MANUAL_CLAIM_RELATIONS.has(reference.relation)))
+    throw new ReviewError("invalid-input", "Choose a valid relationship for every captured record.");
   const versions = await sql.query<{ id: number; url: string }>(
     "select id,url from artifact_versions where newsroom_id=$1 and id=any($2::int[])",
     [newsroomId, references.map((reference) => reference.versionId)],

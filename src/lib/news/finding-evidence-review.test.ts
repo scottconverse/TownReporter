@@ -229,6 +229,24 @@ describe("finding evidence resolution", () => {
       },
     );
     assert.equal(edited.manualClaimRows[0].judgment.value, "unreviewed");
+    const relationEdited = await persistManualClaim(
+      { newsroomId: room },
+      {
+        leadId,
+        draftId: f.draft.id,
+        evidenceToken: edited.evidenceToken,
+        action: "upsert",
+        id: manual.claim.id,
+        fact: "The council meeting begins at 6:30 p.m.",
+        kind: "record",
+        references: [
+          { versionId: f.cited.id, relation: "context" },
+          { versionId: f.mismatch.id, relation: "contrary" },
+        ],
+      },
+    );
+    assert.equal(relationEdited.manualClaimRows[0].captures[0].relation, "context");
+    assert.equal(relationEdited.manualClaimRows[0].judgment.value, "unreviewed");
     await assert.rejects(
       () => persistManualClaim(
         { newsroomId: room },
@@ -261,6 +279,22 @@ describe("finding evidence resolution", () => {
         },
       ),
       /must still belong to this newsroom/,
+    );
+    await assert.rejects(
+      () => persistManualClaim(
+        { newsroomId: room },
+        {
+          leadId,
+          draftId: f.draft.id,
+          evidenceToken: relationEdited.evidenceToken,
+          action: "upsert",
+          id: null,
+          fact: "Malformed relationship must not persist.",
+          kind: "record",
+          references: [{ versionId: f.cited.id, relation: "poisoned" as never }],
+        },
+      ),
+      /valid relationship/,
     );
   });
 
