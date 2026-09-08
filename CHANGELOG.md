@@ -4,6 +4,8 @@ Current release: **0.6.29**.
 
 ## Unreleased
 
+- Routine notice permissions let an owner prepare, pause and audit exact source-and-format pairs. They do not enable automatic publication. Invalid saved pairs stay inactive through pause until the owner explicitly revokes them or explicitly replaces a changed source address.
+
 - The Queue can start an editor-selected batch of up to five eligible leads
   with one explicit Local model, Claude Code, Codex Terra, or Codex Sol
   runtime. Batch admission is all-or-nothing; once queued, each lead retains

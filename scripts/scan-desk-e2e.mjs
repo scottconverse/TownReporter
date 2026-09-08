@@ -394,6 +394,167 @@ async function draftBatchJourney() {
   step("two selected leads use one explicit runtime, complete, and refresh the Drafted queue count");
 }
 
+async function routineNoticePermissionsJourney(context, observePage) {
+  await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  const panel = page.locator("#routine-notice-permissions");
+  await panel.getByRole("heading", { name: "Routine notice permissions", exact: true }).waitFor();
+  await panel
+    .getByText(
+      "Automatic publication is not available in this version; no items will publish from these settings.",
+    )
+    .waitFor();
+  await panel.getByText("No source-and-format permissions are saved.").waitFor();
+  const sourcesHref = await panel.getByRole("link", { name: "Open Sources" }).getAttribute("href");
+  if (!sourcesHref?.includes("/desk/sources"))
+    throw new Error("routine permissions source link is missing");
+  const linked = await context.newPage();
+  observePage(linked, "routine-sources-link");
+  await linked.goto(`${base}${sourcesHref}`, { waitUntil: "domcontentloaded" });
+  await linked.getByRole("heading", { level: 1, name: "Sources", exact: true }).waitFor();
+  await linked.close();
+  step("owner sees empty routine permissions, no publication capability, and the source link");
+
+  await panel.getByRole("checkbox", { name: "Daily settings source — Library notices" }).check();
+  await panel.getByRole("button", { name: "Save routine permissions" }).click();
+  await panel
+    .getByText(
+      "Permissions saved. Automatic publication is not available in this version; no items will publish from these settings.",
+    )
+    .waitFor();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const reloaded = page.locator("#routine-notice-permissions");
+  if (
+    !(await reloaded
+      .getByRole("checkbox", { name: "Daily settings source — Library notices" })
+      .isChecked())
+  ) {
+    throw new Error("saved routine permission did not survive reload");
+  }
+  await reloaded
+    .getByText(/Revision 1/)
+    .first()
+    .waitFor();
+  step("a source-format permission saves and survives a real reload without enabling publication");
+
+  const other = await context.newPage();
+  observePage(other, "routine-second-tab");
+  other.setDefaultTimeout(45_000);
+  await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  const otherPanel = other.locator("#routine-notice-permissions");
+  await otherPanel
+    .getByRole("heading", { name: "Routine notice permissions", exact: true })
+    .waitFor();
+  await otherPanel
+    .getByRole("checkbox", { name: "Daily settings source — Community and arts event logistics" })
+    .check();
+  await reloaded
+    .getByRole("checkbox", { name: "Daily settings source — Parks and recreation notices" })
+    .check();
+  await reloaded.getByRole("button", { name: "Save routine permissions" }).click();
+  await reloaded.getByText(/Permissions saved\. Automatic publication/).waitFor();
+  await otherPanel.getByRole("button", { name: "Save routine permissions" }).click();
+  await otherPanel.getByText("Routine notice settings changed. Reload before saving.").waitFor();
+  await otherPanel.getByRole("button", { name: "Reload latest settings" }).click();
+  await otherPanel.getByText("Latest routine permissions reloaded.").waitFor();
+  step("a stale routine-permissions tab gets an explicit conflict and reload path");
+
+  await other.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
+  const sourceRow = other.locator("tr", { hasText: "Daily settings source" });
+  await sourceRow.getByRole("button", { name: "Drop", exact: true }).click();
+  await other.getByRole("heading", { name: "Rejected", exact: true }).waitFor();
+  await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  await other.reload({ waitUntil: "domcontentloaded" });
+  await otherPanel.getByText("Saved permissions need attention").waitFor();
+  await otherPanel
+    .getByText(/Saved address: https:\/\/daily-settings-/)
+    .first()
+    .waitFor();
+  await otherPanel.getByRole("checkbox", { name: "Pause routine notice permissions" }).check();
+  let releaseDelayedRoutineSave;
+  const delayedRoutineSave = new Promise((resolve) => {
+    releaseDelayedRoutineSave = resolve;
+  });
+  let enteredDelayedRoutineSave;
+  const routineSaveEntered = new Promise((resolve) => {
+    enteredDelayedRoutineSave = resolve;
+  });
+  let holdRoutineSave = true;
+  await other.route("**/*", async (route) => {
+    const request = route.request();
+    if (
+      holdRoutineSave &&
+      request.method() === "POST" &&
+      request.postData()?.includes('"approvals"')
+    ) {
+      holdRoutineSave = false;
+      enteredDelayedRoutineSave();
+      await delayedRoutineSave;
+    }
+    await route.continue();
+  });
+  await otherPanel.getByRole("button", { name: "Save routine permissions" }).click();
+  await routineSaveEntered;
+  const pauseControl = otherPanel.getByRole("checkbox", {
+    name: "Pause routine notice permissions",
+  });
+  if (!(await pauseControl.isDisabled()))
+    throw new Error("pause stayed editable while its save was pending");
+  const revokeControls = otherPanel.getByRole("button", {
+    name: "Revoke saved permission",
+    exact: true,
+  });
+  if (!(await revokeControls.first().isDisabled())) {
+    throw new Error("revoke stayed editable while its save was pending");
+  }
+  releaseDelayedRoutineSave();
+  await otherPanel.getByText(/Permissions saved\. Automatic publication/).waitFor();
+  await other.unroute("**/*");
+  await otherPanel.getByText("Paused", { exact: true }).waitFor();
+  await otherPanel
+    .getByText(/Saved address: https:\/\/daily-settings-/)
+    .first()
+    .waitFor();
+  step("pausing retains an invalid recorded permission until the owner explicitly revokes it");
+
+  while (
+    await otherPanel.getByRole("button", { name: "Revoke saved permission", exact: true }).count()
+  ) {
+    await otherPanel
+      .getByRole("button", { name: "Revoke saved permission", exact: true })
+      .first()
+      .click();
+  }
+  await otherPanel.getByRole("button", { name: "Save routine permissions" }).click();
+  await otherPanel
+    .getByText(/Revoked/)
+    .first()
+    .waitFor();
+  if (await otherPanel.getByText("Saved permissions need attention").isVisible()) {
+    throw new Error("explicit revocation left an invalid routine permission behind");
+  }
+  mkdirSync(evidenceDir, { recursive: true });
+  await otherPanel.screenshot({
+    path: join(evidenceDir, "routine-notice-permissions-desktop.png"),
+  });
+  await other.setViewportSize({ width: 390, height: 844 });
+  if (!(await other.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
+    throw new Error("routine notice permissions have horizontal overflow at 390px");
+  }
+  await otherPanel.screenshot({ path: join(evidenceDir, "routine-notice-permissions-mobile.png") });
+  await other.getByRole("button", { name: "Dark", exact: true }).click();
+  await other.getByRole("button", { name: "Large", exact: true }).click();
+  if (!(await other.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
+    throw new Error(
+      "routine notice permissions have horizontal overflow at 390px in dark large-text mode",
+    );
+  }
+  await otherPanel.screenshot({
+    path: join(evidenceDir, "routine-notice-permissions-mobile-dark-large.png"),
+  });
+  await other.close();
+  step("routine permissions can pause and revoke without creating a publication");
+}
+
 async function main() {
   const browser = await chromium.launch({ args: ["--no-sandbox", "--disable-dev-shm-usage"] });
   const context = await browser.newContext();
@@ -425,6 +586,7 @@ async function main() {
   await ownTheDesk();
   await theScreenRenders();
   if (dailySettings) await dailySettingsJourney(context, observePage);
+  if (dailySettings) await routineNoticePermissionsJourney(context, observePage);
   await draftBatchJourney();
 
   await browser.close();

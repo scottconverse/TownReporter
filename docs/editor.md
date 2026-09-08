@@ -603,8 +603,9 @@ role or losing the job lease stops the older run before further external work
 or final result writes. A subscription quota error pauses the schedule until
 the owner resumes it manually; the desk does not invent a reset time. Use
 **Open scan history** to inspect scheduled scan results and **Open the queue**
-to review any leads. A daily scan files leads only: it does not draft, publish
-or send digests.
+to review any leads. A daily scan files leads only: it does not draft, publish or send digests.
+
+Routine notice permissions on Server are preparation only. The owner may save exact accepted source-and-format pairs, pause them, and read their recent permission changes; no saved pair enables automatic publication in this version. If a source is later rejected, removed, or changes address, its recorded pair stays inactive. Pause keeps that record. The owner must explicitly revoke it, or explicitly select the current accepted address to replace the prior address; a changed address is never selected automatically.
 
 Owners also have:
 
