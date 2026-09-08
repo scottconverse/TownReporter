@@ -115,7 +115,7 @@ export function SectionsSetup() {
                     </dd>
                   </div>
                   <div>
-                    <dt className="font-semibold">Navigation position</dt>
+                    <dt className="font-semibold">Section order</dt>
                     <dd>
                       {change.positionBefore ?? "New"} → {change.positionAfter}
                     </dd>
