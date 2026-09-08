@@ -159,6 +159,7 @@ function authPopupPlugin(): Plugin {
  * Ticks after boot, then on an interval. Production: GET /api/cron/monitors.
  */
 function darkDeskMonitorPlugin(): Plugin {
+  let stopScheduler: (() => void) | undefined;
   return {
     name: "townreporter:dark-desk-monitors",
     apply: "serve",
@@ -220,7 +221,12 @@ function darkDeskMonitorPlugin(): Plugin {
         clearTimeout(jobsFirst);
         clearInterval(jobsId);
       };
+      stopScheduler = stop;
       server.httpServer?.once("close", stop);
+    },
+    closeBundle() {
+      stopScheduler?.();
+      stopScheduler = undefined;
     },
   };
 }
