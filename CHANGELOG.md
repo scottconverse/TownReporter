@@ -10,7 +10,13 @@ Current release: **0.6.28**.
   its own status and workbench link. Automatic, gateway, and API fallback are
   excluded. Batch drafting never publishes a story.
 
+- Draft reporting keeps the originating newsroom's paper identity, captures and provenance. Public captured records, histories and comparisons stay within the public edition; sharing a source URL does not expose another newsroom's evidence. Mismatched capture/version references are excluded. Historical records are not reassigned or rewritten.
+
+- Saving story edits refreshes finding-review controls without a page reload. Judgments stay disabled during a replacement draft or a pending evidence decision. The workbench follows the actual draft job through completion and lost-response recovery instead of mistaking a recently saved old draft for its replacement.
+
 - Completed jobs keep their successful status if redundant completion bookkeeping or a late worker error occurs. Ordinary running jobs still report success or failure, and replaced claims remain protected.
+
+- The story workbench can review recorded findings against private captured text, distinguish missing/mismatched/newer records, and save explicit editor judgments. Stale draft/evidence views refuse saves; failed reloads retain unsaved judgments. Malformed historical structured findings are disclosed as unreadable. This is not exhaustive claim coverage, independent fact-checking or automatic publication permission.
 
 - Multi-source drafting preserves complete structured provenance, findings and unanswered questions through saving and publication. Raw character truncation no longer corrupts their JSON. Previously damaged records are not guessed or rewritten.
 

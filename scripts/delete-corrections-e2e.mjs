@@ -33,12 +33,15 @@
 import { chromium } from "playwright";
 import pg from "pg";
 import { fromCrossJSON, toJSONAsync } from "seroval";
+import { mkdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
 
-const base = checkedUrl(
-  process.env.DELETE_CORR_BASE_URL || "http://127.0.0.1:8080",
-).replace(/\/$/, "");
+const base = checkedUrl(process.env.DELETE_CORR_BASE_URL || "http://127.0.0.1:8080").replace(
+  /\/$/,
+  "",
+);
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -66,6 +69,9 @@ const foreignSlug = `foreign-published-${stamp}`;
 const unpublishedSlug = `own-unpublished-${stamp}`;
 const missingSlug = `missing-${stamp}`;
 const foreignNewsroomId = 820_003;
+const evidenceArtifactDir = resolve(
+  process.env.FINDING_EVIDENCE_ARTIFACT_DIR || "../finding-evidence-proof",
+);
 
 let page;
 let addCorrectionUrl;
@@ -80,16 +86,28 @@ function step(name) {
 async function callObservedAddCorrection(data) {
   if (!addCorrectionUrl) throw new Error("the correction server-function request was not observed");
   const body = JSON.stringify(await toJSONAsync({ data }));
-  const response = await page.evaluate(async ({ url, body }) => {
-    const res = await fetch(url, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json", "x-tsr-serverFn": "true" },
-      body,
-    });
-    return { status: res.status, serialized: res.headers.has("x-tss-serialized"), body: await res.json() };
-  }, { url: addCorrectionUrl, body });
-  if (response.status !== 200) throw new Error(`correction server function returned HTTP ${response.status}`);
+  const response = await page.evaluate(
+    async ({ url, body }) => {
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          "x-tsr-serverFn": "true",
+        },
+        body,
+      });
+      return {
+        status: res.status,
+        serialized: res.headers.has("x-tss-serialized"),
+        body: await res.json(),
+      };
+    },
+    { url: addCorrectionUrl, body },
+  );
+  if (response.status !== 200)
+    throw new Error(`correction server function returned HTTP ${response.status}`);
   const decoded = response.serialized ? fromCrossJSON(response.body, {}) : response.body;
   return decoded?.result ?? decoded;
 }
@@ -170,6 +188,157 @@ async function seedLocatorFinding(slug) {
   );
 }
 
+/**
+ * This is a direct database fixture because no editor control can create a
+ * recorded finding with a cited capture, a deliberately mismatched excerpt,
+ * or a newer version on demand. It uses the same real Postgres database as
+ * the served built application, and every visible sentence says TEST FIXTURE
+ * so this is never mistaken for reporting.
+ */
+async function seedFindingEvidenceReview({ newsroomId, userId }) {
+  const sourceUrl = `https://library.example.test/recreation-update-${stamp}`;
+  await pool.query("insert into section_config(newsroom_id) values($1) on conflict do nothing", [
+    newsroomId,
+  ]);
+  await pool.query(
+    `insert into newsroom_sections(newsroom_id,key,name,position,visible)
+     select $1,'community','Community',coalesce(max(position),-1)+1,true
+       from newsroom_sections where newsroom_id=$1
+     on conflict(newsroom_id,key) do nothing`,
+    [newsroomId],
+  );
+  const section = await pool.query(
+    `select count(*)::int n from newsroom_sections
+      where newsroom_id=$1 and key='community' and replacement_key is null`,
+    [newsroomId],
+  );
+  if (section.rows[0]?.n !== 1)
+    throw new Error("finding evidence fixture did not configure its community section");
+  const lead = await pool.query(
+    `insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,newsworthiness)
+     values($1,$2,$3,$4,'community','drafted',$5,8) returning id`,
+    [
+      userId,
+      newsroomId,
+      `TEST FIXTURE — Library recreation center update ${stamp}`,
+      "TEST FIXTURE: browser evidence-review coverage for a community record.",
+      JSON.stringify([sourceUrl]),
+    ],
+  );
+  const legacyLead = await pool.query(
+    `insert into leads(user_id,newsroom_id,headline,why,topic,status)
+     values($1,$2,$3,$4,'community','drafted') returning id`,
+    [
+      userId,
+      newsroomId,
+      `TEST FIXTURE — Legacy library note ${stamp}`,
+      "Legacy empty-review coverage.",
+    ],
+  );
+  const malformedLead = await pool.query(
+    `insert into leads(user_id,newsroom_id,headline,why,topic,status)
+     values($1,$2,$3,$4,'community','drafted') returning id`,
+    [
+      userId,
+      newsroomId,
+      `TEST FIXTURE — Incomplete structured findings ${stamp}`,
+      "Malformed structured finding refusal coverage.",
+    ],
+  );
+  const cited = await pool.query(
+    `insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,captured_at)
+     values($1,$2,$3,'fixture-cited',$4,$5,'2026-09-07T08:00:00Z') returning id`,
+    [
+      userId,
+      newsroomId,
+      sourceUrl,
+      "TEST FIXTURE — Library agenda",
+      "The library board approved the recreation room update Tuesday.",
+    ],
+  );
+  const newer = await pool.query(
+    `insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,captured_at)
+     values($1,$2,$3,'fixture-newer',$4,$5,'2026-09-07T09:00:00Z') returning id`,
+    [
+      userId,
+      newsroomId,
+      sourceUrl,
+      "TEST FIXTURE — Library agenda update",
+      "The recreation room update was reconsidered Wednesday.",
+    ],
+  );
+  const mismatch = await pool.query(
+    `insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,captured_at)
+     values($1,$2,$3,'fixture-mismatch',$4,$5,'2026-09-07T08:00:00Z') returning id`,
+    [
+      userId,
+      newsroomId,
+      `https://library.example.test/budget-${stamp}`,
+      "TEST FIXTURE — Library budget",
+      "The fixture budget contains no deadline passage.",
+    ],
+  );
+  const capture = await pool.query(
+    `insert into capture_events(user_id,newsroom_id,source_url,fetch_outcome,version_id)
+     values($1,$2,$3,'fetched',$4) returning id`,
+    [userId, newsroomId, sourceUrl, cited.rows[0].id],
+  );
+  const findings = [
+    {
+      text: `TEST FIXTURE: The library board approved the recreation room update ${stamp}.`,
+      source_urls: [sourceUrl],
+      artifact_version_ids: [cited.rows[0].id, 999999999],
+      capture_event_ids: [capture.rows[0].id],
+      locators: ["agenda paragraph 4"],
+      excerpt: "approved the recreation room update Tuesday",
+    },
+    {
+      text: `TEST FIXTURE: The library budget lists a deadline ${stamp}.`,
+      source_urls: [`https://library.example.test/budget-${stamp}`],
+      artifact_version_ids: [mismatch.rows[0].id],
+      capture_event_ids: [],
+      locators: ["budget page 2"],
+      excerpt: "deadline is Friday",
+    },
+  ];
+  await pool.query(
+    `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,provenance_json,found_note,unanswered,research_json)
+     values($1,$2,$3,$4,'TEST FIXTURE dek',$5,'community',$6,'[]',$7,'[]','{}')`,
+    [
+      userId,
+      newsroomId,
+      lead.rows[0].id,
+      `TEST FIXTURE — Library recreation center update ${stamp}`,
+      `TEST FIXTURE body: the library board considered a recreation center update ${stamp}.`,
+      JSON.stringify([sourceUrl]),
+      JSON.stringify(findings),
+    ],
+  );
+  await pool.query(
+    `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,provenance_json,found_note,unanswered,research_json)
+     values($1,$2,$3,$4,'','TEST FIXTURE legacy body','community','[]','[]','','[]','{}')`,
+    [userId, newsroomId, legacyLead.rows[0].id, `TEST FIXTURE — Legacy library note ${stamp}`],
+  );
+  await pool.query(
+    `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,provenance_json,found_note,unanswered,research_json)
+     values($1,$2,$3,$4,'','TEST FIXTURE malformed findings body','community','[]','[]',$5,'[]','{}')`,
+    [
+      userId,
+      newsroomId,
+      malformedLead.rows[0].id,
+      `TEST FIXTURE — Incomplete structured findings ${stamp}`,
+      '[{"text":"TEST FIXTURE truncated structured finding","source_urls":["https://library.example.test',
+    ],
+  );
+  return {
+    leadId: lead.rows[0].id,
+    legacyLeadId: legacyLead.rows[0].id,
+    malformedLeadId: malformedLead.rows[0].id,
+    citedVersionId: cited.rows[0].id,
+    newerVersionId: newer.rows[0].id,
+  };
+}
+
 async function main() {
   // ── The ghost, seeded before anything else opens a browser ────────────────
   await seedUnpublishedCorrection();
@@ -181,6 +350,7 @@ async function main() {
   page.setDefaultTimeout(45_000);
 
   const consoleErrors = [];
+  let expectedAcknowledgementTimeoutErrors = 0;
   const note = (text) => {
     // This walk deliberately loads a story's URL after deleting it, to check
     // the route answers not-found. That load's own document request legitimately
@@ -189,6 +359,10 @@ async function main() {
     // noise on that one step and would otherwise fail every run of a passing
     // walk.
     if (/status of 404/.test(text)) return;
+    if (expectedAcknowledgementTimeoutErrors > 0 && /net::ERR_TIMED_OUT/.test(text)) {
+      expectedAcknowledgementTimeoutErrors -= 1;
+      return;
+    }
     consoleErrors.push(`[after: ${done[done.length - 1] ?? "start"} | ${page.url()}] ${text}`);
   };
   page.on("pageerror", (e) => note(String(e.message ?? e).slice(0, 200)));
@@ -283,6 +457,466 @@ async function main() {
     [email],
   );
   const newsroomId = owner.rows[0].newsroom_id;
+  const findingFixture = await seedFindingEvidenceReview({
+    newsroomId,
+    userId: owner.rows[0].user_id,
+  });
+  await page.goto(`${base}/desk/story/${findingFixture.leadId}`, { waitUntil: "networkidle" });
+  const review = page.locator("#finding-evidence-review");
+  await review
+    .getByText("TEST FIXTURE: The library board approved the recreation room update")
+    .waitFor();
+  const recordedPassages = review.getByText("Recorded excerpt found in cited version");
+  if ((await recordedPassages.count()) !== 2)
+    throw new Error("expected the direct citation and captured-event citation passages");
+  await recordedPassages.first().waitFor();
+  const unavailablePassages = review.getByText("Cited capture unavailable", { exact: true });
+  if ((await unavailablePassages.count()) !== 1)
+    throw new Error("expected exactly one unavailable cited-capture passage");
+  await unavailablePassages.first().waitFor();
+  await review.getByRole("button", { name: "View cited captured version" }).first().click();
+  const capturedText = review.getByRole("region", { name: "Captured text" });
+  await capturedText
+    .getByText("The library board approved the recreation room update Tuesday.")
+    .waitFor();
+  await capturedText.getByRole("button", { name: "Close captured text" }).click();
+  const newerCaptureButtons = review.getByRole("button", { name: /Review newer capture/ });
+  if ((await newerCaptureButtons.count()) !== 2)
+    throw new Error("expected a newer-capture action for each duplicate cited passage");
+  await newerCaptureButtons.first().click();
+  await capturedText
+    .getByText("The recreation room update was reconsidered Wednesday.")
+    .waitFor();
+  await capturedText.getByRole("button", { name: "Close captured text" }).click();
+  const panels = review.locator("article");
+  const firstFinding = panels.nth(0);
+  const secondFinding = panels.nth(1);
+  const savedRevisionBody = `TEST FIXTURE body: saved revision before judgments ${stamp}.`;
+  await page.getByLabel("Body").fill(savedRevisionBody);
+  if (!(await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled()))
+    throw new Error("unsaved draft revision did not disable finding judgments");
+  await page.getByRole("button", { name: "Save edits" }).click();
+  await page.getByText("Saved.", { exact: true }).waitFor();
+  await review
+    .getByText("Save the current headline, dek, body, and section before recording a judgment.")
+    .waitFor({ state: "detached" });
+  if (await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled())
+    throw new Error("saved draft revision left finding judgments disabled");
+  step("saving a draft revision refreshes the finding review without a page reload");
+  let releaseEvidenceDecision;
+  const evidenceDecisionReleased = new Promise((resolve) => {
+    releaseEvidenceDecision = resolve;
+  });
+  let markEvidenceDecisionHeld;
+  const evidenceDecisionHeld = new Promise((resolve) => {
+    markEvidenceDecisionHeld = resolve;
+  });
+  const holdEvidenceDecision = async (route) => {
+    if (
+      route.request().method() === "POST" &&
+      route.request().headers()["x-tsr-serverfn"] === "true"
+    ) {
+      markEvidenceDecisionHeld();
+      await evidenceDecisionReleased;
+      await route.continue();
+      return;
+    }
+    await route.continue();
+  };
+  await page.route("**/*", holdEvidenceDecision);
+  const evidenceDecisionResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.request().headers()["x-tsr-serverfn"] === "true",
+  );
+  const keepEvidence = page.getByRole("button", { name: "I checked: keep this evidence" });
+  await keepEvidence.click({ noWaitAfter: true });
+  await evidenceDecisionHeld;
+  if (!(await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled()))
+    throw new Error("pending keep/remove evidence decision left finding judgments enabled");
+  const refreshedReviewAfterDecision = page.waitForResponse(
+    async (response) => {
+      if (
+        response.request().method() !== "GET" ||
+        response.request().headers()["x-tsr-serverfn"] !== "true" ||
+        !response.ok()
+      ) return false;
+      const body = await response.text().catch(() => "");
+      return (
+        body.includes("canonicalDraft") &&
+        body.includes("evidenceToken") &&
+        body.includes(`TEST FIXTURE — Library recreation center update ${stamp}`)
+      );
+    },
+  );
+  releaseEvidenceDecision();
+  await evidenceDecisionResponse;
+  await page.unroute("**/*", holdEvidenceDecision);
+  await keepEvidence.waitFor({ state: "detached" });
+  await refreshedReviewAfterDecision;
+  await page.waitForFunction(() => {
+    const button = [...document.querySelectorAll("#finding-evidence-review article button")]
+      .find((candidate) => candidate.textContent?.trim() === "Save judgment");
+    return button instanceof HTMLButtonElement && !button.disabled;
+  });
+  await page.waitForFunction(() => {
+    const input = document.querySelector("#finding-evidence-review article select");
+    return input instanceof HTMLSelectElement && !input.disabled;
+  });
+  step("a pending evidence keep/remove decision disables finding judgments until refresh");
+  await firstFinding.getByLabel("Judgment").selectOption("supports");
+  await secondFinding.getByLabel("Judgment").selectOption("needs-reporting");
+  await secondFinding
+    .getByLabel(/Reason/)
+    .fill("TEST FIXTURE: seek the library's written statement.");
+  await firstFinding.getByRole("button", { name: "Save judgment" }).click();
+  await review.getByText("Unsaved edits to another finding were retained.").waitFor();
+  step("finding A saves while retaining finding B's unsaved judgment");
+  if ((await secondFinding.getByLabel("Judgment").inputValue()) !== "needs-reporting")
+    throw new Error("saving finding A discarded typed finding B");
+  await secondFinding.getByRole("button", { name: "Save judgment" }).click();
+  await review.getByText("Evidence judgment saved.").waitFor();
+  step("finding B saves after finding A without a stale-token conflict");
+  await page.reload({ waitUntil: "networkidle" });
+  const reloadedReview = page.locator("#finding-evidence-review");
+  if (
+    (await reloadedReview.locator("article").nth(0).getByLabel("Judgment").inputValue()) !==
+      "supports" ||
+    (await reloadedReview.locator("article").nth(1).getByLabel("Judgment").inputValue()) !==
+    "needs-reporting"
+  )
+    throw new Error("saved finding A and B judgments did not persist after reload");
+  await reloadedReview.locator("article").nth(0).getByLabel("Judgment").selectOption("contradicts");
+  await reloadedReview
+    .locator("article")
+    .nth(0)
+    .getByRole("button", { name: "Save judgment" })
+    .click();
+  await reloadedReview
+    .getByText("A contradiction needs cited contrary captured evidence and a reason.")
+    .waitFor();
+  await page.getByLabel("Body").fill(`TEST FIXTURE unsaved body ${stamp}`);
+  if (
+    !(await reloadedReview
+      .locator("article")
+      .nth(0)
+      .getByRole("button", { name: "Save judgment" })
+      .isDisabled())
+  )
+    throw new Error("unsaved draft did not disable judgment save");
+  await page
+    .getByLabel("Body")
+    .fill(savedRevisionBody);
+  step("restored the exact saved draft before stale-review conflict checks");
+  const secondTab = await context.newPage();
+  const initialReviewResponse = secondTab.waitForResponse(
+    async (response) => {
+      if (
+        response.request().method() !== "GET" ||
+        response.request().headers()["x-tsr-serverfn"] !== "true" ||
+        !response.ok()
+      ) return false;
+      const body = await response.text().catch(() => "");
+      return body.includes("canonicalDraft") && body.includes("evidenceToken");
+    },
+    { timeout: 10_000 },
+  );
+  await secondTab.goto(`${base}/desk/story/${findingFixture.leadId}`, { waitUntil: "networkidle" });
+  const reviewRpcPath = new URL((await initialReviewResponse).url()).pathname;
+  const secondReview = secondTab.locator("#finding-evidence-review");
+  await secondReview
+    .locator("article")
+    .nth(0)
+    .getByLabel("Judgment")
+    .selectOption("does-not-support");
+  await secondReview
+    .locator("article")
+    .nth(0)
+    .getByLabel(/Reason/)
+    .fill("TEST FIXTURE: preserve this unsaved note through reload failure.");
+  await reloadedReview
+    .locator("article")
+    .nth(0)
+    .getByLabel("Judgment")
+    .selectOption("needs-reporting");
+  await reloadedReview
+    .locator("article")
+    .nth(0)
+    .getByLabel(/Reason/)
+    .fill("TEST FIXTURE: concurrent editor requests a fresh source check.");
+  await reloadedReview
+    .locator("article")
+    .nth(0)
+    .getByRole("button", { name: "Save judgment" })
+    .click();
+  await secondReview
+    .locator("article")
+    .nth(0)
+    .getByRole("button", { name: "Save judgment" })
+    .click();
+  await secondReview
+    .getByText("Reload the current review before recording a fresh judgment.")
+    .waitFor();
+  let failedReloadRequests = 0;
+  const blockReviewReload = async (route) => {
+    if (
+      route.request().method() === "GET" &&
+      route.request().headers()["x-tsr-serverfn"] === "true" &&
+      new URL(route.request().url()).pathname === reviewRpcPath
+    ) {
+      failedReloadRequests += 1;
+      await route.fulfill({ status: 503, contentType: "text/plain", body: "fixture reload failure" });
+      return;
+    }
+    await route.continue();
+  };
+  await secondTab.route("**/*", blockReviewReload);
+  await secondReview
+    .getByRole("button", { name: "Reload current review and discard unsaved judgment edits" })
+    .click();
+  await secondReview.getByText("Could not reload the evidence review.").waitFor();
+  if (failedReloadRequests === 0) throw new Error("failed reload proof intercepted no review request");
+  if (
+    (await secondReview.locator("article").nth(0).getByLabel("Judgment").inputValue()) !==
+      "does-not-support" ||
+    (await secondReview.locator("article").nth(0).getByLabel(/Reason/).inputValue()) !==
+      "TEST FIXTURE: preserve this unsaved note through reload failure."
+  )
+    throw new Error("failed evidence reload discarded unsaved judgment input");
+  await secondReview
+    .locator("article")
+    .nth(0)
+    .getByLabel(/Reason/)
+    .fill("TEST FIXTURE: edit made after failed reload survives a later refetch.");
+  await secondTab.unroute("**/*", blockReviewReload);
+  const laterReviewRefetch = secondTab.waitForResponse(
+    async (response) => {
+      if (
+        new URL(response.url()).pathname !== reviewRpcPath ||
+        response.request().method() !== "GET" ||
+        !response.ok()
+      ) return false;
+      const body = await response.text().catch(() => "");
+      return (
+        body.includes("canonicalDraft") &&
+        body.includes("evidenceToken") &&
+        body.includes(`TEST FIXTURE — Library recreation center update ${stamp}`)
+      );
+    },
+    { timeout: 10_000 },
+  );
+  await secondTab.evaluate(() => {
+    window.dispatchEvent(new Event("offline"));
+    window.dispatchEvent(new Event("online"));
+  });
+  await laterReviewRefetch;
+  await secondTab.waitForFunction(
+    (expectedReason) => {
+      const firstFinding = document.querySelector("#finding-evidence-review article");
+      const reason = firstFinding?.querySelector("textarea");
+      return reason instanceof HTMLTextAreaElement && reason.value === expectedReason;
+    },
+    "TEST FIXTURE: edit made after failed reload survives a later refetch.",
+  );
+  if (
+    (await secondReview.locator("article").nth(0).getByLabel("Judgment").inputValue()) !==
+      "does-not-support" ||
+    (await secondReview.locator("article").nth(0).getByLabel(/Reason/).inputValue()) !==
+      "TEST FIXTURE: edit made after failed reload survives a later refetch."
+  )
+    throw new Error("a refetch after failed reload discarded newer unsaved judgment input");
+  await secondTab.close();
+  await page.goto(`${base}/desk/story/${findingFixture.legacyLeadId}`, {
+    waitUntil: "networkidle",
+  });
+  await page.getByText("No recorded findings for this draft.").waitFor();
+  await page.goto(`${base}/desk/story/${findingFixture.malformedLeadId}`, {
+    waitUntil: "networkidle",
+  });
+  const malformedReview = page.locator("#finding-evidence-review");
+  await malformedReview
+    .getByText(
+      "Stored findings are incomplete or unreadable. Review the original material or generate a replacement before recording judgments.",
+    )
+    .waitFor();
+  if ((await malformedReview.locator("article").count()) !== 0)
+    throw new Error("malformed structured findings rendered as judgment rows");
+  if ((await malformedReview.getByRole("button", { name: "Try again" }).count()) !== 0)
+    throw new Error("malformed stored findings incorrectly offered retry as a repair");
+  step("malformed structured findings fail closed without judgment controls or a retry claim");
+  await page.goto(`${base}/desk/story/${findingFixture.leadId}`, { waitUntil: "networkidle" });
+  mkdirSync(evidenceArtifactDir, { recursive: true });
+  const originalViewport = page.viewportSize();
+  await page
+    .locator("#finding-evidence-review")
+    .screenshot({ path: join(evidenceArtifactDir, "finding-evidence-review-desktop.png") });
+  await page.getByRole("button", { name: "Dark", exact: true }).click();
+  await page.getByRole("button", { name: "Large", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)))
+    throw new Error("finding evidence review overflows at 390px dark large text");
+  await page
+    .locator("#finding-evidence-review")
+    .screenshot({
+      path: join(evidenceArtifactDir, "finding-evidence-review-mobile-dark-large.png"),
+    });
+  await page.getByRole("button", { name: "Light", exact: true }).click();
+  await page.getByRole("button", { name: "Text: Normal", exact: true }).click();
+  if (originalViewport) await page.setViewportSize(originalViewport);
+  const queuedDraftJob = await pool.query(
+    `insert into desk_jobs(newsroom_id,user_id,kind,subject_id,status,stage,claim_token,started_at,updated_at)
+     values($1,$2,'draft',$3,'running','drafting',$4,now(),now()) returning id`,
+    [newsroomId, owner.rows[0].user_id, findingFixture.leadId, `fixture-running-${stamp}`],
+  );
+  await page.reload({ waitUntil: "networkidle" });
+  const queuedReview = page.locator("#finding-evidence-review");
+  await page.getByRole("button", { name: "Drafting…", exact: true }).waitFor();
+  if (!(await queuedReview.getByRole("button", { name: "Save judgment" }).first().isDisabled()))
+    throw new Error("running replacement draft did not disable finding judgments");
+  await pool.query(
+    `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,provenance_json,found_note,unanswered,research_json,updated_at)
+     select user_id,newsroom_id,lead_id,headline,dek,body || ' Replacement landed.',topic,source_urls,provenance_json,found_note,unanswered,research_json,now()+interval '1 second'
+       from drafts where lead_id=$1 and newsroom_id=$2 order by updated_at desc,id desc limit 1`,
+    [findingFixture.leadId, newsroomId],
+  );
+  await pool.query(
+    `update desk_jobs set status='completed',stage='done',finished_at=now(),updated_at=now()
+      where id=$1 and newsroom_id=$2`,
+    [queuedDraftJob.rows[0].id, newsroomId],
+  );
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("textarea")].some((field) =>
+      field instanceof HTMLTextAreaElement && field.value.includes("Replacement landed."),
+    ),
+  );
+  await page.waitForFunction(() => {
+    const button = [...document.querySelectorAll("#finding-evidence-review article button")]
+      .find((candidate) => candidate.textContent?.trim() === "Save judgment");
+    return button instanceof HTMLButtonElement && !button.disabled;
+  });
+  step("running replacement disables judgments and the naturally polled replacement loads a fresh review");
+
+  /*
+    A request can reach the browser's network boundary, then lose its reply
+    after a replacement job has already committed. Hold the actual draft RPC
+    (identified by modelChoice; the preceding saveReportingNotes request has
+    no model choice), seed the authoritative completed replacement directly,
+    and make the normal polling query observe it before the held request
+    times out. The page must still adopt that replacement after the aborted
+    acknowledgement; no model request is forwarded in this case.
+  */
+  let heldDraftRoute;
+  let markDraftHeld;
+  const draftHeld = new Promise((resolve) => {
+    markDraftHeld = resolve;
+  });
+  const holdActualDraft = async (route) => {
+    const request = route.request();
+    if (
+      request.method() === "POST" &&
+      request.headers()["x-tsr-serverfn"] === "true" &&
+      request.postData()?.includes("modelChoice")
+    ) {
+      heldDraftRoute = route;
+      markDraftHeld();
+      return;
+    }
+    await route.continue();
+  };
+  await page.route("**/*", holdActualDraft);
+  const acknowledgementRecoveryBody = `TEST FIXTURE acknowledgement recovery replacement ${stamp}.`;
+  await page.getByRole("button", { name: "Redraft", exact: true }).click({ noWaitAfter: true });
+  await draftHeld;
+  if (!heldDraftRoute)
+    throw new Error("the acknowledgement recovery fixture did not hold the actual draft request");
+  const acknowledgementRecoveryJob = await pool.query(
+    `insert into desk_jobs(newsroom_id,user_id,kind,subject_id,status,stage,claim_token,started_at,updated_at,finished_at)
+     values($1,$2,'draft',$3,'completed','done',$4,now(),now(),now()) returning id`,
+    [
+      newsroomId,
+      owner.rows[0].user_id,
+      findingFixture.leadId,
+      `fixture-acknowledgement-recovery-${stamp}`,
+    ],
+  );
+  await pool.query(
+    `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,provenance_json,found_note,unanswered,research_json,updated_at)
+     select user_id,newsroom_id,lead_id,headline,dek,$3,topic,source_urls,provenance_json,found_note,unanswered,research_json,now()+interval '1 second'
+       from drafts where lead_id=$1 and newsroom_id=$2 order by updated_at desc,id desc limit 1`,
+    [findingFixture.leadId, newsroomId, acknowledgementRecoveryBody],
+  );
+  await pool.query(
+    `update leads set notes_json=$3 where id=$1 and newsroom_id=$2`,
+    [findingFixture.leadId, newsroomId, JSON.stringify({ researchScope: "supplied" })],
+  );
+  const replacementWasPolled = page.waitForResponse(
+    async (response) => {
+      if (
+        response.request().method() !== "GET" ||
+        response.request().headers()["x-tsr-serverfn"] !== "true" ||
+        !response.ok()
+      ) return false;
+      return (await response.text().catch(() => "")).includes(acknowledgementRecoveryBody);
+    },
+  );
+  const observedReplacementPoll = await replacementWasPolled;
+  const leadRpcPath = new URL(observedReplacementPoll.url()).pathname;
+  await page.waitForFunction(() => {
+    return [...document.querySelectorAll("label")].some((label) => {
+      const scope = label.querySelector("select");
+      return label.textContent?.includes("Drafting scope") && scope?.value === "supplied";
+    });
+  });
+  let heldPostAbortLeadRefresh;
+  let markPostAbortLeadRefreshHeld;
+  let holdPostAbortRefresh = false;
+  const postAbortLeadRefreshHeld = new Promise((resolve) => {
+    markPostAbortLeadRefreshHeld = resolve;
+  });
+  const holdPostAbortLeadRefresh = async (route) => {
+    const request = route.request();
+    if (
+      holdPostAbortRefresh &&
+      request.method() === "GET" &&
+      request.headers()["x-tsr-serverfn"] === "true" &&
+      new URL(request.url()).pathname === leadRpcPath
+    ) {
+      heldPostAbortLeadRefresh = route;
+      markPostAbortLeadRefreshHeld();
+      return;
+    }
+    await route.continue();
+  };
+  await page.route("**/*", holdPostAbortLeadRefresh);
+  holdPostAbortRefresh = true;
+  expectedAcknowledgementTimeoutErrors = 1;
+  await heldDraftRoute.abort("timedout");
+  await postAbortLeadRefreshHeld;
+  await page.waitForFunction(
+    (replacement) =>
+      [...document.querySelectorAll("textarea")].some(
+        (field) => field instanceof HTMLTextAreaElement && field.value.includes(replacement),
+      ),
+    acknowledgementRecoveryBody,
+    { timeout: 8_000 },
+  );
+  if (!heldPostAbortLeadRefresh)
+    throw new Error("the acknowledgement recovery fixture did not hold the post-abort lead refresh");
+  await heldPostAbortLeadRefresh.continue();
+  await page.unroute("**/*", holdActualDraft);
+  await page.unroute("**/*", holdPostAbortLeadRefresh);
+  const persistedAcknowledgementReplacement = await pool.query(
+    `select body from drafts where lead_id=$1 and newsroom_id=$2 order by updated_at desc,id desc limit 1`,
+    [findingFixture.leadId, newsroomId],
+  );
+  if (persistedAcknowledgementReplacement.rows[0]?.body !== acknowledgementRecoveryBody)
+    throw new Error("acknowledgement recovery fixture did not retain its completed replacement draft");
+  if (acknowledgementRecoveryJob.rows[0]?.id == null)
+    throw new Error("acknowledgement recovery fixture did not create its completed job");
+  step("a timed-out acknowledgement adopts a replacement that polling saw while it was pending");
+  step(
+    "recorded finding judgments save sequentially, conflict honestly, and remain readable on a narrow dark large-text desk",
+  );
   await pool.query(`insert into newsrooms (id, name) values ($1, $2)`, [
     foreignNewsroomId,
     `Foreign paper ${stamp}`,
@@ -300,8 +934,13 @@ async function main() {
   ];
   for (const [attackSlug, attackBody] of attacks) {
     const result = await callObservedAddCorrection({ articleSlug: attackSlug, body: attackBody });
-    if (result?.ok !== false || result?.error !== "That published story is not available in this newsroom.") {
-      throw new Error(`correction target ${attackSlug} was not generically refused: ${JSON.stringify(result)}`);
+    if (
+      result?.ok !== false ||
+      result?.error !== "That published story is not available in this newsroom."
+    ) {
+      throw new Error(
+        `correction target ${attackSlug} was not generically refused: ${JSON.stringify(result)}`,
+      );
     }
   }
   const leakedWrites = await pool.query(
@@ -311,7 +950,9 @@ async function main() {
     [attacks.map(([, attackBody]) => attackBody), attacks.map(([attackSlug]) => attackSlug)],
   );
   if (leakedWrites.rows[0].corrections !== 0 || leakedWrites.rows[0].audits !== 0) {
-    throw new Error(`a refused correction mutated storage: ${JSON.stringify(leakedWrites.rows[0])}`);
+    throw new Error(
+      `a refused correction mutated storage: ${JSON.stringify(leakedWrites.rows[0])}`,
+    );
   }
   step("foreign, unpublished, and missing correction targets share one refusal and write nothing");
 
@@ -369,7 +1010,9 @@ async function main() {
   // The story is back — same URL, because reinsert puts the row back under
   // the same id the correction's article_id still points at.
   await page.goto(articleUrl, { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { level: 1, name: /Kimbark tap fee/i }).waitFor({ timeout: 20_000 });
+  await page
+    .getByRole("heading", { level: 1, name: /Kimbark tap fee/i })
+    .waitFor({ timeout: 20_000 });
   step("the restored story answers at its old URL again");
 
   // The actual claim under test: the correction, which points AT the article

@@ -32,7 +32,8 @@ import {
 } from "@/lib/news/notes";
 import {
   editorDraftError,
-  draftHasLanded,
+  expectedDraftJobHasLanded,
+  recoverExpectedDraftJobId,
   resolveDraftJobState,
   recoveringDraftCopy,
   followUpsRailCopy,
@@ -41,6 +42,7 @@ import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
+import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
@@ -100,6 +102,10 @@ function StoryPage() {
   const [slowWait, setSlowWait] = useState(false);
   const hadBodyAtStart = useRef(false);
   const bodyAtStart = useRef("");
+  const expectedDraftJobId = useRef<number | null>(null);
+  const priorDraftJobId = useRef<number | null>(null);
+  const priorDraftJobWasOpen = useRef(false);
+  const [awaitingDraftJobAck, setAwaitingDraftJobAck] = useState(false);
   const appliedFp = useRef("");
 
   const waiting = waitingSince !== null;
@@ -118,12 +124,23 @@ function StoryPage() {
     : "";
 
   useEffect(() => {
-    if (waitingSince || (data?.job?.status !== "queued" && data?.job?.status !== "running")) return;
-    hadBodyAtStart.current = Boolean(data.draft?.body);
-    bodyAtStart.current = data.draft?.body ?? "";
-    const started = Date.parse(data.job.started_at ?? data.job.created_at ?? "");
+    const job = data?.job;
+    const recoveredJobId = recoverExpectedDraftJobId({
+      expectedJobId: expectedDraftJobId.current,
+      priorJobId: priorDraftJobId.current,
+      priorJobWasOpen: priorDraftJobWasOpen.current,
+      attemptInProgress: waitingSince != null,
+      awaitingAcknowledgement: awaitingDraftJobAck,
+      job,
+    });
+    if (recoveredJobId == null || !job) return;
+    expectedDraftJobId.current = recoveredJobId;
+    if (waitingSince) return;
+    hadBodyAtStart.current = Boolean(data?.draft?.body);
+    bodyAtStart.current = data?.draft?.body ?? "";
+    const started = Date.parse(job.started_at ?? job.created_at ?? "");
     setWaitingSince(Number.isFinite(started) ? started : Date.now());
-  }, [data?.draft?.body, data?.job, waitingSince]);
+  }, [awaitingDraftJobAck, data?.draft?.body, data?.job, waitingSince]);
 
   useEffect(() => {
     if (data?.articleSlug) setPublishedSlug(data.articleSlug);
@@ -141,7 +158,9 @@ function StoryPage() {
       return;
     }
     if (
-      !draftHasLanded({
+      !expectedDraftJobHasLanded({
+        expectedJobId: expectedDraftJobId.current,
+        job: data?.job,
         hadBodyAtStart: hadBodyAtStart.current,
         bodyAtStart: bodyAtStart.current,
         startedAt: waitingSince,
@@ -155,23 +174,24 @@ function StoryPage() {
     setBody(stripReporterNotebook(d.body));
     setTopic(d.topic);
     appliedFp.current = fp;
+    expectedDraftJobId.current = null;
+    priorDraftJobId.current = data.job?.id ?? null;
+    priorDraftJobWasOpen.current = false;
     setWaitingSince(null);
     setSlowWait(false);
     setMsg("");
-  }, [data, waitingSince]);
+  }, [awaitingDraftJobAck, data, waitingSince]);
 
   useEffect(() => {
     if (!waitingSince) return;
-    if (data?.job?.status !== "failed") return;
-    // Ignore a failure that finished BEFORE this click.
-    //
-    // `data.job` is whatever the last query returned, which on the first click
-    // is still the previous attempt. A stale failed job used to cancel the
-    // draft the instant it started and re-show the old error — so the first
-    // click looked dead and only the second one "worked", because by then the
-    // query had caught up. Only a failure from this attempt should stop it.
-    const finished = data.job.finished_at ? Date.parse(data.job.finished_at) : 0;
-    if (finished && finished < waitingSince) return;
+    if (
+      data?.job?.status !== "failed" ||
+      expectedDraftJobId.current == null ||
+      data.job.id !== expectedDraftJobId.current
+    ) return;
+    expectedDraftJobId.current = null;
+    priorDraftJobId.current = data.job.id;
+    priorDraftJobWasOpen.current = false;
     setWaitingSince(null);
     setSlowWait(false);
     setMsg(editorDraftError(data.job.error) ?? data.job.error ?? "The draft did not finish.");
@@ -219,9 +239,16 @@ function StoryPage() {
       setMsg("");
       hadBodyAtStart.current = Boolean(data?.draft?.body);
       bodyAtStart.current = data?.draft?.body ?? "";
+      priorDraftJobId.current = data?.job?.id ?? null;
+      priorDraftJobWasOpen.current =
+        data?.job?.status === "queued" || data?.job?.status === "running";
+      expectedDraftJobId.current = null;
+      setAwaitingDraftJobAck(true);
       setWaitingSince(Date.now());
     },
     onSuccess: async (res) => {
+      setAwaitingDraftJobAck(false);
+      if (answered(res) && res.ok) expectedDraftJobId.current = res.jobId;
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       await qc.invalidateQueries({ queryKey: ["leads"] });
       if (!answered(res)) {
@@ -259,6 +286,7 @@ function StoryPage() {
       setMsg(editorDraftError(res.error) ?? res.error);
     },
     onError: async (err) => {
+      setAwaitingDraftJobAck(false);
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       const raw = err instanceof Error ? err.message : "Draft failed";
       if (looksLikeDraftTimeout(raw)) return;
@@ -683,6 +711,14 @@ function StoryPage() {
                 : "No draft yet. Draft with AI writes a first pass from the lead and its sources; you edit, then publish."}
             </p>
           )}
+          {data.draft ? (
+            <FindingEvidenceReviewPanel
+              leadId={id}
+              reviewRevision={data.evidenceToken}
+              currentDraft={{ headline, dek, body, topic }}
+              disabled={locked || onPaper || waiting || save.isPending || reviewEvidence.isPending}
+            />
+          ) : null}
         </section>
       </div>
     </DeskShell>

@@ -982,6 +982,47 @@ export function draftHasLanded(input: {
   return t >= input.startedAt - 5000;
 }
 
+/** A draft belongs to the wait only after that exact job has completed. */
+export function expectedDraftJobHasLanded(input: {
+  expectedJobId: number | null;
+  job: { id: number; status: string } | null | undefined;
+  hadBodyAtStart: boolean;
+  bodyAtStart?: string;
+  startedAt: number | null;
+  draft: { body?: string | null; updated_at?: string | null } | null | undefined;
+}): boolean {
+  if (
+    input.expectedJobId == null ||
+    input.job?.id !== input.expectedJobId ||
+    input.job.status !== "completed"
+  ) {
+    return false;
+  }
+  return draftHasLanded(input);
+}
+
+/** Correlate an authoritative job after a request acknowledgement was lost or on page recovery. */
+export function recoverExpectedDraftJobId(input: {
+  expectedJobId: number | null;
+  priorJobId: number | null;
+  priorJobWasOpen: boolean;
+  attemptInProgress: boolean;
+  awaitingAcknowledgement: boolean;
+  job: { id: number; status: string } | null | undefined;
+}): number | null {
+  if (input.expectedJobId != null || input.awaitingAcknowledgement) return input.expectedJobId;
+  if (!input.job || !["queued", "running", "completed", "failed"].includes(input.job.status)) {
+    return null;
+  }
+  if (input.priorJobId == null) {
+    return input.attemptInProgress || input.job.status === "queued" || input.job.status === "running"
+      ? input.job.id
+      : null;
+  }
+  if (input.job.id === input.priorJobId && !input.priorJobWasOpen) return null;
+  return input.job.id;
+}
+
 /** Editor-facing label for a still-unopened line. Never show engine tokens. */
 export function humanFrontierLabel(label: string): string {
   const cleaned = label.replace(/^\s*(?:frontier|hop)\s*[:#.\-–—]?\s*/i, "").trim();
