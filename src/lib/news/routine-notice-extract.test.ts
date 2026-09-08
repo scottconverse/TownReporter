@@ -50,6 +50,10 @@ describe("saved PrimeGov meeting extraction", () => {
     assert.equal(result.validation.notice.fields.title.locator, "/title");
     assert.equal(result.validation.notice.fields.start.locator, "/dateTime");
     assert.match(result.validation.notice.fields.agendaUrl.value, /meetingTemplateId=16373/);
+    assert.equal(
+      result.validation.notice.fields.agendaUrl.locator,
+      "/documentList/0/templateId",
+    );
   });
 
   it("refuses missing agenda, invalid IDs, and ambiguous time without throwing", () => {
@@ -194,6 +198,17 @@ describe("saved Schema.org Event extraction", () => {
     })[0];
     assert.equal(result?.status, "refused");
     assert.equal(result?.validation?.valid, false);
+
+    const lookalike = html.replace(
+      "https://schema.org/EventMoved",
+      "https://attacker.example/NotAnEventCancelled",
+    );
+    const refusedLookalike = extractJsonLdEvents(lookalike, {
+      formatKey: "community-arts-event-logistics",
+      provenance,
+    })[0];
+    assert.equal(refusedLookalike?.status, "refused");
+    assert.equal(refusedLookalike?.validation?.valid, false);
   });
 
   it("accepts documented Event identifiers in scalar and array @type values", () => {

@@ -107,12 +107,17 @@ export function extractPrimeGovMeeting(
         templateName: text(agenda.templateName) ?? "Agenda",
         link: null,
       });
+  const agendaLocator = directLink
+    ? `/documentList/${agendaIndex}/link`
+    : Number.isSafeInteger(templateId) && templateId > 0
+      ? `/documentList/${agendaIndex}/templateId`
+      : `/documentList/${agendaIndex}/id`;
   const fields = {
     issuer: context.issuer,
     title: field(text(meeting.title), "/title"),
     start: field(text(meeting.dateTime), "/dateTime"),
     venue: field(text(meeting.location), "/location"),
-    agendaUrl: field(agendaUrl, `/documentList/${agendaIndex}/link`),
+    agendaUrl: field(agendaUrl, agendaLocator),
     ...(context.timezone ? { timezone: context.timezone } : {}),
   };
   const validation = validateRoutineNotice({
@@ -225,8 +230,18 @@ function firstLocation(row: Record<string, unknown>, locator: string) {
 function eventStatus(value: unknown) {
   const status = text(value);
   if (!status) return undefined;
-  const mapped = status.match(/Event(Cancelled|Postponed|Rescheduled)$/)?.[1]?.toLowerCase();
-  return mapped ?? status;
+  const supported = new Map([
+    ["EventCancelled", "cancelled"],
+    ["EventPostponed", "postponed"],
+    ["EventRescheduled", "rescheduled"],
+    ["http://schema.org/EventCancelled", "cancelled"],
+    ["http://schema.org/EventPostponed", "postponed"],
+    ["http://schema.org/EventRescheduled", "rescheduled"],
+    ["https://schema.org/EventCancelled", "cancelled"],
+    ["https://schema.org/EventPostponed", "postponed"],
+    ["https://schema.org/EventRescheduled", "rescheduled"],
+  ]);
+  return supported.get(status) ?? status;
 }
 
 function eventInput(
