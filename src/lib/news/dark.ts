@@ -95,6 +95,7 @@ type DarkArtifactEvidence = {
 
 type DarkArtifactChunk = {
   version_id: number;
+  chunk_index: number;
   excerpt: string;
   page_number: number | null;
   locator: string;
@@ -171,7 +172,7 @@ async function relevantDarkArtifactEvidence(
   );
   const persistedChunks = versionIds.length
     ? await sql.query<DarkArtifactChunk>(
-        `select version_id, excerpt, page_number, locator
+        `select version_id, chunk_index, excerpt, page_number, locator
          from artifact_chunks
          where newsroom_id = $1 and version_id = any($2::int[])
          order by id asc`,
@@ -182,7 +183,7 @@ async function relevantDarkArtifactEvidence(
   const rendered: { title: string; url: string; evidence: string }[] = [];
   for (const artifact of selected) {
     const header = `### [capture:${artifact.capture_event_id ?? "—"} version:${artifact.version_id ?? "—"} hash:${artifact.content_hash.slice(0, 12)}] ${artifact.title}\n${artifact.url}`;
-    const exact = persistedChunks
+    const exactHits = persistedChunks
       .filter((chunk) => chunk.version_id === artifact.version_id)
       .map((chunk) => ({
         ...chunk,
@@ -190,11 +191,30 @@ async function relevantDarkArtifactEvidence(
       }))
       .filter((chunk) => chunk.score > 0)
       .sort((a, b) => b.score - a.score)
-      .slice(0, 3)
-      .map(
-        (chunk) =>
-          `[${chunk.locator}${chunk.page_number == null ? "" : ` page:${chunk.page_number}`}] ${chunk.excerpt}`,
+      .slice(0, 3);
+    const includedChunkIndexes = new Set<number>();
+    const exact = exactHits.flatMap((chunk) => {
+      if (includedChunkIndexes.has(chunk.chunk_index)) return [];
+      includedChunkIndexes.add(chunk.chunk_index);
+      const current = `[${chunk.locator}${chunk.page_number == null ? "" : ` page:${chunk.page_number}`}] ${chunk.excerpt}`;
+      // PDF table extraction may split a single record at a fixed character
+      // boundary. Keep only its immediate, same-page stored continuation —
+      // never a prior or cross-page row — and label it so the brief contract
+      // still requires an explicit same-record pairing for attribution.
+      const continuation = persistedChunks.find(
+        (candidate) =>
+          candidate.version_id === chunk.version_id &&
+          chunk.page_number != null &&
+          candidate.page_number === chunk.page_number &&
+          candidate.chunk_index === chunk.chunk_index + 1,
       );
+      if (!continuation || includedChunkIndexes.has(continuation.chunk_index)) return [current];
+      includedChunkIndexes.add(continuation.chunk_index);
+      return [
+        current,
+        `[adjacent same-page continuation ${continuation.locator} page:${continuation.page_number}] ${continuation.excerpt}`,
+      ];
+    });
     const fallback = chunksFromEvidence(artifact.full_text)
       .map((chunk) => ({
         ...chunk,

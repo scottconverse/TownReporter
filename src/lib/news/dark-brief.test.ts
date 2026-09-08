@@ -84,6 +84,12 @@ describe("BRIEF_SYSTEM", () => {
     assert.match(BRIEF_SYSTEM, /there may be irregularities/);
     assert.match(BRIEF_SYSTEM, /that is not a hypothesis, it is a shrug/);
   });
+
+  it("requires explicit same-record attribution for table values", () => {
+    assert.match(BRIEF_SYSTEM, /same record/i);
+    assert.match(BRIEF_SYSTEM, /adjacent/i);
+    assert.match(BRIEF_SYSTEM, /unknown/i);
+  });
 });
 
 describe("briefPack", () => {

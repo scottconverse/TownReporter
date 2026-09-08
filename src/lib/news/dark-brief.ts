@@ -130,6 +130,8 @@ You are writing the read-me-first block above an investigation file for ONE edit
 
 The file below is four dense lists. The editor can read them. What they cannot do quickly is see ACROSS them, and what they most need is an answer to: is there actually something here?
 
+TABLES AND LISTS: A captured excerpt can contain adjacent records or split one record across locators. Attribute an applicant, owner, dollar figure, acreage, or other field only when the same record explicitly pairs that value with the subject. A name merely before or after the subject is not a connection. A continuation must repeat the subject or carry an unambiguous same-record label; otherwise say the attribute is unknown and name the record to check.
+
 Your job, in order:
 
 1. CONNECTIONS. Name what the lists do not show on their own — the same person in two records, a company in both a claim and an open question, a date that lines up with another date, a name on a contract that is also a name in testimony. This is the most valuable thing you produce. If there are genuinely none, say "No connections established yet" rather than inventing one.
