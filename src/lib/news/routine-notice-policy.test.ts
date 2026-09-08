@@ -76,6 +76,10 @@ test("defaults empty and saves/revokes with monotonic CAS and audit", async () =
     true,
   );
   assert.equal(
+    revoked.recentChanges.find((x) => x.revision === 2 && x.action === "revoked")?.sourceUrl,
+    s.url,
+  );
+  assert.equal(
     revoked.recentChanges.some((x) => x.revision === 2 && x.action === "paused"),
     true,
   );
@@ -233,7 +237,33 @@ test("history never attributes an old approval to a replacement URL or recreated
   );
   const recreated = await readRoutineNoticePolicyFor(owner, room);
   assert.deepEqual(recreated.approvals, []);
-  assert.equal(recreated.recentChanges.every((change) => change.sourceUrl === null), true);
+  assert.equal(
+    recreated.recentChanges.some(
+      (change) =>
+        change.revision === 1 &&
+        change.action === "approved" &&
+        change.sourceUrl === null,
+    ),
+    true,
+  );
+  assert.equal(
+    recreated.recentChanges.some(
+      (change) =>
+        change.revision === 2 &&
+        change.action === "revoked" &&
+        change.sourceUrl === null,
+    ),
+    true,
+  );
+  assert.equal(
+    recreated.recentChanges.some(
+      (change) =>
+        change.revision === 2 &&
+        change.action === "approved" &&
+        change.sourceUrl === replacementUrl,
+    ),
+    true,
+  );
 });
 
 test("audit insertion failure rolls the policy transaction back", async () => {

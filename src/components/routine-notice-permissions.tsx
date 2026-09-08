@@ -429,6 +429,8 @@ export function RoutineNoticePermissions() {
                   : ""}
                 {change.sourceUrl ? (
                   <span className="block break-all text-muted">{change.sourceUrl}</span>
+                ) : change.sourceId !== null ? (
+                  <span className="block text-muted">Source #{change.sourceId} is unavailable.</span>
                 ) : null}
                 <span className="block text-muted">
                   Revision {change.revision} · {change.actor} · {formatChangedAt(change.changedAt)}

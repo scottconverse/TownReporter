@@ -183,7 +183,7 @@ async function readPolicy(sql: Sql, newsroomId: number): Promise<RoutineNoticePo
     format_key: RoutineNoticeFormatKey | null;
     source_url: string | null;
   }>(
-    `select c.revision,c.actor,c.changed_at,c.action,c.source_id,c.format_key,a.source_url from routine_notice_policy_changes c left join routine_notice_approvals a on a.newsroom_id=c.newsroom_id and a.source_id=c.source_id and a.format_key=c.format_key and md5(a.source_url)=c.source_url_hash where c.newsroom_id=$1 order by c.id desc limit 30`,
+    `select c.revision,c.actor,c.changed_at,c.action,c.source_id,c.format_key,s.url source_url from routine_notice_policy_changes c left join sources s on s.id=c.source_id and s.newsroom_id=c.newsroom_id and md5(s.url)=c.source_url_hash where c.newsroom_id=$1 order by c.id desc limit 30`,
     [newsroomId],
   );
   return {

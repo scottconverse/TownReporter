@@ -148,6 +148,7 @@ if (dbProbe.ok) {
     const views = await import("./views.ts");
     const sections = await import("./sections.server.ts");
     const pageWatch = await import("./page-watch.ts");
+    const routineNoticePolicy = await import("./routine-notice-policy.ts");
     const db = await import("../db.ts");
     closePoolForTests = db.closePoolForTests;
 
@@ -176,6 +177,7 @@ if (dbProbe.ok) {
     await sectionSql.query(await readFile(new URL("../../../migrations/0016_trash.sql",import.meta.url),"utf8"));
     await sections.ensureSectionsSchema();
     await pageWatch.ensurePageWatchSchema();
+    await routineNoticePolicy.ensureRoutineNoticePolicySchema();
     const sectionTriggers = await sectionSql<{ tgname: string }>`
       select tgname from pg_trigger where tgname in
         ('leads_resolve_section','drafts_resolve_section','articles_resolve_section') and tgenabled <> 'D'
