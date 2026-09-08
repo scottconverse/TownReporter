@@ -59,12 +59,12 @@ function page(...events: Array<Record<string, unknown>>) {
   )}</script></head><body></body></html>`;
 }
 
-async function fixture(formatKey = "library-notice") {
+async function fixture(formatKey = "library-notice", sourceUrl?: string) {
   const sql = await getSql();
   const room = ++roomSequence;
   const owner = `routine-check-owner-${room}`;
   const editor = `routine-check-editor-${room}`;
-  const url = `https://example.test/routine/${room}`;
+  const url = sourceUrl ?? `https://example.test/routine/${room}`;
   await checks.ensureRoutineNoticeCheckSchema();
   await sql.query("insert into newsrooms(id,name) values($1,'Routine checks')", [room]);
   await sql.query(
@@ -138,6 +138,47 @@ describe("routine notice manual checks", () => {
       );
       assert.equal(count?.n, 0, `${table} must remain untouched`);
     }
+  });
+
+  it("keeps the exact approved fetch URL while binding canonical capture identities", async () => {
+    const exactUrl = `https://www.example.test/routine/${roomSequence + 1}/?utm_source=desk#events`;
+    const f = await fixture("library-notice", exactUrl);
+    let fetchedUrl = "";
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      {
+        ingest: async (url) => {
+          fetchedUrl = url;
+          return htmlDocument(page(event()));
+        },
+      },
+    );
+    assert.equal(fetchedUrl, exactUrl);
+    assert.equal(result.check.source.url, exactUrl);
+    assert.equal(result.check.capture?.textAvailable, true);
+    const captured = await checks.readRoutineNoticeCapturedTextForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      { checkId: result.check.checkId },
+    );
+    assert.match(captured.fullText, /Library craft hour/);
+
+    const sql = await getSql();
+    const changedExactUrl = exactUrl.replace("utm_source=desk", "utm_source=changed");
+    await sql.query("update sources set url=$2 where id=$1", [f.sourceId, changedExactUrl]);
+    await sql.query(
+      "update routine_notice_approvals set source_url=$3 where newsroom_id=$1 and source_id=$2",
+      [f.room, f.sourceId, changedExactUrl],
+    );
+    await sql.query("update routine_notice_policies set revision=2 where newsroom_id=$1", [f.room]);
+    await assert.rejects(
+      checks.checkRoutineNoticeSourceForOwner(
+        { userId: f.owner, newsroomId: f.room },
+        { ...f.input, sourceUrl: changedExactUrl, expectedPolicyRevision: 2 },
+        { ingest: async () => htmlDocument(page(event())) },
+      ),
+      /another check/i,
+    );
   });
 
   it("returns a valid replay before fetching again and refuses a mismatched replay", async () => {
@@ -260,6 +301,7 @@ describe("routine notice manual checks", () => {
     );
     assert.equal(result.check.state, "capture-failed");
     assert.equal(result.check.refusals[0]?.code, "capture-failed");
+    assert.equal(result.check.capture?.textAvailable, false);
   });
 
   it("collapses identical candidates and flags every conflicting version", async () => {

@@ -1,5 +1,6 @@
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { sha256, sha256Bytes } from "./fetch-url.ts";
+import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import { ingestDocument, type IngestDocument } from "./ingest.ts";
 import { rememberCapture } from "./investigate.ts";
 import { ensureLegalSchema } from "./legal-removal-schema.ts";
@@ -26,6 +27,14 @@ const SUPPORTED = new Set<RoutineNoticeFormatKey>([
   "community-arts-event-logistics",
 ]);
 const FORMAT_KEYS = new Set<string>(ROUTINE_NOTICE_FORMAT_KEYS);
+
+function captureUrlIdentity(url: string) {
+  try {
+    return canonicalPublicUrl(url);
+  } catch {
+    return url;
+  }
+}
 
 export class RoutineNoticeCheckError extends Error {
   readonly code: RoutineNoticeCheckErrorCode;
@@ -407,9 +416,10 @@ export async function checkRoutineNoticeSourceForOwner(
     );
     const version = versions[0];
     const event = events[0];
+    const sourceCaptureUrl = captureUrlIdentity(source.url);
     const exactBlobs = blobs.filter(
       (blob) =>
-        blob.original_url === source.url &&
+        captureUrlIdentity(blob.original_url) === sourceCaptureUrl &&
         blob.byte_length === document.rawBytes!.byteLength &&
         Buffer.from(blob.body_b64, "base64").equals(Buffer.from(document.rawBytes!)),
     );
@@ -417,9 +427,9 @@ export async function checkRoutineNoticeSourceForOwner(
       !version ||
       !event ||
       exactBlobs.length !== 1 ||
-      version.url !== source.url ||
+      captureUrlIdentity(version.url) !== sourceCaptureUrl ||
       version.content_hash !== rawHash ||
-      event.source_url !== source.url ||
+      captureUrlIdentity(event.source_url) !== sourceCaptureUrl ||
       event.version_id !== version.id ||
       event.content_hash !== rawHash
     ) {
@@ -591,10 +601,11 @@ async function boundRawEvidence(sql: Sql, actor: Actor, row: CheckRow) {
   if (!evidence) return null;
   const bytes = Buffer.from(evidence.body_b64, "base64");
   const rawHash = await sha256Bytes(bytes);
+  const sourceCaptureUrl = captureUrlIdentity(row.source_url);
   if (
-    evidence.event_url !== row.source_url ||
-    evidence.version_url !== row.source_url ||
-    evidence.blob_url !== row.source_url ||
+    captureUrlIdentity(evidence.event_url) !== sourceCaptureUrl ||
+    captureUrlIdentity(evidence.version_url) !== sourceCaptureUrl ||
+    captureUrlIdentity(evidence.blob_url) !== sourceCaptureUrl ||
     evidence.event_version_id !== row.artifact_version_id ||
     evidence.blob_version_id !== row.artifact_version_id ||
     evidence.event_hash !== row.captured_content_hash ||
@@ -665,7 +676,7 @@ async function loadCheck(sql: Sql, actor: Actor, checkId: number): Promise<Routi
   const newer = row.capture_event_id
     ? await sql.query<{ found: boolean }>(
         "select exists(select 1 from capture_events where newsroom_id=$1 and source_url=$2 and id>$3) found",
-        [actor.newsroomId, row.source_url, row.capture_event_id],
+        [actor.newsroomId, captureUrlIdentity(row.source_url), row.capture_event_id],
       )
     : [{ found: false }];
   const approvalValid =
@@ -686,6 +697,7 @@ async function loadCheck(sql: Sql, actor: Actor, checkId: number): Promise<Routi
           artifactVersionId: row.artifact_version_id,
           observedAt: String(row.observed_at),
           evidenceHref: null,
+          textAvailable: Boolean(evidence),
         }
       : null,
     state,

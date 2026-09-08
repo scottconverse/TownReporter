@@ -39,6 +39,7 @@ export type RoutineNoticeCheckGroup = {
     artifactVersionId: number | null;
     observedAt: string;
     evidenceHref: null;
+    textAvailable: boolean;
   } | null;
   state: RoutineNoticeCheckState;
   counts: { parsed: number; refused: number; conflicts: number };

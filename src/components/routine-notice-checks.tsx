@@ -294,7 +294,7 @@ function CheckGroup({
           {group.newerCaptureAvailable ? " A newer capture is available." : ""}
         </p>
       ) : null}
-      {group.capture ? (
+      {group.capture?.textAvailable ? (
         <p className="mt-3">
           <button type="button" className="underline" onClick={onRead} disabled={opening}>
             {opening ? "Opening captured text…" : "Read captured text"}
