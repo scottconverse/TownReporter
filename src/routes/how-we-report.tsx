@@ -56,7 +56,11 @@ function How() {
         </p>
         <p>
           <strong className="text-ink">Write, then gate.</strong> Drafts are
-          reported stories, not recaps. Hold, kill, or publish is a person.
+          reported stories, not recaps. A person decides whether to hold, kill,
+          or publish them. The owner can separately activate deterministic
+          Today, Weekend, and Deadlines editions from six approved structured
+          notice formats; those editions use bounded logistics and public source
+          links, while ambiguous or substantive material returns for review.
           Every material claim should be checkable against a document we show.
         </p>
         <p>

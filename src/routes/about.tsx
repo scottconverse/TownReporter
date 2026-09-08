@@ -34,8 +34,10 @@ function About() {
         <p>
           We follow {PAPER.city}’s meetings, money, contracts and public records —
           then keep digging when something changes, disappears or doesn’t add
-          up. A human editor still decides what is published. There is no
-          fully automated path to the masthead. {PAPER.trust}
+          up. A human editor decides what is published for reported stories.
+          The owner may separately activate deterministic routine editions for
+          six explicitly approved structured notice formats; arbitrary prose,
+          investigations, disputes and ambiguous claims stay outside that path. {PAPER.trust}
         </p>
         <p>
           The source list is where reporting starts, not where it stops. We
