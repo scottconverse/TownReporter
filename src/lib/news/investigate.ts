@@ -1175,6 +1175,8 @@ export async function rememberCapture(opts: {
   extras?: string[];
   observedAt?: Date;
   rawBytes?: Uint8Array;
+  /** Skip automatic monitor creation for an explicit one-off capture. */
+  autoWatch?: boolean;
   /**
    * The caller's real newsroom (0.6.13). Threaded down to the `artifacts`
    * and `artifact_blobs` inserts below -- the two tables 0.6.11 claimed were
@@ -1342,7 +1344,10 @@ export async function rememberCapture(opts: {
     `;
   }
 
-  if (opts.outcome === "fetched" || opts.outcome === "changed" || opts.outcome === "unchanged") {
+  if (
+    opts.autoWatch !== false &&
+    (opts.outcome === "fetched" || opts.outcome === "changed" || opts.outcome === "unchanged")
+  ) {
     await maybeWatch(
       opts.userId,
       url,

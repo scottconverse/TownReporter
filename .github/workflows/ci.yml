@@ -211,6 +211,8 @@ jobs:
         run: node --experimental-strip-types --test src/lib/news/draft-batch.postgres.test.ts
       - name: Routine notice policy CAS and owner withdrawal hold on real PostgreSQL
         run: node --experimental-strip-types --test src/lib/news/routine-notice-policy.postgres.test.ts
+      - name: Routine notice check replay and final authorization hold on real PostgreSQL
+        run: node --experimental-strip-types --test src/lib/news/routine-notice-checks.postgres.test.ts
 
   # These two walks each need an UNCLAIMED desk: they create their own owner
   # at /login, and the first account in owns the newsroom.

@@ -8,6 +8,7 @@ import {
   replaceRoutineApproval,
   withoutRoutineApproval,
 } from "@/components/routine-notice-permissions-state";
+import { RoutineNoticeChecks } from "@/components/routine-notice-checks";
 import { myDesk } from "@/lib/news/claim";
 import { listSources } from "@/lib/news/desk";
 import {
@@ -402,6 +403,7 @@ export function RoutineNoticePermissions() {
           </div>
         ) : null}
       </div>
+      <RoutineNoticeChecks policy={current} />
       <div className="mt-6 max-w-3xl border-y border-rule py-4 text-sm">
         <p>
           <span className="text-muted">Status:</span> {current.paused ? "Paused" : "Not paused"} ·

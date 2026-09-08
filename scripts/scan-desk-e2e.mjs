@@ -22,6 +22,7 @@
  */
 import { chromium } from "playwright";
 import { expect } from "playwright/test";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
@@ -41,16 +42,35 @@ const base = checkedUrl(
 const stamp = Date.now();
 const email = `scandesk-${stamp}@townreporter.test`;
 const password = "scan-desk-e2e-pass";
+const routineNoticeFixtureUrl = `https://example.com/townreporter-routine-fixture-${stamp}`;
 const dailySettings = process.env.DAILY_SCAN_E2E === "1";
 const evidenceDir = resolve(process.env.DAILY_SCAN_E2E_ARTIFACT_DIR || "../daily-scan-evidence");
 
 let page;
 const done = [];
 let expectedFixtureTimeoutErrors = 0;
+let expectedRoutineRetryAbortErrors = 0;
 
 function step(name) {
   done.push(name);
   console.log(`  ok    ${name}`);
+}
+
+/**
+ * The optional local proof prepares one bound result through the actual
+ * server core and its Vite-only test fetch hook. It targets an isolated
+ * scratch PostgreSQL database; the built browser only reads that result.
+ */
+function seedRoutineNoticeCheckIfRequested() {
+  const script = process.env.ROUTINE_NOTICE_SEED_SCRIPT;
+  if (!script) return false;
+  const output = execFileSync(process.execPath, [script, email], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: process.env,
+  });
+  console.log(`routine notice fixture: ${output.trim()}`);
+  return true;
 }
 
 async function dump(err) {
@@ -152,6 +172,15 @@ async function addAcceptedSource() {
   await page.getByRole("button", { name: "Add source" }).click();
   await page.getByText("On watch: Daily settings source").waitFor();
   step("an accepted source is available without fetching it");
+}
+
+async function addRoutineNoticeFixtureSource() {
+  await page.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
+  await page.getByLabel("URL", { exact: true }).fill(routineNoticeFixtureUrl);
+  await page.getByLabel("Name", { exact: true }).fill("Routine notice fixture source");
+  await page.getByRole("button", { name: "Add source" }).click();
+  await page.getByText("On watch: Routine notice fixture source").waitFor();
+  step("a resolvable routine-check fixture source is accepted without fetching it");
 }
 
 async function dailySettingsJourney(context, observePage) {
@@ -395,6 +424,7 @@ async function draftBatchJourney() {
 }
 
 async function routineNoticePermissionsJourney(context, observePage) {
+  await addRoutineNoticeFixtureSource();
   await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
   const panel = page.locator("#routine-notice-permissions");
   await panel.getByRole("heading", { name: "Routine notice permissions", exact: true }).waitFor();
@@ -414,27 +444,200 @@ async function routineNoticePermissionsJourney(context, observePage) {
   await linked.close();
   step("owner sees empty routine permissions, no publication capability, and the source link");
 
-  await panel.getByRole("checkbox", { name: "Daily settings source — Library notices" }).check();
+  await panel
+    .getByRole("checkbox", { name: "Routine notice fixture source — Library notices" })
+    .check();
+  await panel
+    .getByRole("checkbox", { name: "Routine notice fixture source — Waste and recycling schedules" })
+    .check();
   await panel.getByRole("button", { name: "Save routine permissions" }).click();
   await panel
     .getByText(
       "Permissions saved. Automatic publication is not available in this version; no items will publish from these settings.",
     )
     .waitFor();
+  const seededRoutineCheck = seedRoutineNoticeCheckIfRequested();
   await page.reload({ waitUntil: "domcontentloaded" });
   const reloaded = page.locator("#routine-notice-permissions");
   if (
     !(await reloaded
-      .getByRole("checkbox", { name: "Daily settings source — Library notices" })
+      .getByRole("checkbox", { name: "Routine notice fixture source — Library notices" })
       .isChecked())
   ) {
     throw new Error("saved routine permission did not survive reload");
+  }
+  if (
+    !(await reloaded
+      .getByRole("checkbox", { name: "Routine notice fixture source — Waste and recycling schedules" })
+      .isChecked())
+  ) {
+    throw new Error("saved unsupported routine permission did not survive reload");
   }
   await reloaded
     .getByText(/Revision 1/)
     .first()
     .waitFor();
   step("a source-format permission saves and survives a real reload without enabling publication");
+
+  const checks = reloaded.locator("#routine-notice-checks");
+  await checks.getByRole("heading", { name: "Manual notice checks", exact: true }).waitFor();
+  await checks
+    .getByText(
+      "Manual structural check only. It creates no lead, draft, article, scheduled work, or publication.",
+    )
+    .waitFor();
+  const libraryCheck = checks.locator("li", { hasText: "Library notices" });
+  const unavailableCheck = checks.locator("li", { hasText: "Waste and recycling schedules" });
+  await libraryCheck.getByRole("button", { name: "Check captured notices" }).waitFor();
+  await unavailableCheck.getByRole("button", { name: "Check captured notices" }).waitFor();
+  step("a saved source-format pair offers a manual structural check with no publication capability");
+
+  const captureOnly = process.env.ROUTINE_NOTICE_CAPTURE_ONLY === "1";
+  const observedRoutineRequests = [];
+  const observeRoutineRequest = (request) => {
+    const payload = request.postData() ?? "";
+    if (payload.includes("waste-recycling-schedule")) {
+      observedRoutineRequests.push({
+        method: request.method(),
+        url: request.url(),
+        headers: request.headers(),
+        payload,
+      });
+    }
+  };
+  page.on("request", observeRoutineRequest);
+  let releaseUnavailableCheck;
+  const unavailableCheckReleased = new Promise((resolve) => {
+    releaseUnavailableCheck = resolve;
+  });
+  let markUnavailableCheckEntered;
+  const unavailableCheckEntered = new Promise((resolve) => {
+    markUnavailableCheckEntered = resolve;
+  });
+  let holdUnavailableCheck = true;
+  const holdUnavailableRoutineCheck = async (route) => {
+    const request = route.request();
+    const payload = request.postData() ?? "";
+    if (
+      holdUnavailableCheck &&
+      request.method() === "POST" &&
+      request.headers()["x-tsr-serverfn"] === "true" &&
+      payload.includes("waste-recycling-schedule")
+    ) {
+      holdUnavailableCheck = false;
+      markUnavailableCheckEntered();
+      await unavailableCheckReleased;
+    }
+    await route.continue();
+  };
+  await page.route("**/*", holdUnavailableRoutineCheck);
+  const unavailableButton = unavailableCheck.locator("button").first();
+  if (captureOnly) {
+    await page.unroute("**/*", holdUnavailableRoutineCheck);
+    await unavailableButton.click();
+  } else {
+    await unavailableButton.click();
+    await unavailableCheckEntered;
+    if (!(await unavailableButton.isDisabled())) {
+      throw new Error("the pending unavailable check left its own row editable");
+    }
+    if (await libraryCheck.getByRole("button", { name: "Check captured notices" }).isDisabled()) {
+      throw new Error("the pending unavailable check froze a different approved pair");
+    }
+    releaseUnavailableCheck();
+  }
+  await unavailableCheck
+    .getByText("This approved format does not have a captured-data adapter yet.")
+    .waitFor();
+  if (!captureOnly) await page.unroute("**/*", holdUnavailableRoutineCheck);
+  page.off("request", observeRoutineRequest);
+  if (captureOnly) {
+    writeFileSync(join(evidenceDir, "routine-notice-check-request-shape.json"), JSON.stringify({
+      requests: observedRoutineRequests,
+      unavailableDisabled: await unavailableButton.isDisabled(),
+      libraryDisabled: await libraryCheck.getByRole("button", { name: "Check captured notices" }).isDisabled(),
+    }, null, 2));
+    return;
+  }
+  if (new URL(page.url()).pathname !== "/desk/ops") {
+    throw new Error("an unavailable routine adapter navigated away from Server permissions");
+  }
+  step("an unavailable approved format reports its adapter boundary without starting publication work");
+
+  if (seededRoutineCheck) {
+    await libraryCheck.getByText("Parsed structurally", { exact: true }).waitFor();
+    await libraryCheck.getByRole("button", { name: "Read captured text" }).click();
+    const raw = libraryCheck.locator("pre.read-full");
+    await expect(raw).toContainText("Fixture library craft hour");
+    await expect(raw).toContainText('<script type="application/ld+json">');
+    if (await raw.locator("script").count()) {
+      throw new Error("captured raw HTML rendered an executable script element");
+    }
+    await libraryCheck.getByRole("button", { name: "Close captured text" }).click();
+    step("a real server-bound parsed group reloads and exposes escaped captured text");
+
+    const retryRequestIds = [];
+    const interruptRoutineCheck = async (route) => {
+      const request = route.request();
+      const payload = request.postData() ?? "";
+      if (
+        request.method() === "POST" &&
+        payload.includes('"requestId"') &&
+        payload.includes('"expectedPolicyRevision"')
+      ) {
+        if (
+          !payload.includes('"sourceId"') ||
+          !payload.includes('"sourceUrl"') ||
+          !payload.includes('"formatKey"') ||
+          payload.includes('"captureEventId"') ||
+          payload.includes('"artifactVersionId"')
+        ) {
+          throw new Error("routine check browser request did not keep the server-owned evidence boundary");
+        }
+        const requestId = payload.match(
+          /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i,
+        )?.[0];
+        if (!requestId) throw new Error("routine check request omitted its UUID");
+        retryRequestIds.push(requestId);
+        // This route has already matched the real server-function payload and
+        // its exact routine UUID. Account only for the browser console error
+        // caused by this deliberate transport abort.
+        expectedRoutineRetryAbortErrors += 1;
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    };
+    await page.route("**/*", interruptRoutineCheck);
+    await libraryCheck.getByRole("button", { name: "Check captured notices" }).click();
+    const retry = libraryCheck.getByRole("button", { name: "Retry this check" });
+    await retry.waitFor();
+    await libraryCheck.getByText("Parsed structurally", { exact: true }).waitFor();
+    await retry.click();
+    await expect.poll(() => retryRequestIds.length, { timeout: 10_000 }).toBe(2);
+    if (retryRequestIds[0] !== retryRequestIds[1]) {
+      throw new Error("an uncertain routine check retry changed its request UUID");
+    }
+    await page.unroute("**/*", interruptRoutineCheck);
+    step("a failed check keeps its prior result and replays the same request UUID only on retry");
+  }
+
+  mkdirSync(evidenceDir, { recursive: true });
+  await checks.screenshot({ path: join(evidenceDir, "routine-notice-checks-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
+    throw new Error("manual notice checks have horizontal overflow at 390px");
+  }
+  await checks.screenshot({ path: join(evidenceDir, "routine-notice-checks-mobile.png") });
+  await page.getByRole("button", { name: "Dark", exact: true }).click();
+  await page.getByRole("button", { name: "Large", exact: true }).click();
+  if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
+    throw new Error("manual notice checks have horizontal overflow at 390px in dark large-text mode");
+  }
+  await checks.screenshot({
+    path: join(evidenceDir, "routine-notice-checks-mobile-dark-large.png"),
+  });
+  step("manual notice checks remain readable at a narrow width in dark large-text mode");
 
   const other = await context.newPage();
   observePage(other, "routine-second-tab");
@@ -565,6 +768,10 @@ async function main() {
   const note = (text) => {
     if (expectedFixtureTimeoutErrors > 0 && /net::ERR_TIMED_OUT/.test(text)) {
       expectedFixtureTimeoutErrors -= 1;
+      return;
+    }
+    if (expectedRoutineRetryAbortErrors > 0 && /net::ERR_FAILED/.test(text)) {
+      expectedRoutineRetryAbortErrors -= 1;
       return;
     }
     consoleErrors.push(`[after: ${done[done.length - 1] ?? "start"} | ${page.url()}] ${text}`);
