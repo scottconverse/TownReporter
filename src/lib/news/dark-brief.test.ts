@@ -114,4 +114,23 @@ describe("briefPack", () => {
     });
     assert.equal((pack.match(/\(none yet\)/g) ?? []).length, 6);
   });
+
+  it("keeps a whole selected document at the 10k evidence boundary", () => {
+    const first = "DOCUMENT_TARGET_FRONT";
+    const last = "DOCUMENT_TARGET_BACK";
+    const evidence = `${first}${"x".repeat(10_000 - first.length - last.length)}${last}`;
+    const pack = briefPack({
+      title: "Evidence boundary",
+      facts: [{ body: "fact ".repeat(2_000) }],
+      hypotheses: [],
+      questions: [],
+      findings: [],
+      entities: [],
+      artifacts: [{ title: "Selected record", url: "https://records.example", evidence }],
+    });
+    assert.equal(evidence.length, 10_000);
+    assert.match(pack, /DOCUMENT_TARGET_FRONT/);
+    assert.match(pack, /DOCUMENT_TARGET_BACK/);
+    assert.ok(pack.length <= 22_000, `brief pack was ${pack.length} characters`);
+  });
 });

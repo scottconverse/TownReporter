@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { getSql } from "../db.ts";
 import { ensureInvestigateSchema } from "./investigate.ts";
-import { buildDarkSynthesisPack, ensureDarkSchema } from "./dark.ts";
+import { buildBrief, buildDarkBriefPromptPack, buildDarkSynthesisPack, ensureDarkSchema } from "./dark.ts";
 import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 it("synthesis uses only its newsroom's context and configured city", async () => {
   const sql = await getSql();
@@ -35,4 +35,101 @@ it("synthesis uses only its newsroom's context and configured city", async () =>
   assert.doesNotMatch(pack, /OTHER_SECRET/);
   for (const expected of ["OWN_SOURCE", "OWN_LEAD", "OWN_ARTICLE", "OWN_MEMORY", "Centennial"])
     assert.ok(pack.includes(expected), expected);
+});
+
+it("synthesis keeps an older focus-matching capture and its stored page evidence over later noise", async () => {
+  const sql = await getSql();
+  const newsroomId = 78;
+  const otherNewsroomId = 79;
+  const userId = "synthesis-ranking";
+  await sql`insert into paper_settings(newsroom_id,city,state) values (${newsroomId},'Riverton','Colorado')`;
+  const inv = (
+    await sql<{ id: number }>`
+      insert into investigations(user_id,newsroom_id,title)
+      values (${userId},${newsroomId},'Cedar annexation FILE-4242')
+      returning id
+    `
+  )[0]!.id;
+  // The target begins near the end of a 2,000-character extractor chunk.
+  // A brief that clips each selected document to a head prefix loses it.
+  const targetText = `${"background ".repeat(710)}\nTARGET_ROW: FILE-4242 Cedar annexation covers the project record.`;
+  const version = (
+    await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_status,fetch_outcome)
+      values (${userId},${newsroomId},'https://records.example/cedar','target-hash','Cedar annexation packet',${targetText},200,'fetched')
+      returning id
+    `
+  )[0]!.id;
+  const capture = (
+    await sql<{ id: number }>`
+      insert into capture_events(user_id,newsroom_id,investigation_id,source_url,version_id,http_status,fetch_outcome,content_hash)
+      values (${userId},${newsroomId},${inv},'https://records.example/cedar',${version},200,'fetched','target-hash')
+      returning id
+    `
+  )[0]!.id;
+  await sql`
+    insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,fetch_status,fetch_outcome,version_id,capture_event_id)
+    values (${userId},${newsroomId},${inv},'https://records.example/cedar','Cedar annexation packet','target-hash',${targetText},200,'fetched',${version},${capture})
+  `;
+  await sql`
+    insert into artifact_chunks(version_id,user_id,newsroom_id,chunk_index,page_number,section,excerpt,locator)
+    values (${version},${userId},${newsroomId},0,7,'Annexation','Cedar filing table','page:7')
+  `;
+  for (let i = 0; i < 41; i += 1) {
+    await sql`
+      insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,fetch_status,fetch_outcome)
+      values (${userId},${newsroomId},${inv},${`https://noise.example/${i}`},${`Later unrelated notice ${i}`},${`noise-${i}`},${`unrelated later noise ${i}`},200,'fetched')
+    `;
+  }
+  const otherInv = (
+    await sql<{ id: number }>`
+      insert into investigations(user_id,newsroom_id,title)
+      values (${userId},${otherNewsroomId},'Cedar annexation FILE-4242')
+      returning id
+    `
+  )[0]!.id;
+  await sql`
+    insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,fetch_status,fetch_outcome)
+    values (${userId},${otherNewsroomId},${otherInv},'https://foreign.example/cedar','FOREIGN_TARGET','foreign-target','TARGET_ROW: FOREIGN_SECRET',200,'fetched')
+  `;
+
+  const pack = await buildDarkSynthesisPack(inv, "", newsroomId);
+  assert.match(pack, /TARGET_ROW: FILE-4242 Cedar annexation/);
+  assert.match(pack, new RegExp(`capture:${capture} version:${version} hash:target-hash`));
+  assert.match(pack, /page:7/);
+  assert.doesNotMatch(pack, /FOREIGN_SECRET|FOREIGN_TARGET/);
+
+  const cappedPack = await buildDarkSynthesisPack(inv, "editor context ".repeat(2_000), newsroomId);
+  assert.ok(cappedPack.length <= 28_000, `synthesis pack was ${cappedPack.length} characters`);
+  assert.match(cappedPack, /TARGET_ROW: FILE-4242 Cedar annexation/);
+
+  const briefPack = await buildDarkBriefPromptPack(newsroomId, inv);
+  assert.ok(briefPack);
+  assert.ok(briefPack.length <= 22_000, `brief pack was ${briefPack.length} characters`);
+  assert.match(briefPack, /TARGET_ROW: FILE-4242 Cedar annexation/);
+  assert.match(briefPack, new RegExp(`capture:${capture} version:${version} hash:target-hash`));
+  assert.doesNotMatch(briefPack, /FOREIGN_SECRET|FOREIGN_TARGET/);
+
+  for (let i = 0; i < 30; i += 1) {
+    await sql`
+      insert into claims(user_id,newsroom_id,investigation_id,body,kind,evidence)
+      values (${userId},${newsroomId},${inv},${`long fact ${i} `.repeat(200)},'FACT','recorded')
+    `;
+  }
+
+  let briefPrompt = "";
+  const brief = await buildBrief(
+    userId,
+    newsroomId,
+    inv,
+    undefined,
+    null,
+    async (_system, prompt) => {
+      briefPrompt = prompt;
+      return { ok: true, text: '{"headline":"Cedar record","tldr":"A captured record is available."}' };
+    },
+  );
+  assert.equal(brief.ok, true);
+  assert.match(briefPrompt, /TARGET_ROW: FILE-4242 Cedar annexation/);
+  assert.match(briefPrompt, new RegExp(`capture:${capture} version:${version} hash:target-hash`));
 });

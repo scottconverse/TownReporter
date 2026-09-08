@@ -187,16 +187,47 @@ export function briefPack(input: {
   questions: string[];
   findings: string[];
   entities: { name: string; kind: string }[];
-  artifacts: { title: string; url: string }[];
+  artifacts: { title: string; url: string; evidence?: string }[];
 }): string {
   const cap = (a: string[], n: number) => a.filter(Boolean).slice(0, n);
-  return [
-    `INVESTIGATION: ${input.title}`,
-    `WHAT WE KNOW (facts and observations):\n${cap(input.facts.map((f) => `- ${f.body}${f.evidence ? ` [${f.evidence.slice(0, 160)}]` : ""}`), 30).join("\n") || "(none yet)"}`,
-    `BEING TESTED (hypotheses):\n${cap(input.hypotheses.map((h) => `- ${h}`), 20).join("\n") || "(none yet)"}`,
-    `ON THE RECORD (recorded signals):\n${cap(input.findings.map((f) => `- ${f}`), 20).join("\n") || "(none yet)"}`,
-    `STILL OPEN (questions):\n${cap(input.questions.map((q) => `- ${q}`), 25).join("\n") || "(none yet)"}`,
-    `NAMES AND THINGS SEEN:\n${cap(input.entities.map((e) => `- ${e.name} (${e.kind})`), 40).join("\n") || "(none yet)"}`,
-    `DOCUMENTS READ:\n${cap(input.artifacts.map((a) => `- ${a.title} — ${a.url}`), 30).join("\n") || "(none yet)"}`,
-  ].join("\n\n");
+  const marker = "\n[section budget reached]";
+  const clip = (text: string, n: number) => {
+    if (text.length <= n) return text;
+    if (n <= marker.length) return text.slice(0, n);
+    return `${text.slice(0, n - marker.length)}${marker}`;
+  };
+  const evidenceEntries: string[] = [];
+  let evidenceUsed = 0;
+  for (const artifact of cap(input.artifacts.map((a) => a.evidence || `- ${a.title} — ${a.url}`), 8)) {
+    const separator = evidenceEntries.length ? 2 : 0;
+    if (evidenceUsed + separator + artifact.length > 10_000) continue;
+    evidenceEntries.push(artifact);
+    evidenceUsed += separator + artifact.length;
+  }
+  // The shared evidence selector already fits entries to its own 10k budget.
+  // Keep a selected entry whole here so a fact near its end is not silently
+  // replaced by the beginning of the same capture.
+  const evidence = evidenceEntries.join("\n\n") || "(none yet)";
+  const sections = [
+    `INVESTIGATION: ${clip(input.title, 600)}`,
+    `DOCUMENTS READ:\n${evidence}`,
+    `WHAT WE KNOW (facts and observations):\n${cap(input.facts.map((f) => `- ${clip(f.body, 600)}${f.evidence ? ` [${f.evidence.slice(0, 160)}]` : ""}`), 30).join("\n") || "(none yet)"}`,
+    `BEING TESTED (hypotheses):\n${cap(input.hypotheses.map((h) => `- ${clip(h, 600)}`), 20).join("\n") || "(none yet)"}`,
+    `ON THE RECORD (recorded signals):\n${cap(input.findings.map((f) => `- ${clip(f, 600)}`), 20).join("\n") || "(none yet)"}`,
+    `STILL OPEN (questions):\n${cap(input.questions.map((q) => `- ${clip(q, 600)}`), 25).join("\n") || "(none yet)"}`,
+    `NAMES AND THINGS SEEN:\n${cap(input.entities.map((e) => `- ${clip(e.name, 240)} (${clip(e.kind, 100)})`), 40).join("\n") || "(none yet)"}`,
+  ];
+  const budget = 22_000;
+  let used = 0;
+  const bounded: string[] = [];
+  for (const section of sections) {
+    const separator = bounded.length ? 2 : 0;
+    const remaining = budget - used - separator;
+    if (remaining <= 0) break;
+    const clipped = clip(section, remaining);
+    bounded.push(clipped);
+    used += clipped.length + separator;
+    if (clipped.length < section.length) break;
+  }
+  return bounded.join("\n\n");
 }
