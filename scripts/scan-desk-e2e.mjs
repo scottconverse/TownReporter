@@ -336,15 +336,80 @@ async function routineNoticePermissionsJourney(context, observePage) {
   await otherPanel.getByText("Latest routine permissions reloaded.").waitFor();
   step("a stale routine-permissions tab gets an explicit conflict and reload path");
 
+  await other.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
+  const sourceRow = other.locator("tr", { hasText: "Daily settings source" });
+  await sourceRow.getByRole("button", { name: "Drop", exact: true }).click();
+  await other.getByRole("heading", { name: "Rejected", exact: true }).waitFor();
+  await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  await other.reload({ waitUntil: "domcontentloaded" });
+  await otherPanel.getByText("Saved permissions need attention").waitFor();
+  await otherPanel
+    .getByText(/Saved address: https:\/\/daily-settings-/)
+    .first()
+    .waitFor();
   await otherPanel.getByRole("checkbox", { name: "Pause routine notice permissions" }).check();
+  let releaseDelayedRoutineSave;
+  const delayedRoutineSave = new Promise((resolve) => {
+    releaseDelayedRoutineSave = resolve;
+  });
+  let enteredDelayedRoutineSave;
+  const routineSaveEntered = new Promise((resolve) => {
+    enteredDelayedRoutineSave = resolve;
+  });
+  let holdRoutineSave = true;
+  await other.route("**/*", async (route) => {
+    const request = route.request();
+    if (
+      holdRoutineSave &&
+      request.method() === "POST" &&
+      request.postData()?.includes('"approvals"')
+    ) {
+      holdRoutineSave = false;
+      enteredDelayedRoutineSave();
+      await delayedRoutineSave;
+    }
+    await route.continue();
+  });
   await otherPanel.getByRole("button", { name: "Save routine permissions" }).click();
+  await routineSaveEntered;
+  const pauseControl = otherPanel.getByRole("checkbox", {
+    name: "Pause routine notice permissions",
+  });
+  if (!(await pauseControl.isDisabled()))
+    throw new Error("pause stayed editable while its save was pending");
+  const revokeControls = otherPanel.getByRole("button", {
+    name: "Revoke saved permission",
+    exact: true,
+  });
+  if (!(await revokeControls.first().isDisabled())) {
+    throw new Error("revoke stayed editable while its save was pending");
+  }
+  releaseDelayedRoutineSave();
   await otherPanel.getByText(/Permissions saved\. Automatic publication/).waitFor();
+  await other.unroute("**/*");
   await otherPanel.getByText("Paused", { exact: true }).waitFor();
   await otherPanel
-    .getByRole("checkbox", { name: "Daily settings source — Library notices" })
-    .uncheck();
+    .getByText(/Saved address: https:\/\/daily-settings-/)
+    .first()
+    .waitFor();
+  step("pausing retains an invalid recorded permission until the owner explicitly revokes it");
+
+  while (
+    await otherPanel.getByRole("button", { name: "Revoke saved permission", exact: true }).count()
+  ) {
+    await otherPanel
+      .getByRole("button", { name: "Revoke saved permission", exact: true })
+      .first()
+      .click();
+  }
   await otherPanel.getByRole("button", { name: "Save routine permissions" }).click();
-  await otherPanel.getByText(/Revoked/).waitFor();
+  await otherPanel
+    .getByText(/Revoked/)
+    .first()
+    .waitFor();
+  if (await otherPanel.getByText("Saved permissions need attention").isVisible()) {
+    throw new Error("explicit revocation left an invalid routine permission behind");
+  }
   mkdirSync(evidenceDir, { recursive: true });
   await otherPanel.screenshot({
     path: join(evidenceDir, "routine-notice-permissions-desktop.png"),

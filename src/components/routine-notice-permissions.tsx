@@ -22,9 +22,11 @@ type Feedback = { kind: "ok" | "error"; text: string; reload?: boolean };
 function policyDraft(policy: RoutineNoticePolicy): Draft {
   return {
     paused: policy.paused,
-    approvals: policy.approvals
-      .filter((approval) => approval.valid)
-      .map(({ sourceId, sourceUrl, formatKey }) => ({ sourceId, sourceUrl, formatKey })),
+    approvals: policy.approvals.map(({ sourceId, sourceUrl, formatKey }) => ({
+      sourceId,
+      sourceUrl,
+      formatKey,
+    })),
   };
 }
 
@@ -159,19 +161,27 @@ export function RoutineNoticePermissions() {
     },
   });
 
+  const editingLocked = save.isPending || reloadLatest.isPending;
+
   const toggle = (source: { id: number; url: string }, formatKey: RoutineNoticeFormatKey) => {
     if (!draft) return;
     const key = approvalKey(source.id, formatKey);
-    const exists = draft.approvals.some(
+    const existing = draft.approvals.find(
       (approval) => approvalKey(approval.sourceId, approval.formatKey) === key,
     );
+    const isCurrentAddress = existing?.sourceUrl === source.url;
     changeDraft({
       ...draft,
-      approvals: exists
+      approvals: isCurrentAddress
         ? draft.approvals.filter(
             (approval) => approvalKey(approval.sourceId, approval.formatKey) !== key,
           )
-        : [...draft.approvals, { sourceId: source.id, sourceUrl: source.url, formatKey }],
+        : [
+            ...draft.approvals.filter(
+              (approval) => approvalKey(approval.sourceId, approval.formatKey) !== key,
+            ),
+            { sourceId: source.id, sourceUrl: source.url, formatKey },
+          ],
     });
   };
 
@@ -238,6 +248,7 @@ export function RoutineNoticePermissions() {
             type="checkbox"
             className="mt-1 h-5 w-5"
             checked={draft.paused}
+            disabled={editingLocked}
             onChange={(event) => changeDraft({ ...draft, paused: event.target.checked })}
           />
           <span>
@@ -266,7 +277,9 @@ export function RoutineNoticePermissions() {
                     {ROUTINE_NOTICE_FORMATS.map((format) => {
                       const checked = draft.approvals.some(
                         (approval) =>
-                          approval.sourceId === source.id && approval.formatKey === format.key,
+                          approval.sourceId === source.id &&
+                          approval.formatKey === format.key &&
+                          approval.sourceUrl === source.url,
                       );
                       return (
                         <label key={format.key} className="flex items-start gap-2 text-sm">
@@ -274,6 +287,7 @@ export function RoutineNoticePermissions() {
                             type="checkbox"
                             className="mt-1 h-4 w-4"
                             checked={checked}
+                            disabled={editingLocked}
                             aria-label={`${source.title || source.url} — ${format.label}`}
                             onChange={() => toggle(source, format.key)}
                           />
@@ -294,20 +308,71 @@ export function RoutineNoticePermissions() {
           <div className="border border-rust p-4 text-sm" role="alert">
             <p className="font-medium">Saved permissions need attention</p>
             <p className="mt-1 text-muted">
-              These source records changed, lost acceptance, or disappeared. They cannot be
-              retained; saving this form will revoke them while preserving their audit history.
+              These recorded pairs stay inert until you explicitly revoke them or, when a source has
+              a new accepted address, replace the saved address by selecting that current source and
+              format pair.
             </p>
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              {invalidApprovals.map((approval) => (
-                <li key={approvalKey(approval.sourceId, approval.formatKey)}>
-                  {approval.sourceTitle || approval.sourceUrl} —{" "}
-                  {
-                    ROUTINE_NOTICE_FORMATS.find((format) => format.key === approval.formatKey)
-                      ?.label
-                  }{" "}
-                  ({approval.sourceState})
-                </li>
-              ))}
+            <ul className="mt-2 space-y-3">
+              {invalidApprovals.map((approval) => {
+                const key = approvalKey(approval.sourceId, approval.formatKey);
+                const retained = draft.approvals.some(
+                  (item) =>
+                    approvalKey(item.sourceId, item.formatKey) === key &&
+                    item.sourceUrl === approval.sourceUrl,
+                );
+                const currentSource = accepted.find((source) => source.id === approval.sourceId);
+                const replacementSelected = currentSource
+                  ? draft.approvals.some(
+                      (item) =>
+                        approvalKey(item.sourceId, item.formatKey) === key &&
+                        item.sourceUrl === currentSource.url,
+                    )
+                  : false;
+                return (
+                  <li key={key} className="border-t border-rule pt-3 first:border-t-0 first:pt-0">
+                    <p>
+                      <span className="font-medium">
+                        {approval.sourceTitle || approval.sourceUrl}
+                      </span>{" "}
+                      —{" "}
+                      {
+                        ROUTINE_NOTICE_FORMATS.find((format) => format.key === approval.formatKey)
+                          ?.label
+                      }{" "}
+                      ({approval.sourceState})
+                    </p>
+                    <p className="mt-1 break-all text-muted">Saved address: {approval.sourceUrl}</p>
+                    {retained ? (
+                      <InkButton
+                        tone="danger"
+                        small
+                        disabled={editingLocked}
+                        onClick={() =>
+                          changeDraft({
+                            ...draft,
+                            approvals: draft.approvals.filter(
+                              (item) =>
+                                !(
+                                  approvalKey(item.sourceId, item.formatKey) === key &&
+                                  item.sourceUrl === approval.sourceUrl
+                                ),
+                            ),
+                          })
+                        }
+                      >
+                        Revoke saved permission
+                      </InkButton>
+                    ) : replacementSelected ? (
+                      <p className="mt-1 text-muted">
+                        The current accepted address is marked to replace this saved permission when
+                        you save.
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-muted">Marked to revoke when you save.</p>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ) : null}
@@ -318,10 +383,7 @@ export function RoutineNoticePermissions() {
           </p>
         ) : null}
         <div className="flex flex-wrap items-center gap-3">
-          <InkButton
-            disabled={save.isPending || reloadLatest.isPending || tooMany}
-            onClick={() => save.mutate()}
-          >
+          <InkButton disabled={editingLocked || tooMany} onClick={() => save.mutate()}>
             {save.isPending ? "Saving…" : "Save routine permissions"}
           </InkButton>
           <Link to="/desk/sources" className="text-sm underline">

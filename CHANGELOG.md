@@ -4,6 +4,8 @@ Current release: **0.6.29**.
 
 ## Unreleased
 
+- Routine notice permissions let an owner prepare, pause and audit exact source-and-format pairs. They do not enable automatic publication. Invalid saved pairs stay inactive through pause until the owner explicitly revokes them or explicitly replaces a changed source address.
+
 ## 0.6.29 — 2026-09-07
 
 - Draft reporting keeps the originating newsroom's paper identity, captures and provenance. Public captured records, histories and comparisons stay within the public edition; sharing a source URL does not expose another newsroom's evidence. Mismatched capture/version references are excluded. Historical records are not reassigned or rewritten.
