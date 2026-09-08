@@ -31,6 +31,9 @@
  *                           what a lapsed login mid-draft actually looks
  *                           like, and it is what src/lib/news/automatic-failover.ts
  *                           exists to catch.
+ *   FAKE_CLAUDE_VALID_DRAFT "1" to return a small valid draft JSON for every
+ *                           chat call. This is for an offline browser fixture
+ *                           only; it never invokes a provider.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
@@ -153,6 +156,20 @@ if (argv[0] === "auth" && argv[1] === "login") {
       api_error_status: 401,
       result:
         "Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.",
+    }) + "\n",
+  );
+  process.exit(0);
+} else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_VALID_DRAFT === "1") {
+  process.stdout.write(
+    JSON.stringify({
+      is_error: false,
+      result: JSON.stringify({
+        headline: "TEST FIXTURE — Library registration opens",
+        dek: "TEST FIXTURE: a supplied-material draft for queue refresh coverage.",
+        body: "TEST FIXTURE: Registration is open. Editors review this draft before publication.",
+        topic: "community",
+        source_urls: [],
+      }),
     }) + "\n",
   );
   process.exit(0);

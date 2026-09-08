@@ -1,53 +1,15 @@
 import { createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "../db.ts";
-import { resolveLocalModelChoice } from "./provider-settings.ts";
 import { kickJobs, type DeskJob } from "./jobs.ts";
 import type { DailyScanRuntime } from "./daily-scan.ts";
-import { providerEntry, providerModel } from "./provider-registry.ts";
+import {
+  runForcedChat,
+  validateForcedRuntime,
+  type ForcedRuntimeSnapshot,
+} from "./forced-runtime.server.ts";
 
-const choiceFor = (r: DailyScanRuntime) =>
-  r === "local"
-    ? "local-model"
-    : r === "claude-cli"
-      ? "claude-frontier"
-      : r === "codex-terra"
-        ? "codex-balanced"
-        : "codex-frontier";
 export async function validateDailyRuntime(newsroomId: number, runtime: DailyScanRuntime) {
-  if (runtime === "local") {
-    const local = await resolveLocalModelChoice(newsroomId);
-    if (
-      !local.override ||
-      !/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:\/|$)/i.test(
-        local.override.baseUrl,
-      )
-    )
-      throw new Error(
-        "Local model is unavailable. Select a model on a known local endpoint first.",
-      );
-    return {
-      runtime,
-      modelChoice: choiceFor(runtime),
-      transport: "local",
-      localModel: local.override,
-    };
-  }
-  const choice = choiceFor(runtime);
-  const ready =
-    runtime === "claude-cli"
-      ? await (await import("./ai-claude-code.server.ts")).probeClaudeCode("Claude Code")
-      : await (
-          await import("./ai-codex.server.ts")
-        ).probeCodex(runtime === "codex-terra" ? "Codex Terra" : "Codex Sol");
-  if (!ready.ok) throw new Error(ready.error);
-  const entry = providerEntry(choice);
-  if (!entry) throw new Error("The selected subscription runtime is unavailable in this build.");
-  return {
-    runtime,
-    modelChoice: choice,
-    model: providerModel(entry),
-    transport: runtime === "claude-cli" ? "claude-code" : "codex",
-  };
+  return validateForcedRuntime(newsroomId, runtime);
 }
 function localParts(date: Date, timezone: string) {
   const p = new Intl.DateTimeFormat("en-CA", {
@@ -288,15 +250,16 @@ export async function isDailyScanJob(job: DeskJob): Promise<boolean> {
   return Boolean(rows[0]);
 }
 
-type ForcedChatSnapshot = {
-  runtime: DailyScanRuntime;
-  modelChoice: string;
-  localModel?: { baseUrl: string; id: string };
-  model?: string;
-};
+type ForcedChatSnapshot = ForcedRuntimeSnapshot;
 
 type ForcedChatAdapters<T> = {
-  claude: (input: { system: string; user: string; model: string; timeoutMs: number }) => Promise<T>;
+  claude: (input: {
+    system: string;
+    user: string;
+    model: string;
+    timeoutMs: number;
+    noTools?: boolean;
+  }) => Promise<T>;
   codex: (input: { system: string; user: string; model: string; timeoutMs: number }) => Promise<T>;
   local: (
     system: string,
@@ -305,7 +268,8 @@ type ForcedChatAdapters<T> = {
     options: {
       timeoutMs?: number;
       choice: "local-model";
-      localModel: ForcedChatSnapshot["localModel"];
+      localModel: { baseUrl: string; id: string };
+      noTools?: boolean;
     },
   ) => Promise<T>;
 };
@@ -318,21 +282,7 @@ export async function runForcedDailyChat<T>(
   options: { timeoutMs?: number } | undefined,
   adapters: ForcedChatAdapters<T>,
 ): Promise<T> {
-  const timeoutMs = options?.timeoutMs ?? 150000;
-  if (snapshot.runtime === "claude-cli") {
-    if (!snapshot.model) throw new Error("The scheduled Claude model snapshot is invalid.");
-    return adapters.claude({ system, user, model: snapshot.model, timeoutMs });
-  }
-  if (snapshot.runtime === "codex-terra" || snapshot.runtime === "codex-sol") {
-    if (!snapshot.model) throw new Error("The scheduled Codex model snapshot is invalid.");
-    return adapters.codex({ system, user, model: snapshot.model, timeoutMs });
-  }
-  if (!snapshot.localModel) throw new Error("The scheduled local model snapshot is invalid.");
-  return adapters.local(system, user, maxTokens, {
-    ...options,
-    choice: "local-model",
-    localModel: snapshot.localModel,
-  });
+  return runForcedChat(snapshot, system, user, maxTokens, options, adapters);
 }
 
 type DailyScanWorkDeps = {

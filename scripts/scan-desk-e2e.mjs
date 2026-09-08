@@ -10,13 +10,13 @@
  * stalled-run race) had no CI signal until the following morning at the
  * earliest.
  *
- * Deliberately model-free, same trick as provider-signin/dark-picker: the
- * CLI is scripts/fakes/fake-claude-cli.mjs, signed in via
- * FAKE_CLAUDE_SIGNED_IN=1, and this walk never clicks Run scan — a real scan
- * fetches every accepted source and spends a real model call, which is
- * exactly what this file must not do. It asserts the screen renders: the
- * previous-scans list state (empty, on a fresh desk) and the Run-scan
- * button's own state (present, enabled, not mid-scan).
+ * The scan portion is deliberately model-free: this walk never clicks Run
+ * scan, which would fetch accepted sources. Its batch-draft portion uses
+ * only scripts/fakes/fake-claude-cli.mjs, signed in via
+ * FAKE_CLAUDE_SIGNED_IN=1. It asserts the screen renders: the previous-scans
+ * list state (empty, on a fresh desk), the Run-scan button's own state
+ * (present, enabled, not mid-scan), and the explicit batch-draft control
+ * through its per-lead terminal results.
  *
  *   SCAN_DESK_BASE_URL=http://127.0.0.1:3420 node scripts/scan-desk-e2e.mjs
  */
@@ -270,6 +270,127 @@ async function dailySettingsJourney(context, observePage) {
   step("cleanup leaves the future schedule disabled, so no automatic scan can become due");
 }
 
+async function fileQueueLead(headline, why) {
+  await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
+  const form = page.locator("details.file-form");
+  await form.locator("summary").click();
+  await form.getByLabel("Headline").fill(headline);
+  await form.getByLabel("Why now").fill(why);
+  await form.getByRole("button", { name: "File lead" }).click();
+  await page.getByRole("heading", { name: headline, exact: true }).waitFor();
+}
+
+async function persistSuppliedScope(headline, why) {
+  await fileQueueLead(headline, why);
+
+  // Draft performs the real saveReportingNotes call first. Hold only its
+  // second, model-bearing draftLead request and abort it: the stored scope is
+  // now supplied-only while the lead remains New, and no model call, fetch,
+  // or fabricated application response reached the worker.
+  await page.getByLabel("Drafting scope").selectOption("supplied");
+  await page.getByLabel("Writing model").selectOption("claude-frontier");
+  let heldDraftRoute;
+  let markDraftHeld;
+  const draftHeld = new Promise((resolve) => {
+    markDraftHeld = resolve;
+  });
+  const holdDraftLead = async (route) => {
+    const request = route.request();
+    if (
+      request.method() === "POST" &&
+      request.headers()["x-tsr-serverfn"] === "true" &&
+      request.postData()?.includes("modelChoice")
+    ) {
+      heldDraftRoute = route;
+      markDraftHeld();
+      return;
+    }
+    await route.continue();
+  };
+  await page.route("**/*", holdDraftLead);
+  await page.getByRole("button", { name: "Draft with AI", exact: true }).click();
+  await draftHeld;
+  if (!heldDraftRoute)
+    throw new Error("supplied-scope setup did not hold the model-bearing draft request");
+  expectedFixtureTimeoutErrors += 1;
+  await heldDraftRoute.abort("timedout");
+  await page.unroute("**/*", holdDraftLead);
+}
+
+/**
+ * Batch drafting uses two locally filed supplied-material leads. Their scopes
+ * are persisted through real notes requests while the model calls are held,
+ * so the actual batch worker can complete against the signed-in fake Claude
+ * CLI without source search or network traffic.
+ */
+async function draftBatchJourney() {
+  const first = `Library storytime registration ${stamp}`;
+  const second = `Recreation center fall league deadline ${stamp}`;
+  const extras = [
+    `Library board agenda ${stamp}`,
+    `Parks trail cleanup ${stamp}`,
+    `Community concert schedule ${stamp}`,
+    `Recycling pickup reminder ${stamp}`,
+  ];
+  await persistSuppliedScope(first, "Registration opens for the library program.");
+  await persistSuppliedScope(second, "Residents need the recreation deadline.");
+  for (const headline of extras) {
+    await fileQueueLead(headline, "A locally filed lead used only to verify the selection cap.");
+  }
+
+  await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
+  const batch = page.locator("#draft-batch");
+  await batch.getByRole("heading", { name: "Draft selected leads", exact: true }).waitFor();
+
+  await page.getByRole("checkbox", { name: `Select ${first} for batch drafting` }).check();
+  await page.getByRole("checkbox", { name: `Select ${second} for batch drafting` }).check();
+  for (const headline of extras.slice(0, 3)) {
+    await page.getByRole("checkbox", { name: `Select ${headline} for batch drafting` }).check();
+  }
+  await batch.getByText("5 of 5 selected").waitFor();
+  await expect(
+    page.getByRole("checkbox", { name: `Select ${extras[3]} for batch drafting` }),
+  ).toBeDisabled();
+  for (const headline of extras.slice(0, 3)) {
+    await page.getByRole("checkbox", { name: `Select ${headline} for batch drafting` }).uncheck();
+  }
+  await batch.getByText("2 of 5 selected").waitFor();
+
+  const runtime = batch.getByLabel("Batch runtime");
+  const labels = await runtime.locator("option").allTextContents();
+  const expected = ["Local model", "Claude Code", "Codex Terra", "Codex Sol"];
+  if (JSON.stringify(labels) !== JSON.stringify(expected)) {
+    throw new Error(`batch runtime labels differ: ${JSON.stringify(labels)}`);
+  }
+  await runtime.selectOption("claude-cli");
+  await batch.getByRole("button", { name: "Draft selected" }).click();
+  await batch.getByText("Draft batch started with Claude Code.").waitFor();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await batch.getByText(/Batch #\d+ · Claude Code/).waitFor();
+  await batch.getByRole("link", { name: `Open ${first}` }).waitFor();
+  await batch.getByRole("link", { name: `Open ${second}` }).waitFor();
+
+  // The offline fake returns valid draft JSON. Polling must stop only after
+  // both durable terminal results render, then the queue count must refresh
+  // from New to Drafted instead of retaining stale pre-batch rows.
+  await expect
+    .poll(
+      async () => {
+        const states = await batch.locator("[data-draft-batch-status]").allTextContents();
+        return states.length === 2 && states.every((state) => state.trim() === "Completed");
+      },
+      { timeout: 45_000 },
+    )
+    .toBe(true);
+  await expect
+    .poll(
+      () => page.getByRole("button", { name: "drafted 2", exact: true }).count(),
+      { timeout: 10_000 },
+    )
+    .toBe(1);
+  step("two selected leads use one explicit runtime, complete, and refresh the Drafted queue count");
+}
+
 async function main() {
   const browser = await chromium.launch({ args: ["--no-sandbox", "--disable-dev-shm-usage"] });
   const context = await browser.newContext();
@@ -277,8 +398,14 @@ async function main() {
   page.setDefaultTimeout(45_000);
 
   const consoleErrors = [];
-  const note = (text) =>
+  let expectedFixtureTimeoutErrors = 0;
+  const note = (text) => {
+    if (expectedFixtureTimeoutErrors > 0 && /net::ERR_TIMED_OUT/.test(text)) {
+      expectedFixtureTimeoutErrors -= 1;
+      return;
+    }
     consoleErrors.push(`[after: ${done[done.length - 1] ?? "start"} | ${page.url()}] ${text}`);
+  };
   const observePage = (target, label) => {
     target.on("pageerror", (e) => note(`${label}: ${String(e.message ?? e).slice(0, 200)}`));
     target.on("console", (m) => {
@@ -296,6 +423,7 @@ async function main() {
   await ownTheDesk();
   await theScreenRenders();
   if (dailySettings) await dailySettingsJourney(context, observePage);
+  await draftBatchJourney();
 
   await browser.close();
   if (consoleErrors.length) {

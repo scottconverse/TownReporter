@@ -222,6 +222,12 @@ reporting and writing pass in that run uses the same provider, unless that
 provider's login lapses mid-run -- Automatic then moves to the next ladder
 rung once, if it is ready.
 
+The Queue also offers **Draft selected** for one editor-chosen batch of up to
+five eligible leads. That batch requires one explicit Local model, Claude
+Code, Codex Terra, or Codex Sol runtime; it never uses Automatic, a gateway,
+or API fallback. It retains each lead's saved research scope, shows each
+lead's durable result and workbench link, and never publishes a story.
+
 Pick Codex Terra, frontier Codex Sol, frontier Claude Opus, or **Local
 model** to force that provider for one run. Explicit choices never fall
 back, at enqueue or mid-run. The endpoint/model compatibility overrides are

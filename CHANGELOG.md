@@ -4,6 +4,12 @@ Current release: **0.6.28**.
 
 ## Unreleased
 
+- The Queue can start an editor-selected batch of up to five eligible leads
+  with one explicit Local model, Claude Code, Codex Terra, or Codex Sol
+  runtime. Batch admission is all-or-nothing; once queued, each lead retains
+  its own status and workbench link. Automatic, gateway, and API fallback are
+  excluded. Batch drafting never publishes a story.
+
 - Completed jobs keep their successful status if redundant completion bookkeeping or a late worker error occurs. Ordinary running jobs still report success or failure, and replaced claims remain protected.
 
 - Multi-source drafting preserves complete structured provenance, findings and unanswered questions through saving and publication. Raw character truncation no longer corrupts their JSON. Previously damaged records are not guessed or rewritten.
