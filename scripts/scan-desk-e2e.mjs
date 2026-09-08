@@ -360,6 +360,11 @@ async function draftBatchJourney() {
   await batch.getByLabel("Suggested focus size").selectOption("5");
   await expect(page.getByRole("checkbox", { name: `Select ${first} for batch drafting` })).toBeChecked();
   await expect(page.getByRole("checkbox", { name: `Select ${second} for batch drafting` })).toBeChecked();
+  await batch.getByRole("button", { name: /Add suggested focus/ }).click();
+  await expect(page.getByRole("checkbox", { name: `Select ${first} for batch drafting` })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: `Select ${second} for batch drafting` })).toBeChecked();
+  await expect(batch.locator('input[type="checkbox"]:checked')).toHaveCount(5);
+  step("suggested focus adds existing eligible leads while preserving manual selections and the five-lead cap");
   for (const headline of extras.slice(0, 3)) {
     await page.getByRole("checkbox", { name: `Select ${headline} for batch drafting` }).check();
   }
