@@ -48,6 +48,7 @@ export type RoutineNoticeInput =
         location?: RoutineField;
         end?: RoutineField;
         participationUrl?: RoutineField;
+        eventStatus?: RoutineField;
       } & WithTime
     >
   | CommonInput<
@@ -81,6 +82,7 @@ export type RoutineNoticeInput =
         end?: RoutineField;
         registrationUrl?: RoutineField;
         registrationRequired?: RoutineField;
+        eventStatus?: RoutineField;
       } & WithTime
     >
   | CommonInput<
@@ -96,6 +98,7 @@ export type RoutineNoticeInput =
         admission?: RoutineField;
         allDay?: RoutineField;
         cancellation?: RoutineField;
+        eventStatus?: RoutineField;
       } & WithTime
     >
   | CommonInput<
@@ -183,7 +186,7 @@ type Shape = {
 const shapes: Record<string, Shape> = {
   "library-notice:program": {
     required: ["issuer", "program", "start"],
-    optional: ["end", "location", "participationUrl", "timezone"],
+    optional: ["end", "location", "participationUrl", "eventStatus", "timezone"],
     temporal: ["start", "end"],
     atLeastOne: ["location", "participationUrl"],
   },
@@ -199,7 +202,7 @@ const shapes: Record<string, Shape> = {
   },
   "parks-recreation-notice:program": {
     required: ["issuer", "program", "start", "location"],
-    optional: ["end", "registrationUrl", "registrationRequired", "timezone"],
+    optional: ["end", "registrationUrl", "registrationRequired", "eventStatus", "timezone"],
     temporal: ["start", "end"],
   },
   "parks-recreation-notice:facility": {
@@ -209,7 +212,7 @@ const shapes: Record<string, Shape> = {
   },
   "community-arts-event-logistics:event": {
     required: ["issuer", "title", "start"],
-    optional: ["end", "venue", "onlineUrl", "admission", "allDay", "cancellation", "timezone"],
+    optional: ["end", "venue", "onlineUrl", "admission", "allDay", "cancellation", "eventStatus", "timezone"],
     temporal: ["start", "end"],
     atLeastOne: ["venue", "onlineUrl"],
   },
@@ -253,6 +256,7 @@ const labels: Record<string, string> = {
   admission: "Admission",
   allDay: "All day",
   cancellation: "Cancellation",
+  eventStatus: "Event status",
   registrationUrl: "Registration",
   registrationRequired: "Registration required",
   eligibility: "Eligibility",
@@ -613,6 +617,24 @@ export function validateRoutineNotice(input: unknown): RoutineNoticeValidation {
   ) {
     return { valid: false, formatKey, reasons: [{ code: "invalid-field", field: "cancellation" }] };
   }
+  const eventStatus = typedFields.eventStatus;
+  const normalizedEventStatuses = new Map([
+    ["EventScheduled", "scheduled"],
+    ["EventCancelled", "cancelled"],
+    ["EventPostponed", "postponed"],
+    ["EventRescheduled", "rescheduled"],
+    ["http://schema.org/EventScheduled", "scheduled"],
+    ["http://schema.org/EventCancelled", "cancelled"],
+    ["http://schema.org/EventPostponed", "postponed"],
+    ["http://schema.org/EventRescheduled", "rescheduled"],
+    ["https://schema.org/EventScheduled", "scheduled"],
+    ["https://schema.org/EventCancelled", "cancelled"],
+    ["https://schema.org/EventPostponed", "postponed"],
+    ["https://schema.org/EventRescheduled", "rescheduled"],
+  ]);
+  if (eventStatus && !normalizedEventStatuses.has(eventStatus.value)) {
+    return { valid: false, formatKey, reasons: [{ code: "invalid-field", field: "eventStatus" }] };
+  }
   if (typedFields.registrationRequired?.value === "true" && !typedFields.registrationUrl) {
     return {
       valid: false,
@@ -648,7 +670,11 @@ export function validateRoutineNotice(input: unknown): RoutineNoticeValidation {
     normalizedFields: Object.fromEntries(
       Object.entries(typedFields).map(([key, value]) => [
         key,
-        key === "cancellation" ? value.value.trim().toLowerCase() : value.value.trim(),
+        key === "cancellation"
+          ? value.value.trim().toLowerCase()
+          : key === "eventStatus"
+            ? normalizedEventStatuses.get(value.value)!
+            : value.value.trim(),
       ]),
     ),
     fingerprintMaterial: stableFingerprintMaterial(typedInput, typedFields),
