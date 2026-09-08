@@ -394,6 +394,79 @@ export function openLeads<T extends { status: string }>(leads: T[]): T[] {
   return leads.filter((l) => l.status !== "killed" && l.status !== "published");
 }
 
+export function mergeFocusSelection(
+  currentIds: number[],
+  eligibleIds: number[],
+  suggestedIds: number[],
+  max = 5,
+): number[] {
+  const eligible = new Set(eligibleIds);
+  const selected: number[] = [];
+  const seen = new Set<number>();
+  for (const id of [...currentIds, ...suggestedIds]) {
+    if (selected.length >= max || !eligible.has(id) || seen.has(id)) continue;
+    selected.push(id);
+    seen.add(id);
+  }
+  return selected;
+}
+
+/**
+ * Pick a small, editor-approved focus from the existing batch-eligible queue.
+ * The first lead is always the strongest existing priority. Other sections may
+ * contribute only when their best lead stays within the floor relative to that
+ * strongest score; section variety never promotes a clearly weak lead.
+ */
+export function suggestFocusLeads<
+  T extends {
+    id: number;
+    topic: string;
+    status: string;
+    newsworthiness: number | null;
+    created_at: string;
+  },
+  S extends { key: string },
+>(leads: T[], sections: S[], max = 5): T[] {
+  if (max <= 0) return [];
+  const ranked = leads
+    .filter((lead) => !["held", "killed", "published"].includes(lead.status))
+    .slice()
+    .sort((a, b) => {
+      const score = (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0);
+      if (score) return score;
+      const created = Date.parse(b.created_at) - Date.parse(a.created_at);
+      return created || b.id - a.id;
+    });
+  if (!ranked.length) return [];
+  const bestScore = ranked[0]!.newsworthiness ?? 0;
+  const priorityFloor = Math.max(4, Math.floor(bestScore * 0.5));
+  const selected: T[] = [ranked[0]!];
+  const seen = new Set(selected.map((lead) => lead.id));
+  const coveredTopics = new Set([ranked[0]!.topic]);
+  const sectionKeys = new Set(sections.map((section) => section.key));
+  for (const candidate of ranked) {
+    if (selected.length >= max) break;
+    if (!sectionKeys.has(candidate.topic) || coveredTopics.has(candidate.topic)) continue;
+    if ((candidate.newsworthiness ?? 0) < priorityFloor) continue;
+    selected.push(candidate);
+    seen.add(candidate.id);
+    coveredTopics.add(candidate.topic);
+  }
+  for (const candidate of ranked) {
+    if (selected.length >= max) break;
+    if (!seen.has(candidate.id) && (candidate.newsworthiness ?? 0) >= priorityFloor) {
+      selected.push(candidate);
+      seen.add(candidate.id);
+    }
+  }
+  return selected.sort((a, b) => {
+    const score = (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0);
+    if (score) return score;
+    const created = Date.parse(b.created_at) - Date.parse(a.created_at);
+    return created || b.id - a.id;
+  });
+}
+
 /**
  * The provider's login lapsed mid-run. Say which login, and say plainly that
  * clicking again will not help until it is renewed.
@@ -1081,7 +1154,7 @@ Return JSON:
   ]
 }
 topic must be exactly one of: ${(opts.topics??["council","budget","housing","utilities","schools","planning","infrastructure","elections"]).join(", ")}.
-${opts.section?"File evidence-backed local developments relevant to the selected section and its reporting brief, including community life beyond government. Do not refile facts in Already covered.":"File civic leads when the text contains a meeting, vote, budget figure, contract, deadline, housing/utility/school action, or missing record that is not in Already covered."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is 0-20. proposed_sources may be any public URL discovered in the text. Max 12 leads.`;
+${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is 0-20. proposed_sources may be any public URL discovered in the text. Max 12 leads.`;
 }
 
 /**

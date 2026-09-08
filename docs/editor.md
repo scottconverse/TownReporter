@@ -201,6 +201,12 @@ does not offer Automatic, a gateway, or an API fallback. Each lead keeps its
 saved research scope. If the selected runtime is unavailable, or one selected
 lead cannot be queued, the batch does not start and the Queue explains why.
 
+The bar also offers an optional **Suggested focus** size of three to five
+leads. Suggestions balance existing lead scores and sections. Review the
+evidence before drafting. They operate on the currently loaded Queue and do not
+claim an actual coverage gap. **Add suggested focus** merges them into your
+current selections and never replaces them. The full Queue remains unchanged.
+
 After a batch starts, its saved runtime and each lead's queued, running,
 completed, or failed state remain visible with a link to that lead's
 workbench. One failed lead does not rewrite the status of the others. Batch
@@ -310,6 +316,8 @@ Reporter-notebook leftovers (`What is solid`, `Next checks are…`) are stripped
 Draft reporting uses the originating newsroom's paper settings and captured records. Public evidence links and comparisons expose records from the public newspaper's newsroom only; a matching source URL does not authorize access to another newsroom's captures. Historical capture references that point across newsrooms or to a different source URL are excluded rather than guessed or repaired.
 
 When a draft has recorded findings, **Finding evidence review** lists those findings only; it is not an inventory of every claim in the story. Each row shows the recorded passage and locator, its cited captured record, and mechanical checks for whether that record is available, whether the passage appears there, and whether a newer capture is available. Those checks do not decide whether a finding is true: a passage match only confirms that the recorded words occur in the cited version, a missing record is not a contradiction, and a newer capture does not make the older record false.
+
+**Claims returned by this draft pass** is a separate private inventory of only the structured claims returned when that draft was created. It is not a scan of the current body or a complete claim inventory, and later human edits do not add claims to it. A row can use only the exact captured version or capture event named in that draft's provenance for its returned URL. Missing, cross-newsroom, or repointed provenance stays unavailable; a same-URL or newer capture is never substituted. The same editor judgments are available, but no judgment is automatic and none authorizes publication.
 
 Choose an editor judgment of **Supports**, **Does not support**, **Contradicts**, or **Needs reporting**, and optionally record why. **Supports** and **Contradicts** require a readable cited captured version; **Contradicts** also requires a reason. **Does not support** means the cited material is insufficient; it does not assert contrary evidence. Save the draft before saving a judgment. Changes to the draft or cited record can reopen saved judgments. Another editor's save makes an older view refuse; reload the current review before deciding again. This adds no automatic judgment or publication permission, and the existing draft-wide keep/remove decision remains available.
 

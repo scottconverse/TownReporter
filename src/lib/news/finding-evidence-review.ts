@@ -3,6 +3,8 @@ import { getSql, type Sql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { parseFindings, type StoryFinding } from "./findings.ts";
 import { evidenceReviewToken } from "./draft-evidence.ts";
+import { sha256 } from "./url-guard.ts";
+import type { ProvenanceItem, StoryClaim } from "./report.ts";
 import type { DraftRow } from "./types.ts";
 
 export type FindingJudgment =
@@ -37,6 +39,13 @@ export type FindingEvidenceRow = {
   };
 };
 
+export type ClaimEvidenceRow = {
+  key: string;
+  claim: StoryClaim;
+  captures: FindingCaptureEvidence[];
+  judgment: FindingEvidenceRow["judgment"];
+};
+
 export type FindingEvidenceReview = {
   leadId: number;
   draftId: number;
@@ -44,6 +53,7 @@ export type FindingEvidenceReview = {
   contentToken: string;
   canonicalDraft: { headline: string; dek: string; body: string; topic: string };
   rows: FindingEvidenceRow[];
+  claimRows: ClaimEvidenceRow[];
 };
 
 export type FindingEvidenceResult =
@@ -80,6 +90,9 @@ type ReviewMemo = {
   contentToken?: string;
   judgments?: Record<string, StoredJudgment>;
 };
+
+type StoredReportedClaims = { version: 1; rows: StoryClaim[] };
+type ReviewNamespace = "findingEvidenceReview" | "claimEvidenceReview";
 
 type VersionRow = {
   id: number;
@@ -123,6 +136,7 @@ function objectMemo(raw: string | null | undefined): Record<string, unknown> {
 export function findingEvidenceContentToken(draft: Partial<DraftRow>): string {
   const research = objectMemo(draft.research_json);
   delete research.findingEvidenceReview;
+  delete research.claimEvidenceReview;
   return JSON.stringify([
     draft.id ?? null,
     draft.headline ?? "",
@@ -155,6 +169,61 @@ function assertReadableStoredFindings(raw: unknown): void {
   }
 }
 
+function storedClaims(draft: DraftRow): StoryClaim[] {
+  const claims = objectMemo(draft.research_json).reportedClaims;
+  if (claims == null) return [];
+  if (!claims || typeof claims !== "object" || Array.isArray(claims))
+    throw new ReviewError("invalid-input", "Stored draft claims are incomplete or unreadable.");
+  const value = claims as Partial<StoredReportedClaims>;
+  if (value.version !== 1 || !Array.isArray(value.rows) || value.rows.length > 16)
+    throw new ReviewError("invalid-input", "Stored draft claims are incomplete or unreadable.");
+  return value.rows.map((row) => {
+    if (
+      !row ||
+      typeof row.fact !== "string" ||
+      !row.fact.trim() ||
+      row.fact.length > 400 ||
+      typeof row.url !== "string" ||
+      !row.url.trim() ||
+      row.url.length > 500 ||
+      !["primary", "record", "news"].includes(row.kind)
+    )
+      throw new ReviewError("invalid-input", "Stored draft claims are incomplete or unreadable.");
+    return { fact: row.fact, url: row.url, kind: row.kind };
+  });
+}
+
+function provenanceForClaim(draft: DraftRow, claim: StoryClaim): StoryFinding {
+  let provenance: unknown = [];
+  try {
+    provenance = JSON.parse(draft.provenance_json || "[]");
+  } catch {
+    throw new ReviewError("invalid-input", "Stored draft provenance is incomplete or unreadable.");
+  }
+  const rows = Array.isArray(provenance) ? provenance : [];
+  const matches = rows.filter(
+    (item): item is Partial<ProvenanceItem> =>
+      Boolean(item && typeof item === "object" && (item as Partial<ProvenanceItem>).url === claim.url),
+  );
+  return {
+    text: claim.fact,
+    source_urls: [claim.url],
+    artifact_version_ids: matches.flatMap((item) =>
+      Number.isInteger(item.version_id) && (item.version_id ?? 0) > 0 ? [item.version_id!] : [],
+    ),
+    capture_event_ids: matches.flatMap((item) =>
+      Number.isInteger(item.capture_event_id) && (item.capture_event_id ?? 0) > 0
+        ? [item.capture_event_id!]
+        : [],
+    ),
+    locators: [],
+  };
+}
+
+async function claimKey(index: number, claim: StoryClaim) {
+  return `claim:${index}:${await sha256(JSON.stringify([claim.fact, claim.url, claim.kind]))}`;
+}
+
 function excerptState(excerpt: string | undefined, fullText: string | null) {
   if (!excerpt?.trim()) return "no-excerpt" as const;
   if (fullText == null) return "not-found" as const;
@@ -163,16 +232,16 @@ function excerptState(excerpt: string | undefined, fullText: string | null) {
     : ("not-found" as const);
 }
 
-function storedReview(draft: DraftRow): ReviewMemo {
+function storedReview(draft: DraftRow, namespace: ReviewNamespace): ReviewMemo {
   const memo = objectMemo(draft.research_json);
-  const review = memo.findingEvidenceReview;
+  const review = memo[namespace];
   return review && typeof review === "object" && !Array.isArray(review)
     ? (review as ReviewMemo)
     : {};
 }
 
-function judgmentFor(draft: DraftRow, key: string): StoredJudgment {
-  const review = storedReview(draft);
+function judgmentFor(draft: DraftRow, key: string, namespace: ReviewNamespace): StoredJudgment {
+  const review = storedReview(draft, namespace);
   if (review.contentToken !== findingEvidenceContentToken(draft))
     return { value: "unreviewed", reason: "", contraryVersionId: null };
   const judgment = review.judgments?.[key];
@@ -247,12 +316,18 @@ async function fullReviewToken(
   newsroomId: number,
   draft: DraftRow,
   findings: StoryFinding[],
+  claims: StoryClaim[],
   lock = false,
 ): Promise<string> {
   return JSON.stringify([
     evidenceReviewToken(draft),
     await Promise.all(
       findings.map((finding) => findingReferenceBinding(sql, newsroomId, finding, lock)),
+    ),
+    await Promise.all(
+      claims.map((claim) =>
+        findingReferenceBinding(sql, newsroomId, provenanceForClaim(draft, claim), lock),
+      ),
     ),
   ]);
 }
@@ -263,6 +338,8 @@ async function resolveFinding(
   draft: DraftRow,
   finding: StoryFinding,
   index: number,
+  key = `finding:${index}`,
+  namespace: ReviewNamespace = "findingEvidenceReview",
 ): Promise<FindingEvidenceRow> {
   const versionIds = [...new Set(finding.artifact_version_ids)];
   const captureIds = [...new Set(finding.capture_event_ids)];
@@ -340,8 +417,7 @@ async function resolveFinding(
       viewHref: availableVersion ? `/evidence/${availableVersion.id}` : null,
     });
   }
-  const key = `finding:${index}`;
-  let judgment = judgmentFor(draft, key);
+  let judgment = judgmentFor(draft, key, namespace);
   const currentBinding = await findingReferenceBinding(sql, newsroomId, finding);
   const readableVersions = new Set(
     resolved
@@ -374,6 +450,58 @@ async function resolveFinding(
   };
 }
 
+async function resolveClaim(
+  sql: Sql,
+  newsroomId: number,
+  draft: DraftRow,
+  claim: StoryClaim,
+  index: number,
+): Promise<ClaimEvidenceRow> {
+  const key = await claimKey(index, claim);
+  const resolved = await resolveFinding(
+    sql,
+    newsroomId,
+    draft,
+    provenanceForClaim(draft, claim),
+    index,
+    key,
+    "claimEvidenceReview",
+  );
+  const captures = resolved.captures.map((capture) =>
+    capture.url === claim.url
+      ? capture
+      : {
+          versionId: capture.versionId,
+          captureEventId: capture.captureEventId,
+          url: null,
+          title: null,
+          capturedAt: null,
+          available: false,
+          readable: false,
+          excerptState: "no-excerpt" as const,
+          newerCapture: null,
+          viewHref: null,
+        },
+  );
+  const readableVersionIds = new Set(
+    captures.filter((capture) => capture.available && capture.readable).map((capture) => capture.versionId),
+  );
+  const judgment =
+    (resolved.judgment.value === "supports" && readableVersionIds.size === 0) ||
+    (resolved.judgment.value === "contradicts" &&
+      (!resolved.judgment.reason ||
+        resolved.judgment.contraryVersionId == null ||
+        !readableVersionIds.has(resolved.judgment.contraryVersionId)))
+      ? { value: "unreviewed" as const, reason: "", contraryVersionId: null }
+      : resolved.judgment;
+  return {
+    key,
+    claim,
+    captures,
+    judgment,
+  };
+}
+
 export async function loadFindingEvidenceReview(
   sql: Sql,
   newsroomId: number,
@@ -382,10 +510,11 @@ export async function loadFindingEvidenceReview(
   const draft = await currentDraft(sql, newsroomId, leadId);
   assertReadableStoredFindings(draft.found_note);
   const findings = parseFindings(draft.found_note);
+  const claims = storedClaims(draft);
   return {
     leadId,
     draftId: draft.id,
-    evidenceToken: await fullReviewToken(sql, newsroomId, draft, findings),
+    evidenceToken: await fullReviewToken(sql, newsroomId, draft, findings, claims),
     contentToken: findingEvidenceContentToken(draft),
     canonicalDraft: {
       headline: draft.headline,
@@ -395,6 +524,9 @@ export async function loadFindingEvidenceReview(
     },
     rows: await Promise.all(
       findings.map((finding, index) => resolveFinding(sql, newsroomId, draft, finding, index)),
+    ),
+    claimRows: await Promise.all(
+      claims.map((claim, index) => resolveClaim(sql, newsroomId, draft, claim, index)),
     ),
   };
 }
@@ -415,6 +547,11 @@ export const loadFindingEvidenceCapture = createServerOnlyFn(
       for (const capture of row.captures) {
         if (capture.available && capture.versionId != null) allowed.add(capture.versionId);
         if (capture.newerCapture) allowed.add(capture.newerCapture.versionId);
+      }
+    }
+    for (const row of review.claimRows) {
+      for (const capture of row.captures) {
+        if (capture.available && capture.versionId != null) allowed.add(capture.versionId);
       }
     }
     if (!allowed.has(versionId))
@@ -478,60 +615,56 @@ export const persistFindingEvidenceJudgment = createServerOnlyFn(
       const contentToken = findingEvidenceContentToken(draft);
       assertReadableStoredFindings(draft.found_note);
       const findings = parseFindings(draft.found_note);
+      const claims = storedClaims(draft);
       if (
         draft.id !== input.draftId ||
         input.evidenceToken !==
-          (await fullReviewToken(sql, context.newsroomId, draft, findings, true))
+          (await fullReviewToken(sql, context.newsroomId, draft, findings, claims, true))
       )
         throw new ReviewError(
           "conflict",
           "The draft or its evidence review changed. Reload the current evidence review.",
         );
-      const keyMatch = /^finding:(0|[1-9]\d*)$/.exec(input.findingKey);
-      const index = keyMatch ? Number(keyMatch[1]) : Number.NaN;
-      if (
-        !Number.isInteger(index) ||
-        index < 0 ||
-        index >= findings.length ||
-        input.findingKey !== `finding:${index}`
-      )
-        throw new ReviewError("conflict", "That finding is no longer in the current draft.");
-      if (input.judgment === "contradicts") {
-        const citedVersionIds = new Set(findings[index].artifact_version_ids);
-        if (findings[index].capture_event_ids.length) {
-          const citedCaptures = await sql.query<{ version_id: number | null }>(
-            "select version_id from capture_events where newsroom_id=$1 and id=any($2::int[])",
-            [context.newsroomId, findings[index].capture_event_ids],
+      const findingMatch = /^finding:(0|[1-9]\d*)$/.exec(input.findingKey);
+      const claimMatch = /^claim:(0|[1-9]\d*):[a-f0-9]{64}$/.exec(input.findingKey);
+      const index = Number(findingMatch?.[1] ?? claimMatch?.[1] ?? Number.NaN);
+      const isClaim = Boolean(claimMatch);
+      if (!Number.isInteger(index) || index < 0 || (isClaim ? index >= claims.length : index >= findings.length))
+        throw new ReviewError("conflict", "That evidence item is no longer in the current draft.");
+      if (isClaim && input.findingKey !== (await claimKey(index, claims[index])))
+        throw new ReviewError("conflict", "That claim identity changed. Reload the current evidence review.");
+      const namespace: ReviewNamespace = isClaim ? "claimEvidenceReview" : "findingEvidenceReview";
+      const reference = isClaim ? provenanceForClaim(draft, claims[index]) : findings[index];
+      const resolved = isClaim
+        ? await resolveClaim(sql, context.newsroomId, draft, claims[index], index)
+        : await resolveFinding(
+            sql,
+            context.newsroomId,
+            draft,
+            reference,
+            index,
+            input.findingKey,
+            namespace,
           );
-          for (const capture of citedCaptures)
-            if (capture.version_id != null) citedVersionIds.add(capture.version_id);
-        }
-        const [contrary] = await sql.query<{ full_text: string }>(
-          "select full_text from artifact_versions where newsroom_id=$1 and id=$2",
-          [context.newsroomId, input.contraryVersionId],
+      const citedVersionIds = new Set(
+        resolved.captures
+          .filter((capture) => capture.available && capture.readable && capture.versionId != null)
+          .map((capture) => capture.versionId!),
+      );
+      if (input.judgment === "contradicts" && !citedVersionIds.has(input.contraryVersionId!))
+        throw new ReviewError(
+          "invalid-input",
+          isClaim
+            ? "The contrary evidence must be a readable captured version cited by this claim."
+            : "The contrary evidence must be a readable captured version cited by this finding.",
         );
-        if (!contrary?.full_text.trim() || !citedVersionIds.has(input.contraryVersionId!))
-          throw new ReviewError(
-            "invalid-input",
-            "The contrary evidence must be a readable captured version cited by this finding.",
-          );
-      }
-      if (input.judgment === "supports") {
-        const resolved = await resolveFinding(
-          sql,
-          context.newsroomId,
-          draft,
-          findings[index],
-          index,
+      if (input.judgment === "supports" && citedVersionIds.size === 0)
+        throw new ReviewError(
+          "invalid-input",
+          "Supporting evidence requires a readable captured record cited by this evidence item.",
         );
-        if (!resolved.captures.some((capture) => capture.available && capture.readable))
-          throw new ReviewError(
-            "invalid-input",
-            "Supporting evidence requires a readable captured record cited by this finding.",
-          );
-      }
       const memo = objectMemo(draft.research_json);
-      const previous = storedReview(draft);
+      const previous = storedReview(draft, namespace);
       const judgments =
         previous.contentToken === contentToken && previous.judgments ? previous.judgments : {};
       judgments[input.findingKey] = {
@@ -541,11 +674,11 @@ export const persistFindingEvidenceJudgment = createServerOnlyFn(
         evidenceBinding: await findingReferenceBinding(
           sql,
           context.newsroomId,
-          findings[index],
+          reference,
           true,
         ),
       };
-      memo.findingEvidenceReview = { contentToken, judgments };
+      memo[namespace] = { contentToken, judgments };
       await sql.query(
         "update drafts set research_json=$1,updated_at=now() where id=$2 and newsroom_id=$3",
         [JSON.stringify(memo), draft.id, context.newsroomId],

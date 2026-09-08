@@ -87,13 +87,136 @@ async function fixture() {
   const [draft] = await sql.query<{ id: number }>(
     `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,
       provenance_json,found_note,unanswered,research_json)
-     values('editor',$1,$2,'Headline','Dek','Body','council','[]','[]',$3,'[]','{}') returning id`,
-    [room, leadId, JSON.stringify(findings)],
+     values('editor',$1,$2,'Headline','Dek','Body','council','[]',$4,$3,'[]',$5) returning id`,
+    [
+      room,
+      leadId,
+      JSON.stringify(findings),
+      JSON.stringify([
+        {
+          url: "https://city.test/agenda",
+          version_id: cited.id,
+          capture_event_id: capture.id,
+        },
+      ]),
+      JSON.stringify({
+        reportedClaims: {
+          version: 1,
+          rows: [
+            {
+              fact: "Council approved the water contract.",
+              url: "https://city.test/agenda",
+              kind: "record",
+            },
+          ],
+        },
+      }),
+    ],
   );
   return { sql, cited, newer, mismatch, foreign, capture, draft };
 }
 
 describe("finding evidence resolution", () => {
+  it("keeps the draft-pass claim inventory separate and binds it only to exact draft provenance", async () => {
+    const f = await fixture();
+    const review = await loadFindingEvidenceReview(f.sql, room, leadId);
+    assert.equal(review.rows.length, 2);
+    assert.equal(review.claimRows.length, 1);
+    assert.deepEqual(review.claimRows[0].claim, {
+      fact: "Council approved the water contract.",
+      url: "https://city.test/agenda",
+      kind: "record",
+    });
+    assert.equal(review.claimRows[0].captures[0].versionId, f.cited.id);
+    assert.equal(review.claimRows[0].captures[0].available, true);
+  });
+
+  it("does not expose or retain a judgment for a claim whose named provenance points to another URL", async () => {
+    const f = await fixture();
+    const loaded = await loadFindingEvidenceReview(f.sql, room, leadId);
+    const claim = loaded.claimRows[0];
+    const saved = await persistFindingEvidenceJudgment(
+      { newsroomId: room },
+      {
+        leadId,
+        draftId: f.draft.id,
+        findingKey: claim.key,
+        judgment: "supports",
+        reason: "The exact cited record names the approval.",
+        contraryVersionId: null,
+        evidenceToken: loaded.evidenceToken,
+      },
+    );
+    assert.equal(saved.claimRows[0].judgment.value, "supports");
+    await f.sql.query(
+      "update artifact_versions set url='https://city.test/repointed' where id=$1",
+      [f.cited.id],
+    );
+    const reloaded = await loadFindingEvidenceReview(f.sql, room, leadId);
+    const capture = reloaded.claimRows[0].captures[0];
+    assert.deepEqual(
+      { available: capture.available, url: capture.url, title: capture.title, viewHref: capture.viewHref },
+      { available: false, url: null, title: null, viewHref: null },
+    );
+    assert.equal(reloaded.claimRows[0].judgment.value, "unreviewed");
+    await assert.rejects(
+      () =>
+        persistFindingEvidenceJudgment(
+          { newsroomId: room },
+          {
+            leadId,
+            draftId: f.draft.id,
+            findingKey: claim.key,
+            judgment: "supports",
+            reason: "A stale tab must not retain the repointed record.",
+            contraryVersionId: null,
+            evidenceToken: saved.evidenceToken,
+          },
+        ),
+      /changed/,
+    );
+  });
+
+  it("does not expose a foreign artifact named in claim provenance", async () => {
+    const f = await fixture();
+    await f.sql.query(
+      "update drafts set provenance_json=$1 where id=$2",
+      [
+        JSON.stringify([
+          {
+            url: "https://city.test/agenda",
+            version_id: f.foreign.id,
+            capture_event_id: null,
+          },
+        ]),
+        f.draft.id,
+      ],
+    );
+    const review = await loadFindingEvidenceReview(f.sql, room, leadId);
+    const capture = review.claimRows[0].captures[0];
+    assert.deepEqual(
+      { available: capture.available, url: capture.url, title: capture.title, viewHref: capture.viewHref },
+      { available: false, url: null, title: null, viewHref: null },
+    );
+    assert.doesNotMatch(JSON.stringify(review.claimRows), /FOREIGN PRIVATE TEXT|other\.test\/private/);
+    await assert.rejects(
+      () =>
+        persistFindingEvidenceJudgment(
+          { newsroomId: room },
+          {
+            leadId,
+            draftId: f.draft.id,
+            findingKey: review.claimRows[0].key,
+            judgment: "supports",
+            reason: "Foreign material must not satisfy claim support.",
+            contraryVersionId: null,
+            evidenceToken: review.evidenceToken,
+          },
+        ),
+      /readable captured record cited by this evidence item/,
+    );
+  });
+
   it("separates owned passage facts, missing references, mismatch, and newer notification", async () => {
     const f = await fixture();
     const review = await loadFindingEvidenceReview(f.sql, room, leadId);
@@ -219,6 +342,50 @@ describe("finding evidence resolution", () => {
 });
 
 describe("finding judgment compare-and-swap", () => {
+  it("keeps claim judgments in their own namespace and rejects a stale claim identity", async () => {
+    const f = await fixture();
+    const loaded = await loadFindingEvidenceReview(f.sql, room, leadId);
+    const claim = loaded.claimRows[0];
+    const saved = await persistFindingEvidenceJudgment(
+      { newsroomId: room },
+      {
+        leadId,
+        draftId: f.draft.id,
+        findingKey: claim.key,
+        judgment: "supports",
+        reason: "The cited captured record names the approval.",
+        contraryVersionId: null,
+        evidenceToken: loaded.evidenceToken,
+      },
+    );
+    assert.equal(saved.claimRows[0].judgment.value, "supports");
+    assert.equal(saved.rows[0].judgment.value, "unreviewed");
+    const memo = JSON.parse(
+      (await f.sql.query<{ research_json: string }>("select research_json from drafts where id=$1", [f.draft.id]))[0]
+        .research_json,
+    );
+    assert.equal(memo.claimEvidenceReview.judgments[claim.key].value, "supports");
+    assert.equal(memo.findingEvidenceReview, undefined);
+    memo.reportedClaims.rows[0].fact = "A changed claim identity.";
+    await f.sql.query("update drafts set research_json=$1 where id=$2", [JSON.stringify(memo), f.draft.id]);
+    await assert.rejects(
+      () =>
+        persistFindingEvidenceJudgment(
+          { newsroomId: room },
+          {
+            leadId,
+            draftId: f.draft.id,
+            findingKey: claim.key,
+            judgment: "needs-reporting",
+            reason: "Old tab",
+            contraryVersionId: null,
+            evidenceToken: saved.evidenceToken,
+          },
+        ),
+      /changed/,
+    );
+  });
+
   it("allows sequential judgments with refreshed full tokens and prevents stale overwrites", async () => {
     const f = await fixture();
     const initial = await loadFindingEvidenceReview(f.sql, room, leadId);

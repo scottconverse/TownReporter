@@ -259,6 +259,12 @@ Automatic, a gateway, or an API fallback. It preserves each lead's stored
 research scope. A missing runtime or ineligible selected lead refuses the
 whole start, before any partial batch is created.
 
+The batch area also offers an optional **Suggested focus** size of three to
+five leads. It balances existing lead scores and sections; review the evidence
+before drafting. It operates on the currently loaded Queue and does not claim
+an actual coverage gap. Adding it preserves any leads you selected manually,
+and the full Queue stays visible and unchanged.
+
 The Queue retains the latest batch after a reload, including its selected
 runtime and each lead's queued, running, completed, or failed status with a
 workbench link. These outcomes are separate per lead after a batch is safely
@@ -466,6 +472,8 @@ Low-level configured-provider precedence is below. Per-run explicit choices on S
 After a body edit, drafts with reporting evidence require an explicit evidence review before publishing. Keep the evidence only after checking it against the revised text, or remove the old public evidence. Removal preserves the original private draft archive and does not remove body links. An evidence-review decision is refused if its saved draft has changed, and these actions remain scoped to the editor's newsroom. See [the workbench instructions](editor.md#draft).
 
 Recorded findings have a separate private review list in the workbench. It shows only findings recorded with the draft, their cited passage and locator, and mechanical capture facts: availability, passage match in the cited version, and a newer-capture notice. None of these mechanical facts is a truth judgment. An editor can record **Supports**, **Does not support**, **Contradicts**, or **Needs reporting**; contradiction requires a reason and a readable cited captured version from that finding. The judgment save binds to the exact draft and cited evidence, so a changed draft, captured record, or concurrent save requires a reload. This is not a claim-coverage inventory and does not authorize publication. Captured-text buttons open a private workbench pane. Saving story edits refreshes the review without a page reload; queued or running replacements and pending draft-wide evidence decisions temporarily disable judgment controls. Failed reloads retain unsaved judgment inputs; explicit successful reloads discard them. Malformed historical structured findings are disclosed as unreadable and cannot receive judgments; no historical content is guessed or repaired.
+
+The same pane separately lists **Claims returned by this draft pass**. It preserves only the structured claims returned when that draft was created; it does not parse later human edits or claim complete coverage of the body. Each private row is bound to the exact provenance URL and named captured version or capture event from that draft. Missing, foreign, repointed, arbitrary same-URL, and newer captures remain unavailable for that row rather than replacing its evidence. These use the same human judgment controls and never create an automatic verdict or publication permission.
 
 Reporting uses the originating newsroom's paper identity and captured evidence. Public capture pages, histories and comparisons stay within the public edition: publishing a source URL does not expose another newsroom's copy. Capture references pointing into another newsroom or to a different source URL are excluded; historical rows are not reassigned or rewritten.
 
