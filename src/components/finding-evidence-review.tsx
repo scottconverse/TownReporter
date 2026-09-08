@@ -13,6 +13,7 @@ import {
 import { InkButton } from "@/components/desk-chrome";
 import { BusyLine, Notice } from "@/components/states";
 import { canRebaseDirtyEvidencePeers } from "@/lib/news/finding-evidence-peer";
+import { groupDisplayCaptures } from "@/lib/news/finding-evidence-display";
 
 type JudgmentDraft = {
   value: FindingJudgment;
@@ -58,9 +59,12 @@ function sameDraft(current: CurrentDraft, review: FindingEvidenceReview) {
   );
 }
 
-function captureState(capture: FindingEvidenceReview["rows"][number]["captures"][number]) {
-  if (!capture.available) return "Cited capture unavailable";
-  if (!capture.readable) return "Cited capture exists, but no readable captured text is available";
+function captureState(
+  capture: FindingEvidenceReview["rows"][number]["captures"][number],
+  recordLabel = "Cited capture",
+) {
+  if (!capture.available) return `${recordLabel} unavailable`;
+  if (!capture.readable) return `${recordLabel} exists, but no readable captured text is available`;
   if (capture.excerptState === "found") return "Recorded excerpt found in cited version";
   if (capture.excerptState === "not-found") return "Recorded excerpt not found in cited version";
   return "No recorded excerpt to compare";
@@ -452,6 +456,7 @@ export function FindingEvidenceReviewPanel({
             captures.findIndex((candidate) => candidate.versionId === capture.versionId) ===
               captureIndex,
         );
+        const displayedCaptures = groupDisplayCaptures(row.captures);
         const maySave =
           reviewApplied && !disabled && !localDraftChanged && !reloadRequired && !save.isPending && !manualSave.isPending;
         return (
@@ -483,9 +488,11 @@ export function FindingEvidenceReviewPanel({
               <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
                 Mechanical record checks
               </p>
-              {row.captures.length ? (
+              {displayedCaptures.length ? (
                 <ul className="mt-2 space-y-3">
-                  {row.captures.map((capture, captureIndex) => (
+                  {displayedCaptures.map((group, captureIndex) => {
+                    const capture = group.capture;
+                    return (
                     <li
                       key={`${capture.versionId ?? "missing"}-${capture.captureEventId ?? captureIndex}`}
                       className="border-l border-rule pl-3 text-sm"
@@ -497,6 +504,21 @@ export function FindingEvidenceReviewPanel({
                         {captureState(capture)}
                         {capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}
                       </p>
+                      {group.artifactVersionReference || group.captureEventIds.length ? (
+                        <p className="mt-1 text-muted">
+                          {group.artifactVersionReference && capture.versionId != null
+                            ? `Artifact version ${capture.versionId}`
+                            : ""}
+                          {group.artifactVersionReference && group.captureEventIds.length ? " · " : ""}
+                          {group.captureEventIds
+                            .map((captureEventId) =>
+                              capture.versionId != null
+                                ? `Capture event ${captureEventId} (version ${capture.versionId})`
+                                : `Capture event ${captureEventId}`,
+                            )
+                            .join(" · ")}
+                        </p>
+                      ) : null}
                       <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
                         {capture.viewHref && capture.versionId != null ? (
                           <button
@@ -523,7 +545,8 @@ export function FindingEvidenceReviewPanel({
                         ) : null}
                       </p>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               ) : (
                 <p className="mt-2 text-sm text-muted">
@@ -639,7 +662,9 @@ export function FindingEvidenceReviewPanel({
                 Claims returned by this draft pass
               </h2>
             </div>
-            <p className="meta">{review.claimRows.length} returned claims</p>
+            <p className="meta">
+              {review.claimRows.length} returned {review.claimRows.length === 1 ? "claim" : "claims"}
+            </p>
           </div>
           <p className="mt-2 max-w-3xl text-sm text-muted">
             This inventory records only claims returned with this draft pass. A matching URL or
@@ -659,6 +684,7 @@ export function FindingEvidenceReviewPanel({
                 capture.versionId != null &&
                 captures.findIndex((candidate) => candidate.versionId === capture.versionId) === captureIndex,
             );
+            const displayedCaptures = groupDisplayCaptures(row.captures);
             const maySave =
               reviewApplied && !disabled && !localDraftChanged && !reloadRequired && !save.isPending && !manualSave.isPending;
             return (
@@ -672,9 +698,11 @@ export function FindingEvidenceReviewPanel({
                   <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
                     Exact draft provenance
                   </p>
-                  {row.captures.length ? (
+                  {displayedCaptures.length ? (
                     <ul className="mt-2 space-y-3">
-                      {row.captures.map((capture, captureIndex) => (
+                      {displayedCaptures.map((group, captureIndex) => {
+                        const capture = group.capture;
+                        return (
                         <li
                           key={`${capture.versionId ?? "missing"}-${capture.captureEventId ?? captureIndex}`}
                           className="border-l border-rule pl-3 text-sm"
@@ -684,6 +712,21 @@ export function FindingEvidenceReviewPanel({
                             {captureState(capture)}
                             {capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}
                           </p>
+                          {group.artifactVersionReference || group.captureEventIds.length ? (
+                            <p className="mt-1 text-muted">
+                              {group.artifactVersionReference && capture.versionId != null
+                                ? `Artifact version ${capture.versionId}`
+                                : ""}
+                              {group.artifactVersionReference && group.captureEventIds.length ? " · " : ""}
+                              {group.captureEventIds
+                                .map((captureEventId) =>
+                                  capture.versionId != null
+                                    ? `Capture event ${captureEventId} (version ${capture.versionId})`
+                                    : `Capture event ${captureEventId}`,
+                                )
+                                .join(" · ")}
+                            </p>
+                          ) : null}
                           {capture.viewHref && capture.versionId != null ? (
                             <button
                               type="button"
@@ -700,7 +743,8 @@ export function FindingEvidenceReviewPanel({
                             </p>
                           ) : null}
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   ) : (
                     <p className="mt-2 text-sm text-muted">
@@ -840,7 +884,7 @@ export function FindingEvidenceReviewPanel({
             const contrary = row.captures.filter((capture) => capture.available && capture.readable && capture.relation === "contrary" && capture.versionId != null);
             const maySave = reviewApplied && !disabled && !localDraftChanged && !reloadRequired && !save.isPending && !manualSave.isPending;
             return <article key={row.key} className="mt-5 border border-rule bg-paper p-4 sm:p-5"><p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Manual claim {index + 1} · {row.claim.kind}</p><p className="mt-2 whitespace-pre-wrap font-medium text-ink">{row.claim.fact}</p>
-              <div className="mt-4 border-t border-rule pt-3"><p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Selected captured records</p><ul className="mt-2 space-y-3">{row.captures.map((capture, captureIndex) => <li key={`${capture.versionId ?? "missing"}-${captureIndex}`} className="border-l border-rule pl-3 text-sm"><p className="font-medium text-ink">{capture.title ?? capture.url ?? "Captured record"} · {capture.relation}</p><p className="mt-1 text-muted">{captureState(capture)}{capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}</p>{capture.viewHref && capture.versionId != null ? <button type="button" className="inline-link mt-1" onClick={() => captureRead.mutate(capture.versionId!)} disabled={captureRead.isPending}>View selected captured version</button> : null}</li>)}</ul></div>
+              <div className="mt-4 border-t border-rule pt-3"><p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Selected captured records</p><ul className="mt-2 space-y-3">{row.captures.map((capture, captureIndex) => <li key={`${capture.versionId ?? "missing"}-${captureIndex}`} className="border-l border-rule pl-3 text-sm"><p className="font-medium text-ink">Selected captured record · {capture.title ?? capture.url ?? "Captured record"} · {capture.relation}</p><p className="mt-1 text-muted">{captureState(capture, "Selected captured record")}{capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}</p>{capture.viewHref && capture.versionId != null ? <button type="button" className="inline-link mt-1" onClick={() => captureRead.mutate(capture.versionId!)} disabled={captureRead.isPending}>View selected captured version</button> : null}</li>)}</ul></div>
               <div className="mt-5 border-t border-rule pt-4"><p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Editor judgment</p><label className="mt-2 block text-sm font-medium text-ink" htmlFor={`manual-claim-judgment-${index}`}>Judgment</label><select id={`manual-claim-judgment-${index}`} className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm" value={judgment.value} disabled={!reviewApplied || disabled || save.isPending || manualSave.isPending} onChange={(event) => updateDraft(row.key, { value: event.target.value as FindingJudgment, contraryVersionId: event.target.value === "contradicts" ? judgment.contraryVersionId : null })}>{(Object.keys(judgmentLabels) as FindingJudgment[]).map((value) => <option key={value} value={value}>{judgmentLabels[value]}</option>)}</select><label className="mt-3 block text-sm font-medium text-ink" htmlFor={`manual-claim-reason-${index}`}>Reason {judgment.value === "contradicts" ? "(required for contradiction)" : "(optional)"}</label><textarea id={`manual-claim-reason-${index}`} className="mt-1 min-h-24 w-full border border-rule bg-paper p-3 text-sm" value={judgment.reason} maxLength={2000} disabled={!reviewApplied || disabled || save.isPending || manualSave.isPending} onChange={(event) => updateDraft(row.key, { reason: event.target.value })} />
               {judgment.value === "contradicts" ? <><label className="mt-3 block text-sm font-medium text-ink" htmlFor={`manual-claim-contrary-${index}`}>Explicit contrary captured record</label><select id={`manual-claim-contrary-${index}`} className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm" value={judgment.contraryVersionId ?? ""} disabled={!reviewApplied || disabled || save.isPending || manualSave.isPending} onChange={(event) => updateDraft(row.key, { contraryVersionId: event.target.value ? Number(event.target.value) : null })}><option value="">Choose a contrary record</option>{contrary.map((capture) => <option key={capture.versionId} value={capture.versionId!}>{capture.title ?? capture.url ?? `Captured version ${capture.versionId}`}</option>)}</select></> : null}
               <div className="mt-4 flex flex-wrap gap-3"><InkButton disabled={!maySave} onClick={() => save.mutate({ findingKey: row.key, judgment, hasReadableCapture: corroborating.length > 0 })}>{save.isPending ? "Saving judgment…" : "Save judgment"}</InkButton><InkButton tone="quiet" small disabled={manualSave.isPending} onClick={() => { manualDraftToken.current = review.evidenceToken; setManualClaim({ id: row.claim.id, fact: row.claim.fact, kind: row.claim.kind, references: row.captures.filter((capture) => capture.versionId != null).map((capture) => ({ versionId: capture.versionId!, relation: capture.relation })) }); }}>Edit claim</InkButton></div></div>
