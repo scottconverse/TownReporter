@@ -240,6 +240,20 @@ sign-in steps on the computer/account running TownReporter, then reload and
 retry. Opinion's help also covers the required editorial voice file. This is
 guidance, not an automatic installer or sign-in button.
 
+### Draft selected leads
+
+The Queue can start one atomic batch of one to five eligible leads. Select the
+rows, choose one explicit runtime — **Local model**, **Claude Code**, **Codex
+Terra**, or **Codex Sol** — and use **Draft selected**. The batch does not use
+Automatic, a gateway, or an API fallback. It preserves each lead's stored
+research scope. A missing runtime or ineligible selected lead refuses the
+whole start, before any partial batch is created.
+
+The Queue retains the latest batch after a reload, including its selected
+runtime and each lead's queued, running, completed, or failed status with a
+workbench link. These outcomes are separate per lead after a batch is safely
+queued. Drafts still require editor review and a manual Publish action.
+
 ## The story workbench
 
 `/desk/story/:id` — where a lead becomes a story.

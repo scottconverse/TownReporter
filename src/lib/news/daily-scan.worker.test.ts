@@ -62,6 +62,7 @@ it("the scheduled worker persists actual scan outputs through its fenced commit"
       JSON.stringify({
         runtime: "codex-terra",
         modelChoice: "codex-balanced",
+        transport: "codex",
         model: "selected-terra",
       }),
     ],

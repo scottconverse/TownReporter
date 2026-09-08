@@ -821,6 +821,13 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const leadId = job.subject_id;
   const sql = await getSql();
+  const batchServer = await import("./draft-batch.server.ts");
+  const batchSnapshot = await batchServer.assertDraftBatchCanContinue(sql, job);
+  const batchGuard = async () => {
+    const current = await batchServer.assertDraftBatchCanContinue(await getSql(), job);
+    if (!current) throw new Error("Draft batch runtime snapshot is missing.");
+    return current;
+  };
   const leads = await sql<LeadRow>`
     select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at, notes_json
     from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
@@ -863,6 +870,76 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     */
     providerOverrides: await readProviderOverrides(owned(context)).catch(() => ({})),
   };
+  const reportDeps: Parameters<typeof reportAndDraft>[1] = {
+    onStage: (stage) => setStage(job.id, stage),
+  };
+  if (batchSnapshot) {
+    const { forcedOcrOptions, runForcedChat } = await import("./forced-runtime.server.ts");
+    const adapters =
+      deps.batchChatAdapters ??
+      ({
+        claude: async (input) =>
+          (await import("./ai-claude-code.server.ts")).claudeCodeChat(input),
+        codex: async (input) => (await import("./ai-codex.server.ts")).codexChat(input),
+        local: grokChat,
+      } satisfies NonNullable<PerformDraftWorkDeps["batchChatAdapters"]>);
+    reportDeps.chat = async (system, user, maxTokens = 800) => {
+      const current = await batchGuard();
+      return runForcedChat(
+        current,
+        system,
+        user,
+        maxTokens,
+        { noTools: true },
+        adapters,
+      );
+    };
+    reportDeps.ingest = async (url) => {
+      const current = await batchGuard();
+      const got = await ingestDocument(
+        url,
+        forcedOcrOptions(
+          current,
+          async () => {
+            await batchGuard();
+          },
+          deps.batchOcrAdapters,
+        ),
+      );
+      return {
+        url,
+        title: got.title,
+        text: got.text,
+        extras: got.extras ?? [],
+        notices: got.notices ?? [],
+        pages: got.pages,
+      };
+    };
+    reportDeps.search = async (query) => {
+      await batchGuard();
+      return webSearch(query);
+    };
+    reportDeps.capture = async (_userId, document) =>
+      batchServer.withDraftBatchLease(job, async (transactionSql) => {
+        const { rememberCapture } = await import("./investigate.ts");
+        const rec = await rememberCapture({
+          sql: transactionSql,
+          userId: job.user_id,
+          newsroomId: job.newsroom_id,
+          investigationId: null,
+          url: document.url,
+          title: document.title || document.url,
+          text: document.text.slice(0, 2_000_000),
+          hash: await sha256(document.text || document.url),
+          status: document.text ? 200 : 0,
+          outcome: document.text ? "fetched" : "fetch-failed",
+          classification: "discovered",
+          triggerKind: "draft",
+          pages: document.pages,
+        });
+        return { version_id: rec.versionId, capture_event_id: rec.captureEventId };
+      });
+  }
   let reported = await runReport(
     {
       ...draftInput,
@@ -873,9 +950,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       as long is how an editor loses trust in a desk, so the reason goes on the
       job where the story page already reads it.
     */
-    { onStage: (stage) => setStage(job.id, stage) },
+    reportDeps,
   );
-  if ("error" in reported) {
+  if ("error" in reported && !batchSnapshot) {
     reported = await failOverAndRetry({
       job,
       error: reported.error,

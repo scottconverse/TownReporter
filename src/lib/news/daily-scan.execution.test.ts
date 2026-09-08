@@ -222,9 +222,20 @@ describe("scheduled runtime transport", () => {
           ? {
               runtime,
               modelChoice: "local-model",
+              transport: "local",
               localModel: { baseUrl: "http://127.0.0.1:1234", id: "selected-local" },
             }
-          : { runtime, modelChoice: "scheduled", model: `selected-${runtime}` };
+          : {
+              runtime,
+              modelChoice:
+                runtime === "claude-cli"
+                  ? "claude-frontier"
+                  : runtime === "codex-terra"
+                    ? "codex-balanced"
+                    : "codex-frontier",
+              transport: runtime === "claude-cli" ? "claude-code" : "codex",
+              model: `selected-${runtime}`,
+            };
       const result = await runForcedDailyChat(snapshot, "system", "user", 99, undefined, {
         claude: async () => (calls.push("claude"), "claude-result"),
         codex: async () => (calls.push("codex"), "codex-result"),

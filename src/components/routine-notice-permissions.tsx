@@ -3,6 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { InkButton, SecHead, announceToDesk } from "@/components/desk-chrome";
 import { ListSkeleton } from "@/components/states";
+import {
+  isCurrentRoutineApproval,
+  replaceRoutineApproval,
+  withoutRoutineApproval,
+} from "@/components/routine-notice-permissions-state";
 import { myDesk } from "@/lib/news/claim";
 import { listSources } from "@/lib/news/desk";
 import {
@@ -165,23 +170,12 @@ export function RoutineNoticePermissions() {
 
   const toggle = (source: { id: number; url: string }, formatKey: RoutineNoticeFormatKey) => {
     if (!draft) return;
-    const key = approvalKey(source.id, formatKey);
-    const existing = draft.approvals.find(
-      (approval) => approvalKey(approval.sourceId, approval.formatKey) === key,
-    );
-    const isCurrentAddress = existing?.sourceUrl === source.url;
+    const isCurrentAddress = isCurrentRoutineApproval(draft.approvals, source, formatKey);
     changeDraft({
       ...draft,
       approvals: isCurrentAddress
-        ? draft.approvals.filter(
-            (approval) => approvalKey(approval.sourceId, approval.formatKey) !== key,
-          )
-        : [
-            ...draft.approvals.filter(
-              (approval) => approvalKey(approval.sourceId, approval.formatKey) !== key,
-            ),
-            { sourceId: source.id, sourceUrl: source.url, formatKey },
-          ],
+        ? withoutRoutineApproval(draft.approvals, source, formatKey)
+        : replaceRoutineApproval(draft.approvals, source, formatKey),
     });
   };
 
@@ -275,11 +269,10 @@ export function RoutineNoticePermissions() {
                   <p className="break-all text-sm text-muted">{source.url}</p>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     {ROUTINE_NOTICE_FORMATS.map((format) => {
-                      const checked = draft.approvals.some(
-                        (approval) =>
-                          approval.sourceId === source.id &&
-                          approval.formatKey === format.key &&
-                          approval.sourceUrl === source.url,
+                      const checked = isCurrentRoutineApproval(
+                        draft.approvals,
+                        source,
+                        format.key,
                       );
                       return (
                         <label key={format.key} className="flex items-start gap-2 text-sm">
