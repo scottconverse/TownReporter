@@ -15,6 +15,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const windows = process.platform === "win32";
+test("candidate packaging checks out the exact pull-request head", () => {
+  const workflow = readFileSync(resolve(".github/workflows/windows-install.yml"), "utf8");
+  assert.match(
+    workflow,
+    /- uses: actions\/checkout@v4\s+with:\s+ref: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/,
+  );
+});
 test(
   "one source folder cannot be rebound to a different data directory",
   { skip: !windows && "Windows PowerShell required" },

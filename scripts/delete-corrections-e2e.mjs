@@ -581,7 +581,7 @@ async function main() {
   if ((await secondFinding.getByLabel("Judgment").inputValue()) !== "needs-reporting")
     throw new Error("saving finding A discarded typed finding B");
   await secondFinding.getByRole("button", { name: "Save judgment" }).click();
-  await review.getByText("Evidence judgment saved.").waitFor();
+  await review.getByText("Evidence judgment saved.", { exact: true }).waitFor();
   step("finding B saves after finding A without a stale-token conflict");
   await page.reload({ waitUntil: "networkidle" });
   const reloadedReview = page.locator("#finding-evidence-review");

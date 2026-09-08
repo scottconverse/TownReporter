@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.29](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.29)** — 7 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.30](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.30)** — 7 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -91,6 +91,8 @@ Same six moves the paper itself describes at `/how-we-report`:
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
 ### Recent releases
+
+- **0.6.30** — Editor-selected draft batches, mandatory review before saving section changes, and owner-controlled preparation for exact routine-notice source/format pairs. Pure routine-notice contracts and saved-data adapters remain unverified inputs; this release does not enable automatic publication.
 
 - **0.6.29** — Owner-configured daily discovery with an explicit subscription/local runtime; private recorded-finding evidence review; stronger draft saving and job recovery. Scheduled scans file leads for review and do not draft or publish.
 
