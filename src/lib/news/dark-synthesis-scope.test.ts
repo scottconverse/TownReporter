@@ -78,8 +78,8 @@ it("synthesis keeps an older focus-matching capture and its stored page evidence
   await sql`
     insert into artifact_chunks(version_id,user_id,newsroom_id,chunk_index,page_number,section,excerpt,locator)
     values
-      (${version},${userId},${newsroomId},3,7,'Annexation','PRECEDING_APPLICANT: Neighbor Holdings LLC','page:7:char:6000-6200'),
-      (${version},${userId},${newsroomId},4,7,'Annexation','TARGET_ROW: FILE-4242 Cedar annexation covers the project record.','page:7:char:6200-6400'),
+      (${version},${userId},${newsroomId},3,7,'Annexation','COFFMAN_ROW_HEADING: Coffman Apartments. PRECEDING_APPLICANT: Neighbor Holdings LLC','page:7:char:6000-6200'),
+      (${version},${userId},${newsroomId},4,7,'Annexation','PRECEDING_APPLICANT: Neighbor Holdings LLC. TARGET_ROW: FILE-4242 Cedar annexation covers the project record.','page:7:char:6200-6400'),
       (${version},${userId},${newsroomId},5,7,'Annexation','APPLICANT_TAIL: Dana, Community Association','page:7:char:6400-6500')
   `;
   for (let i = 0; i < 41; i += 1) {
@@ -117,7 +117,13 @@ it("synthesis keeps an older focus-matching capture and its stored page evidence
   assert.match(briefPack, new RegExp(`capture:${capture} version:${version} hash:target-hash`));
   assert.match(briefPack, /APPLICANT_TAIL: Dana, Community Association/);
   assert.match(briefPack, /page:7:char:6400-6500/);
-  assert.doesNotMatch(briefPack, /PRECEDING_APPLICANT: Neighbor Holdings LLC/);
+  assert.match(briefPack, /COFFMAN_ROW_HEADING: Coffman Apartments/);
+  assert.ok(
+    briefPack.indexOf("COFFMAN_ROW_HEADING") < briefPack.indexOf("TARGET_ROW") &&
+      briefPack.indexOf("TARGET_ROW") < briefPack.indexOf("APPLICANT_TAIL"),
+    "stored page evidence must remain in source order",
+  );
+  assert.equal((briefPack.match(/TARGET_ROW: FILE-4242/g) ?? []).length, 1);
   assert.doesNotMatch(briefPack, /FOREIGN_SECRET|FOREIGN_TARGET/);
 
   for (let i = 0; i < 30; i += 1) {
@@ -144,7 +150,8 @@ it("synthesis keeps an older focus-matching capture and its stored page evidence
   assert.match(briefPrompt, new RegExp(`capture:${capture} version:${version} hash:target-hash`));
   assert.match(briefPrompt, /APPLICANT_TAIL: Dana, Community Association/);
   assert.match(briefPrompt, /page:7:char:6400-6500/);
-  assert.doesNotMatch(briefPrompt, /PRECEDING_APPLICANT: Neighbor Holdings LLC/);
+  assert.match(briefPrompt, /COFFMAN_ROW_HEADING: Coffman Apartments/);
+  assert.equal((briefPrompt.match(/TARGET_ROW: FILE-4242/g) ?? []).length, 1);
 });
 
 it("keeps readable evidence without focus tokens and collapses duplicate versions before the cap", async () => {

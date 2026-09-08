@@ -222,46 +222,70 @@ async function relevantDarkArtifactEvidence(
         score: focusTextScore(chunk.excerpt, questionTerms, frontierTerms),
       }))
       .filter((chunk) => chunk.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
-    const includedChunkIndexes = new Set<number>();
-    const exact = exactHits.flatMap((chunk) => {
-      if (includedChunkIndexes.has(chunk.chunk_index)) return [];
-      includedChunkIndexes.add(chunk.chunk_index);
-      const current = `[${chunk.locator}${chunk.page_number == null ? "" : ` page:${chunk.page_number}`}] ${chunk.excerpt}`;
-      // PDF table extraction may split a single record at a fixed character
-      // boundary. Keep only its immediate, same-page stored continuation —
-      // never a prior or cross-page row — and label it so the brief contract
-      // still requires an explicit same-record pairing for attribution.
-      const continuation = persistedChunks.find(
-        (candidate) =>
-          candidate.version_id === chunk.version_id &&
-          chunk.page_number != null &&
-          candidate.page_number === chunk.page_number &&
-          candidate.chunk_index === chunk.chunk_index + 1,
-      );
-      if (!continuation || includedChunkIndexes.has(continuation.chunk_index)) return [current];
-      includedChunkIndexes.add(continuation.chunk_index);
-      return [
-        current,
-        `[adjacent same-page continuation ${continuation.locator} page:${continuation.page_number}] ${continuation.excerpt}`,
-      ];
-    });
+      .sort((a, b) => b.score - a.score || a.chunk_index - b.chunk_index);
+    const separator = rendered.length ? 2 : 0;
+    const availableEvidence = budgetChars - used - separator - header.length - 1;
+    const formatChunk = (chunk: DarkArtifactChunk) =>
+      `[${chunk.locator}${chunk.page_number == null ? "" : ` page:${chunk.page_number}`}] ${chunk.excerpt}`;
+    const chunksForArtifact = persistedChunks
+      .filter((chunk) => chunk.version_id === artifact.version_id)
+      .sort((a, b) => a.chunk_index - b.chunk_index);
+    const rankedPages = [...new Set(exactHits.flatMap((hit) => (hit.page_number == null ? [] : [hit.page_number])))]
+      .map((pageNumber) => ({
+        pageNumber,
+        score: Math.max(...exactHits.filter((hit) => hit.page_number === pageNumber).map((hit) => hit.score)),
+        chunks: chunksForArtifact.filter((chunk) => chunk.page_number === pageNumber),
+      }))
+      .sort((a, b) => b.score - a.score || a.chunks[0]!.chunk_index - b.chunks[0]!.chunk_index);
+    const exact: string[] = [];
+    let exactUsed = 0;
+    for (const page of rankedPages) {
+      const wholePage = page.chunks.map(formatChunk).join("\n");
+      const separatorForPage = exact.length ? 1 : 0;
+      if (wholePage.length + separatorForPage + exactUsed <= availableEvidence) {
+        exact.push(wholePage);
+        exactUsed += wholePage.length + separatorForPage;
+        continue;
+      }
+      // A page that cannot fit still keeps a source-ordered neighborhood of
+      // its strongest matching chunk. This preserves table-row context without
+      // manufacturing a record parser or silently clipping an arbitrary head.
+      const center = exactHits.find((hit) => hit.page_number === page.pageNumber);
+      if (!center) continue;
+      const neighborhood = page.chunks.filter((chunk) => Math.abs(chunk.chunk_index - center.chunk_index) <= 1);
+      const bounded = neighborhood.map(formatChunk).join("\n");
+      if (bounded.length + separatorForPage + exactUsed <= availableEvidence) {
+        exact.push(bounded);
+        exactUsed += bounded.length + separatorForPage;
+      }
+    }
+    if (!exact.length && exactHits[0]) {
+      const center = exactHits[0];
+      const neighborhood = chunksForArtifact
+        .filter(
+          (chunk) =>
+            chunk.page_number === center.page_number && Math.abs(chunk.chunk_index - center.chunk_index) <= 1,
+        )
+        .map(formatChunk)
+        .join("\n");
+      if (neighborhood) exact.push(capText(neighborhood, Math.max(0, availableEvidence)));
+    }
     const fallbackChunks = chunksFromEvidence(artifact.full_text)
       .map((chunk) => ({
         ...chunk,
         score: focusTextScore(chunk.excerpt, questionTerms, frontierTerms),
       }));
-    const fallback = (questionTerms.length || frontierTerms.length
-      ? fallbackChunks.filter((chunk) => chunk.score > 0).sort((a, b) => b.score - a.score).slice(0, 4)
-      : fallbackChunks.slice(0, 1))
+    const fallback = (exact.length
+      ? []
+      : questionTerms.length || frontierTerms.length
+        ? fallbackChunks.filter((chunk) => chunk.score > 0).sort((a, b) => b.score - a.score).slice(0, 4)
+        : fallbackChunks.slice(0, 1))
       .map(
         (chunk) =>
           `[${chunk.locator}${chunk.page_number == null ? "" : ` page:${chunk.page_number}`}] ${chunk.excerpt}`,
       );
     const evidence = [...exact, ...fallback.filter((excerpt) => !exact.includes(excerpt))].join("\n");
     const entry = `${header}\n${evidence || "[no matching excerpt retained]"}`;
-    const separator = rendered.length ? 2 : 0;
     const remaining = budgetChars - used - separator;
     if (remaining <= header.length) break;
     const boundedEntry = capText(entry, remaining);

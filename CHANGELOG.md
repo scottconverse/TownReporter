@@ -6,7 +6,7 @@ Current release: **0.6.34**.
 
 ## 0.6.34 beta
 
-- Dark Desk evidence packing now selects relevant captured records across the complete captured inventory before the shared selection code builds separately bounded inputs for stage-one signal synthesis and the final brief. The selected evidence retains the immediately following same-page chunk for boundary context, and the final-brief instructions require claims to stay paired with the correct record instead of borrowing details from an adjacent record. These safeguards address truncation and attribution failure modes; they do not guarantee model accuracy.
+- Dark Desk evidence packing now selects relevant captured records across the complete captured inventory before the shared selection code builds separately bounded inputs for stage-one signal synthesis and the final brief. When an applicable complete stored PDF page fits the existing budget, it is retained in source order; otherwise selection keeps a contiguous neighborhood around the matching passage. Persisted page context is used without adding duplicate generated fragments. Final-brief instructions require claims to stay paired with the correct record instead of borrowing details from an adjacent record. These safeguards address truncation and attribution failure modes; they do not guarantee model accuracy.
 - Existing model-input caps remain 28,000 characters for stage-one signal synthesis and 22,000 for the final brief; the separate four-gate calls are unchanged. The release receipt records the applicable runtime proof and its limits; this change alone does not claim an investigation outcome or retrieval-quality pass.
 
 ## 0.6.33 beta
