@@ -213,7 +213,7 @@ export function FindingEvidenceReviewPanel({
         setReloadRequired(false);
         setFeedback({
           kind: "ok",
-          text: "Evidence judgment saved. Unsaved edits to another evidence item were retained.",
+          text: "Evidence judgment saved. Unsaved edits to another finding were retained.",
         });
       } else if (peerKeys.length > 0) {
         setReloadRequired(true);
