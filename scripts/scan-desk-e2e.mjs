@@ -492,20 +492,6 @@ async function routineNoticePermissionsJourney(context, observePage) {
   await unavailableCheck.getByRole("button", { name: "Check captured notices" }).waitFor();
   step("a saved source-format pair offers a manual structural check with no publication capability");
 
-  const captureOnly = process.env.ROUTINE_NOTICE_CAPTURE_ONLY === "1";
-  const observedRoutineRequests = [];
-  const observeRoutineRequest = (request) => {
-    const payload = request.postData() ?? "";
-    if (payload.includes("waste-recycling-schedule")) {
-      observedRoutineRequests.push({
-        method: request.method(),
-        url: request.url(),
-        headers: request.headers(),
-        payload,
-      });
-    }
-  };
-  page.on("request", observeRoutineRequest);
   let releaseUnavailableCheck;
   const unavailableCheckReleased = new Promise((resolve) => {
     releaseUnavailableCheck = resolve;
@@ -532,33 +518,19 @@ async function routineNoticePermissionsJourney(context, observePage) {
   };
   await page.route("**/*", holdUnavailableRoutineCheck);
   const unavailableButton = unavailableCheck.locator("button").first();
-  if (captureOnly) {
-    await page.unroute("**/*", holdUnavailableRoutineCheck);
-    await unavailableButton.click();
-  } else {
-    await unavailableButton.click();
-    await unavailableCheckEntered;
-    if (!(await unavailableButton.isDisabled())) {
-      throw new Error("the pending unavailable check left its own row editable");
-    }
-    if (await libraryCheck.getByRole("button", { name: "Check captured notices" }).isDisabled()) {
-      throw new Error("the pending unavailable check froze a different approved pair");
-    }
-    releaseUnavailableCheck();
+  await unavailableButton.click();
+  await unavailableCheckEntered;
+  if (!(await unavailableButton.isDisabled())) {
+    throw new Error("the pending unavailable check left its own row editable");
   }
+  if (await libraryCheck.getByRole("button", { name: "Check captured notices" }).isDisabled()) {
+    throw new Error("the pending unavailable check froze a different approved pair");
+  }
+  releaseUnavailableCheck();
   await unavailableCheck
     .getByText("This approved format does not have a captured-data adapter yet.")
     .waitFor();
-  if (!captureOnly) await page.unroute("**/*", holdUnavailableRoutineCheck);
-  page.off("request", observeRoutineRequest);
-  if (captureOnly) {
-    writeFileSync(join(evidenceDir, "routine-notice-check-request-shape.json"), JSON.stringify({
-      requests: observedRoutineRequests,
-      unavailableDisabled: await unavailableButton.isDisabled(),
-      libraryDisabled: await libraryCheck.getByRole("button", { name: "Check captured notices" }).isDisabled(),
-    }, null, 2));
-    return;
-  }
+  await page.unroute("**/*", holdUnavailableRoutineCheck);
   if (new URL(page.url()).pathname !== "/desk/ops") {
     throw new Error("an unavailable routine adapter navigated away from Server permissions");
   }

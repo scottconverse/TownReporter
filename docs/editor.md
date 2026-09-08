@@ -607,6 +607,8 @@ to review any leads. A daily scan files leads only: it does not draft, publish o
 
 Routine notice permissions on Server are preparation only. The owner may save exact accepted source-and-format pairs, pause them, and read their recent permission changes; no saved pair enables automatic publication in this version. If a source is later rejected, removed, or changes address, its recorded pair stays inactive. Pause keeps that record. The owner must explicitly revoke it, or explicitly select the current accepted address to replace the prior address; a changed address is never selected automatically.
 
+The same panel can manually check an approved library, parks/recreation, or community/arts source for Schema.org Event data. A check stores the bounded captured HTML and reports structurally parsed candidates, refusals, and conflicting versions. **Parsed** means the fields fit the selected format; it does not verify the issuer, facts, eligibility, completeness, or authority. The remaining approved notice formats show that their adapters are unavailable. Checks do not start a monitor, create a lead or draft, or publish anything. Only the owner can open a check's bound captured HTML, and a changed or removed capture is refused instead of substituted.
+
 Owners also have:
 
 - **Paper setup** — change the public identity, timezone, contact links, watch
