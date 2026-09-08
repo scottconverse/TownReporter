@@ -200,10 +200,9 @@ function adapterResults(
   provenance: { captureEventId: number; artifactVersionId: number; contentHash: string },
   ownerContext: AdapterOwnerContext,
 ) {
-  if (!ownerContext)
-    return [
-      { status: "refused", code: "missing-owner-context", locator: "automation-settings" },
-    ] satisfies RoutineExtractionResult[];
+  const missingContext = () => [
+    { status: "refused", code: "missing-owner-context", locator: "automation-settings" },
+  ] satisfies RoutineExtractionResult[];
   const base = {
     newsroomId: actor.newsroomId,
     sourceId: input.sourceId,
@@ -212,12 +211,12 @@ function adapterResults(
     ...provenance,
   };
   if (input.formatKey === "registration-deadline")
-    return content.includes("BEGIN:VCALENDAR") && ownerContext
-      ? extractRoutineIcs(content, "deadline", {
+    return content.includes("BEGIN:VCALENDAR")
+      ? ownerContext ? extractRoutineIcs(content, "deadline", {
           provenance: base,
           issuer: ownerContext.issuer,
           locality: ownerContext.locality,
-        })
+        }) : missingContext()
       : extractApplicationDeadlines(content, base);
   if (input.formatKey === "waste-recycling-schedule")
     return ownerContext
@@ -227,8 +226,9 @@ function adapterResults(
           locality: ownerContext.locality,
           collectionArea: ownerContext.collectionArea ?? undefined,
         })
-      : [];
-  if (input.formatKey === "public-meeting-logistics" && ownerContext) {
+      : missingContext();
+  if (input.formatKey === "public-meeting-logistics") {
+    if (!ownerContext) return missingContext();
     let parsed: unknown;
     try {
       parsed = JSON.parse(content);
@@ -266,6 +266,12 @@ function adapterResults(
         branch: ownerContext.collectionArea ?? ownerContext.locality,
       }) as RoutineExtractionResult[]),
     );
+  if (
+    input.formatKey === "library-notice" &&
+    !ownerContext &&
+    content.includes("specialOpeningHoursSpecification") &&
+    !results.some((result) => result.status === "parsed")
+  ) return missingContext();
   return results.length
     ? results
     : ([

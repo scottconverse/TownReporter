@@ -124,6 +124,19 @@ describe("routine notice manual checks", () => {
     setFetchImplForTests(null);
   });
 
+  it("keeps permission-only Schema.org Event checks compatible without automation context", async () => {
+    const f = await fixture("community-arts-event-logistics");
+    const sql = await getSql();
+    await sql.query("delete from routine_notice_automations where newsroom_id=$1", [f.room]);
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(page(event())) },
+    );
+    assert.equal(result.check.state, "parsed");
+    assert.equal(result.check.counts.parsed, 1);
+  });
+
   it("captures and reparses structured-only HTML without creating editorial work or monitors", async () => {
     const f = await fixture();
     const raw = page(event());
