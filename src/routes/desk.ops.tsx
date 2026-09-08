@@ -47,6 +47,7 @@ import { ProviderTimeField } from "@/components/provider-time-field";
 import { editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
 import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
 import { DailyScanSettings } from "@/components/daily-scan-settings";
+import { RoutineNoticePermissions } from "@/components/routine-notice-permissions";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -157,6 +158,7 @@ function OpsPage() {
       <WritingModels />
 
       <DailyScanSettings />
+      <RoutineNoticePermissions />
 
       <section className="mt-12">
         <SecHead

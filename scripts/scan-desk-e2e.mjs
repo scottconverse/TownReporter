@@ -154,6 +154,7 @@ async function addAcceptedSource() {
 }
 
 async function dailySettingsJourney(context, observePage) {
+  const initialPage = page;
   await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
   const panel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
   await panel.getByRole("heading", { name: "Daily scan", exact: true }).waitFor();
@@ -267,7 +268,104 @@ async function dailySettingsJourney(context, observePage) {
     throw new Error("cleanup unexpectedly enabled the daily schedule");
   }
   await other.close();
+  page = initialPage;
   step("cleanup leaves the future schedule disabled, so no automatic scan can become due");
+}
+
+async function routineNoticePermissionsJourney(context, observePage) {
+  await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  const panel = page.locator("#routine-notice-permissions");
+  await panel.getByRole("heading", { name: "Routine notice permissions", exact: true }).waitFor();
+  await panel
+    .getByText(
+      "Automatic publication is not available in this version; no items will publish from these settings.",
+    )
+    .waitFor();
+  await panel.getByText("No source-and-format permissions are saved.").waitFor();
+  const sourcesHref = await panel.getByRole("link", { name: "Open Sources" }).getAttribute("href");
+  if (!sourcesHref?.includes("/desk/sources"))
+    throw new Error("routine permissions source link is missing");
+  const linked = await context.newPage();
+  observePage(linked, "routine-sources-link");
+  await linked.goto(`${base}${sourcesHref}`, { waitUntil: "domcontentloaded" });
+  await linked.getByRole("heading", { level: 1, name: "Sources", exact: true }).waitFor();
+  await linked.close();
+  step("owner sees empty routine permissions, no publication capability, and the source link");
+
+  await panel.getByRole("checkbox", { name: "Daily settings source — Library notices" }).check();
+  await panel.getByRole("button", { name: "Save routine permissions" }).click();
+  await panel
+    .getByText(
+      "Permissions saved. Automatic publication is not available in this version; no items will publish from these settings.",
+    )
+    .waitFor();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const reloaded = page.locator("#routine-notice-permissions");
+  if (
+    !(await reloaded
+      .getByRole("checkbox", { name: "Daily settings source — Library notices" })
+      .isChecked())
+  ) {
+    throw new Error("saved routine permission did not survive reload");
+  }
+  await reloaded
+    .getByText(/Revision 1/)
+    .first()
+    .waitFor();
+  step("a source-format permission saves and survives a real reload without enabling publication");
+
+  const other = await context.newPage();
+  observePage(other, "routine-second-tab");
+  other.setDefaultTimeout(45_000);
+  await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  const otherPanel = other.locator("#routine-notice-permissions");
+  await otherPanel
+    .getByRole("heading", { name: "Routine notice permissions", exact: true })
+    .waitFor();
+  await otherPanel
+    .getByRole("checkbox", { name: "Daily settings source — Community and arts event logistics" })
+    .check();
+  await reloaded
+    .getByRole("checkbox", { name: "Daily settings source — Parks and recreation notices" })
+    .check();
+  await reloaded.getByRole("button", { name: "Save routine permissions" }).click();
+  await reloaded.getByText(/Permissions saved\. Automatic publication/).waitFor();
+  await otherPanel.getByRole("button", { name: "Save routine permissions" }).click();
+  await otherPanel.getByText("Routine notice settings changed. Reload before saving.").waitFor();
+  await otherPanel.getByRole("button", { name: "Reload latest settings" }).click();
+  await otherPanel.getByText("Latest routine permissions reloaded.").waitFor();
+  step("a stale routine-permissions tab gets an explicit conflict and reload path");
+
+  await otherPanel.getByRole("checkbox", { name: "Pause routine notice permissions" }).check();
+  await otherPanel.getByRole("button", { name: "Save routine permissions" }).click();
+  await otherPanel.getByText(/Permissions saved\. Automatic publication/).waitFor();
+  await otherPanel.getByText("Paused", { exact: true }).waitFor();
+  await otherPanel
+    .getByRole("checkbox", { name: "Daily settings source — Library notices" })
+    .uncheck();
+  await otherPanel.getByRole("button", { name: "Save routine permissions" }).click();
+  await otherPanel.getByText(/Revoked/).waitFor();
+  mkdirSync(evidenceDir, { recursive: true });
+  await otherPanel.screenshot({
+    path: join(evidenceDir, "routine-notice-permissions-desktop.png"),
+  });
+  await other.setViewportSize({ width: 390, height: 844 });
+  if (!(await other.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
+    throw new Error("routine notice permissions have horizontal overflow at 390px");
+  }
+  await otherPanel.screenshot({ path: join(evidenceDir, "routine-notice-permissions-mobile.png") });
+  await other.getByRole("button", { name: "Dark", exact: true }).click();
+  await other.getByRole("button", { name: "Large", exact: true }).click();
+  if (!(await other.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
+    throw new Error(
+      "routine notice permissions have horizontal overflow at 390px in dark large-text mode",
+    );
+  }
+  await otherPanel.screenshot({
+    path: join(evidenceDir, "routine-notice-permissions-mobile-dark-large.png"),
+  });
+  await other.close();
+  step("routine permissions can pause and revoke without creating a publication");
 }
 
 async function main() {
@@ -296,6 +394,7 @@ async function main() {
   await ownTheDesk();
   await theScreenRenders();
   if (dailySettings) await dailySettingsJourney(context, observePage);
+  if (dailySettings) await routineNoticePermissionsJourney(context, observePage);
 
   await browser.close();
   if (consoleErrors.length) {
