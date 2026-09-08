@@ -1,8 +1,13 @@
 # Changelog
 
-Current release: **0.6.32**.
+Current release: **0.6.33**.
 
 ## Unreleased
+
+## 0.6.33 beta
+
+- Packaged installations now pass Codex CLI's documented `--skip-git-repo-check` option, allowing the native Codex runtime to start from an extracted installation directory that is not a Git checkout.
+- Release receipts distinguish native launch, application, and investigation verification. This compatibility fix does not establish that the historical replay or reporting-quality targets passed.
 
 ## 0.6.32 beta
 
