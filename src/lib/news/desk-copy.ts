@@ -439,9 +439,7 @@ export function suggestFocusLeads<
     });
   if (!ranked.length) return [];
   const bestScore = ranked[0]!.newsworthiness ?? 0;
-  // A zero-score queue has no stronger existing priority to protect; keep its
-  // equal-score eligible rows available for an editor's section-balanced focus.
-  const priorityFloor = bestScore > 0 ? Math.max(4, Math.floor(bestScore * 0.5)) : 0;
+  const priorityFloor = Math.max(4, Math.floor(bestScore * 0.5));
   const selected: T[] = [ranked[0]!];
   const seen = new Set(selected.map((lead) => lead.id));
   const coveredTopics = new Set([ranked[0]!.topic]);

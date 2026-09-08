@@ -1165,14 +1165,6 @@ describe("suggestFocusLeads", () => {
     assert.deepEqual(rows.map((row) => row.id), [1, 2, 3]);
   });
 
-  it("keeps equal zero-score eligible leads available when no priority separates them", () => {
-    const rows = suggestFocusLeads([
-      lead(1, "government", 0),
-      lead(2, "schools", 0),
-      lead(3, "health", 0),
-    ], sections, 3);
-    assert.equal(rows.length, 3);
-  });
 });
 
 describe("buildScanUserMessage resident coverage contract", () => {
