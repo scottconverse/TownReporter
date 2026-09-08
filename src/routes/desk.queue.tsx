@@ -86,7 +86,6 @@ function QueuePage() {
   const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("local");
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
   const [batchNotice, setBatchNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
-  const openBatchSeen = useRef<number | null>(null);
   const leadRefreshAfterTerminalBatch = useRef<number | null>(null);
   const batch = useQuery({
     queryKey: ["draft-batch", newsroomId, activeBatchId ?? "latest"],
@@ -104,14 +103,7 @@ function QueuePage() {
     const current = batch.data?.ok ? batch.data.batch : null;
     if (!current) return;
     const open = current.items.some((item) => item.status === "queued" || item.status === "running");
-    if (open) {
-      openBatchSeen.current = current.id;
-      return;
-    }
-    if (
-      openBatchSeen.current !== current.id ||
-      leadRefreshAfterTerminalBatch.current === current.id
-    ) return;
+    if (open || leadRefreshAfterTerminalBatch.current === current.id) return;
     leadRefreshAfterTerminalBatch.current = current.id;
     void qc.invalidateQueries({ queryKey: ["leads"] });
   }, [batch.data, qc]);
@@ -130,7 +122,6 @@ function QueuePage() {
       }
       setSelectedBatchLeadIds([]);
       setActiveBatchId(result.batch.id);
-      openBatchSeen.current = result.batch.id;
       leadRefreshAfterTerminalBatch.current = null;
       setBatchNotice({
         kind: "ok",

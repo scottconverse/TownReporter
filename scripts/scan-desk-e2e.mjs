@@ -155,6 +155,7 @@ async function addAcceptedSource() {
 }
 
 async function dailySettingsJourney(context, observePage) {
+  const originalPage = page;
   await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
   const panel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
   await panel.getByRole("heading", { name: "Daily scan", exact: true }).waitFor();
@@ -268,6 +269,7 @@ async function dailySettingsJourney(context, observePage) {
     throw new Error("cleanup unexpectedly enabled the daily schedule");
   }
   await other.close();
+  page = originalPage;
   step("cleanup leaves the future schedule disabled, so no automatic scan can become due");
 }
 
