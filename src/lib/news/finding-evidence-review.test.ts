@@ -298,6 +298,99 @@ describe("finding evidence resolution", () => {
     );
   });
 
+  it("preserves unrelated judgments while a material manual-claim edit invalidates only that claim", async () => {
+    const f = await fixture();
+    const firstId = "2ff6c441-33fa-474f-a6f7-0cf9295910ef";
+    const secondId = "3ff6c441-33fa-474f-a6f7-0cf9295910ef";
+    let review = await loadFindingEvidenceReview(f.sql, room, leadId);
+    review = await persistManualClaim(
+      { newsroomId: room },
+      {
+        leadId,
+        draftId: f.draft.id,
+        evidenceToken: review.evidenceToken,
+        action: "upsert",
+        id: firstId,
+        fact: "The council meeting begins at 6 p.m.",
+        kind: "record",
+        references: [{ versionId: f.cited.id, relation: "corroborating" }],
+      },
+    );
+    review = await persistManualClaim(
+      { newsroomId: room },
+      {
+        leadId,
+        draftId: f.draft.id,
+        evidenceToken: review.evidenceToken,
+        action: "upsert",
+        id: secondId,
+        fact: "The library reading room opens at 9 a.m.",
+        kind: "record",
+        references: [{ versionId: f.cited.id, relation: "corroborating" }],
+      },
+    );
+    review = await persistFindingEvidenceJudgment(
+      { newsroomId: room },
+      {
+        leadId,
+        draftId: f.draft.id,
+        findingKey: "finding:0",
+        judgment: "supports",
+        reason: "The cited passage states the action.",
+        contraryVersionId: null,
+        evidenceToken: review.evidenceToken,
+      },
+    );
+    review = await persistFindingEvidenceJudgment(
+      { newsroomId: room },
+      {
+        leadId,
+        draftId: f.draft.id,
+        findingKey: review.claimRows[0].key,
+        judgment: "supports",
+        reason: "The exact draft provenance is readable.",
+        contraryVersionId: null,
+        evidenceToken: review.evidenceToken,
+      },
+    );
+    review = await persistFindingEvidenceJudgment(
+      { newsroomId: room },
+      {
+        leadId,
+        draftId: f.draft.id,
+        findingKey: `manual-claim:${secondId}`,
+        judgment: "supports",
+        reason: "The editor selected this readable corroborating record.",
+        contraryVersionId: null,
+        evidenceToken: review.evidenceToken,
+      },
+    );
+
+    const updated = await persistManualClaim(
+      { newsroomId: room },
+      {
+        leadId,
+        draftId: f.draft.id,
+        evidenceToken: review.evidenceToken,
+        action: "upsert",
+        id: firstId,
+        fact: "The council meeting begins at 6:30 p.m.",
+        kind: "record",
+        references: [{ versionId: f.cited.id, relation: "context" }],
+      },
+    );
+    assert.equal(updated.rows[0].judgment.value, "supports");
+    assert.equal(updated.claimRows[0].judgment.value, "supports");
+    assert.equal(
+      updated.manualClaimRows.find((row) => row.claim.id === firstId)?.judgment.value,
+      "unreviewed",
+    );
+    assert.equal(
+      updated.manualClaimRows.find((row) => row.claim.id === secondId)?.judgment.value,
+      "supports",
+    );
+  });
+
   it("refuses a seventeenth manual claim", async () => {
     const f = await fixture();
     const [draft] = await f.sql.query<{ research_json: string }>(

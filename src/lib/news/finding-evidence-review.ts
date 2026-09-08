@@ -195,6 +195,7 @@ export function findingEvidenceContentToken(draft: Partial<DraftRow>): string {
   const research = objectMemo(draft.research_json);
   delete research.findingEvidenceReview;
   delete research.claimEvidenceReview;
+  delete research.manualClaims;
   return JSON.stringify([
     draft.id ?? null,
     draft.headline ?? "",
@@ -427,6 +428,25 @@ async function findingReferenceBinding(
   return JSON.stringify({ versionIds, captureIds, versions, captures });
 }
 
+async function manualClaimBinding(
+  sql: Sql,
+  newsroomId: number,
+  claim: StoredManualClaim,
+  lock = false,
+): Promise<string> {
+  return JSON.stringify({
+    claim: {
+      id: claim.id,
+      fact: claim.fact,
+      kind: claim.kind,
+      references: claim.references.map(({ versionId, url, relation }) => ({ versionId, url, relation })),
+    },
+    captured: JSON.parse(
+      await findingReferenceBinding(sql, newsroomId, referenceForManualClaim(claim), lock),
+    ),
+  });
+}
+
 async function fullReviewToken(
   sql: Sql,
   newsroomId: number,
@@ -446,7 +466,7 @@ async function fullReviewToken(
         findingReferenceBinding(sql, newsroomId, provenanceForClaim(draft, claim), lock),
       ),
       ...manualClaims.map((claim) =>
-        findingReferenceBinding(sql, newsroomId, referenceForManualClaim(claim), lock),
+        manualClaimBinding(sql, newsroomId, claim, lock),
       ),
     ]),
   ]);
@@ -460,6 +480,7 @@ async function resolveFinding(
   index: number,
   key = `finding:${index}`,
   namespace: ReviewNamespace = "findingEvidenceReview",
+  evidenceBinding?: string,
 ): Promise<FindingEvidenceRow> {
   const versionIds = [...new Set(finding.artifact_version_ids)];
   const captureIds = [...new Set(finding.capture_event_ids)];
@@ -538,7 +559,7 @@ async function resolveFinding(
     });
   }
   let judgment = judgmentFor(draft, key, namespace);
-  const currentBinding = await findingReferenceBinding(sql, newsroomId, finding);
+  const currentBinding = evidenceBinding ?? (await findingReferenceBinding(sql, newsroomId, finding));
   const readableVersions = new Set(
     resolved
       .filter((capture) => capture.available && capture.readable)
@@ -629,6 +650,7 @@ async function resolveManualClaim(
   claim: StoredManualClaim,
 ): Promise<ManualClaimEvidenceRow> {
   const key = manualClaimKey(claim);
+  const evidenceBinding = await manualClaimBinding(sql, newsroomId, claim);
   const resolved = await resolveFinding(
     sql,
     newsroomId,
@@ -637,6 +659,7 @@ async function resolveManualClaim(
     0,
     key,
     "claimEvidenceReview",
+    evidenceBinding,
   );
   const captures = resolved.captures.map((capture) => {
     const reference = claim.references.find((candidate) => candidate.versionId === capture.versionId);
@@ -660,7 +683,7 @@ async function resolveManualClaim(
   const readableVersions = new Set(
     captures.filter((capture) => capture.available && capture.readable).map((capture) => capture.versionId),
   );
-  const judgment =
+  let judgment =
     (resolved.judgment.value === "supports" && readableVersions.size === 0) ||
     (resolved.judgment.value === "contradicts" &&
       (!resolved.judgment.reason ||
@@ -668,6 +691,12 @@ async function resolveManualClaim(
         !readableVersions.has(resolved.judgment.contraryVersionId)))
       ? { value: "unreviewed" as const, reason: "", contraryVersionId: null }
       : resolved.judgment;
+  if (
+    judgment.value !== "unreviewed" &&
+    judgmentFor(draft, manualClaimKey(claim), "claimEvidenceReview").evidenceBinding !==
+      evidenceBinding
+  )
+    judgment = { value: "unreviewed", reason: "", contraryVersionId: null };
   return {
     key,
     claim: { id: claim.id, fact: claim.fact, kind: claim.kind },
@@ -919,16 +948,14 @@ export const persistFindingEvidenceJudgment = createServerOnlyFn(
       const previous = storedReview(draft, namespace);
       const judgments =
         previous.contentToken === contentToken && previous.judgments ? previous.judgments : {};
+      const evidenceBinding = isManualClaim
+        ? await manualClaimBinding(sql, context.newsroomId, manualClaim!, true)
+        : await findingReferenceBinding(sql, context.newsroomId, reference, true);
       judgments[input.findingKey] = {
         value: input.judgment,
         reason,
         contraryVersionId: input.judgment === "contradicts" ? input.contraryVersionId : null,
-        evidenceBinding: await findingReferenceBinding(
-          sql,
-          context.newsroomId,
-          reference,
-          true,
-        ),
+        evidenceBinding,
       };
       memo[namespace] = { contentToken, judgments };
       await sql.query(
@@ -1015,6 +1042,13 @@ export const persistManualClaim = createServerOnlyFn(
         }
       }
       memo.manualClaims = { version: 1, rows: manualClaims } satisfies StoredManualClaims;
+      if (input.id) {
+        const claimReview = storedReview(draft, "claimEvidenceReview");
+        if (claimReview.judgments) {
+          delete claimReview.judgments[`manual-claim:${input.id}`];
+          memo.claimEvidenceReview = claimReview;
+        }
+      }
       await sql.query(
         "update drafts set research_json=$1,updated_at=now() where id=$2 and newsroom_id=$3",
         [JSON.stringify(memo), draft.id, context.newsroomId],

@@ -831,7 +831,7 @@ export function FindingEvidenceReviewPanel({
             <div className="mt-4 flex flex-wrap gap-3">
               <InkButton disabled={!manualClaim.fact.trim() || manualClaim.references.length === 0 || disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired} onClick={() => manualSave.mutate("upsert")}>{manualSave.isPending ? "Saving manual claim…" : manualClaim.id ? "Save manual claim" : "Add manual claim"}</InkButton>
               {manualClaim.id ? <InkButton tone="quiet" disabled={manualSave.isPending} onClick={resetManualClaim}>Cancel edit</InkButton> : null}
-              {manualClaim.id ? <InkButton tone="danger" disabled={manualSave.isPending} onClick={() => manualSave.mutate("remove")}>Remove manual claim</InkButton> : null}
+              {manualClaim.id ? <InkButton tone="danger" disabled={disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired || !reviewApplied} onClick={() => manualSave.mutate("remove")}>Remove manual claim</InkButton> : null}
             </div>
           </div>
           {review.manualClaimRows.map((row, index) => {
