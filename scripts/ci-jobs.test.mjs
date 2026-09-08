@@ -72,5 +72,6 @@ test("every job that runs a desk-claiming walk starts its own server", () => {
 test("the real-Postgres job runs the routine notice concurrency proof", () => {
   const postgresJob = jobs(ci)["postgres-integration"]?.join("\n") ?? "";
   assert.match(postgresJob, /src\/lib\/news\/routine-notice-policy\.postgres\.test\.ts/);
+  assert.match(postgresJob, /src\/lib\/news\/routine-notice-automation\.postgres\.test\.ts/);
   assert.match(postgresJob, /TEST_POSTGRES_ADMIN_URL/);
 });

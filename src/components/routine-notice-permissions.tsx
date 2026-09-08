@@ -9,6 +9,7 @@ import {
   withoutRoutineApproval,
 } from "@/components/routine-notice-permissions-state";
 import { RoutineNoticeChecks } from "@/components/routine-notice-checks";
+import { RoutineNoticeAutomationPanel } from "@/components/routine-notice-automation";
 import { myDesk } from "@/lib/news/claim";
 import { listSources } from "@/lib/news/desk";
 import {
@@ -193,8 +194,7 @@ export function RoutineNoticePermissions() {
           sub="Owner-managed source and format permissions."
         />
         <p id="routine-notice-heading" className="mt-3 max-w-2xl text-sm text-muted">
-          The newsroom owner manages these permissions. Automatic publication is not available in
-          this version.
+          The newsroom owner manages these permissions. Explicit activation is configured below.
         </p>
       </section>
     );
@@ -234,8 +234,7 @@ export function RoutineNoticePermissions() {
         sub="Choose the exact accepted source and format pairs an owner may approve."
       />
       <p id="routine-notice-heading" className="mt-3 max-w-2xl text-sm text-muted">
-        Automatic publication is not available in this version; no items will publish from these
-        settings. Saving permissions creates no job, draft, article, or reader-facing product.
+        Permissions alone never publish. Preview and explicitly activate routine editions below.
       </p>
       <div className="mt-5 max-w-3xl space-y-4">
         <label className="flex items-start gap-3 border border-rule p-4">
@@ -249,8 +248,7 @@ export function RoutineNoticePermissions() {
           <span>
             <span className="block font-medium">Pause routine notice permissions</span>
             <span className="mt-1 block text-sm text-muted">
-              Pausing preserves saved pairs. Nothing can publish from these settings in this
-              version.
+              Pausing preserves saved pairs and stops routine checks and later edition reservations.
             </span>
           </span>
         </label>
@@ -270,11 +268,7 @@ export function RoutineNoticePermissions() {
                   <p className="break-all text-sm text-muted">{source.url}</p>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     {ROUTINE_NOTICE_FORMATS.map((format) => {
-                      const checked = isCurrentRoutineApproval(
-                        draft.approvals,
-                        source,
-                        format.key,
-                      );
+                      const checked = isCurrentRoutineApproval(draft.approvals, source, format.key);
                       return (
                         <label key={format.key} className="flex items-start gap-2 text-sm">
                           <input
@@ -404,6 +398,7 @@ export function RoutineNoticePermissions() {
         ) : null}
       </div>
       <RoutineNoticeChecks policy={current} />
+      <RoutineNoticeAutomationPanel policy={current} />
       <div className="mt-6 max-w-3xl border-y border-rule py-4 text-sm">
         <p>
           <span className="text-muted">Status:</span> {current.paused ? "Paused" : "Not paused"} ·
@@ -432,7 +427,9 @@ export function RoutineNoticePermissions() {
                 {change.sourceUrl ? (
                   <span className="block break-all text-muted">{change.sourceUrl}</span>
                 ) : change.sourceId !== null ? (
-                  <span className="block text-muted">Source #{change.sourceId} is unavailable.</span>
+                  <span className="block text-muted">
+                    Source #{change.sourceId} is unavailable.
+                  </span>
                 ) : null}
                 <span className="block text-muted">
                   Revision {change.revision} · {change.actor} · {formatChangedAt(change.changedAt)}

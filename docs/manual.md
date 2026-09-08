@@ -217,12 +217,12 @@ schedule for manual resume without promising a reset time. Server links to the
 scan history and queue, where the owner reviews filed leads. This path does not
 draft, publish or send digests.
 
-Server also lets the owner manually check an approved library,
-parks/recreation or community/arts source for Schema.org Event data. A check
-stores bounded captured HTML and reports structurally parsed candidates,
-refusals and conflicts. Parsed fields remain unverified: the check does not
-establish the issuer, facts, eligibility, completeness or authority. The other
-three approved notice formats report that their adapters are unavailable.
+Server lets the owner manually check all six supported structured formats. Save
+the selected source context in Automatic routine editions while it remains
+paused before checking; missing context produces a visible refusal. A check
+stores bounded captured data and reports structurally parsed candidates,
+refusals and same-observation conflicts. Parsed fields remain unverified: the check does not
+establish the issuer, facts, eligibility, completeness or authority.
 These checks create no monitor, lead, draft, article or publication. Only the
 owner can open the exact captured HTML bound to a check; changed, removed or
 repointed evidence is refused.
@@ -360,6 +360,10 @@ runs cost **$2.66 and $23.76**; the second decided to dispatch research agents
 of its own. Budget for a piece, not for a paragraph.
 
 ## The Server page
+
+The owner can manage **Routine notice permissions** and the separate **Automatic routine editions** control here. Automation starts paused. It accepts at most 12 exact approved structured sources across library, parks/recreation, community/arts, application deadlines, designated waste or deadline calendars, and public-meeting logistics. Each selection requires an owner-entered issuer, locality, and public attribution URL; waste also requires a non-residential collection area. The exact private fetch address and captured source remain private.
+
+After explicit activation, the unattended clock creates deterministic logistics-only ordinary articles: Today in town on the newsroom-local date, This weekend on Friday for Friday through Sunday, and Deadlines approaching only for new or changed deadlines in the next seven days. A run uses at most five useful items and emits no empty edition. Conflicts, cancellation, unsupported recurrence, risky language, stale permissions or evidence, and edited or unpublished target articles stay for review. Recent runs show their result counts and published-article links. Disable automation or pause routine permissions to stop later reservations. Manual checks remain available and never publish by themselves.
 
 `/desk/ops` — everything this machine is doing to keep the paper online.
 

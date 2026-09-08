@@ -6,6 +6,7 @@ import {
   readRoutineNoticePolicyFor,
   saveRoutineNoticePolicyFor,
 } from "./routine-notice-policy.ts";
+import { ensureRoutineNoticeAutomationSchema } from "./routine-notice-automation.ts";
 
 const room = 9520;
 const owner = "routine-owner";
@@ -55,7 +56,7 @@ test("defaults empty and saves/revokes with monotonic CAS and audit", async () =
   const empty = await readRoutineNoticePolicyFor(owner, room);
   assert.equal(empty.revision, 0);
   assert.deepEqual(empty.approvals, []);
-  assert.equal(empty.effectivePublicationAvailable, false);
+  assert.equal(empty.effectivePublicationAvailable, true);
   const saved = await saveRoutineNoticePolicyFor(owner, room, {
     expectedRevision: 0,
     paused: false,
@@ -173,6 +174,56 @@ test("exact displayed URL is required and later source changes invalidate withou
   assert.deepEqual(revoked.approvals, []);
 });
 
+test("retains unchanged automation selections while pausing and cascades only revoked or replaced approvals", async () => {
+  const sql = await getSql();
+  const first = await source();
+  const second = await source();
+  const approvals = [
+    { sourceId: first.id, sourceUrl: first.url, formatKey: "library-notice" as const },
+    { sourceId: second.id, sourceUrl: second.url, formatKey: "library-notice" as const },
+  ];
+  await saveRoutineNoticePolicyFor(owner, room, { expectedRevision: 0, paused: false, approvals });
+  await ensureRoutineNoticeAutomationSchema();
+  await sql.query(
+    "insert into routine_notice_automations(newsroom_id,enabled,revision,timezone,local_time,today_section,weekend_section,deadlines_section) values($1,false,1,'America/Denver','06:15','Today','Weekend','Deadlines')",
+    [room],
+  );
+  for (const pair of approvals)
+    await sql.query(
+      "insert into routine_notice_automation_sources(newsroom_id,source_id,format_key,source_url,public_source_url,issuer,locality,collection_area) values($1,$2,$3,$4,$4,'Fixture issuer','Fixture locality',null)",
+      [room, pair.sourceId, pair.formatKey, pair.sourceUrl],
+    );
+  const selections = async () =>
+    (await sql.query<{ n: number }>(
+      "select count(*)::int n from routine_notice_automation_sources where newsroom_id=$1",
+      [room],
+    ))[0]?.n;
+
+  const paused = await saveRoutineNoticePolicyFor(owner, room, {
+    expectedRevision: 1,
+    paused: true,
+    approvals,
+  });
+  assert.equal(paused.paused, true);
+  assert.equal(await selections(), 2);
+
+  await saveRoutineNoticePolicyFor(owner, room, {
+    expectedRevision: 2,
+    paused: true,
+    approvals: [approvals[1]!],
+  });
+  assert.equal(await selections(), 1);
+
+  const replacementUrl = `${second.url}/replacement`;
+  await sql.query("update sources set url=$2 where id=$1", [second.id, replacementUrl]);
+  await saveRoutineNoticePolicyFor(owner, room, {
+    expectedRevision: 3,
+    paused: true,
+    approvals: [{ ...approvals[1]!, sourceUrl: replacementUrl }],
+  });
+  assert.equal(await selections(), 0);
+});
+
 test("source deletion irreversibly removes live approval without erasing history", async () => {
   const sql = await getSql();
   const s = await source();
@@ -204,9 +255,7 @@ test("history never attributes an old approval to a replacement URL or recreated
   const reapproved = await saveRoutineNoticePolicyFor(owner, room, {
     expectedRevision: 1,
     paused: false,
-    approvals: [
-      { sourceId: s.id, sourceUrl: replacementUrl, formatKey: "library-notice" },
-    ],
+    approvals: [{ sourceId: s.id, sourceUrl: replacementUrl, formatKey: "library-notice" }],
   });
   const oldApproval = reapproved.recentChanges.find(
     (change) => change.revision === 1 && change.action === "approved",
@@ -214,10 +263,7 @@ test("history never attributes an old approval to a replacement URL or recreated
   assert.equal(oldApproval?.sourceUrl, null);
   assert.equal(
     reapproved.recentChanges.some(
-      (change) =>
-        change.revision === 2 &&
-        change.action === "revoked" &&
-        change.sourceUrl === null,
+      (change) => change.revision === 2 && change.action === "revoked" && change.sourceUrl === null,
     ),
     true,
   );
@@ -240,18 +286,13 @@ test("history never attributes an old approval to a replacement URL or recreated
   assert.equal(
     recreated.recentChanges.some(
       (change) =>
-        change.revision === 1 &&
-        change.action === "approved" &&
-        change.sourceUrl === null,
+        change.revision === 1 && change.action === "approved" && change.sourceUrl === null,
     ),
     true,
   );
   assert.equal(
     recreated.recentChanges.some(
-      (change) =>
-        change.revision === 2 &&
-        change.action === "revoked" &&
-        change.sourceUrl === null,
+      (change) => change.revision === 2 && change.action === "revoked" && change.sourceUrl === null,
     ),
     true,
   );

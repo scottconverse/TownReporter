@@ -422,7 +422,7 @@ async function routineNoticePermissionsJourney(context, observePage) {
   await panel.getByRole("heading", { name: "Routine notice permissions", exact: true }).waitFor();
   await panel
     .getByText(
-      "Automatic publication is not available in this version; no items will publish from these settings.",
+      "Permissions alone never publish. Preview and explicitly activate routine editions below.",
     )
     .waitFor();
   await panel.getByText("No source-and-format permissions are saved.").waitFor();
@@ -434,7 +434,7 @@ async function routineNoticePermissionsJourney(context, observePage) {
   await linked.goto(`${base}${sourcesHref}`, { waitUntil: "domcontentloaded" });
   await linked.getByRole("heading", { level: 1, name: "Sources", exact: true }).waitFor();
   await linked.close();
-  step("owner sees empty routine permissions, no publication capability, and the source link");
+  step("owner sees empty routine permissions, separate activation, and the source link");
 
   await panel
     .getByRole("checkbox", { name: "Routine notice fixture source — Library notices" })
@@ -445,7 +445,7 @@ async function routineNoticePermissionsJourney(context, observePage) {
   await panel.getByRole("button", { name: "Save routine permissions" }).click();
   await panel
     .getByText(
-      "Permissions saved. Automatic publication is not available in this version; no items will publish from these settings.",
+      "Permissions saved. Permissions alone do not activate routine editions.",
     )
     .waitFor();
   await page.reload({ waitUntil: "domcontentloaded" });
@@ -468,7 +468,7 @@ async function routineNoticePermissionsJourney(context, observePage) {
     .getByText(/Revision 1/)
     .first()
     .waitFor();
-  step("a source-format permission saves and survives a real reload without enabling publication");
+  step("a source-format permission saves and survives a real reload without activating editions");
 
   const checks = reloaded.locator("#routine-notice-checks");
   await checks.getByRole("heading", { name: "Manual notice checks", exact: true }).waitFor();
@@ -481,51 +481,23 @@ async function routineNoticePermissionsJourney(context, observePage) {
   const unavailableCheck = checks.locator("li", { hasText: "Waste and recycling schedules" });
   await libraryCheck.getByRole("button", { name: "Check captured notices" }).waitFor();
   await unavailableCheck.getByRole("button", { name: "Check captured notices" }).waitFor();
-  step("a saved source-format pair offers a manual structural check with no publication capability");
+  step("saved source-format pairs expose manual checks without activating publication");
 
-  let releaseUnavailableCheck;
-  const unavailableCheckReleased = new Promise((resolve) => {
-    releaseUnavailableCheck = resolve;
-  });
-  let markUnavailableCheckEntered;
-  const unavailableCheckEntered = new Promise((resolve) => {
-    markUnavailableCheckEntered = resolve;
-  });
-  let holdUnavailableCheck = true;
-  const holdUnavailableRoutineCheck = async (route) => {
-    const request = route.request();
-    const payload = request.postData() ?? "";
-    if (
-      holdUnavailableCheck &&
-      request.method() === "POST" &&
-      request.headers()["x-tsr-serverfn"] === "true" &&
-      payload.includes("waste-recycling-schedule")
-    ) {
-      holdUnavailableCheck = false;
-      markUnavailableCheckEntered();
-      await unavailableCheckReleased;
-    }
-    await route.continue();
-  };
-  await page.route("**/*", holdUnavailableRoutineCheck);
-  const unavailableButton = unavailableCheck.locator("button").first();
-  await unavailableButton.click();
-  await unavailableCheckEntered;
-  if (!(await unavailableButton.isDisabled())) {
-    throw new Error("the pending unavailable check left its own row editable");
-  }
-  if (await libraryCheck.getByRole("button", { name: "Check captured notices" }).isDisabled()) {
-    throw new Error("the pending unavailable check froze a different approved pair");
-  }
-  releaseUnavailableCheck();
-  await unavailableCheck
-    .getByText("This approved format does not have a captured-data adapter yet.")
-    .waitFor();
-  await page.unroute("**/*", holdUnavailableRoutineCheck);
-  if (new URL(page.url()).pathname !== "/desk/ops") {
-    throw new Error("an unavailable routine adapter navigated away from Server permissions");
-  }
-  step("an unavailable approved format reports its adapter boundary without starting publication work");
+  const automationPanel = page.locator("#routine-notice-automation");
+  await automationPanel.getByText("No automatic edition runs yet.").waitFor();
+  const libraryAutomation = automationPanel.locator("div", {
+    hasText: "Routine notice fixture source · library-notice",
+  }).last();
+  await libraryAutomation.getByRole("checkbox").check();
+  await libraryAutomation.getByPlaceholder("Authoritative issuer").fill("Town Library");
+  await libraryAutomation.getByPlaceholder("Locality").fill("Town");
+  await libraryAutomation
+    .getByPlaceholder("Public attribution URL")
+    .fill("https://example.com/library-calendar");
+  await libraryAutomation.getByPlaceholder("Area or branch (when required)").fill("Main branch");
+  await automationPanel.getByRole("button", { name: "Save paused settings" }).click();
+  await automationPanel.getByText("Routine editions are paused.").waitFor();
+  step("owner saves explicit attribution and branch settings without activating editions");
 
   await page.setViewportSize({ width: 390, height: 844 });
   if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
@@ -553,7 +525,7 @@ async function routineNoticePermissionsJourney(context, observePage) {
     .getByRole("checkbox", { name: "Daily settings source — Parks and recreation notices" })
     .check();
   await reloaded.getByRole("button", { name: "Save routine permissions" }).click();
-  await reloaded.getByText(/Permissions saved\. Automatic publication/).waitFor();
+  await reloaded.getByText(/Permissions saved\. Permissions alone/).waitFor();
   await otherPanel.getByRole("button", { name: "Save routine permissions" }).click();
   await otherPanel.getByText("Routine notice settings changed. Reload before saving.").waitFor();
   await otherPanel.getByRole("button", { name: "Reload latest settings" }).click();
@@ -609,7 +581,7 @@ async function routineNoticePermissionsJourney(context, observePage) {
     throw new Error("revoke stayed editable while its save was pending");
   }
   releaseDelayedRoutineSave();
-  await otherPanel.getByText(/Permissions saved\. Automatic publication/).waitFor();
+  await otherPanel.getByText(/Permissions saved\. Permissions alone/).waitFor();
   await other.unroute("**/*");
   await otherPanel.getByText("Paused", { exact: true }).waitFor();
   await otherPanel

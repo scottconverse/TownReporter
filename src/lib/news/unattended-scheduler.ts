@@ -1,6 +1,7 @@
 import { tickAllDueMonitors } from "./monitors-cron.ts";
 import { drainQueuedJobs } from "./jobs.ts";
 import { tickDailyScans } from "./daily-scan.server.ts";
+import { tickRoutineNoticeEditions } from "./routine-notice-worker.server.ts";
 
 /**
  * The built server's unattended clock: monitors recapture, job reclaim, and
@@ -44,6 +45,7 @@ export function startUnattendedScheduler(): void {
     try {
       await tickAllDueMonitors();
       await tickDailyScans();
+      await tickRoutineNoticeEditions();
     } catch (err) {
       console.error("[townreporter] monitor tick failed:", err);
     } finally {

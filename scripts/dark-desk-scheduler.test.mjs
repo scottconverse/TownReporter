@@ -69,3 +69,8 @@ test("the clock guards overlap, swallows tick errors, and never pins the process
   assert.match(src, /unref/);
   assert.match(src, /globalThis/);
 });
+
+test("development and built clocks both reserve routine editions", () => {
+  assert.match(read("vite.config.ts"), /tickRoutineNoticeEditions/);
+  assert.match(read("src/lib/news/unattended-scheduler.ts"), /tickRoutineNoticeEditions/);
+});

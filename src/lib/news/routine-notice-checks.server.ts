@@ -1,10 +1,19 @@
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { sha256, sha256Bytes } from "./fetch-url.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
-import { ingestDocument, type IngestDocument } from "./ingest.ts";
+import { ingestDocument } from "./ingest.ts";
 import { rememberCapture } from "./investigate.ts";
 import { ensureLegalSchema } from "./legal-removal-schema.ts";
-import { extractJsonLdEvents, type RoutineExtractionResult } from "./routine-notice-extract.ts";
+import {
+  extractJsonLdEvents,
+  extractPrimeGovMeeting,
+  type RoutineExtractionResult,
+} from "./routine-notice-extract.ts";
+import {
+  extractApplicationDeadlines,
+  extractLibraryHours,
+  extractRoutineIcs,
+} from "./routine-notice-feeds.ts";
 import type {
   CheckRoutineNoticeInput,
   RoutineNoticeCandidateView,
@@ -21,11 +30,7 @@ const ADAPTER_KEY = "schema-event-jsonld";
 const ADAPTER_VERSION = 1;
 const MAX_CAPTURE_TEXT = 512 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const SUPPORTED = new Set<RoutineNoticeFormatKey>([
-  "library-notice",
-  "parks-recreation-notice",
-  "community-arts-event-logistics",
-]);
+const SUPPORTED = new Set<RoutineNoticeFormatKey>(ROUTINE_NOTICE_FORMAT_KEYS);
 const FORMAT_KEYS = new Set<string>(ROUTINE_NOTICE_FORMAT_KEYS);
 
 function captureUrlIdentity(url: string) {
@@ -109,21 +114,22 @@ function cleanCheckInput(raw: unknown): CheckInput {
 }
 
 function cleanListInput(raw: unknown) {
-  const value = raw && typeof raw === "object" && !Array.isArray(raw)
-    ? (raw as Record<string, unknown>)
-    : {};
+  const value =
+    raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   if (
     (value.sourceId !== undefined &&
       (!Number.isSafeInteger(value.sourceId) || Number(value.sourceId) < 1)) ||
     (value.formatKey !== undefined &&
       (typeof value.formatKey !== "string" || !FORMAT_KEYS.has(value.formatKey)))
   ) {
-    throw new RoutineNoticeCheckError("invalid-input", "Routine notice check filters were malformed.");
+    throw new RoutineNoticeCheckError(
+      "invalid-input",
+      "Routine notice check filters were malformed.",
+    );
   }
   return {
     sourceId: value.sourceId === undefined ? null : Number(value.sourceId),
-    formatKey:
-      value.formatKey === undefined ? null : (value.formatKey as RoutineNoticeFormatKey),
+    formatKey: value.formatKey === undefined ? null : (value.formatKey as RoutineNoticeFormatKey),
   };
 }
 
@@ -146,7 +152,9 @@ async function approvedSource(
   input: CheckInput,
   lock = false,
 ): Promise<{ source: SourceRow; paused: boolean; revision: number }> {
-  const rows = await sql.query<SourceRow & { paused: boolean; revision: number; approved_url: string }>(
+  const rows = await sql.query<
+    SourceRow & { paused: boolean; revision: number; approved_url: string }
+  >(
     `select s.id,s.title,s.url,s.status,p.paused,p.revision,a.source_url approved_url
        from routine_notice_policies p
        join routine_notice_approvals a on a.newsroom_id=p.newsroom_id and a.source_id=$2 and a.format_key=$3
@@ -156,13 +164,19 @@ async function approvedSource(
   );
   const row = rows[0];
   if (!row) {
-    throw new RoutineNoticeCheckError("approval-invalid", "That source and format are not approved.");
+    throw new RoutineNoticeCheckError(
+      "approval-invalid",
+      "That source and format are not approved.",
+    );
   }
   if (row.paused) {
     throw new RoutineNoticeCheckError("policy-paused", "Routine notice checks are paused.");
   }
   if (row.revision !== input.expectedPolicyRevision) {
-    throw new RoutineNoticeCheckError("conflict", "Routine notice permissions changed. Reload first.");
+    throw new RoutineNoticeCheckError(
+      "conflict",
+      "Routine notice permissions changed. Reload first.",
+    );
   }
   if (row.status !== "accepted" || row.url !== row.approved_url || row.url !== input.sourceUrl) {
     throw new RoutineNoticeCheckError(
@@ -173,30 +187,67 @@ async function approvedSource(
   return { source: row, paused: row.paused, revision: row.revision };
 }
 
-function rawHtml(document: IngestDocument) {
-  if (
-    !document.rawBytes ||
-    !/^(text\/html|application\/xhtml\+xml)(?:;|$)/i.test(document.contentType) ||
-    document.status < 200 ||
-    document.status >= 300 ||
-    document.outcome === "soft-404"
-  ) {
-    return null;
-  }
-  return new TextDecoder("utf-8", { fatal: false }).decode(document.rawBytes);
-}
-
+type AdapterOwnerContext = {
+  issuer: string;
+  locality: string;
+  collectionArea: string | null;
+  timezone: string;
+} | null;
 function adapterResults(
-  html: string,
+  content: string,
   input: CheckInput,
   actor: Actor,
   provenance: { captureEventId: number; artifactVersionId: number; contentHash: string },
+  ownerContext: AdapterOwnerContext,
 ) {
-  const results = extractJsonLdEvents(html, {
+  const missingContext = () => [
+    { status: "refused", code: "missing-owner-context", locator: "automation-settings" },
+  ] satisfies RoutineExtractionResult[];
+  const base = {
+    newsroomId: actor.newsroomId,
+    sourceId: input.sourceId,
+    sourceUrl: input.sourceUrl,
+    policyRevision: input.expectedPolicyRevision,
+    ...provenance,
+  };
+  if (input.formatKey === "registration-deadline")
+    return content.includes("BEGIN:VCALENDAR")
+      ? ownerContext ? extractRoutineIcs(content, "deadline", {
+          provenance: base,
+          issuer: ownerContext.issuer,
+          locality: ownerContext.locality,
+        }) : missingContext()
+      : extractApplicationDeadlines(content, base);
+  if (input.formatKey === "waste-recycling-schedule")
+    return ownerContext
+      ? extractRoutineIcs(content, "waste", {
+          provenance: base,
+          issuer: ownerContext.issuer,
+          locality: ownerContext.locality,
+          collectionArea: ownerContext.collectionArea ?? undefined,
+        })
+      : missingContext();
+  if (input.formatKey === "public-meeting-logistics") {
+    if (!ownerContext) return missingContext();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      return [];
+    }
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    return rows.map((row) =>
+      extractPrimeGovMeeting(row, {
+        provenance: base,
+        issuer: { value: ownerContext.issuer, locator: "OWNER_ISSUER" },
+        timezone: { value: ownerContext.timezone, locator: "OWNER_TIMEZONE" },
+        portalOrigin: new URL(input.sourceUrl).origin,
+      }),
+    );
+  }
+  const results = extractJsonLdEvents(content, {
     formatKey: input.formatKey as
-      | "library-notice"
-      | "parks-recreation-notice"
-      | "community-arts-event-logistics",
+      "library-notice" | "parks-recreation-notice" | "community-arts-event-logistics",
     provenance: {
       newsroomId: actor.newsroomId,
       sourceId: input.sourceId,
@@ -207,11 +258,42 @@ function adapterResults(
       contentHash: provenance.contentHash,
     },
   });
+  if (input.formatKey === "library-notice" && ownerContext)
+    results.push(
+      ...(extractLibraryHours(content, {
+        provenance: base,
+        issuer: ownerContext.issuer,
+        branch: ownerContext.collectionArea ?? ownerContext.locality,
+      }) as RoutineExtractionResult[]),
+    );
+  if (
+    input.formatKey === "library-notice" &&
+    !ownerContext &&
+    content.includes("specialOpeningHoursSpecification") &&
+    !results.some((result) => result.status === "parsed")
+  ) return missingContext();
   return results.length
     ? results
     : ([
         { status: "refused", code: "structurally-invalid", locator: "document" },
       ] satisfies RoutineExtractionResult[]);
+}
+
+async function automationContext(
+  sql: Sql,
+  actor: Actor,
+  input: CheckInput,
+): Promise<AdapterOwnerContext> {
+  const rows = await sql
+    .query<AdapterOwnerContext & { source_url: string }>(
+      `select s.issuer,s.locality,s.collection_area "collectionArea",s.source_url,a.timezone
+         from routine_notice_automation_sources s
+         join routine_notice_automations a on a.newsroom_id=s.newsroom_id
+        where s.newsroom_id=$1 and s.source_id=$2 and s.format_key=$3`,
+      [actor.newsroomId, input.sourceId, input.formatKey],
+    )
+    .catch(() => []);
+  return rows[0] && rows[0].source_url === input.sourceUrl ? rows[0] : null;
 }
 
 function parsedNotice(result: RoutineExtractionResult): StructurallyValidRoutineNotice | null {
@@ -224,7 +306,9 @@ async function contentFingerprint(notice: StructurallyValidRoutineNotice) {
       formatKey: notice.formatKey,
       variant: notice.variant,
       fields: Object.fromEntries(
-        Object.entries(notice.normalizedFields).sort(([left], [right]) => left.localeCompare(right)),
+        Object.entries(notice.normalizedFields).sort(([left], [right]) =>
+          left.localeCompare(right),
+        ),
       ),
     }),
   );
@@ -263,6 +347,7 @@ export async function checkRoutineNoticeSourceForOwner(
   const sql = await getSql();
   await assertOwner(sql, actor);
   await approvedSource(sql, actor, input);
+  const ownerContext = await automationContext(sql, actor, input);
   const requestedUrlHash = await sha256(input.sourceUrl);
   const priorReplay = await sql.query<{
     id: number;
@@ -287,24 +372,22 @@ export async function checkRoutineNoticeSourceForOwner(
   }
   const document = await (deps.ingest ?? ingestDocument)(input.sourceUrl, {
     acceptRawHtml: (html) =>
-      extractJsonLdEvents(html, {
-        formatKey: input.formatKey as
-          | "library-notice"
-          | "parks-recreation-notice"
-          | "community-arts-event-logistics",
-        provenance: {
-          newsroomId: actor.newsroomId,
-          sourceId: input.sourceId,
-          sourceUrl: input.sourceUrl,
-          policyRevision: input.expectedPolicyRevision,
-          captureEventId: 1,
-          artifactVersionId: 1,
-          contentHash: "preflight",
-        },
-      }).length > 0,
+      adapterResults(
+        html,
+        input,
+        actor,
+        { captureEventId: 1, artifactVersionId: 1, contentHash: "preflight" },
+        ownerContext,
+      ).some((result) => result.status === "parsed"),
   });
   await deps.beforeCommit?.();
-  const html = rawHtml(document);
+  const rawContent =
+    document.rawBytes &&
+    document.status >= 200 &&
+    document.status < 300 &&
+    document.outcome !== "soft-404"
+      ? new TextDecoder().decode(document.rawBytes)
+      : null;
 
   const checkId = await withTransaction(async (tx) => {
     await assertOwner(tx, actor, true);
@@ -331,15 +414,21 @@ export async function checkRoutineNoticeSourceForOwner(
       return replay[0].id;
     }
 
-    const preliminary = html
-      ? adapterResults(html, input, actor, {
-          captureEventId: 1,
-          artifactVersionId: 1,
-          contentHash: "preflight",
-        })
+    const preliminary = rawContent
+      ? adapterResults(
+          rawContent,
+          input,
+          actor,
+          {
+            captureEventId: 1,
+            artifactVersionId: 1,
+            contentHash: "preflight",
+          },
+          ownerContext,
+        )
       : [];
     const hasParsed = preliminary.some((result) => parsedNotice(result));
-    const outcome = html ? (hasParsed ? "fetched" : "parse-failed") : document.outcome;
+    const outcome = rawContent ? (hasParsed ? "fetched" : "parse-failed") : document.outcome;
     const capture = await rememberCapture({
       sql: tx,
       userId: actor.userId,
@@ -354,12 +443,12 @@ export async function checkRoutineNoticeSourceForOwner(
       triggerKind: "routine-notice-check",
       redirectChain: document.redirectChain,
       contentType: document.contentType,
-      extractionMethod: html ? "routine-jsonld" : document.extractionMethod,
+      extractionMethod: rawContent ? "routine-structured" : document.extractionMethod,
       rawBytes: document.rawBytes,
       extras: [],
       autoWatch: false,
     });
-    if (!html || !capture.versionId || !document.rawBytes) {
+    if (!rawContent || !capture.versionId || !document.rawBytes) {
       const created = await tx.query<{ id: number }>(
         `insert into routine_notice_checks(newsroom_id,request_id,source_id,source_url_hash,format_key,policy_revision,capture_event_id,artifact_version_id,adapter_key,adapter_version,state,refusal_summary_json,actor)
          values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'capture-failed',$11,$12) returning id`,
@@ -433,13 +522,22 @@ export async function checkRoutineNoticeSourceForOwner(
       event.version_id !== version.id ||
       event.content_hash !== rawHash
     ) {
-      throw new RoutineNoticeCheckError("conflict", "Captured evidence changed before it was recorded.");
+      throw new RoutineNoticeCheckError(
+        "conflict",
+        "Captured evidence changed before it was recorded.",
+      );
     }
-    const results = adapterResults(html, input, actor, {
-      captureEventId: event.id,
-      artifactVersionId: version.id,
-      contentHash: rawHash,
-    });
+    const results = adapterResults(
+      rawContent,
+      input,
+      actor,
+      {
+        captureEventId: event.id,
+        artifactVersionId: version.id,
+        contentHash: rawHash,
+      },
+      ownerContext,
+    );
     const candidates = [] as Array<{
       ordinal: number;
       externalIdHash: string;
@@ -457,30 +555,24 @@ export async function checkRoutineNoticeSourceForOwner(
             candidate.externalIdHash === externalIdHash &&
             candidate.contentFingerprint === fingerprint,
         )
-      ) continue;
-      candidates.push({ ordinal, externalIdHash, contentFingerprint: fingerprint, conflict: false });
+      )
+        continue;
+      candidates.push({
+        ordinal,
+        externalIdHash,
+        contentFingerprint: fingerprint,
+        conflict: false,
+      });
     }
     for (const externalIdHash of new Set(candidates.map((candidate) => candidate.externalIdHash))) {
-      const prior = await tx.query<{ content_fingerprint: string }>(
-        `select r.content_fingerprint from routine_notice_candidate_refs r join routine_notice_checks c on c.id=r.check_id
-          where c.newsroom_id=$1 and c.source_id=$2 and c.format_key=$3 and r.external_id_hash=$4`,
-        [actor.newsroomId, input.sourceId, input.formatKey, externalIdHash],
-      );
       const current = candidates.filter((candidate) => candidate.externalIdHash === externalIdHash);
-      const fingerprints = new Set([
-        ...prior.map((candidate) => candidate.content_fingerprint),
-        ...current.map((candidate) => candidate.contentFingerprint),
-      ]);
+      const fingerprints = new Set(current.map((candidate) => candidate.contentFingerprint));
       if (fingerprints.size > 1) {
         for (const candidate of current) candidate.conflict = true;
       }
     }
     const conflicts = candidates.filter((candidate) => candidate.conflict).length;
-    const state = candidates.length
-      ? conflicts
-        ? "parsed-with-conflicts"
-        : "parsed"
-      : "refused";
+    const state = candidates.length ? (conflicts ? "parsed-with-conflicts" : "parsed") : "refused";
     const refusals = refusalSummary(results);
     const created = await tx.query<{ id: number }>(
       `insert into routine_notice_checks(newsroom_id,request_id,source_id,source_url_hash,format_key,policy_revision,capture_event_id,artifact_version_id,artifact_blob_id,captured_content_hash,captured_text_digest,raw_blob_sha256,adapter_key,adapter_version,state,refusal_summary_json,actor)
@@ -616,11 +708,77 @@ async function boundRawEvidence(sql: Sql, actor: Actor, row: CheckRow) {
     rawHash !== row.raw_blob_sha256 ||
     bytes.byteLength !== evidence.byte_length ||
     (await sha256(evidence.full_text)) !== row.captured_text_digest
-  ) return null;
+  )
+    return null;
   return { ...evidence, bytes, html: new TextDecoder().decode(bytes) };
 }
 
-async function loadCheck(sql: Sql, actor: Actor, checkId: number): Promise<RoutineNoticeCheckGroup> {
+/** Revalidates and locks the private evidence behind a scheduled publication. */
+export async function assertRoutineNoticeCheckStillBound(
+  sql: Sql,
+  actor: Actor,
+  group: RoutineNoticeCheckGroup,
+) {
+  const [locked] = await sql.query<{ id: number }>(
+    "select id from routine_notice_checks where id=$1 and newsroom_id=$2 for update",
+    [group.checkId, actor.newsroomId],
+  );
+  if (!locked) throw new Error("Routine notice evidence is unavailable before publication.");
+  const row = await checkRow(sql, actor, group.checkId);
+  if (
+    row.source_id !== group.source.id ||
+    row.format_key !== group.formatKey ||
+    row.state !== group.state ||
+    !row.capture_event_id ||
+    !row.artifact_version_id ||
+    !row.artifact_blob_id
+  )
+    throw new Error("Routine notice evidence changed before publication.");
+  await sql.query("select id from capture_events where id=$1 and newsroom_id=$2 for update", [
+    row.capture_event_id,
+    actor.newsroomId,
+  ]);
+  await sql.query("select id from artifact_versions where id=$1 and newsroom_id=$2 for update", [
+    row.artifact_version_id,
+    actor.newsroomId,
+  ]);
+  await sql.query("select id from artifact_blobs where id=$1 and newsroom_id=$2 for update", [
+    row.artifact_blob_id,
+    actor.newsroomId,
+  ]);
+  const evidence = await boundRawEvidence(sql, actor, row);
+  if (!evidence) throw new Error("Routine notice evidence changed before publication.");
+  const refs = await sql.query<{
+    id: number;
+    external_id_hash: string;
+    content_fingerprint: string;
+    outcome: string;
+  }>(
+    "select id,external_id_hash,content_fingerprint,outcome from routine_notice_candidate_refs where check_id=$1 order by ordinal for update",
+    [group.checkId],
+  );
+  const expected = group.candidates.map((candidate) => ({
+    id: candidate.id,
+    external_id_hash: candidate.externalIdHash,
+    outcome: candidate.conflict ? "conflict" : "parsed",
+  }));
+  if (
+    refs.length !== expected.length ||
+    refs.some(
+      (ref, index) =>
+        ref.id !== expected[index]?.id ||
+        ref.external_id_hash !== expected[index]?.external_id_hash ||
+        ref.outcome !== expected[index]?.outcome,
+    )
+  )
+    throw new Error("Routine notice candidates changed before publication.");
+}
+
+async function loadCheck(
+  sql: Sql,
+  actor: Actor,
+  checkId: number,
+): Promise<RoutineNoticeCheckGroup> {
   await assertOwner(sql, actor);
   const row = await checkRow(sql, actor, checkId);
   const refs = await sql.query<{
@@ -629,7 +787,10 @@ async function loadCheck(sql: Sql, actor: Actor, checkId: number): Promise<Routi
     external_id_hash: string;
     content_fingerprint: string;
     outcome: string;
-  }>("select id,ordinal,external_id_hash,content_fingerprint,outcome from routine_notice_candidate_refs where check_id=$1 order by ordinal", [checkId]);
+  }>(
+    "select id,ordinal,external_id_hash,content_fingerprint,outcome from routine_notice_candidate_refs where check_id=$1 order by ordinal",
+    [checkId],
+  );
   const evidence = await boundRawEvidence(sql, actor, row);
   const candidates: RoutineNoticeCandidateView[] = [];
   let state = row.state;
@@ -641,16 +802,26 @@ async function loadCheck(sql: Sql, actor: Actor, checkId: number): Promise<Routi
       formatKey: row.format_key,
       expectedPolicyRevision: row.policy_revision,
     };
-    const results = adapterResults(evidence.html, input, actor, {
-      captureEventId: row.capture_event_id!,
-      artifactVersionId: row.artifact_version_id!,
-      contentHash: row.captured_content_hash!,
-    });
+    const context = await automationContext(sql, actor, input);
+    const results = adapterResults(
+      evidence.html,
+      input,
+      actor,
+      {
+        captureEventId: row.capture_event_id!,
+        artifactVersionId: row.artifact_version_id!,
+        contentHash: row.captured_content_hash!,
+      },
+      context,
+    );
     for (const ref of refs) {
       const result = results[ref.ordinal];
       const notice = result ? parsedNotice(result) : null;
-      if (!notice || (await sha256(notice.provenance.externalId)) !== ref.external_id_hash ||
-          (await contentFingerprint(notice)) !== ref.content_fingerprint) {
+      if (
+        !notice ||
+        (await sha256(notice.provenance.externalId)) !== ref.external_id_hash ||
+        (await contentFingerprint(notice)) !== ref.content_fingerprint
+      ) {
         state = "evidence-unavailable";
         candidates.length = 0;
         break;
@@ -669,7 +840,11 @@ async function loadCheck(sql: Sql, actor: Actor, checkId: number): Promise<Routi
   }
   const refusals = (() => {
     try {
-      return JSON.parse(row.refusal_summary_json) as Array<{ code: string; locator: string; count: number }>;
+      return JSON.parse(row.refusal_summary_json) as Array<{
+        code: string;
+        locator: string;
+        count: number;
+      }>;
     } catch {
       return [{ code: "invalid-receipt", locator: "check", count: 1 }];
     }
@@ -703,7 +878,11 @@ async function loadCheck(sql: Sql, actor: Actor, checkId: number): Promise<Routi
         }
       : null,
     state,
-    counts: { parsed: candidates.length, refused: refusals.reduce((n, item) => n + item.count, 0), conflicts },
+    counts: {
+      parsed: candidates.length,
+      refused: refusals.reduce((n, item) => n + item.count, 0),
+      conflicts,
+    },
     refusals,
     candidates,
     newerCaptureAvailable: Boolean(newer[0]?.found),
@@ -727,9 +906,8 @@ export async function listRoutineNoticeChecksForOwner(actor: Actor, raw: unknown
 }
 
 export async function readRoutineNoticeCapturedTextForOwner(actor: Actor, raw: unknown) {
-  const value = raw && typeof raw === "object" && !Array.isArray(raw)
-    ? (raw as Record<string, unknown>)
-    : {};
+  const value =
+    raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   if (!Number.isSafeInteger(value.checkId) || Number(value.checkId) < 1) {
     throw new RoutineNoticeCheckError("not-found", "Routine notice check not found.");
   }
