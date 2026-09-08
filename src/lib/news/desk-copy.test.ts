@@ -53,6 +53,7 @@ import {
   elapsedLabel,
   redditPostStateLabel,
   buildScanUserMessage,
+  mergeFocusSelection,
   suggestFocusLeads,
 } from "./desk-copy.ts";
 import { STALE_RUNNING_SECONDS } from "./jobs.ts";
@@ -1146,6 +1147,23 @@ describe("suggestFocusLeads", () => {
     ], sections, 5);
     assert.deepEqual(rows.map((row) => row.id), [1, 5, 7, 6]);
   });
+
+  it("drops stale and duplicate selections before adding suggestions", () => {
+    assert.deepEqual(
+      mergeFocusSelection([999, 2, 2], [2, 3, 4], [3, 4], 3),
+      [2, 3, 4],
+    );
+  });
+
+  it("chooses the strongest candidate from each section before applying the cap", () => {
+    const rows = suggestFocusLeads([
+      lead(1, "schools", 20),
+      lead(2, "health", 19),
+      lead(3, "government", 18),
+      lead(4, "health", 10),
+    ], [{ key: "health" }, { key: "government" }, { key: "schools" }], 3);
+    assert.deepEqual(rows.map((row) => row.id), [1, 2, 3]);
+  });
 });
 
 describe("buildScanUserMessage resident coverage contract", () => {
@@ -1159,7 +1177,7 @@ describe("buildScanUserMessage resident coverage contract", () => {
     });
     assert.match(prompt, /schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government/i);
     assert.match(prompt, /source-quoted facts/i);
-    assert.match(prompt, /Do not invent new sections or file filler/i);
+    assert.match(prompt, /Do not refile facts in Already covered, invent new sections, or file filler/i);
     assert.match(prompt, /newsworthiness is 0-20/i);
   });
 

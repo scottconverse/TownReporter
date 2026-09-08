@@ -394,6 +394,23 @@ export function openLeads<T extends { status: string }>(leads: T[]): T[] {
   return leads.filter((l) => l.status !== "killed" && l.status !== "published");
 }
 
+export function mergeFocusSelection(
+  currentIds: number[],
+  eligibleIds: number[],
+  suggestedIds: number[],
+  max = 5,
+): number[] {
+  const eligible = new Set(eligibleIds);
+  const selected: number[] = [];
+  const seen = new Set<number>();
+  for (const id of [...currentIds, ...suggestedIds]) {
+    if (selected.length >= max || !eligible.has(id) || seen.has(id)) continue;
+    selected.push(id);
+    seen.add(id);
+  }
+  return selected;
+}
+
 /**
  * Pick a small, editor-approved focus from the existing batch-eligible queue.
  * The first lead is always the strongest existing priority. Other sections may
@@ -426,21 +443,14 @@ export function suggestFocusLeads<
   const selected: T[] = [ranked[0]!];
   const seen = new Set(selected.map((lead) => lead.id));
   const coveredTopics = new Set([ranked[0]!.topic]);
-  const sectionKeys = sections.map((section) => section.key);
-  for (const key of sectionKeys) {
+  const sectionKeys = new Set(sections.map((section) => section.key));
+  for (const candidate of ranked) {
     if (selected.length >= max) break;
-    if (coveredTopics.has(key)) continue;
-    const candidate = ranked.find(
-      (lead) =>
-        lead.topic === key &&
-        !seen.has(lead.id) &&
-        (lead.newsworthiness ?? 0) >= priorityFloor,
-    );
-    if (candidate) {
-      selected.push(candidate);
-      seen.add(candidate.id);
-      coveredTopics.add(candidate.topic);
-    }
+    if (!sectionKeys.has(candidate.topic) || coveredTopics.has(candidate.topic)) continue;
+    if ((candidate.newsworthiness ?? 0) < priorityFloor) continue;
+    selected.push(candidate);
+    seen.add(candidate.id);
+    coveredTopics.add(candidate.topic);
   }
   for (const candidate of ranked) {
     if (selected.length >= max) break;
@@ -1144,7 +1154,7 @@ Return JSON:
   ]
 }
 topic must be exactly one of: ${(opts.topics??["council","budget","housing","utilities","schools","planning","infrastructure","elections"]).join(", ")}.
-${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not invent new sections or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is 0-20. proposed_sources may be any public URL discovered in the text. Max 12 leads.`;
+${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is 0-20. proposed_sources may be any public URL discovered in the text. Max 12 leads.`;
 }
 
 /**

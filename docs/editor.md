@@ -202,10 +202,10 @@ saved research scope. If the selected runtime is unavailable, or one selected
 lead cannot be queued, the batch does not start and the Queue explains why.
 
 The bar also offers an optional **Suggested focus** size of three to five
-leads. Suggestions use existing eligible leads' queue priority and section
-variety; they are not verified importance or a claim about an actual coverage
-gap. **Add suggested focus** merges them into your current selections and never
-replaces them. The full Queue remains unchanged.
+leads. Suggestions balance existing lead scores and sections. Review the
+evidence before drafting. They operate on the currently loaded Queue and do not
+claim an actual coverage gap. **Add suggested focus** merges them into your
+current selections and never replaces them. The full Queue remains unchanged.
 
 After a batch starts, its saved runtime and each lead's queued, running,
 completed, or failed state remain visible with a link to that lead's

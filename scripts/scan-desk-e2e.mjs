@@ -357,6 +357,9 @@ async function draftBatchJourney() {
 
   await page.getByRole("checkbox", { name: `Select ${first} for batch drafting` }).check();
   await page.getByRole("checkbox", { name: `Select ${second} for batch drafting` }).check();
+  await batch.getByLabel("Suggested focus size").selectOption("5");
+  await expect(page.getByRole("checkbox", { name: `Select ${first} for batch drafting` })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: `Select ${second} for batch drafting` })).toBeChecked();
   for (const headline of extras.slice(0, 3)) {
     await page.getByRole("checkbox", { name: `Select ${headline} for batch drafting` }).check();
   }

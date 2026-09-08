@@ -6,7 +6,7 @@ import { LeadRowView, SEEN_AGAIN_EXPLAINER } from "@/components/desk-leads";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteLead, draftLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
 import { restoreTrashItem } from "@/lib/news/trash";
-import { nearDuplicate, openLeads, suggestFocusLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
+import { mergeFocusSelection, nearDuplicate, openLeads, suggestFocusLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
 import { useEditorSections } from "@/lib/use-sections";
 import { usePaper } from "@/lib/paper-context";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
@@ -304,21 +304,20 @@ function QueuePage() {
             </select>
           </Field>
           <p className="meta">
-            Suggestions use existing queue priority and section variety. They are not verified
-            importance or a claim about an actual coverage gap.
+            Suggestions balance existing lead scores and sections. Review the evidence before drafting.
           </p>
           <InkButton
             small
             disabled={startBatch.isPending || focusAddable.length === 0 || selectedBatchLeads.length >= 5}
             onClick={() => {
-              setSelectedBatchLeadIds((ids) => {
-                const room = 5 - ids.length;
-                const additions = suggestedFocus
-                  .filter((lead) => !ids.includes(lead.id))
-                  .slice(0, room)
-                  .map((lead) => lead.id);
-                return [...ids, ...additions];
-              });
+              setSelectedBatchLeadIds((ids) =>
+                mergeFocusSelection(
+                  ids,
+                  batchEligible.map((lead) => lead.id),
+                  suggestedFocus.map((lead) => lead.id),
+                  5,
+                ),
+              );
             }}
           >
             Add suggested focus ({Math.min(focusAddable.length, 5 - selectedBatchLeads.length)})
