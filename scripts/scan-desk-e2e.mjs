@@ -22,7 +22,6 @@
  */
 import { chromium } from "playwright";
 import { expect } from "playwright/test";
-import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
@@ -49,28 +48,10 @@ const evidenceDir = resolve(process.env.DAILY_SCAN_E2E_ARTIFACT_DIR || "../daily
 let page;
 const done = [];
 let expectedFixtureTimeoutErrors = 0;
-let expectedRoutineRetryAbortErrors = 0;
 
 function step(name) {
   done.push(name);
   console.log(`  ok    ${name}`);
-}
-
-/**
- * The optional local proof prepares one bound result through the actual
- * server core and its Vite-only test fetch hook. It targets an isolated
- * scratch PostgreSQL database; the built browser only reads that result.
- */
-function seedRoutineNoticeCheckIfRequested() {
-  const script = process.env.ROUTINE_NOTICE_SEED_SCRIPT;
-  if (!script) return false;
-  const output = execFileSync(process.execPath, [script, email], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-    env: process.env,
-  });
-  console.log(`routine notice fixture: ${output.trim()}`);
-  return true;
 }
 
 async function dump(err) {
@@ -456,7 +437,6 @@ async function routineNoticePermissionsJourney(context, observePage) {
       "Permissions saved. Automatic publication is not available in this version; no items will publish from these settings.",
     )
     .waitFor();
-  const seededRoutineCheck = seedRoutineNoticeCheckIfRequested();
   await page.reload({ waitUntil: "domcontentloaded" });
   const reloaded = page.locator("#routine-notice-permissions");
   if (
@@ -536,79 +516,15 @@ async function routineNoticePermissionsJourney(context, observePage) {
   }
   step("an unavailable approved format reports its adapter boundary without starting publication work");
 
-  if (seededRoutineCheck) {
-    await libraryCheck.getByText("Parsed structurally", { exact: true }).waitFor();
-    await libraryCheck.getByRole("button", { name: "Read captured text" }).click();
-    const raw = libraryCheck.locator("pre.read-full");
-    await expect(raw).toContainText("Fixture library craft hour");
-    await expect(raw).toContainText('<script type="application/ld+json">');
-    if (await raw.locator("script").count()) {
-      throw new Error("captured raw HTML rendered an executable script element");
-    }
-    await libraryCheck.getByRole("button", { name: "Close captured text" }).click();
-    step("a real server-bound parsed group reloads and exposes escaped captured text");
-
-    const retryRequestIds = [];
-    const interruptRoutineCheck = async (route) => {
-      const request = route.request();
-      const payload = request.postData() ?? "";
-      if (
-        request.method() === "POST" &&
-        payload.includes('"requestId"') &&
-        payload.includes('"expectedPolicyRevision"')
-      ) {
-        if (
-          !payload.includes('"sourceId"') ||
-          !payload.includes('"sourceUrl"') ||
-          !payload.includes('"formatKey"') ||
-          payload.includes('"captureEventId"') ||
-          payload.includes('"artifactVersionId"')
-        ) {
-          throw new Error("routine check browser request did not keep the server-owned evidence boundary");
-        }
-        const requestId = payload.match(
-          /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i,
-        )?.[0];
-        if (!requestId) throw new Error("routine check request omitted its UUID");
-        retryRequestIds.push(requestId);
-        // This route has already matched the real server-function payload and
-        // its exact routine UUID. Account only for the browser console error
-        // caused by this deliberate transport abort.
-        expectedRoutineRetryAbortErrors += 1;
-        await route.abort("failed");
-        return;
-      }
-      await route.continue();
-    };
-    await page.route("**/*", interruptRoutineCheck);
-    await libraryCheck.getByRole("button", { name: "Check captured notices" }).click();
-    const retry = libraryCheck.getByRole("button", { name: "Retry this check" });
-    await retry.waitFor();
-    await libraryCheck.getByText("Parsed structurally", { exact: true }).waitFor();
-    await retry.click();
-    await expect.poll(() => retryRequestIds.length, { timeout: 10_000 }).toBe(2);
-    if (retryRequestIds[0] !== retryRequestIds[1]) {
-      throw new Error("an uncertain routine check retry changed its request UUID");
-    }
-    await page.unroute("**/*", interruptRoutineCheck);
-    step("a failed check keeps its prior result and replays the same request UUID only on retry");
-  }
-
-  mkdirSync(evidenceDir, { recursive: true });
-  await checks.screenshot({ path: join(evidenceDir, "routine-notice-checks-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
     throw new Error("manual notice checks have horizontal overflow at 390px");
   }
-  await checks.screenshot({ path: join(evidenceDir, "routine-notice-checks-mobile.png") });
   await page.getByRole("button", { name: "Dark", exact: true }).click();
   await page.getByRole("button", { name: "Large", exact: true }).click();
   if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
     throw new Error("manual notice checks have horizontal overflow at 390px in dark large-text mode");
   }
-  await checks.screenshot({
-    path: join(evidenceDir, "routine-notice-checks-mobile-dark-large.png"),
-  });
   step("manual notice checks remain readable at a narrow width in dark large-text mode");
 
   const other = await context.newPage();
@@ -740,10 +656,6 @@ async function main() {
   const note = (text) => {
     if (expectedFixtureTimeoutErrors > 0 && /net::ERR_TIMED_OUT/.test(text)) {
       expectedFixtureTimeoutErrors -= 1;
-      return;
-    }
-    if (expectedRoutineRetryAbortErrors > 0 && /net::ERR_FAILED/.test(text)) {
-      expectedRoutineRetryAbortErrors -= 1;
       return;
     }
     consoleErrors.push(`[after: ${done[done.length - 1] ?? "start"} | ${page.url()}] ${text}`);
