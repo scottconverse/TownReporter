@@ -2,11 +2,11 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.30](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.30)** — 7 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.31] — beta.** Direct beta tag: [0.6.31](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.31). Stable Windows acquisition remains [0.6.30](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.30). Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
-A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Nothing prints until a person publishes.
+A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
 MIT licensed. Clone it. Point it at your city.
 
@@ -20,10 +20,10 @@ TownReporter is two rooms:
 
 |                        | What it is                                                         | Who sees it       |
 | ---------------------- | ------------------------------------------------------------------ | ----------------- |
-| **The paper** (`/`)    | Stories and editorials a human published, with sources shown       | Anyone            |
+| **The paper** (`/`)    | Stories and editorials, plus eligible owner-approved routine notices, with sources shown | Anyone            |
 | **The desk** (`/desk`) | Watch list, scan, queue, drafts, notes, Dark Desk, Opinion, Server | Signed-in editors |
 
-There is no fully automated path to the masthead.
+There is no fully automated path to the masthead for ordinary reporting; approved sources can produce the bounded notice roundups described above.
 
 It is not the Longmont Times-Call, not the city, and not a replacement for either. It covers the packets most people never sit through, and it shows the exact documents it used.
 
@@ -47,7 +47,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-Download the Windows installation ZIP from [Releases](https://github.com/scottconverse/TownReporter/releases/latest), extract it, and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
+For beta testing, download the Windows installation ZIP from the direct [0.6.31 beta release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.31). The [latest stable release](https://github.com/scottconverse/TownReporter/releases/latest) remains available separately. Extract the chosen ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first editorial workflow within an hour with working internet and an available AI account or endpoint; release evidence records the measured result and its limits. Public hosting is separate from this local installation.
 
@@ -86,11 +86,13 @@ Same six moves the paper itself describes at `/how-we-report`:
 3. **Follow.** Before a story is drafted, the desk asks what the announcing source leaves unexplained, then follows attachments, names, contracts, parcels, prior meetings.
 4. **Preserve.** Significant captures are stored. If a record later vanishes, the captured version remains, and the article says so.
 5. **Investigate.** Dark Desk is the recursive lane: competing hypotheses, unresolved identities, trails that were exhausted until new evidence reopened them. **It does not print.**
-6. **Write, then gate.** Drafts are reported stories, not recaps. Hold, kill, or publish is a person. Every material claim should be checkable against a document we show.
+6. **Write, then gate.** Drafts are reported stories, not recaps. Ordinary reporting is held, killed or published by a person; approved routine notices use fixed templates and approved sources. Every material claim should be checkable against a document we show.
 
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
 ### Recent releases
+
+- **0.6.31 beta** — An optional Queue focus for up to 3–5 existing eligible leads, with the full queue retained. The owner-approved six-format routine publication path, claim/manual corroboration, and routine automation/roundups are included. Routine automation runs on a daily schedule rather than continuous source watching; an approved source change can be corrected by a same-day rerun.
 
 - **0.6.30** — Editor-selected draft batches, mandatory review before saving section changes, and owner-controlled preparation for exact routine-notice source/format pairs. Pure routine-notice contracts and saved-data adapters remain unverified inputs; this release does not enable automatic publication.
 
@@ -368,10 +370,10 @@ Published stories have a separate [legal-removal workflow](docs/editor.md#legal-
 ## Frequently asked questions
 
 **Is this a newspaper?**
-It is a newsroom you run. Stories that print have a human gate. It is not a newspaper of record, not the city, and not a wire service. Treat every draft as a first draft you still have to report.
+It is a newsroom you run. Ordinary stories that print have a human gate; approved routine notices can use the notice-roundup path described above. It is not a newspaper of record, not the city, and not a wire service. Treat every draft as a first draft you still have to report.
 
 **Will it publish by itself?**
-No. Scan files leads. Draft writes a story into the workbench. Publish is a person.
+Ordinary reporting does not: scans file leads, drafts go to the workbench, and a person reviews and publishes them. Only the six owner-approved routine formats can publish automatically, after their source, eligibility, freshness, conflict, review-history and idempotency checks pass.
 
 **Can I use this for any city?**
 Yes. The first owner completes **Set up the paper**, and can revise the same database-backed settings later on the Server page. No source edit or rebuild is required. See [docs/setup.md](docs/setup.md#point-it-at-another-city).

@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.30 · 7 September 2026**
+**Version 0.6.31 · beta · 8 September 2026**
 
 **Documentation scope:** The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from
@@ -12,8 +12,9 @@ the desk** on the Server page.
 TownReporter is a civic newsroom you run yourself. A public paper on the front,
 a signed-in editor's desk behind it. It watches a city's meetings, packets,
 minutes, money and contracts, notices when something changes or fails to appear,
-and hands an editor a lead. Nothing reaches the paper until a person publishes
-it.
+and hands an editor a lead. Ordinary reporting reaches the paper after a person
+reviews and publishes it; approved sources can produce automatic routine-notice
+roundups through fixed templates.
 
 The working edition covers Longmont, Colorado, at
 [townreporter.org](https://townreporter.org). The code is MIT licensed. Point it
@@ -75,11 +76,12 @@ Editors can use configured sections when filing and scanning; only the owner cha
 
 |                        | What it is                                                       | Who sees it       |
 | ---------------------- | ---------------------------------------------------------------- | ----------------- |
-| **The paper** (`/`)    | Stories and editorials a human published, with the sources shown | Anyone            |
+| **The paper** (`/`)    | Stories and editorials, plus eligible owner-approved routine notices, with sources shown | Anyone            |
 | **The desk** (`/desk`) | Watch list, scan, queue, drafts, Dark Desk, Opinion, Server      | Signed-in editors |
 
-There is no automated path to the masthead. A machine can find a lead, fetch the
-document, write a draft and tell you what it thinks. It cannot publish.
+There is no automated path to the masthead for ordinary reporting. A machine can
+find a lead, fetch the document, write a draft and tell you what it thinks; approved
+routine sources use a separate fixed-template notice-roundup path.
 
 ![The front page](images/01-front-page.png)
 
@@ -105,8 +107,9 @@ the same order the software performs it.
    unresolved identities, trails left open until new evidence reopens them. **It
    never prints.**
 6. **Write, then gate.** Drafts are reported stories, not recaps. Hold, kill or
-   publish is a person. Every material claim should be checkable against a
-   document the paper shows you.
+   publish is a person for ordinary reporting; approved routine formats use fixed
+   templates and approved sources. Every material claim should be checkable against
+   a document the paper shows you.
 
 Corrections are public. Editorial policy is to correct a published story openly; a correction
 runs as a dated note above it.
@@ -361,9 +364,9 @@ of its own. Budget for a piece, not for a paragraph.
 
 ## The Server page
 
-The owner can manage **Routine notice permissions** and the separate **Automatic routine editions** control here. Automation starts paused. It accepts at most 12 exact approved structured sources across library, parks/recreation, community/arts, application deadlines, designated waste or deadline calendars, and public-meeting logistics. Each selection requires an owner-entered issuer, locality, and public attribution URL; waste also requires a non-residential collection area. The exact private fetch address and captured source remain private.
+The owner can manage **Routine notice permissions** and the separate **Automatic routine editions** control here. Automation starts paused. It accepts at most 12 exact approved structured sources across library, parks/recreation, community/arts, application deadlines, designated waste or deadline calendars, and public-meeting logistics. Each active selection requires an owner-entered issuer, locality, and public attribution URL; waste also requires a non-residential collection area, and library structured hours require a branch. Permission-only Event and non-calendar application-deadline checks can run without this automation context. The exact private fetch address and captured source remain private.
 
-After explicit activation, the unattended clock creates deterministic logistics-only ordinary articles: Today in town on the newsroom-local date, This weekend on Friday for Friday through Sunday, and Deadlines approaching only for new or changed deadlines in the next seven days. A run uses at most five useful items and emits no empty edition. Conflicts, cancellation, unsupported recurrence, risky language, stale permissions or evidence, and edited or unpublished target articles stay for review. Recent runs show their result counts and published-article links. Disable automation or pause routine permissions to stop later reservations. Manual checks remain available and never publish by themselves.
+After explicit activation, the daily scheduler creates deterministic logistics-only ordinary articles: Today in town on the newsroom-local date, This weekend on Friday for Friday through Sunday, and Deadlines approaching only for new or changed deadlines in the next seven days; it is not a continuous source watch. An approved source change can correct an automation-owned edition on a same-day rerun. A run uses at most five useful items and emits no empty edition. Conflicts, cancellation, unsupported recurrence, risky language, stale permissions or evidence, and edited or unpublished target articles stay for review. Recent runs show their result counts and published-article links. Disable automation or pause routine permissions to stop later reservations. Manual checks remain available and never publish by themselves.
 
 `/desk/ops` — everything this machine is doing to keep the paper online.
 
