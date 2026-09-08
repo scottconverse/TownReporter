@@ -179,6 +179,20 @@ describe("routine notice manual checks", () => {
       ),
       /another check/i,
     );
+    const groups = await checks.listRoutineNoticeChecksForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      {},
+    );
+    assert.equal(groups[0]?.state, "evidence-unavailable");
+    assert.equal(groups[0]?.candidates.length, 0);
+    assert.equal(groups[0]?.capture?.textAvailable, false);
+    await assert.rejects(
+      checks.readRoutineNoticeCapturedTextForOwner(
+        { userId: f.owner, newsroomId: f.room },
+        { checkId: result.check.checkId },
+      ),
+      /changed or is unavailable/i,
+    );
   });
 
   it("returns a valid replay before fetching again and refuses a mismatched replay", async () => {

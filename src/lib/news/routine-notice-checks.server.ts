@@ -534,6 +534,7 @@ async function writeAudit(sql: Sql, actor: Actor, checkId: number, state: string
 type CheckRow = {
   id: number;
   source_id: number;
+  source_url_hash: string;
   source_title: string;
   source_url: string;
   source_status: string;
@@ -574,6 +575,7 @@ async function checkRow(sql: Sql, actor: Actor, checkId: number) {
 
 async function boundRawEvidence(sql: Sql, actor: Actor, row: CheckRow) {
   if (!row.capture_event_id || !row.artifact_version_id || !row.artifact_blob_id) return null;
+  if ((await sha256(row.source_url)) !== row.source_url_hash) return null;
   const rows = await sql.query<{
     event_url: string;
     event_version_id: number | null;
