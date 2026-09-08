@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.28](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.28)** — 7 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.29](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.29)** — 7 September 2026. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 
@@ -91,6 +91,8 @@ Same six moves the paper itself describes at `/how-we-report`:
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
 ### Recent releases
+
+- **0.6.29** — Owner-configured daily discovery with an explicit subscription/local runtime; private recorded-finding evidence review; stronger draft saving and job recovery. Scheduled scans file leads for review and do not draft or publish.
 
 - **0.6.28** — Corrections stay within the editor's newsroom; Reddit requests preserve the eight-second elapsed-time floor across clock and transport-setup changes.
 - **0.6.27** — Windows installation package, installation-owned maintenance and build/readiness checks, supplied-material drafting and evidence review, and the page-watch trailing-slash correction.
