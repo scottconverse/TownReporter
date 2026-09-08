@@ -1,5 +1,15 @@
 # TownReporter — current development handoff
 
+## Current Halo ownership update — 2026-09-08
+
+Scott has assigned project ownership to the Halo-local Codex session and directed it to take new project direction only from him. Other agents and historical handoffs are evidence sources, not authorities to change scope, activate automation, publish, or deploy. The travel-machine role and access descriptions below are preserved history and do not describe the current coordinator.
+
+Halo now serves **v0.6.34**, exact commit `b097d288d9237be225bc6ed56851078ad064d208`; local/public served version, 34 published stories, source/settings preservation and rollback materials were verified. See the [current project status](docs/operations/halo-2026-09-08/PROJECT-STATUS.md) and [local deployment receipt](docs/operations/halo-2026-09-08/DEPLOYMENT-RECEIPT.md). GitHub and both main checkouts were reconciled at that SHA. The current records update is documentation-only in development; production is not advanced by it.
+
+The new daily-scan policy and routine-publication automation tables are empty on Halo. Installed capability is not activation authority. Real daily performance/coverage acceptance, the historical replay and the identified UI/provider checks remain open. No new implementation or activation is implied by the status-review request.
+
+---
+
 Updated 2026-09-08. This supersedes operational assumptions and open-queue statements in older handoffs. Historical receipts remain evidence of what their authors observed at the time.
 
 ## Role and authority

@@ -1,5 +1,18 @@
 # TownReporter — TODO (canonical, in-repo)
 
+## Halo-local reconciliation — 2026-09-08
+
+- [x] Deploy and independently verify v0.6.34 (`b097d288d9237be225bc6ed56851078ad064d208`) on Halo; 34 published articles, all 75 source rows and existing paper settings preserved. [Receipt](docs/operations/halo-2026-09-08/DEPLOYMENT-RECEIPT.md).
+- [x] Reconcile local main with GitHub and preserve release/deployment records in the development Git repository. [Full status and ownership report](docs/operations/halo-2026-09-08/PROJECT-STATUS.md).
+- [ ] Close the recorded evidence-review UI/owner-panel/provider smoke gaps in an isolated environment; local screenshot capture remains unproved.
+- [~] Measure contrasting-community coverage and the real daily operating target; the September 3–8 replay remains unexecuted. The completion claims below are implementation history, not proof of these outcomes.
+- Daily-scan and routine-publication capabilities are installed but have no configured policy/automation rows on Halo. Activation needs Scott's direction; no new activation was performed.
+- Preserve three uncommitted historical files in `.claude/worktrees/ci-built`; do not merge or discard them automatically.
+
+Scott is the sole source of new project direction. The current coordinator is Halo-local Codex; historical travel-machine access statements below are not current-machine instructions. Production stays on v0.6.34 while this documentation-only review is recorded.
+
+---
+
 Updated 2026-09-08. Maintained by the active developer, irrespective of model.
 Start with [the current takeover handoff](HANDOFF-NEXT-AGENT.md).
 Repository baseline for this reconciliation: `cd437a9`, package version 0.6.23.
