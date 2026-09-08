@@ -158,7 +158,16 @@ it("a reclaimed draft worker cannot write a draft, lead notes, or audit event", 
 it("the current manual draft claim commits the draft, notes, and audit together", async () => {
   const { sql, leadId, job } = await fixture(98202);
   await performDraftWork(job, {
-    reportAndDraft: async () => result,
+    reportAndDraft: async () => ({
+      ...result,
+      claims: [
+        {
+          fact: "The council voted Tuesday.",
+          url: "https://example.test/agenda",
+          kind: "record",
+        },
+      ],
+    }),
     setJobStage: async () => undefined,
   });
   const [{ count: draftCount }] = await sql.query<{ count: number }>(
@@ -177,6 +186,20 @@ it("the current manual draft claim commits the draft, notes, and audit together"
   assert.equal(lead.status, "drafted");
   assert.notEqual(JSON.parse(lead.notes_json).scratch, undefined);
   assert.equal(Number(auditCount), 1);
+  const [draft] = await sql.query<{ research_json: string }>(
+    "select research_json from drafts where lead_id=$1",
+    [leadId],
+  );
+  assert.deepEqual(JSON.parse(draft.research_json).reportedClaims, {
+    version: 1,
+    rows: [
+      {
+        fact: "The council voted Tuesday.",
+        url: "https://example.test/agenda",
+        kind: "record",
+      },
+    ],
+  });
   const [completedJob] = await sql.query<{ status: string }>(
     "select status from desk_jobs where id=$1",
     [job.id],

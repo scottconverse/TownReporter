@@ -10,6 +10,7 @@ import {
 } from "@/lib/news/finding-evidence-review";
 import { InkButton } from "@/components/desk-chrome";
 import { BusyLine, Notice } from "@/components/states";
+import { canRebaseDirtyEvidencePeers } from "@/lib/news/finding-evidence-peer";
 
 type JudgmentDraft = {
   value: FindingJudgment;
@@ -51,7 +52,7 @@ function captureState(capture: FindingEvidenceReview["rows"][number]["captures"]
 
 function draftsFrom(review: FindingEvidenceReview): Record<string, JudgmentDraft> {
   return Object.fromEntries(
-    review.rows.map((row) => [
+    [...review.rows, ...review.claimRows].map((row) => [
       row.key,
       {
         value: row.judgment.value,
@@ -198,16 +199,7 @@ export function FindingEvidenceReviewPanel({
       dirtyKeys.current.delete(variables.findingKey);
       const peerKeys = [...dirtyKeys.current];
       const previous = reviewAtDraftStart.current;
-      const peersUnchanged = Boolean(
-        previous &&
-        previous.draftId === result.review.draftId &&
-        previous.contentToken === result.review.contentToken &&
-        peerKeys.every((key) => {
-          const before = previous.rows.find((row) => row.key === key);
-          const after = result.review.rows.find((row) => row.key === key);
-          return JSON.stringify(before) === JSON.stringify(after);
-        }),
-      );
+      const peersUnchanged = canRebaseDirtyEvidencePeers(previous, result.review, peerKeys);
       qc.setQueryData(["finding-evidence-review", leadId, reviewRevision], result);
       appliedToken.current = result.review.evidenceToken;
       if (peerKeys.length > 0 && peersUnchanged) {
@@ -564,6 +556,148 @@ export function FindingEvidenceReviewPanel({
           </article>
         );
       })}
+      {review ? (
+        <div className="mt-8 border-t border-rule pt-5" aria-labelledby="draft-pass-claims-heading">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <p className="kick">Draft-pass inventory</p>
+              <h2 id="draft-pass-claims-heading" className="h2">
+                Claims returned by this draft pass
+              </h2>
+            </div>
+            <p className="meta">{review.claimRows.length} returned claims</p>
+          </div>
+          <p className="mt-2 max-w-3xl text-sm text-muted">
+            This inventory records only claims returned with this draft pass. A matching URL or
+            captured record does not establish that a claim is true, complete, or supported.
+          </p>
+          {review.claimRows.length === 0 ? (
+            <div className="mt-4 border border-rule bg-paper-2 p-4" role="status">
+              <p className="font-medium text-ink">No claims were returned with this draft pass.</p>
+            </div>
+          ) : null}
+          {review.claimRows.map((row, index) => {
+            const judgment = drafts[row.key] ?? row.judgment;
+            const citedVersions = row.captures.filter(
+              (capture, captureIndex, captures) =>
+                capture.available &&
+                capture.readable &&
+                capture.versionId != null &&
+                captures.findIndex((candidate) => candidate.versionId === capture.versionId) === captureIndex,
+            );
+            const maySave =
+              reviewApplied && !disabled && !localDraftChanged && !reloadRequired && !save.isPending;
+            return (
+              <article key={row.key} className="mt-5 border border-rule bg-paper p-4 sm:p-5">
+                <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
+                  Claim {index + 1} · {row.claim.kind}
+                </p>
+                <p className="mt-2 whitespace-pre-wrap font-medium text-ink">{row.claim.fact}</p>
+                <p className="mt-2 break-all text-sm text-muted">Returned URL: {row.claim.url}</p>
+                <div className="mt-4 border-t border-rule pt-3">
+                  <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
+                    Exact draft provenance
+                  </p>
+                  {row.captures.length ? (
+                    <ul className="mt-2 space-y-3">
+                      {row.captures.map((capture, captureIndex) => (
+                        <li
+                          key={`${capture.versionId ?? "missing"}-${capture.captureEventId ?? captureIndex}`}
+                          className="border-l border-rule pl-3 text-sm"
+                        >
+                          <p className="font-medium text-ink">{capture.title ?? capture.url ?? "Recorded provenance"}</p>
+                          <p className="mt-1 text-muted">
+                            {captureState(capture)}
+                            {capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}
+                          </p>
+                          {capture.viewHref && capture.versionId != null ? (
+                            <button
+                              type="button"
+                              className="inline-link mt-1"
+                              onClick={() => captureRead.mutate(capture.versionId!)}
+                              disabled={captureRead.isPending}
+                            >
+                              View exact captured version
+                            </button>
+                          ) : null}
+                          {capture.newerCapture ? (
+                            <p className="mt-1 text-muted">
+                              A newer capture exists for review; it is not substituted for this draft’s exact record.
+                            </p>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-2 text-sm text-muted">
+                      No exact captured version or capture event was recorded for this returned URL.
+                    </p>
+                  )}
+                </div>
+                <div className="mt-5 border-t border-rule pt-4">
+                  <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Editor judgment</p>
+                  <label className="mt-2 block text-sm font-medium text-ink" htmlFor={`claim-judgment-${index}`}>
+                    Judgment
+                  </label>
+                  <select
+                    id={`claim-judgment-${index}`}
+                    className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
+                    value={judgment.value}
+                    disabled={disabled || save.isPending || !reviewApplied}
+                    onChange={(event) => updateDraft(row.key, {
+                      value: event.target.value as FindingJudgment,
+                      contraryVersionId: event.target.value === "contradicts" ? judgment.contraryVersionId : null,
+                    })}
+                  >
+                    {(Object.keys(judgmentLabels) as FindingJudgment[]).map((value) => (
+                      <option key={value} value={value}>{judgmentLabels[value]}</option>
+                    ))}
+                  </select>
+                  <label className="mt-3 block text-sm font-medium text-ink" htmlFor={`claim-reason-${index}`}>
+                    Reason {judgment.value === "contradicts" ? "(required for contradiction)" : "(optional)"}
+                  </label>
+                  <textarea
+                    id={`claim-reason-${index}`}
+                    className="mt-1 min-h-24 w-full border border-rule bg-paper p-3 text-sm"
+                    value={judgment.reason}
+                    maxLength={2000}
+                    disabled={disabled || save.isPending || !reviewApplied}
+                    onChange={(event) => updateDraft(row.key, { reason: event.target.value })}
+                  />
+                  {judgment.value === "contradicts" ? (
+                    <>
+                      <label className="mt-3 block text-sm font-medium text-ink" htmlFor={`claim-contrary-${index}`}>
+                        Cited contrary captured evidence
+                      </label>
+                      <select
+                        id={`claim-contrary-${index}`}
+                        className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
+                        value={judgment.contraryVersionId ?? ""}
+                        disabled={disabled || save.isPending || !reviewApplied}
+                        onChange={(event) => updateDraft(row.key, { contraryVersionId: event.target.value ? Number(event.target.value) : null })}
+                      >
+                        <option value="">Choose an exact captured version</option>
+                        {citedVersions.map((capture) => (
+                          <option key={capture.versionId} value={capture.versionId!}>{capture.title ?? capture.url ?? `Captured version ${capture.versionId}`}</option>
+                        ))}
+                      </select>
+                    </>
+                  ) : null}
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <InkButton
+                      disabled={!maySave}
+                      onClick={() => save.mutate({ findingKey: row.key, judgment, hasReadableCapture: citedVersions.length > 0 })}
+                    >
+                      {save.isPending ? "Saving judgment…" : "Save judgment"}
+                    </InkButton>
+                    {localDraftChanged ? <span className="self-center text-sm text-muted">Save the draft first.</span> : null}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : null}
     </section>
   );
 }
