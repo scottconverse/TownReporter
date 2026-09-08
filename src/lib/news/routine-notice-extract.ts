@@ -228,20 +228,7 @@ function firstLocation(row: Record<string, unknown>, locator: string) {
 }
 
 function eventStatus(value: unknown) {
-  const status = text(value);
-  if (!status) return undefined;
-  const supported = new Map([
-    ["EventCancelled", "cancelled"],
-    ["EventPostponed", "postponed"],
-    ["EventRescheduled", "rescheduled"],
-    ["http://schema.org/EventCancelled", "cancelled"],
-    ["http://schema.org/EventPostponed", "postponed"],
-    ["http://schema.org/EventRescheduled", "rescheduled"],
-    ["https://schema.org/EventCancelled", "cancelled"],
-    ["https://schema.org/EventPostponed", "postponed"],
-    ["https://schema.org/EventRescheduled", "rescheduled"],
-  ]);
-  return supported.get(status) ?? status;
+  return text(value) ?? undefined;
 }
 
 function eventInput(
@@ -256,8 +243,8 @@ function eventInput(
   const start = field(text(row.startDate), `${locator}.startDate`);
   const end = field(text(row.endDate), `${locator}.endDate`);
   const { venue, onlineUrl } = firstLocation(row, locator);
-  const cancellationValue = eventStatus(row.eventStatus);
-  const cancellation = field(cancellationValue ?? null, `${locator}.eventStatus`);
+  const statusValue = eventStatus(row.eventStatus);
+  const eventStatusField = field(statusValue ?? null, `${locator}.eventStatus`);
   const timezone = field(text(row.timezone), `${locator}.timezone`);
   const recurrence = row.eventSchedule
     ? field(JSON.stringify(row.eventSchedule), `${locator}.eventSchedule`)
@@ -269,7 +256,7 @@ function eventInput(
       start,
       end,
       timezone,
-      cancellation,
+      eventStatus: eventStatusField,
       recurrence,
     }),
   };
@@ -341,6 +328,13 @@ export function extractJsonLdEvents(
       const externalId = text(node.row["@id"]) ?? text(node.row.url);
       if (!externalId) {
         results.push(refused("missing-stable-identity", node.locator));
+        continue;
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(node.row, "eventStatus") &&
+        !text(node.row.eventStatus)
+      ) {
+        results.push(refused("structurally-invalid", `${node.locator}.eventStatus`));
         continue;
       }
       const validation = validateRoutineNotice(
