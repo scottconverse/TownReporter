@@ -1,10 +1,15 @@
 # Changelog
 
-Current release: **0.6.31**.
+Current release: **0.6.32**.
 
 ## Unreleased
 
-- The private evidence pane now presents one available captured version once while naming its distinct artifact and capture-event references. Returned-claim counts use singular grammar, and editor-selected records are labeled separately from cited captures.
+## 0.6.32 beta
+
+- The private evidence pane presents one available captured version once when artifact and capture-event references point to the same readable record, while still naming each distinct reference.
+- Returned-claim totals now use singular wording when exactly one claim was returned.
+- Editor-selected captured records are labeled separately from records cited by the draft, including unavailable and unreadable states.
+- Current beta headings link the release label directly instead of repeating a separate beta-tag link.
 
 ## 0.6.31 beta
 

@@ -186,11 +186,7 @@ When a site redirects only to add or remove a trailing slash on the same address
 
 ## Five live investigations — acceptance exercise
 
-**Pending Halo-local execution.** This plan is not a report that the runs
-happened. The remote developer prepares regression checks and the report
-format; a local operator executes against the live installation only when the
-owner directs it. Do not publish automatically or manufacture a queue item to
-make a run appear successful.
+**Owner-authorized travel-local execution, still pending.** This plan is not a report that the runs happened. Run five investigations in an isolated travel-machine environment, without Halo data or services, and separately replay the September 3–8 historical interval. Halo real-data staging and promotion remain a distinct local-operator exercise. Do not publish automatically or manufacture a queue item to make a run appear successful.
 
 The first two topics are the owner's wording and hypotheses, not established
 facts:
