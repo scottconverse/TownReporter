@@ -259,6 +259,12 @@ Automatic, a gateway, or an API fallback. It preserves each lead's stored
 research scope. A missing runtime or ineligible selected lead refuses the
 whole start, before any partial batch is created.
 
+The batch area also offers an optional **Suggested focus** size of three to
+five leads. It balances existing lead scores and sections; review the evidence
+before drafting. It operates on the currently loaded Queue and does not claim
+an actual coverage gap. Adding it preserves any leads you selected manually,
+and the full Queue stays visible and unchanged.
+
 The Queue retains the latest batch after a reload, including its selected
 runtime and each lead's queued, running, completed, or failed status with a
 workbench link. These outcomes are separate per lead after a batch is safely
