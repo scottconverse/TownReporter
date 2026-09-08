@@ -105,7 +105,7 @@ function StoryPage() {
   const expectedDraftJobId = useRef<number | null>(null);
   const priorDraftJobId = useRef<number | null>(null);
   const priorDraftJobWasOpen = useRef(false);
-  const awaitingDraftJobAck = useRef(false);
+  const [awaitingDraftJobAck, setAwaitingDraftJobAck] = useState(false);
   const appliedFp = useRef("");
 
   const waiting = waitingSince !== null;
@@ -130,7 +130,7 @@ function StoryPage() {
       priorJobId: priorDraftJobId.current,
       priorJobWasOpen: priorDraftJobWasOpen.current,
       attemptInProgress: waitingSince != null,
-      awaitingAcknowledgement: awaitingDraftJobAck.current,
+      awaitingAcknowledgement: awaitingDraftJobAck,
       job,
     });
     if (recoveredJobId == null || !job) return;
@@ -140,7 +140,7 @@ function StoryPage() {
     bodyAtStart.current = data?.draft?.body ?? "";
     const started = Date.parse(job.started_at ?? job.created_at ?? "");
     setWaitingSince(Number.isFinite(started) ? started : Date.now());
-  }, [data?.draft?.body, data?.job, waitingSince]);
+  }, [awaitingDraftJobAck, data?.draft?.body, data?.job, waitingSince]);
 
   useEffect(() => {
     if (data?.articleSlug) setPublishedSlug(data.articleSlug);
@@ -180,7 +180,7 @@ function StoryPage() {
     setWaitingSince(null);
     setSlowWait(false);
     setMsg("");
-  }, [data, waitingSince]);
+  }, [awaitingDraftJobAck, data, waitingSince]);
 
   useEffect(() => {
     if (!waitingSince) return;
@@ -243,11 +243,11 @@ function StoryPage() {
       priorDraftJobWasOpen.current =
         data?.job?.status === "queued" || data?.job?.status === "running";
       expectedDraftJobId.current = null;
-      awaitingDraftJobAck.current = true;
+      setAwaitingDraftJobAck(true);
       setWaitingSince(Date.now());
     },
     onSuccess: async (res) => {
-      awaitingDraftJobAck.current = false;
+      setAwaitingDraftJobAck(false);
       if (answered(res) && res.ok) expectedDraftJobId.current = res.jobId;
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       await qc.invalidateQueries({ queryKey: ["leads"] });
@@ -286,7 +286,7 @@ function StoryPage() {
       setMsg(editorDraftError(res.error) ?? res.error);
     },
     onError: async (err) => {
-      awaitingDraftJobAck.current = false;
+      setAwaitingDraftJobAck(false);
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       const raw = err instanceof Error ? err.message : "Draft failed";
       if (looksLikeDraftTimeout(raw)) return;

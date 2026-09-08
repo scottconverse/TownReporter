@@ -847,6 +847,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const sourceInput = draftSourceInputs(urls, prevNotes, researchScope);
   const draftInput = {
     userId: context.userId,
+    newsroomId: context.newsroomId,
     lead,
     urls: sourceInput.urls,
     memory,

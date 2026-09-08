@@ -350,6 +350,7 @@ async function main() {
   page.setDefaultTimeout(45_000);
 
   const consoleErrors = [];
+  let expectedAcknowledgementTimeoutErrors = 0;
   const note = (text) => {
     // This walk deliberately loads a story's URL after deleting it, to check
     // the route answers not-found. That load's own document request legitimately
@@ -358,6 +359,10 @@ async function main() {
     // noise on that one step and would otherwise fail every run of a passing
     // walk.
     if (/status of 404/.test(text)) return;
+    if (expectedAcknowledgementTimeoutErrors > 0 && /net::ERR_TIMED_OUT/.test(text)) {
+      expectedAcknowledgementTimeoutErrors -= 1;
+      return;
+    }
     consoleErrors.push(`[after: ${done[done.length - 1] ?? "start"} | ${page.url()}] ${text}`);
   };
   page.on("pageerror", (e) => note(String(e.message ?? e).slice(0, 200)));
@@ -790,6 +795,125 @@ async function main() {
     return button instanceof HTMLButtonElement && !button.disabled;
   });
   step("running replacement disables judgments and the naturally polled replacement loads a fresh review");
+
+  /*
+    A request can reach the browser's network boundary, then lose its reply
+    after a replacement job has already committed. Hold the actual draft RPC
+    (identified by modelChoice; the preceding saveReportingNotes request has
+    no model choice), seed the authoritative completed replacement directly,
+    and make the normal polling query observe it before the held request
+    times out. The page must still adopt that replacement after the aborted
+    acknowledgement; no model request is forwarded in this case.
+  */
+  let heldDraftRoute;
+  let markDraftHeld;
+  const draftHeld = new Promise((resolve) => {
+    markDraftHeld = resolve;
+  });
+  const holdActualDraft = async (route) => {
+    const request = route.request();
+    if (
+      request.method() === "POST" &&
+      request.headers()["x-tsr-serverfn"] === "true" &&
+      request.postData()?.includes("modelChoice")
+    ) {
+      heldDraftRoute = route;
+      markDraftHeld();
+      return;
+    }
+    await route.continue();
+  };
+  await page.route("**/*", holdActualDraft);
+  const acknowledgementRecoveryBody = `TEST FIXTURE acknowledgement recovery replacement ${stamp}.`;
+  await page.getByRole("button", { name: "Redraft", exact: true }).click({ noWaitAfter: true });
+  await draftHeld;
+  if (!heldDraftRoute)
+    throw new Error("the acknowledgement recovery fixture did not hold the actual draft request");
+  const acknowledgementRecoveryJob = await pool.query(
+    `insert into desk_jobs(newsroom_id,user_id,kind,subject_id,status,stage,claim_token,started_at,updated_at,finished_at)
+     values($1,$2,'draft',$3,'completed','done',$4,now(),now(),now()) returning id`,
+    [
+      newsroomId,
+      owner.rows[0].user_id,
+      findingFixture.leadId,
+      `fixture-acknowledgement-recovery-${stamp}`,
+    ],
+  );
+  await pool.query(
+    `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,provenance_json,found_note,unanswered,research_json,updated_at)
+     select user_id,newsroom_id,lead_id,headline,dek,$3,topic,source_urls,provenance_json,found_note,unanswered,research_json,now()+interval '1 second'
+       from drafts where lead_id=$1 and newsroom_id=$2 order by updated_at desc,id desc limit 1`,
+    [findingFixture.leadId, newsroomId, acknowledgementRecoveryBody],
+  );
+  await pool.query(
+    `update leads set notes_json=$3 where id=$1 and newsroom_id=$2`,
+    [findingFixture.leadId, newsroomId, JSON.stringify({ researchScope: "supplied" })],
+  );
+  const replacementWasPolled = page.waitForResponse(
+    async (response) => {
+      if (
+        response.request().method() !== "GET" ||
+        response.request().headers()["x-tsr-serverfn"] !== "true" ||
+        !response.ok()
+      ) return false;
+      return (await response.text().catch(() => "")).includes(acknowledgementRecoveryBody);
+    },
+  );
+  const observedReplacementPoll = await replacementWasPolled;
+  const leadRpcPath = new URL(observedReplacementPoll.url()).pathname;
+  await page.waitForFunction(() => {
+    return [...document.querySelectorAll("label")].some((label) => {
+      const scope = label.querySelector("select");
+      return label.textContent?.includes("Drafting scope") && scope?.value === "supplied";
+    });
+  });
+  let heldPostAbortLeadRefresh;
+  let markPostAbortLeadRefreshHeld;
+  let holdPostAbortRefresh = false;
+  const postAbortLeadRefreshHeld = new Promise((resolve) => {
+    markPostAbortLeadRefreshHeld = resolve;
+  });
+  const holdPostAbortLeadRefresh = async (route) => {
+    const request = route.request();
+    if (
+      holdPostAbortRefresh &&
+      request.method() === "GET" &&
+      request.headers()["x-tsr-serverfn"] === "true" &&
+      new URL(request.url()).pathname === leadRpcPath
+    ) {
+      heldPostAbortLeadRefresh = route;
+      markPostAbortLeadRefreshHeld();
+      return;
+    }
+    await route.continue();
+  };
+  await page.route("**/*", holdPostAbortLeadRefresh);
+  holdPostAbortRefresh = true;
+  expectedAcknowledgementTimeoutErrors = 1;
+  await heldDraftRoute.abort("timedout");
+  await postAbortLeadRefreshHeld;
+  await page.waitForFunction(
+    (replacement) =>
+      [...document.querySelectorAll("textarea")].some(
+        (field) => field instanceof HTMLTextAreaElement && field.value.includes(replacement),
+      ),
+    acknowledgementRecoveryBody,
+    { timeout: 8_000 },
+  );
+  if (!heldPostAbortLeadRefresh)
+    throw new Error("the acknowledgement recovery fixture did not hold the post-abort lead refresh");
+  await heldPostAbortLeadRefresh.continue();
+  await page.unroute("**/*", holdActualDraft);
+  await page.unroute("**/*", holdPostAbortLeadRefresh);
+  const persistedAcknowledgementReplacement = await pool.query(
+    `select body from drafts where lead_id=$1 and newsroom_id=$2 order by updated_at desc,id desc limit 1`,
+    [findingFixture.leadId, newsroomId],
+  );
+  if (persistedAcknowledgementReplacement.rows[0]?.body !== acknowledgementRecoveryBody)
+    throw new Error("acknowledgement recovery fixture did not retain its completed replacement draft");
+  if (acknowledgementRecoveryJob.rows[0]?.id == null)
+    throw new Error("acknowledgement recovery fixture did not create its completed job");
+  step("a timed-out acknowledgement adopts a replacement that polling saw while it was pending");
   step(
     "recorded finding judgments save sequentially, conflict honestly, and remain readable on a narrow dark large-text desk",
   );

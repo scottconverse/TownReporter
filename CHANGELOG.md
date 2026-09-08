@@ -6,6 +6,8 @@ Current release: **0.6.29**.
 
 ## 0.6.29 — 2026-09-07
 
+- Draft reporting keeps the originating newsroom's paper identity, captures and provenance. Public captured records, histories and comparisons stay within the public edition; sharing a source URL does not expose another newsroom's evidence. Mismatched capture/version references are excluded. Historical records are not reassigned or rewritten.
+
 - Saving story edits refreshes finding-review controls without a page reload. Judgments stay disabled during a replacement draft or a pending evidence decision. The workbench follows the actual draft job through completion and lost-response recovery instead of mistaking a recently saved old draft for its replacement.
 
 - Completed jobs keep their successful status if redundant completion bookkeeping or a late worker error occurs. Ordinary running jobs still report success or failure, and replaced claims remain protected.

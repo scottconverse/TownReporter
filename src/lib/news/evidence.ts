@@ -3,6 +3,7 @@ import { getSql } from "../db.ts";
 import type { ProvenanceItem } from "./findings.ts";
 
 import { describeTextChanges, type VersionDiff } from "./retrieve.ts";
+import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 
 export type CaptureObservationKind =
   | "captured"
@@ -141,7 +142,8 @@ function provenanceFromRow(raw: string | null | undefined): ProvenanceItem[] {
 async function publishedSourceUrls(): Promise<Set<string>> {
   const sql = await getSql();
   const rows = await sql<{ provenance_json: string | null; source_urls: string }>`
-    select provenance_json, source_urls from articles where status = 'published'
+    select provenance_json, source_urls from articles
+    where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
   `;
   const urls = new Set<string>();
   for (const row of rows) {
@@ -168,7 +170,8 @@ async function blobForVersion(versionId: number | null): Promise<{
   try {
     const sql = await getSql();
     const b = await sql<{ byte_length: number }>`
-      select byte_length from artifact_blobs where version_id = ${versionId} limit 1
+      select byte_length from artifact_blobs
+      where version_id = ${versionId} and newsroom_id = ${DEFAULT_NEWSROOM_ID} limit 1
     `;
     return b[0] ? { byte_length: b[0].byte_length } : null;
   } catch {
@@ -192,13 +195,17 @@ type CaptureRow = {
 async function loadCapturesForUrl(url: string): Promise<CaptureRow[]> {
   const sql = await getSql();
   const events = await sql<CaptureRow>`
-    select ce.id as capture_event_id, ce.version_id, ce.observed_at::text as observed_at,
+    select ce.id as capture_event_id, av.id as version_id, ce.observed_at::text as observed_at,
       ce.fetch_outcome, ce.disappearance, coalesce(ce.content_hash, av.content_hash) as content_hash,
       coalesce(av.title, '') as title, ce.source_url as url,
       av.full_text as full_text, av.content_hash as version_hash
     from capture_events ce
-    left join artifact_versions av on av.id = ce.version_id
-    where ce.source_url = ${url}
+    left join artifact_versions av
+      on av.id = ce.version_id
+        and av.newsroom_id = ce.newsroom_id
+        and av.url = ce.source_url
+    where ce.newsroom_id = ${DEFAULT_NEWSROOM_ID} and ce.source_url = ${url}
+      and (ce.version_id is null or av.id is not null)
     order by ce.observed_at asc, ce.id asc
     limit 80
   `;
@@ -208,7 +215,7 @@ async function loadCapturesForUrl(url: string): Promise<CaptureRow[]> {
       av.fetch_outcome, false as disappearance, av.content_hash as content_hash,
       av.title as title, av.url as url, av.full_text as full_text, av.content_hash as version_hash
     from artifact_versions av
-    where av.url = ${url}
+    where av.newsroom_id = ${DEFAULT_NEWSROOM_ID} and av.url = ${url}
     order by av.captured_at asc, av.id asc
     limit 40
   `;
@@ -290,7 +297,8 @@ async function loadVersion(id: number): Promise<PublicEvidence | null> {
     full_text: string;
   }>`
     select id, url, title, captured_at::text as captured_at, content_hash, fetch_outcome, full_text
-    from artifact_versions where id = ${id} limit 1
+    from artifact_versions
+    where id = ${id} and newsroom_id = ${DEFAULT_NEWSROOM_ID} limit 1
   `;
   const row = rows[0];
   if (!row) return null;
