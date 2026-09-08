@@ -334,7 +334,7 @@ jobs:
           HOST: 127.0.0.1
           PROVIDER_SIGNIN_BASE_URL: http://127.0.0.1:3312
           PROVIDER_SIGNIN_PHASE: fake
-          CLAUDE_CLI_PATH: "${{ github.workspace }}/scripts/fakes/fake-claude-cli.mjs"
+          CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
           FAKE_CLAUDE_STATE_FILE: /tmp/fake-claude-signed-in
           FAKE_CLAUDE_DELAY_MS: "8000"
         run: |
@@ -488,7 +488,7 @@ jobs:
           DAILY_SCAN_E2E: "1"
           DAILY_SCAN_E2E_ARTIFACT_DIR: "${{ runner.temp }}/daily-scan-evidence"
           DATABASE_URL: ""
-          CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          CLAUDE_CLI_PATH: "${{ github.workspace }}/scripts/fakes/fake-claude-cli.mjs"
           FAKE_CLAUDE_SIGNED_IN: "1"
           FAKE_CLAUDE_VALID_DRAFT: "1"
         run: |
