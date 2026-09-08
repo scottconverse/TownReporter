@@ -301,9 +301,33 @@ async function seedFindingEvidenceReview({ newsroomId, userId }) {
       excerpt: "deadline is Friday",
     },
   ];
+  const reportedClaims = {
+    version: 1,
+    rows: [
+      {
+        fact: `TEST FIXTURE: The library board approved the recreation room update ${stamp}.`,
+        url: sourceUrl,
+        kind: "record",
+      },
+    ],
+  };
+  const provenance = [
+    {
+      title: "TEST FIXTURE — Library agenda",
+      organization: "Library",
+      document_date: "2026-09-07",
+      url: sourceUrl,
+      captured_at: "2026-09-07T08:00:00Z",
+      version_id: cited.rows[0].id,
+      version_count: 1,
+      capture_event_id: capture.rows[0].id,
+      disappeared: false,
+      role: "source",
+    },
+  ];
   await pool.query(
     `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,provenance_json,found_note,unanswered,research_json)
-     values($1,$2,$3,$4,'TEST FIXTURE dek',$5,'community',$6,'[]',$7,'[]','{}')`,
+     values($1,$2,$3,$4,'TEST FIXTURE dek',$5,'community',$6,$7,$8,'[]',$9)`,
     [
       userId,
       newsroomId,
@@ -311,7 +335,9 @@ async function seedFindingEvidenceReview({ newsroomId, userId }) {
       `TEST FIXTURE — Library recreation center update ${stamp}`,
       `TEST FIXTURE body: the library board considered a recreation center update ${stamp}.`,
       JSON.stringify([sourceUrl]),
+      JSON.stringify(provenance),
       JSON.stringify(findings),
+      JSON.stringify({ reportedClaims }),
     ],
   );
   await pool.query(
@@ -463,7 +489,7 @@ async function main() {
   });
   await page.goto(`${base}/desk/story/${findingFixture.leadId}`, { waitUntil: "networkidle" });
   const review = page.locator("#finding-evidence-review");
-  await review
+  await review.locator("article").first()
     .getByText("TEST FIXTURE: The library board approved the recreation room update")
     .waitFor();
   const recordedPassages = review.getByText("Recorded excerpt found in cited version");
@@ -480,6 +506,17 @@ async function main() {
     .getByText("The library board approved the recreation room update Tuesday.")
     .waitFor();
   await capturedText.getByRole("button", { name: "Close captured text" }).click();
+  const claimInventory = review.locator('[aria-labelledby="draft-pass-claims-heading"]');
+  await claimInventory
+    .getByText("TEST FIXTURE: The library board approved the recreation room update")
+    .waitFor();
+  await claimInventory.getByText("Returned URL:").waitFor();
+  await claimInventory.getByRole("button", { name: "View exact captured version" }).first().click();
+  await capturedText
+    .getByText("The library board approved the recreation room update Tuesday.")
+    .waitFor();
+  await capturedText.getByRole("button", { name: "Close captured text" }).click();
+  step("the private draft-pass claim inventory shows only its exact captured provenance");
   const newerCaptureButtons = review.getByRole("button", { name: /Review newer capture/ });
   if ((await newerCaptureButtons.count()) !== 2)
     throw new Error("expected a newer-capture action for each duplicate cited passage");

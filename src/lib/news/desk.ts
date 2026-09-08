@@ -981,7 +981,11 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const notes = reported.integrity_notes;
   const provenanceJson = JSON.stringify(reported.provenance);
   const unansweredJson = JSON.stringify(reported.unanswered);
-  const researchJson = JSON.stringify({ ...reported.research_memo, researchScope: draftInput.researchScope });
+  const researchJson = JSON.stringify({
+    ...reported.research_memo,
+    researchScope: draftInput.researchScope,
+    reportedClaims: { version: 1, rows: reported.claims },
+  });
   const yours = keepHumanTodos(prevNotes);
   /*
     Claims of absence, as checkboxes the editor must tick before Publish.
