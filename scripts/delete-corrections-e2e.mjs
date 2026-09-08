@@ -585,8 +585,8 @@ async function main() {
     throw new Error("manual claim judgment did not remain reopened after reload");
   step("an editor-created claim keeps only an explicit owned captured record, refuses a stale open form, and reopens after an edit");
   const newerCaptureButtons = review.getByRole("button", { name: /Review newer capture/ });
-  if ((await newerCaptureButtons.count()) !== 2)
-    throw new Error("expected a newer-capture action for each duplicate cited passage");
+  if ((await newerCaptureButtons.count()) !== 1)
+    throw new Error("expected one newer-capture action for the grouped cited record");
   await newerCaptureButtons.first().click();
   await capturedText
     .getByText("The recreation room update was reconsidered Wednesday.")
