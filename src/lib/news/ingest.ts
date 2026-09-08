@@ -136,6 +136,11 @@ export type OcrOptions = {
   newsroomId?: string;
   jobLabel?: string;
   localModel?: { baseUrl: string; id: string } | null;
+  /** Immutable batch/scheduled transport. Bypasses API-key and Automatic selection. */
+  forcedPlan?:
+    | { kind: "claude-code" | "codex"; model: string }
+    | { kind: "local"; baseUrl: string; model: string };
+  beforeModelCall?: () => Promise<void>;
   /**
    * Test-only per-transport override (mirrors ai.ts's `GrokChatAdapters`),
    * keyed by the transport kind ("anthropic" | "codex" | "claude-code" |

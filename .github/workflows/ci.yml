@@ -207,6 +207,8 @@ jobs:
         run: node --experimental-strip-types --test src/lib/news/draft-order.postgres.test.ts
       - name: Daily scan ticks reserve one atomic job on real PostgreSQL
         run: node --experimental-strip-types --test src/lib/news/daily-scan.postgres.test.ts
+      - name: Editor-selected draft batches serialize on real PostgreSQL
+        run: node --experimental-strip-types --test src/lib/news/draft-batch.postgres.test.ts
 
   # These two walks each need an UNCLAIMED desk: they create their own owner
   # at /login, and the first account in owns the newsroom.
@@ -459,10 +461,9 @@ jobs:
   # this job it had zero CI-gated browser coverage -- the only scripts that
   # ever touched /desk/scan were the nightly, opt-in, real-money proof job
   # and two one-off audit scratch files wired into neither `npm test` nor
-  # this file (GauntletGate TES-01). Model-free, same trick as
-  # provider-signin/dark-picker: the fake Claude CLI answers signed in and
-  # Run scan is never clicked, so nothing here spends money or calls a real
-  # provider. See the walk under scripts/, named for what it proves.
+  # this file (GauntletGate TES-01). The fake Claude CLI answers signed in;
+  # Run scan is never clicked, and batch drafting only exercises that fake
+  # runtime. Nothing here calls a real provider. See the walk under scripts/.
   scan-desk:
     name: The Scan desk renders, in a browser
     runs-on: ubuntu-latest
@@ -476,7 +477,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run build
-      - name: Scan and daily settings save, conflict, and pause render without starting a scan
+      - name: Scan, daily settings, and batch drafting render with the fake runtime
         env:
           BETTER_AUTH_SECRET: ci-scan-desk-secret-not-for-production
           PORT: "3420"
@@ -487,6 +488,7 @@ jobs:
           DATABASE_URL: ""
           CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
           FAKE_CLAUDE_SIGNED_IN: "1"
+          FAKE_CLAUDE_VALID_DRAFT: "1"
         run: |
           npm start > /tmp/scan-desk.log 2>&1 &
           DEV_PID=$!

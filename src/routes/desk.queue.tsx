@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { LeadRowView, SEEN_AGAIN_EXPLAINER } from "@/components/desk-leads";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
@@ -10,6 +10,19 @@ import { nearDuplicate, openLeads, workingQueueEmptyCopy } from "@/lib/news/desk
 import { useEditorSections } from "@/lib/use-sections";
 import { usePaper } from "@/lib/paper-context";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
+import { myDesk } from "@/lib/news/claim";
+import {
+  getDraftBatch,
+  startDraftBatch,
+  type DraftBatchRuntime,
+} from "@/lib/news/draft-batch";
+
+const BATCH_RUNTIMES: ReadonlyArray<{ value: DraftBatchRuntime; label: string }> = [
+  { value: "local", label: "Local model" },
+  { value: "claude-cli", label: "Claude Code" },
+  { value: "codex-terra", label: "Codex Terra" },
+  { value: "codex-sol", label: "Codex Sol" },
+];
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
 
@@ -19,6 +32,8 @@ function QueuePage() {
   const PAPER = usePaper();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const desk = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const newsroomId = desk.data?.ok ? desk.data.newsroomId : null;
   const { data: leads = [], isPending, isError, error, refetch, isRefetching } = useQuery({
     queryKey: ["leads"],
     queryFn: () => listLeads(),
@@ -67,6 +82,60 @@ function QueuePage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [draftNotices, setDraftNotices] = useState<Record<number, { kind: "ok" | "err"; text: string }>>({});
   const [draftingIds, setDraftingIds] = useState<number[]>([]);
+  const [selectedBatchLeadIds, setSelectedBatchLeadIds] = useState<number[]>([]);
+  const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("local");
+  const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
+  const [batchNotice, setBatchNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const leadRefreshAfterTerminalBatch = useRef<number | null>(null);
+  const batch = useQuery({
+    queryKey: ["draft-batch", newsroomId, activeBatchId ?? "latest"],
+    queryFn: () => getDraftBatch({ data: activeBatchId ? { batchId: activeBatchId } : {} }),
+    enabled: newsroomId !== null,
+    refetchInterval: (query) => {
+      const result = query.state.data;
+      if (!result?.ok || !result.batch) return false;
+      return result.batch.items.some((item) => item.status === "queued" || item.status === "running")
+        ? 1_500
+        : false;
+    },
+  });
+  useEffect(() => {
+    const current = batch.data?.ok ? batch.data.batch : null;
+    if (!current) return;
+    const open = current.items.some((item) => item.status === "queued" || item.status === "running");
+    if (open || leadRefreshAfterTerminalBatch.current === current.id) return;
+    leadRefreshAfterTerminalBatch.current = current.id;
+    void qc.invalidateQueries({ queryKey: ["leads"] });
+  }, [batch.data, qc]);
+  const startBatch = useMutation({
+    mutationFn: (input: { leadIds: number[]; runtime: DraftBatchRuntime }) =>
+      startDraftBatch({
+        data: { items: input.leadIds.map((leadId) => ({ leadId })), runtime: input.runtime },
+      }),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setBatchNotice({
+          kind: "err",
+          text: `${result.error}${result.leadId ? ` (lead #${result.leadId})` : ""}`,
+        });
+        return;
+      }
+      setSelectedBatchLeadIds([]);
+      setActiveBatchId(result.batch.id);
+      leadRefreshAfterTerminalBatch.current = null;
+      setBatchNotice({
+        kind: "ok",
+        text: `Draft batch started with ${result.batch.runtime.label}.`,
+      });
+      qc.setQueryData(["draft-batch", newsroomId, result.batch.id], result);
+    },
+    onError: (error) => {
+      setBatchNotice({
+        kind: "err",
+        text: error instanceof Error ? error.message : "That draft batch did not start.",
+      });
+    },
+  });
   const queueDraft = useMutation({
     mutationFn: (input: { leadId: number; modelChoice: StoryModelChoice }) => draftLead({ data: input }),
     onMutate: ({ leadId }) => setDraftingIds((ids) => [...ids.filter((id) => id !== leadId), leadId]),
@@ -121,6 +190,12 @@ function QueuePage() {
   });
 
   const working = openLeads(leads);
+  const batchEligible = leads.filter(
+    (lead) => lead.status !== "held" && lead.status !== "killed" && lead.status !== "published",
+  );
+  const selectedBatchLeads = selectedBatchLeadIds.filter((leadId) =>
+    batchEligible.some((lead) => lead.id === leadId),
+  );
   const publishedCount = leads.filter((l) => l.status === "published").length;
   const last = scans.data?.[0];
   const counts = {
@@ -204,6 +279,83 @@ function QueuePage() {
           </InkButton>
         </form>
       </details>
+
+      <section id="draft-batch" aria-labelledby="draft-batch-heading">
+        <h2 id="draft-batch-heading">Draft selected leads</h2>
+        <p className="wire-sum">
+          Choose up to five eligible queue leads and one writing runtime. Each lead keeps its own
+          stored research scope. This queues drafts for editor review; it does not publish anything.
+        </p>
+        <div className="form-grid">
+          <Field label="Batch runtime">
+            <select
+              value={batchRuntime}
+              disabled={startBatch.isPending}
+              onChange={(event) => setBatchRuntime(event.target.value as DraftBatchRuntime)}
+            >
+              {BATCH_RUNTIMES.map((runtime) => (
+                <option key={runtime.value} value={runtime.value}>
+                  {runtime.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <p className="meta">{selectedBatchLeads.length} of 5 selected</p>
+        <InkButton
+          disabled={newsroomId === null || selectedBatchLeads.length === 0 || startBatch.isPending}
+          onClick={() => {
+            setBatchNotice(null);
+            startBatch.mutate({ leadIds: selectedBatchLeads, runtime: batchRuntime });
+          }}
+        >
+          {startBatch.isPending ? "Starting batch…" : "Draft selected"}
+        </InkButton>
+        {batchNotice ? <Notice kind={batchNotice.kind}>{batchNotice.text}</Notice> : null}
+        {desk.isPending || batch.isPending ? (
+          <p className="meta">Loading the latest draft batch…</p>
+        ) : batch.isError ? (
+          <Notice kind="err">Could not load the latest draft batch.</Notice>
+        ) : batch.data && !batch.data.ok ? (
+          <Notice kind="err">{batch.data.error}</Notice>
+        ) : batch.data?.ok && batch.data.batch ? (
+          <div className="lead-list roomy" aria-label="Draft batch results">
+            <p className="meta">
+              Batch #{batch.data.batch.id} · {batch.data.batch.runtime.label}
+            </p>
+            {batch.data.batch.runtime.runtime === "local" ? (
+              <p className="meta">
+                This batch keeps the saved local model shown above.{" "}
+                <Link to="/desk/ops" className="inline-link">
+                  Review local models on Server
+                </Link>{" "}
+                before starting another batch.
+              </p>
+            ) : null}
+            {batch.data.batch.items.map((item) => {
+              const lead = leads.find((candidate) => candidate.id === item.leadId);
+              return (
+                <div className="lead-row" key={item.jobId}>
+                  <div className="lead-main">
+                    <a className="hl-link" href={item.workbenchHref}>
+                      Open {lead?.headline ?? `lead #${item.leadId}`}
+                    </a>
+                    <p className="meta">
+                      <span data-draft-batch-status>
+                        {item.status[0].toUpperCase() + item.status.slice(1)}
+                      </span>{" "}
+                      · {item.stage}
+                    </p>
+                    {item.error ? <Notice kind="err">{item.error}</Notice> : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="meta">No draft batch has been started in this newsroom.</p>
+        )}
+      </section>
 
       <div className="filters">
         {(["all", "new", "drafted", "held", "killed"] as const).map((k) => (
@@ -292,6 +444,21 @@ function QueuePage() {
               }}
               drafting={draftingIds.includes(l.id)}
               draftNotice={draftNotices[l.id] ?? null}
+              batchSelected={selectedBatchLeads.includes(l.id)}
+              batchDisabled={
+                startBatch.isPending ||
+                (!selectedBatchLeads.includes(l.id) && selectedBatchLeads.length >= 5)
+              }
+              onBatchSelect={
+                l.status !== "held" && l.status !== "killed" && l.status !== "published"
+                  ? (selected) => {
+                      setSelectedBatchLeadIds((ids) => {
+                        if (selected) return [...ids.filter((id) => id !== l.id), l.id];
+                        return ids.filter((id) => id !== l.id);
+                      });
+                    }
+                  : undefined
+              }
             />
           ))}
         </div>

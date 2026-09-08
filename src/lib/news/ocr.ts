@@ -178,6 +178,21 @@ const NO_VISION_AVAILABLE =
 
 /** Which provider actually reads the pages, honouring the editor's picker choice. */
 async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
+  if (opts.forcedPlan) {
+    if (opts.forcedPlan.kind === "local") {
+      const local = await resolveVisionLocal({
+        baseUrl: opts.forcedPlan.baseUrl,
+        id: opts.forcedPlan.model,
+      });
+      return (
+        local ?? {
+          needsOcr: true,
+          reason: "the selected local model cannot read images.",
+        }
+      );
+    }
+    return opts.forcedPlan;
+  }
   const provider = opts.provider;
   if (!provider || provider === "auto") {
     // Automatic order: Anthropic API -> Codex -> Claude Code CLI -> a
@@ -414,6 +429,7 @@ export const productionOcr: OcrImpl = async (buf, opts = {}) => {
     };
   }
 
+  await opts.beforeModelCall?.();
   const plan = await resolvePlan(opts);
   if ("needsOcr" in plan) {
     return { text: "", pages: [], reason: plan.reason };
@@ -429,6 +445,7 @@ export const productionOcr: OcrImpl = async (buf, opts = {}) => {
     const image = images[i]!;
     if (image.bytes.byteLength > OCR_MAX_IMAGE_BYTES) continue; // over the 2MB-per-page cap
     let raw: string;
+    await opts.beforeModelCall?.();
     try {
       raw = await transcribePage(plan, image, timeoutMs, opts.adapters as OcrAdapters | undefined);
     } catch {
