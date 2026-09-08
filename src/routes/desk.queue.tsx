@@ -6,7 +6,7 @@ import { LeadRowView, SEEN_AGAIN_EXPLAINER } from "@/components/desk-leads";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteLead, draftLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
 import { restoreTrashItem } from "@/lib/news/trash";
-import { nearDuplicate, openLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
+import { nearDuplicate, openLeads, suggestFocusLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
 import { useEditorSections } from "@/lib/use-sections";
 import { usePaper } from "@/lib/paper-context";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
@@ -75,6 +75,7 @@ function QueuePage() {
     onError: (e) => setDeleteError(e instanceof Error ? e.message : "That would not go back."),
   });
   const [filter, setFilter] = useState<"all" | "new" | "drafted" | "held" | "killed">("all");
+  const [focusTarget, setFocusTarget] = useState<3 | 4 | 5>(3);
   const [headline, setHeadline] = useState("");
   const [why, setWhy] = useState("");
   const [topic, setTopic] = useState("council");
@@ -196,6 +197,8 @@ function QueuePage() {
   const selectedBatchLeads = selectedBatchLeadIds.filter((leadId) =>
     batchEligible.some((lead) => lead.id === leadId),
   );
+  const suggestedFocus = suggestFocusLeads(batchEligible, sections, focusTarget);
+  const focusAddable = suggestedFocus.filter((lead) => !selectedBatchLeads.includes(lead.id));
   const publishedCount = leads.filter((l) => l.status === "published").length;
   const last = scans.data?.[0];
   const counts = {
@@ -286,6 +289,41 @@ function QueuePage() {
           Choose up to five eligible queue leads and one writing runtime. Each lead keeps its own
           stored research scope. This queues drafts for editor review; it does not publish anything.
         </p>
+        <div className="wire-sum">
+          <Field label="Suggested focus size">
+            <select
+              value={focusTarget}
+              onChange={(event) => setFocusTarget(Number(event.target.value) as 3 | 4 | 5)}
+              disabled={startBatch.isPending}
+            >
+              {[3, 4, 5].map((size) => (
+                <option key={size} value={size}>
+                  {size} leads
+                </option>
+              ))}
+            </select>
+          </Field>
+          <p className="meta">
+            Suggestions use existing queue priority and section variety. They are not verified
+            importance or a claim about an actual coverage gap.
+          </p>
+          <InkButton
+            small
+            disabled={startBatch.isPending || focusAddable.length === 0 || selectedBatchLeads.length >= 5}
+            onClick={() => {
+              setSelectedBatchLeadIds((ids) => {
+                const room = 5 - ids.length;
+                const additions = suggestedFocus
+                  .filter((lead) => !ids.includes(lead.id))
+                  .slice(0, room)
+                  .map((lead) => lead.id);
+                return [...ids, ...additions];
+              });
+            }}
+          >
+            Add suggested focus ({Math.min(focusAddable.length, 5 - selectedBatchLeads.length)})
+          </InkButton>
+        </div>
         <div className="form-grid">
           <Field label="Batch runtime">
             <select
