@@ -211,6 +211,52 @@ describe("saved Schema.org Event extraction", () => {
     assert.equal(refusedLookalike?.validation?.valid, false);
   });
 
+  it("preserves and normalizes only exact Schema.org event statuses in every JSON-LD family", () => {
+    for (const formatKey of [
+      "library-notice",
+      "parks-recreation-notice",
+      "community-arts-event-logistics",
+    ] as const) {
+      for (const [rawStatus, normalized] of [
+        ["EventScheduled", "scheduled"],
+        ["https://schema.org/EventCancelled", "cancelled"],
+      ] as const) {
+        const html = `<script type="application/ld+json">${JSON.stringify({
+          "@type": "Event",
+          "@id": `${formatKey}-${normalized}`,
+          name: "Town program",
+          startDate: "2026-09-08T10:00:00-06:00",
+          organizer: { name: "Town" },
+          location: { name: "Hall" },
+          eventStatus: rawStatus,
+        })}</script>`;
+        const result = extractJsonLdEvents(html, { formatKey, provenance })[0];
+        assert.equal(result?.status, "parsed");
+        if (result?.status !== "parsed" || !result.validation.valid) continue;
+        assert.equal(result.validation.notice.fields.eventStatus?.value, rawStatus);
+        assert.equal(result.validation.notice.fields.eventStatus?.locator.endsWith(".eventStatus"), true);
+        assert.equal(result.validation.notice.normalizedFields.eventStatus, normalized);
+      }
+    }
+
+    const foreign = `<script type="application/ld+json">${JSON.stringify({
+      "@type": "Event",
+      "@id": "foreign-status",
+      name: "Town program",
+      startDate: "2026-09-08T10:00:00-06:00",
+      organizer: { name: "Town" },
+      location: { name: "Hall" },
+      eventStatus: "https://attacker.example/NotAnEventCancelled",
+    })}</script>`;
+    for (const formatKey of [
+      "library-notice",
+      "parks-recreation-notice",
+      "community-arts-event-logistics",
+    ] as const) {
+      assert.equal(extractJsonLdEvents(foreign, { formatKey, provenance })[0]?.status, "refused");
+    }
+  });
+
   it("accepts documented Event identifiers in scalar and array @type values", () => {
     for (const type of [
       "https://schema.org/Event",
