@@ -1,10 +1,16 @@
 # Changelog
 
-Current release: **0.6.30**.
+Current release: **0.6.31**.
 
 ## Unreleased
 
+## 0.6.31 beta
+
 - Owners can explicitly activate paused-by-default automatic routine editions from up to 12 approved structured sources. Deterministic logistics-only templates cover all six approved families and publish Today, Friday-weekend, or new/changed seven-day deadline roundups through ordinary articles, public source links, and visible corrections. Empty or unchanged editions are skipped; conflicts, risky language, stale authority/evidence, edited articles, and unsupported calendar features remain for review. Private feed addresses and captured text are not attached to public articles.
+- The Queue keeps the full lead set while offering an optional focus on up to 3–5 existing eligible leads. Suggestions balance existing scores and section variety; the editor keeps final selection and reviews evidence before drafting.
+- The beta scope continues the owner-approved six structured resident formats: library notices, parks and recreation notices, verified community and arts events, routine registration deadlines, waste and recycling schedules, and public-meeting logistics. Sources and formats require explicit owner opt-in; unsupported or ambiguous inputs remain unavailable or are refused explicitly.
+- Claim-level/manual corroboration and routine-automation/roundup work are included in the beta scope. Ordinary reporting remains human-reviewed and published; the six owner-approved routine formats use deterministic source, eligibility, freshness, conflict, review-history and idempotency checks before automatic publication. Routine automation runs daily rather than continuously watching sources, and an approved source change can be corrected by a same-day rerun.
+- The Windows installation and local newsroom workflow build on the published 0.6.30 base. This beta does not claim Halo deployment or a performance guarantee; the 60-minute and 3–5-useful-item targets require measured acceptance on the tested environment.
 
 ## 0.6.30 — 2026-09-07
 
