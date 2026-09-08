@@ -500,6 +500,12 @@ async function main() {
   await review
     .getByText("Save the current headline, dek, body, and section before recording a judgment.")
     .waitFor({ state: "detached" });
+  await page.waitForFunction(() => {
+    const firstFinding = document.querySelector("#finding-evidence-review article");
+    return [...(firstFinding?.querySelectorAll("button") ?? [])].some(
+      (button) => button.textContent?.trim() === "Save judgment" && !button.disabled,
+    );
+  });
   if (await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled())
     throw new Error("saved draft revision left finding judgments disabled");
   step("saving a draft revision refreshes the finding review without a page reload");
