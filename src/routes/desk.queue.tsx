@@ -130,6 +130,8 @@ function QueuePage() {
       }
       setSelectedBatchLeadIds([]);
       setActiveBatchId(result.batch.id);
+      openBatchSeen.current = result.batch.id;
+      leadRefreshAfterTerminalBatch.current = null;
       setBatchNotice({
         kind: "ok",
         text: `Draft batch started with ${result.batch.runtime.label}.`,

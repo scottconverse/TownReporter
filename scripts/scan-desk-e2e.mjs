@@ -46,6 +46,7 @@ const evidenceDir = resolve(process.env.DAILY_SCAN_E2E_ARTIFACT_DIR || "../daily
 
 let page;
 const done = [];
+let expectedFixtureTimeoutErrors = 0;
 
 function step(name) {
   done.push(name);
@@ -398,7 +399,6 @@ async function main() {
   page.setDefaultTimeout(45_000);
 
   const consoleErrors = [];
-  let expectedFixtureTimeoutErrors = 0;
   const note = (text) => {
     if (expectedFixtureTimeoutErrors > 0 && /net::ERR_TIMED_OUT/.test(text)) {
       expectedFixtureTimeoutErrors -= 1;
