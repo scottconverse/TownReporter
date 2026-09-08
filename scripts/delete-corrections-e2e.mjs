@@ -517,6 +517,57 @@ async function main() {
     .waitFor();
   await capturedText.getByRole("button", { name: "Close captured text" }).click();
   step("the private draft-pass claim inventory shows only its exact captured provenance");
+  const manualClaims = review.locator('[aria-labelledby="manual-claims-heading"]');
+  await manualClaims.getByLabel("Claim text").fill(
+    `TEST FIXTURE: The library recreation room meeting starts at 6 p.m. ${stamp}.`,
+  );
+  await manualClaims.getByLabel("Named, dated record").selectOption(String(findingFixture.citedVersionId));
+  await manualClaims.getByLabel("Relationship").selectOption("corroborating");
+  await manualClaims.getByRole("button", { name: "Add record" }).click();
+  await manualClaims.getByRole("button", { name: "Add manual claim" }).click();
+  await review.getByText("Manual claim saved.", { exact: true }).waitFor();
+  const manualRow = manualClaims.locator("article").first();
+  await manualRow.getByText("TEST FIXTURE: The library recreation room meeting starts at 6 p.m.").waitFor();
+  await manualRow.getByRole("button", { name: "View selected captured version" }).click();
+  await capturedText.getByText("The library board approved the recreation room update Tuesday.").waitFor();
+  await capturedText.getByRole("button", { name: "Close captured text" }).click();
+  await manualRow.getByLabel("Judgment").selectOption("supports");
+  await manualRow.getByLabel(/Reason/).fill("TEST FIXTURE: the selected record is an editor-marked corroborating record.");
+  await manualRow.getByRole("button", { name: "Save judgment" }).click();
+  await review.getByText("Evidence judgment saved.", { exact: true }).waitFor();
+  await manualRow.getByRole("button", { name: "Edit claim" }).click();
+  await manualClaims.getByLabel("Claim text").fill(
+    `TEST FIXTURE: The library recreation room meeting starts at 6:30 p.m. ${stamp}.`,
+  );
+  const findingWhileManualFormOpen = review.locator("article").first();
+  await findingWhileManualFormOpen.getByLabel("Judgment").selectOption("does-not-support");
+  await findingWhileManualFormOpen.getByLabel(/Reason/).fill("TEST FIXTURE: update the review token while a manual claim form remains open.");
+  await findingWhileManualFormOpen.getByRole("button", { name: "Save judgment" }).click();
+  await review.getByText("Evidence judgment saved.", { exact: true }).waitFor();
+  await manualClaims.getByRole("button", { name: "Save manual claim" }).click();
+  await review.getByRole("button", { name: "Reload current review and discard unsaved evidence edits" }).waitFor();
+  if ((await manualClaims.getByLabel("Claim text").inputValue()).indexOf("6:30 p.m.") < 0)
+    throw new Error("a refresh discarded the manual claim form after its stale save was refused");
+  await review.getByRole("button", { name: "Reload current review and discard unsaved evidence edits" }).click();
+  await review.getByText("Current evidence review loaded.", { exact: true }).waitFor();
+  if (await manualClaims.getByLabel("Claim text").inputValue())
+    throw new Error("successful explicit reload did not discard the stale manual claim form");
+  await manualClaims.locator("article").first().getByRole("button", { name: "Edit claim" }).click();
+  await manualClaims.getByLabel("Claim text").fill(
+    `TEST FIXTURE: The library recreation room meeting starts at 6:30 p.m. ${stamp}.`,
+  );
+  await manualClaims.getByRole("button", { name: "Save manual claim" }).click();
+  await review.getByText("Manual claim saved.", { exact: true }).waitFor();
+  if ((await manualRow.getByLabel("Judgment").inputValue()) !== "unreviewed")
+    throw new Error("editing a manual claim did not invalidate its prior judgment");
+  await page.reload({ waitUntil: "networkidle" });
+  const persistedManualClaims = page.locator('#finding-evidence-review [aria-labelledby="manual-claims-heading"]');
+  await persistedManualClaims
+    .getByText("TEST FIXTURE: The library recreation room meeting starts at 6:30 p.m.")
+    .waitFor();
+  if ((await persistedManualClaims.locator("article").first().getByLabel("Judgment").inputValue()) !== "unreviewed")
+    throw new Error("manual claim judgment did not remain reopened after reload");
+  step("an editor-created claim keeps only an explicit owned captured record, refuses a stale open form, and reopens after an edit");
   const newerCaptureButtons = review.getByRole("button", { name: /Review newer capture/ });
   if ((await newerCaptureButtons.count()) !== 2)
     throw new Error("expected a newer-capture action for each duplicate cited passage");
@@ -715,7 +766,7 @@ async function main() {
   };
   await secondTab.route("**/*", blockReviewReload);
   await secondReview
-    .getByRole("button", { name: "Reload current review and discard unsaved judgment edits" })
+    .getByRole("button", { name: "Reload current review and discard unsaved evidence edits" })
     .click();
   await secondReview.getByText("Could not reload the evidence review.").waitFor();
   if (failedReloadRequests === 0) throw new Error("failed reload proof intercepted no review request");
