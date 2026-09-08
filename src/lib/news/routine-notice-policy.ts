@@ -54,7 +54,7 @@ export type RoutineNoticePolicy = {
   revision: number;
   updatedAt: string | null;
   updatedBy: string | null;
-  effectivePublicationAvailable: false;
+  effectivePublicationAvailable: true;
   approvals: RoutineNoticeApproval[];
   recentChanges: RoutineNoticeChange[];
 };
@@ -79,8 +79,7 @@ export type RoutineNoticePolicyResult =
 
 export const ROUTINE_NOTICE_APPROVAL_LIMIT = 60;
 const KEYS = new Set<string>(ROUTINE_NOTICE_FORMATS.map((x) => x.key));
-const NOTICE =
-  "Permissions saved. Automatic publication is not available in this version; no items will publish from these settings.";
+const NOTICE = "Permissions saved. Permissions alone do not activate routine editions.";
 type ErrorCode = Exclude<RoutineNoticePolicyResult, { ok: true }>["code"];
 class PolicyError extends Error {
   readonly code: ErrorCode;
@@ -191,7 +190,7 @@ async function readPolicy(sql: Sql, newsroomId: number): Promise<RoutineNoticePo
     revision: policy?.revision ?? 0,
     updatedAt: policy?.updated_at ? String(policy.updated_at) : null,
     updatedBy: policy?.updated_by ?? null,
-    effectivePublicationAvailable: false,
+    effectivePublicationAvailable: true,
     approvals: approvals.map((a) => {
       const state = !a.current_url
         ? "missing"

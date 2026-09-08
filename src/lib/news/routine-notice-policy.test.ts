@@ -55,7 +55,7 @@ test("defaults empty and saves/revokes with monotonic CAS and audit", async () =
   const empty = await readRoutineNoticePolicyFor(owner, room);
   assert.equal(empty.revision, 0);
   assert.deepEqual(empty.approvals, []);
-  assert.equal(empty.effectivePublicationAvailable, false);
+  assert.equal(empty.effectivePublicationAvailable, true);
   const saved = await saveRoutineNoticePolicyFor(owner, room, {
     expectedRevision: 0,
     paused: false,
@@ -204,9 +204,7 @@ test("history never attributes an old approval to a replacement URL or recreated
   const reapproved = await saveRoutineNoticePolicyFor(owner, room, {
     expectedRevision: 1,
     paused: false,
-    approvals: [
-      { sourceId: s.id, sourceUrl: replacementUrl, formatKey: "library-notice" },
-    ],
+    approvals: [{ sourceId: s.id, sourceUrl: replacementUrl, formatKey: "library-notice" }],
   });
   const oldApproval = reapproved.recentChanges.find(
     (change) => change.revision === 1 && change.action === "approved",
@@ -214,10 +212,7 @@ test("history never attributes an old approval to a replacement URL or recreated
   assert.equal(oldApproval?.sourceUrl, null);
   assert.equal(
     reapproved.recentChanges.some(
-      (change) =>
-        change.revision === 2 &&
-        change.action === "revoked" &&
-        change.sourceUrl === null,
+      (change) => change.revision === 2 && change.action === "revoked" && change.sourceUrl === null,
     ),
     true,
   );
@@ -240,18 +235,13 @@ test("history never attributes an old approval to a replacement URL or recreated
   assert.equal(
     recreated.recentChanges.some(
       (change) =>
-        change.revision === 1 &&
-        change.action === "approved" &&
-        change.sourceUrl === null,
+        change.revision === 1 && change.action === "approved" && change.sourceUrl === null,
     ),
     true,
   );
   assert.equal(
     recreated.recentChanges.some(
-      (change) =>
-        change.revision === 2 &&
-        change.action === "revoked" &&
-        change.sourceUrl === null,
+      (change) => change.revision === 2 && change.action === "revoked" && change.sourceUrl === null,
     ),
     true,
   );

@@ -150,6 +150,7 @@ if (dbProbe.ok) {
     const pageWatch = await import("./page-watch.ts");
     const routineNoticePolicy = await import("./routine-notice-policy.ts");
     const routineNoticeChecks = await import("./routine-notice-checks.server.ts");
+    const routineNoticeAutomation = await import("./routine-notice-automation.ts");
     const db = await import("../db.ts");
     closePoolForTests = db.closePoolForTests;
 
@@ -180,6 +181,7 @@ if (dbProbe.ok) {
     await pageWatch.ensurePageWatchSchema();
     await routineNoticePolicy.ensureRoutineNoticePolicySchema();
     await routineNoticeChecks.ensureRoutineNoticeCheckSchema();
+    await routineNoticeAutomation.ensureRoutineNoticeAutomationSchema();
     const routineCheckGuards = await sectionSql<{ tgname: string }>`
       select tgname from pg_trigger
       where tgname='routine_notice_checks_legal_guard' and tgenabled <> 'D'

@@ -213,6 +213,8 @@ jobs:
         run: node --experimental-strip-types --test src/lib/news/routine-notice-policy.postgres.test.ts
       - name: Routine notice check replay and final authorization hold on real PostgreSQL
         run: node --experimental-strip-types --test src/lib/news/routine-notice-checks.postgres.test.ts
+      - name: Routine edition scheduling reserves one atomic job on real PostgreSQL
+        run: node --experimental-strip-types --test src/lib/news/routine-notice-automation.postgres.test.ts
 
   # These two walks each need an UNCLAIMED desk: they create their own owner
   # at /login, and the first account in owns the newsroom.

@@ -355,6 +355,10 @@ of its own. Budget for a piece, not for a paragraph.
 
 ## The Server page
 
+The owner can manage **Routine notice permissions** and the separate **Automatic routine editions** control here. Automation starts paused. It accepts at most 12 exact approved structured sources across library, parks/recreation, community/arts, application deadlines, designated waste or deadline calendars, and public-meeting logistics. Each selection requires an owner-entered issuer, locality, and public attribution URL; waste also requires a non-residential collection area. The exact private fetch address and captured source remain private.
+
+After explicit activation, the unattended clock creates deterministic logistics-only ordinary articles: Today in town on the newsroom-local date, This weekend on Friday for Friday through Sunday, and Deadlines approaching only for new or changed deadlines in the next seven days. A run uses at most five useful items and emits no empty edition. Conflicts, cancellation, unsupported recurrence, risky language, stale permissions or evidence, and edited or unpublished target articles stay for review. Recent runs show their result counts and published-article links. Disable automation or pause routine permissions to stop later reservations. Manual checks remain available and never publish by themselves.
+
 `/desk/ops` — everything this machine is doing to keep the paper online.
 
 ![Server](images/11-server.png)
