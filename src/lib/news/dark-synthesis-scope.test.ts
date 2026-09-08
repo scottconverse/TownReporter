@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { getSql } from "../db.ts";
 import { ensureInvestigateSchema } from "./investigate.ts";
-import { buildDarkSynthesisPack, ensureDarkSchema } from "./dark.ts";
+import { buildBrief, buildDarkBriefPromptPack, buildDarkSynthesisPack, ensureDarkSchema } from "./dark.ts";
 import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 it("synthesis uses only its newsroom's context and configured city", async () => {
   const sql = await getSql();
@@ -35,4 +35,178 @@ it("synthesis uses only its newsroom's context and configured city", async () =>
   assert.doesNotMatch(pack, /OTHER_SECRET/);
   for (const expected of ["OWN_SOURCE", "OWN_LEAD", "OWN_ARTICLE", "OWN_MEMORY", "Centennial"])
     assert.ok(pack.includes(expected), expected);
+});
+
+it("synthesis keeps an older focus-matching capture and its stored page evidence over later noise", async () => {
+  const sql = await getSql();
+  const newsroomId = 78;
+  const otherNewsroomId = 79;
+  const userId = "synthesis-ranking";
+  await sql`insert into paper_settings(newsroom_id,city,state) values (${newsroomId},'Riverton','Colorado')`;
+  const inv = (
+    await sql<{ id: number }>`
+      insert into investigations(user_id,newsroom_id,title)
+      values (${userId},${newsroomId},'Cedar annexation FILE-4242')
+      returning id
+    `
+  )[0]!.id;
+  // The target begins near the end of a 2,000-character extractor chunk.
+  // A brief that clips each selected document to a head prefix loses it.
+  const targetText = `${"background ".repeat(710)}\nTARGET_ROW: FILE-4242 Cedar annexation covers the project record.`;
+  const version = (
+    await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_status,fetch_outcome)
+      values (${userId},${newsroomId},'https://records.example/cedar','target-hash','Cedar annexation packet',${targetText},200,'fetched')
+      returning id
+    `
+  )[0]!.id;
+  const capture = (
+    await sql<{ id: number }>`
+      insert into capture_events(user_id,newsroom_id,investigation_id,source_url,version_id,http_status,fetch_outcome,content_hash)
+      values (${userId},${newsroomId},${inv},'https://records.example/cedar',${version},200,'fetched','target-hash')
+      returning id
+    `
+  )[0]!.id;
+  await sql`
+    insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,fetch_status,fetch_outcome,version_id,capture_event_id)
+    values (${userId},${newsroomId},${inv},'https://records.example/cedar','Cedar annexation packet','target-hash',${targetText},200,'fetched',${version},${capture})
+  `;
+  await sql`
+    insert into artifact_chunks(version_id,user_id,newsroom_id,chunk_index,page_number,section,excerpt,locator)
+    values (${version},${userId},${newsroomId},0,7,'Annexation','Cedar filing table','page:7')
+  `;
+  await sql`
+    insert into artifact_chunks(version_id,user_id,newsroom_id,chunk_index,page_number,section,excerpt,locator)
+    values
+      (${version},${userId},${newsroomId},3,7,'Annexation','COFFMAN_ROW_HEADING: Coffman Apartments. PRECEDING_APPLICANT: Neighbor Holdings LLC','page:7:char:6000-6200'),
+      (${version},${userId},${newsroomId},4,7,'Annexation','PRECEDING_APPLICANT: Neighbor Holdings LLC. TARGET_ROW: FILE-4242 Cedar annexation covers the project record.','page:7:char:6200-6400'),
+      (${version},${userId},${newsroomId},5,7,'Annexation','APPLICANT_TAIL: Dana, Community Association','page:7:char:6400-6500')
+  `;
+  for (let i = 0; i < 41; i += 1) {
+    await sql`
+      insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,fetch_status,fetch_outcome)
+      values (${userId},${newsroomId},${inv},${`https://noise.example/${i}`},${`Later unrelated notice ${i}`},${`noise-${i}`},${`unrelated later noise ${i}`},200,'fetched')
+    `;
+  }
+  const otherInv = (
+    await sql<{ id: number }>`
+      insert into investigations(user_id,newsroom_id,title)
+      values (${userId},${otherNewsroomId},'Cedar annexation FILE-4242')
+      returning id
+    `
+  )[0]!.id;
+  await sql`
+    insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,fetch_status,fetch_outcome)
+    values (${userId},${otherNewsroomId},${otherInv},'https://foreign.example/cedar','FOREIGN_TARGET','foreign-target','TARGET_ROW: FOREIGN_SECRET',200,'fetched')
+  `;
+
+  const pack = await buildDarkSynthesisPack(inv, "", newsroomId);
+  assert.match(pack, /TARGET_ROW: FILE-4242 Cedar annexation/);
+  assert.match(pack, new RegExp(`capture:${capture} version:${version} hash:target-hash`));
+  assert.match(pack, /page:7/);
+  assert.doesNotMatch(pack, /FOREIGN_SECRET|FOREIGN_TARGET/);
+
+  const cappedPack = await buildDarkSynthesisPack(inv, "editor context ".repeat(2_000), newsroomId);
+  assert.ok(cappedPack.length <= 28_000, `synthesis pack was ${cappedPack.length} characters`);
+  assert.match(cappedPack, /TARGET_ROW: FILE-4242 Cedar annexation/);
+
+  const briefPack = await buildDarkBriefPromptPack(newsroomId, inv);
+  assert.ok(briefPack);
+  assert.ok(briefPack.length <= 22_000, `brief pack was ${briefPack.length} characters`);
+  assert.match(briefPack, /TARGET_ROW: FILE-4242 Cedar annexation/);
+  assert.match(briefPack, new RegExp(`capture:${capture} version:${version} hash:target-hash`));
+  assert.match(briefPack, /APPLICANT_TAIL: Dana, Community Association/);
+  assert.match(briefPack, /page:7:char:6400-6500/);
+  assert.match(briefPack, /COFFMAN_ROW_HEADING: Coffman Apartments/);
+  assert.ok(
+    briefPack.indexOf("COFFMAN_ROW_HEADING") < briefPack.indexOf("TARGET_ROW") &&
+      briefPack.indexOf("TARGET_ROW") < briefPack.indexOf("APPLICANT_TAIL"),
+    "stored page evidence must remain in source order",
+  );
+  assert.equal((briefPack.match(/TARGET_ROW: FILE-4242/g) ?? []).length, 1);
+  assert.doesNotMatch(briefPack, /FOREIGN_SECRET|FOREIGN_TARGET/);
+
+  for (let i = 0; i < 30; i += 1) {
+    await sql`
+      insert into claims(user_id,newsroom_id,investigation_id,body,kind,evidence)
+      values (${userId},${newsroomId},${inv},${`long fact ${i} `.repeat(200)},'FACT','recorded')
+    `;
+  }
+
+  let briefPrompt = "";
+  const brief = await buildBrief(
+    userId,
+    newsroomId,
+    inv,
+    undefined,
+    null,
+    async (_system, prompt) => {
+      briefPrompt = prompt;
+      return { ok: true, text: '{"headline":"Cedar record","tldr":"A captured record is available."}' };
+    },
+  );
+  assert.equal(brief.ok, true);
+  assert.match(briefPrompt, /TARGET_ROW: FILE-4242 Cedar annexation/);
+  assert.match(briefPrompt, new RegExp(`capture:${capture} version:${version} hash:target-hash`));
+  assert.match(briefPrompt, /APPLICANT_TAIL: Dana, Community Association/);
+  assert.match(briefPrompt, /page:7:char:6400-6500/);
+  assert.match(briefPrompt, /COFFMAN_ROW_HEADING: Coffman Apartments/);
+  assert.equal((briefPrompt.match(/TARGET_ROW: FILE-4242/g) ?? []).length, 1);
+});
+
+it("keeps readable evidence without focus tokens and collapses duplicate versions before the cap", async () => {
+  const sql = await getSql();
+  const userId = "synthesis-empty-focus";
+  const emptyRoom = 80;
+  await sql`insert into paper_settings(newsroom_id,city,state) values (${emptyRoom},'Riverton','Colorado')`;
+  const emptyInv = (
+    await sql<{ id: number }>`
+      insert into investigations(user_id,newsroom_id,title)
+      values (${userId},${emptyRoom},'AI tax')
+      returning id
+    `
+  )[0]!.id;
+  await sql`
+    insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,fetch_status,fetch_outcome)
+    values (${userId},${emptyRoom},${emptyInv},'https://records.example/short-focus','Short focus record','empty-focus','EMPTY_FOCUS_EVIDENCE remains readable without a four-character query token.',200,'fetched')
+  `;
+  const emptyPack = await buildDarkSynthesisPack(emptyInv, "", emptyRoom);
+  assert.match(emptyPack, /EMPTY_FOCUS_EVIDENCE/);
+
+  const duplicateRoom = 81;
+  await sql`insert into paper_settings(newsroom_id,city,state) values (${duplicateRoom},'Riverton','Colorado')`;
+  const duplicateInv = (
+    await sql<{ id: number }>`
+      insert into investigations(user_id,newsroom_id,title)
+      values (${userId},${duplicateRoom},'Cedar annexation FILE-4242')
+      returning id
+    `
+  )[0]!.id;
+  const targetVersion = (
+    await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_status,fetch_outcome)
+      values (${userId},${duplicateRoom},'https://records.example/target','target-version','Cedar annexation FILE-4242','Cedar annexation FILE-4242 UNIQUE_VERSION_TARGET',200,'fetched')
+      returning id
+    `
+  )[0]!.id;
+  const duplicateVersion = (
+    await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_status,fetch_outcome)
+      values (${userId},${duplicateRoom},'https://records.example/repeated','repeated-version','Cedar annexation FILE-4242','Cedar annexation FILE-4242 duplicate capture',200,'fetched')
+      returning id
+    `
+  )[0]!.id;
+  await sql`
+    insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,fetch_status,fetch_outcome,version_id)
+    values (${userId},${duplicateRoom},${duplicateInv},'https://records.example/target','Cedar annexation FILE-4242','target-version','Cedar annexation FILE-4242 UNIQUE_VERSION_TARGET',200,'fetched',${targetVersion})
+  `;
+  for (let i = 0; i < 8; i += 1) {
+    await sql`
+      insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,fetch_status,fetch_outcome,version_id)
+      values (${userId},${duplicateRoom},${duplicateInv},${`https://records.example/repeated/${i}`},'Cedar annexation FILE-4242','repeated-version','Cedar annexation FILE-4242 duplicate capture',200,'fetched',${duplicateVersion})
+    `;
+  }
+  const duplicatePack = await buildDarkSynthesisPack(duplicateInv, "", duplicateRoom);
+  assert.match(duplicatePack, /UNIQUE_VERSION_TARGET/);
+  assert.equal((duplicatePack.match(new RegExp(`version:${duplicateVersion} hash:repeated-ver`, "g")) ?? []).length, 1);
 });

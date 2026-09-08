@@ -36,6 +36,9 @@ import {
   resurfaceDeadEnds,
   runDueMonitors,
 } from "./investigate.ts";
+import { readableCapture } from "./html-text.ts";
+import { chunksFromEvidence } from "./ingest.ts";
+import { queryTokens } from "./retrieve.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
 import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
@@ -71,6 +74,226 @@ import {
   setJobStage,
   type DeskJob,
 } from "./jobs.ts";
+
+const DARK_SYNTHESIS_PACK_CAP = 28_000;
+const DARK_SYNTHESIS_CONTEXT_CAP = 14_000;
+const DARK_ARTIFACT_CAP = 12_000;
+const DARK_ARTIFACT_COUNT = 8;
+const SECTION_BUDGET_MARKER = "\n[section budget reached]";
+
+type DarkArtifactEvidence = {
+  id: number;
+  title: string;
+  url: string;
+  full_text: string;
+  content_hash: string;
+  version_id: number | null;
+  capture_event_id: number | null;
+  fetch_status: number | null;
+  fetch_outcome: string | null;
+};
+
+type DarkArtifactCandidate = Omit<DarkArtifactEvidence, "full_text"> & {
+  score: number;
+};
+
+type DarkArtifactChunk = {
+  version_id: number;
+  chunk_index: number;
+  excerpt: string;
+  page_number: number | null;
+  locator: string;
+};
+
+function artifactReadable(artifact: DarkArtifactEvidence): boolean {
+  return (
+    readableCapture({
+      text: artifact.full_text,
+      status: artifact.fetch_status,
+      outcome: artifact.fetch_outcome,
+      title: artifact.title,
+    }).kind === "ok"
+  );
+}
+
+function focusTextScore(text: string, questionTerms: string[], frontierTerms: string[]) {
+  const blob = text.toLowerCase();
+  const hits = (terms: string[]) => terms.reduce((score, term) => score + (blob.includes(term) ? 1 : 0), 0);
+  // The editor's question is the purpose of the pack. Frontier vocabulary is
+  // useful context, but it must not crowd out the question with generic noise.
+  return hits(questionTerms) * 5 + hits(frontierTerms);
+}
+
+function capText(text: string, cap: number): string {
+  if (text.length <= cap) return text;
+  if (cap <= SECTION_BUDGET_MARKER.length) return text.slice(0, cap);
+  return `${text.slice(0, cap - SECTION_BUDGET_MARKER.length)}${SECTION_BUDGET_MARKER}`;
+}
+
+/**
+ * Select stored evidence by the editor's actual question before applying an
+ * output cap. Captures are never inferred from a current URL: every header
+ * carries the stored capture/version/hash and persisted chunks keep their
+ * genuine page locators when the extractor supplied one.
+ */
+async function relevantDarkArtifactEvidence(
+  investigationId: number,
+  newsroomId: number,
+  focus: { title: string; paste: string; frontier: string[] },
+  budgetChars: number,
+): Promise<{ text: string; artifacts: { title: string; url: string; evidence: string }[] }> {
+  const sql = await getSql();
+  const questionTerms = [...new Set(queryTokens(`${focus.title} ${focus.paste}`))];
+  const frontierTerms = [
+    ...new Set(queryTokens(focus.frontier.join(" ")).filter((term) => !questionTerms.includes(term))),
+  ];
+  // Score all stored captures in SQL, but transfer full bodies only after the
+  // readable, version-aware candidates have been ranked. A large mature file
+  // must not allocate every capture body in the application merely to choose
+  // eight evidence records.
+  const candidates = await sql.query<DarkArtifactCandidate>(
+    `with scored as (
+       select a.id, a.title, a.url, a.content_hash, a.version_id, a.capture_event_id,
+         a.fetch_status, a.fetch_outcome,
+         (
+           5 * (select count(*) from unnest($3::text[]) term
+                where position(term in lower(a.title || ' ' || a.url || ' ' || a.full_text)) > 0)
+           + (select count(*) from unnest($4::text[]) term
+              where position(term in lower(a.title || ' ' || a.url || ' ' || a.full_text)) > 0)
+         )::int as score,
+         case when a.version_id is null then 'artifact:' || a.id::text
+              else 'version:' || a.version_id::text end as evidence_key
+       from artifacts a
+       where a.newsroom_id = $1
+         and a.investigation_id = $2
+         and char_length(btrim(a.full_text)) >= 40
+         and coalesce(a.fetch_status, 200) < 400
+         and coalesce(a.fetch_status, 200) not in (401, 403, 404, 410, 429)
+         and coalesce(a.fetch_outcome, 'fetched') not in ('not-found', 'soft-404', 'fetch-failed', 'parse-failed')
+         and coalesce(a.extraction_method, '') not in ('refused-too-large', 'refused-content-type')
+     ), deduplicated as (
+       select distinct on (evidence_key) id, title, url, content_hash, version_id, capture_event_id,
+         fetch_status, fetch_outcome, score
+       from scored
+       order by evidence_key, id desc
+     )
+     select id, title, url, content_hash, version_id, capture_event_id, fetch_status, fetch_outcome, score
+     from deduplicated
+     where score > 0 or (cardinality($3::text[]) = 0 and cardinality($4::text[]) = 0)
+     order by score desc, id desc
+     limit $5`,
+    [newsroomId, investigationId, questionTerms, frontierTerms, DARK_ARTIFACT_COUNT],
+  );
+  const selectedRows = candidates.length
+    ? await sql.query<DarkArtifactEvidence>(
+        `select id, title, url, full_text, content_hash, version_id, capture_event_id, fetch_status, fetch_outcome
+         from artifacts
+         where newsroom_id = $1 and id = any($2::int[])`,
+        [newsroomId, candidates.map((candidate) => candidate.id)],
+      )
+    : [];
+  const selectedById = new Map(selectedRows.map((artifact) => [artifact.id, artifact]));
+  const selected = candidates
+    .map((candidate) => selectedById.get(candidate.id))
+    .filter((artifact): artifact is DarkArtifactEvidence => Boolean(artifact && artifactReadable(artifact)));
+
+  if (!selected.length) return { text: "(none)", artifacts: [] };
+
+  const versionIds = selected.flatMap((artifact) =>
+    artifact.version_id == null ? [] : [artifact.version_id],
+  );
+  const persistedChunks = versionIds.length
+    ? await sql.query<DarkArtifactChunk>(
+        `select version_id, chunk_index, excerpt, page_number, locator
+         from artifact_chunks
+         where newsroom_id = $1 and version_id = any($2::int[])
+         order by id asc`,
+        [newsroomId, versionIds],
+      )
+    : [];
+  let used = 0;
+  const rendered: { title: string; url: string; evidence: string }[] = [];
+  for (const artifact of selected) {
+    const header = `### [capture:${artifact.capture_event_id ?? "—"} version:${artifact.version_id ?? "—"} hash:${artifact.content_hash.slice(0, 12)}] ${artifact.title}\n${artifact.url}`;
+    const exactHits = persistedChunks
+      .filter((chunk) => chunk.version_id === artifact.version_id)
+      .map((chunk) => ({
+        ...chunk,
+        score: focusTextScore(chunk.excerpt, questionTerms, frontierTerms),
+      }))
+      .filter((chunk) => chunk.score > 0)
+      .sort((a, b) => b.score - a.score || a.chunk_index - b.chunk_index);
+    const separator = rendered.length ? 2 : 0;
+    const availableEvidence = budgetChars - used - separator - header.length - 1;
+    const formatChunk = (chunk: DarkArtifactChunk) =>
+      `[${chunk.locator}${chunk.page_number == null ? "" : ` page:${chunk.page_number}`}] ${chunk.excerpt}`;
+    const chunksForArtifact = persistedChunks
+      .filter((chunk) => chunk.version_id === artifact.version_id)
+      .sort((a, b) => a.chunk_index - b.chunk_index);
+    const rankedPages = [...new Set(exactHits.flatMap((hit) => (hit.page_number == null ? [] : [hit.page_number])))]
+      .map((pageNumber) => ({
+        pageNumber,
+        score: Math.max(...exactHits.filter((hit) => hit.page_number === pageNumber).map((hit) => hit.score)),
+        chunks: chunksForArtifact.filter((chunk) => chunk.page_number === pageNumber),
+      }))
+      .sort((a, b) => b.score - a.score || a.chunks[0]!.chunk_index - b.chunks[0]!.chunk_index);
+    const exact: string[] = [];
+    let exactUsed = 0;
+    for (const page of rankedPages) {
+      const wholePage = page.chunks.map(formatChunk).join("\n");
+      const separatorForPage = exact.length ? 1 : 0;
+      if (wholePage.length + separatorForPage + exactUsed <= availableEvidence) {
+        exact.push(wholePage);
+        exactUsed += wholePage.length + separatorForPage;
+        continue;
+      }
+      // A page that cannot fit still keeps a source-ordered neighborhood of
+      // its strongest matching chunk. This preserves table-row context without
+      // manufacturing a record parser or silently clipping an arbitrary head.
+      const center = exactHits.find((hit) => hit.page_number === page.pageNumber);
+      if (!center) continue;
+      const neighborhood = page.chunks.filter((chunk) => Math.abs(chunk.chunk_index - center.chunk_index) <= 1);
+      const bounded = neighborhood.map(formatChunk).join("\n");
+      if (bounded.length + separatorForPage + exactUsed <= availableEvidence) {
+        exact.push(bounded);
+        exactUsed += bounded.length + separatorForPage;
+      }
+    }
+    if (!exact.length && exactHits[0]) {
+      const center = exactHits[0];
+      const neighborhood = chunksForArtifact
+        .filter(
+          (chunk) =>
+            chunk.page_number === center.page_number && Math.abs(chunk.chunk_index - center.chunk_index) <= 1,
+        )
+        .map(formatChunk)
+        .join("\n");
+      if (neighborhood) exact.push(capText(neighborhood, Math.max(0, availableEvidence)));
+    }
+    const fallbackChunks = chunksFromEvidence(artifact.full_text)
+      .map((chunk) => ({
+        ...chunk,
+        score: focusTextScore(chunk.excerpt, questionTerms, frontierTerms),
+      }));
+    const fallback = (exact.length
+      ? []
+      : questionTerms.length || frontierTerms.length
+        ? fallbackChunks.filter((chunk) => chunk.score > 0).sort((a, b) => b.score - a.score).slice(0, 4)
+        : fallbackChunks.slice(0, 1))
+      .map(
+        (chunk) =>
+          `[${chunk.locator}${chunk.page_number == null ? "" : ` page:${chunk.page_number}`}] ${chunk.excerpt}`,
+      );
+    const evidence = [...exact, ...fallback.filter((excerpt) => !exact.includes(excerpt))].join("\n");
+    const entry = `${header}\n${evidence || "[no matching excerpt retained]"}`;
+    const remaining = budgetChars - used - separator;
+    if (remaining <= header.length) break;
+    const boundedEntry = capText(entry, remaining);
+    used += separator + boundedEntry.length;
+    rendered.push({ title: artifact.title, url: artifact.url, evidence: boundedEntry });
+  }
+  return { text: rendered.map((artifact) => artifact.evidence).join("\n\n") || "(none)", artifacts: rendered };
+}
 
 function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
@@ -812,16 +1035,17 @@ export async function buildDarkSynthesisPack(
   investigationId: number,
   paste: string,
   newsroomId: number,
+  packCap: number = DARK_SYNTHESIS_PACK_CAP,
 ): Promise<string> {
   const sql = await getSql();
+  const investigation = await sql<{ title: string }>`
+    select title from investigations
+    where id = ${investigationId} and newsroom_id = ${newsroomId}
+    limit 1
+  `;
   const sources = await sql<SourceRow>`
     select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
     from sources where newsroom_id = ${newsroomId} order by id asc
-  `;
-  const arts = await sql<{ title: string; url: string; full_text: string }>`
-    select title, url, full_text from artifacts
-    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId}
-    order by id desc limit 12
   `;
   const frontier = await sql<{ label: string; kind: string; why: string }>`
     select label, kind, why from frontier_items
@@ -866,16 +1090,16 @@ export async function buildDarkSynthesisPack(
   `;
 
   const { place } = await readDarkPlace(newsroomId);
-  const pack = [
+  const context = [
+    `INVESTIGATION QUESTION:\n${capText(investigation[0]?.title ?? "(unknown)", 600)}${paste ? `\nEDITOR PASTE:\n${capText(paste, 4_000)}` : ""}`,
     `CITY: ${place.city}, ${place.state}. Investigation ${investigationId}. Watch list is a start, not a boundary.`,
-    `WATCH LIST:\n${sources.map((s) => `${s.tier} ${s.status} ${s.title} ${s.url}`).join("\n") || "(empty)"}`,
-    `SEARCHES RUN:\n${searches.map((s) => s.query).join("\n") || "(none)"}`,
-    `FRONTIER:\n${frontier.map((f) => `${f.kind}: ${f.label} — ${f.why}`).join("\n") || "(none)"}`,
-    `RELATIONSHIPS:\n${rels.map((r) => `${r.from_name} -[${r.kind}]-> ${r.to_name}`).join("\n") || "(none)"}`,
-    `CLAIMS:\n${claims.map((c) => `${c.kind}: ${c.body}`).join("\n") || "(none)"}`,
-    `HYPOTHESES:\n${hyps.map((h) => `[${h.status}] ${h.body}`).join("\n") || "(none)"}`,
-    `ANOMALIES:\n${anoms.map((a) => `${a.kind}: ${a.summary}`).join("\n") || "(none)"}`,
-    `ARTIFACTS:\n${arts.map((s) => `### ${s.title}\n${s.url}\n${s.full_text.slice(0, 1600)}`).join("\n\n") || "(none)"}`,
+    `WATCH LIST:\n${sources.slice(0, 30).map((s) => `${s.tier} ${s.status} ${capText(s.title, 180)} ${capText(s.url, 300)}`).join("\n") || "(empty)"}`,
+    `SEARCHES RUN:\n${searches.map((s) => capText(s.query, 360)).join("\n") || "(none)"}`,
+    `FRONTIER:\n${frontier.map((f) => `${f.kind}: ${capText(f.label, 240)} — ${capText(f.why, 500)}`).join("\n") || "(none)"}`,
+    `RELATIONSHIPS:\n${rels.map((r) => `${capText(r.from_name, 180)} -[${capText(r.kind, 80)}]-> ${capText(r.to_name, 180)}`).join("\n") || "(none)"}`,
+    `CLAIMS:\n${claims.map((c) => `${capText(c.kind, 80)}: ${capText(c.body, 600)}`).join("\n") || "(none)"}`,
+    `HYPOTHESES:\n${hyps.map((h) => `[${capText(h.status, 80)}] ${capText(h.body, 600)}`).join("\n") || "(none)"}`,
+    `ANOMALIES:\n${anoms.map((a) => `${capText(a.kind, 80)}: ${capText(a.summary, 600)}`).join("\n") || "(none)"}`,
     `OPEN LEADS:\n${
       leads
         .map((l) => {
@@ -883,16 +1107,27 @@ export async function buildDarkSynthesisPack(
             l.status === "killed" && l.resurfaced_count > 0
               ? ` (killed, resurfaced ×${l.resurfaced_count})`
               : "";
-          return `${l.status} ${l.topic}: ${l.headline}${resurfaced}`;
+          return `${l.status} ${capText(l.topic, 100)}: ${capText(l.headline, 420)}${resurfaced}`;
         })
         .join("\n") || "(none)"
     }`,
-    `PUBLISHED:\n${articles.map((a) => `${a.topic}: ${a.headline}`).join("\n") || "(none)"}`,
-    `BEAT MEMORY:\n${memory.map((m) => `${m.entity}: ${m.last_angle}`).join("\n") || "(none)"}`,
-    paste ? `EDITOR PASTE:\n${paste.slice(0, 8000)}` : "EDITOR PASTE: (none)",
-  ].join("\n\n");
+    `PUBLISHED:\n${articles.map((a) => `${capText(a.topic, 100)}: ${capText(a.headline, 420)}`).join("\n") || "(none)"}`,
+    `BEAT MEMORY:\n${memory.map((m) => `${capText(m.entity, 160)}: ${capText(m.last_angle, 420)}`).join("\n") || "(none)"}`,
+  ];
+  const contextText = capText(context.join("\n\n"), Math.min(DARK_SYNTHESIS_CONTEXT_CAP, packCap - 2_000));
+  const artifactBudget = Math.min(DARK_ARTIFACT_CAP, Math.max(2_000, packCap - contextText.length - 24));
+  const artifactEvidence = await relevantDarkArtifactEvidence(
+    investigationId,
+    newsroomId,
+    {
+      title: investigation[0]?.title ?? "",
+      paste,
+      frontier: frontier.flatMap((item) => [item.label, item.why]),
+    },
+    artifactBudget,
+  );
 
-  return pack;
+  return `${contextText}\n\nARTIFACTS:\n${artifactEvidence.text}`;
 }
 
 async function synthesizeSignals(
@@ -913,8 +1148,14 @@ async function synthesizeSignals(
   preferences?: ResearchSnapshot,
 ) {
   const sql = await getSql();
-  const sourcePack = await buildDarkSynthesisPack(investigationId, paste, newsroomId);
-  const pack = (preferences ? describeResearchWindow(preferences)+"\n\n" : "") + sourcePack;
+  const researchWindow = preferences ? `${describeResearchWindow(preferences)}\n\n` : "";
+  const sourcePack = await buildDarkSynthesisPack(
+    investigationId,
+    paste,
+    newsroomId,
+    DARK_SYNTHESIS_PACK_CAP - researchWindow.length,
+  );
+  const pack = researchWindow + sourcePack;
 
   /*
     The prompt is built from the dials, not fixed.
@@ -930,7 +1171,7 @@ async function synthesizeSignals(
     the dark desk failed with "Claude Code request timed out" for exactly this.
   */
   const { place } = await readDarkPlace(newsroomId);
-  const ai = await grokChat(darkSystemFor(dials, place), pack.slice(0, 28000), 3200, {
+  const ai = await grokChat(darkSystemFor(dials, place), pack, 3200, {
     timeoutMs: providerBudget(choice, overrides).callMs,
     choice,
     localModel: overrides?.["local-model"]?.localModel,
@@ -2236,18 +2477,13 @@ export const saveDarkCounty = createServerFn({ method: "POST" })
  * — the four lists below it are the real content, and a missing summary must
  * never stop the file opening.
  */
-export async function buildBrief(
-  userId: string,
-  newsroomId: number,
-  id: number,
-  choice?: EffectiveProviderChoice,
-  overrides?: ProviderOverrides | null,
-) {
+/** The exact bounded evidence pack sent to the brief model. */
+export async function buildDarkBriefPromptPack(newsroomId: number, id: number): Promise<string | null> {
   const sql = await getSql();
   const inv = await sql<{ title: string }>`
     select title from investigations where id = ${id} and newsroom_id = ${newsroomId} limit 1
   `;
-  if (!inv[0]) return { ok: false as const, error: "not found" };
+  if (!inv[0]) return null;
 
   const claims = await sql<{ body: string; kind: string; evidence: string | null }>`
     select body, kind, evidence from claims where investigation_id = ${id}
@@ -2266,14 +2502,21 @@ export async function buildBrief(
     join entities e on e.id = ie.entity_id
     where ie.investigation_id = ${id} order by ie.id desc limit 40
   `.catch(() => []);
-  const arts = await sql<{ title: string; url: string }>`
-    select title, url from artifacts where investigation_id = ${id} order by id desc limit 30
-  `.catch(() => []);
   const anoms = await sql<{ kind: string; summary: string }>`
     select kind, summary from anomalies where investigation_id = ${id} order by id desc limit 20
   `.catch(() => []);
 
-  const pack = briefPack({
+  const artifactEvidence = await relevantDarkArtifactEvidence(
+    id,
+    newsroomId,
+    {
+      title: inv[0].title,
+      paste: "",
+      frontier: front.flatMap((item) => [item.label, item.why]),
+    },
+    10_000,
+  );
+  return briefPack({
     title: inv[0].title,
     facts: claims
       .filter((c) => /FACT|OBSERVATION/i.test(c.kind))
@@ -2282,10 +2525,23 @@ export async function buildBrief(
     questions: front.map((f) => `${f.label}${f.why ? ` — ${f.why}` : ""}`),
     findings: anoms.map((a) => `${a.kind}: ${a.summary}`),
     entities: ents,
-    artifacts: arts,
+    artifacts: artifactEvidence.artifacts,
   });
+}
 
-  const ai = await grokChat(BRIEF_SYSTEM, pack.slice(0, 22000), 1200, {
+export async function buildBrief(
+  userId: string,
+  newsroomId: number,
+  id: number,
+  choice?: EffectiveProviderChoice,
+  overrides?: ProviderOverrides | null,
+  chat: typeof grokChat = grokChat,
+) {
+  const sql = await getSql();
+  const pack = await buildDarkBriefPromptPack(newsroomId, id);
+  if (!pack) return { ok: false as const, error: "not found" };
+
+  const ai = await chat(BRIEF_SYSTEM, pack, 1200, {
     timeoutMs: providerBudget(choice, overrides).callMs,
     choice,
     localModel: overrides?.["local-model"]?.localModel,

@@ -14,7 +14,7 @@ Release evidence separates the timed fresh Windows installation and manual publi
 
 ## Download and install
 
-1. For the beta, open the direct [TownReporter 0.6.33 beta release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.33); for the latest stable build, use the [latest stable releases page](https://github.com/scottconverse/TownReporter/releases/latest). Download the Windows installation ZIP listed under the chosen release's Assets. Extract the ZIP completely into a folder you intend to keep. Do not run it from inside the ZIP.
+1. For the beta, open the direct [TownReporter 0.6.34 beta release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.34); for the latest stable build, use the [latest stable releases page](https://github.com/scottconverse/TownReporter/releases/latest). Download the Windows installation ZIP listed under the chosen release's Assets. Extract the ZIP completely into a folder you intend to keep. Do not run it from inside the ZIP.
 2. Open **Install TownReporter.cmd** in the extracted folder. It downloads pinned Node and PostgreSQL distributions, checks their hashes, installs the application dependencies and Chromium, creates a private database and authentication secret, and builds TownReporter.
 3. Read any prerequisite or port-conflict message. An error stops installation; it does not authorize stopping another program. The installer does not need an existing Node, Git or PostgreSQL installation, and does not replace one.
 4. Wait for the readiness check and open the local address the installer prints. The default is **http://127.0.0.1:4388**.

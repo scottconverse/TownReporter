@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.33](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.33) — beta.** Stable Windows acquisition remains [0.6.30](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.30). Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.34](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.34) — beta.** Stable Windows acquisition remains [0.6.30](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.30). Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Halo operators can use the [0.6.33 local staging and promotion prompt](docs/HALO-UPDATE-0.6.33.md) after the exact beta release is published.
+Halo operators can use the [0.6.34 local staging and promotion prompt](docs/HALO-UPDATE-0.6.34.md) after the exact beta release is published.
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -48,7 +48,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-For beta testing, download the Windows installation ZIP from the direct [0.6.33 beta release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.33). The [latest stable release](https://github.com/scottconverse/TownReporter/releases/latest) remains available separately. Extract the chosen ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
+For beta testing, download the Windows installation ZIP from the direct [0.6.34 beta release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.34). The [latest stable release](https://github.com/scottconverse/TownReporter/releases/latest) remains available separately. Extract the chosen ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first editorial workflow within an hour with working internet and an available AI account or endpoint; release evidence records the measured result and its limits. Public hosting is separate from this local installation.
 
@@ -93,6 +93,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.34 beta** — Dark Desk selects relevant captured records across the full inventory before shared selection builds separately bounded inputs for stage-one signal synthesis and the final brief. The release receipt records runtime proof and its limits.
 - **0.6.33 beta** — Packaged installations can start the native Codex CLI from their extracted, non-Git application directory. See the release receipt for native and application verification.
 - **0.6.32 beta** — Evidence review groups duplicate views of the same available captured version while retaining its artifact and capture-event identities, uses singular claim counts, distinguishes editor-selected records from draft citations, and simplifies current-beta release links.
 - **0.6.31 beta** — An optional Queue focus for up to 3–5 existing eligible leads, with the full queue retained. The owner-approved six-format routine publication path, claim/manual corroboration, and routine automation/roundups are included. Routine automation runs on a daily schedule rather than continuous source watching; an approved source change can be corrected by a same-day rerun.
