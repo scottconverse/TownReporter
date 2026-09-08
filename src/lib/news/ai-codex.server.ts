@@ -202,6 +202,10 @@ export function buildCodexArgs(input: {
     "never",
     "--search",
     "exec",
+    // Packaged installations run from an extracted, non-Git directory. This
+    // is the Codex CLI's documented opt-out for that repository check; it
+    // does not alter the chosen sandbox, approval, or user configuration.
+    "--skip-git-repo-check",
     ...(input.imagePaths?.length ? input.imagePaths.flatMap((p) => ["--image", p]) : []),
     "--model",
     input.model,

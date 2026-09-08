@@ -14,6 +14,7 @@ const EXPECTED_NATIVE_ARGS = [
   "never",
   "--search",
   "exec",
+  "--skip-git-repo-check",
   "--model",
   "gpt-5.6-sol",
   "--sandbox",
@@ -57,7 +58,7 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     assert.equal(args.includes("read-only"), false);
     assert.equal(args.includes("--ignore-user-config"), false);
     assert.equal(args.includes("--ignore-rules"), false);
-    assert.equal(args.includes("--skip-git-repo-check"), false);
+    assert.equal(args.includes("--skip-git-repo-check"), true);
   });
 
   it("keeps native web search on for legacy false and undefined inputs", () => {
@@ -75,6 +76,7 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     const imageIdx = args.indexOf("--image");
     assert.ok(execIdx >= 0, "exec subcommand must be present");
     assert.ok(imageIdx > execIdx, "--image must come after the exec subcommand");
+    assert.equal(args[execIdx + 1], "--skip-git-repo-check");
     assert.equal(args[imageIdx + 1], "C:\\tmp\\page.jpg");
     assert.equal(args.includes("--model"), true);
   });
