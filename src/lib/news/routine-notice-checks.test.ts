@@ -85,6 +85,15 @@ async function fixture(formatKey = "library-notice", sourceUrl?: string) {
     "insert into routine_notice_approvals(newsroom_id,source_id,source_url,format_key) values($1,$2,$3,$4)",
     [room, source!.id, url, formatKey],
   );
+  await automation.ensureRoutineNoticeAutomationSchema();
+  await sql.query(
+    "insert into routine_notice_automations(newsroom_id,enabled,revision,timezone,local_time,today_section,weekend_section,deadlines_section) values($1,false,1,'America/Denver','06:15','news','events','deadlines')",
+    [room],
+  );
+  await sql.query(
+    "insert into routine_notice_automation_sources(newsroom_id,source_id,format_key,source_url,public_source_url,issuer,locality,collection_area) values($1,$2,$3,$4,$4,'Town Library','Longmont','Main Library')",
+    [room, source!.id, formatKey, url],
+  );
   return {
     room,
     owner,
@@ -158,19 +167,34 @@ describe("routine notice manual checks", () => {
     );
   });
 
+  it("treats a later source revision as a new observation rather than a permanent conflict", async () => {
+    const f = await fixture("community-arts-event-logistics");
+    const run = (title: string) =>
+      checks.checkRoutineNoticeSourceForOwner(
+        { userId: f.owner, newsroomId: f.room },
+        { ...f.input, requestId: randomUUID() },
+        { ingest: async () => htmlDocument(page(event({ name: title }))) },
+      );
+    const first = await run("Concert at six");
+    const changed = await run("Concert at seven");
+    assert.equal(first.check.state, "parsed");
+    assert.equal(changed.check.state, "parsed");
+    assert.equal(changed.check.candidates[0]?.conflict, false);
+    assert.notEqual(first.check.candidates[0]?.fields.title?.value, changed.check.candidates[0]?.fields.title?.value);
+  });
+
   it("captures and parses an owner-designated RFC5545 waste area without exposing a personalized feed URL", async () => {
     const f = await fixture(
       "waste-recycling-schedule",
       "https://calendar.example/private/token-123.ics",
     );
-    await automation.ensureRoutineNoticeAutomationSchema();
     const sql = await getSql();
     await sql.query(
-      "insert into routine_notice_automations(newsroom_id,enabled,revision,timezone,local_time,today_section,weekend_section,deadlines_section,activated_by) values($1,true,1,'America/Denver','06:15','news','news','news',$2)",
+      "update routine_notice_automations set enabled=true,activated_by=$2 where newsroom_id=$1",
       [f.room, f.owner],
     );
     await sql.query(
-      "insert into routine_notice_automation_sources(newsroom_id,source_id,format_key,source_url,public_source_url,issuer,locality,collection_area) values($1,$2,'waste-recycling-schedule',$3,'https://city.example/waste','City sanitation','Longmont','North collection area')",
+      "update routine_notice_automation_sources set public_source_url='https://city.example/waste',issuer='City sanitation',collection_area='North collection area' where newsroom_id=$1 and source_id=$2 and format_key='waste-recycling-schedule' and source_url=$3",
       [f.room, f.sourceId, f.url],
     );
     const raw =

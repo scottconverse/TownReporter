@@ -128,9 +128,12 @@ async function assertRoutineRunCanContinue(job: DeskJob, run: {
     );
   });
 }
-export async function performRoutineNoticeWork(job: DeskJob): Promise<void> {
+export async function performRoutineNoticeWork(
+  job: DeskJob,
+  deps: Parameters<typeof performRoutineNoticeWorkWith>[1] = {},
+): Promise<void> {
   try {
-    await performRoutineNoticeWorkWith(job);
+    await performRoutineNoticeWorkWith(job, deps);
   } catch (error) {
     const sql = await getSql();
     await sql.query(
@@ -155,6 +158,7 @@ export async function performRoutineNoticeWorkWith(
     check?: CheckFn;
     beforeCommit?: () => Promise<void>;
     verifyCheck?: typeof assertRoutineNoticeCheckStillBound;
+    now?: Date;
   } = {},
 ): Promise<void> {
   await ensureRoutineNoticeAutomationSchema();
@@ -172,6 +176,8 @@ export async function performRoutineNoticeWorkWith(
     [job.subject_id, job.newsroom_id],
   );
   if (!run) throw new Error("Routine edition run is missing.");
+  if (localStamp(deps.now ?? new Date(), run.timezone).date !== String(run.local_date).slice(0, 10))
+    throw new Error("Routine edition run expired before publication; editor review is required.");
   const sources = await sql.query<{
     source_id: number;
     source_url: string;
@@ -249,6 +255,7 @@ export async function performRoutineNoticeWorkWith(
   const localDate = String(run.local_date).slice(0, 10);
   const planned = eligibleRoutineNotices(notices, localDate, run.timezone);
   const earlierDeadlineKeys = new Set<string>();
+  let malformedDeadlineReceipt = false;
   for (const row of await sql.query<{ candidate_keys_json: string }>(
     "select candidate_keys_json from routine_notice_publications where newsroom_id=$1 and channel='deadlines' and issue_date<$2",
     [run.newsroom_id, localDate],
@@ -256,9 +263,11 @@ export async function performRoutineNoticeWorkWith(
     try {
       for (const key of JSON.parse(row.candidate_keys_json)) earlierDeadlineKeys.add(String(key));
     } catch {
-      // A malformed private receipt cannot authorize another unattended publication.
+      malformedDeadlineReceipt = true;
     }
   }
+  if (malformedDeadlineReceipt)
+    throw new Error("A prior deadline publication receipt is malformed; editor review is required.");
   planned.eligible = planned.eligible
     .filter(
       (item) =>
@@ -326,7 +335,8 @@ export async function performRoutineNoticeWorkWith(
             total +
             group.counts.refused +
             group.counts.conflicts +
-            (group.state === "capture-failed" || group.state === "evidence-unavailable" ? 1 : 0),
+            (group.state === "capture-failed" || group.state === "evidence-unavailable" ||
+            (group.state === "refused" && group.counts.refused === 0) ? 1 : 0),
           0,
         );
     const existingByChannel = new Map(
@@ -375,8 +385,17 @@ export async function performRoutineNoticeWorkWith(
           ],
         );
         await tx.query(
-          "update routine_notice_publications set run_id=$2,content_fingerprint=$3 where id=$1",
-          [existing.id, run.id, fingerprint],
+          "update routine_notice_publications set run_id=$2,content_fingerprint=$3,candidate_keys_json=$4 where id=$1",
+          [
+            existing.id,
+            run.id,
+            fingerprint,
+            JSON.stringify(
+              planned.eligible
+                .filter((entry) => entry.channel === plan.channel)
+                .map((entry) => entry.notice.provenance.externalId),
+            ),
+          ],
         );
         corrected += 1;
         continue;

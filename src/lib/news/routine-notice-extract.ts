@@ -26,6 +26,7 @@ export type RoutineExtractionRefusalCode =
   | "malformed-json"
   | "missing-stable-identity"
   | "unsupported-event-type"
+  | "missing-owner-context"
   | "structurally-invalid";
 
 export type RoutineExtractionResult =

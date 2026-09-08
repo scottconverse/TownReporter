@@ -1,7 +1,7 @@
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { sha256, sha256Bytes } from "./fetch-url.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
-import { ingestDocument, type IngestDocument } from "./ingest.ts";
+import { ingestDocument } from "./ingest.ts";
 import { rememberCapture } from "./investigate.ts";
 import { ensureLegalSchema } from "./legal-removal-schema.ts";
 import {
@@ -200,6 +200,10 @@ function adapterResults(
   provenance: { captureEventId: number; artifactVersionId: number; contentHash: string },
   ownerContext: AdapterOwnerContext,
 ) {
+  if (!ownerContext)
+    return [
+      { status: "refused", code: "missing-owner-context", locator: "automation-settings" },
+    ] satisfies RoutineExtractionResult[];
   const base = {
     newsroomId: actor.newsroomId,
     sourceId: input.sourceId,
@@ -555,16 +559,8 @@ export async function checkRoutineNoticeSourceForOwner(
       });
     }
     for (const externalIdHash of new Set(candidates.map((candidate) => candidate.externalIdHash))) {
-      const prior = await tx.query<{ content_fingerprint: string }>(
-        `select r.content_fingerprint from routine_notice_candidate_refs r join routine_notice_checks c on c.id=r.check_id
-          where c.newsroom_id=$1 and c.source_id=$2 and c.format_key=$3 and r.external_id_hash=$4`,
-        [actor.newsroomId, input.sourceId, input.formatKey, externalIdHash],
-      );
       const current = candidates.filter((candidate) => candidate.externalIdHash === externalIdHash);
-      const fingerprints = new Set([
-        ...prior.map((candidate) => candidate.content_fingerprint),
-        ...current.map((candidate) => candidate.contentFingerprint),
-      ]);
+      const fingerprints = new Set(current.map((candidate) => candidate.contentFingerprint));
       if (fingerprints.size > 1) {
         for (const candidate of current) candidate.conflict = true;
       }

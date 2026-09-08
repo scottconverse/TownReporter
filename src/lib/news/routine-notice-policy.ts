@@ -293,12 +293,6 @@ export async function saveRoutineNoticePolicyFor(userId: string, newsroomId: num
         "insert into routine_notice_policies(newsroom_id,paused,revision,updated_by,updated_at) values($1,$2,$3,$4,now())",
         [newsroomId, input.paused, revision, userId],
       );
-    await sql.query("delete from routine_notice_approvals where newsroom_id=$1", [newsroomId]);
-    for (const pair of input.approvals)
-      await sql.query(
-        "insert into routine_notice_approvals(newsroom_id,source_id,source_url,format_key) values($1,$2,$3,$4)",
-        [newsroomId, pair.sourceId, pair.sourceUrl, pair.formatKey],
-      );
     const desiredByKey = new Map(input.approvals.map((p) => [`${p.sourceId}:${p.formatKey}`, p]));
     const added = input.approvals.filter((p) => {
       const previous = priorKeys.get(`${p.sourceId}:${p.formatKey}`);
@@ -308,6 +302,16 @@ export async function saveRoutineNoticePolicyFor(userId: string, newsroomId: num
       const desired = desiredByKey.get(`${p.source_id}:${p.format_key}`);
       return !desired || desired.sourceUrl !== p.source_url;
     });
+    for (const pair of removed)
+      await sql.query(
+        "delete from routine_notice_approvals where newsroom_id=$1 and source_id=$2 and format_key=$3 and source_url=$4",
+        [newsroomId, pair.source_id, pair.format_key, pair.source_url],
+      );
+    for (const pair of added)
+      await sql.query(
+        "insert into routine_notice_approvals(newsroom_id,source_id,source_url,format_key) values($1,$2,$3,$4)",
+        [newsroomId, pair.sourceId, pair.sourceUrl, pair.formatKey],
+      );
     for (const pair of added)
       await sql.query(
         "insert into routine_notice_policy_changes(newsroom_id,revision,actor,action,source_id,source_url_hash,format_key) values($1,$2,$3,'approved',$4,md5($5),$6)",

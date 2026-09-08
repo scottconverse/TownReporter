@@ -93,7 +93,7 @@ export function RoutineNoticeAutomationPanel({ policy }: { policy: RoutineNotice
         sub="Deterministic logistics from explicitly approved structured sources."
       />
       <p id="routine-editions-heading" className="mt-2 max-w-3xl text-sm text-muted">
-        Review the publication settings below and use Check results for the parsed logistics. Activation publishes ordinary Today in town, Friday
+        Save the source context here while paused before using Check results for parsed logistics. Review the publication settings below. Activation publishes ordinary Today in town, Friday
         weekend, and useful new deadline roundups. Unsupported or ambiguous source prose stays for
         review.
       </p>

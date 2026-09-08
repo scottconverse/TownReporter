@@ -12,6 +12,7 @@ import {
 } from "./routine-notice-automation.ts";
 import { ensureJobsSchema, type DeskJob } from "./jobs.ts";
 import {
+  performRoutineNoticeWork,
   performRoutineNoticeWorkWith,
   tickRoutineNoticeEditions,
 } from "./routine-notice-worker.server.ts";
@@ -196,6 +197,25 @@ test("actual scheduled worker atomically publishes one logistics-only article an
   assert.equal(`${article?.body} ${article?.source_urls}`.includes("token=secret"), false);
   assert.deepEqual(JSON.parse(article!.source_urls), ["https://events.example/calendar"]);
 
+  const [receiptArticle] = await sql.query<{ id: number }>(
+    "insert into articles(user_id,newsroom_id,slug,headline,body,topic,source_urls) values($1,$2,$3,'Prior deadlines','Prior','deadlines','[]') returning id",
+    [owner, room, `prior-deadlines-${room}`],
+  );
+  await sql.query(
+    "insert into routine_notice_publications(newsroom_id,run_id,channel,issue_date,article_id,content_fingerprint,candidate_keys_json,article_body_hash) values($1,$2,'deadlines','2026-09-07',$3,'old','{','old')",
+    [room, job.subject_id, receiptArticle!.id],
+  );
+  const [malformedJob] = await sql.query<any>(
+    "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'routine-notice',$3,'deterministic','scheduled','supplied','default','running','Working','routine-malformed') returning *",
+    [room, owner, job.subject_id],
+  );
+  await assert.rejects(
+    performRoutineNoticeWorkWith(malformedJob as DeskJob, { check: fakeCheck as any, verifyCheck: async () => {} }),
+    /receipt is malformed/i,
+  );
+  await sql.query("update desk_jobs set status='failed' where id=$1", [malformedJob.id]);
+  await sql.query("delete from routine_notice_publications where newsroom_id=$1 and channel='deadlines'", [room]);
+
   eventTitle = "Concert — new time";
   const [correctionJob] = await sql.query<any>(
     "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'routine-notice',$3,'deterministic','scheduled','supplied','default','running','Working','routine-correction') returning *",
@@ -205,11 +225,13 @@ test("actual scheduled worker atomically publishes one logistics-only article an
     check: fakeCheck as any,
     verifyCheck: async () => {},
   });
-  const [afterCorrection] = await sql.query<{ corrections: number; articles: number }>(
-    "select (select count(*)::int from corrections where newsroom_id=$1) corrections,(select count(*)::int from articles where newsroom_id=$1) articles",
+  const [afterCorrection] = await sql.query<{ corrections: number; articles: number; candidate_keys_json: string }>(
+    "select (select count(*)::int from corrections where newsroom_id=$1) corrections,(select count(*)::int from articles where newsroom_id=$1) articles,candidate_keys_json from routine_notice_publications where newsroom_id=$1",
     [room],
   );
-  assert.deepEqual(afterCorrection, { corrections: 1, articles: 1 });
+  assert.equal(afterCorrection?.corrections, 1);
+  assert.equal(afterCorrection?.articles, 2);
+  assert.notDeepEqual(JSON.parse(afterCorrection!.candidate_keys_json), []);
 
   await sql.query("update articles set body='Editor changed this edition.' where newsroom_id=$1", [room]);
   eventTitle = "Concert — final time";
@@ -310,6 +332,28 @@ test("a lost job lease refuses before any source fetch", async () => {
   );
   assert.equal(checks, 0);
   assert.equal((await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1", [room]))[0]?.n, 0);
+});
+
+test("an old queued run expires with a visible failure before any source fetch", async () => {
+  await activateFixture();
+  await tickRoutineNoticeEditions(new Date("2026-09-08T13:00:00Z"));
+  const sql = await getSql();
+  const [job] = await sql.query<any>(
+    "update desk_jobs set status='running',claim_token='expired-run' where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room],
+  );
+  let checks = 0;
+  await assert.rejects(
+    performRoutineNoticeWork(job as DeskJob, {
+      now: new Date("2026-09-09T13:00:00Z"),
+      check: (async () => { checks += 1; throw new Error("must not fetch"); }) as any,
+    }),
+    /expired before publication/i,
+  );
+  assert.equal(checks, 0);
+  const [run] = await sql.query<{ status: string; summary_json: string }>("select status,summary_json from routine_notice_runs where id=$1", [job.subject_id]);
+  assert.equal(run?.status, "failed");
+  assert.match(run?.summary_json ?? "", /expired before publication/i);
 });
 
 test("saved permissions remain dormant until an owner explicitly activates an exact source identity", async () => {

@@ -71,6 +71,16 @@ test("assigns offset timestamps by the configured newsroom local day", () => {
   );
   assert.equal(eligibleRoutineNotices([notice], "2026-09-08", "UTC").eligible.length, 0);
 });
+test("includes Friday notices in Friday's weekend edition", () => {
+  const notice = n("community-arts-event-logistics", { issuer: "Arts", title: "Friday concert", start: "2026-09-11T18:00:00-06:00", venue: "Park" }, "fri");
+  assert.deepEqual(eligibleRoutineNotices([notice], "2026-09-11", "America/Denver").eligible.map((item) => item.channel), ["today", "weekend"]);
+});
+test("converts named-zone wall times into the newsroom day and labels the source zone", () => {
+  const notice = n("registration-deadline", { issuer: "City", program: "Permit", deadline: "2026-09-09T00:30:00", registrationUrl: "https://city.example/apply", timezone: "America/New_York" }, "zone");
+  const result = eligibleRoutineNotices([notice], "2026-09-08", "America/Denver");
+  assert.equal(result.eligible[0]?.channel, "deadlines");
+  assert.match(result.eligible[0]!.line, /America\/New_York/);
+});
 test("routes allegation-like free text to review and never renders it", () => {
   const risky = n(
     "community-arts-event-logistics",
@@ -85,4 +95,14 @@ test("routes allegation-like free text to review and never renders it", () => {
   const result = eligibleRoutineNotices([risky], "2026-09-08");
   assert.equal(result.eligible.length, 0);
   assert.equal(result.review.length, 1);
+});
+test("routes explicit cancellation and non-scheduled event statuses to review", () => {
+  for (const fields of [
+    { issuer: "Arts", title: "Concert", start: "2026-09-08T18:00:00-06:00", venue: "Park", eventStatus: "EventCancelled" },
+    { issuer: "Arts", title: "Concert", start: "2026-09-08T18:00:00-06:00", venue: "Park", cancellation: "postponed" },
+  ]) {
+    const result = eligibleRoutineNotices([n("community-arts-event-logistics", fields, "cancel")], "2026-09-08", "America/Denver");
+    assert.equal(result.eligible.length, 0);
+    assert.equal(result.review.length, 1);
+  }
 });

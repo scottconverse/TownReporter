@@ -33,6 +33,31 @@ function date(value: string | undefined, timezone: string) {
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
+function namedZoneInstant(value: string, timezone: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (!match) return null;
+  const wanted = match.slice(1).map((part) => Number(part ?? 0));
+  const center = Date.UTC(wanted[0]!, wanted[1]! - 1, wanted[2]!, wanted[3]!, wanted[4]!, wanted[5]!);
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  });
+  for (let delta = -14 * 60; delta <= 14 * 60; delta += 15) {
+    const instant = center + delta * 60_000;
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(instant)).filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+    if ([parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second].every((part, index) => part === wanted[index])) return new Date(instant);
+  }
+  return null;
+}
+function occurrenceDate(fields: Record<string, string>, newsroomTimezone: string) {
+  const value = fields.deadline ?? fields.start ?? fields.serviceDate ?? fields.effectiveDate;
+  if (!value) return "";
+  if (/T/.test(value) && !/(?:Z|[+-]\d{2}:\d{2})$/.test(value) && fields.timezone) {
+    const instant = namedZoneInstant(value, fields.timezone);
+    return instant ? date(instant.toISOString(), newsroomTimezone) : "";
+  }
+  return date(value, newsroomTimezone);
+}
 function weekendRange(localDate: string) {
   const d = new Date(`${localDate}T12:00:00Z`);
   const day = d.getUTCDay();
@@ -44,19 +69,20 @@ function weekendRange(localDate: string) {
 }
 function logisticsLine(n: StructurallyValidRoutineNotice) {
   const f = n.normalizedFields;
+  const when = (value: string | undefined) => `${value ?? ""}${value?.includes("T") && f.timezone ? ` ${f.timezone}` : ""}`;
   switch (n.formatKey) {
     case "library-notice":
-      return `${f.program ?? f.branch}: ${f.start ?? f.effectiveDate}${f.location ? ` at ${f.location}` : ""}${f.hours ? ` · ${f.hours}` : ""}${f.closure ? ` · ${f.closure}` : ""}`;
+      return `${f.program ?? f.branch}: ${when(f.start ?? f.effectiveDate)}${f.location ? ` at ${f.location}` : ""}${f.hours ? ` · ${f.hours}` : ""}${f.closure ? ` · ${f.closure}` : ""}`;
     case "parks-recreation-notice":
-      return `${f.program}: ${f.start} at ${f.location}`;
+      return `${f.program}: ${when(f.start)} at ${f.location}`;
     case "community-arts-event-logistics":
-      return `${f.title}: ${f.start}${f.venue ? ` at ${f.venue}` : f.onlineUrl ? " online" : ""}`;
+      return `${f.title}: ${when(f.start)}${f.venue ? ` at ${f.venue}` : f.onlineUrl ? " online" : ""}`;
     case "registration-deadline":
-      return `${f.program}: applications close ${f.deadline}`;
+      return `${f.program}: applications close ${when(f.deadline)}`;
     case "waste-recycling-schedule":
       return `${f.service}: ${f.serviceDate} · ${f.area}${f.scheduleChange ? ` · ${f.scheduleChange}` : ""}`;
     case "public-meeting-logistics":
-      return `${f.title}: ${f.start}${f.venue ? ` at ${f.venue}` : ""}`;
+      return `${f.title}: ${when(f.start)}${f.venue ? ` at ${f.venue}` : ""}`;
   }
 }
 export function eligibleRoutineNotices(
@@ -74,29 +100,27 @@ export function eligibleRoutineNotices(
       continue;
     }
     const f = notice.normalizedFields;
-    const when = date(f.deadline ?? f.start ?? f.serviceDate ?? f.effectiveDate, timezone);
+    if (
+      f.cancellation ||
+      (f.eventStatus && !/(?:^|\/)EventScheduled$/.test(f.eventStatus))
+    ) {
+      review.push(notice);
+      continue;
+    }
+    const when = occurrenceDate(f, timezone);
     if (!when) continue;
-    const channel: RoutineEditionChannel =
-      notice.formatKey === "registration-deadline"
-        ? "deadlines"
-        : when === localDate
-          ? "today"
-          : when >= fri && when <= sun
-            ? "weekend"
-            : "today";
-    if (channel === "today" && when !== localDate) continue;
-    if (channel === "deadlines") {
+    const channels: RoutineEditionChannel[] = [];
+    if (notice.formatKey === "registration-deadline") {
       const end = new Date(`${localDate}T00:00:00Z`);
       end.setUTCDate(end.getUTCDate() + 7);
       if (when < localDate || when > end.toISOString().slice(0, 10)) continue;
+      channels.push("deadlines");
+    } else {
+      if (when === localDate) channels.push("today");
+      if (when >= fri && when <= sun) channels.push("weekend");
     }
-    eligible.push({
-      channel,
-      notice,
-      occurrenceDate: when,
-      line,
-      sourceUrl: notice.provenance.sourceUrl,
-    });
+    for (const channel of channels)
+      eligible.push({ channel, notice, occurrenceDate: when, line, sourceUrl: notice.provenance.sourceUrl });
   }
   return { eligible, review };
 }
