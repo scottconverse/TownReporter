@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { eligibleRoutineNotices, planRoutineEditions } from "./routine-notice-editions.ts";
-import type { StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
+import { validateRoutineNotice, type StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
 const n = (
   formatKey: StructurallyValidRoutineNotice["formatKey"],
   fields: Record<string, string>,
@@ -104,5 +104,16 @@ test("routes explicit cancellation and non-scheduled event statuses to review", 
     const result = eligibleRoutineNotices([n("community-arts-event-logistics", fields, "cancel")], "2026-09-08", "America/Denver");
     assert.equal(result.eligible.length, 0);
     assert.equal(result.review.length, 1);
+  }
+});
+test("uses the validator's normalized scheduled status while retaining cancelled review", () => {
+  const base = n("community-arts-event-logistics", { issuer: "Arts", title: "Concert", start: "2026-09-08T18:00:00-06:00", venue: "Park" }, "validated-status");
+  for (const [status, expected] of [["EventScheduled", 1], ["EventCancelled", 0]] as const) {
+    const validation = validateRoutineNotice({ ...base, fields: { ...base.fields, eventStatus: { value: status, locator: "eventStatus" } } });
+    assert.equal(validation.valid, true);
+    if (!validation.valid) continue;
+    const result = eligibleRoutineNotices([validation.notice], "2026-09-08", "America/Denver");
+    assert.equal(result.eligible.length, expected);
+    assert.equal(result.review.length, expected ? 0 : 1);
   }
 });

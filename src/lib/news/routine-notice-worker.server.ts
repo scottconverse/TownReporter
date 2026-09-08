@@ -158,7 +158,7 @@ export async function performRoutineNoticeWorkWith(
     check?: CheckFn;
     beforeCommit?: () => Promise<void>;
     verifyCheck?: typeof assertRoutineNoticeCheckStillBound;
-    now?: Date;
+    now?: Date | (() => Date);
   } = {},
 ): Promise<void> {
   await ensureRoutineNoticeAutomationSchema();
@@ -176,7 +176,8 @@ export async function performRoutineNoticeWorkWith(
     [job.subject_id, job.newsroom_id],
   );
   if (!run) throw new Error("Routine edition run is missing.");
-  if (localStamp(deps.now ?? new Date(), run.timezone).date !== String(run.local_date).slice(0, 10))
+  const now = () => typeof deps.now === "function" ? deps.now() : deps.now ?? new Date();
+  if (localStamp(now(), run.timezone).date !== String(run.local_date).slice(0, 10))
     throw new Error("Routine edition run expired before publication; editor review is required.");
   const sources = await sql.query<{
     source_id: number;
@@ -261,7 +262,10 @@ export async function performRoutineNoticeWorkWith(
     [run.newsroom_id, localDate],
   )) {
     try {
-      for (const key of JSON.parse(row.candidate_keys_json)) earlierDeadlineKeys.add(String(key));
+      const keys: unknown = JSON.parse(row.candidate_keys_json);
+      if (!Array.isArray(keys) || !keys.every((key) => typeof key === "string"))
+        throw new Error("malformed receipt");
+      for (const key of keys) earlierDeadlineKeys.add(key);
     } catch {
       malformedDeadlineReceipt = true;
     }
@@ -290,6 +294,8 @@ export async function performRoutineNoticeWorkWith(
       "select enabled,revision,today_section,weekend_section,deadlines_section from routine_notice_automations where newsroom_id=$1 for update",
       [run.newsroom_id],
     );
+    if (localStamp(now(), run.timezone).date !== localDate)
+      throw new Error("Routine edition run expired before publication; editor review is required.");
     const [policy] = await tx.query<any>(
       "select paused,revision from routine_notice_policies where newsroom_id=$1 for update",
       [run.newsroom_id],

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { beforeEach, test } from "node:test";
-import { getSql } from "../db.ts";
+import { readFile, readdir } from "node:fs/promises";
+import { before, beforeEach, test } from "node:test";
+import { getPglite, getSql } from "../db.ts";
 import {
   ensureRoutineNoticePolicySchema,
   saveRoutineNoticePolicyFor,
@@ -11,6 +12,8 @@ import {
   saveRoutineNoticeAutomationFor,
 } from "./routine-notice-automation.ts";
 import { ensureJobsSchema, type DeskJob } from "./jobs.ts";
+import { checkRoutineNoticeSourceForOwner } from "./routine-notice-checks.server.ts";
+import type { IngestDocument } from "./ingest.ts";
 import {
   performRoutineNoticeWork,
   performRoutineNoticeWorkWith,
@@ -18,7 +21,13 @@ import {
 } from "./routine-notice-worker.server.ts";
 
 const room = 9650,
-  owner = "routine-beta-owner";
+  owner = "routine-beta-owner",
+  runNow = new Date("2026-09-08T13:00:00Z");
+before(async () => {
+  const pg = await getPglite();
+  for (const file of (await readdir(new URL("../../../migrations/", import.meta.url))).filter((name) => name.endsWith(".sql")).sort())
+    await pg.exec(await readFile(new URL(`../../../migrations/${file}`, import.meta.url), "utf8"));
+});
 beforeEach(async () => {
   const sql = await getSql();
   await sql.query(
@@ -63,14 +72,15 @@ beforeEach(async () => {
     "insert into newsrooms(id,name) values($1,'Routine beta') on conflict(id) do nothing",
     [room],
   );
+  await sql.query("insert into section_config(newsroom_id) values($1) on conflict do nothing", [room]);
   await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'owner')", [
     owner,
     room,
   ]);
-  for (const key of ["news", "events", "deadlines"])
+  for (const [position, key] of ["news", "events", "deadlines"].entries())
     await sql.query(
-      "insert into newsroom_sections(newsroom_id,key,name,visible) values($1,$2,$2,true)",
-      [room, key],
+      "insert into newsroom_sections(newsroom_id,key,name,visible,position) values($1,$2,$2,true,$3)",
+      [room, key, position],
     );
 });
 
@@ -168,6 +178,7 @@ test("actual scheduled worker atomically publishes one logistics-only article an
   );
   await assert.rejects(
     performRoutineNoticeWorkWith(job as DeskJob, {
+      now: runNow,
       check: fakeCheck as any,
       verifyCheck: async () => {},
     }),
@@ -182,6 +193,7 @@ test("actual scheduled worker atomically publishes one logistics-only article an
   await sql.query("drop function fail_routine_run_audit()");
 
   await performRoutineNoticeWorkWith(job as DeskJob, {
+    now: runNow,
     check: fakeCheck as any,
     verifyCheck: async () => {},
   });
@@ -202,7 +214,7 @@ test("actual scheduled worker atomically publishes one logistics-only article an
     [owner, room, `prior-deadlines-${room}`],
   );
   await sql.query(
-    "insert into routine_notice_publications(newsroom_id,run_id,channel,issue_date,article_id,content_fingerprint,candidate_keys_json,article_body_hash) values($1,$2,'deadlines','2026-09-07',$3,'old','{','old')",
+    "insert into routine_notice_publications(newsroom_id,run_id,channel,issue_date,article_id,content_fingerprint,candidate_keys_json,article_body_hash) values($1,$2,'deadlines','2026-09-07',$3,'old','\"bad\"','old')",
     [room, job.subject_id, receiptArticle!.id],
   );
   const [malformedJob] = await sql.query<any>(
@@ -210,7 +222,7 @@ test("actual scheduled worker atomically publishes one logistics-only article an
     [room, owner, job.subject_id],
   );
   await assert.rejects(
-    performRoutineNoticeWorkWith(malformedJob as DeskJob, { check: fakeCheck as any, verifyCheck: async () => {} }),
+    performRoutineNoticeWorkWith(malformedJob as DeskJob, { now: runNow, check: fakeCheck as any, verifyCheck: async () => {} }),
     /receipt is malformed/i,
   );
   await sql.query("update desk_jobs set status='failed' where id=$1", [malformedJob.id]);
@@ -222,6 +234,7 @@ test("actual scheduled worker atomically publishes one logistics-only article an
     [room, owner, job.subject_id],
   );
   await performRoutineNoticeWorkWith(correctionJob as DeskJob, {
+    now: runNow,
     check: fakeCheck as any,
     verifyCheck: async () => {},
   });
@@ -240,6 +253,7 @@ test("actual scheduled worker atomically publishes one logistics-only article an
     [room, owner, job.subject_id],
   );
   await performRoutineNoticeWorkWith(editedJob as DeskJob, {
+    now: runNow,
     check: fakeCheck as any,
     verifyCheck: async () => {},
   });
@@ -293,6 +307,7 @@ test("revocation at the final boundary leaves no article, correction, audit, or 
   });
   await assert.rejects(
     performRoutineNoticeWorkWith(job as DeskJob, {
+      now: runNow,
       check: fake as any,
       verifyCheck: async () => {},
       beforeCommit: async () => {
@@ -323,6 +338,7 @@ test("a lost job lease refuses before any source fetch", async () => {
   let checks = 0;
   await assert.rejects(
     performRoutineNoticeWorkWith(job as DeskJob, {
+      now: runNow,
       check: (async () => {
         checks += 1;
         throw new Error("must not fetch");
@@ -332,6 +348,33 @@ test("a lost job lease refuses before any source fetch", async () => {
   );
   assert.equal(checks, 0);
   assert.equal((await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1", [room]))[0]?.n, 0);
+});
+
+test("real captured checks publish, correct a changed source revision, and then remain idempotent", async () => {
+  const source = await activateFixture();
+  await tickRoutineNoticeEditions(runNow);
+  const sql = await getSql();
+  const [firstJob] = await sql.query<any>("update desk_jobs set status='running',claim_token='real-check-1' where newsroom_id=$1 and kind='routine-notice' returning *", [room]);
+  let title = "Captured concert";
+  const check = (actor: { userId: string; newsroomId: number }, input: unknown) => {
+    const html = `<script type="application/ld+json">${JSON.stringify({ "@type": "Event", "@id": "real-event-1", name: title, startDate: "2026-09-08T18:00:00-06:00", organizer: { name: "Arts Council" }, location: { name: "Park" } })}</script>`;
+    const document: IngestDocument = { ok: false, status: 200, outcome: "parse-failed", text: "", title: "Events", extras: [], contentType: "text/html", needsOcr: false, redirectChain: [], extractionMethod: "readability", pages: [], notices: [], rawBytes: new TextEncoder().encode(html) };
+    return checkRoutineNoticeSourceForOwner(actor, input, { ingest: async () => document });
+  };
+  await performRoutineNoticeWorkWith(firstJob as DeskJob, { now: runNow, check });
+  title = "Captured concert at seven";
+  const nextJob = async (token: string) => (await sql.query<any>(
+    "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'routine-notice',$3,'deterministic','scheduled','supplied','default','running','Working',$4) returning *",
+    [room, owner, firstJob.subject_id, token],
+  ))[0];
+  await performRoutineNoticeWorkWith(await nextJob("real-check-2"), { now: runNow, check });
+  const [changedState] = await sql.query<any>("select (select count(*)::int from corrections where newsroom_id=$1) corrections,(select count(*)::int from articles where newsroom_id=$1) articles,(select summary_json from routine_notice_runs where id=$2) summary,(select body from articles where newsroom_id=$1 limit 1) body", [room, firstJob.subject_id]);
+  assert.equal(changedState?.corrections, 1, JSON.stringify(changedState));
+  await performRoutineNoticeWorkWith(await nextJob("real-check-3"), { now: runNow, check });
+  assert.equal((await sql.query<{ n: number }>("select count(*)::int n from corrections where newsroom_id=$1", [room]))[0]?.n, 1);
+  const groups = await sql.query<{ state: string }>("select state from routine_notice_checks where newsroom_id=$1 order by id", [room]);
+  assert.deepEqual(groups.map((group) => group.state), ["parsed", "parsed", "parsed"]);
+  assert.equal(source.id > 0, true);
 });
 
 test("an old queued run expires with a visible failure before any source fetch", async () => {
@@ -354,6 +397,24 @@ test("an old queued run expires with a visible failure before any source fetch",
   const [run] = await sql.query<{ status: string; summary_json: string }>("select status,summary_json from routine_notice_runs where id=$1", [job.subject_id]);
   assert.equal(run?.status, "failed");
   assert.match(run?.summary_json ?? "", /expired before publication/i);
+});
+
+test("a run crossing the newsroom day during source work refuses at the final transaction", async () => {
+  const source = await activateFixture();
+  await tickRoutineNoticeEditions(runNow);
+  const sql = await getSql();
+  const [job] = await sql.query<any>("update desk_jobs set status='running',claim_token='midnight-run' where newsroom_id=$1 and kind='routine-notice' returning *", [room]);
+  let clock = runNow;
+  const check = async () => ({ ok: true as const, check: {
+    checkId: 1, source: { id: source.id, title: "Events", url: source.url, sourceHref: "/desk/sources" }, formatKey: "community-arts-event-logistics" as const,
+    checkedAt: runNow.toISOString(), capture: null, state: "refused" as const, counts: { parsed: 0, refused: 1, conflicts: 0 }, refusals: [{ code: "structurally-invalid", locator: "document", count: 1 }], candidates: [], newerCaptureAvailable: false,
+    policy: { revision: 1, paused: false, approvalValid: true }, canCheck: true,
+  }});
+  await assert.rejects(
+    performRoutineNoticeWorkWith(job as DeskJob, { now: () => clock, check: check as any, beforeCommit: async () => { clock = new Date("2026-09-09T13:00:00Z"); } }),
+    /expired before publication/i,
+  );
+  assert.equal((await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1", [room]))[0]?.n, 0);
 });
 
 test("saved permissions remain dormant until an owner explicitly activates an exact source identity", async () => {

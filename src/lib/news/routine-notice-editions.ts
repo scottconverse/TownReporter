@@ -102,7 +102,7 @@ export function eligibleRoutineNotices(
     const f = notice.normalizedFields;
     if (
       f.cancellation ||
-      (f.eventStatus && !/(?:^|\/)EventScheduled$/.test(f.eventStatus))
+      (f.eventStatus && f.eventStatus !== "scheduled" && !/(?:^|\/)EventScheduled$/.test(f.eventStatus))
     ) {
       review.push(notice);
       continue;
