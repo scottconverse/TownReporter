@@ -330,6 +330,13 @@ export function extractJsonLdEvents(
         results.push(refused("missing-stable-identity", node.locator));
         continue;
       }
+      if (
+        Object.prototype.hasOwnProperty.call(node.row, "eventStatus") &&
+        !text(node.row.eventStatus)
+      ) {
+        results.push(refused("structurally-invalid", `${node.locator}.eventStatus`));
+        continue;
+      }
       const validation = validateRoutineNotice(
         eventInput(node.row, node.locator, context, externalId),
       );

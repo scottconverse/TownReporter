@@ -257,6 +257,30 @@ describe("saved Schema.org Event extraction", () => {
     }
   });
 
+  it("distinguishes an absent event status from a malformed supplied status", () => {
+    const base = {
+      "@type": "Event",
+      "@id": "status-shape",
+      name: "Town program",
+      startDate: "2026-09-08T10:00:00-06:00",
+      organizer: { name: "Town" },
+      location: { name: "Hall" },
+    };
+    const resultFor = (row: Record<string, unknown>) =>
+      extractJsonLdEvents(
+        `<script type="application/ld+json">${JSON.stringify(row)}</script>`,
+        { formatKey: "community-arts-event-logistics", provenance },
+      )[0];
+
+    assert.equal(resultFor(base)?.status, "parsed");
+    for (const eventStatus of [null, 42, {}, [], "   "]) {
+      const result = resultFor({ ...base, eventStatus });
+      assert.equal(result?.status, "refused");
+      assert.equal(result?.code, "structurally-invalid");
+      assert.equal(result?.locator.endsWith(".eventStatus"), true);
+    }
+  });
+
   it("accepts documented Event identifiers in scalar and array @type values", () => {
     for (const type of [
       "https://schema.org/Event",
