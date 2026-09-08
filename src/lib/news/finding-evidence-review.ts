@@ -46,6 +46,35 @@ export type ClaimEvidenceRow = {
   judgment: FindingEvidenceRow["judgment"];
 };
 
+export type ManualClaimReferenceRelation = "corroborating" | "contrary" | "context";
+type StoredManualClaimReference = {
+  versionId: number;
+  url: string;
+  relation: ManualClaimReferenceRelation;
+};
+type StoredManualClaim = {
+  id: string;
+  fact: string;
+  kind: StoryClaim["kind"];
+  references: StoredManualClaimReference[];
+};
+type StoredManualClaims = { version: 1; rows: StoredManualClaim[] };
+
+export type ManualClaimEvidenceRow = {
+  key: string;
+  claim: Pick<StoredManualClaim, "id" | "fact" | "kind">;
+  captures: Array<FindingCaptureEvidence & { relation: ManualClaimReferenceRelation }>;
+  judgment: FindingEvidenceRow["judgment"];
+};
+
+export type ManualClaimCaptureOption = {
+  versionId: number;
+  title: string | null;
+  url: string;
+  capturedAt: string | null;
+  readable: boolean;
+};
+
 export type FindingEvidenceReview = {
   leadId: number;
   draftId: number;
@@ -54,6 +83,8 @@ export type FindingEvidenceReview = {
   canonicalDraft: { headline: string; dek: string; body: string; topic: string };
   rows: FindingEvidenceRow[];
   claimRows: ClaimEvidenceRow[];
+  manualClaimRows: ManualClaimEvidenceRow[];
+  manualClaimCaptureOptions: ManualClaimCaptureOption[];
 };
 
 export type FindingEvidenceResult =
@@ -76,6 +107,28 @@ export type FindingEvidenceCaptureResult =
       };
     }
   | { ok: false; code: "forbidden" | "not-found" | "invalid-input"; error: string };
+
+export type SaveManualClaimInput =
+  | {
+      leadId: number;
+      draftId: number;
+      evidenceToken: string;
+      action: "upsert";
+      id: string | null;
+      fact: string;
+      kind: StoryClaim["kind"];
+      references: Array<{ versionId: number; relation: ManualClaimReferenceRelation }>;
+    }
+  | {
+      leadId: number;
+      draftId: number;
+      evidenceToken: string;
+      action: "remove";
+      id: string;
+      fact?: never;
+      kind?: never;
+      references?: never;
+    };
 
 class ReviewError extends Error {
   readonly code: "forbidden" | "not-found" | "conflict" | "invalid-input";
@@ -191,6 +244,64 @@ function storedClaims(draft: DraftRow): StoryClaim[] {
       throw new ReviewError("invalid-input", "Stored draft claims are incomplete or unreadable.");
     return { fact: row.fact, url: row.url, kind: row.kind };
   });
+}
+
+function storedManualClaims(draft: DraftRow): StoredManualClaim[] {
+  const claims = objectMemo(draft.research_json).manualClaims;
+  if (claims == null) return [];
+  if (!claims || typeof claims !== "object" || Array.isArray(claims))
+    throw new ReviewError("invalid-input", "Stored manual claims are incomplete or unreadable.");
+  const value = claims as Partial<StoredManualClaims>;
+  if (value.version !== 1 || !Array.isArray(value.rows) || value.rows.length > 16)
+    throw new ReviewError("invalid-input", "Stored manual claims are incomplete or unreadable.");
+  return value.rows.map((claim) => {
+    if (
+      !claim ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(claim.id) ||
+      typeof claim.fact !== "string" ||
+      !claim.fact.trim() ||
+      claim.fact.length > 400 ||
+      !["primary", "record", "news"].includes(claim.kind) ||
+      !Array.isArray(claim.references) ||
+      claim.references.length === 0 ||
+      claim.references.length > 6
+    )
+      throw new ReviewError("invalid-input", "Stored manual claims are incomplete or unreadable.");
+    const references = claim.references.map((reference) => {
+      if (
+        !reference ||
+        !Number.isInteger(reference.versionId) ||
+        reference.versionId < 1 ||
+        typeof reference.url !== "string" ||
+        !reference.url.trim() ||
+        reference.url.length > 500 ||
+        !["corroborating", "contrary", "context"].includes(reference.relation)
+      )
+        throw new ReviewError("invalid-input", "Stored manual claims are incomplete or unreadable.");
+      return {
+        versionId: reference.versionId,
+        url: reference.url,
+        relation: reference.relation,
+      } as StoredManualClaimReference;
+    });
+    if (new Set(references.map((reference) => reference.versionId)).size !== references.length)
+      throw new ReviewError("invalid-input", "Stored manual claims are incomplete or unreadable.");
+    return { id: claim.id, fact: claim.fact, kind: claim.kind, references };
+  });
+}
+
+function manualClaimKey(claim: StoredManualClaim) {
+  return `manual-claim:${claim.id}`;
+}
+
+function referenceForManualClaim(claim: StoredManualClaim): StoryFinding {
+  return {
+    text: claim.fact,
+    source_urls: claim.references.map((reference) => reference.url),
+    artifact_version_ids: claim.references.map((reference) => reference.versionId),
+    capture_event_ids: [],
+    locators: [],
+  };
 }
 
 function provenanceForClaim(draft: DraftRow, claim: StoryClaim): StoryFinding {
@@ -317,6 +428,7 @@ async function fullReviewToken(
   draft: DraftRow,
   findings: StoryFinding[],
   claims: StoryClaim[],
+  manualClaims: StoredManualClaim[],
   lock = false,
 ): Promise<string> {
   return JSON.stringify([
@@ -324,11 +436,14 @@ async function fullReviewToken(
     await Promise.all(
       findings.map((finding) => findingReferenceBinding(sql, newsroomId, finding, lock)),
     ),
-    await Promise.all(
-      claims.map((claim) =>
+    await Promise.all([
+      ...claims.map((claim) =>
         findingReferenceBinding(sql, newsroomId, provenanceForClaim(draft, claim), lock),
       ),
-    ),
+      ...manualClaims.map((claim) =>
+        findingReferenceBinding(sql, newsroomId, referenceForManualClaim(claim), lock),
+      ),
+    ]),
   ]);
 }
 
@@ -502,6 +617,101 @@ async function resolveClaim(
   };
 }
 
+async function resolveManualClaim(
+  sql: Sql,
+  newsroomId: number,
+  draft: DraftRow,
+  claim: StoredManualClaim,
+): Promise<ManualClaimEvidenceRow> {
+  const key = manualClaimKey(claim);
+  const resolved = await resolveFinding(
+    sql,
+    newsroomId,
+    draft,
+    referenceForManualClaim(claim),
+    0,
+    key,
+    "claimEvidenceReview",
+  );
+  const captures = resolved.captures.map((capture) => {
+    const reference = claim.references.find((candidate) => candidate.versionId === capture.versionId);
+    if (!reference || capture.url !== reference.url) {
+      return {
+        versionId: capture.versionId,
+        captureEventId: capture.captureEventId,
+        url: null,
+        title: null,
+        capturedAt: null,
+        available: false,
+        readable: false,
+        excerptState: "no-excerpt" as const,
+        newerCapture: null,
+        viewHref: null,
+        relation: reference?.relation ?? "context" as ManualClaimReferenceRelation,
+      };
+    }
+    return { ...capture, relation: reference.relation };
+  });
+  const readableVersions = new Set(
+    captures.filter((capture) => capture.available && capture.readable).map((capture) => capture.versionId),
+  );
+  const judgment =
+    (resolved.judgment.value === "supports" && readableVersions.size === 0) ||
+    (resolved.judgment.value === "contradicts" &&
+      (!resolved.judgment.reason ||
+        resolved.judgment.contraryVersionId == null ||
+        !readableVersions.has(resolved.judgment.contraryVersionId)))
+      ? { value: "unreviewed" as const, reason: "", contraryVersionId: null }
+      : resolved.judgment;
+  return {
+    key,
+    claim: { id: claim.id, fact: claim.fact, kind: claim.kind },
+    captures,
+    judgment,
+  };
+}
+
+async function manualClaimCaptureOptions(
+  sql: Sql,
+  newsroomId: number,
+  draft: DraftRow,
+): Promise<ManualClaimCaptureOption[]> {
+  let provenance: unknown = [];
+  try {
+    provenance = JSON.parse(draft.provenance_json || "[]");
+  } catch {
+    throw new ReviewError("invalid-input", "Stored draft provenance is incomplete or unreadable.");
+  }
+  const exactVersionIds = Array.isArray(provenance)
+    ? provenance.flatMap((item) =>
+        item && typeof item === "object" && Number.isInteger((item as Partial<ProvenanceItem>).version_id)
+          ? [(item as ProvenanceItem).version_id]
+          : [],
+      )
+    : [];
+  const rows = await sql.query<{
+    id: number;
+    title: string | null;
+    url: string;
+    captured_at: string | Date | null;
+    full_text: string | null;
+  }>(
+    `select id,title,url,captured_at,full_text
+       from artifact_versions
+      where newsroom_id=$1
+      order by case when id=any($2::int[]) then 0 else 1 end,captured_at desc,id desc
+      limit 32`,
+    [newsroomId, exactVersionIds],
+  );
+  return rows.map((row) => ({
+    versionId: row.id,
+    title: row.title || null,
+    url: row.url,
+    capturedAt: row.captured_at ? String(row.captured_at) : null,
+    readable: Boolean(row.full_text?.trim()),
+  }));
+}
+
 export async function loadFindingEvidenceReview(
   sql: Sql,
   newsroomId: number,
@@ -511,10 +721,11 @@ export async function loadFindingEvidenceReview(
   assertReadableStoredFindings(draft.found_note);
   const findings = parseFindings(draft.found_note);
   const claims = storedClaims(draft);
+  const manualClaims = storedManualClaims(draft);
   return {
     leadId,
     draftId: draft.id,
-    evidenceToken: await fullReviewToken(sql, newsroomId, draft, findings, claims),
+    evidenceToken: await fullReviewToken(sql, newsroomId, draft, findings, claims, manualClaims),
     contentToken: findingEvidenceContentToken(draft),
     canonicalDraft: {
       headline: draft.headline,
@@ -528,6 +739,10 @@ export async function loadFindingEvidenceReview(
     claimRows: await Promise.all(
       claims.map((claim, index) => resolveClaim(sql, newsroomId, draft, claim, index)),
     ),
+    manualClaimRows: await Promise.all(
+      manualClaims.map((claim) => resolveManualClaim(sql, newsroomId, draft, claim)),
+    ),
+    manualClaimCaptureOptions: await manualClaimCaptureOptions(sql, newsroomId, draft),
   };
 }
 
@@ -550,6 +765,11 @@ export const loadFindingEvidenceCapture = createServerOnlyFn(
       }
     }
     for (const row of review.claimRows) {
+      for (const capture of row.captures) {
+        if (capture.available && capture.versionId != null) allowed.add(capture.versionId);
+      }
+    }
+    for (const row of review.manualClaimRows) {
       for (const capture of row.captures) {
         if (capture.available && capture.versionId != null) allowed.add(capture.versionId);
       }
@@ -616,10 +836,11 @@ export const persistFindingEvidenceJudgment = createServerOnlyFn(
       assertReadableStoredFindings(draft.found_note);
       const findings = parseFindings(draft.found_note);
       const claims = storedClaims(draft);
+      const manualClaims = storedManualClaims(draft);
       if (
         draft.id !== input.draftId ||
         input.evidenceToken !==
-          (await fullReviewToken(sql, context.newsroomId, draft, findings, claims, true))
+          (await fullReviewToken(sql, context.newsroomId, draft, findings, claims, manualClaims, true))
       )
         throw new ReviewError(
           "conflict",
@@ -627,15 +848,27 @@ export const persistFindingEvidenceJudgment = createServerOnlyFn(
         );
       const findingMatch = /^finding:(0|[1-9]\d*)$/.exec(input.findingKey);
       const claimMatch = /^claim:(0|[1-9]\d*):[a-f0-9]{64}$/.exec(input.findingKey);
+      const manualClaimMatch = /^manual-claim:([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(input.findingKey);
       const index = Number(findingMatch?.[1] ?? claimMatch?.[1] ?? Number.NaN);
       const isClaim = Boolean(claimMatch);
-      if (!Number.isInteger(index) || index < 0 || (isClaim ? index >= claims.length : index >= findings.length))
+      const isManualClaim = Boolean(manualClaimMatch);
+      const manualClaim = isManualClaim
+        ? manualClaims.find((claim) => claim.id === manualClaimMatch![1])
+        : undefined;
+      if (
+        (!isManualClaim && (!Number.isInteger(index) || index < 0 || (isClaim ? index >= claims.length : index >= findings.length))) ||
+        (isManualClaim && !manualClaim)
+      )
         throw new ReviewError("conflict", "That evidence item is no longer in the current draft.");
       if (isClaim && input.findingKey !== (await claimKey(index, claims[index])))
         throw new ReviewError("conflict", "That claim identity changed. Reload the current evidence review.");
-      const namespace: ReviewNamespace = isClaim ? "claimEvidenceReview" : "findingEvidenceReview";
-      const reference = isClaim ? provenanceForClaim(draft, claims[index]) : findings[index];
-      const resolved = isClaim
+      const namespace: ReviewNamespace = isClaim || isManualClaim ? "claimEvidenceReview" : "findingEvidenceReview";
+      const reference = isManualClaim
+        ? referenceForManualClaim(manualClaim!)
+        : isClaim ? provenanceForClaim(draft, claims[index]) : findings[index];
+      const resolved = isManualClaim
+        ? await resolveManualClaim(sql, context.newsroomId, draft, manualClaim!)
+        : isClaim
         ? await resolveClaim(sql, context.newsroomId, draft, claims[index], index)
         : await resolveFinding(
             sql,
@@ -651,17 +884,31 @@ export const persistFindingEvidenceJudgment = createServerOnlyFn(
           .filter((capture) => capture.available && capture.readable && capture.versionId != null)
           .map((capture) => capture.versionId!),
       );
-      if (input.judgment === "contradicts" && !citedVersionIds.has(input.contraryVersionId!))
+      const supportVersionIds = new Set(
+        resolved.captures
+          .filter((capture) => capture.available && capture.readable && (!isManualClaim || ("relation" in capture && capture.relation === "corroborating")) && capture.versionId != null)
+          .map((capture) => capture.versionId!),
+      );
+      const contraryVersionIds = new Set(
+        resolved.captures
+          .filter((capture) => capture.available && capture.readable && (!isManualClaim || ("relation" in capture && capture.relation === "contrary")) && capture.versionId != null)
+          .map((capture) => capture.versionId!),
+      );
+      if (input.judgment === "contradicts" && !(isManualClaim ? contraryVersionIds : citedVersionIds).has(input.contraryVersionId!))
         throw new ReviewError(
           "invalid-input",
-          isClaim
+          isManualClaim
+            ? "The contrary evidence must be a readable record explicitly marked contrary for this manual claim."
+            : isClaim
             ? "The contrary evidence must be a readable captured version cited by this claim."
             : "The contrary evidence must be a readable captured version cited by this finding.",
         );
-      if (input.judgment === "supports" && citedVersionIds.size === 0)
+      if (input.judgment === "supports" && (isManualClaim ? supportVersionIds : citedVersionIds).size === 0)
         throw new ReviewError(
           "invalid-input",
-          "Supporting evidence requires a readable captured record cited by this evidence item.",
+          isManualClaim
+            ? "Supporting evidence requires a readable record explicitly marked corroborating for this manual claim."
+            : "Supporting evidence requires a readable captured record cited by this evidence item.",
         );
       const memo = objectMemo(draft.research_json);
       const previous = storedReview(draft, namespace);
@@ -686,6 +933,87 @@ export const persistFindingEvidenceJudgment = createServerOnlyFn(
     });
     const sql = await getSql();
     return loadFindingEvidenceReview(sql, context.newsroomId, input.leadId);
+  },
+);
+
+async function resolvedManualReferences(
+  sql: Sql,
+  newsroomId: number,
+  references: Array<{ versionId: number; relation: ManualClaimReferenceRelation }>,
+): Promise<StoredManualClaimReference[]> {
+  if (references.length === 0 || references.length > 6)
+    throw new ReviewError("invalid-input", "Choose from one to six already captured records.");
+  if (new Set(references.map((reference) => reference.versionId)).size !== references.length)
+    throw new ReviewError("invalid-input", "Choose each captured record only once.");
+  if (references.some((reference) => !Number.isInteger(reference.versionId) || reference.versionId < 1))
+    throw new ReviewError("invalid-input", "Choose valid captured records.");
+  const versions = await sql.query<{ id: number; url: string }>(
+    "select id,url from artifact_versions where newsroom_id=$1 and id=any($2::int[])",
+    [newsroomId, references.map((reference) => reference.versionId)],
+  );
+  if (versions.length !== references.length)
+    throw new ReviewError("invalid-input", "Every selected captured record must still belong to this newsroom.");
+  const urls = new Map(versions.map((version) => [version.id, version.url]));
+  return references.map((reference) => {
+    if (!urls.get(reference.versionId) || urls.get(reference.versionId)!.length > 500)
+      throw new ReviewError("invalid-input", "A selected captured record has an invalid URL.");
+    return { ...reference, url: urls.get(reference.versionId)! };
+  });
+}
+
+export const persistManualClaim = createServerOnlyFn(
+  async function persistManualClaim(
+    context: { newsroomId: number },
+    input: SaveManualClaimInput,
+  ): Promise<FindingEvidenceReview> {
+    const { withLeadDraftLock } = await import("./draft-order.server.ts");
+    await withLeadDraftLock(context, input.leadId, async (sql) => {
+      const draft = await currentDraft(sql, context.newsroomId, input.leadId);
+      assertReadableStoredFindings(draft.found_note);
+      const findings = parseFindings(draft.found_note);
+      const claims = storedClaims(draft);
+      const manualClaims = storedManualClaims(draft);
+      if (
+        draft.id !== input.draftId ||
+        input.evidenceToken !==
+          (await fullReviewToken(sql, context.newsroomId, draft, findings, claims, manualClaims, true))
+      )
+        throw new ReviewError(
+          "conflict",
+          "The draft or its evidence review changed. Reload the current evidence review.",
+        );
+      const memo = objectMemo(draft.research_json);
+      if (input.action === "remove") {
+        const index = manualClaims.findIndex((claim) => claim.id === input.id);
+        if (index < 0) throw new ReviewError("conflict", "That manual claim is no longer current.");
+        manualClaims.splice(index, 1);
+      } else {
+        if (
+          !input.fact.trim() ||
+          input.fact.length > 400 ||
+          !["primary", "record", "news"].includes(input.kind)
+        ) throw new ReviewError("invalid-input", "Provide a claim of 400 characters or fewer and a valid kind.");
+        const references = await resolvedManualReferences(sql, context.newsroomId, input.references);
+        const id = input.id ?? globalThis.crypto.randomUUID();
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))
+          throw new ReviewError("invalid-input", "Invalid manual claim identifier.");
+        const next: StoredManualClaim = { id, fact: input.fact, kind: input.kind, references };
+        const index = manualClaims.findIndex((claim) => claim.id === id);
+        if (index < 0) {
+          if (manualClaims.length >= 16)
+            throw new ReviewError("invalid-input", "This draft can hold at most 16 manual claims.");
+          manualClaims.push(next);
+        } else {
+          manualClaims[index] = next;
+        }
+      }
+      memo.manualClaims = { version: 1, rows: manualClaims } satisfies StoredManualClaims;
+      await sql.query(
+        "update drafts set research_json=$1,updated_at=now() where id=$2 and newsroom_id=$3",
+        [JSON.stringify(memo), draft.id, context.newsroomId],
+      );
+    });
+    return loadFindingEvidenceReview(await getSql(), context.newsroomId, input.leadId);
   },
 );
 
@@ -721,6 +1049,34 @@ function cleanCaptureInput(raw: unknown) {
     leadId: typeof value.leadId === "number" ? value.leadId : Number.NaN,
     draftId: typeof value.draftId === "number" ? value.draftId : Number.NaN,
     versionId: typeof value.versionId === "number" ? value.versionId : Number.NaN,
+  };
+}
+
+function cleanManualClaimInput(raw: unknown): SaveManualClaimInput {
+  const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const common = {
+    leadId: typeof value.leadId === "number" ? value.leadId : Number.NaN,
+    draftId: typeof value.draftId === "number" ? value.draftId : Number.NaN,
+    evidenceToken: typeof value.evidenceToken === "string" ? value.evidenceToken : "",
+  };
+  if (value.action === "remove") {
+    return { ...common, action: "remove", id: typeof value.id === "string" ? value.id : "" };
+  }
+  return {
+    ...common,
+    action: "upsert",
+    id: value.id === null ? null : typeof value.id === "string" ? value.id : null,
+    fact: typeof value.fact === "string" ? value.fact : "",
+    kind: typeof value.kind === "string" ? value.kind as StoryClaim["kind"] : "news",
+    references: Array.isArray(value.references)
+      ? value.references.map((reference) => {
+          const item = reference && typeof reference === "object" ? reference as Record<string, unknown> : {};
+          return {
+            versionId: typeof item.versionId === "number" ? item.versionId : Number.NaN,
+            relation: typeof item.relation === "string" ? item.relation as ManualClaimReferenceRelation : "context",
+          };
+        })
+      : [],
   };
 }
 
@@ -783,6 +1139,26 @@ export const saveFindingEvidenceJudgment = createServerFn({ method: "POST" })
         ok: false,
         code: error instanceof ReviewError ? error.code : "invalid-input",
         error: error instanceof Error ? error.message : "Evidence review failed.",
+      };
+    }
+  });
+
+export const saveManualClaim = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator(cleanManualClaimInput)
+  .handler(async ({ context, data }): Promise<FindingEvidenceResult> => {
+    try {
+      if (
+        !Number.isInteger(data.leadId) || data.leadId < 1 ||
+        !Number.isInteger(data.draftId) || data.draftId < 1 ||
+        !data.evidenceToken
+      ) throw new ReviewError("invalid-input", "Invalid manual claim.");
+      return { ok: true, review: await persistManualClaim(context, data) };
+    } catch (error) {
+      return {
+        ok: false,
+        code: error instanceof ReviewError ? error.code : "invalid-input",
+        error: error instanceof Error ? error.message : "Manual claim could not be saved.",
       };
     }
   });
