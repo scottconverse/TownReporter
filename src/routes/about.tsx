@@ -35,8 +35,9 @@ function About() {
           We follow {PAPER.city}’s meetings, money, contracts and public records —
           then keep digging when something changes, disappears or doesn’t add
           up. A human editor decides what is published for reported stories.
-          The owner may separately activate deterministic routine editions for
-          six explicitly approved structured notice formats; arbitrary prose,
+          The owner may separately activate automatic roundups of approved
+          library, recreation, community-event, registration, waste-collection
+          and public-meeting notices; arbitrary prose,
           investigations, disputes and ambiguous claims stay outside that path. {PAPER.trust}
         </p>
         <p>
