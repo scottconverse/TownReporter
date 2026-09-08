@@ -93,6 +93,10 @@ type DarkArtifactEvidence = {
   fetch_outcome: string | null;
 };
 
+type DarkArtifactCandidate = Omit<DarkArtifactEvidence, "full_text"> & {
+  score: number;
+};
+
 type DarkArtifactChunk = {
   version_id: number;
   chunk_index: number;
@@ -120,10 +124,6 @@ function focusTextScore(text: string, questionTerms: string[], frontierTerms: st
   return hits(questionTerms) * 5 + hits(frontierTerms);
 }
 
-function focusScore(artifact: DarkArtifactEvidence, questionTerms: string[], frontierTerms: string[]) {
-  return focusTextScore(`${artifact.title} ${artifact.url} ${artifact.full_text}`, questionTerms, frontierTerms);
-}
-
 function capText(text: string, cap: number): string {
   if (text.length <= cap) return text;
   if (cap <= SECTION_BUDGET_MARKER.length) return text.slice(0, cap);
@@ -143,27 +143,59 @@ async function relevantDarkArtifactEvidence(
   budgetChars: number,
 ): Promise<{ text: string; artifacts: { title: string; url: string; evidence: string }[] }> {
   const sql = await getSql();
-  const all = await sql<DarkArtifactEvidence>`
-    select id, title, url, full_text, content_hash, version_id, capture_event_id, fetch_status, fetch_outcome
-    from artifacts
-    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId}
-  `;
   const questionTerms = [...new Set(queryTokens(`${focus.title} ${focus.paste}`))];
   const frontierTerms = [
     ...new Set(queryTokens(focus.frontier.join(" ")).filter((term) => !questionTerms.includes(term))),
   ];
-  const selected = all
-    .filter(artifactReadable)
-    .map((artifact) => ({
-      artifact,
-      score: focusScore(artifact, questionTerms, frontierTerms),
-    }))
-    .sort((a, b) => b.score - a.score || b.artifact.id - a.artifact.id)
-    // If there is no question vocabulary at all, retain recent readable
-    // evidence rather than treating a failed capture as a fact.
-    .filter((entry, index, entries) => entry.score > 0 || entries[0]?.score === 0)
-    .slice(0, DARK_ARTIFACT_COUNT)
-    .map((entry) => entry.artifact);
+  // Score all stored captures in SQL, but transfer full bodies only after the
+  // readable, version-aware candidates have been ranked. A large mature file
+  // must not allocate every capture body in the application merely to choose
+  // eight evidence records.
+  const candidates = await sql.query<DarkArtifactCandidate>(
+    `with scored as (
+       select a.id, a.title, a.url, a.content_hash, a.version_id, a.capture_event_id,
+         a.fetch_status, a.fetch_outcome,
+         (
+           5 * (select count(*) from unnest($3::text[]) term
+                where position(term in lower(a.title || ' ' || a.url || ' ' || a.full_text)) > 0)
+           + (select count(*) from unnest($4::text[]) term
+              where position(term in lower(a.title || ' ' || a.url || ' ' || a.full_text)) > 0)
+         )::int as score,
+         case when a.version_id is null then 'artifact:' || a.id::text
+              else 'version:' || a.version_id::text end as evidence_key
+       from artifacts a
+       where a.newsroom_id = $1
+         and a.investigation_id = $2
+         and char_length(btrim(a.full_text)) >= 40
+         and coalesce(a.fetch_status, 200) < 400
+         and coalesce(a.fetch_status, 200) not in (401, 403, 404, 410, 429)
+         and coalesce(a.fetch_outcome, 'fetched') not in ('not-found', 'soft-404', 'fetch-failed', 'parse-failed')
+         and coalesce(a.extraction_method, '') not in ('refused-too-large', 'refused-content-type')
+     ), deduplicated as (
+       select distinct on (evidence_key) id, title, url, content_hash, version_id, capture_event_id,
+         fetch_status, fetch_outcome, score
+       from scored
+       order by evidence_key, id desc
+     )
+     select id, title, url, content_hash, version_id, capture_event_id, fetch_status, fetch_outcome, score
+     from deduplicated
+     where score > 0 or (cardinality($3::text[]) = 0 and cardinality($4::text[]) = 0)
+     order by score desc, id desc
+     limit $5`,
+    [newsroomId, investigationId, questionTerms, frontierTerms, DARK_ARTIFACT_COUNT],
+  );
+  const selectedRows = candidates.length
+    ? await sql.query<DarkArtifactEvidence>(
+        `select id, title, url, full_text, content_hash, version_id, capture_event_id, fetch_status, fetch_outcome
+         from artifacts
+         where newsroom_id = $1 and id = any($2::int[])`,
+        [newsroomId, candidates.map((candidate) => candidate.id)],
+      )
+    : [];
+  const selectedById = new Map(selectedRows.map((artifact) => [artifact.id, artifact]));
+  const selected = candidates
+    .map((candidate) => selectedById.get(candidate.id))
+    .filter((artifact): artifact is DarkArtifactEvidence => Boolean(artifact && artifactReadable(artifact)));
 
   if (!selected.length) return { text: "(none)", artifacts: [] };
 
@@ -215,14 +247,14 @@ async function relevantDarkArtifactEvidence(
         `[adjacent same-page continuation ${continuation.locator} page:${continuation.page_number}] ${continuation.excerpt}`,
       ];
     });
-    const fallback = chunksFromEvidence(artifact.full_text)
+    const fallbackChunks = chunksFromEvidence(artifact.full_text)
       .map((chunk) => ({
         ...chunk,
         score: focusTextScore(chunk.excerpt, questionTerms, frontierTerms),
-      }))
-      .filter((chunk) => chunk.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 4)
+      }));
+    const fallback = (questionTerms.length || frontierTerms.length
+      ? fallbackChunks.filter((chunk) => chunk.score > 0).sort((a, b) => b.score - a.score).slice(0, 4)
+      : fallbackChunks.slice(0, 1))
       .map(
         (chunk) =>
           `[${chunk.locator}${chunk.page_number == null ? "" : ` page:${chunk.page_number}`}] ${chunk.excerpt}`,

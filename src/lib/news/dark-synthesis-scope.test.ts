@@ -146,3 +146,60 @@ it("synthesis keeps an older focus-matching capture and its stored page evidence
   assert.match(briefPrompt, /page:7:char:6400-6500/);
   assert.doesNotMatch(briefPrompt, /PRECEDING_APPLICANT: Neighbor Holdings LLC/);
 });
+
+it("keeps readable evidence without focus tokens and collapses duplicate versions before the cap", async () => {
+  const sql = await getSql();
+  const userId = "synthesis-empty-focus";
+  const emptyRoom = 80;
+  await sql`insert into paper_settings(newsroom_id,city,state) values (${emptyRoom},'Riverton','Colorado')`;
+  const emptyInv = (
+    await sql<{ id: number }>`
+      insert into investigations(user_id,newsroom_id,title)
+      values (${userId},${emptyRoom},'AI tax')
+      returning id
+    `
+  )[0]!.id;
+  await sql`
+    insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,fetch_status,fetch_outcome)
+    values (${userId},${emptyRoom},${emptyInv},'https://records.example/short-focus','Short focus record','empty-focus','EMPTY_FOCUS_EVIDENCE remains readable without a four-character query token.',200,'fetched')
+  `;
+  const emptyPack = await buildDarkSynthesisPack(emptyInv, "", emptyRoom);
+  assert.match(emptyPack, /EMPTY_FOCUS_EVIDENCE/);
+
+  const duplicateRoom = 81;
+  await sql`insert into paper_settings(newsroom_id,city,state) values (${duplicateRoom},'Riverton','Colorado')`;
+  const duplicateInv = (
+    await sql<{ id: number }>`
+      insert into investigations(user_id,newsroom_id,title)
+      values (${userId},${duplicateRoom},'Cedar annexation FILE-4242')
+      returning id
+    `
+  )[0]!.id;
+  const targetVersion = (
+    await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_status,fetch_outcome)
+      values (${userId},${duplicateRoom},'https://records.example/target','target-version','Cedar annexation FILE-4242','Cedar annexation FILE-4242 UNIQUE_VERSION_TARGET',200,'fetched')
+      returning id
+    `
+  )[0]!.id;
+  const duplicateVersion = (
+    await sql<{ id: number }>`
+      insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_status,fetch_outcome)
+      values (${userId},${duplicateRoom},'https://records.example/repeated','repeated-version','Cedar annexation FILE-4242','Cedar annexation FILE-4242 duplicate capture',200,'fetched')
+      returning id
+    `
+  )[0]!.id;
+  await sql`
+    insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,fetch_status,fetch_outcome,version_id)
+    values (${userId},${duplicateRoom},${duplicateInv},'https://records.example/target','Cedar annexation FILE-4242','target-version','Cedar annexation FILE-4242 UNIQUE_VERSION_TARGET',200,'fetched',${targetVersion})
+  `;
+  for (let i = 0; i < 8; i += 1) {
+    await sql`
+      insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,fetch_status,fetch_outcome,version_id)
+      values (${userId},${duplicateRoom},${duplicateInv},${`https://records.example/repeated/${i}`},'Cedar annexation FILE-4242','repeated-version','Cedar annexation FILE-4242 duplicate capture',200,'fetched',${duplicateVersion})
+    `;
+  }
+  const duplicatePack = await buildDarkSynthesisPack(duplicateInv, "", duplicateRoom);
+  assert.match(duplicatePack, /UNIQUE_VERSION_TARGET/);
+  assert.equal((duplicatePack.match(new RegExp(`version:${duplicateVersion} hash:repeated-ver`, "g")) ?? []).length, 1);
+});
