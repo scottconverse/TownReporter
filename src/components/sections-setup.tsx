@@ -78,7 +78,8 @@ export function SectionsSetup() {
         replacement; old section links still work.
       </p>
       <p className="mt-2">
-        Preview and Cancel do not save. Apply changes updates the paper immediately.
+        Review changes and Back to editing do not save. Confirm and apply updates the paper
+        immediately; Cancel changes discards the draft.
       </p>
       {message ? (
         <p role="status" className="my-4 border border-rule p-3">
