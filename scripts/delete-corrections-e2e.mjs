@@ -361,6 +361,7 @@ async function seedFindingEvidenceReview({ newsroomId, userId }) {
     legacyLeadId: legacyLead.rows[0].id,
     malformedLeadId: malformedLead.rows[0].id,
     citedVersionId: cited.rows[0].id,
+    captureEventId: capture.rows[0].id,
     newerVersionId: newer.rows[0].id,
   };
 }
@@ -493,9 +494,16 @@ async function main() {
     .getByText("TEST FIXTURE: The library board approved the recreation room update")
     .waitFor();
   const recordedPassages = review.getByText("Recorded excerpt found in cited version");
-  if ((await recordedPassages.count()) !== 2)
-    throw new Error("expected the direct citation and captured-event citation passages");
+  if ((await recordedPassages.count()) !== 1)
+    throw new Error("expected the direct citation and captured-event citation to share one displayed record");
   await recordedPassages.first().waitFor();
+  const firstFindingRecord = review.locator("article").first();
+  await firstFindingRecord
+    .getByText(
+      `Artifact version ${findingFixture.citedVersionId} · Capture event ${findingFixture.captureEventId} (version ${findingFixture.citedVersionId})`,
+      { exact: true },
+    )
+    .waitFor();
   const unavailablePassages = review.getByText("Cited capture unavailable", { exact: true });
   if ((await unavailablePassages.count()) !== 1)
     throw new Error("expected exactly one unavailable cited-capture passage");
@@ -510,7 +518,10 @@ async function main() {
   await claimInventory
     .getByText("TEST FIXTURE: The library board approved the recreation room update")
     .waitFor();
+  await claimInventory.getByText("1 returned claim", { exact: true }).waitFor();
   await claimInventory.getByText("Returned URL:").waitFor();
+  if ((await claimInventory.getByRole("button", { name: "View exact captured version" }).count()) !== 1)
+    throw new Error("expected one rendered exact-provenance card for the shared artifact and capture event");
   await claimInventory.getByRole("button", { name: "View exact captured version" }).first().click();
   await capturedText
     .getByText("The library board approved the recreation room update Tuesday.")
@@ -528,6 +539,11 @@ async function main() {
   await review.getByText("Manual claim saved.", { exact: true }).waitFor();
   const manualRow = manualClaims.locator("article").first();
   await manualRow.getByText("TEST FIXTURE: The library recreation room meeting starts at 6 p.m.").waitFor();
+  await manualRow
+    .getByText("Selected captured record · TEST FIXTURE — Library agenda · corroborating", {
+      exact: true,
+    })
+    .waitFor();
   await manualRow.getByRole("button", { name: "View selected captured version" }).click();
   await capturedText.getByText("The library board approved the recreation room update Tuesday.").waitFor();
   await capturedText.getByRole("button", { name: "Close captured text" }).click();

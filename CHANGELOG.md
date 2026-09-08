@@ -4,6 +4,8 @@ Current release: **0.6.31**.
 
 ## Unreleased
 
+- The private evidence pane now presents one available captured version once while naming its distinct artifact and capture-event references. Returned-claim counts use singular grammar, and editor-selected records are labeled separately from cited captures.
+
 ## 0.6.31 beta
 
 - Owners can explicitly activate paused-by-default automatic routine editions from up to 12 approved structured sources. Deterministic logistics-only templates cover all six approved families and publish Today, Friday-weekend, or new/changed seven-day deadline roundups through ordinary articles, public source links, and visible corrections. Empty or unchanged editions are skipped; conflicts, risky language, stale authority/evidence, edited articles, and unsupported calendar features remain for review. Private feed addresses and captured text are not attached to public articles.
