@@ -86,6 +86,8 @@ test(
     assert.match(output, /PASS private credentials/);
     assert.match(output, /PASS incomplete runtime/);
     assert.match(output, /PASS concurrent process/);
+    assert.match(output, /PASS readiness timeout releases owned probe logs before returning/);
+    assert.match(output, /PASS asynchronous readiness termination is joined with a bounded wait/);
   },
 );
 test(

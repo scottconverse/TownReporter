@@ -134,12 +134,38 @@ try { Invoke-PgControl @('/c', 'exit', '7') } catch { $failed = $true }
 if (!$failed) { throw 'Failed native control command was incorrectly reported successful.' }
 Write-Output 'PASS native process success and failure exit codes remain available after waiting.'
 Invoke-Expression (Read-Function (Join-Path $AppRoot 'installer\Common.ps1') 'Wait-InstallReadiness')
+& {
+  # Model Kill's asynchronous completion deterministically, without sleeping.
+  function Start-Process {
+    $fake = [pscustomobject]@{ Handle=1; HasExited=$false; KillRequested=$false }
+    $fake | Add-Member ScriptMethod WaitForExit {
+      param([int]$Milliseconds)
+      if ($Milliseconds -lt 0 -or $Milliseconds -gt 1000) { throw 'Probe cleanup must use a bounded wait.' }
+      if ($this.KillRequested) { $this.HasExited = $true; return $true }
+      return $false
+    }
+    $fake | Add-Member ScriptMethod Kill { $this.KillRequested = $true }
+    $fake | Add-Member ScriptMethod Dispose {
+      if (!$this.HasExited) { throw 'Readiness disposed its owned probe before termination completed.' }
+    }
+    return $fake
+  }
+  if (Wait-InstallReadiness 'unused-fixture.ps1' 1) { throw 'A timed-out probe became ready during cleanup.' }
+}
+Write-Output 'PASS asynchronous readiness termination is joined with a bounded wait.'
 $slowProbe = Join-Path $reviewRoot 'slow-probe.ps1'
 'param([string]$DataRoot); Start-Sleep -Seconds 10; exit 0' | Set-Content -LiteralPath $slowProbe -Encoding ASCII
 $deadline = [Diagnostics.Stopwatch]::StartNew()
 if (Wait-InstallReadiness $slowProbe 1) { throw 'An unfinished readiness probe was reported successful.' }
 if ($deadline.ElapsedMilliseconds -gt 3000) { throw 'A one-second readiness budget waited for the ten-second probe.' }
 Write-Output 'PASS slow readiness probe is bounded by the overall wall-clock deadline.'
+foreach ($logName in @('readiness.out.log', 'readiness.err.log')) {
+  try {
+    $releasedLog = [IO.File]::Open((Join-Path $reviewRoot $logName), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $releasedLog.Dispose()
+  } catch { throw 'Readiness timeout returned before its owned probe released the redirected logs.' }
+}
+Write-Output 'PASS readiness timeout releases owned probe logs before returning.'
 Remove-Item -LiteralPath $slowProbe
 Remove-Item -LiteralPath (Join-Path $reviewRoot 'readiness.out.log')
 Remove-Item -LiteralPath (Join-Path $reviewRoot 'readiness.err.log')

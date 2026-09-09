@@ -120,6 +120,9 @@ function Wait-InstallReadiness([string]$ProbeScript, [int]$TimeoutSeconds = 120)
       if (!$probe.WaitForExit([int]$remaining)) {
         # This exact Process object owns only the read-only probe we just created.
         if (!$probe.HasExited) { $probe.Kill() }
+        # Kill is asynchronous on Windows. Allow a bounded termination grace
+        # before disposing the owned handle or reusing its redirected log files.
+        if (!$probe.WaitForExit(1000)) { Write-Warning 'Readiness probe termination did not finish within its one-second cleanup budget.' }
         return $false
       }
       if ($probe.ExitCode -eq 0) { return $true }
