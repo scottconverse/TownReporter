@@ -118,6 +118,41 @@ async function fixture() {
 }
 
 describe("finding evidence resolution", () => {
+  for (const provenanceUrl of ["https://city.test/agenda/", "https://city.test/agenda"]) {
+    it(`resolves a trailing-slash claim against canonical captures and ${provenanceUrl} provenance`, async () => {
+      const f = await fixture();
+      await f.sql.query("update drafts set provenance_json=$1,research_json=$2,found_note='[]' where id=$3", [
+        JSON.stringify([{ url: provenanceUrl, version_id: f.cited.id, capture_event_id: f.capture.id }]),
+        JSON.stringify({ reportedClaims: { version: 1, rows: [{ fact: "Council approved the water contract.", url: "https://city.test/agenda/", kind: "record" }] } }),
+        f.draft.id,
+      ]);
+      const review = await loadFindingEvidenceReview(f.sql, room, leadId);
+      assert.deepEqual(review.claimRows[0].captures.map(c => ({ versionId: c.versionId, captureEventId: c.captureEventId, available: c.available })), [
+        { versionId: f.cited.id, captureEventId: null, available: true },
+        { versionId: f.cited.id, captureEventId: f.capture.id, available: true },
+      ]);
+      assert.equal((await loadFindingEvidenceCapture(f.sql, room, leadId, f.draft.id, f.cited.id)).ok, true);
+      const saved = await persistFindingEvidenceJudgment({ newsroomId: room }, {
+        leadId, draftId: f.draft.id, findingKey: review.claimRows[0].key,
+        judgment: "supports", reason: "Exact captured record supports the claim.",
+        contraryVersionId: null, evidenceToken: review.evidenceToken,
+      });
+      assert.equal(saved.claimRows[0].judgment.value, "supports");
+    });
+  }
+  for (const claimUrl of ["https://city.test/budget", "https://city.test/agenda?record=2"]) {
+    it(`does not equate a distinct path or document query with the cited capture: ${claimUrl}`, async () => {
+      const f = await fixture();
+      await f.sql.query("update drafts set provenance_json=$1,research_json=$2,found_note='[]' where id=$3", [
+        JSON.stringify([{ url: claimUrl, version_id: f.cited.id, capture_event_id: f.capture.id }]),
+        JSON.stringify({ reportedClaims: { version: 1, rows: [{ fact: "Council approved the water contract.", url: claimUrl, kind: "record" }] } }),
+        f.draft.id,
+      ]);
+      const review = await loadFindingEvidenceReview(f.sql, room, leadId);
+      assert.equal(review.claimRows[0].captures.length, 2);
+      assert.ok(review.claimRows[0].captures.every(c => !c.available && c.url === null));
+    });
+  }
   it("keeps the draft-pass claim inventory separate and binds it only to exact draft provenance", async () => {
     const f = await fixture();
     const review = await loadFindingEvidenceReview(f.sql, room, leadId);

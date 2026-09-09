@@ -4,6 +4,7 @@ import { deskMiddleware } from "./desk-auth.ts";
 import { parseFindings, type StoryFinding } from "./findings.ts";
 import { evidenceReviewToken } from "./draft-evidence.ts";
 import { sha256 } from "./url-guard.ts";
+import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import type { ProvenanceItem, StoryClaim } from "./report.ts";
 import type { DraftRow } from "./types.ts";
 
@@ -310,6 +311,17 @@ function referenceForManualClaim(claim: StoredManualClaim): StoryFinding {
   };
 }
 
+function sameCaptureUrl(left: string | null | undefined, right: string): boolean {
+  if (!left) return false;
+  try {
+    // Capture storage uses this same identity normalization, including trailing
+    // slashes and tracking parameters. Never guess redirects or drop document queries.
+    return canonicalPublicUrl(left) === canonicalPublicUrl(right);
+  } catch {
+    return false;
+  }
+}
+
 function provenanceForClaim(draft: DraftRow, claim: StoryClaim): StoryFinding {
   let provenance: unknown = [];
   try {
@@ -320,7 +332,7 @@ function provenanceForClaim(draft: DraftRow, claim: StoryClaim): StoryFinding {
   const rows = Array.isArray(provenance) ? provenance : [];
   const matches = rows.filter(
     (item): item is Partial<ProvenanceItem> =>
-      Boolean(item && typeof item === "object" && (item as Partial<ProvenanceItem>).url === claim.url),
+      Boolean(item && typeof item === "object" && sameCaptureUrl((item as Partial<ProvenanceItem>).url, claim.url)),
   );
   return {
     text: claim.fact,
@@ -609,7 +621,7 @@ async function resolveClaim(
     "claimEvidenceReview",
   );
   const captures = resolved.captures.map((capture) =>
-    capture.url === claim.url
+    sameCaptureUrl(capture.url, claim.url)
       ? capture
       : {
           versionId: capture.versionId,
