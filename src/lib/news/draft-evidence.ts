@@ -8,7 +8,8 @@ export function publicEvidenceWasRemoved(draft: Partial<DraftRow>): boolean {
   return (memo(draft.research_json).evidenceReview as { decision?: string } | undefined)?.decision === "remove";
 }
 export function mayInheritLeadSources(draft: Partial<DraftRow>): boolean {
-  return !publicEvidenceWasRemoved(draft) && memo(draft.research_json).researchScope !== "supplied";
+  const research = memo(draft.research_json);
+  return !publicEvidenceWasRemoved(draft) && research.researchScope !== "supplied" && research.citationPolicy !== "explicit";
 }
 export function evidenceNeedsReview(draft: Partial<DraftRow>, body: string): boolean {
   const review = memo(draft.research_json).evidenceReview as { required?: boolean } | undefined;

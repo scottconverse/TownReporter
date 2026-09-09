@@ -967,23 +967,16 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   }
   if ("error" in reported) throw new Error(reported.error);
 
-  // The watch list's own pages are how a lead was spotted, not what it is
-  // sourced to. Drop them and the section/tag fronts before they are recorded.
-  const watched = await sql<{ url: string }>`
-    select url from sources where newsroom_id = ${owned(context)}
-  `;
-  const cited = reported.source_urls.length ? reported.source_urls : draftInput.urls;
-  const sourceUrls = JSON.stringify(
-    dropListingUrls(
-      cited,
-      watched.map((w) => w.url),
-    ),
-  );
+  // Discovery exclusions are not citation rules: a watched page or a root
+  // dashboard can be the substantive primary record. Preserve the reporter's
+  // explicit citations, including an empty list, without adding lead seeds.
+  const sourceUrls = JSON.stringify(sanitizePublicUrls(reported.source_urls));
   const notes = reported.integrity_notes;
   const provenanceJson = JSON.stringify(reported.provenance);
   const unansweredJson = JSON.stringify(reported.unanswered);
   const researchJson = JSON.stringify({
     ...reported.research_memo,
+    citationPolicy: "explicit",
     researchScope: draftInput.researchScope,
     reportedClaims: { version: 1, rows: reported.claims },
   });
@@ -1476,7 +1469,9 @@ export const performPublish = createServerOnlyFn(async function performPublish(
   draft.body = stripReporterNotebook(draft.body);
 
   /*
-    A draft with no sources falls back to its lead's.
+    Legacy/manual drafts with no sources may fall back to their lead's.
+    Report-backed drafts mark their citation list explicit, including empty;
+    publication must not resurrect uncited discovery URLs for those drafts.
 
     Belt and braces for UX-005. The insert above now copies the URL into the
     draft, but every draft created before that fix is still empty, and those

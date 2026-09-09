@@ -8,6 +8,7 @@ import type { ReportedDraftResult } from "./desk-model-run.ts";
 let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;
 let performDraftWork: typeof import("./desk.ts").performDraftWork;
+let performPublish: typeof import("./desk.ts").performPublish;
 
 before(async () => {
   vite = await createServer({
@@ -16,7 +17,7 @@ before(async () => {
     resolve: { alias: { "@": join(process.cwd(), "src") } },
   });
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
-  ({ performDraftWork } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
+  ({ performDraftWork, performPublish } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
 });
 
 after(async () => vite.close());
@@ -205,6 +206,39 @@ it("the current manual draft claim commits the draft, notes, and audit together"
     [job.id],
   );
   assert.equal(completedJob.status, "completed");
+});
+
+for (const cites of [true, false]) {
+  it(`persists ${cites ? "explicit primary citations despite root and watched URL shapes" : "an explicit empty citation list without inheriting lead sources"}`, async () => {
+    const { sql, userId, leadId, job } = await fixture(cites ? 98207 : 98208);
+    const dashboard = "https://indicators.longmontcolorado.gov/";
+    const court = "https://longmontcolorado.gov/judicial-department/municipal-court/";
+    const external = "https://www.scientificamerican.com/article/renewable-energy-credits/";
+    await sql.query("update leads set source_urls=$1 where id=$2", [JSON.stringify([dashboard, court]), leadId]);
+    await sql.query("insert into sources(user_id,newsroom_id,url,title,kind,tier,status) values($1,$2,$3,'Court','page','A','accepted')", [userId, job.newsroom_id, court]);
+    const cited = cites ? [dashboard, external, court] : [];
+    await performDraftWork(job, {
+      reportAndDraft: async () => ({ ...result, source_urls: cited }),
+      setJobStage: async () => undefined,
+    });
+    const [draft] = await sql.query<{ source_urls: string }>("select source_urls from drafts where lead_id=$1 and newsroom_id=$2", [leadId, job.newsroom_id]);
+    assert.deepEqual(JSON.parse(draft.source_urls), cited);
+    const published = await performPublish({ userId, newsroomId: job.newsroom_id }, leadId);
+    assert.equal(published.ok, true);
+    const [article] = await sql.query<{ source_urls: string }>("select source_urls from articles where lead_id=$1 and newsroom_id=$2", [leadId, job.newsroom_id]);
+    assert.deepEqual(JSON.parse(article.source_urls), cited);
+  });
+}
+
+it("legacy manual drafts still inherit their lead citations at publication", async () => {
+  const { sql, userId, leadId, job } = await fixture(98209);
+  const seeds = ["https://records.example.gov/meeting"];
+  await sql.query("update leads set source_urls=$1 where id=$2", [JSON.stringify(seeds), leadId]);
+  await sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,body,topic,source_urls,research_json) values($1,$2,$3,'Manual draft','The meeting is Tuesday.','council','[]','{}')", [userId, job.newsroom_id, leadId]);
+  const published = await performPublish({ userId, newsroomId: job.newsroom_id }, leadId);
+  assert.equal(published.ok, true);
+  const [article] = await sql.query<{ source_urls: string }>("select source_urls from articles where lead_id=$1 and newsroom_id=$2", [leadId, job.newsroom_id]);
+  assert.deepEqual(JSON.parse(article.source_urls), seeds);
 });
 
 it("rolls back the draft and lead update when the final audit insert fails", async () => {
