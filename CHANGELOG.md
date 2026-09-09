@@ -4,6 +4,17 @@ Current release: **0.6.34**.
 
 ## Unreleased
 
+- Ordinary drafts reuse the bounded editing pass to reconcile claims against URL-labeled source evidence; skipped or failed reconciliation retains the draft with a review warning. Organization-name matching no longer inserts citations, and explicit empty editor citations remain empty. This is model-assisted review, not independent fact verification.
+- Draft persistence preserves explicitly cited dashboards and watched primary pages instead of applying discovery exclusions. New report-backed drafts mark their citation lists explicit so publication cannot refill an empty list from lead seeds; legacy/manual inheritance remains compatible.
+- The ordinary test environment keeps explicit empty database/live-evaluation overrides so TanStack/Vite cannot reload checkout credentials from `.env` after startup. Routine-check tests assert PGLite before fixture writes.
+- News listing extraction falls back when reader mode selects only listing/signup controls and preserves semantic main/article content roots carrying header-spacing CSS classes. The scanner now uses this body extractor before its text cap; accepted plain-text/unlabelled-text responses remain readable and site notices remain separate.
+- Write a story offers the newspaper's existing configured reporting sections before drafting; omitted selection retains the previous text-based suggestion.
+- Explicit opening Write-box assignments retain their requested subject and short form through research, redrafting and editing. Overlong results receive one shortening attempt, then remain available with an honest warning rather than being discarded. This is request preservation, not a factual-accuracy guarantee.
+- Daily scans resolve the same effective newsroom timezone as the owner UI, including legacy absent/null settings. An invalid timezone pauses only that newsroom rather than preventing later newsroom scans.
+- Claim evidence review uses capture storage's canonical URL identity, so a trailing slash does not hide an existing exact captured record. Foreign newsroom and different-document checks remain in place.
+- Windows installer readiness timeouts wait a bounded second after terminating their owned probe before disposing redirected logs.
+- Routine-notice integration tests use the same Vite-transformed, migrated database module as the server under test rather than mixing separate Node/Vite fixture instances.
+
 ## 0.6.34 beta
 
 - Dark Desk evidence packing now selects relevant captured records across the complete captured inventory before the shared selection code builds separately bounded inputs for stage-one signal synthesis and the final brief. When an applicable complete stored PDF page fits the existing budget, it is retained in source order; otherwise selection keeps a contiguous neighborhood around the matching passage. Persisted page context is used without adding duplicate generated fragments. Final-brief instructions require claims to stay paired with the correct record instead of borrowing details from an adjacent record. These safeguards address truncation and attribution failure modes; they do not guarantee model accuracy.

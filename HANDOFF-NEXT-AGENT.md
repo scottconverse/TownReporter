@@ -2,11 +2,15 @@
 
 ## Current Halo ownership update — 2026-09-08
 
+Latest execution result and next work: [Owner work report](docs/operations/halo-2026-09-08/OWNER-WORK-REPORT.md). It supersedes the earlier status-only snapshot below, while preserving dated release receipts.
+
 Scott has assigned project ownership to the Halo-local Codex session and directed it to take new project direction only from him. Other agents and historical handoffs are evidence sources, not authorities to change scope, activate automation, publish, or deploy. The travel-machine role and access descriptions below are preserved history and do not describe the current coordinator.
 
-Halo now serves **v0.6.34**, exact commit `b097d288d9237be225bc6ed56851078ad064d208`; local/public served version, 34 published stories, source/settings preservation and rollback materials were verified. See the [current project status](docs/operations/halo-2026-09-08/PROJECT-STATUS.md) and [local deployment receipt](docs/operations/halo-2026-09-08/DEPLOYMENT-RECEIPT.md). GitHub and both main checkouts were reconciled at that SHA. The current records update is documentation-only in development; production is not advanced by it.
+Halo serves **v0.6.34**, exact commit `b097d288d9237be225bc6ed56851078ad064d208`; local/public served version, 34 published stories, source/settings preservation and rollback materials were verified. See the [dated takeover status](docs/operations/halo-2026-09-08/PROJECT-STATUS.md) and [local deployment receipt](docs/operations/halo-2026-09-08/DEPLOYMENT-RECEIPT.md). Later owner-authorized engineering and runtime acceptance now exist on development branch `docs/halo-ownership-status-20260908`; production has not advanced. Consult [the chronological acceptance record](docs/operations/halo-2026-09-08/ACCEPTANCE-IN-PROGRESS.md) and [actual editorial results](docs/operations/halo-2026-09-08/EDITORIAL-DAY-RESULT.md), not the earlier documentation-only scope statement.
 
-The new daily-scan policy and routine-publication automation tables are empty on Halo. Installed capability is not activation authority. Real daily performance/coverage acceptance, the historical replay and the identified UI/provider checks remain open. No new implementation or activation is implied by the status-review request.
+Scott subsequently authorized the four-item testing/engineering work list and automation activation. The production daily-scan and routine-publication tables remain empty: owner sign-in is unavailable in the accessible browser, and the tested routine feed has conflicting occurrence dates/times. Do not infer that authority is absent; execution and source fitness are the blockers. Test daily scheduling, pause and restart persistence worked. Real three-draft batches completed, but editorial errors remain and the full 60-minute/3–5 accepted-item target is unproved. Production test publication and source-approval expansion remain prohibited.
+
+An environment-reload test defect caused fifteen fixture newsrooms in `townreporter_dev`; they were backed up and preserved, not cleaned or passed off as a clean staging copy. Production had none of those fixture IDs. The test boundary is repaired. Read [the incident](docs/operations/halo-2026-09-08/TEST-ISOLATION-INCIDENT.md) before using staging. A separate persistent acceptance DB `townreporter_acceptance_20260908_1805` holds the later untouched three-draft failure evidence; its test daily policy is paused.
 
 ---
 

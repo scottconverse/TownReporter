@@ -2,14 +2,19 @@
 
 ## Halo-local reconciliation — 2026-09-08
 
+Latest execution result: [Owner work report](docs/operations/halo-2026-09-08/OWNER-WORK-REPORT.md). Local repairs and runtime evidence do not imply production activation or a completed editorial-quality target.
+
 - [x] Deploy and independently verify v0.6.34 (`b097d288d9237be225bc6ed56851078ad064d208`) on Halo; 34 published articles, all 75 source rows and existing paper settings preserved. [Receipt](docs/operations/halo-2026-09-08/DEPLOYMENT-RECEIPT.md).
 - [x] Reconcile local main with GitHub and preserve release/deployment records in the development Git repository. [Full status and ownership report](docs/operations/halo-2026-09-08/PROJECT-STATUS.md).
-- [ ] Close the recorded evidence-review UI/owner-panel/provider smoke gaps in an isolated environment; local screenshot capture remains unproved.
+- [~] Focused isolated evidence-review, owner controls, native drafting, desktop/mobile screenshot inspection and restart/policy persistence now have runtime receipts. This is not a blanket UI or publication-quality pass. [Working evidence](docs/operations/halo-2026-09-08/ACCEPTANCE-IN-PROGRESS.md), [restart proof](docs/operations/halo-2026-09-08/PERSISTENCE-VERIFICATION.md).
 - [~] Measure contrasting-community coverage and the real daily operating target; the September 3–8 replay remains unexecuted. The completion claims below are implementation history, not proof of these outcomes.
-- Daily-scan and routine-publication capabilities are installed but have no configured policy/automation rows on Halo. Activation needs Scott's direction; no new activation was performed.
+- [~] Scott authorized test execution, resulting engineering and automation activation. The isolated owner flow completed one unattended daily scan and pause; production activation is pending candidate checks and owner sign-in. Routine-source preview exposed contradictory event times and must not be mistaken for publication readiness. [Working evidence and defects](docs/operations/halo-2026-09-08/ACCEPTANCE-IN-PROGRESS.md).
+- [x] Implement bounded DEV repairs for installer readiness cleanup, effective scheduler timezone, claim/capture URL matching, explicit editorial assignments/section retention and scanner extraction. Local scoped commits and focused regression evidence are preserved; not yet a production release.
+- [~] Reconcile generated assertions against actual evidence using the existing bounded edit pass and stop guessed organization-name citation insertion. Final held-source reporting tests pass 71/71. [Receipt and limits](docs/operations/halo-2026-09-08/EDITORIAL-RECONCILIATION-VERIFICATION.md). Live editorial quality remains a separate acceptance result.
+- [ ] Replace/reconcile the staging copy before using it as a clean production clone. Fifteen test fixture newsrooms remain preserved after an environment-reload isolation failure; production had none. The boundary defect is repaired, and the contaminated staging copy was backed up before any cleanup. [Incident](docs/operations/halo-2026-09-08/TEST-ISOLATION-INCIDENT.md).
 - Preserve three uncommitted historical files in `.claude/worktrees/ci-built`; do not merge or discard them automatically.
 
-Scott is the sole source of new project direction. The current coordinator is Halo-local Codex; historical travel-machine access statements below are not current-machine instructions. Production stays on v0.6.34 while this documentation-only review is recorded.
+Scott is the sole source of new project direction. The current coordinator is Halo-local Codex; historical travel-machine access statements below are not current-machine instructions. Production stays on v0.6.34 during isolated engineering and acceptance work.
 
 ---
 

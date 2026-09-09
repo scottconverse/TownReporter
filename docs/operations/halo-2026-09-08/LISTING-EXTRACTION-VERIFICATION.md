@@ -170,3 +170,52 @@ Both runs emitted the same eleven pre-existing PDF-fixture warnings reproduced a
 | ingest-plaintext-green-20260908.log | 642AA49508740ED2B99BB69A562510959A60C3E726708BB54C451390BC4BAA48 |
 
 This supersedes the prior source snapshot for ingestion verification; a whole-repository rerun and live editorial acceptance remain the main agent's responsibility.
+
+## Incremental correction: generic text and missing Content-Type
+
+Cross-review identified the same regression for accepted non-HTML textual responses other than explicit text/plain. Stubbed responses with no Content-Type and with application/json both reproduced `Page had almost no readable text`. Before extraction, dispatch now distinguishes declared HTML or HTML markup from non-HTML text. Accepted non-HTML text retains the existing normalization, minimum and 14,000-character cap. There is no raw-text fallback after an HTML extraction failure, so navigation cannot re-enter through that fallback. A missing-header navigation-heavy HTML test proves it still uses article extraction.
+
+The initial exploratory regression also expected text/markdown acceptance; the existing fetch content-type boundary correctly refused it. That new test was corrected to assert the existing refusal before implementation. No existing tests were weakened, and the unsupported-type allowlist was not expanded. The initial exploratory log remains preserved separately.
+
+Exact corrected RED and GREEN commands:
+
+```powershell
+node --input-type=module -e "import{spawnSync}from'node:child_process';import{safeTestEnvironment}from'./scripts/test-environment.mjs';const r=spawnSync(process.execPath,['--import','./scripts/test-environment-guard.mjs','--experimental-strip-types','--test','src/lib/news/ingest.test.ts'],{env:safeTestEnvironment(),stdio:'inherit'});process.exit(r.status??1);" 2>&1 | Tee-Object artifacts/ingest-generic-text-red-corrected-20260908.log; exit $LASTEXITCODE
+node --input-type=module -e "import{spawnSync}from'node:child_process';import{safeTestEnvironment}from'./scripts/test-environment.mjs';const r=spawnSync(process.execPath,['--import','./scripts/test-environment-guard.mjs','--experimental-strip-types','--test','src/lib/news/ingest.test.ts','src/lib/news/article-extract.test.ts','src/lib/news/render-fetch.test.ts'],{env:safeTestEnvironment(),stdio:'inherit'});process.exit(r.status??1);" 2>&1 | Tee-Object artifacts/ingest-generic-text-green-20260908.log; exit $LASTEXITCODE
+```
+
+Verbatim corrected RED then widened GREEN summaries:
+
+```text
+ℹ tests 24
+ℹ suites 9
+ℹ pass 22
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1147.7241
+
+ℹ tests 32
+ℹ suites 11
+ℹ pass 32
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1257.4197
+```
+
+Both RED failures were the readable-response rejection described above; complete stacks remain in the raw log. The same eleven existing PDF-fixture warnings listed earlier occurred. No network, database, model, build or deployment ran in this incremental test. `git diff --check` passed with line-ending normalization notices only.
+
+| Raw artifact in `artifacts/` | SHA-256 |
+|---|---|
+| ingest-generic-text-red-20260908.log (initial exploratory expectation) | 4B40F7243384742280C136F5C320E4879A28B246A89214F8DE527DEBC81BE3C8 |
+| ingest-generic-text-red-corrected-20260908.log | 8BB428522AAAD44D0A908E092CD23C8DBCFBF0897936EDA3F5CA6A6F520B4FE0 |
+| ingest-generic-text-green-20260908.log | E22267FA18D099A9D75F0F480437445BD1F4E7896DE1D6FCBF756BC602F5A35A |
+
+## Parent-reported integration acceptance and snapshot limits
+
+At this documentation update, checkout HEAD was independently read as `0bd7ed5`; no source was modified in this update. The main agent reported full-suite r3 totals of scripts 343 tests / 341 passed / 2 skipped, and sources 1648 tests / 1603 passed / 45 skipped, with no failures. **Those totals are parent-reported, not independently rerun here.** The generic-text source correction landed incrementally during that sweep, so the sweep is not represented as an immutable single-candidate proof; the separate targeted evidence above binds that correction.
+
+The main agent also reported that the rebuilt development City scanner at 18:03 used actual Codex Terra and returned one source fetched, four leads and three proposals, contrasting with the prior navigation-only zero-result run. **That is parent-observed live acceptance, not this subagent's independent observation.** It demonstrates extraction reaching a real scanner run, not that all four leads are publishable, editorially accepted or factually verified. No test content publication is claimed. No further source change or test run was performed for this documentation update.
