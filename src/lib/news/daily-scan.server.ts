@@ -2,6 +2,7 @@ import { createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { kickJobs, type DeskJob } from "./jobs.ts";
 import type { DailyScanRuntime } from "./daily-scan.ts";
+import { getPaperConfig } from "./paper-settings.ts";
 import {
   runForcedChat,
   validateForcedRuntime,
@@ -34,11 +35,26 @@ export async function tickDailyScans(
     "update daily_scan_reservations r set status=j.status,error=j.error,finished_at=coalesce(j.finished_at,now()) from desk_jobs j where r.desk_job_id=j.id and r.status in ('queued','running') and j.status in ('completed','failed')",
   );
   const ps = await sql.query<any>(
-    "select p.*,s.timezone from daily_scan_policies p join paper_settings s on s.newsroom_id=p.newsroom_id where p.enabled=true and p.paused=false",
+    "select * from daily_scan_policies where enabled=true and paused=false",
   );
   let reserved = 0;
   for (const p of ps) {
-    const local = localParts(now, p.timezone);
+    // Match the settings UI, including nullable or absent legacy settings.
+    const { timezone } = await getPaperConfig(p.newsroom_id);
+    let local: ReturnType<typeof localParts>;
+    try {
+      local = localParts(now, timezone);
+    } catch {
+      await sql.query(
+        "update daily_scan_policies set paused=true,pause_reason=$2,revision=revision+1,updated_at=now() where newsroom_id=$1 and revision=$3",
+        [
+          p.newsroom_id,
+          "The newsroom timezone is invalid. Correct it in paper settings, then resume the daily scan.",
+          p.revision,
+        ],
+      );
+      continue;
+    }
     if (local.time < p.local_time) continue;
     const alreadyReserved = await sql.query(
       "select 1 from daily_scan_reservations where newsroom_id=$1 and (local_day=$2 or status in ('queued','running')) limit 1",
@@ -101,7 +117,7 @@ export async function tickDailyScans(
               enabled: true,
               revision: p.revision,
               localTime: p.local_time,
-              timezone: p.timezone,
+              timezone,
               sourceCap: p.source_cap,
             }),
             JSON.stringify(sources),

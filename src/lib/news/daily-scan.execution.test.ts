@@ -120,6 +120,77 @@ describe("scheduled final commit fence", () => {
 });
 
 describe("scheduled tick and policy status", () => {
+  for (const timezone of [null, "   ", "missing-row"] as const) {
+    it(`uses the UI's effective timezone for ${String(timezone)} legacy settings`, async () => {
+      const sql = await getSql();
+      await sql.query("delete from daily_scan_reservations");
+      await sql.query("delete from desk_jobs");
+      await sql.query("delete from scan_runs");
+      if (timezone !== "missing-row")
+        await sql.query("insert into paper_settings(newsroom_id,timezone) values(501,$1)", [
+          timezone,
+        ]);
+      await sql.query(
+        "insert into sources values(1,501,'https://example.test/source','Source','rss',1,'accepted',null,null,null)",
+      );
+      const now = new Date("2026-09-04T12:00:00Z");
+      const shown = await readDailyScanPolicy(501, now);
+      assert.equal(shown.nextRunAt, now.toISOString());
+      const deps = {
+        kick: false,
+        runtimeSnapshot: async () => ({
+          runtime: "codex-terra" as const,
+          modelChoice: "codex-balanced",
+          model: "fixture",
+          transport: "codex" as const,
+        }),
+      };
+      assert.deepEqual(await tickDailyScans(now, deps), { reserved: 1 });
+      const [receipt] = await sql.query<{ policy_snapshot: { timezone: string } }>(
+        "select policy_snapshot from daily_scan_reservations where newsroom_id=501",
+      );
+      assert.equal(receipt.policy_snapshot.timezone, shown.timezone);
+      assert.deepEqual(await tickDailyScans(now, deps), { reserved: 0 });
+    });
+  }
+  it("pauses an invalid timezone without preventing another newsroom's due scan", async () => {
+    const sql = await getSql();
+    await sql.query("delete from daily_scan_reservations");
+    await sql.query("delete from desk_jobs");
+    await sql.query("delete from scan_runs");
+    await sql.query(
+      "insert into paper_settings(newsroom_id,timezone) values(501,'Not/AZone'),(502,'UTC')",
+    );
+    await sql.query(
+      "insert into daily_scan_policies values(502,true,false,null,'06:00','codex-terra',12,'[2]',1,'owner-502',now())",
+    );
+    await sql.query("insert into newsroom_members values('owner-502','owner',502)");
+    await sql.query(
+      "insert into sources values(2,502,'https://example.test/source','Source','rss',1,'accepted',null,null,null)",
+    );
+    const probed: number[] = [];
+    assert.deepEqual(
+      await tickDailyScans(new Date("2026-09-04T12:00:00Z"), {
+        kick: false,
+        runtimeSnapshot: async (room) => {
+          probed.push(room);
+          return {
+            runtime: "codex-terra" as const,
+            modelChoice: "codex-balanced",
+            model: "fixture",
+            transport: "codex" as const,
+          };
+        },
+      }),
+      { reserved: 1 },
+    );
+    assert.deepEqual(probed, [502]);
+    const [bad] = await sql.query<{ paused: boolean; pause_reason: string }>(
+      "select paused,pause_reason from daily_scan_policies where newsroom_id=501",
+    );
+    assert.equal(bad.paused, true);
+    assert.match(bad.pause_reason, /timezone/i);
+  });
   it("shows a due catch-up, reserves it once, then shows the next local day", async () => {
     const sql = await getSql();
     await sql.query("delete from daily_scan_reservations");
