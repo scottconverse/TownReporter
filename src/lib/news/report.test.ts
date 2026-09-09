@@ -63,10 +63,10 @@ describe("story credit URLs", () => {
     assert.ok(used.includes(HOME) || used.includes(INDEX));
   });
 
-  it("turns the first Longmont Leader mention into a story link, not a homepage", () => {
+  it("does not guess a citation from a Longmont Leader mention", () => {
     const body = "The Longmont Leader reported that the city cannot simply ban noisy planes.";
     const out = linkOutletInBody(body, [STORY]);
-    assert.match(out, /\[Longmont Leader\]\(https:\/\/www\.longmontleader\.com\/local-news\/why-longmont/);
+    assert.equal(out, body);
     assert.doesNotMatch(out, /\]\(https:\/\/www\.longmontleader\.com\/\)/);
   });
 
@@ -596,9 +596,9 @@ describe("linkOutletInBody misattribution", () => {
     assert.equal(out, body);
   });
 
-  it("still links the paper's name to a real article", () => {
+  it("preserves an explicitly authored link to a real article", () => {
     const url = "https://www.timescall.com/2026/08/28/front-range-rail-sales-tax-ballot/";
-    const out = linkOutletInBody("The Longmont Times-Call reported Thursday.", [url]);
+    const out = linkOutletInBody(`The [Longmont Times-Call](${url}) reported Thursday.`, [url]);
     assert.ok(out.includes(`](${url})`));
   });
 
@@ -624,10 +624,10 @@ describe("linkOutletInBody misattribution", () => {
     assert.doesNotMatch(out, /Read the original/);
   });
 
-  it("still links an outlet the prose does name", () => {
+  it("does not infer a citation from an outlet the prose names", () => {
     const url = "https://www.dailycamera.com/2026/08/28/boulder-county-rail-tax-vote/";
     const out = linkOutletInBody("The Daily Camera reported the vote.", [url]);
-    assert.match(out, /\[Daily Camera\]\(/);
+    assert.equal(out, "The Daily Camera reported the vote.");
   });
 });
 

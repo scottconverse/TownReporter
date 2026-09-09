@@ -567,7 +567,7 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
     },
   );
 
-  it("credits the originating Leader story URL, not the homepage listing", async () => {
+  it("opens the originating Leader story without manufacturing a citation the writer omitted", async () => {
     const HOME = "https://www.longmontleader.com/";
     const INDEX = "https://www.longmontleader.com/local-news";
     const STORY =
@@ -640,14 +640,15 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
     );
     assert.ok(!("error" in result), "error" in result ? result.error : "");
     if ("error" in result) return;
-    assert.equal(result.source_urls[0], STORY);
-    assert.match(
+    assert.ok(result.research_memo.captured.some(doc => doc.url === STORY));
+    assert.ok(!result.source_urls.includes(STORY));
+    assert.doesNotMatch(
       result.body,
       /\[Longmont Leader\]\(https:\/\/www\.longmontleader\.com\/local-news\/why-longmont/,
     );
     assert.equal(
       result.unanswered.some((u) => /full url of the originating story/i.test(u)),
-      false,
+      true,
     );
   });
 

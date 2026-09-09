@@ -1,6 +1,6 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { reportAndDraft, REPORT_RESEARCH_SYSTEM, type FetchedDoc } from "./report.ts";
+import { reportAndDraft, REPORT_RESEARCH_SYSTEM, REPORT_WRITE_SYSTEM, REPORT_EDIT_SYSTEM, linkOutletInBody, type FetchedDoc } from "./report.ts";
 import type { LeadRow } from "./types.ts";
 import { runAbsenceGate } from "./absence-gate.ts";
 import { draftSourceInputs } from "./draft-input.ts";
@@ -10,6 +10,87 @@ import { parseWriteStoryInput } from "./write-story.ts";
 const lead: LeadRow = { id: 1, headline: "Library hours change on Tuesday", why: "Editor's supplied notice", topic: "community", status: "new", source_urls: "[]", evidence: "", newsworthiness: 1, created_at: "2026-09-07" };
 const alien = "https://vendor.example/news/test-automation-press-release";
 const supplied = "https://library.example/hours";
+it("does not turn an organization mention into an unrelated same-host citation", () => {
+  const job = "https://longmontcolorado.gov/news/city-job-openings-2026/";
+  const project = "https://longmontcolorado.gov/news/park-cooling-project/";
+  const body = "The City of Longmont supported the project.";
+  assert.equal(linkOutletInBody(body, [job, project]), body);
+  const explicit = `The [City of Longmont](${project}) supported the project.`;
+  assert.equal(linkOutletInBody(explicit, [job, project]), explicit);
+});
+it("distinguishes synthesis from unsupported comparisons, date roles and inverted safety advice", () => {
+  for (const prompt of [REPORT_RESEARCH_SYSTEM, REPORT_WRITE_SYSTEM, REPORT_EDIT_SYSTEM]) {
+    assert.match(prompt, /unsupported contrasts.*rankings.*counts/i);
+    assert.match(prompt, /publication date.*event date.*capture date/i);
+    assert.match(prompt, /direction.*safety advice/i);
+  }
+  assert.doesNotMatch(REPORT_EDIT_SYSTEM, /evidence or the draft/i);
+});
+for (const outcome of ["success", "refusal", "unreadable", "exception"]) {
+  it(`reconciles an ordinary draft against URL-labeled evidence and retains it on ${outcome}`, async () => {
+    const log = { searches: [] as string[], fetched: [] as string[], packets: [] as string[] };
+    const deps = dependencies(log);
+    let editCalls = 0;
+    deps.chat = async (system, user) => {
+      if (system.includes('"fetch_urls"')) return {ok:true, text:JSON.stringify({form:"brief",news:lead.headline})};
+      if (system === REPORT_EDIT_SYSTEM) {
+        editCalls++;
+        assert.match(user, /CLAIMS TO RECONCILE/);
+        assert.ok(user.includes(supplied));
+        assert.match(user, /library opens at noon Tuesday/i);
+        if (outcome === "refusal") return {ok:false, error:"test edit unavailable"};
+        if (outcome === "exception") throw new Error("test edit timed out");
+        if (outcome === "unreadable") return {ok:true, text:"not a draft"};
+        return {ok:true, text:JSON.stringify({headline:lead.headline,body:"The library opens at noon Tuesday, according to its notice.",topic:lead.topic,source_urls:[supplied]})};
+      }
+      return {ok:true,text:JSON.stringify({headline:lead.headline,body:"The notice lists new library hours for residents this week.",topic:lead.topic,source_urls:[supplied],claims:[{fact:"Library opens at noon Tuesday.",url:supplied,kind:"primary"}]})};
+    };
+    const result = await reportAndDraft({userId:"reconcile",lead,urls:[supplied],memory:[],researchScope:"supplied",modelChoice:"claude-frontier"},deps);
+    assert.equal(editCalls,1);
+    assert.ok(!("error" in result));
+    if (!("error" in result)) {
+      if (outcome === "success") assert.match(result.body,/opens at noon Tuesday/);
+      else {
+        assert.match(result.body,/notice lists new library hours/);
+        assert.match(result.integrity_notes,/Evidence reconciliation not completed/);
+      }
+    }
+  });
+}
+it("keeps a useful draft honestly unchecked when no editing budget remains", async () => {
+  const log = { searches: [] as string[], fetched: [] as string[], packets: [] as string[] };
+  const deps = dependencies(log);
+  let edits = 0;
+  deps.chat = async (system) => {
+    if (system === REPORT_EDIT_SYSTEM) edits++;
+    return {ok:true,text:JSON.stringify(system.includes('"fetch_urls"') ? {news:lead.headline,form:"brief"} : {headline:lead.headline,body:"The library notice lists new opening hours for local residents.",source_urls:[],topic:lead.topic})};
+  };
+  const result = await reportAndDraft({userId:"budget",lead,urls:[supplied],memory:[],researchScope:"supplied",modelChoice:"claude-frontier"},{...deps,budgetMs:9500});
+  assert.equal(edits,0);
+  assert.ok(!("error" in result));
+  if (!("error" in result)) {
+    assert.match(result.body,/library notice/);
+    assert.match(result.integrity_notes,/Evidence reconciliation not completed/);
+    assert.deepEqual(result.source_urls,[],"opened documents are not implicitly cited");
+    assert.ok(result.research_memo.captured.some(doc => doc.url === supplied));
+  }
+});
+for (const clear of [true, false]) {
+  it(`honors an editor's ${clear ? "explicit empty citation list" : "omitted citation field"}`, async () => {
+    const deps = dependencies({searches:[],fetched:[],packets:[]});
+    deps.chat = async (system) => {
+      if (system.includes('"fetch_urls"')) return {ok:true,text:JSON.stringify({form:"brief",news:lead.headline})};
+      const draft = {headline:lead.headline,body:"The library notice describes opening hours for residents this week.",topic:lead.topic};
+      return {ok:true,text:JSON.stringify(system === REPORT_EDIT_SYSTEM ? {...draft,...(clear ? {source_urls:[]} : {})} : {...draft,source_urls:[supplied]})};
+    };
+    const result = await reportAndDraft({userId:"edit-citations",lead,urls:[supplied],memory:[],researchScope:"supplied",modelChoice:"claude-frontier"},deps);
+    assert.ok(!("error" in result));
+    if (!("error" in result)) {
+      assert.match(result.body,/library notice/);
+      assert.deepEqual(result.source_urls,clear ? [] : [supplied]);
+    }
+  });
+}
 it("honors an explicit short assignment over the research angle and carries dating constraints through editing", async () => {
   const assignmentText = "Write a short local item about upcoming library programs.";
   const parsedInput = parseWriteStoryInput(assignmentText);

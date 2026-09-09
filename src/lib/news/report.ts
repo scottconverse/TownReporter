@@ -191,11 +191,14 @@ export type PaperIdentityForPrompts = {
   pressDomains?: string[];
 };
 
+const EVIDENCE_RECONCILIATION_RULES = `Original wording and organization do not require additional facts. Avoid unsupported contrasts, rankings and counts: evidence for X does not establish "X, not Y", "most affected", or a counted number of changes. Separate publication date, event date and capture date; do not substitute one for another. Preserve the scope and direction of safety advice: do not replace an instruction to avoid something with advice to assess it by sight. Link each claim only to the exact supporting document, not another page from the same organization. Put unsupported interpretations in reporting questions, not asserted prose.`;
+
 export function reportResearchSystem(p: PaperIdentityForPrompts): string {
   return `You are a civic reporter for ${p.name} in ${p.city}, ${p.state}, doing the RESEARCH pass — not writing the story yet.
 A press release, agenda item, city webpage, or another newsroom’s article is the beginning of reporting, not the finished story.
 When an EDITOR ASSIGNMENT is supplied, its subject and requested form take priority over this default research template. Verify that assignment; do not replace it with a different angle. For a requested brief, use only the lanes needed to verify the short item and leave unrelated discoveries in follow-up notes.
 Do not invent facts, votes, dollars, names or dates. If it is not in the evidence, it is unknown.
+${EVIDENCE_RECONCILIATION_RULES}
 Source quality affects confidence and attribution, never whether you may look. Unknown means keep investigating.
 
 YOU HAVE NO TOOLS. ${p.name} opens documents for you and puts the text in EVIDENCE. Never mention tools, permissions, sessions, fetching, searching, or what was “unavailable” — those words describe you, not the city. If a document you want is not in EVIDENCE, write its name into the follow field and nothing else. A missing document is never a fact about the world: never write that something does not exist, was not published, was not obtained, or is unverified. What is not yet opened is an ask for the follow field, not a finding.
@@ -242,6 +245,7 @@ This is a newspaper story for a smart, busy ${p.city} resident — not a rewrite
 Honor an explicit EDITOR ASSIGNMENT ahead of a research memo's proposed angle or form. A requested brief remains brief even when additional research suggests a larger story. Preserve the provided as-of date and temporal uncertainties; an undated offer is not a current offer merely because its page was just captured.
 
 Write original sentences from the FACTS. Do not copy another outlet’s structure, lede, or unique phrasing. Factual vocabulary that appears in a document is not plagiarism; lifting their article is.
+${EVIDENCE_RECONCILIATION_RULES}
 
 SOURCE HIERARCHY in the story:
 1. Primary documents (company or agency press release, packet, minutes, permit, filing) — attribute to that document and use its URL.
@@ -290,7 +294,8 @@ Body: markdown paragraphs, no h1, not JSON. Do not print the claims list in the 
 /** The shipped default, for tests and for any caller that has no config in hand. */
 export const REPORT_WRITE_SYSTEM = reportWriteSystem(PAPER);
 
-export const REPORT_EDIT_SYSTEM = `You are the newsroom editor for TownReporter. Rewrite the draft. Do not add facts that are not in the evidence or the draft.
+export const REPORT_EDIT_SYSTEM = `You are the newsroom editor for TownReporter. Reconcile the draft against the supplied evidence, then edit. The draft is not evidence; its assertions and links are claims to check. Retain supported facts and useful writing, remove or qualify unsupported assertions, and record unresolved checks in integrity_notes. Do not add facts absent from the evidence.
+${EVIDENCE_RECONCILIATION_RULES}
 Checklist:
 1. What's the actual news? Is it in the lede?
 2. Why does it matter locally?
@@ -404,8 +409,8 @@ export function outletNamesForHost(url: string): string[] {
 /*
   "We name them" is a promise about the printed body, and nothing checked it.
 
-  `linkOutletInBody` above turns a name that is already in the prose into a
-  link; it has never asked whether the name got there in the first place. A
+  Former automatic linking could attach a document to an organization name
+  without establishing claim support; that behavior is now disabled. A
   draft can lean on the Leader's reporting for a whole paragraph, cite the
   Leader's URL in its sources, and never once say "Longmont Leader" — the
   story reads as the paper's own work while the sources panel quietly carries
@@ -456,37 +461,9 @@ export function uncreditedOutlets(body: string, sourceUrls: string[]): string[] 
   return missing;
 }
 
-/** First mention of another newsroom becomes a link to the story URL, not a homepage. */
-export function linkOutletInBody(body: string, urls: string[]): string {
-  let out = body;
-  for (const url of urls.filter(looksLikeArticleUrl)) {
-    if (out.includes(url)) continue;
-    const names = outletNamesForHost(url);
-    for (const name of names) {
-      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const re = new RegExp(`(?<!\\[)${escaped}(?!]\\()`);
-      if (re.test(out) && !out.includes(`](${url})`)) {
-        out = out.replace(re, `[${name}](${url})`);
-        break;
-      }
-    }
-    /*
-      No "read the original" footer.
-
-      It used to append one for any source URL whose host it could name, on the
-      theory that an uncredited newsroom deserves the link. But "the original"
-      is a claim about where the story came from, and nothing here checks that.
-      A 2026 story about a house explosion ended with "Read the original:
-      Longmont Times-Call" pointing at a 2022 item about a gas main closure that
-      search had swept in — a false attribution printed under the story, in the
-      paper's own voice.
-
-      An outlet is credited when the prose names it, which is the only case
-      where the link is demonstrably about this story. Every other source still
-      appears in the provenance panel, with its title, date and role.
-    */
-  }
-  return out;
+/** Preserve authored links; organization-name matching cannot establish attribution. */
+export function linkOutletInBody(body: string, _urls: string[]): string {
+  return body;
 }
 
 export function asStoryForm(raw: unknown): StoryForm {
@@ -1556,14 +1533,15 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     if (!coerced.body) return { error: "Draft came back unreadable. Try again." };
 
     const parsed = parseJsonBlock<Record<string, unknown>>(writeAi.text) ?? {};
-    const announcing = docs[0]?.text ?? "";
-    const beforeParas = coerced.body.split(/\n{2,}/).filter((para) => para.trim()).length;
     let passBody = collapseRepeatedParagraphs(stripReporterNotebook(stripAiFiller(coerced.body)));
-    const afterParas = passBody.split(/\n{2,}/).filter(Boolean).length;
-    if ((looksLikeRewrite(passBody, announcing) || afterParas < beforeParas || (requestedBrief && passBody.trim().split(/\s+/).length > 350)) && timeLeft() > 10_000) {
+    let reconciled = false;
+    if (timeLeft() > 10_000) {
+      const claimRows = Array.isArray(parsed.claims) ? parsed.claims : [];
+      const editQueries = [coerced.headline, passBody, ...claimRows.map(row => row && typeof row === "object" ? String((row as Record<string, unknown>).fact ?? "") : "")];
+      const editEvidence = formatRetrievedEvidence(retrieveRelevantChunks(docs, editQueries, { budgetChars: 7000 }));
       const editAi = await chat(
         REPORT_EDIT_SYSTEM,
-        `${assignmentBlock}\n\nRESEARCH UNKNOWNS: ${stringsFrom(research?.unknowns).join("; ")}\n\nDraft JSON to edit:\n${JSON.stringify({
+        `${assignmentBlock}\n\nRESEARCH UNKNOWNS: ${stringsFrom(research?.unknowns).join("; ")}\n\nCLAIMS TO RECONCILE (not evidence):\n${JSON.stringify(claimRows).slice(0, 3000)}\n\nDraft JSON to edit:\n${JSON.stringify({
           headline: coerced.headline,
           dek: coerced.dek,
           body: passBody,
@@ -1576,9 +1554,9 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
         }).slice(
           0,
           12000,
-        )}\n\nAnnouncing source excerpt:\n${announcing.slice(0, 3000)}\n\nRetrieved evidence excerpt:\n${built.evidence.slice(0, 4000)}`,
+        )}\n\nURL-LABELED EVIDENCE MATCHED TO DRAFT:\n${editEvidence}`,
         1800,
-      );
+      ).catch(() => ({ ok: false as const, error: "Editing did not complete." }));
       if (editAi.ok) {
         const edited = coerceDraft(editAi.text, {
           headline: coerced.headline,
@@ -1586,20 +1564,22 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
           topic: coerced.topic,
         });
         if (edited.body) {
+          reconciled = true;
           passBody = collapseRepeatedParagraphs(stripReporterNotebook(stripAiFiller(edited.body)));
           const editedUrls = sanitizePublicUrls(edited.source_urls);
+          const ep = parseJsonBlock<Record<string, unknown>>(editAi.text);
           Object.assign(coerced, {
             headline: edited.headline,
             dek: edited.dek,
             topic: edited.topic,
-            source_urls: editedUrls.length ? editedUrls : coerced.source_urls,
+            source_urls: Array.isArray(ep?.source_urls) ? editedUrls : coerced.source_urls,
             integrity_notes: edited.integrity_notes || coerced.integrity_notes,
           });
-          const ep = parseJsonBlock<Record<string, unknown>>(editAi.text);
           if (ep) Object.assign(parsed, ep);
         }
       }
     }
+    if (!reconciled) coerced.integrity_notes = [coerced.integrity_notes, "Evidence reconciliation not completed within the available edit pass. Draft retained; verify its claims and citations before publication."].filter(Boolean).join("\n");
     // Filing belongs to the editor. Both writer and polishing passes may
     // propose a topic, but neither can change the lead's selected section.
     coerced.topic = opts.lead.topic;
@@ -1685,9 +1665,9 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     sanitizePublicUrls(
       Array.isArray(coerced.source_urls) && coerced.source_urls.length
         ? coerced.source_urls
-        : docs.map((d) => d.url),
+        : [],
     ).filter(u => docs.some(d => d.url === u && Boolean(d.text))),
-    docs.map((d) => d.url),
+    [],
     opts.lead.headline,
   );
   body = linkOutletInBody(body, used);
@@ -1761,7 +1741,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     dek: coerced.dek,
     body,
     topic: coerced.topic,
-    source_urls: used.length ? used : seedUrls,
+    source_urls: used,
     integrity_notes: coerced.integrity_notes,
     memory_entities: coerced.memory_entities,
     form,
