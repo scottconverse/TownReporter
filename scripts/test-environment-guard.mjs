@@ -1,5 +1,5 @@
 /**
- * Loaded before every ordinary test process. The runner already removes the
+ * Loaded before every ordinary test process. The runner already blanks the
  * variable; this second, fail-closed check protects against a future runner
  * regression. Individual integration tests may create and opt into their own
  * scratch Postgres after this guard has run.
@@ -12,4 +12,10 @@ if (process.env.DATABASE_URL?.trim()) {
 }
 if (process.env.RUN_LIVE_MODEL_TESTS === "1") {
   throw new Error("Refusing to start the ordinary test suite with live model evaluation enabled.");
+}
+// Preserve empty overrides even if a future caller omits them: Vite's env
+// loader prioritizes existing process values, including empty strings.
+// Deliberate per-test scratch Postgres opt-ins remain possible afterward.
+for (const key of ["DATABASE_URL", "VERCEL", "VERCEL_ENV", "RUN_LIVE_MODEL_TESTS"]) {
+  process.env[key] = "";
 }

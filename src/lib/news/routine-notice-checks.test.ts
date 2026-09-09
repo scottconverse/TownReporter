@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { randomUUID } from "node:crypto";
 import { createServer } from "vite";
-import { getSql } from "../db.ts";
 import type { IngestDocument } from "./ingest.ts";
 
 let vite: Awaited<ReturnType<typeof createServer>>;
+let getSql: typeof import("../db.ts").getSql;
 let checks: typeof import("./routine-notice-checks.server.ts");
 let automation: typeof import("./routine-notice-automation.ts");
 let ingestModule: typeof import("./ingest.ts");
@@ -14,6 +14,12 @@ let roomSequence = 98000;
 
 before(async () => {
   vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
+  // Use the same Vite-transformed database module as the server under test.
+  // A direct Node import has no import.meta.glob migration transform and can
+  // create a separate, unmigrated PGLite instance on this runtime.
+  const db = await vite.ssrLoadModule("/src/lib/db.ts");
+  assert.equal(db.getDbSource(), "pglite", "Ordinary routine checks must not use an operator PostgreSQL database");
+  ({ getSql } = db);
   checks = await vite.ssrLoadModule("/src/lib/news/routine-notice-checks.server.ts");
   automation = await vite.ssrLoadModule("/src/lib/news/routine-notice-automation.ts");
   ingestModule = await vite.ssrLoadModule("/src/lib/news/ingest.ts");
