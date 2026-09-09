@@ -5,6 +5,14 @@ import { safeTestEnvironment } from "./test-environment.mjs";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const guard = new URL("./test-environment-guard.mjs", import.meta.url).href;
 
+if (process.argv.length > 2) {
+  console.error(
+    "npm test runs the complete suite and does not accept filtering arguments. " +
+    "For a focused run use: node scripts/with-app-env.mjs node --experimental-strip-types --test <test-file>",
+  );
+  process.exit(2);
+}
+
 /**
  * The ordinary suite is destructive by design inside its disposable database:
  * several tests clear whole membership/invite tables. Never let an inherited
