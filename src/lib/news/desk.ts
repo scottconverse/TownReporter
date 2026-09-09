@@ -859,6 +859,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     urls: sourceInput.urls,
     memory,
     extraEvidence: prevNotes.scratch,
+    editorialAssignment: prevNotes.editorialAssignment,
     researchScope,
     extraUrls: sourceInput.extraUrls,
     /*
@@ -1044,6 +1045,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     verify: reported.integrity_notes ? [reported.integrity_notes] : [],
     opened,
     scratch: prevNotes.scratch,
+    editorialAssignment: prevNotes.editorialAssignment,
     researchScope: draftInput.researchScope,
     suppliedUrls: prevNotes.suppliedUrls,
   };
@@ -1100,13 +1102,14 @@ export const draftLead = createServerFn({ method: "POST" })
  */
 export const writeStoryFromInput = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { text: string; modelChoice?: string; researchScope?: "public" | "supplied" }) => input)
+  .validator((input: { text: string; modelChoice?: string; researchScope?: "public" | "supplied"; sectionKey?: string }) => input)
   .handler(async ({ context, data }) => {
     const { writeStoryForAuthenticatedEditor } =
       await import("./model-request-commit.server.ts");
     return writeStoryForAuthenticatedEditor({
       context: { userId: context.userId, newsroomId: owned(context) },
       text: data.text,
+      sectionKey: data.sectionKey,
       modelChoice: data.modelChoice,
       researchScope: data.researchScope,
     });

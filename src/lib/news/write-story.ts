@@ -21,7 +21,23 @@ export type WriteStoryParsed = {
   topic: string;
   urls: string[];
   scratch: string;
+  editorialAssignment?: EditorialAssignment;
 };
+
+export type EditorialAssignment = {
+  origin: "write-box";
+  text: string;
+  requestedForm?: "brief";
+};
+
+/** Only an explicit opening command from the authenticated Write box is an
+ * assignment. Later pasted paragraphs and source text remain evidence. */
+export function editorialAssignmentFromText(text: string): EditorialAssignment | undefined {
+  const firstLine = text.trim().split(/\r?\n/, 1)[0]?.trim() ?? "";
+  if (firstLine.length > 1000 || !/^(?:please\s+)?(?:write|draft|prepare|cover|summarize)\b/i.test(firstLine)) return undefined;
+  const brief = /\b(?:short|brief|concise)\s+(?:(?:local|news|civic)\s+)?(?:item|story|article|report|piece|summary)\b|\ba brief\b/i.test(firstLine);
+  return { origin: "write-box", text: firstLine, ...(brief ? { requestedForm: "brief" as const } : {}) };
+}
 
 export type WriteStoryParseResult =
   | { ok: true; value: WriteStoryParsed }
@@ -99,5 +115,6 @@ export function parseWriteStoryInput(rawText: string): WriteStoryParseResult {
   const topic = topicFromText(text);
   const scratch = text.trim().slice(0, WRITE_STORY_SCRATCH_LIMIT);
 
-  return { ok: true, value: { headline, why, topic, urls, scratch } };
+  const editorialAssignment = editorialAssignmentFromText(text);
+  return { ok: true, value: { headline, why, topic, urls, scratch, ...(editorialAssignment ? { editorialAssignment } : {}) } };
 }

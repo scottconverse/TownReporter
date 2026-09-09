@@ -6,6 +6,8 @@
   and confirmed the story is right to say the document is not there.
 */
 /** One query the absence gate's ladder ran, and whether it hit. */
+import { editorialAssignmentFromText, type EditorialAssignment } from "./write-story.ts";
+
 export type NoteTodoQuery = { query: string; hit: boolean };
 
 export type NoteTodo = {
@@ -38,6 +40,8 @@ export type ReportingNotes = {
   researchScope?: "public" | "supplied";
   /** URLs explicitly filed/pasted by the editor, never discovery history. */
   suppliedUrls?: string[];
+  /** Explicit editor command captured at the authenticated Write box, not from source text. */
+  editorialAssignment?: EditorialAssignment;
 };
 
 function todoSource(raw: unknown): NoteTodo["src"] {
@@ -129,6 +133,8 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
       verify: strs(o.verify),
       opened,
       scratch: String(o.scratch ?? "").slice(0, 8000),
+      ...((o.editorialAssignment as EditorialAssignment | undefined)?.origin === "write-box" && typeof (o.editorialAssignment as EditorialAssignment).text === "string"
+        ? { editorialAssignment: editorialAssignmentFromText((o.editorialAssignment as EditorialAssignment).text) } : {}),
       ...(o.researchScope === "supplied" || o.researchScope === "public" ? { researchScope: o.researchScope } : {}),
       ...(Array.isArray(o.suppliedUrls) ? { suppliedUrls: o.suppliedUrls.filter((u): u is string => typeof u === "string").slice(0, 8) } : {}),
     };
@@ -490,6 +496,7 @@ export function packNotes(notes: ReportingNotes, limit = 16000): string {
   return JSON.stringify({
     researchScope: work.researchScope,
     suppliedUrls: work.suppliedUrls,
+    editorialAssignment: work.editorialAssignment,
     news: work.news,
     why: work.why,
     angle: work.angle,

@@ -15,7 +15,7 @@ import {
 } from "./model-choice.ts";
 import { parseWriteStoryInput } from "./write-story.ts";
 import { appendScratch, packNotes, parseNotes } from "./notes.ts";
-import { sectionScanSnapshot, ensureSectionsSchema } from "./sections.server.ts";
+import { sectionScanSnapshot, ensureSectionsSchema, getSections, resolvedSectionKey } from "./sections.server.ts";
 
 export type AuthenticatedEditorContext = {
   userId: string;
@@ -374,6 +374,7 @@ export async function commitOpinionForAuthenticatedEditor(
 
 export type WriteStoryCommitDeps = StoryDraftCommitDeps & {
   audit?: typeof audit;
+  getSections?: typeof getSections;
 };
 
 /**
@@ -401,18 +402,31 @@ export async function writeStoryForAuthenticatedEditor(
     text: string;
     researchScope?: "public" | "supplied";
     modelChoice?: string;
+    sectionKey?: string;
   },
   deps: WriteStoryCommitDeps = {},
 ) {
   const parsed = parseWriteStoryInput(input.text);
   if (!parsed.ok) return { ok: false as const, error: parsed.error };
-  const { headline, why, topic, urls, scratch } = parsed.value;
+  const { headline, why, urls, scratch, editorialAssignment } = parsed.value;
+  let topic = parsed.value.topic;
+  if (input.sectionKey !== undefined) {
+    try {
+      if (typeof input.sectionKey !== "string" || !input.sectionKey.trim()) throw new Error("Choose an active reporting section.");
+      const config = await (deps.getSections ?? getSections)(input.context.newsroomId);
+      const key = resolvedSectionKey(config.sections, input.sectionKey);
+      if (key !== input.sectionKey || key === "about" || key === "opinion") throw new Error("Choose an active reporting section.");
+      topic = key;
+    } catch (error) {
+      return { ok: false as const, error: error instanceof Error ? error.message : "Could not validate the selected section. Reload sections and retry." };
+    }
+  }
 
   const sql = await (deps.getSql ?? getSql)();
   await sql.query(
     "alter table leads add column if not exists notes_json text not null default '{}'",
   );
-  const notesJson = packNotes({ ...appendScratch(parseNotes(null), scratch), suppliedUrls: urls, researchScope: input.researchScope === "supplied" ? "supplied" : "public" });
+  const notesJson = packNotes({ ...appendScratch(parseNotes(null), scratch), editorialAssignment, suppliedUrls: urls, researchScope: input.researchScope === "supplied" ? "supplied" : "public" });
   const urlsJson = JSON.stringify(urls);
   const rows = await sql<{ id: number }>`
     insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)

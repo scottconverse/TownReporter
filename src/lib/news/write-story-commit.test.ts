@@ -59,6 +59,65 @@ async function ensureWriteStorySchema() {
 }
 
 describe("writeStoryForAuthenticatedEditor", () => {
+  const sectionConfig = {
+    revision: 1,
+    sections: ["community-life", "council", "hidden", "retired", "about", "opinion"].map(key => ({
+      key, name: key, visible: key !== "hidden", brief: "", instructions: "", sourceIds: [],
+      replacementKey: key === "retired" ? "community-life" : null,
+    })),
+  };
+  for (const sectionKey of ["community-life", "hidden", undefined]) {
+    it(`files the selected section ${sectionKey ?? "omitted default"} without inventing a new topic`, async () => {
+      const sql = await ensureWriteStorySchema();
+      const result = await writeStoryForAuthenticatedEditor({
+        context: { userId: "section-editor", newsroomId: 820 },
+        text: "Write a short local item about upcoming programs.", sectionKey,
+        modelChoice: "claude-frontier",
+      }, {
+        getSql: async () => sql, getSections: async () => sectionConfig,
+        audit: async () => {}, assertRate: async () => {},
+        probeProvider: async () => ({ ok: true, choice: "claude-frontier" }),
+        enqueueJob: opts => enqueueJob({ ...opts, kick: false }),
+      });
+      assert.ok(result.ok);
+      const [lead] = await sql<{topic:string}>`select topic from leads where id=${result.leadId}`;
+      const [draft] = await sql<{topic:string}>`select topic from drafts where lead_id=${result.leadId}`;
+      assert.equal(lead.topic, sectionKey ?? "council");
+      assert.equal(draft.topic, lead.topic);
+    });
+  }
+  for (const sectionKey of ["foreign-only", "retired", "about", "opinion", "bad/key", "", null, 7]) {
+    it(`rejects unavailable/non-reporting section ${JSON.stringify(sectionKey)} before filing`, async () => {
+      const sql = await ensureWriteStorySchema();
+      let touched = false;
+      const result = await writeStoryForAuthenticatedEditor({
+        context: { userId: "section-editor", newsroomId: 820 },
+        text: "Write a short local item about upcoming programs.",
+        sectionKey: sectionKey as string,
+      }, {
+        getSections: async (newsroomId) => { assert.equal(newsroomId, 820); return sectionConfig; },
+        getSql: async () => { touched = true; return sql; },
+        audit: async () => {}, assertRate: async () => {},
+        probeProvider: async () => ({ ok: true, choice: "claude-frontier" }),
+        enqueueJob: opts => enqueueJob({ ...opts, kick: false }),
+      });
+      assert.equal(result.ok, false);
+      assert.equal(touched, false);
+      if (!result.ok) assert.match(result.error, /section/i);
+    });
+  }
+  it("persists the authenticated Write box assignment independently of its scratch evidence", async () => {
+    const sql = await ensureWriteStorySchema();
+    const text = "Write a short local item about upcoming library programs.";
+    const result = await writeStoryForAuthenticatedEditor({ context: { userId: "assignment-editor", newsroomId: 813 }, text, modelChoice: "claude-frontier" }, {
+      getSql: async () => sql, audit: async () => {}, assertRate: async () => {},
+      probeProvider: async () => ({ ok: true, choice: "claude-frontier", label: "Claude" }),
+      enqueueJob: (opts) => enqueueJob({ ...opts, kick: false }),
+    });
+    assert.ok(result.ok);
+    const [row] = await sql<{ notes_json: string }>`select notes_json from leads where newsroom_id=813`;
+    assert.deepEqual(JSON.parse(row.notes_json).editorialAssignment, { origin: "write-box", text, requestedForm: "brief" });
+  });
   it("persists supplied-material scope on both the lead and immutable queued job", async () => {
     const sql = await ensureWriteStorySchema();
     const res = await writeStoryForAuthenticatedEditor({ context: { userId: "scope-editor", newsroomId: 811 }, text: "Library hours change Tuesday. Opens at noon.", researchScope: "supplied", modelChoice: "claude-frontier" }, {

@@ -1,4 +1,5 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
+import { useEditorSections } from "@/lib/use-sections";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -53,6 +54,7 @@ export const Route = createFileRoute("/desk/")({ component: DeskHome });
 const OPEN_KEY = "townreporter.dark.openId";
 
 function DeskHome() {
+  const sectionQuery = useEditorSections();
   const { formatDateTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -170,6 +172,7 @@ function DeskHome() {
   */
   const [storyText, setStoryText] = useState("");
   const [storyScope, setStoryScope] = useState<"public" | "supplied">("public");
+  const [storySection, setStorySection] = useState("");
   const [storyModel, setStoryModel] = useState<StoryModelChoice>("auto");
   const [storyNotice, setStoryNotice] = useState<{
     text: string;
@@ -177,7 +180,7 @@ function DeskHome() {
     authDetail?: string | null;
   } | null>(null);
   const writeStory = useMutation({
-    mutationFn: () => writeStoryFromInput({ data: { text: storyText, modelChoice: storyModel, researchScope: storyScope } }),
+    mutationFn: () => writeStoryFromInput({ data: { text: storyText, modelChoice: storyModel, researchScope: storyScope, sectionKey: storySection || undefined } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         const raw = res?.error ?? "That did not file.";
@@ -329,6 +332,17 @@ function DeskHome() {
             that space instead of below it.
           */}
           <DraftScopePicker value={storyScope} onChange={setStoryScope} disabled={writeStory.isPending} />
+          <label className="my-3 block text-sm">
+            <span className="mb-1 block">Section (optional)</span>
+            <select className="w-full max-w-md" value={storySection} onChange={e => setStorySection(e.target.value)} disabled={writeStory.isPending || sectionQuery.isPending}>
+              <option value="">Suggest from text — current default</option>
+              {sectionQuery.sections.filter(s => s.key !== "about" && s.key !== "opinion").map(s => <option key={s.key} value={s.key}>{s.name}</option>)}
+              {storySection && !sectionQuery.sections.some(s => s.key === storySection) ? <option value={storySection}>Previous selection unavailable — choose again</option> : null}
+            </select>
+            <span className="mt-1 block text-sm text-muted" role="status">
+              {sectionQuery.isPending ? "Loading newspaper sections…" : sectionQuery.isError ? "Sections could not load. You can still write using the current default." : "Choose where this story belongs. Leaving this blank keeps the current text-based suggestion; you can refile the draft later."}
+            </span>
+          </label>
           <div className="composer-row">
             <ModelPicker
               scope="story"
