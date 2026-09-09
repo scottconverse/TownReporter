@@ -3,6 +3,34 @@ import assert from "node:assert/strict";
 import { extractArticleText } from "./article-extract.ts";
 
 describe("extractArticleText", () => {
+  it("recovers dated static news cards when Readability keeps only listing controls", () => {
+    // Reduced from the public /news response observed 2026-09-09: the cards
+    // already exist in server HTML; the loading-more marker is not an empty app.
+    const html = `<html><head><title>News archive</title></head><body><main id="main-content" class="main h-header--mobile">
+      <div>Filter<p>Department</p>All Departments<p>Category</p>All Categories<p>Type</p>All
+        <div>Email Signup<p>Sign up for our emails to receive the latest news and alerts.</p>Sign Up</div>
+      </div><div role="region" aria-live="polite">3018 results found</div>
+      <label>Sort news by</label><select><option>Newest to Oldest</option></select>
+      <div id="news-article-container">
+        <div class="card-article"><a href="/news/clean-air/">
+          <div>Longmont Recognized as a Clean Air Champion</div><div class="card-article__date">September 8, 2026</div></a></div>
+        <div class="card-article"><a href="/news/cooling-parks/">
+          <div>New Cooling Features at Three City Parks</div><div class="card-article__date">August 31, 2026</div></a></div>
+      </div><div id="archive-news-article-loading"><span>Loading more news &amp; alerts...</span></div>
+    </main></body></html>`;
+    const result = extractArticleText(html, "https://example.test/news/");
+    assert.match(result.text, /Clean Air Champion/);
+    assert.match(result.text, /September 8, 2026/);
+    assert.match(result.text, /Cooling Features/);
+    assert.match(result.text, /August 31, 2026/);
+  });
+
+  it("keeps genuine article prose discussing loading results and sorting", () => {
+    const body = "The library is loading more news into its historical archive. Researchers found 3018 results from its first collection and can sort the results by date. The project opens Tuesday and includes records donated by local families.";
+    const result = extractArticleText(`<html><head><title>Library archive</title></head><body><article><p>${body}</p></article></body></html>`);
+    assert.equal(result.text, body);
+    assert.equal(result.method, "readability");
+  });
   it("returns the article body, not the nav, on a gov-style CMS page", () => {
     const navLinks = Array.from(
       { length: 40 },

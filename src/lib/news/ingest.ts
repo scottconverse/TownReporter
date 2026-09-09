@@ -492,7 +492,13 @@ async function ingestRedditIfNeeded(url: URL): Promise<RedditIngest | null> {
   return fetchRedditDocument(url);
 }
 
-export type IngestResult = { text: string; titleHint: string; extras: string[] };
+export type IngestResult = {
+  text: string;
+  titleHint: string;
+  extras: string[];
+  /** Site furniture retained separately, never treated as article body. */
+  notices?: string[];
+};
 
 export type IngestDocument = {
   ok: boolean;
@@ -846,6 +852,18 @@ export async function ingestUrl(raw: string): Promise<IngestResult> {
     return { text: `RSS ${url.toString()}\n\n${text}`, titleHint: url.hostname, extras: [] };
   }
 
+  // Plain-text and unlabelled textual sources were readable before article
+  // extraction. Detect HTML up front, never fall back to raw navigation after
+  // an HTML extraction failure. Explicit text/plain remains literal text.
+  const mediaType = ctype.split(";", 1)[0]?.trim();
+  const hasHtmlMarkup = /<!doctype\s+html\b|<\/?[a-z][a-z0-9:-]*(?:\s[^<>]*?)?\/?>/i.test(body);
+  const isHtml = mediaType === "text/html" || hasHtmlMarkup;
+  if (mediaType === "text/plain" || !isHtml) {
+    const text = body.replace(/\s+/g, " ").trim().slice(0, 14000);
+    if (text.length < 40) throw new Error("Page had almost no readable text");
+    return { text, titleHint: url.hostname, extras: [] };
+  }
+
   const titleMatch = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const titleHint = titleMatch
     ? titleMatch[1]!
@@ -854,13 +872,11 @@ export async function ingestUrl(raw: string): Promise<IngestResult> {
         .trim()
         .slice(0, 140)
     : url.hostname;
-  const text = body
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 14000);
+  // The scanner uses this path rather than ingestDocument. Apply the same
+  // body extraction before its context cap so large menus cannot crowd out
+  // dated cards or article text. Keep notices outside the article contract.
+  const extracted = extractArticleText(body, url.toString());
+  const text = extracted.text.slice(0, 14000);
   if (text.length < 40) throw new Error("Page had almost no readable text");
   const extras = mergePageExtras(body, url);
   const alt = body.match(
@@ -873,5 +889,5 @@ export async function ingestUrl(raw: string): Promise<IngestResult> {
       /* skip */
     }
   }
-  return { text, titleHint, extras };
+  return { text, titleHint: extracted.title || titleHint, extras, notices: extractSiteNotices(body) };
 }

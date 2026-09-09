@@ -60,6 +60,7 @@ const BOILERPLATE_CLASS_ID = /\b(nav(bar)?|menu|main-?menu|site-?header|site-?fo
 
 function stripBoilerplate(document: {
   querySelectorAll: (sel: string) => Iterable<{
+    tagName: string;
     getAttribute: (name: string) => string | null;
     remove: () => void;
   }>;
@@ -71,6 +72,9 @@ function stripBoilerplate(document: {
   }
   const candidates = Array.from(document.querySelectorAll("[class], [id]"));
   for (const el of candidates) {
+    // Semantic content roots can carry header-spacing utility classes. Their
+    // descendant nav/banner elements were removed above; do not delete the story.
+    if (/^(MAIN|ARTICLE)$/i.test(el.tagName)) continue;
     const cls = el.getAttribute("class") ?? "";
     const id = el.getAttribute("id") ?? "";
     if (BOILERPLATE_CLASS_ID.test(cls) || BOILERPLATE_CLASS_ID.test(id)) el.remove();
@@ -84,7 +88,16 @@ function looksLikeMisparse(text: string): boolean {
   // Readability occasionally "succeeds" on a scrap — a cookie banner or a
   // single nav label — that happens to clear its own internal threshold.
   // Treat a very short result as no result, same as null.
-  return text.trim().length < READABILITY_MIN_CHARS;
+  if (text.trim().length < READABILITY_MIN_CHARS) return true;
+  // Reader mode can discard link-heavy news cards and score only the listing
+  // controls or signup box. These paired, standalone UI labels are not prose:
+  // retry the existing main-content fallback, not a browser or whole-page dump.
+  const lines = text.split(/\n+/).map((line) => line.trim());
+  const listingControls = lines.some((line) => /^[\d,]+ results(?: found)?$/i.test(line)) &&
+    lines.some((line) => /^Sort (?:news|events|results|articles|items|posts) by$/i.test(line));
+  const signupBox = lines.some((line) => /^Email Sign\s?up$/i.test(line)) &&
+    lines.some((line) => /^Sign Up$/i.test(line));
+  return listingControls || signupBox;
 }
 
 export function extractArticleText(html: string, url?: string): ExtractedArticle {

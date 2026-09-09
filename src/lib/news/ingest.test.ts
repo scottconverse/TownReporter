@@ -8,10 +8,102 @@ import {
   encodeOcrExtractionMethod,
   extractPdfBetter,
   extractPdfText,
+  ingestUrl,
   mapLimit,
   parseRssItems,
   withRetry,
 } from "./ingest.ts";
+import { setFetchImplForTests } from "./fetch-url.ts";
+
+describe("ingestUrl HTML scanner path", () => {
+  for (const contentType of [undefined, "application/json"]) {
+    it(`preserves readable non-HTML responses with ${contentType ?? "no Content-Type"}`, async () => {
+      const report = "Council will discuss the water contract Tuesday. Residents may comment in person. ".repeat(200);
+      setFetchImplForTests(async () => new Response(new TextEncoder().encode(report), {
+        headers: contentType ? { "content-type": contentType } : {},
+      }));
+      try {
+        const result = await ingestUrl("https://93.184.216.34/report");
+        assert.equal(result.text, report.trim().slice(0, 14000));
+        assert.equal(result.text.length, 14000);
+      } finally {
+        setFetchImplForTests(null);
+      }
+    });
+  }
+
+  it("does not expand the existing unsupported content-type allowlist", async () => {
+    setFetchImplForTests(async () => new Response("A sufficiently long markdown report that the fetch boundary does not accept.", {
+      headers: { "content-type": "text/markdown" },
+    }));
+    try {
+      await assert.rejects(() => ingestUrl("https://93.184.216.34/report"), /Unsupported content type/);
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+
+  it("still extracts HTML navigation when its Content-Type is absent", async () => {
+    const html = `<html><body><nav>${"Navigation menu item ".repeat(1000)}</nav><main><article><p>Council will discuss the water contract Tuesday. Residents may comment in person.</p></article></main></body></html>`;
+    setFetchImplForTests(async () => new Response(new TextEncoder().encode(html)));
+    try {
+      const result = await ingestUrl("https://93.184.216.34/news");
+      assert.match(result.text, /water contract Tuesday/);
+      assert.doesNotMatch(result.text, /Navigation menu item/);
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+
+  it("preserves text/plain reports without sending them through an HTML parser", async () => {
+    const report = "Council will discuss the water contract Tuesday. Cost is < 500 dollars and attendance is open.\n\nResidents may comment.";
+    setFetchImplForTests(async () => new Response(report, {
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    }));
+    try {
+      const result = await ingestUrl("https://93.184.216.34/report.txt");
+      assert.equal(result.text, report.replace(/\s+/g, " "));
+      assert.equal(result.titleHint, "93.184.216.34");
+      assert.deepEqual(result.extras, []);
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+
+  it("extracts dated news cards beyond a large navigation menu and keeps notices separate", async () => {
+    // Reduced public news listing structure, with CMS navigation larger than
+    // the scanner's text cap. Stub the real HTTP seam; no DNS/network/model.
+    const html = `<html><head><title>News archive</title>
+      <link rel="alternate" type="application/rss+xml" href="/feed.xml"></head><body>
+      <header><nav>${"Department services and information ".repeat(600)}</nav></header>
+      <aside role="alert">City offices close Monday for scheduled maintenance.</aside>
+      <main id="main-content" class="main h-header--mobile">
+      <div>Email Signup<p>Sign up for our emails to receive the latest news and alerts.</p>Sign Up</div>
+      <div>3018 results found</div><label>Sort news by</label>
+      <div class="card-article"><a href="/news/clean-air/">Longmont Recognized as a Clean Air Champion</a><div>September 8, 2026</div></div>
+      <div class="card-article"><a href="/news/cooling-parks/">New Cooling Features at Three City Parks</a><div>August 31, 2026</div></div>
+      <div>Loading more news &amp; alerts...</div></main></body></html>`;
+    let requests = 0;
+    setFetchImplForTests(async () => {
+      requests++;
+      return new Response(html, { headers: { "content-type": "text/html" } });
+    });
+    try {
+      const result = await ingestUrl("https://93.184.216.34/news/");
+      assert.equal(requests, 1);
+      assert.match(result.text, /Clean Air Champion/);
+      assert.match(result.text, /September 8, 2026/);
+      assert.match(result.text, /Cooling Features/);
+      assert.doesNotMatch(result.text, /Department services/);
+      assert.doesNotMatch(result.text, /City offices close/);
+      assert.ok(result.notices?.some((notice) => notice.includes("City offices close Monday")));
+      assert.ok(result.extras.includes("https://93.184.216.34/feed.xml"));
+      assert.equal(result.titleHint, "News archive");
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+});
 
 describe("extractPdfText", () => {
   it("pulls Tj strings from uncompressed civic packets", () => {
