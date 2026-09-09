@@ -70,6 +70,13 @@ export const VERDICT_COPY: Record<BriefVerdict, string> = {
 
 const str = (v: unknown, max: number) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 
+const visiblyBoundedStr = (v: unknown, max: number) => {
+  const value = String(v ?? "").replace(/\s+/g, " ").trim();
+  if (value.length <= max) return value;
+  const marker = " … [truncated]";
+  return `${value.slice(0, max - marker.length).trimEnd()}${marker}`;
+};
+
 const list = (v: unknown, max: number, each: number) =>
   Array.isArray(v)
     ? v.map((x) => str(x, each)).filter(Boolean).slice(0, max)
@@ -106,7 +113,10 @@ export function parseBrief(raw: unknown, now = new Date()): InvestigationBrief {
     })(),
     supports: list(o.supports, 6, 240),
     benign: str(o.benign, 400),
-    kills_it: str(o.kills_it, 300),
+    // This can be a multi-clause named-record instruction. Preserve normal
+    // answers whole; if hostile/accidental output reaches the defensive 10k
+    // boundary, tell the editor that the stored brief is incomplete.
+    kills_it: visiblyBoundedStr(o.kills_it, 10_000),
     sections: {
       record: str(s.record, 220),
       tested: str(s.tested, 220),
@@ -144,7 +154,7 @@ Your job, in order:
 
 5. WHAT WOULD KILL IT. The single document, record or search that would settle it either way. Specific: a named record from a named body, not "more research".
 
-6. VERDICT: promising | thin | dead | unknown. Be willing to say dead. An editor's hour is the scarcest thing here, and a false "promising" costs more than a false "dead".
+6. VERDICT: promising | thin | dead | unknown. Use unknown when decisive records have not been read, captures failed, or the supplied file cannot resolve the premise. Absence from the supplied file is not evidence of absence in the world. Use thin for a real but weak evidentiary thread and promising for a concrete supported connection worth following. Be willing to say dead when affirmative evidence contradicts the premise or resolves the suspected connection without a remaining evidentiary thread; explain that evidence. Do not turn a failed search or an unread record into a negative finding. Name the next missing record instead.
 
 7. One line above each of the four sections, saying what is in it.
 

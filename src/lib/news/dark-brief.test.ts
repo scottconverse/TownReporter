@@ -31,6 +31,25 @@ describe("parseBrief", () => {
     assert.match(b.generated_at, /^\d{4}-/);
   });
 
+  it("keeps a complete multi-clause instruction for the record that would settle the file", () => {
+    const instruction =
+      "Obtain the complete procurement file from the City Clerk, including the signed award memo, " +
+      "every scoring sheet, conflict disclosure, bid tabulation, evaluator note, amendment, and the " +
+      "email transmitting the recommendation; then compare the named evaluators, dates, amounts, and " +
+      "vendor ownership against the Secretary of State filings and the council's final vote before " +
+      "deciding whether the premise survives.";
+
+    assert.ok(instruction.length > 300);
+    assert.equal(parseBrief({ kills_it: instruction }).kills_it, instruction);
+  });
+
+  it("marks a defensive truncation instead of silently ending mid-instruction", () => {
+    const parsed = parseBrief({ kills_it: `Pull the named record and compare ${"x".repeat(12_000)}` });
+
+    assert.match(parsed.kills_it, /\[truncated\]$/);
+    assert.ok(parsed.kills_it.length > 300);
+  });
+
   /**
    * A summary panel that breaks the page is worse than no summary panel — it
    * sits above four sections the editor still needs.
@@ -89,6 +108,13 @@ describe("BRIEF_SYSTEM", () => {
     assert.match(BRIEF_SYSTEM, /same record/i);
     assert.match(BRIEF_SYSTEM, /adjacent/i);
     assert.match(BRIEF_SYSTEM, /unknown/i);
+  });
+
+  it("distinguishes an incomplete investigation from a disproved premise", () => {
+    assert.match(BRIEF_SYSTEM, /unknown.*decisive records.*not.*read/is);
+    assert.match(BRIEF_SYSTEM, /dead.*affirmative evidence/is);
+    assert.match(BRIEF_SYSTEM, /absence from the supplied file is not evidence of absence/i);
+    assert.doesNotMatch(BRIEF_SYSTEM, /false "promising" costs more than a false "dead"/);
   });
 });
 
