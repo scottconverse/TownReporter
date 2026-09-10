@@ -183,6 +183,39 @@ describe("saved Schema.org Event extraction", () => {
     assert.equal(results[0].validation.notice.fields.venue.value, "Civic Hall");
   });
 
+  it("keeps a physical Place URL out of online details while retaining a VirtualLocation URL", () => {
+    // Mixed-location fixture: the physical Place is from the official Sunset Soiree event;
+    // the VirtualLocation is constructed to cover the distinct online-event shape.
+    const html = `<script type="application/ld+json">${JSON.stringify({
+      "@type": "Event",
+      "@id": "https://longmontcolorado.gov/event/3rd-annual-sunset-soiree/#event",
+      name: "3rd Annual Sunset Soiree",
+      startDate: "2026-09-11T18:00:00-06:00",
+      organizer: { name: "City of Longmont" },
+      location: [
+        {
+          "@type": "Place",
+          name: "Longmont Museum",
+          url: "https://longmontcolorado.gov/venue/longmont-museum/",
+        },
+        { "@type": "VirtualLocation", url: "https://events.example/sunset-stream" },
+      ],
+    })}</script>`;
+    const result = extractJsonLdEvents(html, {
+      formatKey: "community-arts-event-logistics",
+      provenance,
+    })[0];
+    assert.equal(result?.status, "parsed");
+    if (result?.status !== "parsed") return;
+    assert.equal(result.validation.valid, true);
+    if (!result.validation.valid) return;
+    assert.equal(result.validation.notice.fields.venue?.value, "Longmont Museum");
+    assert.equal(
+      result.validation.notice.fields.onlineUrl?.value,
+      "https://events.example/sunset-stream",
+    );
+  });
+
   it("uses caller-selected library or parks context and never classifies from names", () => {
     const html = `<script type="application/ld+json">[{"@type":"Event","@id":"same-event","name":"Story hour","startDate":"2026-09-08T10:00:00-06:00","organizer":{"name":"Library"},"location":{"name":"Room A"}}]</script>`;
     const library = extractJsonLdEvents(html, { formatKey: "library-notice", provenance });

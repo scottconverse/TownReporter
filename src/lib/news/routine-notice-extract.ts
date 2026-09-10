@@ -225,7 +225,16 @@ function firstLocation(row: Record<string, unknown>, locator: string) {
       ? `${locator}.location[${index}]`
       : `${locator}.location`;
     venue ??= field(text(location.name), `${prefix}.name`);
-    onlineUrl ??= field(text(location.url), `${prefix}.url`);
+    if (
+      eventTypes(location["@type"]).some(
+        (type) =>
+          type === "VirtualLocation" ||
+          type === "https://schema.org/VirtualLocation" ||
+          type === "http://schema.org/VirtualLocation",
+      )
+    ) {
+      onlineUrl ??= field(text(location.url), `${prefix}.url`);
+    }
   }
   return { venue, onlineUrl };
 }
