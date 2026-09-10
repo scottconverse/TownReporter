@@ -265,7 +265,11 @@ export function machineTodosFrom(parts: (string | undefined | null)[]): NoteTodo
     const whole = String(raw ?? "").trim();
     if (!whole) continue;
     for (const t of splitTodoLine(whole)) {
-      const key = t.toLowerCase();
+      // Models often repeat one errand with spacing drift or an optional full
+      // stop. Normalize only those presentation differences for comparison;
+      // keep the first text displayed, and retain questions, amounts and all
+      // internal punctuation as distinct reporting work.
+      const key = t.toLowerCase().replace(/\s+/g, " ").replace(/\.+$/, "").trim();
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ t: t.slice(0, 400), done: false, src: "machine" });

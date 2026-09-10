@@ -200,6 +200,46 @@ describe("splitTodoLine", () => {
     const many = Array.from({ length: 40 }, (_, i) => `Get document number ${i} from the clerk`);
     assert.equal(machineTodosFrom(many).length, 16);
   });
+
+  it("deduplicates machine errands that differ only by whitespace or a final period", () => {
+    const first = "The quantity and value of renewable-energy credits sold or planned for sale.";
+    const todos = machineTodosFrom([
+      first,
+      "  The   quantity and value of renewable-energy credits sold or planned for sale  ",
+      "How many credits were sold?",
+      "How many credits were sold.",
+      "Confirm the $5 credit amount.",
+      "Confirm the $50 credit amount.",
+      "Confirm credits sold, or planned for sale.",
+      "Confirm credits sold or planned for sale.",
+    ]);
+
+    assert.equal(todos[0]?.t, first, "the first visible wording survives unchanged");
+    assert.deepEqual(
+      todos.map((todo) => todo.t),
+      [
+        first,
+        "How many credits were sold?",
+        "How many credits were sold.",
+        "Confirm the $5 credit amount.",
+        "Confirm the $50 credit amount.",
+        "Confirm credits sold, or planned for sale.",
+        "Confirm credits sold or planned for sale.",
+      ],
+    );
+  });
+
+  it("does not rewrite or deduplicate historical stored human and gate todos", () => {
+    const parsed = parseNotes(JSON.stringify({
+      todo: [
+        { t: "Call the clerk.", done: false, src: "you" },
+        { t: "Call the clerk", done: false, src: "you" },
+        { t: "Verify the filing.", done: false, src: "gate" },
+        { t: "Verify the filing", done: false, src: "gate" },
+      ],
+    }));
+    assert.equal(parsed.todo.length, 4);
+  });
 });
 
 describe("selectExcerpt", () => {

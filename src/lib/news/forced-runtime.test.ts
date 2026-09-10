@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { productionOcr } from "./ocr.ts";
+import { singleRenderedPdfFixture } from "./pdf-test-fixture.ts";
 import {
   forcedOcrOptions,
   parseForcedRuntimeSnapshot,
@@ -14,16 +15,6 @@ const claude = {
   transport: "claude-code",
   model: "selected-claude",
 } as const satisfies ForcedRuntimeSnapshot;
-
-function fakePdfWithJpeg(): Uint8Array {
-  const jpeg = new Uint8Array(5000);
-  jpeg.set([0xff, 0xd8, 0xff], 0);
-  jpeg.set([0xff, 0xd9], jpeg.length - 2);
-  const pdf = new Uint8Array(jpeg.length + 30);
-  pdf.set(Buffer.from("%PDF-1.4 scanned "), 0);
-  pdf.set(jpeg, 20);
-  return pdf;
-}
 
 describe("forced runtime snapshots", () => {
   it("rejects a runtime paired with another provider choice", () => {
@@ -89,7 +80,7 @@ describe("forced runtime snapshots", () => {
     const calls: string[] = [];
     try {
       const result = await productionOcr(
-        fakePdfWithJpeg(),
+        singleRenderedPdfFixture(),
         forcedOcrOptions(claude, undefined, {
           anthropic: async () => {
             calls.push("anthropic");

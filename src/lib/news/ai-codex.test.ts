@@ -4,6 +4,8 @@ import path from "node:path";
 import {
   buildCodexArgs,
   buildCodexPrompt,
+  classifyCodexDiagnostic,
+  codexFailureMessage,
   codexChat,
   probeCodex,
   runCodexProcessForTest,
@@ -50,6 +52,78 @@ function nodeImport(source: string): string {
 }
 
 describe("Codex native drafting launch", { concurrency: false }, () => {
+  it("classifies native outcomes without retaining worker text", () => {
+    assert.equal(
+      classifyCodexDiagnostic("failed to initialize in-process app-server client: Access is denied", {
+        code: 1,
+        timedOut: false,
+      }),
+      "startup-permission",
+    );
+    assert.equal(
+      classifyCodexDiagnostic("", { code: null, timedOut: true }),
+      "timeout",
+    );
+    assert.equal(classifyCodexDiagnostic("", { code: 0, timedOut: false }), "completed");
+    assert.equal(
+      classifyCodexDiagnostic("The report discusses credentials and permission policy.", {
+        code: 0,
+        timedOut: false,
+      }),
+      "completed",
+    );
+    assert.equal(
+      classifyCodexDiagnostic("provider returned an ordinary failure", { code: 1, timedOut: false }),
+      "failed",
+    );
+  });
+
+  it("does not infer a Codex state-folder cause from an unrelated access denial", () => {
+    assert.equal(
+      classifyCodexDiagnostic("Could not read the attached source: Access is denied", {
+        code: 1,
+        timedOut: false,
+      }),
+      "failed",
+    );
+    assert.equal(
+      codexFailureMessage("Could not read the attached source: Access is denied", {
+        code: 1,
+        timedOut: false,
+      }),
+      "Codex could not complete this draft.",
+    );
+    assert.equal(
+      classifyCodexDiagnostic("Could not update the source cache: readonly database", {
+        code: 1,
+        timedOut: false,
+      }),
+      "failed",
+    );
+  });
+
+  it("emits only bounded diagnostic metadata when explicitly enabled", async () => {
+    const events: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => events.push(args.map(String).join(" "));
+    try {
+      await withEnv({ TOWNREPORTER_CODEX_DIAGNOSTICS: "1" }, () =>
+        runCodexProcessForTest(
+          process.execPath,
+          ["-e", "process.stdout.write('OUTPUT_CANARY');process.stderr.write('ERROR_CANARY');"],
+          "INPUT_CANARY",
+          1_000,
+        ),
+      );
+    } finally {
+      console.error = originalError;
+    }
+    assert.equal(events.length, 1);
+    assert.match(events[0]!, /\[codex-diagnostic\]/);
+    assert.match(events[0]!, /inputBytes/);
+    assert.doesNotMatch(events[0]!, /INPUT_CANARY|OUTPUT_CANARY|ERROR_CANARY/);
+  });
+
   it("uses the exact noninteractive full-access launch contract", () => {
     const args = buildCodexArgs({ model: "gpt-5.6-sol" });
 
@@ -59,6 +133,27 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     assert.equal(args.includes("--ignore-user-config"), false);
     assert.equal(args.includes("--ignore-rules"), false);
     assert.equal(args.includes("--skip-git-repo-check"), true);
+  });
+
+  it("keeps inherited reasoning when unset and opts into verified high per launch", async () => {
+    await withEnv({ TOWNREPORTER_CODEX_REASONING_EFFORT: undefined }, async () => {
+      assert.deepEqual(buildCodexArgs({ model: "gpt-5.6-sol" }), [...EXPECTED_NATIVE_ARGS]);
+    });
+    await withEnv({ TOWNREPORTER_CODEX_REASONING_EFFORT: "high" }, async () => {
+      const args = buildCodexArgs({ model: "gpt-5.6-sol" });
+      assert.deepEqual(args.slice(args.indexOf("--model"), args.indexOf("--sandbox")), [
+        "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=high",
+      ]);
+      assert.equal(args.includes("--search"), true);
+      assert.equal(args.includes("danger-full-access"), true);
+    });
+  });
+
+  it("rejects an unverified reasoning value instead of silently ignoring it", async () => {
+    await assert.rejects(
+      () => withEnv({ TOWNREPORTER_CODEX_REASONING_EFFORT: "ultra" }, async () => buildCodexArgs({ model: "gpt-5.6-sol" })),
+      /Unsupported TOWNREPORTER_CODEX_REASONING_EFFORT: ultra.*only verified value is high/i,
+    );
   });
 
   it("keeps native web search on for legacy false and undefined inputs", () => {
@@ -102,6 +197,31 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     });
 
     assert.deepEqual(result, { ok: false, error: "Codex model name is invalid." });
+  });
+
+  it("turns a native state startup permission failure into actionable guidance", () => {
+    const message = codexFailureMessage(
+      "failed to open state DB: attempt to write a readonly database\n" +
+        "failed to initialize in-process app-server client: Access is denied",
+      { code: 1, timedOut: false },
+    );
+
+    assert.equal(
+      message,
+      "Codex could not start because TownReporter cannot write to its Codex state folder. Run TownReporter with the signed-in Windows user's normal filesystem permissions, then try again.",
+    );
+    assert.doesNotMatch(message, /readonly database|access is denied/i);
+    assert.equal(
+      codexFailureMessage("OAuth session expired. Please reauthenticate.", {
+        code: 1,
+        timedOut: false,
+      }),
+      "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.",
+    );
+    assert.equal(
+      codexFailureMessage("ordinary provider failure", { code: 1, timedOut: false }),
+      "Codex could not complete this draft.",
+    );
   });
 
   it("sends voice and hostile source text through stdin rather than argv", async () => {
@@ -210,6 +330,39 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
       ok: false,
       error:
         "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.",
+    });
+  });
+
+  it("reports a bounded state startup permission failure during login preflight", async () => {
+    const fakeCli = [
+      'process.stderr.write("failed to open state DB: attempt to write a readonly database\\n");',
+      'process.stderr.write("failed to initialize in-process app-server client: Access is denied");',
+      "process.exit(1);",
+    ].join("");
+    const result = await withEnv(
+      { CODEX_CLI_PATH: process.execPath, NODE_OPTIONS: nodeImport(fakeCli) },
+      () => probeCodex(),
+    );
+
+    assert.deepEqual(result, {
+      ok: false,
+      error:
+        "Codex could not start because TownReporter cannot write to its Codex state folder. Run TownReporter with the signed-in Windows user's normal filesystem permissions, then try again.",
+    });
+    assert.doesNotMatch(result.error, /readonly database|access is denied/i);
+  });
+
+  it("does not claim a state-folder failure for an unrelated preflight access denial", async () => {
+    const fakeCli =
+      'process.stderr.write("Could not read an unrelated file: Access is denied");process.exit(1);';
+    const result = await withEnv(
+      { CODEX_CLI_PATH: process.execPath, NODE_OPTIONS: nodeImport(fakeCli) },
+      () => probeCodex(),
+    );
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: "Codex could not confirm its login.",
     });
   });
 

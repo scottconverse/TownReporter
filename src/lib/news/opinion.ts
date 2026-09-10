@@ -49,8 +49,8 @@ export type EditorialRow = {
 export const opinionReadiness = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .validator((choice?: string) => opinionModelChoice(choice))
-  .handler(async ({ data: choice }) => {
-    return checkOpinionReadiness(choice);
+  .handler(async ({ context, data: choice }) => {
+    return checkOpinionReadiness(choice, {}, owned(context));
   });
 
 export const listEditorials = createServerFn({ method: "GET" })

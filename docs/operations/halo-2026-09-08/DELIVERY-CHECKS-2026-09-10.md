@@ -357,3 +357,32 @@ Both parent-executed commands exited 0 without captured warnings or errors.
 These are existing-source consolidation checks, not a new TDD claim. The two
 picker checks inspect source, not a browser. Final built-interface acceptance
 and real investigative quality remain separate outstanding work.
+
+## Native provider guidance, Opinion readiness, and follow-ups
+
+The pending native adapter adds opt-in duration/byte-count diagnostics without
+logging prompts or responses, and separates state-folder startup problems from
+expired login guidance. Unset reasoning preserves the native setting; the
+optional app override currently accepts only the previously verified `high`.
+Opinion readiness now receives the authenticated newsroom so explicitly chosen
+custom connections resolve in the correct newsroom. Generated follow-up tasks
+deduplicate spacing and final-period differences without changing human tasks.
+
+`node scripts/with-app-env.mjs node --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 src/lib/news/ai-codex.test.ts src/lib/news/forced-runtime.test.ts src/lib/news/opinion-readiness.test.ts src/lib/news/notes.test.ts`
+
+```text
+[with-app-env] DATABASE_URL unset -- PGLite in-memory
+ℹ tests 61
+ℹ suites 7
+ℹ pass 61
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12742.4237
+```
+
+Parent-executed, exit 0; no captured warnings/errors. Native process tests used
+fake child executables/Node and injected transports, not real Codex or Claude
+generations. No paid API, local model, or production database was used. These
+checks consolidate existing changes; no new test-first implementation claimed.
