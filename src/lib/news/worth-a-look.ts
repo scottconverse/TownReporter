@@ -57,6 +57,31 @@ const PRIORITY_BONUS: Record<string, number> = {
   "reddit-tip": 6,
 };
 
+/*
+  A statement about what this particular evidence packet did not establish is
+  useful context inside its investigation, but it is not new civic material.
+  If promoted to this rail it can invent a "monitored record" story and seed
+  a second investigation with nothing except the first investigation's gap.
+
+  Keep this deliberately narrower than a public-record absence: it requires a
+  supplied/captured/provided research item plus language of evidentiary
+  insufficiency. "The city's named annual report has not appeared" remains a
+  legitimate missing-record lead.
+*/
+function isInternalEvidenceCollectionGap(...fields: Array<string | null | undefined>): boolean {
+  const item = "(?:supplied|captured|provided)\\s+(?:(?:case|source|evidence|research)\\s+)?(?:capture|record|file|document|material)s?";
+  const verb = "(?:establish(?:es|ed)?|support(?:s|ed)?|identif(?:y|ies|ied)|name(?:s|d)?|confirm(?:s|ed)?|show(?:s|ed)?|links?)";
+  const negativeScope = new RegExp(
+    `\\bno cited\\s+[^.!?]{0,100}\\b(?:record|document|filing|passage|ballot)s?\\b[^.!?]{0,100}\\b${verb}\\b|` +
+    `\\b(?:no\\s+${item}|none of (?:the )?${item})\\b[^.!?]{0,160}\\b${verb}\\b|` +
+      `\\b${item}\\b[^.!?]{0,160}\\b(?:does not|do not|cannot|can't|fails? to)\\s+${verb}\\b`,
+    "i",
+  );
+  return fields
+    .filter((field): field is string => typeof field === "string")
+    .some((field) => field.split(/[.!?]+/).some((sentence) => negativeScope.test(sentence)));
+}
+
 function frontierPriority(status: string, kind: string): number {
   if (status === "reopened") return PRIORITY_BONUS.reopened ?? 11;
   return PRIORITY_BONUS[kind] ?? 6;
@@ -100,6 +125,7 @@ export function rankWorthItems(input: {
   const out: WorthSeed[] = [];
 
   for (const a of input.anomalies ?? []) {
+    if (isInternalEvidenceCollectionGap(a.summary, a.details)) continue;
     const kind = a.kind || "anomaly";
     const title = a.summary.slice(0, 160) || kind;
     const url = a.url ?? "";
@@ -118,7 +144,7 @@ export function rankWorthItems(input: {
       why:
         kind === "reddit-tip"
           ? "A resident posted this on the town's subreddit. Nobody has checked it."
-          : `Dark Desk / monitors flagged a ${kind.replace(/-/g, " ")}.`,
+          : "An investigation follow-up worth checking; it is not independently verified.",
       evidence: url || a.summary,
       source_url: url,
       question: questionFor(kind, title),
@@ -169,6 +195,7 @@ export function rankWorthItems(input: {
 
   for (const s of input.signals ?? []) {
     if (!/CONTINUE|FOR VERIFICATION|FINDING|MONITOR/i.test(s.handoff)) continue;
+    if (isInternalEvidenceCollectionGap(s.name, s.observation, s.pathway)) continue;
     out.push({
       id: `signal:${s.id}`,
       kind: "signal",
@@ -362,7 +389,7 @@ export function presentWorthItem(item: WorthSeed): WorthSeed {
     happened = happened || "Posted on the town's subreddit.";
   } else if (!why || /flagged a |strength |handoff/i.test(item.why)) {
     why = why
-      .replace(/Dark Desk \/ monitors flagged a [\w\s]+\./i, "A monitored public record did not look the way it usually does.")
+      .replace(/Dark Desk \/ monitors flagged a [\w\s]+\./i, "An investigation follow-up worth checking; it is not independently verified.")
       .replace(/Prior Dark Desk signal \([^)]+\)\.?/i, "A previous Dark Desk pass left this open.")
       .replace(/High-newsworthiness scanner lead \([^)]+\)\.?/i, "The scanner ranked this as worth a reporter’s time.");
   }

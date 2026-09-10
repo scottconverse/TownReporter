@@ -33,6 +33,9 @@ import {
   excerptForEditor,
   headlineFromUrl,
   humanFrontierLabel,
+  investigationRoundLabel,
+  darkJobActive,
+  observedDarkJobFinished,
   looksLikeInternalSummary,
   organizationFromUrl,
   pileForStatus,
@@ -60,7 +63,12 @@ import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 import { ModelPicker } from "@/components/model-picker";
 import { PageWatchPanel } from "@/components/page-watch-panel";
-import { darkModelChoice, modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
+import {
+  darkModelChoice,
+  modelChoiceLabel,
+  shouldHydrateDarkModel,
+  type StoryModelChoice,
+} from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/dark")({
   component: DarkPage,
@@ -166,6 +174,7 @@ function DarkPage() {
   */
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const pickedFor = useRef<number | null>(null);
+  const observedActiveDarkJob = useRef<{ investigationId: number; jobId: number } | null>(null);
   const [briefWaiting, setBriefWaiting] = useState(false);
   const detail = useQuery({
     queryKey: ["investigation", openId],
@@ -174,6 +183,7 @@ function DarkPage() {
     refetchInterval: (q) => {
       const st = q.state.data?.investigation.status;
       if (st === "investigating") return 2000;
+      if (darkJobActive(q.state.data?.darkJob?.status)) return 2000;
       // The brief is its own job (0.6.2); poll while one is in flight.
       const bj = q.state.data?.briefJob;
       if (bj && (bj.status === "queued" || bj.status === "running")) return 2000;
@@ -205,6 +215,12 @@ function DarkPage() {
     const last = detail.data?.investigation.last_model_choice;
     if (openId == null || pickedFor.current === openId) return;
     if (!detail.data) return;
+    if (!shouldHydrateDarkModel(
+      openId,
+      detail.data.investigation.id,
+      last,
+      detail.data.investigation.status,
+    )) return;
     pickedFor.current = openId;
     setModelChoice(darkModelChoice(last));
   }, [openId, detail.data]);
@@ -229,6 +245,23 @@ function DarkPage() {
     void qc.invalidateQueries({ queryKey: ["dark-runs"] });
     if (openId != null) void qc.invalidateQueries({ queryKey: ["investigation", openId] });
   };
+
+  const detailInvestigationId = detail.data?.investigation.id;
+  const currentDarkJob = detail.data?.darkJob;
+  useEffect(() => {
+    if (openId == null || detailInvestigationId !== openId) return;
+    const job = currentDarkJob;
+    if (job && darkJobActive(job.status)) {
+      observedActiveDarkJob.current = { investigationId: openId, jobId: job.id };
+      return;
+    }
+    if (!observedDarkJobFinished(observedActiveDarkJob.current, openId, job)) return;
+    observedActiveDarkJob.current = null;
+    clearPhase();
+    void qc.invalidateQueries({ queryKey: ["worth-a-look"] });
+    void qc.invalidateQueries({ queryKey: ["investigations"] });
+    void qc.invalidateQueries({ queryKey: ["dark-runs"] });
+  }, [openId, detailInvestigationId, currentDarkJob, qc]);
 
   const advance = useMutation({
     mutationFn: (id: number) => continueInvestigation({ data: { id, modelChoice } }),
@@ -270,6 +303,10 @@ function DarkPage() {
   });
 
   function afterOpen(id: number, cardId?: string) {
+    // This file was created with the picker value already on screen. Bind it
+    // before the first open-state payload can hydrate Automatic and lock the
+    // new id while the async job is still being committed.
+    pickedFor.current = id;
     rememberOpen(id);
     setNotice(null);
     beginDigPhase();
@@ -539,7 +576,7 @@ function DarkPage() {
 
   const starting =
     openFromCard.isPending || openPaste.isPending || find.isPending || followLead.isPending;
-  const digging = advance.isPending;
+  const digging = advance.isPending || darkJobActive(detail.data?.darkJob?.status);
   const busyStart = starting;
 
   useEffect(() => {
@@ -659,6 +696,13 @@ function DarkPage() {
           digging={(digging || inv?.status === "investigating") && !stalled}
           keepDisabled={(digging || inv?.status === "investigating") && !stalled}
           stalled={stalled}
+          darkJobError={
+            detail.data?.darkJob?.status === "failed"
+              ? editorError(detail.data.darkJob.error ?? "") ||
+                detail.data.darkJob.error ||
+                "This research run did not finish."
+              : null
+          }
           phase={cardPhase || liveLine}
           notice={noticeAt === "work" ? notice : null}
           noticeOk={noticeOk}
@@ -912,7 +956,7 @@ function DeskFileCard({
       <p className="worth-t">{row.title || `File ${row.id}`}</p>
       <p className="np-meta">
         {records} records on file
-        {still > 0 ? ` · ${still} still to open` : ""} · last touched{" "}
+        {still > 0 ? ` · ${still} open follow-up entries` : ""} · last touched{" "}
         {formatShortDate(row.updated_at)}
       </p>
       <div className="np-acts">
@@ -1110,6 +1154,7 @@ function InvestigationWorkspace({
   digging,
   keepDisabled,
   stalled,
+  darkJobError,
   phase,
   notice,
   noticeOk,
@@ -1137,6 +1182,7 @@ function InvestigationWorkspace({
   digging: boolean;
   keepDisabled: boolean;
   stalled: boolean;
+  darkJobError: string | null;
   phase: string;
   notice: string | null;
   noticeOk: boolean;
@@ -1203,17 +1249,17 @@ function InvestigationWorkspace({
   /*
     The two stages, said out loud.
 
-    A file whose signals are all still stage 1 has not been checked against an
-    opposing account, and the queue button says so in words rather than just
-    going grey. Ticking "send unverified, as a tip" un-blocks it — the gate
+    A signal may remain unverified after checks ran but found insufficient
+    evidence. State the missing qualification, not an invented lack of effort.
+    Ticking "send unverified, as a tip" un-blocks it — the gate
     decides what may be CALLED verified, never what the editor may do.
   */
   const verifiedSignals = signals.filter((s) => s.verification_status === "verified");
   const queueBlocked = signals.length > 0 && verifiedSignals.length === 0 && !sendUnverified;
   const queueBlockedReason =
     signals.length === 1
-      ? "The one signal on this file is still speculative — the desk has not shown that it tried to disprove it, so it cannot go to the queue as a finding."
-      : `None of the ${signals.length} signals on this file have been through the four gates yet — the desk has not shown that it tried to disprove them, so they cannot go to the queue as findings.`;
+      ? "The signal has not met all verification requirements. Review its checks and missing evidence below, or send it unverified as a tip."
+      : `None of the ${signals.length} signals has met all verification requirements. Review their checks and missing evidence below, or send them unverified as tips.`;
   const facts = claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind));
   const questions = openQuestionsFrom(detail);
   // Grade each "On the record" line by whether it ties to a captured
@@ -1264,6 +1310,7 @@ function InvestigationWorkspace({
     return out;
   })();
   const leftover = nextDeduped.length;
+  const totalOpen = Number(inv?.still_open ?? leftover);
   const pauseText = editorPauseReason(inv?.pause_reason, captureStats);
   const parentTitle = inv?.title || `File ${openId}`;
   const started = startedLine(parentTitle, pasteArt?.excerpt ?? "", inv?.summary ?? "");
@@ -1279,8 +1326,8 @@ function InvestigationWorkspace({
   const statusLine = [
     statusBit,
     readableLabel,
-    leftover > 0 ? `${leftover} still to open` : null,
-    `round ${round} of ${budget}`,
+    totalOpen > 0 ? `${totalOpen} open follow-up entries` : null,
+    investigationRoundLabel(round, budget),
     inv?.updated_at ? `last touched ${formatShortDate(inv.updated_at)}` : null,
   ]
     .filter(Boolean)
@@ -1337,6 +1384,7 @@ function InvestigationWorkspace({
         </div>
       </div>
       {stalled ? <p className="note err">{stalledRunCopy("dark")}</p> : null}
+      {darkJobError ? <p className="note err" role="alert">{darkJobError}</p> : null}
       {digging ? <Busy label={phase || "Searching records…"} /> : null}
       {notice && !digging ? <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p> : null}
       {
@@ -1426,7 +1474,7 @@ function InvestigationWorkspace({
               <SecHead
                 title="Still unopened"
                 count={nextDeduped.length}
-                sub="Names, pages, and documents mentioned in the records. Not read yet, duplicates folded in."
+                sub="Items shown from the open follow-up list. Displayed duplicates are folded in."
               />
               <div className="of-frontier">
                 {nextDeduped.slice(0, frN).map((f) => (
@@ -1454,10 +1502,10 @@ function InvestigationWorkspace({
                   Next 10 — {nextDeduped.length - frN} more
                 </InkButton>
               ) : null}
-              {Number(inv?.still_open ?? leftover) > nextDeduped.length ? (
+              {totalOpen > nextDeduped.length ? (
                 <p className="meta">
-                  {Number(inv?.still_open ?? leftover) - nextDeduped.length} more were mentioned but
-                  not yet named. They surface as rounds read them.
+                  This view shows a limited, deduplicated subset of {totalOpen} open follow-up
+                  entries. Keep digging works from the full list.
                 </p>
               ) : null}
             </>

@@ -130,3 +130,96 @@ describe("monitor change outcomes", () => {
     for (const last_outcome of ["fetched","unchanged"]) assert.deepEqual(rankWorthItems({monitors:[{url:"https://example.gov/record",title:"Local record",last_outcome}]}),[]);
   });
 });
+
+describe("internal evidence gaps", () => {
+  it("does not turn absent citations into new civic leads", () => {
+    assert.deepEqual(rankWorthItems({ anomalies: [
+      { kind: "anomaly", summary: "No cited official document links the participant to a named office.", url: null },
+      { kind: "anomaly", summary: "No cited contest-specific record establishes the count.", url: null },
+    ] }), []);
+  });
+
+  it("does not invent monitoring provenance for a generic investigation anomaly", () => {
+    const [card] = rankWorthItems({ anomalies: [
+      { kind: "anomaly", summary: "Two firms share an address; the relationship is unverified.", url: null },
+    ] }).map(presentWorthItem);
+    assert.match(card.why, /investigation follow-up/i);
+    assert.doesNotMatch(card.why, /monitored public record/i);
+    const [monitor] = rankWorthItems({ monitors: [
+      { url: "https://example.gov/report", title: "Annual report", last_outcome: "changed" },
+    ] }).map(presentWorthItem);
+    assert.match(monitor.why, /watching|check/i);
+  });
+
+  it("does not promote supplied/captured-record scope gaps as civic anomalies or signals", () => {
+    const ranked = rankWorthItems({
+      anomalies: [
+        {
+          kind: "anomaly",
+          summary: "No supplied capture establishes who backed the proposal.",
+          details: "No captured record identifies the alleged second participant.",
+          url: null,
+        },
+      ],
+      signals: [
+        {
+          id: 7,
+          name: "The supplied case file does not name the alleged second participant",
+          observation: "No provided document supports the attribution.",
+          pathway: "Read more supplied materials.",
+          handoff: "MONITOR",
+          strength: 8,
+        },
+      ],
+    });
+    assert.deepEqual(ranked, []);
+  });
+
+  it("keeps an actual named public-record absence and a legitimate unverified lead", () => {
+    const ranked = rankWorthItems({
+      anomalies: [
+        {
+          kind: "missing-record",
+          summary: "Longmont's 2026 water-quality report has not appeared on the city's public records page.",
+          details: "The annual report is expected each spring.",
+          url: "https://longmontcolorado.gov/water/reports",
+        },
+      ],
+      signals: [
+        {
+          id: 8,
+          name: "Council agenda omits the promised transit update",
+          observation: "The June 10 agenda is public, but its transportation section contains no transit update.",
+          pathway: "Compare the agenda with the council's prior promise.",
+          handoff: "FOR VERIFICATION",
+          strength: 7,
+        },
+      ],
+    });
+    assert.equal(ranked.length, 2);
+    assert.ok(ranked.some((item) => item.kind === "missing-record"));
+    assert.ok(ranked.some((item) => item.kind === "signal"));
+  });
+
+  it("does not combine a positive supplied record with a separate negative research question", () => {
+    const ranked = rankWorthItems({
+      anomalies: [
+        {
+          kind: "anomaly",
+          summary: "The supplied record confirms Acme won the contract.",
+          details: "Check whether there was no competitive bidding.",
+          url: "https://example.gov/contracts/acme",
+        },
+        {
+          kind: "anomaly",
+          summary: "Available public records do not name the beneficial owners.",
+          details: "The state business registry is the next record to check.",
+          url: "https://example.gov/business-registry",
+        },
+      ],
+    });
+    assert.equal(ranked.length, 2);
+    assert.ok(ranked.some((item) => /Acme won/i.test(item.title)));
+    assert.ok(ranked.some((item) => /beneficial owners/i.test(item.title)));
+  });
+});

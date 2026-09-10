@@ -759,9 +759,16 @@ export const getInvestigation = createServerFn({ method: "GET" })
     await ensureDarkSchema();
     const sql = await getSql();
     const inv = await sql<InvestigationRow>`
-      select id, title, status, summary, hops, budget, pause_reason, created_at, updated_at,
-             last_model_choice
-      from investigations where id = ${id} and newsroom_id = ${owned(context)} limit 1
+      select i.id, i.title, i.status, i.summary, i.hops, i.budget, i.pause_reason,
+             i.created_at, i.updated_at, i.last_model_choice,
+             coalesce((
+               select count(*)::int from frontier_items f
+               where f.investigation_id = i.id
+                 and f.newsroom_id = ${owned(context)}
+                 and f.status in ('open', 'investigating', 'reopened')
+             ), 0) as still_open
+      from investigations i
+      where i.id = ${id} and i.newsroom_id = ${owned(context)} limit 1
     `;
     if (!inv[0]) return null;
     const frontier = await sql<{
@@ -992,6 +999,9 @@ export const getInvestigation = createServerFn({ method: "GET" })
     return {
       investigation: inv[0],
       stalled,
+      darkJob: job
+        ? { id: job.id, status: job.status, stage: job.stage, error: job.error }
+        : null,
       briefJob: brief_job
         ? { id: brief_job.id, status: brief_job.status, error: brief_job.error }
         : null,
@@ -1485,17 +1495,20 @@ async function executeDarkRun(
     // so the loop's searches name this town and the run record can say which
     // tier answered.
     const where = await readDarkPlace(newsroomId).catch(() => null);
-    const loop = await researchLoop({
-      userId,
-      investigationId,
-      hops: budget.hops,
-      choice,
-      providerOverrides: overrides,
-      newsroomId,
-      place: where?.place,
-      officialDomains: where?.official,
-      pressDomains: where?.press,
-      preferences: snapshot.preferences,
+    const loop = await runDarkResearchWithRememberedChoice(investigationId, choice!, {
+      remember: rememberLastModelChoice,
+      run: (on) => researchLoop({
+        userId,
+        investigationId,
+        hops: budget.hops,
+        choice: on,
+        providerOverrides: overrides,
+        newsroomId,
+        place: where?.place,
+        officialDomains: where?.official,
+        pressDomains: where?.press,
+        preferences: snapshot.preferences,
+      }),
     });
 
     const synth = await synthesizeSignals(
@@ -1811,6 +1824,28 @@ export async function planDarkRoundFailover(
   return { next: plan.next, label: plan.label, switchedBecause };
 }
 
+export async function runDarkResearchWithRememberedChoice<T>(
+  investigationId: number,
+  choice: EffectiveProviderChoice,
+  deps: {
+    remember: (investigationId: number, choice: EffectiveProviderChoice) => Promise<unknown>;
+    run: (choice: EffectiveProviderChoice) => Promise<T>;
+  },
+): Promise<T> {
+  await deps.remember(investigationId, choice).catch(() => undefined);
+  return deps.run(choice);
+}
+
+export function terminalPlannerStartupFailure(
+  loop: { hops: number; plannerStartupFailures: number },
+  synthesisError: string | null | undefined,
+): string | null {
+  return loop.hops === 0 && loop.plannerStartupFailures > 0 && synthesisError
+    ? synthesisError
+    : null;
+}
+
+/** Worker for an editor-requested later-page read from the exact retained PDF. */
 export async function performArtifactOcrWork(
   job: DeskJob,
   deps: { ocr?: typeof productionOcr } = {},
@@ -1931,17 +1966,20 @@ export async function performDarkRound(job: DeskJob) {
     const budget = budgetFor(dials);
     const where = await readDarkPlace(owned(context)).catch(() => null);
     const runOnce = async (on: EffectiveProviderChoice) => {
-      const ran = await researchLoop({
-        userId: context.userId,
-        investigationId: id,
-        hops: budget.hops,
-        choice: on,
-        providerOverrides: overrides,
-        newsroomId: owned(context),
-        place: where?.place,
-        officialDomains: where?.official,
-        pressDomains: where?.press,
-      preferences: snapshot.preferences,
+      const ran = await runDarkResearchWithRememberedChoice(id, on, {
+        remember: rememberLastModelChoice,
+        run: (rememberedChoice) => researchLoop({
+          userId: context.userId,
+          investigationId: id,
+          hops: budget.hops,
+          choice: rememberedChoice,
+          providerOverrides: overrides,
+          newsroomId: owned(context),
+          place: where?.place,
+          officialDomains: where?.official,
+          pressDomains: where?.press,
+          preferences: snapshot.preferences,
+        }),
       });
       const signals = await synthesizeSignals(
         context.userId,
@@ -1984,6 +2022,8 @@ export async function performDarkRound(job: DeskJob) {
         ({ loop, synth } = await runOnce(choice));
       }
     }
+    const terminalFailure = terminalPlannerStartupFailure(loop, synth.error);
+    if (terminalFailure) throw new Error(terminalFailure);
     // Stage 2, on the "Keep digging" path too.
     const verifySummary = await runVerificationStage(
       context.userId,

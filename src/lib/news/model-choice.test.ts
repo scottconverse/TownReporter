@@ -11,6 +11,7 @@ import {
   opinionProviderProblem,
   STORY_MODEL_CHOICES,
   storyModelChoice,
+  shouldHydrateDarkModel,
 } from "./model-choice.ts";
 
 const STORY_VALUES = [
@@ -38,6 +39,12 @@ describe("model choice contract", () => {
     assert.match(modelChoiceHelp(choice), /no fallback/i);
     assert.doesNotMatch(modelChoiceHelp(choice), /tries Claude/);
     assert.deepEqual(STORY_MODEL_CHOICES.map((option) => option.value), STORY_VALUES);
+  });
+  it("ignores stale Dark Desk detail, then hydrates when the selected file's detail arrives", () => {
+    assert.equal(shouldHydrateDarkModel(8, 7, "codex-balanced", "briefed"), false);
+    assert.equal(shouldHydrateDarkModel(8, 8, null, "investigating"), false);
+    assert.equal(shouldHydrateDarkModel(8, 8, "codex-balanced", "investigating"), true);
+    assert.equal(shouldHydrateDarkModel(8, 8, null, "briefed"), true);
   });
 
   it("keeps unique Story values in the intended order with Automatic first", () => {

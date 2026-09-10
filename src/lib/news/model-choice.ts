@@ -116,6 +116,16 @@ export function darkModelChoice(value: unknown): DarkModelChoice {
     : "auto";
 }
 
+export function shouldHydrateDarkModel(
+  selectedInvestigationId: number,
+  detailInvestigationId: number,
+  lastModelChoice: unknown,
+  status: unknown,
+): boolean {
+  return selectedInvestigationId === detailInvestigationId &&
+    (lastModelChoice != null || status !== "investigating");
+}
+
 export function modelChoiceLabel(value: unknown): string {
   if (isCustomModelChoice(value)) return "Custom API connection";
   if (value === "configured") return providerEntry("configured")?.label ?? "Configured gateway";

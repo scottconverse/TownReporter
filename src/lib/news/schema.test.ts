@@ -51,6 +51,41 @@ describe("parseScanResult", () => {
     assert.match(parsed.parseError ?? "", /usable JSON/i);
     assert.equal(parsed.leads.length, 0);
   });
+
+  it("keeps leads with missing or invalid scores and tells the editor they rank at zero", () => {
+    const parsed = parseScanResult({
+      editor_summary: "Two useful notices were filed.",
+      leads: [
+        { headline: "Missing score", topic: "council" },
+        { headline: "Numeric string score", topic: "schools", newsworthiness: "12" },
+        { headline: "Out of range score", topic: "council", newsworthiness: 99 },
+        { headline: "Decimal score", topic: "schools", newsworthiness: 12.5 },
+      ],
+    });
+    assert.equal(parsed.parseError, null);
+    assert.deepEqual(parsed.leads.map((lead) => lead.newsworthiness), [0, 0, 0, 0]);
+    assert.match(parsed.editor_summary, /4 filed leads had missing or invalid newsworthiness scores/i);
+    assert.match(parsed.editor_summary, /kept at 0\/20/i);
+  });
+
+  it("keeps an explicit numeric zero as an intentional low rank without a warning", () => {
+    const parsed = parseScanResult({
+      editor_summary: "One low-priority notice was filed.",
+      leads: [{ headline: "Explicit low priority", topic: "council", newsworthiness: 0 }],
+    });
+    assert.equal(parsed.leads[0]!.newsworthiness, 0);
+    assert.equal(parsed.editor_summary, "One low-priority notice was filed.");
+  });
+
+  it("keeps the ranking diagnostic visible when the model summary fills its limit", () => {
+    const parsed = parseScanResult({
+      editor_summary: "x".repeat(2000),
+      leads: [{ headline: "Missing score", topic: "council" }],
+    });
+    assert.ok(parsed.editor_summary.length <= 2000);
+    assert.match(parsed.editor_summary, /Ranking note: 1 filed lead had missing or invalid/i);
+    assert.match(parsed.editor_summary.slice(0, 1200), /Ranking note: 1 filed lead had missing or invalid/i);
+  });
 });
 
 describe("scan fetch hashes", () => {

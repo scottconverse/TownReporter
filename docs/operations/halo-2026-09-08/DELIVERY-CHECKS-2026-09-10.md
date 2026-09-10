@@ -313,3 +313,47 @@ action stops rather than spending empty hops, and abbreviated document requests
 remain intact. No real investigation, source-provider availability, or model
 quality acceptance is claimed. The saved failed election investigation remains
 failed; these tests do not rewrite its verdict.
+
+## Dark editor controls and ranking consolidation
+
+Existing pending changes expose queued/running/failed job state, retain the
+editor's model selection while a file opens, refresh the lists on job completion,
+and distinguish cumulative rounds from per-run limits. Worth-a-Look no longer
+turns an internal evidence gap into a purported monitored-record event. Scan
+score diagnostics retain a valid lead at zero instead of inventing a rank.
+Luna independently reviewed the Dark dependency group; no ordinary-flow blocker
+was found. A question about successful synthesis after failed new research
+remains for real-output review, not a demonstrated defect requiring a new gate.
+
+`node scripts/with-app-env.mjs node --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 src/lib/news/dark-round-failover.test.ts src/lib/news/model-choice.test.ts src/lib/news/desk-copy.test.ts src/lib/news/worth-a-look.test.ts src/lib/news/schema.test.ts`
+
+```text
+[with-app-env] DATABASE_URL unset -- PGLite in-memory
+ℹ tests 150
+ℹ suites 26
+ℹ pass 150
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 23088.0114
+```
+
+`node scripts/with-app-env.mjs node --test --test-concurrency=1 --test-timeout=60000 scripts/dark-picker-hydration.test.mjs`
+
+```text
+[with-app-env] DATABASE_URL unset -- PGLite in-memory
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 71.0691
+```
+
+Both parent-executed commands exited 0 without captured warnings or errors.
+These are existing-source consolidation checks, not a new TDD claim. The two
+picker checks inspect source, not a browser. Final built-interface acceptance
+and real investigative quality remain separate outstanding work.

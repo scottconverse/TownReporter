@@ -191,9 +191,9 @@ export function editorPauseReason(
     const n = budget[1];
     if (isMostlyBlocked(captureStats)) {
       const blocked = captureStats!.total - captureStats!.ok;
-      return `Dark Desk opened a batch of records, but most of them (${blocked} of ${captureStats!.total}) hit blocks, paywalls, or empty pages — not real content. It still has ${n} pages, names, or documents it has not opened yet. Click Keep digging and it will try different pages.`;
+      return `Dark Desk opened a batch of records, but most of them (${blocked} of ${captureStats!.total}) hit blocks, paywalls, or empty pages — not real content. ${n} open follow-up entries remain. Click Keep digging and it will try different pages.`;
     }
-    return `Dark Desk opened a batch of records, then stopped so it would not run all night. It still has ${n} pages, names, or documents it has not opened yet. That is normal — not an error, and not “too many leads.” Click Keep digging to read the next batch.`;
+    return `Dark Desk opened a batch of records, then stopped so it would not run all night. ${n} open follow-up entries remain. That is normal — not an error, and not “too many leads.” Click Keep digging to read the next batch.`;
   }
   return editorError(raw);
 }
@@ -229,6 +229,31 @@ export function looksLikeInternalSummary(text: string): boolean {
   return /^(heuristic hop:|hops \d|opened from dark desk|looked through \d+ rounds)/i.test(t);
 }
 
+/** Cumulative file history and the per-run ceiling are separate facts. */
+export function investigationRoundLabel(hops: number, budget: number): string {
+  const rounds = Math.max(0, hops);
+  const perRun = budget || 5;
+  return `${rounds} round${rounds === 1 ? "" : "s"} completed · up to ${perRun} per run`;
+}
+
+export function darkJobActive(status: string | null | undefined): boolean {
+  return status === "queued" || status === "running";
+}
+
+export function observedDarkJobFinished(
+  observed: { investigationId: number; jobId: number } | null,
+  investigationId: number | null,
+  job: { id: number; status: string } | null | undefined,
+): boolean {
+  return Boolean(
+    observed &&
+      job &&
+      observed.investigationId === investigationId &&
+      observed.jobId === job.id &&
+      (job.status === "completed" || job.status === "failed"),
+  );
+}
+
 export function progressLine(input: {
   running: boolean;
   status: string;
@@ -245,9 +270,9 @@ export function progressLine(input: {
   }
   if (input.running || input.status === "investigating") {
     if (input.artifacts > 0 && round > 0) {
-      return `${input.artifacts} records on file. Round ${round} of ${of}…`;
+      return `${input.artifacts} records on file. ${investigationRoundLabel(round, of)}…`;
     }
-    if (round > 0) return `Still reading. Round ${round} of ${of}…`;
+    if (round > 0) return `Still reading. ${investigationRoundLabel(round, of)}…`;
     if (input.searches > 0) return "Following names and documents mentioned in the records…";
     if (input.artifacts > 0) return `${input.artifacts} records on file. Checking earlier copies…`;
     if (input.claims > 0) return "Checking what the records actually say…";
@@ -1146,7 +1171,7 @@ Return JSON:
       "topic": "council",
       "source_urls": ["https://..."],
       "evidence": "short quotes or facts from the text",
-      "newsworthiness": 0
+      "newsworthiness": 12
     }
   ],
   "proposed_sources": [
@@ -1154,7 +1179,7 @@ Return JSON:
   ]
 }
 topic must be exactly one of: ${(opts.topics??["council","budget","housing","utilities","schools","planning","infrastructure","elections"]).join(", ")}.
-${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is 0-20. proposed_sources may be any public URL discovered in the text. Max 12 leads.`;
+${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is an integer from 0 to 20: 0 means valid but lowest priority, 10 means a useful dated local development, and 20 means an urgent major decision or immediate resident impact. Do not file filler or manufacture a lead to earn a score. proposed_sources may be any public URL discovered in the text. Max 12 leads.`;
 }
 
 /**

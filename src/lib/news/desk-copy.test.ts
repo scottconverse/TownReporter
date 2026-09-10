@@ -15,6 +15,9 @@ import {
   followUpsRailCopy,
   headlineFromUrl,
   humanFrontierLabel,
+  investigationRoundLabel,
+  darkJobActive,
+  observedDarkJobFinished,
   investigationStopKind,
   kindFromSourceUrl,
   tierFromKind,
@@ -200,12 +203,21 @@ describe("editor copy", () => {
       "Hop budget 5 reached with 65 frontier item(s) still open. Budget pauses work; evidence exhaustion would close it.",
     );
     assert.ok(msg);
-    assert.match(msg!, /65 pages, names, or documents/);
+    assert.match(msg!, /65 open follow-up entries remain/);
     assert.match(msg!, /Keep digging/);
     assert.match(msg!, /not an error/i);
     assert.doesNotMatch(msg!, /frontier/i);
     assert.doesNotMatch(msg!, /\bhop\b/i);
     assert.doesNotMatch(msg!, /budget/i);
+  });
+
+  it("distinguishes the full open-entry count from the limited deduplicated display", () => {
+    const dataSource = readFileSync(new URL("./dark.ts", import.meta.url), "utf8");
+    const screenSource = readFileSync(new URL("../../routes/desk.dark.tsx", import.meta.url), "utf8");
+    assert.match(dataSource, /as still_open[\s\S]*from investigations i/);
+    assert.match(screenSource, /const totalOpen = Number\(inv\?\.still_open \?\? leftover\)/);
+    assert.match(screenSource, /limited, deduplicated subset of \{totalOpen\} open follow-up/);
+    assert.doesNotMatch(screenSource, /more were mentioned but\s+not yet named/);
   });
 
   it("does not say 'that is normal' when the batch was mostly blocked (Dark Desk F6)", () => {
@@ -254,7 +266,7 @@ describe("editor copy", () => {
       searches: 3,
       claims: 1,
     });
-    assert.match(mid, /Round 2 of 5/);
+    assert.match(mid, /2 rounds completed · up to 5 per run/);
     assert.doesNotMatch(mid, /\bhop\b/i);
     assert.doesNotMatch(mid, /frontier/i);
     const paused = progressLine({
@@ -268,6 +280,33 @@ describe("editor copy", () => {
     });
     assert.match(paused, /more still to open/i);
     assert.doesNotMatch(paused, /\bhop\b/i);
+  });
+
+  it("does not present cumulative rounds as a per-run fraction", () => {
+    assert.equal(investigationRoundLabel(10, 5), "10 rounds completed · up to 5 per run");
+    assert.equal(investigationRoundLabel(1, 5), "1 round completed · up to 5 per run");
+    assert.doesNotMatch(investigationRoundLabel(10, 5), /10\s+of\s+5/i);
+  });
+
+  it("tracks only a matching observed dark job through terminal states", () => {
+    assert.equal(darkJobActive("queued"), true);
+    assert.equal(darkJobActive("running"), true);
+    assert.equal(darkJobActive("completed"), false);
+    assert.equal(darkJobActive("failed"), false);
+
+    const observed = { investigationId: 4, jobId: 10 };
+    assert.equal(observedDarkJobFinished(observed, 4, { id: 10, status: "completed" }), true);
+    assert.equal(observedDarkJobFinished(observed, 4, { id: 10, status: "failed" }), true);
+    assert.equal(observedDarkJobFinished(observed, 5, { id: 10, status: "completed" }), false);
+    assert.equal(observedDarkJobFinished(observed, 4, { id: 11, status: "completed" }), false);
+    assert.equal(observedDarkJobFinished(observed, 4, { id: 10, status: "running" }), false);
+
+    const dataSource = readFileSync(new URL("./dark.ts", import.meta.url), "utf8");
+    const screenSource = readFileSync(new URL("../../routes/desk.dark.tsx", import.meta.url), "utf8");
+    assert.match(dataSource, /darkJob:\s*job/);
+    assert.match(screenSource, /darkJobActive\(q\.state\.data\?\.darkJob\?\.status\)/);
+    assert.match(screenSource, /observedDarkJobFinished\(observedActiveDarkJob\.current, openId, job\)/);
+    assert.match(screenSource, /darkJobError \? <p className="note err" role="alert">/);
   });
 
   it("translates engine dumps into English", () => {
@@ -1179,7 +1218,10 @@ describe("buildScanUserMessage resident coverage contract", () => {
     assert.match(prompt, /schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government/i);
     assert.match(prompt, /source-quoted facts/i);
     assert.match(prompt, /Do not refile facts in Already covered, invent new sections, or file filler/i);
-    assert.match(prompt, /newsworthiness is 0-20/i);
+    assert.match(prompt, /newsworthiness is an integer from 0 to 20/i);
+    assert.match(prompt, /0 means valid but lowest priority/i);
+    assert.match(prompt, /do not file filler or manufacture a lead to earn a score/i);
+    assert.doesNotMatch(prompt, /"newsworthiness": 0/);
   });
 
   it("keeps a selected section's brief while requiring quoted local evidence", () => {

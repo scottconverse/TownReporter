@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { planDarkRoundFailover } from "./dark.ts";
+import {
+  planDarkRoundFailover,
+  runDarkResearchWithRememberedChoice,
+  terminalPlannerStartupFailure,
+} from "./dark.ts";
 import type { DeskJob } from "./jobs.ts";
 
 /**
@@ -139,5 +143,51 @@ describe("planDarkRoundFailover", () => {
 
     assert.equal(result, null);
     assert.equal(probed, false, "a refusal is not a login lapse or a timeout and must not trigger a probe");
+  });
+});
+
+describe("runDarkResearchWithRememberedChoice", () => {
+  it("persists each primary or failover choice before that research attempt starts", async () => {
+    const calls: string[] = [];
+    const deps = {
+      remember: async (_id: number, choice: string) => { calls.push(`remember:${choice}`); },
+      run: async (choice: string) => { calls.push(`run:${choice}`); return choice; },
+    };
+
+    await runDarkResearchWithRememberedChoice(5, "claude-frontier", deps);
+    await runDarkResearchWithRememberedChoice(5, "codex-balanced", deps);
+
+    assert.deepEqual(calls, [
+      "remember:claude-frontier",
+      "run:claude-frontier",
+      "remember:codex-balanced",
+      "run:codex-balanced",
+    ]);
+  });
+
+  it("keeps choice persistence best-effort and still starts research when its write fails", async () => {
+    let ran = false;
+    const result = await runDarkResearchWithRememberedChoice(5, "codex-balanced", {
+      remember: async () => { throw new Error("database write unavailable"); },
+      run: async () => { ran = true; return "finished"; },
+    });
+    assert.equal(ran, true);
+    assert.equal(result, "finished");
+  });
+});
+
+describe("terminalPlannerStartupFailure", () => {
+  it("classifies a provider failure before any source action as a failed round", () => {
+    assert.equal(
+      terminalPlannerStartupFailure({ hops: 0, plannerStartupFailures: 1 }, "Codex could not complete this draft"),
+      "Codex could not complete this draft",
+    );
+  });
+
+  it("does not misclassify a completed zero-result search as a provider failure", () => {
+    assert.equal(
+      terminalPlannerStartupFailure({ hops: 1, plannerStartupFailures: 0 }, "Codex could not complete this draft"),
+      null,
+    );
   });
 });

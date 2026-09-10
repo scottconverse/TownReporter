@@ -75,21 +75,31 @@ export function parseScanResult(raw: unknown, allowedTopics: readonly string[] =
   const hasShape = "leads" in obj || "editor_summary" in obj || "proposed_sources" in obj;
   if (!hasShape) return empty;
 
-  const editor_summary =
+  let editor_summary =
     typeof obj.editor_summary === "string" ? obj.editor_summary.trim().slice(0, 2000) : "";
   const leadsIn = Array.isArray(obj.leads) ? obj.leads : [];
   const leads: ParsedScanLead[] = [];
+  let unrankedLeads = 0;
   for (const item of leadsIn) {
     const parsed = ScanLeadSchema.safeParse(item);
     if (parsed.success) {
       const rawTopic = item && typeof item === "object" && "topic" in item ? String(item.topic).trim().toLowerCase() : "";
       const topic = allowedTopics.includes(rawTopic) ? rawTopic : allowedTopics.includes(parsed.data.topic) ? parsed.data.topic : allowedTopics[0];
-      if (topic) leads.push({...parsed.data,topic});
+      if (topic) {
+        const score = item && typeof item === "object" ? (item as Record<string, unknown>).newsworthiness : undefined;
+        const ranked = typeof score === "number" && Number.isInteger(score) && score >= 0 && score <= 20;
+        leads.push({...parsed.data, topic, newsworthiness: ranked ? score : 0});
+        if (!ranked) unrankedLeads += 1;
+      }
     }
     if (leads.length >= 12) break;
   }
   if (leadsIn.length > 0 && leads.length === 0) {
     return { ...empty, editor_summary, parseError: "Writing pass returned leads the desk could not read." };
+  }
+  if (unrankedLeads) {
+    const rankingNote = `Ranking note: ${unrankedLeads} filed lead${unrankedLeads === 1 ? "" : "s"} had missing or invalid newsworthiness scores and ${unrankedLeads === 1 ? "was" : "were"} kept at 0/20.`;
+    editor_summary = [rankingNote, editor_summary].filter(Boolean).join(" ").slice(0, 2000);
   }
 
   const proposedIn = Array.isArray(obj.proposed_sources) ? obj.proposed_sources : [];
