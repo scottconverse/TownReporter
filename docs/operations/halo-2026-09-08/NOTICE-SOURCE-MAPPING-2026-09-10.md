@@ -50,6 +50,37 @@ https://longmont.primegov.com/public/portal ; this is only portal discovery,
 not proof of the JSON endpoint required by the meeting adapter.
 No family was enabled by this research. Editions/worker machinery already exists.
 
+## Registration source gap: real source, not another engine
+
+September 10 follow-up, source HEAD310362f. Existing registration dispatcher
+accepts designated ICS or extractApplicationDeadlines. The latter reads
+EducationalOccupationalProgram.applicationDeadline JSON-LD, not brochure text.
+This is a concrete mapping limitation; source settings alone cannot solve it.
+
+Halo Gateway Exa search located the official Fall2026 sports brochure:
+https://longmontcolorado.gov/wp-content/uploads/2026/07/f26_sports.pdf
+Direct PDF text retrieval confirmed page2 (printed page14) has Youth Basketball
+League grades3–12, an explicit December13 registration deadline, and the brochure's
+Fall2026 footer. That page supplies the registration link
+https://bit.ly/recreationregistration . It also contains a September6 volleyball
+deadline, already past at retrieval. Do not treat every brochure entry as current
+or a January program start as its registration deadline. Search snippets alone
+were not used as verification. Brochure tables/visual layout were not inspected;
+this is source discovery, not an accepted automatic notice or a saved check.
+
+The fetched event page
+https://longmontcolorado.gov/event/recreation-fall-registration-begins/
+announces registration OPENING August11, not a closing deadline. Its calendar
+event cannot simply be approved as a deadline feed. Gateway fetch page2 contains
+the relevant text; remaining navigation pages were not needed. Search coverage
+was partial and did not establish absence of a better source.
+
+Next implementation choice: use existing PDF page extraction and source-bound
+notice validation to map actual brochure deadlines, or find the registration
+system's explicit deadline fields. No new scheduler, edition engine or generalized
+research platform is required. Do not enable an unsupported HTML/PDF mapping
+and call registration completed.
+
 ## Physical venue versus virtual attendance correction
 
 Terra added a constructed mixed Place/VirtualLocation regression (not a byte
