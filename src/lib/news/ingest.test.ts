@@ -185,6 +185,19 @@ describe("extractPdfBetter", () => {
     assert.equal(scanned.ocrPagesTotal, 3);
   });
 
+  it("keeps a successful but incomplete page OCR explicit for persistence", async () => {
+    const scanned = await extractPdfBetter(new Uint8Array([0, 1, 2, 3, 4]), async () => ({
+      text: "OCR recovered the first page of a longer scanned council packet.",
+      pages: [{ page: 1, text: "OCR recovered the first page of a longer scanned council packet." }],
+      provider: "Claude",
+      pagesRead: 1,
+      pagesTotal: 3,
+      reason: "OCR incomplete: pages 2-3 were not attempted (page limit).",
+    }));
+    assert.equal(scanned.method, "ocr");
+    assert.equal(scanned.ocrIncompleteReason, "OCR incomplete: pages 2-3 were not attempted (page limit).");
+  });
+
   it("stays needs-ocr, with the honest reason, below the 40-character floor", async () => {
     const scanned = await extractPdfBetter(new Uint8Array([0, 1, 2, 3, 4]), async () => ({
       text: "",
@@ -205,6 +218,17 @@ describe("encodeOcrExtractionMethod / describeExtractionMethod", () => {
     assert.equal(
       describeExtractionMethod(stored),
       "Read by OCR · Claude · 3 of 5 extracted images · PDF page order not established",
+    );
+  });
+
+  it("labels page-aware partial OCR without changing legacy image labels", () => {
+    assert.equal(
+      describeExtractionMethod("ocr-pages-partial:Claude:1/3"),
+      "Read by OCR · Claude · 1 of 3 PDF pages · incomplete",
+    );
+    assert.equal(
+      describeExtractionMethod("ocr:Claude:1/3"),
+      "Read by OCR · Claude · 1 of 3 extracted images · PDF page order not established",
     );
   });
 

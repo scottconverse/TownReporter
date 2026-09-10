@@ -6,7 +6,9 @@ import {
   extractEmbeddedJpegs,
   extractEmbeddedPngs,
   extractEmbeddedPageImages,
+  OCR_TOTAL_BUDGET_MS,
   productionOcr,
+  renderPdfPages,
 } from "./ocr.ts";
 import { resetLocalCatalogCacheForTests } from "./local-models.ts";
 import { resetLocalDiscoveryReachableForTests } from "./provider-registry.ts";
@@ -47,6 +49,40 @@ function fakePng(dataSize = 4000): Uint8Array {
   ];
   const iend = [...u32be(0), ...Buffer.from("IEND"), ...new Array(4).fill(0)];
   return new Uint8Array([...sig, ...ihdr, ...idat, ...iend]);
+}
+
+/** Real vector PDFs with no text layer; the renderer must preserve their page order. */
+function blankPagePdf(pageCount: number): Uint8Array {
+  const pageObjectStart = 3;
+  const contentsObjectStart = pageObjectStart + pageCount;
+  const bodies = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Pages /Kids [${Array.from({ length: pageCount }, (_, i) => `${pageObjectStart + i} 0 R`).join(" ")}] /Count ${pageCount} >>`,
+    ...Array.from(
+      { length: pageCount },
+      (_, i) =>
+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] /Contents ${contentsObjectStart + i} 0 R >>`,
+    ),
+    ...Array.from({ length: pageCount }, (_, i) => {
+      const stream = `${i % 2} 0 ${1 - (i % 2)} rg 0 0 72 72 re f\n`;
+      return `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}endstream`;
+    }),
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (let i = 0; i < bodies.length; i++) {
+    offsets.push(Buffer.byteLength(pdf, "latin1"));
+    pdf += `${i + 1} 0 obj\n${bodies[i]}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(pdf, "latin1");
+  pdf += `xref\n0 ${bodies.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${bodies.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(pdf, "latin1");
+}
+
+function twoBlankPagePdf(): Uint8Array {
+  return blankPagePdf(2);
 }
 
 const ENV_KEYS = [
@@ -149,15 +185,14 @@ describe("productionOcr", () => {
     resetClaudeCliCache();
   });
 
-  it("records embedded images without inventing PDF page citations", async () => {
+  it("keeps legacy embedded image labels unpaged", () => {
     const pdf = new Uint8Array([...fakePng(), ...fakeJpeg()]);
-    const result = await withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () =>
-      productionOcr(pdf, {
-        adapters: { anthropic: async (image) => `Source text from ${image.mime}.` },
-      }),
-    );
-    const chunks = chunksFromEvidence(result.text, result.pages);
-    assert.equal(chunks.length, 2);
+    const images = extractEmbeddedPageImages(pdf);
+    assert.equal(images.length, 2);
+    const chunks = chunksFromEvidence("", [
+      { page: null, imageIndex: 1, text: "first legacy image" },
+      { page: null, imageIndex: 2, text: "second legacy image" },
+    ]);
     assert.deepEqual(
       chunks.map((c) => c.page_number),
       [null, null],
@@ -175,19 +210,79 @@ describe("productionOcr", () => {
     );
   });
 
-  it("gives an honest reason for a scan format with no embedded page images", async () => {
+  it("gives an honest reason when a PDF cannot be rendered", async () => {
     const noImages = new Uint8Array([...Buffer.from("%PDF-1.4\n"), 1, 2, 3, 4, 5]);
     const result = await withEnv({}, () => productionOcr(noImages));
     assert.equal(result.text, "");
     assert.equal(result.pages.length, 0);
-    assert.match(result.reason ?? "", /scan format is not supported yet/);
+    assert.match(result.reason ?? "", /could not be rendered/);
+  });
+
+  it("renders a real textless two-page PDF in PDF page order for citation", async () => {
+    let call = 0;
+    const renderedColors: number[][] = [];
+    const result = await withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () =>
+      productionOcr(twoBlankPagePdf(), {
+        adapters: {
+          anthropic: async (image) => {
+            const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+            const decoded = await loadImage(Buffer.from(image.bytes));
+            const canvas = createCanvas(1, 1);
+            const context = canvas.getContext("2d");
+            context.drawImage(decoded, 0, 0, 1, 1);
+            renderedColors.push([...context.getImageData(0, 0, 1, 1).data]);
+            call += 1;
+            return `Rendered PDF page ${call} is readable.`;
+          },
+        },
+      }),
+    );
+    assert.deepEqual(
+      result.pages.map((page) => page.page),
+      [1, 2],
+    );
+    assert.deepEqual(
+      chunksFromEvidence(result.text, result.pages).map((chunk) => chunk.locator),
+      ["page:1", "page:2"],
+    );
+    assert.deepEqual(renderedColors, [
+      [0, 0, 255, 255],
+      [255, 0, 0, 255],
+    ]);
+  });
+
+  it("marks a rendered PDF over the page cap as incomplete instead of complete", async () => {
+    const result = await withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () =>
+      productionOcr(blankPagePdf(13), {
+        adapters: { anthropic: async () => "Readable scanned packet page text for the test." },
+      }),
+    );
+    assert.equal(result.pagesRead, 12);
+    assert.equal(result.pagesTotal, 13);
+    assert.match(result.reason ?? "", /pages 13-13 were not attempted \(page limit\)/);
+  });
+
+  it("renders only an editor-requested later PDF page range", async () => {
+    const result = await withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () =>
+      productionOcr(blankPagePdf(14), {
+        pageRange: { start: 13, end: 14 },
+        adapters: { anthropic: async () => "Readable requested PDF page text for the test." },
+      }),
+    );
+    assert.deepEqual(result.pages.map((page) => page.page), [13, 14]);
+    assert.equal(result.pagesRead, 2);
+    assert.equal(result.pagesTotal, 14);
+    assert.doesNotMatch(result.reason ?? "", /page limit/);
+  });
+
+  it("does not start page rendering after the whole-document budget expires", async () => {
+    const result = await renderPdfPages(twoBlankPagePdf(), Date.now() - OCR_TOTAL_BUDGET_MS);
+    assert.equal(result.images.length, 0);
+    assert.match(result.reason ?? "", /pages 1-2 were not attempted \(time limit\)/);
   });
 
   it("reads images through a mocked Anthropic client and reports who read how many", async () => {
-    const jpeg = fakeJpeg(4200);
-    const pdf = new Uint8Array(20 + jpeg.byteLength);
-    pdf.set(Buffer.from("%PDF-1.4 scan "), 0);
-    pdf.set(jpeg, 20);
+    const pdf = blankPagePdf(1);
 
     const result = await withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () =>
       productionOcr(pdf, {
@@ -198,17 +293,12 @@ describe("productionOcr", () => {
     assert.equal(result.pagesRead, 1);
     assert.equal(result.pagesTotal, 1);
     assert.match(result.text, /NextLight rate/);
-    assert.equal(result.pages[0]?.page, null);
-    assert.equal(result.pages[0]?.imageIndex, 1);
+    assert.equal(result.pages[0]?.page, 1);
+    assert.equal(result.pages[0]?.imageIndex, undefined);
   });
 
-  it("concatenates multiple images in extraction order", async () => {
-    const j1 = fakeJpeg(4200);
-    const j2 = fakeJpeg(4400);
-    const pdf = new Uint8Array(20 + j1.byteLength + 20 + j2.byteLength);
-    pdf.set(Buffer.from("%PDF-1.4 scan "), 0);
-    pdf.set(j1, 20);
-    pdf.set(j2, 20 + j1.byteLength + 20);
+  it("concatenates multiple rendered pages in PDF order", async () => {
+    const pdf = twoBlankPagePdf();
 
     let call = 0;
     const result = await withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () =>
@@ -227,10 +317,7 @@ describe("productionOcr", () => {
   });
 
   it("refuses a non-vision local model with the exact editor-facing reason", async () => {
-    const jpeg = fakeJpeg(4200);
-    const pdf = new Uint8Array(20 + jpeg.byteLength);
-    pdf.set(Buffer.from("%PDF-1.4 scan "), 0);
-    pdf.set(jpeg, 20);
+    const pdf = blankPagePdf(1);
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: unknown) => {
@@ -261,10 +348,7 @@ describe("productionOcr", () => {
   });
 
   it("says plainly when the chosen provider cannot read images at all", async () => {
-    const jpeg = fakeJpeg(4200);
-    const pdf = new Uint8Array(20 + jpeg.byteLength);
-    pdf.set(Buffer.from("%PDF-1.4 scan "), 0);
-    pdf.set(jpeg, 20);
+    const pdf = blankPagePdf(1);
 
     // "configured" is the internal gateway id (an `openai`-kind entry never
     // offered a vision path) -- reaches the final "cannot read images"
@@ -275,10 +359,7 @@ describe("productionOcr", () => {
   });
 
   it("reads a page through the Claude Code CLI path and filters self-referential narration", async () => {
-    const jpeg = fakeJpeg(4200);
-    const pdf = new Uint8Array(20 + jpeg.byteLength);
-    pdf.set(Buffer.from("%PDF-1.4 scan "), 0);
-    pdf.set(jpeg, 20);
+    const pdf = blankPagePdf(1);
 
     const result = await withEnv({ CLAUDE_CLI_PATH: FAKE_CLAUDE, FAKE_CLAUDE_SIGNED_IN: "1" }, () =>
       productionOcr(pdf, {

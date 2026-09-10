@@ -118,6 +118,8 @@ export type PdfExtract = {
   ocrProvider?: string;
   ocrPagesRead?: number;
   ocrPagesTotal?: number;
+  /** OCR returned usable text but did not complete every PDF page. */
+  ocrIncompleteReason?: string;
   /** Set when `needsOcr` is true and OCR was attempted (or refused) — the honest reason why. */
   needsOcrReason?: string;
 };
@@ -133,6 +135,8 @@ export type PdfExtract = {
  */
 export type OcrOptions = {
   provider?: string;
+  /** Editor-requested inclusive PDF pages. Omitted keeps the ordinary first-12 read. */
+  pageRange?: { start: number; end: number };
   newsroomId?: string;
   jobLabel?: string;
   localModel?: { baseUrl: string; id: string } | null;
@@ -246,6 +250,7 @@ export async function extractPdfBetter(
           ocrProvider: ocrResult.provider,
           ocrPagesRead: ocrResult.pagesRead,
           ocrPagesTotal: ocrResult.pagesTotal,
+          ocrIncompleteReason: ocrResult.reason,
         };
       }
       return {
@@ -273,6 +278,16 @@ export function encodeOcrExtractionMethod(
   pagesTotal: number | undefined,
 ): string {
   return `ocr:${provider ?? "unknown"}:${pagesRead ?? 0}/${pagesTotal ?? 0}`;
+}
+
+/** A page-aware OCR record; legacy `ocr:` values remain extracted-image records. */
+export function encodeOcrPageExtractionMethod(
+  provider: string | undefined,
+  pagesRead: number | undefined,
+  pagesTotal: number | undefined,
+  incompleteReason?: string,
+): string {
+  return `ocr-pages${incompleteReason ? "-partial" : ""}:${provider ?? "unknown"}:${pagesRead ?? 0}/${pagesTotal ?? 0}`;
 }
 
 /**
@@ -526,6 +541,8 @@ export type IngestDocument = {
   ocrProvider?: string;
   ocrPagesRead?: number;
   ocrPagesTotal?: number;
+  /** Set when OCR captured usable text but did not complete every PDF page. */
+  ocrIncompleteReason?: string;
   /** Set when `outcome === "needs-ocr"` — the honest, editor-facing reason why. */
   needsOcrReason?: string;
 };
@@ -545,6 +562,9 @@ function clean(doc: IngestDocument): IngestDocument {
     extras: doc.extras.map((e) => storableText(e)),
     notices: (doc.notices ?? []).map((n) => storableText(n)),
     needsOcrReason: doc.needsOcrReason ? storableText(doc.needsOcrReason) : doc.needsOcrReason,
+    ocrIncompleteReason: doc.ocrIncompleteReason
+      ? storableText(doc.ocrIncompleteReason)
+      : doc.ocrIncompleteReason,
   };
 }
 
@@ -707,11 +727,17 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: IngestOptions): Promi
         redirectChain: tracked.chain,
         extractionMethod:
           pdf.method === "ocr"
-            ? encodeOcrExtractionMethod(pdf.ocrProvider, pdf.ocrPagesRead, pdf.ocrPagesTotal)
+            ? encodeOcrPageExtractionMethod(
+                pdf.ocrProvider,
+                pdf.ocrPagesRead,
+                pdf.ocrPagesTotal,
+                pdf.ocrIncompleteReason,
+              )
             : pdf.method,
         ocrProvider: pdf.ocrProvider,
         ocrPagesRead: pdf.ocrPagesRead,
         ocrPagesTotal: pdf.ocrPagesTotal,
+        ocrIncompleteReason: pdf.ocrIncompleteReason,
         pages: pdf.pages,
         rawBytes: buf,
       });

@@ -291,12 +291,14 @@ function stubServerOnlyOnClient(): Plugin {
     id.startsWith("playwright-core/") ||
     id === "chromium-bidi" ||
     id.startsWith("chromium-bidi/");
+  const isCanvas = (id: string) => id === "@napi-rs/canvas" || id.startsWith("@napi-rs/canvas/");
   return {
     name: "stub-server-only-on-client",
     enforce: "pre",
     resolveId(id, _importer, options) {
       if (options?.ssr) return;
       if (isPlaywright(id)) return "\0stub-playwright";
+      if (isCanvas(id)) return "\0stub-canvas";
       // Keep "pglite" out of the emitted public filename too. The payload
       // gate deliberately treats any browser asset with that name as a leak.
       if (isPglite(id)) return "\0server-db-stub";
@@ -304,6 +306,11 @@ function stubServerOnlyOnClient(): Plugin {
     load(id) {
       if (id === "\0stub-playwright") {
         return "export const chromium = { launch: async () => null }; export default {};";
+      }
+      if (id === "\0stub-canvas") {
+        // OCR is server-only. Keep the native Skia package (and its .node
+        // binding) out of browser assets; a client-side call must fail loudly.
+        return 'throw new Error("Canvas OCR is server-only");';
       }
       if (id === "\0server-db-stub") {
         // The browser must never reach this. Throwing rather than returning a
@@ -338,6 +345,11 @@ export default defineConfig(({ command, isPreview }) => ({
     strictPort: true,
   },
   resolve: { tsconfigPaths: true },
+  // @napi-rs/canvas loads a platform-specific .node binding through its JS
+  // loader. Leave that package external to Vite's SSR graph so Nitro/runtime
+  // can retain the installed native package instead of parsing the binary as
+  // UTF-8. The client-side resolver above supplies a loud inert stub.
+  ssr: { external: ["@napi-rs/canvas"] },
   plugins: [
     pgliteBootstrapPlugin(),
     darkDeskMonitorPlugin(),

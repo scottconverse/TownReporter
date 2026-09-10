@@ -1,7 +1,7 @@
 import { subredditFromSources } from "./dark-place.ts";
 import { describeResearchWindow, validateResearchPreferences, type ResearchPreferences, type ResearchSnapshot } from './dark-preferences.ts';
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { ensureSchemaOnce, getSql } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import {
   grokChat,
@@ -38,6 +38,8 @@ import {
 } from "./investigate.ts";
 import { readableCapture } from "./html-text.ts";
 import { chunksFromEvidence } from "./ingest.ts";
+import { productionOcr } from "./ocr.ts";
+import { storableText } from "./storable-text.ts";
 import { queryTokens } from "./retrieve.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
@@ -1031,6 +1033,74 @@ export const getArtifact = createServerFn({ method: "GET" })
     return rows[0] ?? null;
   });
 
+type ArtifactOcrRequest = { artifactId: number; start: number; end: number; modelChoice: string };
+type ArtifactOcrReceipt = {
+  artifactId?: number;
+  start?: number;
+  end?: number;
+  pages?: { page: number | null; text: string }[];
+  pagesRead?: number;
+  pagesTotal?: number;
+  provider?: string;
+  reason?: string | null;
+};
+
+function artifactOcrRequest(raw: ArtifactOcrRequest): ArtifactOcrRequest {
+  const artifactId = Number(raw?.artifactId);
+  const start = Number(raw?.start);
+  const end = Number(raw?.end);
+  if (!Number.isInteger(artifactId) || artifactId < 1) throw new Error("Choose a captured PDF.");
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || end - start >= 12) {
+    throw new Error("Choose one to twelve PDF pages.");
+  }
+  const modelChoice = storyModelChoice(raw?.modelChoice);
+  if (modelChoice === "auto") throw new Error("Choose the named model that will read these retained PDF pages.");
+  return { artifactId, start, end, modelChoice };
+}
+
+/** Queue a bounded OCR reread from retained bytes; never refetches a live URL. */
+export const queueArtifactOcr = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator(artifactOcrRequest)
+  .handler(async ({ context, data }) => {
+    await ensureDarkSchema();
+    const sql = await getSql();
+    const retained = await sql<{ id: number }>`
+      select a.id from artifacts a
+      join artifact_blobs b on b.version_id = a.version_id and b.newsroom_id = a.newsroom_id
+      where a.id = ${data.artifactId} and a.newsroom_id = ${owned(context)}
+      limit 1
+    `;
+    if (!retained[0]) return { ok: false as const, error: "The original PDF bytes were not retained; this read will not refetch the live URL." };
+    const job = await enqueueJob({
+      userId: context.userId,
+      newsroomId: owned(context),
+      kind: "artifact-ocr",
+      subjectId: data.artifactId,
+      modelChoice: data.modelChoice,
+      resultJson: JSON.stringify(data),
+    });
+    return { ok: true as const, jobId: job.id, status: job.status };
+  });
+
+export const getArtifactOcrJob = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((artifactId: number) => Number(artifactId))
+  .handler(async ({ context, data: artifactId }) => {
+    const sql = await getSql();
+    const rows = await sql<{ id: number; status: string; stage: string; error: string | null; result_json: string }>`
+      select j.id, j.status, j.stage, j.error, j.result_json
+      from desk_jobs j join artifacts a on a.id = j.subject_id and a.newsroom_id = j.newsroom_id
+      where j.kind = ${"artifact-ocr"} and j.subject_id = ${artifactId} and j.newsroom_id = ${owned(context)}
+      order by j.id desc limit 1
+    `;
+    const job = rows[0];
+    if (!job) return null;
+    let result: ArtifactOcrReceipt = {};
+    try { result = JSON.parse(job.result_json || "{}") as ArtifactOcrReceipt; } catch { /* malformed legacy job receipt */ }
+    return { ...job, result };
+  });
+
 export async function buildDarkSynthesisPack(
   investigationId: number,
   paste: string,
@@ -1739,6 +1809,85 @@ export async function planDarkRoundFailover(
   const switchedBecause = failoverReasonPhrase(previous, plan.reason);
   await setStage(job.id, `Switched to ${plan.label}: ${switchedBecause}`);
   return { next: plan.next, label: plan.label, switchedBecause };
+}
+
+export async function performArtifactOcrWork(
+  job: DeskJob,
+  deps: { ocr?: typeof productionOcr } = {},
+) {
+  await ensureDarkSchema();
+  const sql = await getSql();
+  const stored = await sql<{ result_json: string }>`
+    select result_json from desk_jobs
+    where id = ${job.id} and newsroom_id = ${job.newsroom_id} and kind = ${"artifact-ocr"}
+    limit 1
+  `;
+  let request: ArtifactOcrRequest;
+  try {
+    request = artifactOcrRequest(JSON.parse(stored[0]?.result_json || "{}") as ArtifactOcrRequest);
+  } catch {
+    throw new Error("This PDF page-read request is invalid.");
+  }
+  if (request.artifactId !== job.subject_id) throw new Error("This PDF page-read request does not match its captured file.");
+  const source = await sql<{ version_id: number | null; body_b64: string; mime: string }>`
+    select a.version_id, b.body_b64, b.mime
+    from artifacts a join artifact_blobs b on b.version_id = a.version_id and b.newsroom_id = a.newsroom_id
+    where a.id = ${request.artifactId} and a.newsroom_id = ${job.newsroom_id}
+    order by b.captured_at desc limit 1
+  `;
+  const retained = source[0];
+  if (!retained?.version_id || !retained.body_b64 || !/pdf/i.test(retained.mime)) {
+    throw new Error("The original retained PDF is unavailable; this read will not refetch the live URL.");
+  }
+  await setJobStage(job.id, `Reading PDF pages ${request.start}-${request.end} with ${modelChoiceLabel(job.model_choice)}…`);
+  const read = await (deps.ocr ?? productionOcr)(new Uint8Array(Buffer.from(retained.body_b64, "base64")), {
+    provider: job.model_choice,
+    pageRange: { start: request.start, end: request.end },
+    newsroomId: String(job.newsroom_id),
+    jobLabel: `Dark artifact ${request.artifactId}, pages ${request.start}-${request.end}`,
+  });
+  const pages = read.pages.map((page) => ({ page: page.page, text: storableText(page.text) }));
+  const result = {
+    artifactId: request.artifactId,
+    start: request.start,
+    end: request.end,
+    pages,
+    pagesRead: read.pagesRead ?? pages.length,
+    pagesTotal: read.pagesTotal ?? 0,
+    provider: read.provider ?? modelChoiceLabel(job.model_choice),
+    reason: read.reason ?? null,
+  };
+  await withTransaction(async (tx) => {
+    if (pages.length) {
+      const chunks = chunksFromEvidence(read.text, pages);
+      const next = await tx<{ next: number }>`
+        select coalesce(max(chunk_index), -1) + 1 as next from artifact_chunks
+        where version_id = ${retained.version_id} and newsroom_id = ${job.newsroom_id}
+      `;
+      let offset = next[0]?.next ?? 0;
+      for (const chunk of chunks) {
+        const duplicate = await tx<{ id: number }>`
+          select id from artifact_chunks
+          where version_id = ${retained.version_id} and newsroom_id = ${job.newsroom_id}
+            and page_number is not distinct from ${chunk.page_number} and excerpt = ${chunk.excerpt}
+          limit 1
+        `;
+        if (duplicate[0]) continue;
+        await tx`
+          insert into artifact_chunks (version_id, user_id, newsroom_id, chunk_index, page_number, section, excerpt, locator)
+          values (
+            ${retained.version_id}, ${job.user_id}, ${job.newsroom_id}, ${offset++},
+            ${chunk.page_number}, ${"editor-requested OCR"}, ${chunk.excerpt},
+            ${`editor-ocr:${job.id}:${chunk.locator}`}
+          )
+        `;
+      }
+    }
+    await tx`
+      update desk_jobs set result_json = ${JSON.stringify(result)}, updated_at = now()
+      where id = ${job.id} and newsroom_id = ${job.newsroom_id} and claim_token = ${job.claim_token}
+    `;
+  });
 }
 
 export async function performDarkRound(job: DeskJob) {

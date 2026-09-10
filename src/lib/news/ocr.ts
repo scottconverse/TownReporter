@@ -3,11 +3,10 @@
 
   The owner's framing: "Claude just did this via the browser — it looked at
   the no-text-layer PDF pages and read them. Claude and Codex can both open
-  and look directly at a scan." So this module does not run a rasterizer or
-  a Tesseract binary. It pulls the page IMAGES already embedded in the PDF
-  (extractEmbeddedJpegs/extractEmbeddedPngs below — most scanners embed one
-  JPEG or PNG per page) and asks a vision-capable model to transcribe each
-  one, through the exact same PROVIDER_REGISTRY every other AI call in this
+  and look directly at a scan." This module renders actual PDF pages through
+  PDF.js and native canvas, then asks a vision-capable model to transcribe
+  each page in document order. It does not require a Tesseract installation.
+  It uses the exact same PROVIDER_REGISTRY every other AI call in this
   desk goes through (../provider-registry.ts) — never a hardcoded provider.
 
   Four transports, matching `ProviderKind`:
@@ -19,11 +18,10 @@
     - A local OpenAI-compatible server, only when the chosen model is marked
       `vision` by local-models.ts's discovery.
 
-  A PDF that has no embedded page images at all (CCITT Group 4 / JBIG2 fax
-  scans store pixels a different way — no lift-outable JPEG/PNG stream)
-  yields no text here, honestly, with a reason ingest.ts's `needs-ocr`
-  outcome carries to the editor. That is a real gap, not a bug to paper
-  over with a guess.
+  Rendering/reading failures and page, image-size or time limits are reported
+  as incomplete. The legacy embedded-image helpers below remain available;
+  their results do not establish PDF page order. A running PDF render cannot
+  be forcibly interrupted by the cooperative whole-document time budget.
 */
 import type { OcrImpl, OcrOptions, PdfPage } from "./ingest.ts";
 import { isSelfReferential } from "./claim-hygiene.ts";
@@ -95,6 +93,13 @@ export function extractEmbeddedPngs(buf: Uint8Array, max = 12): Uint8Array[] {
 
 export type PageImage = { bytes: Uint8Array; mime: "image/jpeg" | "image/png" };
 
+type RenderedPdfPageImage = PageImage & { page: number };
+type RenderedPdfPages = {
+  images: RenderedPdfPageImage[];
+  totalPages: number;
+  reason?: string;
+};
+
 /** Extractable embedded images, JPEGs first, capped at `max`. No PDF page association or order is established. */
 export function extractEmbeddedPageImages(buf: Uint8Array, max = 12): PageImage[] {
   const jpegs = extractEmbeddedJpegs(buf, max).map((bytes) => ({
@@ -120,6 +125,7 @@ export const OCR_MAX_PAGES = 12;
 // Historical API name retained; this is an extracted-image cap, not a PDF page count.
 export const OCR_MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 export const OCR_TOTAL_BUDGET_MS = 10 * 60 * 1000;
+const OCR_RENDER_WIDTH = 1600;
 const OCR_MIN_CALL_MS = 15_000;
 const OCR_MAX_CALL_MS = 90_000;
 
@@ -414,18 +420,95 @@ function callTimeoutMs(startedAt: number, imagesLeft: number): number {
 }
 
 /**
+ * Render the actual PDF pages in their document order. Unlike raw stream
+ * extraction, PDF.js decodes fax/JBIG2 image encodings and never mistakes a
+ * decorative image for a page. Rendering is deliberately bounded: only the
+ * first `OCR_MAX_PAGES` pages are attempted and over-budget PNGs are reported
+ * as an incomplete read instead of being silently treated as complete.
+ */
+export async function renderPdfPages(
+  buf: Uint8Array,
+  startedAt = Date.now(),
+  pageRange?: OcrOptions["pageRange"],
+): Promise<RenderedPdfPages> {
+  const { createIsomorphicCanvasFactory, getDocumentProxy, renderPageAsImage } = await import("unpdf");
+  let pdf: Awaited<ReturnType<typeof getDocumentProxy>> | null = null;
+  try {
+    // PDF.js may transfer its input to a worker; retain the caller's bytes for
+    // the later render calls and for the captured raw-artifact receipt.
+    const canvasImport = () => import("@napi-rs/canvas");
+    const CanvasFactory = await createIsomorphicCanvasFactory(canvasImport);
+    pdf = await getDocumentProxy(Uint8Array.from(buf), { CanvasFactory });
+    const totalPages = pdf.numPages;
+    const requestedStart = pageRange?.start ?? 1;
+    const requestedEnd = pageRange?.end ?? Math.min(totalPages, OCR_MAX_PAGES);
+    if (
+      !Number.isInteger(requestedStart) ||
+      !Number.isInteger(requestedEnd) ||
+      requestedStart < 1 ||
+      requestedEnd < requestedStart ||
+      requestedEnd > totalPages ||
+      requestedEnd - requestedStart + 1 > OCR_MAX_PAGES
+    ) {
+      return {
+        images: [],
+        totalPages,
+        reason: `Choose an inclusive PDF page range from 1 to ${totalPages}, up to ${OCR_MAX_PAGES} pages.`,
+      };
+    }
+    const images: RenderedPdfPageImage[] = [];
+    const omitted: string[] = [];
+    for (let page = requestedStart; page <= requestedEnd; page++) {
+      if (Date.now() - startedAt >= OCR_TOTAL_BUDGET_MS) {
+        omitted.push(`pages ${page}-${requestedEnd} were not attempted (time limit)`);
+        break;
+      }
+      try {
+        const rendered = await renderPageAsImage(pdf, page, {
+          width: OCR_RENDER_WIDTH,
+          canvasImport,
+        });
+        const bytes = new Uint8Array(rendered);
+        if (bytes.byteLength > OCR_MAX_IMAGE_BYTES) {
+          omitted.push(`page ${page} exceeded the ${OCR_MAX_IMAGE_BYTES / 1024 / 1024} MiB image limit`);
+          continue;
+        }
+        images.push({ page, bytes, mime: "image/png" });
+      } catch {
+        omitted.push(`page ${page} could not be rendered`);
+      }
+    }
+    if (!pageRange && totalPages > OCR_MAX_PAGES) {
+      omitted.push(`pages ${OCR_MAX_PAGES + 1}-${totalPages} were not attempted (page limit)`);
+    }
+    return {
+      images,
+      totalPages,
+      reason: omitted.length ? `OCR incomplete: ${omitted.join("; ")}.` : undefined,
+    };
+  } catch {
+    return { images: [], totalPages: 0, reason: "This PDF could not be rendered for OCR." };
+  } finally {
+    await pdf?.cleanup().catch(() => {
+      /* Cleanup must not hide the extraction result. */
+    });
+  }
+}
+
+/**
  * Read a scanned PDF's page images through whichever vision model the desk
  * resolves to. See this module's top doc comment for the four transports
  * and provider-registry.ts for how "the editor's picker choice" is honoured.
  */
 export const productionOcr: OcrImpl = async (buf, opts = {}) => {
-  const images = extractEmbeddedPageImages(buf, OCR_MAX_PAGES);
+  const started = Date.now();
+  const rendered = await renderPdfPages(buf, started, opts.pageRange);
+  const images = rendered.images;
   if (images.length === 0) {
     return {
       text: "",
       pages: [],
-      reason:
-        "This scan format is not supported yet (no embedded JPEG or PNG page images were found in the PDF — likely a CCITT Group 4 or JBIG2 fax-style scan).",
+      reason: rendered.reason ?? "This PDF has no renderable pages for OCR.",
     };
   }
 
@@ -435,26 +518,33 @@ export const productionOcr: OcrImpl = async (buf, opts = {}) => {
     return { text: "", pages: [], reason: plan.reason };
   }
 
-  const started = Date.now();
   const pages: PdfPage[] = [];
   let pagesRead = 0;
+  const unread: string[] = [];
   for (let i = 0; i < images.length; i++) {
     const imagesLeft = images.length - i;
     const timeoutMs = callTimeoutMs(started, imagesLeft);
-    if (timeoutMs <= 0) break; // out of the total 10-minute budget
+    if (timeoutMs <= 0) {
+      unread.push(
+        ...images.slice(i).map((remaining) => `page ${remaining.page} was not read (time limit)`),
+      );
+      break;
+    }
     const image = images[i]!;
-    if (image.bytes.byteLength > OCR_MAX_IMAGE_BYTES) continue; // over the 2MB-per-page cap
     let raw: string;
     await opts.beforeModelCall?.();
     try {
       raw = await transcribePage(plan, image, timeoutMs, opts.adapters as OcrAdapters | undefined);
     } catch {
+      unread.push(`page ${image.page} could not be read`);
       continue; // one page failing should not lose the pages already read
     }
     const cleaned = stripNarration(raw);
     if (cleaned) {
-      pages.push({ page: null, imageIndex: i + 1, text: cleaned });
+      pages.push({ page: image.page, text: cleaned });
       pagesRead++;
+    } else {
+      unread.push(`page ${image.page} returned no readable text`);
     }
   }
 
@@ -467,8 +557,13 @@ export const productionOcr: OcrImpl = async (buf, opts = {}) => {
     pages,
     provider: planLabel(plan),
     pagesRead,
-    // Historical field names retained for stored extraction-method compatibility.
-    // This is the capped extracted-image inventory, never the PDF's page count.
-    pagesTotal: images.length,
+    // Historical field names retained; rendered OCR now reports the actual PDF page count.
+    pagesTotal: rendered.totalPages,
+    reason:
+      rendered.reason || unread.length
+        ? [rendered.reason, unread.length ? `OCR incomplete: ${unread.join("; ")}.` : undefined]
+            .filter(Boolean)
+            .join(" ")
+        : undefined,
   };
 };

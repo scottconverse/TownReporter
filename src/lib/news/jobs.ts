@@ -15,7 +15,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
  * provider took. It is a job now, on the default lane, for the same reasons
  * drafting is.
  */
-export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice";
+export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice" | "artifact-ocr";
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
 /**
@@ -207,6 +207,9 @@ async function realWork(job: DeskJob): Promise<void> {
   } else if (job.kind === "routine-notice") {
     const { performRoutineNoticeWork } = await import("./routine-notice-worker.server.ts");
     await performRoutineNoticeWork(job);
+  } else if (job.kind === "artifact-ocr") {
+    const { performArtifactOcrWork } = await import("./dark.ts");
+    await performArtifactOcrWork(job);
   }
 }
 
@@ -287,6 +290,8 @@ export async function enqueueJob(opts: {
   modelChoice?: string;
   modelChoiceSource?: "editor" | "auto";
   researchScope?: "public" | "supplied";
+  /** Narrow job-specific input/result receipt for a queued artifact OCR read. */
+  resultJson?: string;
   kick?: boolean;
 }): Promise<DeskJob> {
   await ensureJobsSchema();
@@ -316,8 +321,8 @@ export async function enqueueJob(opts: {
   */
   const lane = laneForKind(opts.kind);
   const created = await sql<DeskJob>`
-    insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, lane, status, stage)
-    values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${opts.modelChoiceSource ?? "editor"}, ${opts.researchScope ?? "public"}, ${lane}, ${"queued"}, ${"Queued"})
+    insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, lane, status, stage, result_json)
+    values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${opts.modelChoiceSource ?? "editor"}, ${opts.researchScope ?? "public"}, ${lane}, ${"queued"}, ${"Queued"}, ${opts.resultJson ?? "{}"})
     on conflict do nothing
     returning id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error,
               created_at, updated_at, started_at, finished_at
@@ -338,8 +343,8 @@ export async function enqueueJob(opts: {
     // findOpenJob below finds the third caller's row and returns it. The design
     // intent is that concurrent enqueues always coalesce, never error.
     const retry = await sql<DeskJob>`
-      insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, lane, status, stage)
-      values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${opts.modelChoiceSource ?? "editor"}, ${opts.researchScope ?? "public"}, ${lane}, ${"queued"}, ${"Queued"})
+      insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, lane, status, stage, result_json)
+      values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${opts.modelChoiceSource ?? "editor"}, ${opts.researchScope ?? "public"}, ${lane}, ${"queued"}, ${"Queued"}, ${opts.resultJson ?? "{}"})
       on conflict do nothing
       returning id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error,
                 created_at, updated_at, started_at, finished_at

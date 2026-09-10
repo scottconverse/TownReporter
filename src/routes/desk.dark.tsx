@@ -9,12 +9,14 @@ import {
   fileRedditTip,
   getInvestigation,
   getArtifact,
+  getArtifactOcrJob,
   listDarkRuns,
   listInvestigations,
   listWorthALook,
   openDarkInvestigation,
   parkInvestigation,
   queueInvestigation,
+  queueArtifactOcr,
   refreshBrief,
   reopenParkedInvestigation,
   scanTipSubreddit,
@@ -1411,7 +1413,7 @@ function InvestigationWorkspace({
             sub="Click a title. The captured page opens below — that is the file."
           />
           {artifacts.length > 0 ? (
-            <OpenedRecords artifacts={artifacts} />
+            <OpenedRecords artifacts={artifacts} modelChoice={modelChoice} />
           ) : digging ? (
             <p className="meta">Opening pages now. They land on the file as they are read…</p>
           ) : (
@@ -1592,6 +1594,7 @@ function ocrStatusLine(method: string | null | undefined): string | null {
 
 function OpenedRecords({
   artifacts,
+  modelChoice,
 }: {
   artifacts: {
     id: number;
@@ -1605,6 +1608,7 @@ function OpenedRecords({
     excerpt?: string;
     extraction_method?: string | null;
   }[];
+  modelChoice: StoryModelChoice;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   const ordered = artifacts.slice().reverse();
@@ -1636,6 +1640,37 @@ function OpenedRecords({
     queryKey: ["artifact", selected?.id ?? 0],
     queryFn: () => getArtifact({ data: selected!.id }),
     enabled: selected != null,
+  });
+  const [pageStart, setPageStart] = useState("13");
+  const [pageEnd, setPageEnd] = useState("13");
+  const mustChooseReader = modelChoice === "auto";
+  useEffect(() => {
+    setPageStart("13");
+    setPageEnd("13");
+  }, [selected?.id]);
+  const pageRead = useQuery({
+    queryKey: ["artifact-ocr-job", selected?.id ?? 0],
+    queryFn: () => getArtifactOcrJob({ data: selected!.id }),
+    enabled: selected != null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 1500 : false;
+    },
+  });
+  const requestPageRead = useMutation({
+    mutationFn: async () => {
+      const queued = await queueArtifactOcr({
+        data: {
+          artifactId: selected!.id,
+          start: Number(pageStart),
+          end: Number(pageEnd),
+          modelChoice,
+        },
+      });
+      if (!queued.ok) throw new Error(queued.error);
+      return queued;
+    },
+    onSuccess: () => void pageRead.refetch(),
   });
 
   if (!ordered.length) return null;
@@ -1742,6 +1777,57 @@ function OpenedRecords({
               Next
             </button>
           </p>
+          <form
+            className="read-acts"
+            onSubmit={(event) => {
+              event.preventDefault();
+              requestPageRead.mutate();
+            }}
+          >
+            <label>
+              Read PDF pages
+              <input
+                type="number"
+                min="1"
+                value={pageStart}
+                onChange={(event) => setPageStart(event.target.value)}
+                disabled={mustChooseReader || requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}
+              />
+            </label>
+            <span>through</span>
+            <label>
+              <span className="sr-only">Last PDF page</span>
+              <input
+                type="number"
+                min="1"
+                value={pageEnd}
+                onChange={(event) => setPageEnd(event.target.value)}
+                disabled={mustChooseReader || requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}
+              />
+            </label>
+            <button type="submit" className="inline-link" disabled={mustChooseReader || requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}>
+              {pageRead.data?.status === "queued" || pageRead.data?.status === "running" ? "Reading retained PDF…" : "Read selected pages"}
+            </button>
+            <span className="np-meta">{mustChooseReader ? "Choose a named model in the Dark Desk picker before sending retained PDF pages." : `Uses ${modelChoiceLabel(modelChoice)} · up to 12 pages · original retained PDF only`}</span>
+          </form>
+          {requestPageRead.error ? <p className="note err">{requestPageRead.error.message}</p> : null}
+          {pageRead.data?.error ? <p className="note err">{pageRead.data.error}</p> : null}
+          {pageRead.data?.stage && (pageRead.data.status === "queued" || pageRead.data.status === "running") ? (
+            <p className="meta">{pageRead.data.stage}</p>
+          ) : null}
+          {(() => {
+            const result = pageRead.data?.result as
+              | { start?: number; end?: number; provider?: string; reason?: string | null; pages?: { page: number; text: string }[] }
+              | undefined;
+            if (!result?.pages?.length && !result?.reason) return null;
+            return (
+              <section className="read-full">
+                <p className="meta">Requested PDF pages {result.start}-{result.end} · {result.provider ?? modelChoiceLabel(modelChoice)}</p>
+                {result.pages?.map((page) => <p key={page.page}><strong>Page {page.page}</strong><br />{page.text}</p>)}
+                {result.reason ? <p className="meta">{result.reason}</p> : null}
+              </section>
+            );
+          })()}
           {selected.url.startsWith("http") ? <p className="read-url">{selected.url}</p> : null}
           {ocrStatusLine(selected.extraction_method) ? (
             <p className="meta">{ocrStatusLine(selected.extraction_method)}</p>

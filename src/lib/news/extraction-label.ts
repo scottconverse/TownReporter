@@ -10,6 +10,11 @@
 /** The editor-facing sentence for a stored `extraction_method` value. */
 export function describeExtractionMethod(method: string | undefined | null): string {
   const raw = (method ?? "").trim();
+  const pageOcr = /^ocr-pages(-partial)?:([^:]*):(\d+)\/(\d+)$/.exec(raw);
+  if (pageOcr) {
+    const [, partial, provider, read, total] = pageOcr;
+    return `Read by OCR · ${provider} · ${read} of ${total} PDF pages${partial ? " · incomplete" : ""}`;
+  }
   const ocr = /^ocr:([^:]*):(\d+)\/(\d+)$/.exec(raw);
   if (ocr) {
     const [, provider, read, total] = ocr;

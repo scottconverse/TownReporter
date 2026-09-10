@@ -178,3 +178,31 @@ development working tree, not a separately built staged commit.
 Luna independently checked dependency closure for this delivery slice and found
 no missing import/export or ordinary-flow integration blocker. Source changes
 and the editor guide are development-only; no production deployment occurred.
+
+## Retained PDF page reader
+
+Scott explicitly approved the editor-clicked page reader after disclosure that
+selected pages go to the shown provider, cloud use may incur normal charges,
+and transcripts are saved alongside—not over—the original capture. This action
+requires a named model; it does not change Automatic for other workflows.
+
+The renderer's requested-pages regression passed: pages 13–14, exact page
+numbers, stubbed provider, 1 passed, 442.2639 ms. The first persistence test
+failed because its fixture attempted a second job before completing the first
+(`desk_jobs_one_open_per_subject`). The test now models the queue's existing
+completion step; no product constraint was weakened. Rerun: 1 passed,
+14886.4989 ms. It verifies the selected provider/range, page-13 transcript and
+receipt, unchanged original PDF and version text, cleaned NUL text, and no
+duplicate chunk for identical repeated output. All data was in-memory PGLite;
+no real model, remote PDF transfer, or production database was used.
+
+Integrated TypeScript initially rejected the OCR status response's `unknown`
+result. Giving it the actual serializable receipt type resolved the error;
+`tsc --noEmit` subsequently exited 0. One bounded integrated build exited 0;
+its migration step explicitly skipped because `DATABASE_URL` was empty.
+Build log: `artifacts/delivery-build-1789067074743.log`.
+Built entry SHA-256:
+`005FC96714B43FCE7D57913201C5BCCC317DCF5AE1AF52364F76B1D41F13AC8B`.
+The build retains Node's DEP0190 shell-spawn deprecation warning. It used the
+integrated development tree, including other not-yet-committed feature work;
+it is not a clean release-candidate or production acceptance claim.
