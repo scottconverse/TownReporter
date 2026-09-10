@@ -47,7 +47,13 @@ function optionsFor(surface: ProviderSurface): ModelChoiceOption[] {
 
 export const STORY_MODEL_CHOICES: readonly ModelChoiceOption[] = optionsFor("story");
 
-export type StoryModelChoice = "auto" | PickerProviderId;
+export type CustomModelChoice = `custom:${string}`;
+export type StoryModelChoice = "auto" | PickerProviderId | CustomModelChoice;
+/** Preserve explicit custom intent, including stale IDs. Server resolution validates
+ * ownership and availability; invalid custom picks must never become Automatic. */
+export function isCustomModelChoice(value: unknown): value is CustomModelChoice {
+  return typeof value === "string" && value.startsWith("custom:");
+}
 export type EffectiveStoryModelChoice = StoryModelChoice | "configured";
 
 /*
@@ -84,6 +90,7 @@ export type OpinionModelChoice = StoryModelChoice;
 export type DarkModelChoice = StoryModelChoice;
 
 export function storyModelChoice(value: unknown): StoryModelChoice {
+  if (isCustomModelChoice(value)) return value;
   return STORY_MODEL_CHOICES.some((choice) => choice.value === value)
     ? (value as StoryModelChoice)
     : "auto";
@@ -95,6 +102,7 @@ export function effectiveStoryModelChoice(value: unknown): EffectiveStoryModelCh
 }
 
 export function opinionModelChoice(value: unknown): OpinionModelChoice {
+  if (isCustomModelChoice(value)) return value;
   return OPINION_MODEL_CHOICES.some((choice) => choice.value === value)
     ? (value as OpinionModelChoice)
     : "auto";
@@ -102,12 +110,14 @@ export function opinionModelChoice(value: unknown): OpinionModelChoice {
 
 /** Same narrowing as Opinion's, against the Dark list. */
 export function darkModelChoice(value: unknown): DarkModelChoice {
+  if (isCustomModelChoice(value)) return value;
   return DARK_MODEL_CHOICES.some((choice) => choice.value === value)
     ? (value as DarkModelChoice)
     : "auto";
 }
 
 export function modelChoiceLabel(value: unknown): string {
+  if (isCustomModelChoice(value)) return "Custom API connection";
   if (value === "configured") return providerEntry("configured")?.label ?? "Configured gateway";
   const normalized = storyModelChoice(value);
   return STORY_MODEL_CHOICES.find((choice) => choice.value === normalized)?.label ?? "Automatic";
@@ -136,6 +146,7 @@ function ladderSentence(): string {
  * cannot leave the help text describing a ladder that no longer exists.
  */
 export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"): string {
+  if (isCustomModelChoice(value)) return "Uses only the selected custom API connection for this run; no fallback. Your provider's usage charges may apply.";
   const options =
     scope === "opinion"
       ? OPINION_MODEL_CHOICES

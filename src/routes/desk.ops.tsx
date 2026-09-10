@@ -48,6 +48,15 @@ import { editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
 import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
 import { DailyScanSettings } from "@/components/daily-scan-settings";
 import { RoutineNoticePermissions } from "@/components/routine-notice-permissions";
+import { CustomAiConnections } from "@/components/custom-ai-connections";
+import {
+  getCustomAiConnectionsFn,
+  saveCustomAiConnectionFn,
+  enableCustomAiConnectionFn,
+  deleteCustomAiConnectionFn,
+  discoverCustomAiModelsFn,
+  testCustomAiConnectionFn,
+} from "@/lib/news/custom-ai-settings";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -156,6 +165,7 @@ function OpsPage() {
       }
     >
       <WritingModels />
+      <CustomAiSettings />
 
       <DailyScanSettings />
       <RoutineNoticePermissions />
@@ -316,6 +326,26 @@ function OpsPage() {
  * Owner-only, and enforced on the server (see src/lib/news/provider-login.ts),
  * not merely hidden here.
  */
+function CustomAiSettings() {
+  const qc = useQueryClient();
+  const connections = useQuery({ queryKey: ["custom-ai-connections"], queryFn: () => getCustomAiConnectionsFn() });
+  async function refresh() { await qc.invalidateQueries({ queryKey: ["custom-ai-connections"] }); }
+  return (
+    <div id="custom-ai-connections" className="mt-12 min-w-0 border-t border-rule pt-8">
+      {connections.isPending ? <p role="status">Loading your API connections…</p> : connections.isError ? (
+        <div role="alert"><p>Could not load your API connections. Existing writing models are unchanged.</p><InkButton tone="quiet" onClick={() => void connections.refetch()}>Try again</InkButton></div>
+      ) : <CustomAiConnections
+        connections={connections.data ?? []}
+        onSave={async (data) => { await saveCustomAiConnectionFn({ data }); await refresh(); }}
+        onEnable={async (id, enabled) => { await enableCustomAiConnectionFn({ data: { id, enabled } }); await refresh(); }}
+        onDelete={async (id) => { await deleteCustomAiConnectionFn({ data: { id } }); await refresh(); }}
+        onDiscover={(id) => discoverCustomAiModelsFn({ data: { id } })}
+        onTest={(id) => testCustomAiConnectionFn({ data: { id } })}
+      />}
+    </div>
+  );
+}
+
 function WritingModels() {
   const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
   const { signin } = Route.useSearch();

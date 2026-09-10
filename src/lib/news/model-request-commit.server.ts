@@ -55,7 +55,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
   }
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
-  const providerProbe = await (deps.probeProvider ?? probeProvider)(input.modelChoice);
+  const providerProbe = await (deps.probeProvider ?? probeProvider)(input.modelChoice, input.context.newsroomId);
   const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {
     return {
@@ -146,7 +146,7 @@ export async function commitScanForAuthenticatedEditor(
   },
   deps: ScanCommitDeps = {},
 ) {
-  const providerProbe = await (deps.probeProvider ?? probeProvider)(input.modelChoice);
+  const providerProbe = await (deps.probeProvider ?? probeProvider)(input.modelChoice, input.context.newsroomId);
   const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {
     return {
@@ -265,7 +265,7 @@ export async function commitOpinionForAuthenticatedEditor(
     return { ok: false as const, error: "Give it a subject, a URL, or a sentence to work from." };
   }
 
-  const readiness = await (deps.checkReadiness ?? checkOpinionReadiness)(input.modelChoice);
+  const readiness = await (deps.checkReadiness ?? checkOpinionReadiness)(input.modelChoice, {}, input.context.newsroomId);
   if (!readiness.ready) return { ok: false as const, error: readiness.why };
   const effectiveChoice = readiness.effectiveChoice;
 

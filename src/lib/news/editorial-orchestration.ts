@@ -5,7 +5,11 @@ import {
   type EditorialPointer,
   type NewsroomIdentity,
 } from "./editorial.ts";
-import { opinionModelChoice, type OpinionModelChoice } from "./model-choice.ts";
+import {
+  isCustomModelChoice,
+  opinionModelChoice,
+  type OpinionModelChoice,
+} from "./model-choice.ts";
 
 export type WriteEditorialInput = {
   userId: string;
@@ -62,6 +66,12 @@ export type EditorialOrchestrationRuntime = {
    * "Opinion 'Local model' pick silently uses Claude".
    */
   runLocalPair: (context: {
+    input: WriteEditorialInput;
+    found: { ok: true; voice: { path: string; bytes: number } };
+    researchPack: string;
+  }) => Promise<ChatResult>;
+  /** Explicit custom picks receive the same authorized one-pass Opinion pack. */
+  runCustomPair: (context: {
     input: WriteEditorialInput;
     found: { ok: true; voice: { path: string; bytes: number } };
     researchPack: string;
@@ -155,10 +165,14 @@ export async function orchestrateEditorial(
     (none exist in production) normalises to Automatic via
     `opinionModelChoice` and lands on the Claude rung rather than failing.
   */
-  const runPair = async (candidate: EffectiveOpinionModelChoice): Promise<ChatResult> =>
-    candidate === "local-model"
+  const runPair = async (candidate: EffectiveOpinionModelChoice): Promise<ChatResult> => {
+    if (isCustomModelChoice(candidate)) {
+      return runtime.runCustomPair({ input, found, researchPack });
+    }
+    return candidate === "local-model"
       ? runtime.runLocalPair({ input, found, researchPack })
       : runtime.runClaudePair({ input, found, researchPack });
+  };
 
   const requested = opinionModelChoice(input.modelChoice);
   const candidates: EffectiveOpinionModelChoice[] =
@@ -188,9 +202,8 @@ export async function orchestrateEditorial(
   const detail = failures.filter(Boolean).join(" ");
   return {
     ok: false,
-    error:
-      `Claude Opus could not produce an editorial. ${detail} Nothing was filed.`
-        .replace(/\s+/g, " ")
-        .trim(),
+    error: `Claude Opus could not produce an editorial. ${detail} Nothing was filed.`
+      .replace(/\s+/g, " ")
+      .trim(),
   };
 }

@@ -427,9 +427,157 @@ describe("grokChat", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("uses the OpenAI-compatible call budget for an explicit custom connection", () => {
+    const budget = providerBudget("custom:9ce9a944-f444-4a69-8927-7c7705c07a35");
+    assert.deepEqual(budget, {
+      wallMs: 38_000,
+      callMs: 20_000,
+      reserveMs: 12_000,
+    });
+  });
+
+  it("routes an explicit custom connection through only its resolved OpenAI-compatible transport", async () => {
+    const calls: string[] = [];
+    const result = await grokChat(
+      "system",
+      "user",
+      8,
+      { choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35", newsroomId: 44 },
+      {
+        resolveCustom: async (newsroomId: number, id: string) => {
+          calls.push(`resolve:${newsroomId}:${id}`);
+          return { baseUrl: "https://custom.example/v1", modelId: "custom-model", apiKey: "test-secret" };
+        },
+        openai: async (provider) => {
+          calls.push(`openai:${provider.baseUrl}:${provider.model}:${provider.label}`);
+          return { ok: true as const, text: "custom answer" };
+        },
+        codex: async () => {
+          calls.push("wrong:codex");
+          return { ok: false as const, error: "wrong provider" };
+        },
+      } as any,
+    );
+    assert.deepEqual(result, { ok: true, text: "custom answer" });
+    assert.deepEqual(calls, [
+      "resolve:44:9ce9a944-f444-4a69-8927-7c7705c07a35",
+      "openai:https://custom.example/v1:custom-model:Custom AI",
+    ]);
+  });
+
+  it("fails an explicit unavailable custom connection without falling back to another provider", async () => {
+    const calls: string[] = [];
+    const result = await grokChat(
+      "system",
+      "user",
+      8,
+      { choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35", newsroomId: 44 },
+      {
+        resolveCustom: async () => {
+          calls.push("resolve");
+          throw new Error("The selected custom AI connection is disabled, deleted, or has no model. Choose another model; TownReporter will not fall back automatically.");
+        },
+        openai: async () => {
+          calls.push("wrong:openai");
+          return { ok: false as const, error: "wrong provider" };
+        },
+        codex: async () => {
+          calls.push("wrong:codex");
+          return { ok: false as const, error: "wrong provider" };
+        },
+      } as any,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /disabled, deleted, or has no model/i);
+    assert.deepEqual(calls, ["resolve"]);
+  });
+
+  it("does not reflect a custom provider error body into the returned job error", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ error: { message: "bad credential test-only-key" } }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    try {
+      const result = await grokChat(
+        "system",
+        "user",
+        8,
+        { choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35", newsroomId: 44 },
+        {
+          resolveCustom: async () => ({
+            baseUrl: "https://custom.example/v1",
+            modelId: "manual-model",
+            apiKey: "test-only-key",
+          }),
+        },
+      );
+      assert.deepEqual(result, { ok: false, error: "Custom AI API error 400" });
+      assert.doesNotMatch(JSON.stringify(result), /test-only-key/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe("model-picker provider readiness", () => {
+  it("accepts a saved custom manual model when its endpoint does not implement /models", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: { url: string; authorization: string | null }[] = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({
+        url: String(input),
+        authorization: new Headers(init?.headers).get("Authorization"),
+      });
+      return new Response(null, { status: 404 });
+    };
+    try {
+      const result = await probeProvider(
+        "custom:9ce9a944-f444-4a69-8927-7c7705c07a35",
+        44,
+        {
+          resolveCustom: async () => ({
+            baseUrl: "https://custom.example/v1",
+            modelId: "manual-model",
+            apiKey: "test-only-key",
+          }),
+        },
+      );
+      assert.deepEqual(result, { ok: true, label: "Custom AI", choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35" });
+      assert.deepEqual(calls, [
+        { url: "https://custom.example/v1/models", authorization: "Bearer test-only-key" },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("still reports rejected custom credentials rather than accepting an unavailable manual model", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(null, { status: 401 });
+    try {
+      const result = await probeProvider(
+        "custom:9ce9a944-f444-4a69-8927-7c7705c07a35",
+        44,
+        {
+          resolveCustom: async () => ({
+            baseUrl: "https://custom.example/v1",
+            modelId: "manual-model",
+            apiKey: "test-only-key",
+          }),
+        },
+      );
+      assert.deepEqual(result, {
+        ok: false,
+        error: "Custom AI rejected its credentials. Sign in or update its key.",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("validates an Anthropic key before a Claude job can be enqueued", async () => {
     const originalFetch = globalThis.fetch;
     const urls: string[] = [];

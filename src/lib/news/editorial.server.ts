@@ -115,7 +115,7 @@ export async function ensureEditorialSchema() {
 }
 
 export async function writeEditorial(input: WriteEditorialInput): Promise<WriteEditorialResult> {
-  const cfg = await getPaperConfig();
+  const cfg = await getPaperConfig(input.newsroomId);
   input = { ...input, paper: { name: cfg.name, city: cfg.city } };
   return orchestrateEditorial(input, {
     findVoiceFile,
@@ -186,6 +186,27 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
         }),
         4_000,
         { timeoutMs: editorialTimeoutMs(), choice: "local-model", localModel },
+      );
+    },
+    runCustomPair: async ({ input: editorialInput }) => {
+      const voice = await readVoiceTextForLocalModel();
+      if (!voice.ok) return voice;
+      const { grokChat } = await import("./ai");
+      return grokChat(
+        voice.text,
+        buildWritingPack({
+          paper: editorialInput.paper,
+          subject: editorialInput.subject,
+          ourStory: editorialInput.ourStory,
+          askedFor: editorialInput.askedFor,
+          research: "",
+        }),
+        4_000,
+        {
+          timeoutMs: editorialTimeoutMs(),
+          choice: editorialInput.modelChoice,
+          newsroomId: editorialInput.newsroomId,
+        },
       );
     },
     fileEditorial,

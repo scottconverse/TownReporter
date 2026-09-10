@@ -17,6 +17,34 @@ const LIVE_TIMEOUT_NO_OUTPUT = "Claude Code request timed out after 150s, 0 byte
  * never a second fetch pass over the watch list.
  */
 describe("runScanChatWithFailover", () => {
+  it("passes the authenticated newsroom to an explicit custom connection without failover", async () => {
+    const calls: Array<{ choice?: string; newsroomId?: number }> = [];
+    const result = await runScanChatWithFailover({
+      job: {
+        id: 6,
+        model_choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35",
+        model_choice_source: "editor",
+      },
+      newsroomId: 44,
+      system: "scan system",
+      user: "private accepted source excerpts",
+      maxTokens: 3500,
+      timeoutMs: () => 90_000,
+      grokChat: async (_system, _user, _tokens, options) => {
+        calls.push(options ?? {});
+        return { ok: true, text: "{}" };
+      },
+      probe: async () => {
+        throw new Error("an explicit custom pick must not fail over");
+      },
+      setModelChoice: async () => undefined,
+      setStage: async () => undefined,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, [
+      { choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35", newsroomId: 44, timeoutMs: 90_000 },
+    ]);
+  });
   it("retries once on a provider auth failure when the job is on Automatic, reusing the same system/user text", async () => {
     const grokCalls: { system: string; user: string; choice: unknown }[] = [];
     const probeCalls: string[] = [];
@@ -148,7 +176,11 @@ describe("runScanChatWithFailover", () => {
 
     assert.equal(result.ok, false);
     assert.deepEqual(grokCalls, ["claude-frontier"], "must never retry on another rung");
-    assert.equal(probeCalled, false, "planAutomaticFailover must not even probe for an explicit choice");
+    assert.equal(
+      probeCalled,
+      false,
+      "planAutomaticFailover must not even probe for an explicit choice",
+    );
   });
 
   it("never fails over a non-auth failure, even on Automatic", async () => {
@@ -181,7 +213,11 @@ describe("runScanChatWithFailover", () => {
     if (result.ok) assert.fail("expected the refusal to pass through");
     assert.match(result.error, /content policy/i);
     assert.deepEqual(grokCalls, ["claude-frontier"]);
-    assert.equal(probeCalled, false, "a refusal is not a login lapse and must not trigger a failover probe");
+    assert.equal(
+      probeCalled,
+      false,
+      "a refusal is not a login lapse and must not trigger a failover probe",
+    );
   });
 
   it("returns the first failure unchanged when Automatic's next rung is not ready either", async () => {
@@ -207,7 +243,11 @@ describe("runScanChatWithFailover", () => {
     });
 
     assert.equal(result.ok, false);
-    assert.deepEqual(grokCalls, ["claude-frontier"], "must not retry when there is nowhere ready to retry on");
+    assert.deepEqual(
+      grokCalls,
+      ["claude-frontier"],
+      "must not retry when there is nowhere ready to retry on",
+    );
   });
 });
 
@@ -246,7 +286,11 @@ describe("runScanChatWithFailover per-attempt timeout", () => {
         if (seenTimeouts.length === 1) return { ok: false as const, error: LIVE_401 };
         return { ok: true as const, text: '{"leads":[]}' };
       },
-      probe: async () => ({ ok: true as const, label: "Codex Terra", choice: "codex-balanced" as const }),
+      probe: async () => ({
+        ok: true as const,
+        label: "Codex Terra",
+        choice: "codex-balanced" as const,
+      }),
       setModelChoice: async () => undefined,
       setStage: async () => undefined,
     });

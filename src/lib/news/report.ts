@@ -1222,6 +1222,7 @@ export async function reportAndDraft(
       return grokChat(system, user, maxTokens, {
         timeoutMs: ms,
         choice: effectiveModelChoice,
+        newsroomId,
         noTools: suppliedOnly,
         localModel: opts.providerOverrides?.["local-model"]?.localModel,
       });

@@ -336,7 +336,7 @@ const snapshotDarkSettingsFor = createServerOnlyFn(async (newsroomId: number, ru
  * row, no dark_runs row and no rate spend ever exist, so there is nothing for
  * the queue to mark completed while lying about what happened.
  */
-async function darkPreflightRefusal(choice?: string): Promise<{
+async function darkPreflightRefusal(choice?: string, newsroomId?: number): Promise<{
   ok: false;
   kind: string;
   error: string;
@@ -344,7 +344,7 @@ async function darkPreflightRefusal(choice?: string): Promise<{
   retryable: boolean;
 } | null> {
   const { scanPreflight } = await import("./preflight.ts");
-  const ready = scanPreflight(await probeProvider(choice), choice);
+  const ready = scanPreflight(await probeProvider(choice, newsroomId), choice);
   if (ready.ok) return null;
   return {
     ok: false as const,
@@ -1174,6 +1174,7 @@ async function synthesizeSignals(
   const ai = await grokChat(darkSystemFor(dials, place), pack, 3200, {
     timeoutMs: providerBudget(choice, overrides).callMs,
     choice,
+    newsroomId,
     localModel: overrides?.["local-model"]?.localModel,
     // Dark Desk F1: synthesis reads the pack already assembled above and
     // returns JSON only — it never fetches or searches itself.
@@ -1533,8 +1534,8 @@ export const runDarkDesk = createServerFn({ method: "POST" })
       trusting a string off the wire.
     */
     const asked = storyModelChoice(data.modelChoice);
-    const probe = await probeProvider(asked);
-    const refusal = await darkPreflightRefusal(asked);
+    const probe = await probeProvider(asked, owned(context));
+    const refusal = await darkPreflightRefusal(asked, owned(context));
     if (refusal) return refusal;
     await ensureDarkSchema();
     await assertRate(context.userId, "dark", owned(context));
@@ -1620,8 +1621,8 @@ export async function startDarkRound(
     gets pinned on the job -- so a round does not silently change author
     between the press and the queue picking it up.
   */
-  const probe = await probeProvider(asked);
-  const refusal = await darkPreflightRefusal(asked);
+  const probe = await probeProvider(asked, owned(context));
+  const refusal = await darkPreflightRefusal(asked, owned(context));
   if (refusal) return refusal;
   await ensureDarkSchema();
   const sql = await getSql();
@@ -2544,6 +2545,7 @@ export async function buildBrief(
   const ai = await chat(BRIEF_SYSTEM, pack, 1200, {
     timeoutMs: providerBudget(choice, overrides).callMs,
     choice,
+    newsroomId,
     localModel: overrides?.["local-model"]?.localModel,
     // Dark Desk F1: the brief reads the file already assembled above and
     // returns JSON only — it never fetches or searches itself.
@@ -2574,8 +2576,8 @@ export async function startBriefJob(
   modelChoice: string = "auto",
 ) {
   const asked = storyModelChoice(modelChoice);
-  const probe = await probeProvider(asked);
-  const refusal = await darkPreflightRefusal(asked);
+  const probe = await probeProvider(asked, owned(context));
+  const refusal = await darkPreflightRefusal(asked, owned(context));
   if (refusal) return refusal;
   await ensureDarkSchema();
   const effectiveChoice = probe.ok ? probe.choice : asked;

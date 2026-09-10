@@ -246,6 +246,16 @@ describe("the pack hands over leads, not conclusions", () => {
 
 /** Claude remains an explicit Opinion choice and must honor its CLI switch. */
 describe("the editorial writer respects a disabled CLI", () => {
+  it("loads the queued Opinion paper identity from the request newsroom", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8"),
+    );
+    assert.match(
+      src,
+      /getPaperConfig\(input\.newsroomId\)/,
+      "a non-default newsroom must not receive the default paper identity in its outbound pack",
+    );
+  });
   it("checks the CLI is allowed before it spends anything", async () => {
     const src = await import("node:fs").then((fs) =>
       fs.readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8"),
@@ -276,6 +286,7 @@ type EditorialRuntime = {
   >;
   runClaudePair: () => Promise<EditorialChatResult>;
   runLocalPair: () => Promise<EditorialChatResult>;
+  runCustomPair: () => Promise<EditorialChatResult>;
   fileEditorial: () => Promise<{
     ok: true;
     draftId: number;
@@ -348,6 +359,10 @@ function claudeRuntime(events: string[], reply: EditorialChatResult) {
       events.push("local");
       throw new Error("Automatic/claude-frontier must never run the Local model pair");
     },
+    async runCustomPair() {
+      events.push("custom");
+      throw new Error("Automatic/claude-frontier must never run a custom pair");
+    },
     async fileEditorial() {
       events.push("file");
       return {
@@ -384,6 +399,10 @@ function localRuntime(events: string[], reply: EditorialChatResult) {
       events.push("local");
       return reply;
     },
+    async runCustomPair() {
+      events.push("custom");
+      throw new Error("an explicit local-model pick must never run a custom pair");
+    },
     async fileEditorial() {
       events.push("file");
       return {
@@ -393,6 +412,33 @@ function localRuntime(events: string[], reply: EditorialChatResult) {
         words: 4,
         hadAppendix: false,
       };
+    },
+    timeoutMs: () => 60_000,
+  };
+  return runtime;
+}
+
+function customRuntime(events: string[], reply: EditorialChatResult) {
+  const runtime: EditorialRuntime = {
+    async findVoiceFile() {
+      events.push("voice:locate");
+      return { ok: true, voice: { path: "C:\\private\\voice.md", bytes: 1_024 } };
+    },
+    async runClaudePair() {
+      events.push("claude");
+      throw new Error("an explicit custom pick must never run the Claude pair");
+    },
+    async runLocalPair() {
+      events.push("local");
+      throw new Error("an explicit custom pick must never run the Local model pair");
+    },
+    async runCustomPair() {
+      events.push("custom");
+      return reply;
+    },
+    async fileEditorial() {
+      events.push("file");
+      return { ok: true, draftId: 43, headline: "OPINION: Custom", words: 100, hadAppendix: false };
     },
     timeoutMs: () => 60_000,
   };
@@ -576,5 +622,21 @@ describe("Opinion runs one Local model pair when explicitly picked", () => {
     if (result.ok) assert.fail("a refusal was filed");
     assert.match(result.error, /declined|Nothing was filed/i);
     assert.equal(events.includes("file"), false);
+  });
+});
+
+describe("Opinion runs one custom API pair when explicitly picked", () => {
+  it("sends the approved Opinion context only to the selected custom connection", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const choice = "custom:9ce9a944-f444-4a69-8927-7c7705c07a35";
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: choice },
+      customRuntime(events, { ok: true, text: DELIVERED }),
+    );
+    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    if (!result.ok) return;
+    assert.equal(result.modelChoice, choice);
+    assert.deepEqual(events, ["voice:locate", "custom", "file"]);
   });
 });

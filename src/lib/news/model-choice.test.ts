@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   effectiveStoryModelChoice,
+  darkModelChoice,
   localModelOptionLabel,
   modelChoiceLabel,
   modelChoiceHelp,
@@ -21,6 +22,24 @@ const STORY_VALUES = [
 ] as const;
 
 describe("model choice contract", () => {
+  it("never converts a missing or malformed custom connection into Automatic", () => {
+    for (const value of ["custom:", "custom:deleted", "custom:untrusted/input"]) {
+      for (const normalize of [storyModelChoice, opinionModelChoice, darkModelChoice]) {
+        assert.equal(normalize(value), value);
+      }
+    }
+  });
+  it("preserves an explicit saved API connection in every workflow without changing built-in choices", () => {
+    const choice = "custom:2ff67746-9c53-465d-9d63-fb96a7ec1175";
+    for (const normalize of [storyModelChoice, opinionModelChoice, darkModelChoice, effectiveStoryModelChoice]) {
+      assert.equal(normalize(choice), choice);
+    }
+    assert.match(modelChoiceLabel(choice), /custom api/i);
+    assert.match(modelChoiceHelp(choice), /no fallback/i);
+    assert.doesNotMatch(modelChoiceHelp(choice), /tries Claude/);
+    assert.deepEqual(STORY_MODEL_CHOICES.map((option) => option.value), STORY_VALUES);
+  });
+
   it("keeps unique Story values in the intended order with Automatic first", () => {
     const values = STORY_MODEL_CHOICES.map((choice) => choice.value);
     assert.deepEqual(values, STORY_VALUES);

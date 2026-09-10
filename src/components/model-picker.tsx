@@ -3,6 +3,7 @@ import {
   OPINION_MODEL_CHOICES,
   STORY_MODEL_CHOICES,
   localModelOptionLabel,
+  isCustomModelChoice,
   modelChoiceHelp,
   type DarkModelChoice,
   type ModelChoiceOption,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/news/model-choice";
 import { providerAvailability, localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
 import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
+import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId } from "react";
 
@@ -173,12 +175,26 @@ function LocalModelSelect({ scope }: { scope: "story" | "opinion" | "dark" }) {
 }
 
 export function ModelPicker(props: Props) {
-  const options =
+  const connections = useQuery({
+    queryKey: ["custom-ai-connections"],
+    queryFn: () => getCustomAiConnectionsFn(),
+    staleTime: 15_000,
+  });
+  const builtInOptions =
     props.scope === "opinion"
       ? OPINION_MODEL_CHOICES
       : props.scope === "dark"
         ? DARK_MODEL_CHOICES
         : STORY_MODEL_CHOICES;
+  const customOptions: ModelChoiceOption[] = (connections.data ?? []).map((connection) => ({
+    value: `custom:${connection.id}`,
+    label: connection.name,
+    detail: connection.modelId ?? "Choose a model in Server settings",
+  }));
+  const options = [...builtInOptions, ...customOptions];
+  if (isCustomModelChoice(props.value) && !options.some((option) => option.value === props.value)) {
+    options.push({ value: props.value, label: "Custom API connection", detail: connections.isPending ? "Loading…" : "Unavailable — choose another model" });
+  }
   const selected = options.find((option) => option.value === props.value) ?? options[0];
   const helpId = useId();
   const flagId = useId();
@@ -201,6 +217,10 @@ export function ModelPicker(props: Props) {
   });
   function isAvailable(value: string): boolean {
     if (value === "auto") return true;
+    if (isCustomModelChoice(value)) {
+      const connection = connections.data?.find((row) => `custom:${row.id}` === value);
+      return Boolean(connection?.enabled && connection.modelId);
+    }
     // Undecided (still loading, or the query failed) defaults to available
     // so the picker never locks up over a slow network call -- the
     // preflight check on the actual run is the backstop that refuses
@@ -213,7 +233,11 @@ export function ModelPicker(props: Props) {
   // selection, so an editor sees "not set up" before picking it rather than
   // after a failed draft.
   const flagged = !selectedUnavailable && unavailable.length === 1 ? unavailable[0] : null;
-  const help = selectedUnavailable ? notSetUpHelp(selected) : modelChoiceHelp(selected.value, props.scope ?? "story");
+  const help = isCustomModelChoice(props.value)
+    ? selectedUnavailable
+      ? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model. No automatic fallback."
+      : `Uses only ${selected.label} (${selected.detail}) for this run; no fallback. Your provider's usage charges may apply.`
+    : selectedUnavailable ? notSetUpHelp(selected) : modelChoiceHelp(selected.value, props.scope ?? "story");
   return (
     <div className={props.compact ? "model-picker compact" : "model-picker"}>
       <label htmlFor={selectId} className="model-picker-label">
@@ -247,11 +271,15 @@ export function ModelPicker(props: Props) {
       {props.value === "local-model" && !selectedUnavailable ? (
         <LocalModelSelect scope={props.scope ?? "story"} />
       ) : null}
+      {connections.isError ? <span className="model-picker-help" role="status">Could not load custom API connections. Existing model choices still work.</span> : null}
       <details className="min-w-0 text-sm" style={{ gridColumn: "1 / -1" }}>
         <summary className="cursor-pointer underline underline-offset-2 focus-visible:outline-2">
           Set up a writing model
         </summary>
         <div className="mt-2 space-y-2">
+          <p>
+            <a className="inline-link" href="/desk/ops#custom-ai-connections">Add or manage your own AI API</a>. Saving a connection does not change Automatic or start a model request.
+          </p>
           <p>
             Set up the provider on the computer running TownReporter, not just the computer viewing
             this page.

@@ -2,6 +2,7 @@ type GrokOk = { ok: true; text: string };
 type GrokErr = { ok: false; error: string };
 
 import {
+  isCustomModelChoice,
   storyModelChoice,
   type EffectiveStoryModelChoice,
   type StoryModelChoice,
@@ -81,6 +82,12 @@ type GrokChatAdapter = (
 /** Injectable runtime boundary for hermetic provider-dispatch tests. */
 export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>> & {
   probe?: (choice?: EffectiveProviderChoice | string) => Promise<ProviderProbe>;
+  /** Test-only seam for the server-only custom-connection resolver. */
+  resolveCustom?: (newsroomId: number, id: string) => Promise<{
+    baseUrl: string;
+    modelId: string;
+    apiKey: string | null;
+  }>;
 };
 
 function trimSlash(url: string): string {
@@ -283,6 +290,56 @@ export function resolveProvider(
   return null;
 }
 
+type CustomProviderResolution =
+  | { ok: true; provider: Extract<Provider, { kind: "openai" }> }
+  | { ok: false; error: string };
+
+/**
+ * Resolve a stored custom connection only at the server call boundary. The
+ * database resolver enforces newsroom ownership and enabled/model state; its
+ * decrypted key lives only in this provider object for the duration of one
+ * request and is never written into a job, options object, or log.
+ */
+async function resolveCustomProvider(
+  choice: string,
+  newsroomId: number | undefined,
+  injected?: GrokChatAdapters["resolveCustom"],
+): Promise<CustomProviderResolution> {
+  if (!isCustomModelChoice(choice)) {
+    return { ok: false, error: GROK_UNAVAILABLE };
+  }
+  if (!Number.isInteger(newsroomId) || newsroomId == null) {
+    return {
+      ok: false,
+      error: "The selected custom AI connection cannot be resolved without its newsroom. Choose another model; TownReporter will not fall back automatically.",
+    };
+  }
+  try {
+    const resolve =
+      injected ??
+      (await import("./custom-ai-connections.server.ts")).resolveCustomAiChoice;
+    const connection = await resolve(newsroomId, choice.slice("custom:".length));
+    return {
+      ok: true,
+      provider: {
+        kind: "openai",
+        baseUrl: trimSlash(connection.baseUrl),
+        model: connection.modelId,
+        apiKey: connection.apiKey || "not-needed",
+        label: "Custom AI",
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error && err.message
+          ? err.message
+          : "The selected custom AI connection is unavailable. Choose another model; TownReporter will not fall back automatically.",
+    };
+  }
+}
+
 /**
  * Availability the desk can trust. `resolveProvider` says what is *configured*;
  * this says whether it can actually run — which for the CLI means the binary is
@@ -297,6 +354,7 @@ function connectionError(label: string, err: unknown): string {
 
 async function probeOpenAi(
   provider: Extract<Provider, { kind: "openai" }>,
+  options?: { allowManualModelWhenCatalogUnsupported?: boolean },
 ): Promise<ProviderProbe> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (provider.apiKey && provider.apiKey !== "not-needed") {
@@ -312,6 +370,13 @@ async function probeOpenAi(
         ok: false,
         error: `${provider.label} rejected its credentials. Sign in or update its key.`,
       };
+    }
+    // A saved custom connection names its model explicitly. A number of
+    // OpenAI-compatible providers implement chat completions but deliberately
+    // omit model discovery; a 404/405 catalog must not make that manual model
+    // unusable. Credentials are still tested when the endpoint supports it.
+    if (options?.allowManualModelWhenCatalogUnsupported && (res.status === 404 || res.status === 405)) {
+      return { ok: true, label: provider.label, choice: "configured" };
     }
     if (!res.ok)
       return { ok: false, error: `${provider.label} readiness check failed (${res.status}).` };
@@ -364,7 +429,15 @@ export const AUTOMATIC_LADDER = automaticLadder();
 
 export async function probeProvider(
   choice?: EffectiveProviderChoice | string,
+  newsroomId?: number,
+  adapters?: Pick<GrokChatAdapters, "resolveCustom">,
 ): Promise<ProviderProbe> {
+  if (choice && isCustomModelChoice(choice)) {
+    const resolved = await resolveCustomProvider(choice, newsroomId, adapters?.resolveCustom);
+    if (!resolved.ok) return resolved;
+    const result = await probeOpenAi(resolved.provider, { allowManualModelWhenCatalogUnsupported: true });
+    return result.ok ? { ...result, choice } : result;
+  }
   if (choice === "auto") {
     const configured = customGateway();
     if (configured) {
@@ -504,6 +577,8 @@ export async function grokChat(
      * provider ignores it.
      */
     localModel?: LocalModelOverride | null;
+    /** Authenticated paper scope for an explicit custom:<UUID> choice. */
+    newsroomId?: number;
   },
   adapters?: GrokChatAdapters,
 ): Promise<GrokOk | GrokErr> {
@@ -515,7 +590,11 @@ export async function grokChat(
     if (!ready.ok) return ready;
     return grokChat(system, user, maxTokens, { ...opts, choice: ready.choice }, adapters);
   }
-  const provider = resolveProvider(opts?.choice, opts?.localModel);
+  const custom = opts?.choice && isCustomModelChoice(opts.choice)
+    ? await resolveCustomProvider(opts.choice, opts.newsroomId, adapters?.resolveCustom)
+    : null;
+  if (custom && !custom.ok) return custom;
+  const provider = custom?.ok ? custom.provider : resolveProvider(opts?.choice, opts?.localModel);
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
 
   const timeoutMs = opts?.timeoutMs ?? 45_000;
@@ -609,6 +688,10 @@ export async function grokChat(
   };
   if (body.error) {
     const detail = typeof body.error === "string" ? body.error : body.error.message;
+    // A custom endpoint is outside TownReporter's control. Its error body may
+    // reflect an Authorization header or request payload; preserve the useful
+    // HTTP failure category without letting that body enter a job error or UI.
+    if (llm.label === "Custom AI") return { ok: false, error: "Custom AI API error" };
     return { ok: false, error: `${llm.label} API error${detail ? `: ${detail}` : ""}` };
   }
   const message = body.choices?.[0]?.message;
@@ -705,6 +788,10 @@ export function providerBudget(
   if (choice === "auto" || choice === "configured") {
     return effectiveBudget("configured", overrides);
   }
+  // A custom connection is an explicit OpenAI-compatible transport resolved
+  // at the server boundary. Its endpoint/model are intentionally absent from
+  // the public registry, but it has the same ordinary HTTP call shape.
+  if (isCustomModelChoice(choice)) return { ...KIND_BUDGETS.openai };
   const entry = providerEntry(choice);
   if (entry) return effectiveBudget(entry.id, overrides);
   /*

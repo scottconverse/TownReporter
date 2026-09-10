@@ -20,6 +20,24 @@ async function withEnv<T>(changes: Record<string, string | undefined>, run: () =
 }
 
 describe("Opinion provider readiness", { concurrency: false }, () => {
+  it("probes an explicitly selected custom connection in its newsroom", async () => {
+    const custom = "custom:9ce9a944-f444-4a69-8927-7c7705c07a35" as const;
+    const calls: Array<[string, number | undefined]> = [];
+    const result = await checkOpinionReadiness(
+      custom,
+      {
+        findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
+        probeCandidate: async (choice, newsroomId) => {
+          calls.push([choice, newsroomId]);
+          return { ok: true as const, label: "Custom AI", choice };
+        },
+      },
+      44,
+    );
+    assert.equal(result.ready, true);
+    assert.equal(result.effectiveChoice, custom);
+    assert.deepEqual(calls, [[custom, 44]]);
+  });
   it("does not mistake an Anthropic API key for the Claude Code CLI Opinion path", async () => {
     const originalFetch = globalThis.fetch;
     let fetches = 0;

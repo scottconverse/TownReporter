@@ -13,7 +13,7 @@ type CandidateProbe =
 
 export type OpinionReadinessDeps = {
   findVoice?: () => Promise<VoiceProbe>;
-  probeCandidate?: (choice: CandidateChoice) => Promise<CandidateProbe>;
+  probeCandidate?: (choice: CandidateChoice, newsroomId?: number) => Promise<CandidateProbe>;
 };
 
 async function defaultVoiceProbe(): Promise<VoiceProbe> {
@@ -49,10 +49,13 @@ async function probeClaudeFrontier(): Promise<CandidateProbe> {
  * transport every other surface uses, so it is probed the same way Story and
  * Scan probe an explicit pick: `probeProvider(choice)` in ai.ts.
  */
-async function defaultCandidateProbe(choice: CandidateChoice): Promise<CandidateProbe> {
+async function defaultCandidateProbe(
+  choice: CandidateChoice,
+  newsroomId?: number,
+): Promise<CandidateProbe> {
   if (choice === "claude-frontier") return probeClaudeFrontier();
   const { probeProvider } = await import("./ai.ts");
-  const result = await probeProvider(choice);
+  const result = await probeProvider(choice, newsroomId);
   if (!result.ok) return result;
   // `probeProvider` can answer "configured" for Automatic's internal gateway
   // pin; an explicit named pick never goes through that path, so normalise
@@ -64,6 +67,7 @@ async function defaultCandidateProbe(choice: CandidateChoice): Promise<Candidate
 export async function checkOpinionReadiness(
   choice: OpinionModelChoice,
   deps: OpinionReadinessDeps = {},
+  newsroomId?: number,
 ) {
   const problems: string[] = [];
   const voice = await (deps.findVoice ?? defaultVoiceProbe)();
@@ -85,7 +89,7 @@ export async function checkOpinionReadiness(
   const providerProblems: string[] = [];
   const probeCandidate = deps.probeCandidate ?? defaultCandidateProbe;
   for (const candidate of candidates) {
-    const probe = await probeCandidate(candidate);
+    const probe = await probeCandidate(candidate, newsroomId);
     if (probe.ok) {
       selected = probe;
       break;

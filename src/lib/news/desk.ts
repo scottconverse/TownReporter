@@ -667,6 +667,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await deps.scheduledGuard?.();
   const ai = await runScanChatWithFailover({
     job,
+    newsroomId: job.newsroom_id,
     system: scanSystem({ name: paperConfig.name, city: paperConfig.city, state: paperConfig.state }),
     user: userMsg,
     maxTokens: 3500,

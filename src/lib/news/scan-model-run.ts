@@ -26,10 +26,7 @@ import { planAutomaticFailover, failoverReasonPhrase } from "./automatic-failove
  * 90s so the configured-gateway path (150s wall budget, smaller callMs) is
  * never made worse than it already was.
  */
-export function scanCallTimeoutMs(
-  choice: string,
-  overrides?: ProviderOverrides | null,
-): number {
+export function scanCallTimeoutMs(choice: string, overrides?: ProviderOverrides | null): number {
   return Math.max(90_000, providerBudget(choice, overrides).callMs);
 }
 
@@ -49,7 +46,12 @@ type GrokChatFn = (
   system: string,
   user: string,
   maxTokens: number,
-  opts?: { timeoutMs?: number; model?: string; choice?: EffectiveProviderChoice },
+  opts?: {
+    timeoutMs?: number;
+    model?: string;
+    choice?: EffectiveProviderChoice;
+    newsroomId?: number;
+  },
 ) => Promise<GrokResult>;
 
 export type ScanJobForFailover = {
@@ -60,6 +62,8 @@ export type ScanJobForFailover = {
 
 export type RunScanChatWithFailoverInput = {
   job: ScanJobForFailover;
+  /** Authenticated scope used only when the pinned choice is custom:<UUID>. */
+  newsroomId?: number;
   system: string;
   user: string;
   maxTokens: number;
@@ -88,12 +92,22 @@ export type RunScanChatWithFailoverInput = {
 export async function runScanChatWithFailover(
   input: RunScanChatWithFailoverInput,
 ): Promise<GrokResult> {
-  const { job, system, user, maxTokens, timeoutMs, grokChat: chat, probe, setModelChoice, setStage } =
-    input;
+  const {
+    job,
+    system,
+    user,
+    maxTokens,
+    timeoutMs,
+    grokChat: chat,
+    probe,
+    setModelChoice,
+    setStage,
+  } = input;
   const firstChoice = effectiveStoryModelChoice(job.model_choice);
   const ai = await chat(system, user, maxTokens, {
     timeoutMs: timeoutMs(firstChoice),
     choice: firstChoice,
+    newsroomId: input.newsroomId,
   });
   if (ai.ok) return ai;
 
@@ -109,5 +123,9 @@ export async function runScanChatWithFailover(
   await setModelChoice(job.id, plan.next);
   const switchedBecause = failoverReasonPhrase(previousLabel, plan.reason);
   await setStage(job.id, `Switched to ${plan.label}: ${switchedBecause}`);
-  return chat(system, user, maxTokens, { timeoutMs: timeoutMs(plan.next), choice: plan.next });
+  return chat(system, user, maxTokens, {
+    timeoutMs: timeoutMs(plan.next),
+    choice: plan.next,
+    newsroomId: input.newsroomId,
+  });
 }

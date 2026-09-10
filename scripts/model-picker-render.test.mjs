@@ -48,8 +48,11 @@ const choices = moduleUrl(
 */
 const availabilityStubSrc = `
 let current;
+let connections = [];
+export function __setConnections(data) { connections = data; }
 export function __setAvailability(data) { current = data; }
-export const useQuery = () => ({ data: current });
+export const useQuery = ({ queryKey }) => ({ data: queryKey[0] === "custom-ai-connections" ? connections : current });
+export const getCustomAiConnectionsFn = async () => connections;
 export const providerAvailability = async () => current;
 
 /*
@@ -83,6 +86,7 @@ const { ModelPicker } = await import(
       "@/lib/news/model-choice": choices,
       "@/lib/news/provider-availability": availabilityStubUrl,
       "@/lib/news/provider-settings": availabilityStubUrl,
+      "@/lib/news/custom-ai-settings": availabilityStubUrl,
       "@tanstack/react-query": availabilityStubUrl,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
@@ -221,4 +225,29 @@ test("every offered provider available leaves no option disabled and no 'not set
   const html = renderToStaticMarkup(createElement(ModelPicker, { value: "auto", onChange() {} }));
   assert.doesNotMatch(html, /disabled=""/);
   assert.doesNotMatch(html, /not set up/);
+});
+
+test("saved API connections supplement rather than replace all built-in picker choices", () => {
+  availabilityStub.__setConnections([{ id: "abc", name: "Newsroom LiteLLM", modelId: "my-model", enabled: true }]);
+  for (const scope of ["story", "dark", "opinion"]) {
+    const html = render({ scope, value: "custom:abc" });
+    assert.match(html, /value="custom:abc" selected=""/);
+    assert.match(html, /Newsroom LiteLLM — my-model/);
+    assert.match(html, /Uses only Newsroom LiteLLM \(my-model\) for this run; no fallback/);
+    assert.match(html, /value="auto"/);
+    assert.match(html, /value="local-model"/);
+    assert.match(html, /value="claude-frontier"/);
+  }
+  availabilityStub.__setConnections([]);
+});
+
+test("disabled and deleted custom picks remain visible without selecting Automatic", () => {
+  for (const rows of [[], [{ id: "abc", name: "Disabled API", modelId: "my-model", enabled: false }]]) {
+    availabilityStub.__setConnections(rows);
+    const html = render({ value: "custom:abc" });
+    assert.match(html, /value="custom:abc"[^>]*selected=""/);
+    assert.doesNotMatch(html, /value="auto"[^>]*selected=""/);
+    assert.match(html, /No automatic fallback/);
+  }
+  availabilityStub.__setConnections([]);
 });
