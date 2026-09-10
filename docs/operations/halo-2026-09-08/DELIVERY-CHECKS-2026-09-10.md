@@ -399,3 +399,28 @@ belong with the already committed reporting implementation.
 
 Development commit `5f66df6` was pushed successfully to the existing GitHub
 development branch. No production promotion was performed.
+
+## Integrated editor build checkpoint
+
+Parent ran `node artifacts/build-delivery-candidate.mjs` against HEAD `6061201`
+plus the preserved pending runtime changes. Exit 0. Raw log:
+`artifacts/delivery-build-1789072683045.log`. Build wrapper PID 16200 exited;
+the following process check found only the unchanged production server pair
+23012/22152 among TownReporter/test/build matches. Saved DATABASE_URL was
+cleared, migration explicitly skipped, and model providers disabled for build.
+One recorded warning: Node DEP0190 (shell argument concatenation); no build
+error. Entry file SHA-256:
+`EAF1318570C639CC4D580FDAC7F89D93AED971A6BC2017D80D4D243BF31255B4`.
+This is an integrated development build, not a clean-commit release or browser
+acceptance claim. Production remains unchanged.
+
+`node node_modules/typescript/bin/tsc --noEmit` then exited 0 with no output.
+Parent next ran `node artifacts/resume-publishing-check.mjs sources-reach-the-reader.mjs`
+with that exact build hash. Seven browser steps passed: first-run editor setup,
+lead with source, manual story/save, evidence review, publication, reader source,
+and source link. Raw log `artifacts/resume-sources-reach-the-reader.mjs-1789072790794.log`.
+Fresh in-memory PGLite, providers disabled, no production content or settings
+changed. Owned server PID 28272 and child 35700 were stopped successfully;
+driver 34912 exited. Server log includes aborted-request ECONNRESET errors and
+a Better Auth client-IP warning. The functional flow passed, not a clean-log
+or generated-reporting-quality claim.
