@@ -237,6 +237,7 @@ export async function verifyRunSignals(opts: {
         const ai = await grokChat(DARK_VERIFY_SYSTEM, pack, 1400, {
           timeoutMs: providerBudget(opts.choice, opts.overrides).callMs,
           choice: opts.choice,
+          newsroomId: opts.newsroomId,
           localModel: opts.overrides?.["local-model"]?.localModel,
           // Stage 2 reads what the app already fetched. It never searches.
           noTools: true,

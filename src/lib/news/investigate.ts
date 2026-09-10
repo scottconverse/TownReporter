@@ -48,7 +48,7 @@ import {
   type SearchAttempt,
   type WebHit,
 } from "./search-web.ts";
-import { retrieveRelevantChunks } from "./retrieve.ts";
+import { queryTokens, retrieveRelevantChunks } from "./retrieve.ts";
 import { identityKey, isConfirmedSame, resolveEntityName } from "./entity-resolve.ts";
 import { isRedditUrl } from "./reddit.ts";
 import { sanitizePublicUrls } from "./schema.ts";
@@ -63,6 +63,11 @@ import {
 export const HOPS_PER_RUN = 5;
 export const SEARCHES_PER_HOP = 3;
 export const FETCHES_PER_HOP = 4;
+/** Matches grokPlanner's provider input ceiling; keep important context inside it. */
+export const PLANNER_INPUT_CAP = 24_000;
+const PLANNER_GRAPH_CAP = 16_000;
+const PLANNER_ARTIFACT_CAP = 6_000;
+const PLANNER_HISTORY_CAP = 700;
 /** Dark Desk F5: see the researchLoop fetch loop for why this is capped separately from FETCHES_PER_HOP. */
 export const REDDIT_FETCHES_PER_HOP_CAP = 3;
 
@@ -751,6 +756,7 @@ export async function grokPlanner(
   choice?: EffectiveProviderChoice,
   overrides?: ProviderOverrides | null,
   place?: Place,
+  newsroomId?: number,
 ): Promise<HopPlan> {
   /*
     The provider's own per-call budget, not the 45-second default.
@@ -772,10 +778,11 @@ export async function grokPlanner(
     for this round. A round pinned to Codex would be budgeted and planned as
     if it were Claude. See `plannerModel` for the substitution rule.
   */
-  const ai = await grokChat(darkPlannerFor(place), pack.slice(0, 24000), 2200, {
+  const ai = await grokChat(darkPlannerFor(place), pack.slice(0, PLANNER_INPUT_CAP), 2200, {
     timeoutMs: callMs,
     model: plannerModel(choice),
     choice,
+    newsroomId,
     localModel: overrides?.["local-model"]?.localModel,
     // Dark Desk F1: the planner only ever returns JSON (searches/fetch_urls
     // for the app to run) — it must never be handed a live tool surface to
@@ -1088,18 +1095,20 @@ export async function persistDiscovery(
 }
 
 async function markFrontier(
-  userId: string,
+  _userId: string,
   investigationId: number,
   label: string,
   status: string,
   reason: string,
 ) {
   const sql = await getSql();
+  const { norm } = frontierDedupKey("url", label);
   await sql`
     update frontier_items
     set status = ${status}, closed_reason = ${reason.slice(0, 800)}
     where investigation_id = ${investigationId}
-      and label = ${label.slice(0, 240)} and status in ('open', 'investigating', 'reopened')
+      and label_norm = ${norm}
+      and status in ('open', 'investigating', 'reopened')
   `;
 }
 
@@ -1201,7 +1210,10 @@ export async function rememberCapture(opts: {
     /* keep raw */
   }
   const fullText = (opts.text ?? "").slice(0, ARCHIVE_TEXT_CAP);
-  // Page-aware chunks need the same cleaning as the combined ingestion text.
+  // `ingestDocument` cleans its combined text, but page-aware PDF chunks
+  // retain their own page strings. Those strings go straight into
+  // `artifact_chunks` below, where one NUL makes Postgres reject the whole
+  // Dark round after the artifact/version rows were already written.
   const pages = opts.pages?.map((page) => ({ ...page, text: storableText(page.text) }));
   const extractedHash = opts.hash || (await sha256(fullText || url));
   const rawHash =
@@ -1637,6 +1649,19 @@ export async function retrievePack(
 ): Promise<string> {
   const sql = await getSql();
   const newsroomId = await investigationNewsroom(investigationId);
+  const investigation = await sql<{ title: string }>`
+    select title from investigations where newsroom_id = ${newsroomId} and id = ${investigationId} limit 1
+  `;
+  const compact = (text: string, cap: number) =>
+    text.length <= cap ? text : `${text.slice(0, Math.max(0, cap - 27))}\n[section budget reached]`;
+  const section = (name: string, text: string, cap: number) => `${name}:\n${compact(text, cap)}`;
+  const canonical = (raw: string) => {
+    try {
+      return canonicalPublicUrl(raw);
+    } catch {
+      return raw;
+    }
+  };
   const seedsRaw = await sql<{
     url: string;
     title: string;
@@ -1681,7 +1706,12 @@ export async function retrievePack(
     }).kind === "ok";
   const seeds = seedsRaw.filter(isReadable);
   const recent = recentRaw.filter(isReadable);
-  const lowered = terms.map((t) => t.toLowerCase()).filter((t) => t.length > 3);
+  // The frontier can be only old navigation URLs; the editor's original
+  // question is still a relevant selector for captured evidence.
+  const titleTerms = queryTokens(investigation[0]?.title ?? "");
+  const lowered = [...terms, ...titleTerms]
+    .map((t) => t.toLowerCase())
+    .filter((t) => t.length > 3);
   const scored = recent
     .map((a) => {
       const blob = `${a.title} ${a.url} ${a.full_text}`.toLowerCase();
@@ -1743,7 +1773,8 @@ export async function retrievePack(
   }>`
     select label, kind, why, priority, next_steps, status from frontier_items
     where newsroom_id = ${newsroomId} and investigation_id = ${investigationId}
-    order by priority desc, id asc limit 16
+    order by case when status in ('open', 'investigating', 'reopened') then 0 else 1 end,
+      priority desc, id asc limit 16
   `;
   const hyps = await sql<{
     body: string;
@@ -1814,47 +1845,101 @@ export async function retrievePack(
     select hypothesis, dismissed_because from dead_ends
     where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} order by id desc limit 8
   `;
-  const searches = await sql<{ query: string; state: string | null }>`
-    select query, state from search_log
+  const searches = await sql<{
+    query: string;
+    state: string | null;
+    selected_json: string | null;
+    results_json: string | null;
+  }>`
+    select query, state, selected_json, results_json from search_log
     where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} order by id desc limit 24
   `;
-  return [
-    `FRONTIER:\n${frontier.map((f) => `${f.status} ${f.priority} ${f.kind}: ${f.label} — ${f.why}`).join("\n") || "(empty)"}`,
-    `HYPOTHESES:\n${hyps.map((h) => `[${h.status}] ${h.body} pro:${h.supporting} con:${h.contradicting}`).join("\n") || "(none)"}`,
-    `ENTITIES (this investigation):\n${ents.map((e) => `${e.kind}: ${e.name} — ${e.why}`).join("\n") || "(none)"}`,
-    `HISTORICAL MATCHES (other investigations, labeled):\n${historical.map((e) => `[from inv ${e.investigation_id}${e.verdict ? ` ${e.verdict}` : ""}] ${e.kind}: ${e.name} — ${e.why}`).join("\n") || "(none)"}`,
-    `RELATIONSHIPS:\n${rels.map((r) => `${r.from_name} -[${r.kind}]-> ${r.to_name}`).join("\n") || "(none)"}`,
-    `CLAIMS:\n${claims.map((c) => `${c.kind}: ${c.body}`).join("\n") || "(none)"}`,
-    `ANOMALIES:\n${anoms.map((a) => `${a.kind}: ${a.summary}`).join("\n") || "(none)"}`,
-    `DEAD ENDS:\n${dead.map((d) => `${d.hypothesis} — ${d.dismissed_because}`).join("\n") || "(none)"}`,
-    `SEARCHES:\n${searches.map((s) => `${s.state ?? "unknown"} ${s.query}`).join("\n") || "(none)"}`,
-    `RELEVANT ARTIFACTS:\n${
-      picked
-        .map((a) => {
+  const captured = await sql<{ url: string }>`
+    select distinct url from artifacts
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId}
+  `;
+  const capturedUrls = new Set(
+    captured.flatMap((row) => sanitizePublicUrls([row.url]).map(canonical)),
+  );
+  const surfacedUrls = new Set<string>();
+  const unreadSearchResults: string[] = [];
+  for (const search of searches) {
+    if (search.state !== "SEARCH_SUCCESS_RESULTS" || unreadSearchResults.length >= 12) continue;
+    const titles = new Map<string, string>();
+    try {
+      const results = JSON.parse(search.results_json || "[]") as unknown;
+      if (Array.isArray(results)) {
+        for (const result of results) {
+          if (!result || typeof result !== "object") continue;
+          const item = result as { url?: unknown; title?: unknown };
+          if (typeof item.url !== "string") continue;
+          for (const url of sanitizePublicUrls([item.url]).map(canonical)) {
+            titles.set(url, String(item.title ?? "").replace(/\s+/g, " ").trim().slice(0, 180));
+          }
+        }
+      }
+    } catch {
+      // A legacy/malformed result record cannot become a planner instruction.
+    }
+    let perQuery = 0;
+    for (const url of sanitizePublicUrls(parseJsonArray(search.selected_json)).map(canonical)) {
+      if (perQuery >= 3 || unreadSearchResults.length >= 12) break;
+      if (capturedUrls.has(url) || surfacedUrls.has(url)) continue;
+      surfacedUrls.add(url);
+      perQuery += 1;
+      const title = titles.get(url) || "Untitled search result";
+      const query = search.query.replace(/\s+/g, " ").trim().slice(0, 300);
+      unreadSearchResults.push(`- ${title} — ${url}\n  query: ${query}`);
+    }
+  }
+  const artifactHeads = picked.map((a, index) => {
+    const rec = a as { version_id?: number | null; capture_event_id?: number | null; content_hash?: string };
+    const sourceUrl = a.url.length <= 220 ? a.url : "[URL omitted: exceeds source-index entry budget]";
+    return `[source:${index + 1} capture:${rec.capture_event_id ?? "—"} version:${rec.version_id ?? "—"} hash:${(rec.content_hash ?? "").slice(0, 12)}] ${a.title.slice(0, 120)}\n${sourceUrl}`;
+  });
+  const sourceIndex = `SOURCES:\n${artifactHeads.join("\n") || "(none)"}`;
+  const excerptBudget = Math.max(0, PLANNER_ARTIFACT_CAP - sourceIndex.length - 32 - picked.length * 14);
+  const artifactBudget = Math.floor(excerptBudget / Math.max(1, picked.length));
+  const excerpts = picked
+        .map((a, index) => {
           const rec = a as {
             version_id?: number | null;
             capture_event_id?: number | null;
             content_hash?: string;
           };
-          const head = `### [capture:${rec.capture_event_id ?? "—"} version:${rec.version_id ?? "—"} hash:${(rec.content_hash ?? "").slice(0, 12)}] ${a.title}\n${a.url}\n`;
-          if (a.full_text.length <= PLANNER_TEXT_CAP) return head + a.full_text;
+          if (artifactBudget <= 0) return "";
+          if (a.full_text.length <= artifactBudget) return `[source:${index + 1}] ${a.full_text}`;
           const hits = retrieveRelevantChunks(
             [{ url: a.url, title: a.title, text: a.full_text }],
-            terms,
+            [...terms, ...titleTerms],
             {
-              budgetChars: PLANNER_TEXT_CAP,
+              budgetChars: artifactBudget,
               perDoc: 6,
             },
           );
           const body =
             hits.map((c) => `[${c.locator}] ${c.excerpt}`).join("\n") ||
-            a.full_text.slice(0, PLANNER_TEXT_CAP);
-          return head + body;
+            a.full_text.slice(0, artifactBudget);
+          return `[source:${index + 1}] ${body}`;
         })
-        .join("\n\n") || "(none)"
-    }`,
-    `CHUNK HITS:\n${matchedChunks.map((c) => `[version:${c.version_id} page:${c.page_number ?? "—"} ${c.locator}] ${c.excerpt.slice(0, 500)}`).join("\n") || "(none)"}`,
+        .join("\n\n");
+  const artifacts = `${sourceIndex}\n\nEXCERPTS:\n${excerpts || "(source identities reserved; no excerpt budget)"}`;
+  const graph = [
+    section("INVESTIGATION", investigation[0]?.title.slice(0, 220) || `Investigation ${investigationId}`, 250),
+    section("UNREAD SEARCH RESULTS", unreadSearchResults.join("\n") || "(none)", 1_800),
+    section("RELEVANT ARTIFACTS", artifacts, PLANNER_ARTIFACT_CAP),
+    section("CHUNK HITS", matchedChunks.map((c) => `[version:${c.version_id} page:${c.page_number ?? "—"} ${c.locator}] ${c.excerpt.slice(0, 500)}`).join("\n") || "(none)", 800),
+    section("FRONTIER", frontier.map((f) => `${f.status} ${f.priority} ${f.kind}: ${f.label} — ${f.why}`).join("\n") || "(empty)", 900),
+    section("HYPOTHESES", hyps.map((h) => `[${h.status}] ${h.body} pro:${h.supporting} con:${h.contradicting}`).join("\n") || "(none)", PLANNER_HISTORY_CAP),
+    section("ENTITIES (this investigation)", ents.map((e) => `${e.kind}: ${e.name} — ${e.why}`).join("\n") || "(none)", 600),
+    section("HISTORICAL MATCHES (other investigations, labeled)", historical.map((e) => `[from inv ${e.investigation_id}${e.verdict ? ` ${e.verdict}` : ""}] ${e.kind}: ${e.name} — ${e.why}`).join("\n") || "(none)", PLANNER_HISTORY_CAP),
+    section("RELATIONSHIPS", rels.map((r) => `${r.from_name} -[${r.kind}]-> ${r.to_name}`).join("\n") || "(none)", 500),
+    section("CLAIMS", claims.map((c) => `${c.kind}: ${c.body}`).join("\n") || "(none)", 500),
+    section("ANOMALIES", anoms.map((a) => `${a.kind}: ${a.summary}`).join("\n") || "(none)", 400),
+    section("DEAD ENDS", dead.map((d) => `${d.hypothesis} — ${d.dismissed_because}`).join("\n") || "(none)", 400),
+    section("SEARCHES", searches.map((s) => `${s.state ?? "unknown"} ${s.query}`).join("\n") || "(none)", 600),
   ].join("\n\n");
+  return compact(graph, PLANNER_GRAPH_CAP);
 }
 
 export async function findEvidenceChunks(
@@ -1932,12 +2017,17 @@ export async function researchLoop(opts: {
   paused: boolean;
   summary: string;
   plannerFailures: number;
+  plannerStartupFailures: number;
 }> {
   const sql = await getSql();
   const { describeResearchWindow, queryWithResearchWindow } = await import("./dark-preferences.ts");
   const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
   const place: Place = opts.place ?? await getPaperConfig(newsroomId);
   await investigationNewsroom(opts.investigationId, newsroomId);
+  const investigation = await sql<{ title: string }>`
+    select title from investigations where id = ${opts.investigationId} and newsroom_id = ${newsroomId} limit 1
+  `;
+  const investigationTitle = investigation[0]?.title ?? "";
   const officialDomainList = opts.officialDomains ?? [];
   const pressDomainList = opts.pressDomains ?? [];
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
@@ -1946,6 +2036,7 @@ export async function researchLoop(opts: {
   const tried = new Set<string>();
   /** Every hop that had to fall back, so the run can say so. */
   const plannerFailures: string[] = [];
+  const plannerStartupFailures: string[] = [];
   const priorQueries = await sql<{ query: string }>`
     select query from search_log where investigation_id = ${opts.investigationId}
   `;
@@ -1988,7 +2079,10 @@ export async function researchLoop(opts: {
         };
       }
     }
-    return searchWithFallback(q);
+    return searchWithFallback(q, undefined, {
+      officialDomains: officialDomainList,
+      localityStopwords: [place.city, place.state, place.county ?? ""],
+    });
   }
 
   for (let hop = 0; hop < hopsBudget; hop++) {
@@ -2006,18 +2100,20 @@ export async function researchLoop(opts: {
     `;
     const terms = openFrontier.map((f) => f.label);
     const graph = await retrievePack(opts.userId, opts.investigationId, terms);
+    const preferenceContext = opts.preferences ? describeResearchWindow(opts.preferences).slice(0, 2_000) : "";
+    const triedContext = [...tried].slice(-40).join("\n").slice(0, 3_000);
     const pack = [
-      opts.preferences ? describeResearchWindow(opts.preferences) : "",
+      preferenceContext,
       `INVESTIGATION ${opts.investigationId}. Hop ${hop + 1}. ${place.city}, ${place.state}.`,
       graph,
-      `QUERIES ALREADY TRIED:\n${[...tried].slice(-40).join("\n") || "(none)"}`,
+      `QUERIES ALREADY TRIED:\n${triedContext || "(none)"}`,
       `Generate the NEXT searches and fetches. Follow names, companies, contracts, parcels. Search contradictions. A failed search is not "nothing found." Do not stop after one hop. Cite capture and version IDs from artifacts when making claims.`,
-    ].join("\n\n");
+    ].join("\n\n").slice(0, PLANNER_INPUT_CAP);
 
     let plan: HopPlan;
     if (planner) plan = await planner(pack);
     else {
-      const grok = await grokPlanner(pack, opts.choice, opts.providerOverrides, place);
+      const grok = await grokPlanner(pack, opts.choice, opts.providerOverrides, place, newsroomId);
       const heur = heuristicPlan(graph, tried);
       plan = grok.searches.length || grok.fetch_urls.length ? grok : heur;
       if (grok.planner_error) plan.planner_error = grok.planner_error;
@@ -2028,7 +2124,12 @@ export async function researchLoop(opts: {
 
     // Say it out loud. A run that dug with the heuristic must not read like a
     // run that dug with the model.
-    if (plan.planner_error) plannerFailures.push(plan.planner_error);
+    if (plan.planner_error) {
+      plannerFailures.push(plan.planner_error);
+      if (plan.planner_error !== "model replied but the plan had no next step") {
+        plannerStartupFailures.push(plan.planner_error);
+      }
+    }
     lastSummary = plan.summary;
 
     for (const url of plan.fetch_urls) {
@@ -2052,6 +2153,7 @@ export async function researchLoop(opts: {
 
     const fromFrontier: string[] = [];
     const toFetch = new Set<string>(plan.fetch_urls);
+    const currentSearchHits = new Set<string>();
     for (const f of openFrontier) {
       if (f.kind === "url" && /^https?:/i.test(f.label)) {
         toFetch.add(f.label);
@@ -2115,6 +2217,22 @@ export async function researchLoop(opts: {
       place,
     ).filter((q) => !tried.has(queryFingerprint(q)));
     const queries = [...withMinimums, ...fill].map((q) => queryWithResearchWindow(q, opts.preferences)).filter((q) => !tried.has(queryFingerprint(q))).slice(0, SEARCHES_PER_HOP);
+
+    /*
+      A provider startup failure is not a research hop when its fallback
+      cannot produce even one source action. Retrying that identical empty
+      fallback to the full hop budget only consumes the editor's run while
+      creating no search receipt or capture. A completed zero-result search,
+      by contrast, still has a query and continues through the normal path.
+    */
+    const hasSourceAction =
+      queries.length > 0 ||
+      [...toFetch].some((url) => !fetchedThisRun.has(canon(url)));
+    if (plan.planner_error && !hasSourceAction) {
+      lastSummary = `Planner could not start research: ${plan.planner_error}`;
+      break;
+    }
+
     const selectedThisHop: string[] = [];
     const fetchedThisHop: string[] = [];
     const thisHopEvidenceNames: string[] = [];
@@ -2159,14 +2277,23 @@ export async function researchLoop(opts: {
       `;
       const logId = logRows[0]?.id ?? null;
       const lineage = attempt.lineage?.length ? attempt.lineage : [attempt];
+      const assessedStep = [...lineage].reverse().find((step) => step.state === "SEARCH_SUCCESS_RESULTS");
       for (const step of lineage) {
+        // Keep the aggregate discovery assessment with a successful attempt,
+        // not in place of a later provider's real failure. This is metadata,
+        // not a factual judgment about any document that was not captured.
+        const relevance = step === assessedStep ? attempt.relevance : step.relevance;
+        const warnings = [...new Set([...(step.warnings ?? []), ...(relevance ? attempt.warnings ?? [] : [])])];
         await sql`
           insert into search_attempts (
             user_id, newsroom_id, investigation_id, search_log_id, frontier_id, query, provider, state, hits_json, error
           ) values (
             ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${logId}, ${matchedFrontier?.id ?? null},
             ${q.slice(0, 300)}, ${step.provider}, ${step.state},
-            ${JSON.stringify(step.hits).slice(0, 8000)}, ${step.error ?? null}
+            ${JSON.stringify(step.hits).slice(0, 8000)},
+            ${step.error ?? (warnings.length || relevance || step.available !== undefined || step.complete !== undefined || step.nextCursor !== undefined
+              ? `search-metadata:${JSON.stringify({ warnings, available: step.available ?? null, complete: step.complete ?? null, next_cursor: step.nextCursor ?? null, relevance: relevance ?? null }).slice(0, 1800)}`
+              : null)}
           )
         `;
       }
@@ -2184,7 +2311,11 @@ export async function researchLoop(opts: {
         `;
       }
       for (const hit of attempt.hits.slice(0, 6)) {
-        toFetch.add(hit.url);
+        const degraded = attempt.relevance?.decision === "degraded";
+        if (!degraded) {
+          toFetch.add(hit.url);
+          currentSearchHits.add(hit.url);
+        }
         await persistDiscovery(opts.userId, opts.investigationId, {
           kind: "url",
           label: hit.url,
@@ -2193,6 +2324,15 @@ export async function researchLoop(opts: {
           priority: 9,
           query: q,
         });
+        if (degraded) {
+          await markFrontier(
+            opts.userId,
+            opts.investigationId,
+            hit.url,
+            "deferred",
+            "Search relevance degraded — saved without spending a fetch slot",
+          );
+        }
       }
       for (const f of openFrontier) {
         if (
@@ -2243,15 +2383,24 @@ export async function researchLoop(opts: {
     }
 
     let redditFetchesThisHop = 0;
+    // Give successful discovery one of the existing four fetch opportunities.
+    // Otherwise older planner/frontier links can consume every hop indefinitely
+    // while the search result the investigation needs stays unread. Remaining
+    // slots retain the ordinary queue, including explicit planner fetches.
+    let searchSlotUsed = false;
     while (fetchedThisHop.length < FETCHES_PER_HOP) {
+      const discovery = !searchSlotUsed
+        ? sanitizePublicUrls([...currentSearchHits]).map(canon).find((u) => !fetchedThisRun.has(u))
+        : undefined;
       const url = [
         ...new Set(
-          sanitizePublicUrls([...toFetch])
+          sanitizePublicUrls(discovery ? [discovery, ...toFetch] : [...toFetch])
             .map(canon)
             .filter((u) => !fetchedThisRun.has(u)),
         ),
       ][0];
       if (!url) break;
+      if (url === discovery) searchSlotUsed = true;
       fetchedThisRun.add(url);
       fetchedThisHop.push(url);
 
@@ -2465,7 +2614,23 @@ export async function researchLoop(opts: {
       await observeBaseline(opts.userId, url, got.title, undefined, got.extras, newsroomId);
       await markFrontier(opts.userId, opts.investigationId, url, "resolved", "Fetched");
       for (const extra of got.extras.slice(0, 6)) {
-        toFetch.add(extra);
+        let extraPath = extra;
+        try {
+          const parsedExtra = new URL(extra);
+          extraPath = `${decodeURIComponent(parsedExtra.pathname)} ${decodeURIComponent(parsedExtra.search)}`;
+        } catch {
+          // Invalid encodings and non-URLs fail closed instead of borrowing relevance from a hostname.
+          extraPath = "";
+        }
+        const extraTokens = new Set(queryTokens(extraPath));
+        const contextTokens = new Set(queryTokens([investigationTitle, ...plan.questions, ...queries].join(" ")));
+        const shared = [...extraTokens].filter((token) => contextTokens.has(token));
+        const documentTarget =
+          /\.(?:pdf|docx?|xlsx?|csv)(?:\s|$)/i.test(extraPath) ||
+          /\/(?:documentcenter\/view|api\/document)\/\d+(?:\/|\s|$)/i.test(extraPath) ||
+          /\/download(?:\s|$)[^\n]*\bid=\d+/i.test(extraPath);
+        const relevantExtra = documentTarget || shared.length >= 2;
+        if (relevantExtra) toFetch.add(extra);
         await persistDiscovery(opts.userId, opts.investigationId, {
           kind: "url",
           label: extra,
@@ -2473,6 +2638,15 @@ export async function researchLoop(opts: {
           evidence: url,
           priority: 11,
         });
+        if (!relevantExtra) {
+          await markFrontier(
+            opts.userId,
+            opts.investigationId,
+            extra,
+            "deferred",
+            "Attachment link did not match enough investigation terms",
+          );
+        }
       }
       const refs = extractReferences(got.text);
       await addFrontierFromRefs(opts.userId, opts.investigationId, refs, url);
@@ -2548,10 +2722,13 @@ export async function researchLoop(opts: {
     the model. The whole database had zero entities, claims and hypotheses
     while every summary described a successful dig.
   */
-  const fellBack = plannerFailures.length
+  const fellBack = plannerFailures.length && hopsDone > 0
     ? `
 Planner fell back on ${plannerFailures.length} of ${hopsDone} hop${hopsDone === 1 ? "" : "s"}: ${[...new Set(plannerFailures)].join("; ")}`
-    : "";
+    : plannerFailures.length
+      ? `
+Planner could not start research: ${[...new Set(plannerFailures)].join("; ")}`
+      : "";
 
   return {
     hops: hopsDone,
@@ -2560,6 +2737,7 @@ Planner fell back on ${plannerFailures.length} of ${hopsDone} hop${hopsDone === 
     paused,
     summary: lastSummary + fellBack,
     plannerFailures: plannerFailures.length,
+    plannerStartupFailures: plannerStartupFailures.length,
   };
 }
 

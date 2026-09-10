@@ -352,7 +352,9 @@ export function documentAsks(parts: (string | null | undefined)[], cap = 4): str
   for (const raw of parts) {
     const whole = String(raw ?? "").trim();
     if (!whole) continue;
-    for (const piece of whole.split(/\s*;\s*|(?<=[.!?])\s+/)) {
+    // A date or name abbreviation is not the end of a document request.
+    // R19 cut "Oct. 12 ... meeting" to "Oct." before search ever saw it.
+    for (const piece of whole.split(/\s*;\s*|(?<=[.!?])(?<!\b(?:Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|Dr|Mr|Mrs|Ms|St)\.)\s+/i)) {
       const ask = piece.replace(/\s+/g, " ").replace(/^[\s,;.—-]+|[\s,;]+$/g, "").trim();
       if (ask.length < 8 || !DOC_TYPE.test(ask)) continue;
       const key = ask.toLowerCase();

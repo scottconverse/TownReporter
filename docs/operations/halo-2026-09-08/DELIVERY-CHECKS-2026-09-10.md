@@ -288,3 +288,28 @@ blocker was identified. The lead ran both checks serially on Windows:
 Both commands exited 0, with no captured warnings or errors. These verify the
 pre-existing pending implementation; this turn added no runtime logic and is
 not a new TDD claim. No real provider, saved database, or production mutation.
+
+## Research-loop consolidation check
+
+`node scripts/with-app-env.mjs node --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 src/lib/news/investigate.loop.test.ts src/lib/news/investigate.search-relevance.test.ts src/lib/news/absence-gate.test.ts`
+
+```text
+[with-app-env] DATABASE_URL unset -- PGLite in-memory
+ℹ tests 51
+ℹ suites 8
+ℹ pass 51
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 23355.1639
+```
+
+Lead-executed once on the integrated pending development source, exit 0;
+no captured warnings or errors. Injected planner/search/fetch fixtures exercise
+real isolated persistence. Relevant evidence stays within the planner boundary,
+new search discoveries receive a fetch slot, failed startup without a source
+action stops rather than spending empty hops, and abbreviated document requests
+remain intact. No real investigation, source-provider availability, or model
+quality acceptance is claimed. The saved failed election investigation remains
+failed; these tests do not rewrite its verdict.

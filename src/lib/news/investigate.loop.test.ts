@@ -10,6 +10,7 @@ import {
   observeBaseline,
   persistDiscovery,
   researchLoop,
+  retrievePack,
   seedInvestigation,
   type FetchFn,
   type HopPlan,
@@ -139,6 +140,126 @@ async function bootInv(user: string, title: string) {
 }
 
 describe("researchLoop integration", { timeout: 120000 }, () => {
+  it("keeps the title, unread result, and relevant capture inside the real planner boundary", async () => {
+    const user = `loop-planner-budget-${Date.now()}`;
+    const title = "Transit award investigation subject";
+    const { id, sql } = await bootInv(user, title);
+    const captureUrl = "https://records.example/award-packet";
+    const target = "https://records.example/third-selected-award";
+    await seedInvestigation(user, id, "", [
+      { title: "Award packet", url: captureUrl, excerpt: "RELEVANT_CAPTURE_MARKER Transit award contract." },
+    ]);
+    for (let n = 0; n < 12; n++) {
+      await sql`insert into hypotheses (user_id, newsroom_id, investigation_id, body, supporting, contradicting, status)
+        values (${user}, 1, ${id}, ${`STORED_HISTORY_${n} ${"x".repeat(5000)}`}, '', '', 'open')`;
+    }
+    await sql`insert into search_log (user_id, newsroom_id, investigation_id, hop, query, results_json, selected_json, state)
+      values (${user}, 1, ${id}, 1, ${"transit award"}, ${JSON.stringify([{ title: "Third selected award", url: target }])}, ${JSON.stringify([target])}, 'SEARCH_SUCCESS_RESULTS')`;
+    let plannerInput = "";
+    await researchLoop({
+      userId: user, investigationId: id, hops: 1,
+      planner: async (pack) => { plannerInput = pack.slice(0, 24_000); return emptyPlan(); },
+      fetch: fetchDoc, archives: async () => [],
+    });
+    assert.match(plannerInput, new RegExp(title));
+    assert.match(plannerInput, new RegExp(target));
+    assert.match(plannerInput, /RELEVANT_CAPTURE_MARKER/);
+  });
+
+  it("shows an uncaptured third selected result to the planner despite stale attachments", async () => {
+    const user = `loop-unread-result-${Date.now()}`;
+    const { id, sql } = await bootInv(user, "Investigate procurement record");
+    for (let n = 0; n < 17; n++) {
+      await persistDiscovery(user, id, {
+        kind: "url",
+        label: `https://city.example/attachment-${n}.pdf`,
+        why: "Attachment/document link on an earlier page",
+        priority: 11,
+      });
+    }
+    const captured = "https://records.example/already-read";
+    const first = "https://records.example/first-result";
+    const second = "https://records.example/second-result";
+    const target = "https://records.example/third-result";
+    await seedInvestigation(user, id, "", [
+      { title: "Already read", url: captured, excerpt: "Stored record text." },
+    ]);
+    await sql`
+      insert into search_log (user_id, newsroom_id, investigation_id, hop, query, results_json, selected_json, state)
+      values
+        (${user}, 1, ${id}, 1, ${"ignored failed search"}, ${"[]"}, ${JSON.stringify(["https://records.example/failed"])}, ${"SEARCH_FAILED_NETWORK"}),
+        (${user}, 1, ${id}, 1, ${"ignored malformed result"}, ${"not-json"}, ${"not-json"}, ${"SEARCH_SUCCESS_RESULTS"}),
+        (${user}, 1, ${id}, 1, ${"generic procurement records"},
+          ${JSON.stringify([
+            { title: "Already read", url: captured },
+            { title: "First result", url: first },
+            { title: "Second result", url: second },
+            { title: "Third result", url: target },
+          ])},
+          ${JSON.stringify([captured, first, second, target])}, ${"SEARCH_SUCCESS_RESULTS"})
+    `;
+
+    const pack = await retrievePack(user, id, ["attachment"]);
+    assert.match(pack, /UNREAD SEARCH RESULTS/);
+    const unread = pack.split("UNREAD SEARCH RESULTS")[1]!.split("RELEVANT ARTIFACTS")[0]!;
+    assert.match(unread, /Third result/);
+    assert.ok(unread.includes(target));
+    assert.match(unread, /generic procurement records/);
+    assert.doesNotMatch(unread, /already-read|records\.example\/failed|malformed result/);
+
+    const fetched: string[] = [];
+    await researchLoop({
+      userId: user,
+      investigationId: id,
+      hops: 1,
+      planner: async (nextPack) => {
+        assert.match(nextPack, /Third result/);
+        const plan = emptyPlan();
+        plan.fetch_urls = [target];
+        return plan;
+      },
+      fetch: async (url) => {
+        fetched.push(url);
+        return { ok: true, status: 200, text: "Readable public record for capture.", title: "Record", extras: [] };
+      },
+      archives: async () => [],
+    });
+    assert.equal(fetched[0], target, "planner-selected result precedes stale attachment URLs");
+    assert.equal(fetched.length, 4, "does not expand the existing fetch budget");
+  });
+
+  it("gives a fresh search discovery a fetch slot despite a full older attachment frontier", async () => {
+    const user = `loop-search-fairness-${Date.now()}`;
+    const { id } = await bootInv(user, "Investigate contract spending");
+    for (let n = 0; n < 16; n++) {
+      await persistDiscovery(user, id, {
+        kind: "url", label: `https://longmontcolorado.gov/services/attachment-${n}.pdf`,
+        why: "Attachment/document link on an earlier page", priority: 11,
+      });
+    }
+    const found = "https://longmontcolorado.gov/contracts/actual-award.pdf";
+    const requested = "https://longmontcolorado.gov/contracts/notice";
+    const fetched: string[] = [];
+    await researchLoop({
+      userId: user, investigationId: id, hops: 1,
+      planner: async () => {
+        const p = emptyPlan();
+        p.fetch_urls = [requested];
+        p.searches = ["contract award spending"];
+        return p;
+      },
+      search: async () => [{ title: "Contract award", url: found, snippet: "Award notice" }],
+      fetch: async (url) => {
+        fetched.push(url);
+        return { ok: true, status: 200, text: "Public contract document with sufficient readable source text for this capture.", title: "Contract document", extras: [] };
+      },
+      archives: async () => [],
+    });
+    assert.ok(fetched.includes(found), "successful discovery must not remain unread behind old links");
+    assert.ok(fetched.includes(requested), "the planner's explicit fetch must still run");
+    assert.equal(fetched.length, 4, "do not solve starvation by expanding the fetch budget");
+  });
+
   it("follows company → agent → second company → PDF contract → parcel through persisted state", async () => {
     const user = `loop-chain-${Date.now()}`;
     const { sql, id } = await bootInv(user, "FRMS chain");
@@ -428,6 +549,37 @@ describe("researchLoop integration", { timeout: 120000 }, () => {
       select kind from anomalies where investigation_id = ${id} and user_id = ${user}
     `;
     assert.ok(anoms.some((a) => a.kind === "search-failed"));
+  });
+
+  it("does not spend every hop when a failed planner has no heuristic work to run", async () => {
+    const user = `loop-planner-startup-${Date.now()}`;
+    const { sql, id } = await bootInv(user, "Planner startup failure");
+    let searches = 0;
+
+    const result = await researchLoop({
+      userId: user,
+      investigationId: id,
+      hops: 5,
+      search: async () => {
+        searches += 1;
+        return [];
+      },
+      fetch: fetchDoc,
+      planner: async () => ({
+        ...emptyPlan(),
+        summary: "Heuristic hop: 0 searches, 0 fetches, 0 frontier items.",
+        planner_error: "Codex could not start because permission was denied",
+      }),
+      archives: async () => [],
+    });
+
+    assert.equal(result.hops, 0, "a provider failure without a source action is not a research hop");
+    assert.equal(result.plannerFailures, 1, "record the one failed provider attempt without retrying it");
+    assert.equal(searches, 0, "a failed planner is distinct from a completed zero-result search");
+    const row = await sql<{ hops: number }>`
+      select hops from investigations where id = ${id}
+    `;
+    assert.equal(row[0]?.hops, 0);
   });
 
   it("learns a meeting cadence and flags a missing meeting without dropping the anomaly", async () => {

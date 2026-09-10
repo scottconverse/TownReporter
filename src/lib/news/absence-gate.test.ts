@@ -86,6 +86,14 @@ describe("tool-talk never describes the city", () => {
 });
 
 describe("the memo's document asks become site-restricted queries", () => {
+  it("keeps abbreviated dates and names in document errands", () => {
+    const dated = "District town-hall agenda or event-details page for the Oct. 12 Longmont High School meeting";
+    const named = "Find the report from Dr. Jackie Kapushion at St. Vrain.";
+    assert.deepEqual(documentAsks([`${dated}; ${named} Find the registration page.`]), [
+      dated, named, "Find the registration page.",
+    ]);
+  });
+
   it("reads the ask the live memo actually wrote, and skips lines that name no document", () => {
     const asks = documentAsks([FOLLOW, "Call the city manager back."]);
     assert.equal(asks.length, 1);
