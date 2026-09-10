@@ -80,7 +80,7 @@ function logisticsLine(n: StructurallyValidRoutineNotice) {
     case "registration-deadline":
       return `${f.program}: applications close ${when(f.deadline)}`;
     case "waste-recycling-schedule":
-      return `${f.service}: ${f.serviceDate} · ${f.area}${f.scheduleChange ? ` · ${f.scheduleChange}` : ""}`;
+      return `${f.service}: ${f.serviceDate}${f.endDate ? `–${f.endDate}` : ""} · ${f.area}${f.scheduleChange ? ` · ${f.scheduleChange}` : ""}${f.collectionInstructions ? ` · ${f.collectionInstructions}` : ""}`;
     case "public-meeting-logistics":
       return `${f.title}: ${when(f.start)}${f.venue ? ` at ${f.venue}` : ""}`;
   }
@@ -116,8 +116,11 @@ export function eligibleRoutineNotices(
       if (when < localDate || when > end.toISOString().slice(0, 10)) continue;
       channels.push("deadlines");
     } else {
-      if (when === localDate) channels.push("today");
-      if (when >= fri && when <= sun) channels.push("weekend");
+      const through = notice.formatKey === "waste-recycling-schedule" && f.endDate
+        ? date(f.endDate, timezone)
+        : when;
+      if (when <= localDate && through >= localDate) channels.push("today");
+      if (when <= sun && through >= fri) channels.push("weekend");
     }
     for (const channel of channels)
       eligible.push({ channel, notice, occurrenceDate: when, line, sourceUrl: notice.provenance.sourceUrl });

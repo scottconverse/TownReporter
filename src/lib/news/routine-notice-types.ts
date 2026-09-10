@@ -120,6 +120,8 @@ export type RoutineNoticeInput =
         service: RoutineField;
         area: RoutineField;
         serviceDate: RoutineField;
+        endDate?: RoutineField;
+        collectionInstructions?: RoutineField;
       }
     >
   | CommonInput<
@@ -130,6 +132,8 @@ export type RoutineNoticeInput =
         service: RoutineField;
         area: RoutineField;
         serviceDate: RoutineField;
+        endDate?: RoutineField;
+        collectionInstructions?: RoutineField;
         scheduleChange: RoutineField;
       }
     >
@@ -223,13 +227,13 @@ const shapes: Record<string, Shape> = {
   },
   "waste-recycling-schedule:regular": {
     required: ["issuer", "service", "area", "serviceDate"],
-    optional: [],
-    temporal: ["serviceDate"],
+    optional: ["endDate", "collectionInstructions"],
+    temporal: ["serviceDate", "endDate"],
   },
   "waste-recycling-schedule:changed": {
     required: ["issuer", "service", "area", "serviceDate", "scheduleChange"],
-    optional: [],
-    temporal: ["serviceDate"],
+    optional: ["endDate", "collectionInstructions"],
+    temporal: ["serviceDate", "endDate"],
   },
   "public-meeting-logistics:meeting": {
     required: ["issuer", "title", "start", "agendaUrl"],
@@ -264,6 +268,8 @@ const labels: Record<string, string> = {
   service: "Service",
   area: "Area",
   serviceDate: "Date",
+  endDate: "Collection through",
+  collectionInstructions: "Collection instructions",
   scheduleChange: "Schedule change",
   attendanceUrl: "Attendance",
   agendaUrl: "Agenda",
@@ -641,6 +647,13 @@ export function validateRoutineNotice(input: unknown): RoutineNoticeValidation {
       formatKey,
       reasons: [{ code: "missing-required-field", field: "registrationUrl" }],
     };
+  }
+  if (typedFields.serviceDate && typedFields.endDate) {
+    const start = typedFields.serviceDate.value;
+    const end = typedFields.endDate.value;
+    if (!dateOnly.test(start) || !dateOnly.test(end) || end < start) {
+      return { valid: false, formatKey, reasons: [{ code: "invalid-field", field: "endDate" }] };
+    }
   }
   if (typedFields.start && typedFields.end) {
     const samePrecision =

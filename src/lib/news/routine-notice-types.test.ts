@@ -145,6 +145,55 @@ describe("routine notice structural contracts", () => {
     if (changed.valid) assert.match(changed.rendered, /Schedule change: Moved from Thursday/);
   });
 
+  it("preserves a source-provided waste collection range and instructions", () => {
+    for (const variant of ["regular", "changed"] as const) {
+      const result = validateRoutineNotice({
+        formatKey: "waste-recycling-schedule",
+        variant,
+        provenance,
+        fields: {
+          issuer: field("City of Longmont", "/issuer"),
+          service: field("Fall leaf collection", "/service"),
+          area: field("North of 9th Avenue", "/area"),
+          serviceDate: field("2026-10-26", "/collection/start"),
+          endDate: field("2026-10-30", "/collection/end"),
+          collectionInstructions: field(
+            "Bags before 7 AM Monday; leave them out all week.",
+            "/collection/instructions",
+          ),
+          ...(variant === "changed"
+            ? { scheduleChange: field("2026 collection schedule", "/schedule") }
+            : {}),
+        },
+      } as RoutineNoticeInput);
+      assert.equal(result.valid, true, variant);
+      if (result.valid) {
+        assert.equal(result.notice.normalizedFields.serviceDate, "2026-10-26");
+        assert.equal(result.notice.normalizedFields.endDate, "2026-10-30");
+        assert.equal(
+          result.notice.normalizedFields.collectionInstructions,
+          "Bags before 7 AM Monday; leave them out all week.",
+        );
+      }
+    }
+  });
+
+  it("rejects a waste collection end date before its start date", () => {
+    const result = validateRoutineNotice({
+      ...valid[4],
+      fields: {
+        ...valid[4].fields,
+        endDate: field("2026-11-08", "/collection/end"),
+        serviceDate: field("2026-11-09", "/collection/start"),
+      },
+    });
+    assert.deepEqual(result, {
+      valid: false,
+      formatKey: "waste-recycling-schedule",
+      reasons: [{ code: "invalid-field", field: "endDate" }],
+    });
+  });
+
   it("accepts explicit online participation instead of requiring a physical place", () => {
     const library = structuredClone(valid[0]);
     delete library.fields.location;

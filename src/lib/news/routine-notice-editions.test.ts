@@ -75,6 +75,33 @@ test("includes Friday notices in Friday's weekend edition", () => {
   const notice = n("community-arts-event-logistics", { issuer: "Arts", title: "Friday concert", start: "2026-09-11T18:00:00-06:00", venue: "Park" }, "fri");
   assert.deepEqual(eligibleRoutineNotices([notice], "2026-09-11", "America/Denver").eligible.map((item) => item.channel), ["today", "weekend"]);
 });
+
+test("keeps a multi-day collection range and source instructions in the edition", () => {
+  const notice = n(
+    "waste-recycling-schedule",
+    {
+      issuer: "City of Longmont",
+      service: "Fall leaf collection",
+      area: "North of 9th Avenue",
+      serviceDate: "2026-10-26",
+      endDate: "2026-10-30",
+      collectionInstructions: "Bags before 7 AM Monday; leave them out all week.",
+    },
+    "fall-leaf-north",
+  );
+  notice.variant = "regular";
+  const Wednesday = eligibleRoutineNotices([notice], "2026-10-28", "America/Denver");
+  assert.deepEqual(Wednesday.eligible.map((item) => item.channel), ["today", "weekend"]);
+  assert.equal(Wednesday.eligible[0]!.channel, "today");
+  assert.match(Wednesday.eligible[0]!.line, /2026-10-26.*2026-10-30/);
+  assert.match(Wednesday.eligible[0]!.line, /Bags before 7 AM Monday; leave them out all week/);
+
+  const Friday = eligibleRoutineNotices([notice], "2026-10-30", "America/Denver");
+  assert.deepEqual(
+    Friday.eligible.map((item) => item.channel),
+    ["today", "weekend"],
+  );
+});
 test("converts named-zone wall times into the newsroom day and labels the source zone", () => {
   const notice = n("registration-deadline", { issuer: "City", program: "Permit", deadline: "2026-09-09T00:30:00", registrationUrl: "https://city.example/apply", timezone: "America/New_York" }, "zone");
   const result = eligibleRoutineNotices([notice], "2026-09-08", "America/Denver");
