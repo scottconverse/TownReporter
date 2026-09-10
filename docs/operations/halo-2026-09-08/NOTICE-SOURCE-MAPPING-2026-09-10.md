@@ -149,3 +149,27 @@ of meetingTemplateId=17256 showed a portal heading of September 15 at midnight
 while the agenda body and API said September 14 at 6 PM. Resolve that source
 discrepancy before enabling publication; zero internal feed conflicts does not
 prove the heading agrees. Registration and waste mappings remain open.
+
+## Parks and arts saved-source checks (later September 10)
+
+Parent extended the existing ignored real-source helper with --parks/--arts,
+using the two URLs above. No product code changed. Each invocation fetched once
+and passed the actual bytes to the normal owner saved-check path in fresh PGLite,
+then checked reload equality, stored raw-byte/version hashes, times and disabled
+automation. Arts also asserted absence of onlineUrl for the physical venue.
+
+- `node artifacts/notice-real-source-check.mjs --parks`: exit0, ok:true,
+  parsed1/refused0/conflicts0, HTTP200,308761bytes. Receipt
+  `artifacts/notice-real-source-check/receipt-2026-09-10T22-37-15.129Z.json`,
+  SHA256 `463E5CF4BA765A1585D09F41D0A64E741BF74BFF50CE77F2FCEEA15EF594C1E4`.
+- `node artifacts/notice-real-source-check.mjs --arts`: exit0, ok:true,
+  parsed1/refused0/conflicts0, HTTP200,314212bytes. Receipt
+  `artifacts/notice-real-source-check/receipt-2026-09-10T22-37-41.656Z.json`,
+  SHA256 `507AFF7E4F86D3CA47BC6219E8DE84D7862B9E597B6611E6DE2A1CE67ECAC734`.
+
+Both terminal handles completed serially; no model generation, production rows,
+publication or activation. No warnings/errors in returned execution output.
+These supersede the earlier pure-extraction-only status for parks/arts. They
+prove the saved-source path for these actual pages, not reusable calendar
+discovery or the complete operational family. The museum response hash changed
+since the first probe; the retained receipt records the bytes actually checked.
