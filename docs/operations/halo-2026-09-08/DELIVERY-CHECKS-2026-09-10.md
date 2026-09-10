@@ -248,3 +248,43 @@ provider failures and partial coverage remain distinguishable from zero hits.
 failures/skips, 359.4696 ms. Fetches/provider replies were injected fixtures;
 this was not a live Gateway or external search-provider availability check.
 No Gateway service, settings, or installation was changed.
+
+## Shared in-process job lane — consolidation
+
+The existing pending repair shares drainer flags across bundled background and
+SSR module identities using `Symbol.for`. It does not add a scheduler or change
+the existing lane limits, and does not claim coordination across processes.
+Luna independently reviewed the diff and dependency closure; no ordinary-flow
+blocker was identified. The lead ran both checks serially on Windows:
+
+`node scripts/with-app-env.mjs node --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 src/lib/news/jobs.module-identity.test.ts`
+
+```text
+[with-app-env] DATABASE_URL unset -- PGLite in-memory
+ℹ tests 1
+ℹ suites 1
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11063.2734
+```
+
+`node scripts/with-app-env.mjs node --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 src/lib/news/jobs.test.ts`
+
+```text
+[with-app-env] DATABASE_URL unset -- PGLite in-memory
+ℹ tests 37
+ℹ suites 8
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11358.1842
+```
+
+Both commands exited 0, with no captured warnings or errors. These verify the
+pre-existing pending implementation; this turn added no runtime logic and is
+not a new TDD claim. No real provider, saved database, or production mutation.

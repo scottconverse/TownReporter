@@ -69,8 +69,18 @@ export type DeskJob = {
  */
 const LANE_CONCURRENCY: Record<JobLane, number> = { editorial: 1, default: 2 };
 
-/** One `draining` flag per lane, not one for the whole drainer. */
-const draining: Record<JobLane, boolean> = { editorial: false, default: false };
+/**
+ * One `draining` flag per lane, shared by every bundled copy of this module in
+ * the process. The background entry and SSR entry can each bundle jobs.ts;
+ * module-local flags let both copies open a full lane and bypass its limit.
+ * `Symbol.for` keeps the ownership record common without making a cross-process
+ * scheduler claim -- separate server processes still coordinate only through
+ * the existing database claim tokens and stale-run recovery.
+ */
+const JOB_DRAINING_KEY = Symbol.for("townreporter:job-lane-draining");
+const jobGlobal = globalThis as typeof globalThis &
+  Record<symbol, Record<JobLane, boolean> | undefined>;
+const draining = (jobGlobal[JOB_DRAINING_KEY] ??= { editorial: false, default: false });
 
 export async function ensureJobsSchema() {
   const sql = await getSql();
