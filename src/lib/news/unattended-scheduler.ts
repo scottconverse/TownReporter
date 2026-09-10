@@ -2,6 +2,7 @@ import { tickAllDueMonitors } from "./monitors-cron.ts";
 import { drainQueuedJobs } from "./jobs.ts";
 import { tickDailyScans } from "./daily-scan.server.ts";
 import { tickRoutineNoticeEditions } from "./routine-notice-worker.server.ts";
+import { tickStatsReports } from "./stats-reports.server.ts";
 
 /**
  * The built server's unattended clock: monitors recapture, job reclaim, and
@@ -66,6 +67,19 @@ export function startUnattendedScheduler(): void {
     }
   };
 
+  let statsTicking = false;
+  const tickStats = async () => {
+    if (statsTicking) return;
+    statsTicking = true;
+    try {
+      await tickStatsReports();
+    } catch (err) {
+      console.error("[townreporter] stats report tick failed:", err);
+    } finally {
+      statsTicking = false;
+    }
+  };
+
   const intervalMs = 5 * 60 * 1000;
   // unref: a background clock must never hold the process open on its own
   // (a test that imports the server would otherwise hang at exit).
@@ -81,4 +95,13 @@ export function startUnattendedScheduler(): void {
   setInterval(() => {
     void tickJobs();
   }, 20_000).unref?.();
+  setTimeout(() => {
+    void tickStats();
+  }, 60_000).unref?.();
+  setInterval(
+    () => {
+      void tickStats();
+    },
+    60 * 60 * 1000,
+  ).unref?.();
 }

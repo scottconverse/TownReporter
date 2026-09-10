@@ -207,6 +207,21 @@ function darkDeskMonitorPlugin(): Plugin {
           jobsTicking = false;
         }
       };
+      let statsTicking = false;
+      const tickStats = async () => {
+        if (statsTicking) return;
+        statsTicking = true;
+        try {
+          const mod = (await server.ssrLoadModule("/src/lib/news/stats-reports.server.ts")) as {
+            tickStatsReports?: () => Promise<unknown>;
+          };
+          if (typeof mod.tickStatsReports === "function") await mod.tickStatsReports();
+        } catch (err) {
+          console.error("[townreporter] stats report tick failed:", err);
+        } finally {
+          statsTicking = false;
+        }
+      };
       const intervalMs = 5 * 60 * 1000;
       const first = setTimeout(() => {
         void tick();
@@ -220,11 +235,22 @@ function darkDeskMonitorPlugin(): Plugin {
       const jobsId = setInterval(() => {
         void tickJobs();
       }, 20_000);
+      const statsFirst = setTimeout(() => {
+        void tickStats();
+      }, 60_000);
+      const statsId = setInterval(
+        () => {
+          void tickStats();
+        },
+        60 * 60 * 1000,
+      );
       const stop = () => {
         clearTimeout(first);
         clearInterval(id);
         clearTimeout(jobsFirst);
         clearInterval(jobsId);
+        clearTimeout(statsFirst);
+        clearInterval(statsId);
       };
       stopScheduler = stop;
       server.httpServer?.once("close", stop);

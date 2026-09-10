@@ -58,3 +58,6 @@ artifacts/**
 
 # Per-install pointer (persistent secrets/data live outside the source tree).
 .townreporter-install.json
+
+# Development-only fallback for generated aggregate Stats reports.
+/.townreporter-data/

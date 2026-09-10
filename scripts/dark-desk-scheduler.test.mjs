@@ -74,3 +74,16 @@ test("development and built clocks both reserve routine editions", () => {
   assert.match(read("vite.config.ts"), /tickRoutineNoticeEditions/);
   assert.match(read("src/lib/news/unattended-scheduler.ts"), /tickRoutineNoticeEditions/);
 });
+
+test("stats disk reporting has an independent bounded clock in development and built servers", () => {
+  const built = read("src/lib/news/unattended-scheduler.ts");
+  const vite = read("vite.config.ts");
+  assert.match(built, /^import \{ tickStatsReports \} from "\.\/stats-reports\.server\.ts";/m);
+  assert.match(built, /statsTicking/);
+  assert.match(vite, /tickStatsReports/);
+  assert.match(vite, /statsTicking/);
+  for (const src of [built, vite]) {
+    assert.match(src, /60_000/);
+    assert.match(src, /60 \* 60 \* 1000/);
+  }
+});

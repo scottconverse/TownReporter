@@ -90,10 +90,14 @@ export async function recordView(
 export type StoryViewRow = {
   slug: string;
   headline: string;
+  today: number;
+  views7d: number;
+  views30d: number;
   views: number;
 };
 
 export type ViewStats = {
+  siteToday: number;
   siteTotal: number;
   site7d: number;
   site30d: number;
@@ -112,6 +116,11 @@ export async function getViewStats(userId: string): Promise<ViewStats> {
   await ensureViewsSchema();
   const sql = await getSql();
 
+  const [siteToday] = await sql<{ total: string | null }>`
+    select sum(count) as total from page_views
+    where newsroom_id = ${newsroomId} and target = ${SITE_TARGET}
+      and day = current_date
+  `;
   const [siteTotal] = await sql<{ total: string | null }>`
     select sum(count) as total from page_views
     where newsroom_id = ${newsroomId} and target = ${SITE_TARGET}
@@ -119,19 +128,30 @@ export async function getViewStats(userId: string): Promise<ViewStats> {
   const [site7d] = await sql<{ total: string | null }>`
     select sum(count) as total from page_views
     where newsroom_id = ${newsroomId} and target = ${SITE_TARGET}
-      and day >= current_date - interval '7 days'
+      and day >= current_date - interval '6 days'
   `;
   const [site30d] = await sql<{ total: string | null }>`
     select sum(count) as total from page_views
     where newsroom_id = ${newsroomId} and target = ${SITE_TARGET}
-      and day >= current_date - interval '30 days'
+      and day >= current_date - interval '29 days'
   `;
 
   // Left join, not inner: a published story with zero recorded views is
   // real information for this page (nothing is reading it), not a row to
   // hide. It sorts to the bottom on its own, coalesced to 0.
-  const storyRows = await sql<{ slug: string; headline: string; views: string | null }>`
-    select a.slug as slug, a.headline as headline, coalesce(sum(pv.count), 0) as views
+  const storyRows = await sql<{
+    slug: string;
+    headline: string;
+    today: string | null;
+    views_7d: string | null;
+    views_30d: string | null;
+    views: string | null;
+  }>`
+    select a.slug as slug, a.headline as headline,
+      coalesce(sum(pv.count) filter (where pv.day = current_date), 0) as today,
+      coalesce(sum(pv.count) filter (where pv.day >= current_date - interval '6 days'), 0) as views_7d,
+      coalesce(sum(pv.count) filter (where pv.day >= current_date - interval '29 days'), 0) as views_30d,
+      coalesce(sum(pv.count), 0) as views
     from articles a
     left join page_views pv
       on pv.newsroom_id = a.newsroom_id
@@ -143,12 +163,16 @@ export async function getViewStats(userId: string): Promise<ViewStats> {
   `;
 
   return {
+    siteToday: Number(siteToday?.total ?? 0),
     siteTotal: Number(siteTotal?.total ?? 0),
     site7d: Number(site7d?.total ?? 0),
     site30d: Number(site30d?.total ?? 0),
     stories: storyRows.map((r) => ({
       slug: r.slug,
       headline: r.headline,
+      today: Number(r.today ?? 0),
+      views7d: Number(r.views_7d ?? 0),
+      views30d: Number(r.views_30d ?? 0),
       views: Number(r.views ?? 0),
     })),
   };

@@ -194,25 +194,34 @@ describe("getViewStats", () => {
       insert into page_views (newsroom_id, target, day, count) values
         (${newsroomId}, ${SITE_TARGET}, current_date, 5),
         (${newsroomId}, ${SITE_TARGET}, current_date - interval '3 days', 4),
+        (${newsroomId}, ${SITE_TARGET}, current_date - interval '6 days', 6),
+        (${newsroomId}, ${SITE_TARGET}, current_date - interval '7 days', 7),
         (${newsroomId}, ${SITE_TARGET}, current_date - interval '10 days', 3),
+        (${newsroomId}, ${SITE_TARGET}, current_date - interval '29 days', 29),
+        (${newsroomId}, ${SITE_TARGET}, current_date - interval '30 days', 30),
         (${newsroomId}, ${SITE_TARGET}, current_date - interval '40 days', 2)
     `;
     await sql`
       insert into page_views (newsroom_id, target, day, count) values
         (${newsroomId}, ${storyTarget(slugA)}, current_date, 7),
+        (${newsroomId}, ${storyTarget(slugA)}, current_date - interval '6 days', 6),
+        (${newsroomId}, ${storyTarget(slugA)}, current_date - interval '7 days', 8),
+        (${newsroomId}, ${storyTarget(slugA)}, current_date - interval '29 days', 29),
+        (${newsroomId}, ${storyTarget(slugA)}, current_date - interval '30 days', 31),
         (${newsroomId}, ${storyTarget(slugB)}, current_date, 2)
     `;
 
     const stats = await getViewStats(userId);
-    assert.equal(stats.siteTotal, 5 + 4 + 3 + 2);
-    assert.equal(stats.site7d, 5 + 4);
-    assert.equal(stats.site30d, 5 + 4 + 3);
+    assert.equal(stats.siteToday, 5);
+    assert.equal(stats.siteTotal, 5 + 4 + 6 + 7 + 3 + 29 + 30 + 2);
+    assert.equal(stats.site7d, 5 + 4 + 6, "today plus the previous 6 calendar dates");
+    assert.equal(stats.site30d, 5 + 4 + 6 + 7 + 3 + 29, "today plus the previous 29 calendar dates");
     assert.deepEqual(
-      stats.stories.map((s) => [s.slug, s.views]),
+      stats.stories.map((s) => [s.slug, s.today, s.views7d, s.views30d, s.views]),
       [
-        [slugA, 7],
-        [slugB, 2],
-        [slugC, 0],
+        [slugA, 7, 7 + 6, 7 + 6 + 8 + 29, 7 + 6 + 8 + 29 + 31],
+        [slugB, 2, 2, 2, 2],
+        [slugC, 0, 0, 0, 0],
       ],
       "ranked descending by views, with the never-viewed story last at 0 (not hidden)",
     );
