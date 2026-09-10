@@ -1,9 +1,21 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
-import { evidenceNeedsReview, mayInheritLeadSources, type EvidenceDecision } from "@/lib/news/draft-evidence";
+import {
+  evidenceNeedsReview,
+  mayInheritLeadSources,
+  type EvidenceDecision,
+} from "@/lib/news/draft-evidence";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Busy, Chip, DeskShell, Field, InkButton, leadOrigin, announceToDesk } from "@/components/desk-chrome";
+import {
+  Busy,
+  Chip,
+  DeskShell,
+  Field,
+  InkButton,
+  leadOrigin,
+  announceToDesk,
+} from "@/components/desk-chrome";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   createFollowUp,
@@ -44,6 +56,17 @@ import { ModelPicker } from "@/components/model-picker";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
+import { integrityNoteItems } from "@/lib/news/coerce-draft";
+import { DraftReconcileControl } from "@/components/draft-reconcile-control";
+import {
+  assessCheckedDraftResult,
+  assessRefreshedCheckedDraft,
+  draftFieldsMatch,
+  getCheckedDraftResultFn,
+  getDraftReconciliationStatusFn,
+  requestDraftReconciliationFn,
+  type EditableDraftFields,
+} from "@/lib/news/draft-reconcile-actions";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
   component: StoryPage,
@@ -70,7 +93,7 @@ function answered<T>(res: T | undefined | null): res is T {
 
 function StoryPage() {
   const { sections } = useEditorSections();
-  const TOPICS = sections.map(s=>s.key);
+  const TOPICS = sections.map((s) => s.key);
   const { formatShortDate } = usePaperDateFormatters();
   const { leadId } = Route.useParams();
   const id = Number(leadId);
@@ -107,6 +130,19 @@ function StoryPage() {
   const priorDraftJobWasOpen = useRef(false);
   const [awaitingDraftJobAck, setAwaitingDraftJobAck] = useState(false);
   const appliedFp = useRef("");
+  const reconcileSnapshot = useRef<EditableDraftFields | null>(null);
+  const currentDraftFields = useRef<EditableDraftFields>({
+    headline: "",
+    dek: "",
+    body: "",
+    topic: "",
+  });
+  const appliedReconcileJob = useRef<number | null>(null);
+  const [reconcileNote, setReconcileNote] = useState("");
+  const [reconcileNoteError, setReconcileNoteError] = useState(false);
+  const [reconcileNoteWarning, setReconcileNoteWarning] = useState(false);
+  const [checkedDraftReady, setCheckedDraftReady] = useState(false);
+  const [checkedDraftStale, setCheckedDraftStale] = useState(false);
 
   const waiting = waitingSince !== null;
 
@@ -119,9 +155,22 @@ function StoryPage() {
     refetchOnReconnect: true,
   });
 
-  const previousJobError = !waiting && !msg && data?.job?.status === "failed"
-    ? editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish."
-    : "";
+  currentDraftFields.current = { headline, dek, body, topic };
+  const reconcileStatus = useQuery({
+    queryKey: ["draft-reconcile", id],
+    queryFn: () => getDraftReconciliationStatusFn({ data: { leadId: id } }),
+    enabled: Boolean(data?.draft?.id),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 2_000 : false;
+    },
+    refetchIntervalInBackground: true,
+  });
+
+  const previousJobError =
+    !waiting && !msg && data?.job?.status === "failed"
+      ? (editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish.")
+      : "";
 
   useEffect(() => {
     const job = data?.job;
@@ -188,7 +237,8 @@ function StoryPage() {
       data?.job?.status !== "failed" ||
       expectedDraftJobId.current == null ||
       data.job.id !== expectedDraftJobId.current
-    ) return;
+    )
+      return;
     expectedDraftJobId.current = null;
     priorDraftJobId.current = data.job.id;
     priorDraftJobWasOpen.current = false;
@@ -303,17 +353,204 @@ function StoryPage() {
       });
       return saveDraft({ data: { leadId: id, headline, dek, body, topic } });
     },
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["lead", id] }); setMsg("Saved."); },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      setMsg("Saved.");
+    },
     onError: (err) => {
       setMsg(err instanceof Error ? err.message : "Could not save.");
     },
   });
 
   const reviewEvidence = useMutation({
-    mutationFn: (decision: EvidenceDecision) => saveDraft({ data: { leadId: id, headline, dek, body, topic, evidenceDecision: decision, evidenceToken: data?.evidenceToken } }),
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["lead", id] }); setMsg("Saved."); },
-    onError: (error) => setMsg(error instanceof Error ? error.message : "Evidence review could not be saved."),
+    mutationFn: (decision: EvidenceDecision) =>
+      saveDraft({
+        data: {
+          leadId: id,
+          headline,
+          dek,
+          body,
+          topic,
+          evidenceDecision: decision,
+          evidenceToken: data?.evidenceToken,
+        },
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      setMsg("Saved.");
+    },
+    onError: (error) =>
+      setMsg(error instanceof Error ? error.message : "Evidence review could not be saved."),
   });
+
+  const applyCheckedDraft = async (
+    draftId: number,
+    expected?: EditableDraftFields,
+    explicit = false,
+  ) => {
+    const checked = await getCheckedDraftResultFn({ data: { leadId: id, draftId } });
+    const assessment = assessCheckedDraftResult({
+      resultDraftId: checked.id,
+      currentDraftId: checked.currentDraftId,
+    });
+    if (!assessment.safeToAutoLoad && !explicit) {
+      setCheckedDraftReady(true);
+      setCheckedDraftStale(true);
+      setReconcileNoteWarning(true);
+      setReconcileNoteError(false);
+      setReconcileNote(
+        "Evidence check finished, but a newer saved draft exists. The newer draft was kept. Load the checked version only to review it as unsaved text.",
+      );
+      return false;
+    }
+    if (expected && !draftFieldsMatch(expected, currentDraftFields.current)) {
+      setCheckedDraftReady(true);
+      setCheckedDraftStale(false);
+      setReconcileNoteWarning(true);
+      setReconcileNoteError(false);
+      setReconcileNote(
+        "Evidence check finished. You typed while it loaded, so your unsaved edits were kept.",
+      );
+      return false;
+    }
+    if (assessment.safeToAutoLoad && expected && !explicit) {
+      const refreshed = await refetch();
+      if (refreshed.isError) throw refreshed.error;
+      const refreshedAssessment = assessRefreshedCheckedDraft({
+        checkedDraftId: checked.id,
+        refreshedDraftId: refreshed.data?.draft?.id ?? null,
+        checked: {
+          headline: checked.headline,
+          dek: checked.dek,
+          body: stripReporterNotebook(checked.body ?? ""),
+          topic: checked.topic,
+        },
+        refreshed: refreshed.data?.draft
+          ? {
+              headline: refreshed.data.draft.headline,
+              dek: refreshed.data.draft.dek,
+              body: stripReporterNotebook(refreshed.data.draft.body ?? ""),
+              topic: refreshed.data.draft.topic,
+            }
+          : null,
+        expected,
+        current: currentDraftFields.current,
+      });
+      if (refreshedAssessment === "stale") {
+        setCheckedDraftReady(true);
+        setCheckedDraftStale(true);
+        setReconcileNoteWarning(true);
+        setReconcileNoteError(false);
+        setReconcileNote(
+          "Evidence check finished, but a newer saved draft exists. The newer draft was kept. Load the checked version only to review it as unsaved text.",
+        );
+        return false;
+      }
+      if (refreshedAssessment === "typed") {
+        setCheckedDraftReady(true);
+        setCheckedDraftStale(false);
+        setReconcileNoteWarning(true);
+        setReconcileNoteError(false);
+        setReconcileNote(
+          "Evidence check finished. You typed while it loaded, so your unsaved edits were kept.",
+        );
+        return false;
+      }
+    }
+    setHeadline(checked.headline);
+    setDek(checked.dek);
+    setBody(stripReporterNotebook(checked.body ?? ""));
+    setTopic(checked.topic);
+    appliedFp.current = assessment.safeToAutoLoad
+      ? `${checked.updatedAt ?? ""}|${(checked.body ?? "").length}|${checked.headline ?? ""}`
+      : "";
+    setCheckedDraftReady(false);
+    setCheckedDraftStale(false);
+    if (!assessment.safeToAutoLoad) {
+      setReconcileNoteWarning(true);
+      setReconcileNoteError(false);
+      setReconcileNote(
+        "Checked version loaded for review as unsaved text. A newer saved draft still exists and was not replaced.",
+      );
+    }
+    return true;
+  };
+
+  const reconcile = useMutation({
+    mutationFn: () => requestDraftReconciliationFn({ data: { leadId: id, modelChoice } }),
+    onMutate: () => {
+      reconcileSnapshot.current = { ...currentDraftFields.current };
+      appliedReconcileJob.current = reconcileStatus.data?.jobId ?? null;
+      setCheckedDraftReady(false);
+      setReconcileNote("");
+      setReconcileNoteError(false);
+      setReconcileNoteWarning(false);
+      setCheckedDraftStale(false);
+    },
+    onSuccess: async (result) => {
+      if (!answered(result)) {
+        setReconcileNote(NO_ANSWER);
+        setReconcileNoteError(true);
+        return;
+      }
+      if (!result.ok) {
+        setReconcileNote(result.error);
+        setReconcileNoteError(true);
+        return;
+      }
+      await qc.invalidateQueries({ queryKey: ["draft-reconcile", id] });
+      setReconcileNote("");
+    },
+    onError: (cause) => {
+      setReconcileNote(
+        cause instanceof Error ? cause.message : "The evidence check could not be queued.",
+      );
+      setReconcileNoteError(true);
+    },
+  });
+
+  useEffect(() => {
+    const status = reconcileStatus.data;
+    if (!status || status.status !== "completed" || appliedReconcileJob.current === status.jobId)
+      return;
+    appliedReconcileJob.current = status.jobId;
+    const snapshot = reconcileSnapshot.current;
+    if (!snapshot) return;
+    if (!status.resultDraftId) {
+      setReconcileNote(
+        "Evidence check finished without identifying its saved result. Reload the page and review the current draft.",
+      );
+      setReconcileNoteError(true);
+      return;
+    }
+    if (!draftFieldsMatch(snapshot, currentDraftFields.current)) {
+      setCheckedDraftReady(true);
+      setCheckedDraftStale(false);
+      setReconcileNoteWarning(true);
+      setReconcileNote(
+        "Evidence check finished. You typed while it ran, so your unsaved edits were kept.",
+      );
+      return;
+    }
+    void applyCheckedDraft(status.resultDraftId, snapshot)
+      .then((loaded) => {
+        if (!loaded) return;
+        setReconcileNote(
+          status.evidenceCheckIncomplete
+            ? "Evidence check finished, but no matching saved capture was available. The retained draft is loaded and remains marked for review."
+            : "Evidence check finished and the checked saved draft is loaded.",
+        );
+        setReconcileNoteError(false);
+        setReconcileNoteWarning(status.evidenceCheckIncomplete);
+      })
+      .catch((cause) => {
+        setReconcileNote(
+          cause instanceof Error ? cause.message : "The checked draft could not be loaded.",
+        );
+        setReconcileNoteError(true);
+        setReconcileNoteWarning(false);
+      });
+  }, [reconcileStatus.data]);
 
   const publish = useMutation({
     mutationFn: async () => {
@@ -389,11 +626,7 @@ function StoryPage() {
     data.lead.headline.startsWith("[Dark]");
   const locked = data.lead.status === "killed";
   const onPaper = data.lead.status === "published" || Boolean(publishedSlug);
-  const canPublish =
-    Boolean(data.draft) &&
-    data.lead.status !== "held" &&
-    !locked &&
-    !onPaper;
+  const canPublish = Boolean(data.draft) && data.lead.status !== "held" && !locked && !onPaper;
   const found = findingsFrom(data.draft?.found_note);
   const unanswered = unansweredNotes(data.draft?.unanswered);
   const verify = data.draft?.integrity_notes?.trim() || "";
@@ -418,7 +651,10 @@ function StoryPage() {
     something the story hangs on, and that call stays the editor's.
   */
   const draftSources = parseUrlList(data.draft?.source_urls ?? "[]");
-  const uncredited = uncreditedOutlets(body, draftSources.length > 0 || !mayInheritLeadSources(data.draft ?? {}) ? draftSources : sources);
+  const uncredited = uncreditedOutlets(
+    body,
+    draftSources.length > 0 || !mayInheritLeadSources(data.draft ?? {}) ? draftSources : sources,
+  );
   /*
     Claims of absence block printing until a person has confirmed each one.
 
@@ -430,6 +666,22 @@ function StoryPage() {
     says so before the editor reaches for the button.
   */
   const evidenceStale = data.draft ? evidenceNeedsReview(data.draft, body) : false;
+  const savedDraftFields: EditableDraftFields | null = data.draft
+    ? {
+        headline: data.draft.headline,
+        dek: data.draft.dek,
+        body: stripReporterNotebook(data.draft.body ?? ""),
+        topic: data.draft.topic,
+      }
+    : null;
+  const hasUnsavedDraftEdits = Boolean(
+    savedDraftFields && !draftFieldsMatch(savedDraftFields, { headline, dek, body, topic }),
+  );
+  const reconcileActive =
+    reconcile.isPending ||
+    reconcileStatus.data?.status === "queued" ||
+    reconcileStatus.data?.status === "running";
+  const savePending = save.isPending || reviewEvidence.isPending || publish.isPending;
   const openClaims = uncheckedGateTodos(notes);
   const blockedReason = openClaims.length
     ? openClaims.length === 1
@@ -475,8 +727,8 @@ function StoryPage() {
           </p>
           {fromDark ? (
             <p className="side-note">
-              This trail came from Dark Desk. Draft privately here; printing is a separate click
-              and every claim still needs evidence.
+              This trail came from Dark Desk. Draft privately here; printing is a separate click and
+              every claim still needs evidence.
             </p>
           ) : null}
           {sources.length > 0 ? (
@@ -501,28 +753,71 @@ function StoryPage() {
         </aside>
 
         <section className="story-work">
-          {!locked && !onPaper ? <DraftScopePicker value={researchScope} onChange={setResearchScope} disabled={waiting} /> : null}
-          {evidenceStale && !onPaper ? <div className="note publish-blocked" role="status">
-            <p>The story changed after its evidence was gathered. The previous reporting remains in private notes; review the sources and claims below before publishing this version.</p>
-            <a href="#evidence-review" className="inline-link" onClick={() => { const details = document.getElementById("evidence-review")?.closest("details"); if (details) details.open = true; }}>Review claims and sources</a>
-            <ul>{parseUrlList(data.draft?.source_urls ?? "[]").map(url => <li key={url}><a href={url} target="_blank" rel="noreferrer" className="inline-link">{url}</a></li>)}</ul>
-            <div className="flex gap-3 mt-2">
-              <InkButton disabled={reviewEvidence.isPending} onClick={() => reviewEvidence.mutate("keep")}>I checked: keep this evidence</InkButton>
-              <InkButton tone="ghost" disabled={reviewEvidence.isPending} onClick={() => reviewEvidence.mutate("remove")}>Remove old evidence from public story</InkButton>
+          {!locked && !onPaper ? (
+            <DraftScopePicker
+              value={researchScope}
+              onChange={setResearchScope}
+              disabled={waiting}
+            />
+          ) : null}
+          {evidenceStale && !onPaper ? (
+            <div className="note publish-blocked" role="status">
+              <p>
+                The story changed after its evidence was gathered. The previous reporting remains in
+                private notes; review the sources and claims below before publishing this version.
+              </p>
+              <a
+                href="#evidence-review"
+                className="inline-link"
+                onClick={() => {
+                  const details = document.getElementById("evidence-review")?.closest("details");
+                  if (details) details.open = true;
+                }}
+              >
+                Review claims and sources
+              </a>
+              <ul>
+                {parseUrlList(data.draft?.source_urls ?? "[]").map((url) => (
+                  <li key={url}>
+                    <a href={url} target="_blank" rel="noreferrer" className="inline-link">
+                      {url}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-3 mt-2">
+                <InkButton
+                  disabled={reviewEvidence.isPending}
+                  onClick={() => reviewEvidence.mutate("keep")}
+                >
+                  I checked: keep this evidence
+                </InkButton>
+                <InkButton
+                  tone="ghost"
+                  disabled={reviewEvidence.isPending}
+                  onClick={() => reviewEvidence.mutate("remove")}
+                >
+                  Remove old evidence from public story
+                </InkButton>
+              </div>
+              <p>
+                Remove clears the old public source list, reporting trail, findings and unanswered
+                questions; it keeps their private audit copy and does not edit your body or its
+                links.
+              </p>
             </div>
-            <p>Remove clears the old public source list, reporting trail, findings and unanswered questions; it keeps their private audit copy and does not edit your body or its links.</p>
-          </div> : null}
+          ) : null}
           <div className="work-bar">
             {!locked && !onPaper ? (
               <>
                 <ModelPicker
                   value={modelChoice}
                   onChange={setModelChoice}
-                  disabled={waiting}
+                  disabled={waiting || reconcileActive || savePending}
                   compact
                 />
                 <InkButton
-                  disabled={waiting}
+                  disabled={waiting || reconcileActive}
                   onClick={() => {
                     if (waiting) return;
                     draft.mutate();
@@ -540,15 +835,44 @@ function StoryPage() {
             ) : null}
             {data.draft && !locked && !onPaper ? (
               <>
-                <InkButton tone="ghost" disabled={save.isPending} onClick={() => save.mutate()}>
+                <InkButton
+                  tone="ghost"
+                  disabled={save.isPending || reconcileActive}
+                  onClick={() => save.mutate()}
+                >
                   Save edits
                 </InkButton>
+                <DraftReconcileControl
+                  status={reconcileStatus.data}
+                  active={reconcileActive}
+                  disabled={waiting || reconcileActive || savePending || hasUnsavedDraftEdits}
+                  dirty={hasUnsavedDraftEdits}
+                  note={reconcileNote}
+                  noteError={reconcileNoteError}
+                  noteWarning={reconcileNoteWarning}
+                  checkedDraftReady={checkedDraftReady}
+                  checkedDraftStale={checkedDraftStale}
+                  onStart={() => reconcile.mutate()}
+                  onReload={() => {
+                    const resultDraftId = reconcileStatus.data?.resultDraftId;
+                    if (!resultDraftId) return;
+                    void applyCheckedDraft(resultDraftId, undefined, true).catch((cause) => {
+                      setReconcileNote(
+                        cause instanceof Error
+                          ? cause.message
+                          : "The checked draft could not be loaded.",
+                      );
+                      setReconcileNoteError(true);
+                      setReconcileNoteWarning(false);
+                    });
+                  }}
+                />
                 {canPublish ? (
                   confirmingPublish ? (
                     <>
                       <span className="note">
-                        This puts the story on the public paper and in the feed, under
-                        your name, now. Corrections are published, not silent edits.
+                        This puts the story on the public paper and in the feed, under your name,
+                        now. Corrections are published, not silent edits.
                       </span>
                       {uncredited.length > 0 ? (
                         <span className="note">
@@ -558,7 +882,12 @@ function StoryPage() {
                         </span>
                       ) : null}
                       <InkButton
-                        disabled={publish.isPending || evidenceStale || reviewEvidence.isPending}
+                        disabled={
+                          publish.isPending ||
+                          evidenceStale ||
+                          reviewEvidence.isPending ||
+                          reconcileActive
+                        }
                         onClick={() => {
                           setConfirmingPublish(false);
                           publish.mutate();
@@ -577,7 +906,10 @@ function StoryPage() {
                           publish.isPending ||
                           !headline.trim() ||
                           !body.trim() ||
-                          openClaims.length > 0 || evidenceStale || reviewEvidence.isPending
+                          openClaims.length > 0 ||
+                          evidenceStale ||
+                          reviewEvidence.isPending ||
+                          reconcileActive
                         }
                         onClick={() => setConfirmingPublish(true)}
                       >
@@ -636,7 +968,9 @@ function StoryPage() {
               label={
                 slowWait
                   ? "The click dropped. The writing pass is still finishing — this page is pulling the draft in."
-                  : researchScope === "supplied" ? "Drafting from your supplied material. Stay on this page." : "Reporting first — following the trail, then drafting. Stay on this page."
+                  : researchScope === "supplied"
+                    ? "Drafting from your supplied material. Stay on this page."
+                    : "Reporting first — following the trail, then drafting. Stay on this page."
               }
             />
           ) : null}
@@ -670,7 +1004,7 @@ function StoryPage() {
                 <select value={topic} onChange={(e) => setTopic(e.target.value)} disabled={onPaper}>
                   {TOPICS.filter((t) => t !== "about").map((t) => (
                     <option key={t} value={t}>
-                      {sections.find(s=>s.key===t)?.name??t}
+                      {sections.find((s) => s.key === t)?.name ?? t}
                     </option>
                   ))}
                   {topic && !TOPICS.includes(topic as (typeof TOPICS)[number]) ? (
@@ -716,7 +1050,14 @@ function StoryPage() {
               leadId={id}
               reviewRevision={data.evidenceToken}
               currentDraft={{ headline, dek, body, topic }}
-              disabled={locked || onPaper || waiting || save.isPending || reviewEvidence.isPending}
+              disabled={
+                locked ||
+                onPaper ||
+                waiting ||
+                save.isPending ||
+                reviewEvidence.isPending ||
+                reconcileActive
+              }
             />
           ) : null}
         </section>
@@ -761,7 +1102,11 @@ function unansweredNotes(raw: string | null | undefined): string[] {
   try {
     const v = JSON.parse(raw) as unknown;
     return Array.isArray(v)
-      ? v.map(String).map((s) => s.trim()).filter(Boolean).slice(0, 12)
+      ? v
+          .map(String)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .slice(0, 12)
       : [];
   } catch {
     return [];
@@ -800,6 +1145,7 @@ function ReportingNotesPane({
   const [pullMsg, setPullMsg] = useState("");
   const small = usePhoneNotes();
   const filled = notesHaveMemo(notes);
+  const verifyItems = notes.verify.flatMap(integrityNoteItems);
 
   /*
     "People who still need to respond" (Direction A stage 1, the Follow-ups
@@ -817,7 +1163,9 @@ function ReportingNotesPane({
   const [fuDue, setFuDue] = useState("");
   const addFollowUp = useMutation({
     mutationFn: () =>
-      createFollowUp({ data: { leadId, who: fuWho.trim(), what: fuWhat.trim(), dueOn: fuDue || null } }),
+      createFollowUp({
+        data: { leadId, who: fuWho.trim(), what: fuWhat.trim(), dueOn: fuDue || null },
+      }),
     onSuccess: (res) => {
       if (res?.ok) {
         setFuWho("");
@@ -903,15 +1251,13 @@ function ReportingNotesPane({
     does not exist, and printing it unchecked is how the paper prints something
     false. The checkbox is the editor saying they opened the city's site.
   */
-  const gateClaims = notes.todo
-    .map((t, i) => ({ t, i }))
-    .filter((row) => row.t.src === "gate");
+  const gateClaims = notes.todo.map((t, i) => ({ t, i })).filter((row) => row.t.src === "gate");
   const absenceBlock = gateClaims.length ? (
     <div className="note-sec note-gate">
       <p className="side-label">Verify before print · Claims of absence</p>
       <p className="note-one">
-        The story says these documents are not there. Open the city's own site and confirm each
-        one. Publishing is blocked until every box is ticked.
+        The story says these documents are not there. Open the city's own site and confirm each one.
+        Publishing is blocked until every box is ticked.
       </p>
       {gateClaims.map((row) => (
         <div key={`gate-${row.i}-${row.t.t}`} className="gate-claim-block">
@@ -958,18 +1304,21 @@ function ReportingNotesPane({
     notes.todo.filter((t) => t.src !== "gate").length ? (
       <div className="note-sec">
         <p className="side-label">Still to pull</p>
-        {notes.todo.map((t, i) => (t.src === "gate" ? null : (
-          <TodoRow
-            key={`${prefix}-${t.src}-${t.t}-${i}`}
-            item={t}
-            disabled={locked}
-            pulling={pulling === i}
-            onToggle={() => save.mutate({ toggle: i, todos: notes.todo })}
-            onPull={() => pull.mutate({ index: i, query: t.t })}
-          />
-        )))}
+        {notes.todo.map((t, i) =>
+          t.src === "gate" ? null : (
+            <TodoRow
+              key={`${prefix}-${t.src}-${t.t}-${i}`}
+              item={t}
+              disabled={locked}
+              pulling={pulling === i}
+              onToggle={() => save.mutate({ toggle: i, todos: notes.todo })}
+              onPull={() => pull.mutate({ index: i, query: t.t })}
+            />
+          ),
+        )}
         <p className="note-hint">
-          Pull searches that line and drops the excerpt in the box under the story. The checkbox just strikes it.
+          Pull searches that line and drops the excerpt in the box under the story. The checkbox
+          just strikes it.
         </p>
         {pullMsg ? <p className="note-one">{pullMsg}</p> : null}
       </div>
@@ -1035,10 +1384,10 @@ function ReportingNotesPane({
               ))}
             </div>
           ) : null}
-          {notes.verify.length ? (
+          {verifyItems.length ? (
             <div className="note-sec">
               <p className="side-label">Verify before print</p>
-              {notes.verify.map((v) => (
+              {verifyItems.map((v) => (
                 <p key={v} className="note-one">
                   {v}
                 </p>
@@ -1051,7 +1400,9 @@ function ReportingNotesPane({
               {notes.opened.map((d) => {
                 const method = openedExtractionByUrl[d.url] ?? null;
                 const raw = (method ?? "").trim();
-                const ocrLine = /^(ocr|needs-ocr):/.test(raw) ? describeExtractionMethod(raw) : null;
+                const ocrLine = /^(ocr|needs-ocr):/.test(raw)
+                  ? describeExtractionMethod(raw)
+                  : null;
                 return (
                   <p key={d.url} className="note-one">
                     <a href={d.url} target="_blank" rel="noreferrer" className="inline-link">
@@ -1083,11 +1434,13 @@ function ReportingNotesPane({
                   ? (replyText, repliedOn) => {
                       // The server appends the reply to this lead's own
                       // "found" notes too; refresh both.
-                      void recordFollowUpReply({ data: { id: f.id, replyText, repliedOn } }).then(() => {
-                        void qc.invalidateQueries({ queryKey: ["follow-ups"] });
-                        void qc.invalidateQueries({ queryKey: ["lead", leadId] });
-                        announceToDesk("Reply recorded.");
-                      });
+                      void recordFollowUpReply({ data: { id: f.id, replyText, repliedOn } }).then(
+                        () => {
+                          void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+                          void qc.invalidateQueries({ queryKey: ["lead", leadId] });
+                          announceToDesk("Reply recorded.");
+                        },
+                      );
                     }
                   : undefined
               }
@@ -1117,9 +1470,22 @@ function ReportingNotesPane({
         {!locked ? (
           addingFollowUp ? (
             <div className="note-add followup-reply-form">
-              <input value={fuWho} onChange={(e) => setFuWho(e.target.value)} placeholder="Who — e.g. City Manager's office" />
-              <input value={fuWhat} onChange={(e) => setFuWhat(e.target.value)} placeholder="For what — one line" />
-              <input type="date" value={fuDue} onChange={(e) => setFuDue(e.target.value)} aria-label="Due date" />
+              <input
+                value={fuWho}
+                onChange={(e) => setFuWho(e.target.value)}
+                placeholder="Who — e.g. City Manager's office"
+              />
+              <input
+                value={fuWhat}
+                onChange={(e) => setFuWhat(e.target.value)}
+                placeholder="For what — one line"
+              />
+              <input
+                type="date"
+                value={fuDue}
+                onChange={(e) => setFuDue(e.target.value)}
+                aria-label="Due date"
+              />
               <InkButton
                 small
                 tone="ghost"
@@ -1213,4 +1579,3 @@ function TodoRow({
     </div>
   );
 }
-

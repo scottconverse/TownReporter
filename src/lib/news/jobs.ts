@@ -15,7 +15,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
  * provider took. It is a job now, on the default lane, for the same reasons
  * drafting is.
  */
-export type JobKind = "scan" | "draft" | "dark" | "editorial" | "brief" | "routine-notice";
+export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice";
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
 /**
@@ -184,6 +184,9 @@ async function realWork(job: DeskJob): Promise<void> {
   if (job.kind === "draft") {
     const { performDraftWork } = await import("./desk.ts");
     await performDraftWork(job);
+  } else if (job.kind === "reconcile") {
+    const { performDraftReconcileWork } = await import("./draft-reconcile.server.ts");
+    await performDraftReconcileWork(job);
   } else if (job.kind === "scan") {
     const daily = await import("./daily-scan.server.ts");
     const mode = scanDispatchMode(job, await daily.isDailyScanJob(job));

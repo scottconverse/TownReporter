@@ -21,10 +21,10 @@ export async function withLeadDraftLock<T>(context: { newsroomId: number }, lead
     return run(sql, lead.status);
   });
 }
-/** Fence a background draft commit by its live job claim and editor membership. */
-export async function withClaimedLeadDraftLock<T>(
+async function withClaimedLeadDraftTransaction<T>(
   job: Pick<DeskJob,"id"|"newsroom_id"|"user_id"|"claim_token">,
   leadId: number,
+  completeJob: boolean,
   run: (sql: Sql, status: string | null) => Promise<T>,
 ): Promise<T> {
   if (!job.claim_token) throw new Error("Draft job has no active claim.");
@@ -41,6 +41,7 @@ export async function withClaimedLeadDraftLock<T>(
     if (!member) throw new Error("Draft permission was withdrawn before results could be saved.");
     const lead = await lockLeadForDraft(sql, job.newsroom_id, leadId);
     const result = await run(sql, lead.status);
+    if (!completeJob) return result;
     const [completed] = await sql<{id:number}>`
       update desk_jobs
       set status = 'completed', stage = 'Done', error = null,
@@ -52,6 +53,22 @@ export async function withClaimedLeadDraftLock<T>(
     if (!completed) throw new Error("Draft job lease was lost before completion could be saved.");
     return result;
   });
+}
+/** Fence an intermediate writer checkpoint without prematurely completing its job. */
+export async function withClaimedLeadDraftCheckpointLock<T>(
+  job: Pick<DeskJob,"id"|"newsroom_id"|"user_id"|"claim_token">,
+  leadId: number,
+  run: (sql: Sql, status: string | null) => Promise<T>,
+): Promise<T> {
+  return withClaimedLeadDraftTransaction(job,leadId,false,run);
+}
+/** Fence a background draft commit by its live job claim and editor membership. */
+export async function withClaimedLeadDraftLock<T>(
+  job: Pick<DeskJob,"id"|"newsroom_id"|"user_id"|"claim_token">,
+  leadId: number,
+  run: (sql: Sql, status: string | null) => Promise<T>,
+): Promise<T> {
+  return withClaimedLeadDraftTransaction(job,leadId,true,run);
 }
 export async function withCurrentDraftForPublish<T>(context: { newsroomId: number }, leadId: number, expected: DraftRow, run: (sql: Sql) => Promise<T>): Promise<T> {
   return withLeadDraftLock(context, leadId, async (sql, status) => {

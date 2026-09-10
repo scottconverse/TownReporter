@@ -7,6 +7,7 @@ import { cleanDraftBatchInput } from "./draft-batch.ts";
 import {
   commitDraftBatchForAuthenticatedEditor,
   ensureDraftBatchSchema,
+  parseDraftBatchCompletion,
   readDraftBatchForAuthenticatedEditor,
 } from "./draft-batch.server.ts";
 
@@ -331,6 +332,27 @@ describe("draft batch transaction and read", () => {
       assert.equal(latest.batch?.id, created.batch.id);
       assert.equal(latest.batch?.items[0]?.workbenchHref, "/desk/story/" + leadId);
     }
+    const sql = await getSql();
+    await sql.query("create table if not exists drafts(id serial primary key,user_id text,newsroom_id integer,lead_id integer,headline text,body text,topic text,integrity_notes text,created_at timestamptz default now())");
+    const [batchDraft] = await sql.query<{ id: number }>(
+      "insert into drafts(user_id,newsroom_id,lead_id,headline,body,topic,integrity_notes) values($1,$2,$3,'Batch draft','Original','council','incomplete') returning id",
+      [context.userId, newsroomId, leadId],
+    );
+    await sql.query(
+      "update desk_jobs set result_json=$1 where newsroom_id=$2 and draft_batch_id=$3",
+      [JSON.stringify({ untouched: "retained", version: 1, draftId: batchDraft.id, evidenceCheckIncomplete: true }), newsroomId, created.batch.id],
+    );
+    await sql.query(
+      "insert into drafts(user_id,newsroom_id,lead_id,headline,body,topic,integrity_notes) values($1,$2,$3,'Newer manual draft','Edited later','council','')",
+      [context.userId, newsroomId, leadId],
+    );
+    const bound = await readDraftBatchForAuthenticatedEditor(context, created.batch.id);
+    assert.equal(bound.ok && bound.batch?.items[0]?.evidenceCheckIncomplete, true);
+    assert.equal(bound.ok && bound.batch?.items[0]?.draftId, batchDraft.id);
+    assert.deepEqual(
+      parseDraftBatchCompletion(JSON.stringify({ version: 1, draftId: 12345, evidenceCheckIncomplete: true, untouched: "retained" })),
+      { draftId: 12345, evidenceCheckIncomplete: true },
+    );
     const foreign = await readDraftBatchForAuthenticatedEditor(
       { userId: "foreign", newsroomId: newsroomId + 1 },
       created.batch.id,

@@ -160,3 +160,21 @@ One isolated run of `source-identity-migration.test.ts` and `sections.test.ts`:
 10 passed, no failures/skips, 12574.4862 ms. The migration test applies twice
 and checks all historical rows remain while the same editor can add the same
 URL to a second newsroom. No production migration was run.
+
+## Draft recovery and batch delivery
+
+One serialized run of `draft-checkpoint.test.ts`, `draft-reconcile.test.ts`,
+`draft-batch-worker.test.ts`, and `draft-batch.test.ts`: 33 passed, 2 suites,
+0 failures/cancelled/skipped, 58997.5262 ms. The environment wrapper explicitly
+reported `DATABASE_URL unset -- PGLite in-memory`; provider transports were
+stubbed. No production database or real model was used.
+
+The run proves writer output is retained when a later pass fails, a newer editor
+draft is preserved, reconciliation queues the saved draft, and batch results
+retain their selected runtime and saved-draft identity. It does not establish
+the factual quality of generated stories. Tests ran against the integrated
+development working tree, not a separately built staged commit.
+
+Luna independently checked dependency closure for this delivery slice and found
+no missing import/export or ordinary-flow integration blocker. Source changes
+and the editor guide are development-only; no production deployment occurred.

@@ -78,7 +78,7 @@ export function scoreExcerpt(excerpt: string, queries: string[]): number {
 export function retrieveRelevantChunks(
   docs: EvidenceDoc[],
   queries: string[],
-  opts: { budgetChars?: number; perDoc?: number } = {},
+  opts: { budgetChars?: number; perDoc?: number; priorityUrls?: string[] } = {},
 ): RetrievedChunk[] {
   const budget = opts.budgetChars ?? 14000;
   const perDoc = opts.perDoc ?? 8;
@@ -123,6 +123,22 @@ export function retrieveRelevantChunks(
   const out: RetrievedChunk[] = [];
   let used = 0;
   const seen = new Set<string>();
+  // Reconciliation must retain a bounded foothold in the assigned source,
+  // even when a large secondary PDF wins the global score contest. Cap this
+  // to two URLs so caller-provided priorities cannot crowd out discovery.
+  const normalizeUrl = (url: string) => url.replace(/\/$/, "");
+  const priorities = [...new Set((opts.priorityUrls ?? []).map(normalizeUrl))].slice(0, 2);
+  const priorityBudget = Math.floor(budget / 2);
+  let priorityUsed = 0;
+  for (const priority of priorities) {
+    const candidate = scored.find((c) => normalizeUrl(c.url) === priority && !seen.has(`${c.url}:${c.locator}`));
+    if (!candidate || priorityUsed + candidate.excerpt.length > priorityBudget) continue;
+    const key = `${candidate.url}:${candidate.locator}`;
+    seen.add(key);
+    out.push(candidate);
+    used += candidate.excerpt.length;
+    priorityUsed += candidate.excerpt.length;
+  }
   for (const c of scored) {
     const key = `${c.url}:${c.locator}`;
     if (seen.has(key)) continue;

@@ -6,6 +6,7 @@ import { runAbsenceGate } from "./absence-gate.ts";
 import { draftSourceInputs } from "./draft-input.ts";
 import { parseNotes } from "./notes.ts";
 import { parseWriteStoryInput } from "./write-story.ts";
+import { retrieveRelevantChunks } from "./retrieve.ts";
 
 const lead: LeadRow = { id: 1, headline: "Library hours change on Tuesday", why: "Editor's supplied notice", topic: "community", status: "new", source_urls: "[]", evidence: "", newsworthiness: 1, created_at: "2026-09-07" };
 const alien = "https://vendor.example/news/test-automation-press-release";
@@ -25,6 +26,43 @@ it("distinguishes synthesis from unsupported comparisons, date roles and inverte
     assert.match(prompt, /direction.*safety advice/i);
   }
   assert.doesNotMatch(REPORT_EDIT_SYSTEM, /evidence or the draft/i);
+});
+it("labels research questions and unknowns as hypotheses that evidence can resolve", async () => {
+  const packets: { system: string; user: string }[] = [];
+  const deps = dependencies({ searches: [], fetched: [], packets: [] });
+  deps.chat = async (system, user) => {
+    packets.push({ system, user });
+    if (system === REPORT_RESEARCH_SYSTEM) {
+      return { ok: true, text: JSON.stringify({
+        news: lead.headline,
+        form: "brief",
+        questions: ["What time does the library open Tuesday?"],
+        unknowns: ["Tuesday opening time"],
+      }) };
+    }
+    return { ok: true, text: JSON.stringify({
+      headline: lead.headline,
+      body: "The library opens at noon Tuesday, according to its notice.",
+      topic: lead.topic,
+      source_urls: [supplied],
+      unanswered: [],
+    }) };
+  };
+
+  await reportAndDraft(
+    { userId: "unknown-semantics", lead, urls: [supplied], memory: [], researchScope: "supplied", modelChoice: "claude-frontier" },
+    deps,
+  );
+
+  const writePacket = packets.find((packet) => packet.system === REPORT_WRITE_SYSTEM)?.user ?? "";
+  const editPacket = packets.find((packet) => packet.system === REPORT_EDIT_SYSTEM)?.user ?? "";
+  for (const packet of [writePacket, editPacket]) {
+    assert.match(packet, /not evidence/i);
+    assert.match(packet, /remove or narrow/i);
+    assert.match(packet, /Tuesday opening time/);
+  }
+  assert.match(REPORT_EDIT_SYSTEM, /research questions and unknowns are hypotheses/i);
+  assert.match(REPORT_EDIT_SYSTEM, /supplied evidence answers/i);
 });
 for (const outcome of ["success", "refusal", "unreadable", "exception"]) {
   it(`reconciles an ordinary draft against URL-labeled evidence and retains it on ${outcome}`, async () => {
@@ -74,6 +112,78 @@ it("keeps a useful draft honestly unchecked when no editing budget remains", asy
     assert.deepEqual(result.source_urls,[],"opened documents are not implicitly cited");
     assert.ok(result.research_memo.captured.some(doc => doc.url === supplied));
   }
+});
+it("passes the remaining wall budget to an injected report chat", async () => {
+  const timeouts: number[] = [];
+  const deps = dependencies({ searches: [], fetched: [], packets: [] });
+  deps.chat = async (system, _user, _maxTokens, _choice, options) => {
+    timeouts.push(options?.timeoutMs ?? -1);
+    if (system.includes('"fetch_urls"')) return { ok: true, text: JSON.stringify({ news: lead.headline, form: "brief" }) };
+    return { ok: true, text: JSON.stringify({ headline: lead.headline, body: "The library notice lists new opening hours for local residents.", source_urls: [], topic: lead.topic }) };
+  };
+  const result = await reportAndDraft(
+    { userId: "budget-forward", lead, urls: [supplied], memory: [], researchScope: "supplied", modelChoice: "claude-frontier" },
+    { ...deps, budgetMs: 20_000 },
+  );
+  assert.ok(!("error" in result));
+  assert.ok(timeouts.length > 0);
+  assert.ok(timeouts.every((ms) => ms >= 6_000 && ms <= 18_000));
+});
+it("honors a lower per-provider call budget", async () => {
+  const timeouts: number[] = [];
+  const deps = dependencies({ searches: [], fetched: [], packets: [] });
+  deps.chat = async (system, _user, _maxTokens, _choice, options) => {
+    timeouts.push(options?.timeoutMs ?? -1);
+    return { ok: true, text: JSON.stringify(system.includes('"fetch_urls"') ? { news: lead.headline, form: "brief" } : { headline: lead.headline, body: "The library notice lists new opening hours for local residents.", source_urls: [], topic: lead.topic }) };
+  };
+  await reportAndDraft(
+    { userId: "override-forward", lead, urls: [supplied], memory: [], researchScope: "supplied", modelChoice: "claude-frontier", providerOverrides: { "claude-frontier": { callMs: 10_000 } } },
+    { ...deps, budgetMs: 20_000 },
+  );
+  assert.ok(timeouts.length > 0);
+  assert.ok(timeouts.every((ms) => ms <= 10_000));
+});
+it("does not start an injected call inside the near-wall guard", async () => {
+  let calls = 0;
+  const deps = dependencies({ searches: [], fetched: [], packets: [] });
+  deps.chat = async () => { calls++; return { ok: true, text: "{}" }; };
+  const result = await reportAndDraft(
+    { userId: "near-wall", lead, urls: [supplied], memory: [], researchScope: "supplied", modelChoice: "claude-frontier" },
+    { ...deps, budgetMs: 7_000 },
+  );
+  assert.equal(calls, 0);
+  assert.ok("error" in result);
+});
+it("reserves an assigned multilingual source while retaining secondary evidence", () => {
+  const primary = { url: "https://longmontcolorado.gov/news/2026-midyear-longmont-progress-updates", title: "2026 Midyear Longmont Progress Updates", text: "Avances de Longmont hasta mediados de 2026 actualizados. " + "Información de programas y servicios municipales. ".repeat(40) + "Longmont solo puede contabilizar un 31% como energía sin carbono para 2025. Platte River planea vender créditos entre 2026 y 2029 para evitar aumentos en las tarifas. Las emisiones aumentarán en 2027 y disminuirán significativamente en 2030." };
+  const secondary = { url: "https://prpa.org/2025-annual-report.pdf", title: "2025 Annual Report", text: "Platte River renewable energy credit sales February board packet utility rate pressure relief 2025. ".repeat(90) };
+  const query = ["Platte River renewable energy credits February utility credit", "renewable energy credit sales 2025 board packet rate pressure relief"];
+  const baseline = retrieveRelevantChunks([secondary, primary], query, { budgetChars: 7_000 });
+  assert.equal(baseline.some((chunk) => chunk.url === primary.url), false, "global ranking should reproduce primary starvation");
+  const chunks = retrieveRelevantChunks([secondary, primary], query, { budgetChars: 7_000, priorityUrls: [primary.url] });
+  const reserved = chunks.find((chunk) => chunk.url === primary.url);
+  assert.ok(reserved);
+  assert.match(reserved?.excerpt ?? "", /31%|2027|2030/);
+  assert.ok(chunks.some((chunk) => chunk.url === secondary.url));
+});
+it("puts the assigned primary and discovered secondary in reconciliation evidence", async () => {
+  const primary = "https://longmontcolorado.gov/news/2026-midyear-longmont-progress-updates";
+  const secondary = "https://example.org/midyear-progress-background";
+  let editPacket = "";
+  const packetLead: LeadRow = { ...lead, headline: "Longmont midyear progress updates", why: "The city posted a measurable midyear update.", source_urls: JSON.stringify([primary]) };
+  await reportAndDraft({ userId: "priority-packet", lead: packetLead, urls: [primary], memory: [], modelChoice: "claude-frontier" }, {
+    paper: async () => ({ name: "TownReporter", city: "Longmont", state: "Colorado", officialDomains: [] }),
+    search: async () => [{ url: secondary, title: "Midyear progress background" }],
+    ingest: async (url) => ({ url, title: url === primary ? "2026 Midyear Longmont Progress Updates" : "Midyear progress background", text: url === primary ? "Avances de Longmont hasta mediados de 2026. El 31% de 2025 fue energía sin carbono; las ventas 2026 a 2029 afectan emisiones 2027 y 2030." : "Midyear progress background gives local context and milestones.", extras: [] }),
+    capture: async () => ({ version_id: 1, capture_event_id: 1 }), hydrate: async () => [],
+    chat: async (system, user) => {
+      if (system === REPORT_EDIT_SYSTEM) editPacket = user;
+      return { ok: true, text: JSON.stringify(system === REPORT_RESEARCH_SYSTEM ? { news: packetLead.headline, angle: packetLead.headline, form: "reported", lanes: { context: ["Midyear progress background"] } } : { headline: packetLead.headline, body: "Longmont posted a midyear progress update with documented milestones.", topic: packetLead.topic, source_urls: [primary, secondary], claims: [] }) };
+    },
+  });
+  assert.ok(editPacket.includes(primary));
+  assert.ok(editPacket.includes("31%"));
+  assert.ok(editPacket.includes(secondary));
 });
 for (const clear of [true, false]) {
   it(`honors an editor's ${clear ? "explicit empty citation list" : "omitted citation field"}`, async () => {

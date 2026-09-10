@@ -837,7 +837,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   job: DeskJob,
   deps: PerformDraftWorkDeps = {},
 ) {
-  const { withClaimedLeadDraftLock } = await import("./draft-order.server.ts");
+  const { withClaimedLeadDraftLock, withClaimedLeadDraftCheckpointLock } = await import("./draft-order.server.ts");
   const runReport = deps.reportAndDraft ?? reportAndDraft;
   const probe = deps.probe ?? probeProvider;
   const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
@@ -860,6 +860,11 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const lead = leads[0];
   if (!lead) throw new Error("Lead not found");
   if (lead.status === "killed") throw new Error("Restore this lead before drafting.");
+  let expectedDraft = (await sql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1`)[0] ?? null;
+  const draftStillExpected = (current: DraftRow | null) =>
+    current?.id === expectedDraft?.id &&
+    String(current?.updated_at ?? "") === String(expectedDraft?.updated_at ?? "") &&
+    (!current || !expectedDraft || evidenceReviewToken(current) === evidenceReviewToken(expectedDraft));
   await ensureDraftMemoColumn();
 
   let urls: string[] = [];
@@ -899,24 +904,48 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const reportDeps: Parameters<typeof reportAndDraft>[1] = {
     onStage: (stage) => setStage(job.id, stage),
   };
+  reportDeps.onWriterDraft = async checkpoint => {
+    const checkpointNote = "Evidence reconciliation not completed within the available edit pass. Draft retained; verify its claims and citations before publication.";
+    const integrityNotes = [...new Set([checkpoint.integrity_notes,checkpointNote].map(value=>String(value??"").trim()).filter(Boolean))].join("\n");
+    const provenance = checkpoint.captures.map(capture => ({
+      url: capture.url,
+      title: capture.title,
+      version_id: capture.version_id,
+      capture_event_id: capture.capture_event_id,
+      role: "followed",
+    }));
+    await withClaimedLeadDraftCheckpointLock(job,leadId,async transactionSql => {
+      const current = (await transactionSql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1 for update`)[0] ?? null;
+      if (!draftStillExpected(current)) throw new Error("The draft changed while the writer was working. The editor's newer draft was preserved.");
+      const [saved] = await transactionSql<DraftRow>`
+        insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json)
+        values(${context.userId},${owned(context)},${leadId},${checkpoint.headline},${checkpoint.dek},${checkpoint.body},${lead.topic},${JSON.stringify(checkpoint.source_urls)},${integrityNotes},${JSON.stringify(provenance)},${String(checkpoint.form??"")},${JSON.stringify(checkpoint.found??null)},${JSON.stringify(Array.isArray(checkpoint.unanswered)?checkpoint.unanswered:[])},${JSON.stringify({citationPolicy:"explicit",researchScope:draftInput.researchScope,reportedClaims:{version:1,rows:Array.isArray(checkpoint.claims)?checkpoint.claims:[]},writerCheckpoint:{version:1,jobId:job.id,evidenceCheckIncomplete:true}})})
+        returning *
+      `;
+      await transactionSql`
+        update desk_jobs set result_json=(coalesce(nullif(result_json,''),'{}')::jsonb || ${JSON.stringify({checkpointDraftId:Number(saved.id)})}::jsonb)::text,updated_at=now()
+        where id=${job.id} and newsroom_id=${job.newsroom_id} and status='running' and claim_token=${job.claim_token??""}
+      `;
+      expectedDraft=saved;
+    });
+  };
   if (batchSnapshot) {
     const { forcedOcrOptions, runForcedChat } = await import("./forced-runtime.server.ts");
     const adapters =
       deps.batchChatAdapters ??
       ({
-        claude: async (input) =>
-          (await import("./ai-claude-code.server.ts")).claudeCodeChat(input),
+        claude: async (input) => (await import("./ai-claude-code.server.ts")).claudeCodeChat(input),
         codex: async (input) => (await import("./ai-codex.server.ts")).codexChat(input),
         local: grokChat,
       } satisfies NonNullable<PerformDraftWorkDeps["batchChatAdapters"]>);
-    reportDeps.chat = async (system, user, maxTokens = 800) => {
+    reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
       const current = await batchGuard();
       return runForcedChat(
         current,
         system,
         user,
         maxTokens,
-        { noTools: true },
+        { noTools: true, timeoutMs: options?.timeoutMs },
         adapters,
       );
     };
@@ -966,24 +995,19 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         return { version_id: rec.versionId, capture_event_id: rec.captureEventId };
       });
   }
-  let reported = await runReport(
+  const runReportWithCheckpoint = (input: Parameters<typeof reportAndDraft>[0]) => runReport(input,reportDeps);
+  let reported = await runReportWithCheckpoint(
     {
       ...draftInput,
       modelChoice: effectiveStoryModelChoice(job.model_choice),
     },
-    /*
-      The absence gate can force one redraft (report.ts). Silently taking twice
-      as long is how an editor loses trust in a desk, so the reason goes on the
-      job where the story page already reads it.
-    */
-    reportDeps,
   );
   if ("error" in reported && !batchSnapshot) {
     reported = await failOverAndRetry({
       job,
       error: reported.error,
       draftInput,
-      runReport,
+      runReport: runReportWithCheckpoint,
       probe,
       setModelChoice,
       setStage,
@@ -1070,7 +1094,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const notesJson = packNotes(nextNotes);
 
   await withClaimedLeadDraftLock(job, leadId, async (sql) => {
-  await sql`
+    const current=(await sql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1 for update`)[0]??null;
+    if (!draftStillExpected(current)) throw new Error("The draft changed while reporting was finishing. The editor's newer draft was preserved.");
+    const [savedDraft] = await sql<{ id: number }>`
     insert into drafts (
       user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
       provenance_json, form, found_note, unanswered, research_json
@@ -1081,12 +1107,28 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       ${provenanceJson}, ${reported.form}, ${reported.found_note}, ${unansweredJson},
       ${researchJson}
     )
+    returning id
   `;
-  await sql`
+    if (job.draft_batch_id && savedDraft) {
+      const completion = JSON.stringify({
+        version: 1,
+        draftId: Number(savedDraft.id),
+        evidenceCheckIncomplete: notes.includes(
+          "Evidence reconciliation not completed within the available edit pass.",
+        ),
+      });
+      await sql`
+      update desk_jobs
+      set result_json = (coalesce(nullif(result_json, ''), '{}')::jsonb || ${completion}::jsonb)::text
+      where id = ${job.id} and newsroom_id = ${job.newsroom_id}
+        and status = 'running' and claim_token = ${job.claim_token ?? ""}
+    `;
+    }
+    await sql`
     update leads set status = 'drafted', notes_json = ${notesJson}
     where id = ${leadId} and newsroom_id = ${owned(context)}
   `;
-  await sql`
+    await sql`
     insert into audit_events (user_id, action, detail, newsroom_id)
     values (${context.userId}, 'draft', ${String(leadId)}, ${owned(context)})
   `;

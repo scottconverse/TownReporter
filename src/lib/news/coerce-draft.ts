@@ -23,6 +23,18 @@ function asTopic(value: unknown, fallback: string): string {
   return s === fallback || (TOPICS as readonly string[]).includes(s) ? s : fallback;
 }
 
+export function normalizeIntegrityNotes(value: unknown): string {
+  const text = Array.isArray(value)
+    ? value.map((item) => String(item).trim()).filter(Boolean).join("\n")
+    : String(value ?? "").trim();
+  return text.slice(0, 2000);
+}
+
+/** New array notes use newlines; historical prose (including commas) stays intact. */
+export function integrityNoteItems(value: string): string[] {
+  return value.split(/\r?\n+/).map((item) => item.trim()).filter(Boolean);
+}
+
 /** Pull a JSON string field even when the model left inner quotes unescaped. */
 export function extractQuoted(raw: string, key: string): string | undefined {
   const startRe = new RegExp(`"${key}"\\s*:\\s*"`);
@@ -58,7 +70,7 @@ function fromObject(
     body,
     topic: asTopic(obj.topic, fallback.topic),
     source_urls: obj.source_urls,
-    integrity_notes: String(obj.integrity_notes ?? "").trim().slice(0, 2000),
+    integrity_notes: normalizeIntegrityNotes(obj.integrity_notes),
     memory_entities: Array.isArray(obj.memory_entities)
       ? obj.memory_entities.map((x) => String(x).slice(0, 80)).slice(0, 16)
       : [],

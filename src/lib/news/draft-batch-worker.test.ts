@@ -4,6 +4,7 @@ import { after, before, it } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
 import type { DeskJob } from "./jobs.ts";
 import type { ReportedDraftResult } from "./desk-model-run.ts";
+import { singleRenderedPdfFixture } from "./pdf-test-fixture.ts";
 
 let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;
@@ -38,16 +39,6 @@ const reported = {
   claims: [],
   research_memo: {},
 } as ReportedDraftResult;
-
-function scannedPdf(): Uint8Array {
-  const jpeg = new Uint8Array(5000);
-  jpeg.set([0xff, 0xd8, 0xff], 0);
-  jpeg.set([0xff, 0xd9], jpeg.length - 2);
-  const pdf = new Uint8Array(jpeg.length + 30);
-  pdf.set(Buffer.from("%PDF-1.4 scanned "), 0);
-  pdf.set(jpeg, 20);
-  return pdf;
-}
 
 async function fixture(newsroomId: number) {
   const sql = await getSql();
@@ -110,11 +101,15 @@ async function fixture(newsroomId: number) {
 
 it("actual draft worker uses only the persisted forced transport", async () => {
   const { sql, userId, job } = await fixture(99201);
+  await sql.query("update desk_jobs set result_json=$1 where id=$2", [
+    JSON.stringify({ requestId: "retained" }),
+    job.id,
+  ]);
   const calls: string[] = [];
   const previousKey = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = "must-not-be-used";
   setFetchImplForTests(
-    async () => new Response(scannedPdf(), { headers: { "content-type": "application/pdf" } }),
+    async () => new Response(singleRenderedPdfFixture(), { headers: { "content-type": "application/pdf" } }),
   );
   try {
     await performDraftWork(job, {
@@ -124,13 +119,18 @@ it("actual draft worker uses only the persisted forced transport", async () => {
         const capture = await deps.capture?.(userId, document!);
         assert.ok(capture?.version_id);
         assert.ok(capture?.capture_event_id);
-        const answer = await deps.chat?.("system", "user", 100, "codex-frontier");
+        const answer = await deps.chat?.("system", "user", 100, "codex-frontier", { timeoutMs: 12_345 });
         assert.equal(answer?.ok, true);
-        return reported;
+        return {
+          ...reported,
+          integrity_notes:
+            "Evidence reconciliation not completed within the available edit pass. Draft retained.",
+        };
       },
       batchChatAdapters: {
         claude: async (input) => {
           assert.equal(input.noTools, true);
+          assert.equal(input.timeoutMs, 12_345);
           calls.push("claude:" + input.model);
           return { ok: true, text: "answer" };
         },
@@ -164,11 +164,18 @@ it("actual draft worker uses only the persisted forced transport", async () => {
     else process.env.ANTHROPIC_API_KEY = previousKey;
   }
   assert.deepEqual(calls, ["claude-ocr", "claude:selected-claude"]);
-  const [persisted] = await sql.query<{ status: string; drafts: number }>(
-    "select j.status,(select count(*)::int from drafts d where d.lead_id=j.subject_id) drafts from desk_jobs j where j.id=$1",
+  const [persisted] = await sql.query<{ status: string; drafts: number; result_json: string; draft_id: number }>(
+    "select j.status,j.result_json,(select count(*)::int from drafts d where d.lead_id=j.subject_id) drafts,(select id from drafts d where d.lead_id=j.subject_id order by id desc limit 1) draft_id from desk_jobs j where j.id=$1",
     [job.id],
   );
-  assert.deepEqual(persisted, { status: "completed", drafts: 1 });
+  assert.equal(persisted.status, "completed");
+  assert.equal(persisted.drafts, 1);
+  assert.deepEqual(JSON.parse(persisted.result_json), {
+    requestId: "retained",
+    version: 1,
+    draftId: persisted.draft_id,
+    evidenceCheckIncomplete: true,
+  });
   const [captureScope] = await sql.query<{ owned: number; default_room: number }>(
     "select count(*) filter (where newsroom_id=$1)::int owned,count(*) filter (where newsroom_id=1)::int default_room from capture_events where source_url=$2",
     [job.newsroom_id, "https://93.184.216.34/scan.pdf"],

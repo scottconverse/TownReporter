@@ -10,6 +10,7 @@ let getSql: typeof import("../db.ts").getSql;
 let performDraftWork: typeof import("./desk.ts").performDraftWork;
 let performPublish: typeof import("./desk.ts").performPublish;
 let parseFindings: typeof import("./findings.ts").parseFindings;
+let saveDraftForEditor: typeof import("./draft-edit.server.ts").saveDraftForEditor;
 
 before(async () => {
   vite = await createServer({
@@ -20,6 +21,7 @@ before(async () => {
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
   ({ performDraftWork, performPublish } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
   ({ parseFindings } = await vite.ssrLoadModule("/src/lib/news/findings.ts"));
+  ({ saveDraftForEditor } = await vite.ssrLoadModule("/src/lib/news/draft-edit.server.ts"));
 });
 
 after(async () => vite.close());
@@ -151,4 +153,101 @@ it("keeps bounded multi-source evidence as valid JSON through draft and publicat
   assert.deepEqual(JSON.parse(article.provenance_json), provenance);
   assert.deepEqual(JSON.parse(article.found_note), findings);
   assert.deepEqual(JSON.parse(article.unanswered), unanswered);
+});
+
+it("keeps an explicit empty citation list empty through draft save and publication", async () => {
+  const sql = await getSql();
+  const newsroomId = 98402;
+  const userId = "explicit-empty-citations-editor";
+  const leadSource = "https://lead.example.test/discovery-record";
+  await sql.query("delete from articles where newsroom_id=$1", [newsroomId]);
+  await sql.query("delete from audit_events where newsroom_id=$1", [newsroomId]);
+  await sql.query("delete from desk_jobs where newsroom_id=$1", [newsroomId]);
+  await sql.query("delete from drafts where newsroom_id=$1", [newsroomId]);
+  await sql.query("delete from leads where newsroom_id=$1", [newsroomId]);
+  await sql.query("delete from newsroom_members where newsroom_id=$1", [newsroomId]);
+  await sql.query("insert into newsroom_members(user_id,role,newsroom_id) values($1,'editor',$2)", [
+    userId,
+    newsroomId,
+  ]);
+  const [lead] = await sql.query<{ id: number }>(
+    "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'Lead with a discovery URL','Why','council','new',$3,'',1,'{}') returning id",
+    [userId, newsroomId, JSON.stringify([leadSource])],
+  );
+  const [jobRow] = await sql.query<{ id: number }>(
+    "insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,lane,status,stage,claim_token) values($1,$2,'draft',$3,'claude-frontier','editor','default','running','Drafting','explicit-empty-claim') returning id",
+    [userId, newsroomId, lead.id],
+  );
+  const reported = {
+    headline: "Council meeting notice",
+    dek: "A brief without public citations.",
+    body: "The council posted an agenda for its next meeting.",
+    topic: "council",
+    source_urls: [],
+    integrity_notes: "",
+    memory_entities: [],
+    form: "brief",
+    provenance: [],
+    found_note: "[]",
+    findings: [],
+    unanswered: [],
+    claims: [],
+    research_memo: {},
+  } as ReportedDraftResult;
+  const job = {
+    id: jobRow.id,
+    newsroom_id: newsroomId,
+    user_id: userId,
+    kind: "draft",
+    subject_id: lead.id,
+    model_choice: "claude-frontier",
+    model_choice_source: "editor",
+    lane: "default",
+    status: "running",
+    stage: "Drafting",
+    failover_note: "",
+    error: null,
+    created_at: "",
+    updated_at: "",
+    started_at: null,
+    finished_at: null,
+    claim_token: "explicit-empty-claim",
+  } as DeskJob;
+
+  await performDraftWork(job, {
+    reportAndDraft: async () => reported,
+    setJobStage: async () => undefined,
+  });
+  let [draft] = await sql.query<{ source_urls: string; research_json: string }>(
+    "select source_urls,research_json from drafts where lead_id=$1 and newsroom_id=$2",
+    [lead.id, newsroomId],
+  );
+  assert.equal(draft.source_urls, "[]");
+  assert.equal(JSON.parse(draft.research_json).citationPolicy, "explicit");
+
+  await saveDraftForEditor(
+    { userId, newsroomId },
+    { leadId: lead.id, headline: reported.headline, dek: reported.dek, body: reported.body, topic: reported.topic },
+  );
+  [draft] = await sql.query<{ source_urls: string; research_json: string }>(
+    "select source_urls,research_json from drafts where lead_id=$1 and newsroom_id=$2",
+    [lead.id, newsroomId],
+  );
+  assert.equal(draft.source_urls, "[]", "saving must not restore the lead discovery URL");
+  assert.equal(JSON.parse(draft.research_json).citationPolicy, "explicit");
+
+  const published = await performPublish({ userId, newsroomId }, lead.id);
+  assert.equal(published.ok, true);
+  const [article] = await sql.query<{
+    source_urls: string;
+    provenance_json: string;
+    found_note: string;
+  }>(
+    "select source_urls,provenance_json,found_note from articles where lead_id=$1 and newsroom_id=$2",
+    [lead.id, newsroomId],
+  );
+  assert.equal(article.source_urls, "[]", "publication must not inherit the lead discovery URL");
+  assert.equal(article.provenance_json, "[]", "publication must not create reader provenance from the lead URL");
+  assert.equal(article.found_note, "[]", "publication must not carry the lead URL into reader findings");
+  assert.doesNotMatch(JSON.stringify(article), new RegExp(leadSource.replace(/[./]/g, "\\$&")));
 });

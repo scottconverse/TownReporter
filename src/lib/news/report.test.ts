@@ -16,6 +16,7 @@ import {
   parseFindings,
   preferStoryUrls,
   provenanceFromUrls,
+  reportAndDraft,
   resolvePublicFindings,
   stripAiFiller,
   stripReporterNotebook,
@@ -25,6 +26,74 @@ import {
 import type { LeadRow } from "./types.ts";
 import { describeTextChanges, retrieveRelevantChunks } from "./retrieve.ts";
 import { rankWorthItems } from "./worth-a-look.ts";
+
+it("supplies the configured topic key to writing and reconciliation as authoritative metadata", async () => {
+  const sourceUrl = "https://schools.example/notices/benefits";
+  const packets: { system: string; user: string }[] = [];
+  const lead: LeadRow = {
+    id: 62,
+    headline: "Benefit applications remain available",
+    why: "Families can apply throughout the school year.",
+    topic: "schools",
+    status: "new",
+    source_urls: JSON.stringify([sourceUrl]),
+    evidence: "",
+    newsworthiness: 1,
+    created_at: "2026-09-09",
+  };
+  const draft = {
+    headline: lead.headline,
+    dek: lead.why,
+    body: "The district says applications remain available.",
+    topic: lead.topic,
+    source_urls: [sourceUrl],
+    integrity_notes: "No configured Topic key was supplied with the lead.",
+    unanswered: [],
+  };
+
+  const result = await reportAndDraft(
+    {
+      userId: "topic-context",
+      lead,
+      urls: [sourceUrl],
+      memory: [],
+      researchScope: "supplied",
+      modelChoice: "claude-frontier",
+    },
+    {
+      paper: async () => ({
+        name: "Test Paper",
+        city: "Longmont",
+        state: "Colorado",
+      }),
+      ingest: async (url) => ({
+        url,
+        title: "District benefit notice",
+        text: "Applications remain available throughout the school year.",
+        extras: [],
+      }),
+      capture: async () => ({ version_id: 1, capture_event_id: 2 }),
+      hydrate: async () => [],
+      chat: async (system, user) => {
+        packets.push({ system, user });
+        if (system.includes('"fetch_urls"')) {
+          return { ok: true, text: JSON.stringify({ news: lead.headline, form: "brief" }) };
+        }
+        return { ok: true, text: JSON.stringify(draft) };
+      },
+    },
+  );
+
+  assert.ok(!("error" in result));
+  const modelPackets = packets.filter((packet) => !packet.system.includes('"fetch_urls"'));
+  assert.equal(modelPackets.length, 2);
+  for (const packet of modelPackets) {
+    assert.match(packet.user, /EDITORIAL METADATA \(authoritative, not evidence\)/);
+    assert.match(packet.user, /Topic key: "schools"/);
+    assert.match(packet.user, /never claim supplied metadata is missing/i);
+    assert.match(packet.user, /When it is empty, retain an honest section-assignment warning/i);
+  }
+});
 
 describe("describeSourceUrl", () => {
   it("does not replace a document URL with the organization's homepage label", () => {

@@ -9,6 +9,8 @@ export type DraftBatchItem = {
   status: "queued" | "running" | "completed" | "failed";
   stage: string;
   error: string | null;
+  draftId: number | null;
+  evidenceCheckIncomplete: boolean;
   workbenchHref: string;
 };
 export type DraftBatchView = {

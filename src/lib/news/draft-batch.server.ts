@@ -18,6 +18,25 @@ import type { AuthenticatedEditorContext } from "./model-request-commit.server.t
 
 export const validateBatchRuntime = validateForcedRuntime;
 
+export function parseDraftBatchCompletion(value: unknown): {
+  draftId: number;
+  evidenceCheckIncomplete: boolean;
+} | null {
+  try {
+    const row = typeof value === "string" ? JSON.parse(value) : value;
+    if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+    const result = row as Record<string, unknown>;
+    if (result.version !== 1 || !Number.isSafeInteger(result.draftId) || Number(result.draftId) <= 0)
+      return null;
+    return {
+      draftId: Number(result.draftId),
+      evidenceCheckIncomplete: result.evidenceCheckIncomplete === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function isCurrentBatchEditor(context: AuthenticatedEditorContext): Promise<boolean> {
   const [member] = await (
     await getSql()
@@ -173,10 +192,20 @@ async function batchView(
     status: DraftBatchView["items"][number]["status"];
     stage: string;
     error: string | null;
+    result_json: string;
   }>(
-    "select subject_id,id,status,stage,error from desk_jobs where newsroom_id=$1 and draft_batch_id=$2 order by id",
+    "select subject_id,id,status,stage,error,result_json from desk_jobs where newsroom_id=$1 and draft_batch_id=$2 order by id",
     [context.newsroomId, batch.id],
   );
+  const parsed = new Map(jobs.map((job) => [job.id, parseDraftBatchCompletion(job.result_json)]));
+  const candidateDraftIds = [...new Set([...parsed.values()].flatMap((row) => row ? [row.draftId] : []))];
+  const boundDrafts = candidateDraftIds.length
+    ? await sql.query<{ id: number; lead_id: number }>(
+        "select id,lead_id from drafts where newsroom_id=$1 and id=any($2::int[])",
+        [context.newsroomId, candidateDraftIds],
+      )
+    : [];
+  const validDrafts = new Map(boundDrafts.map((draft) => [Number(draft.id), Number(draft.lead_id)]));
   return {
     ok: true,
     batch: {
@@ -186,14 +215,22 @@ async function batchView(
           ? batch.created_at.toISOString()
           : new Date(batch.created_at).toISOString(),
       runtime: { runtime: snapshot.runtime, label: forcedRuntimeLabel(snapshot) },
-      items: jobs.map((job) => ({
+      items: jobs.map((job) => {
+        const completion = parsed.get(job.id);
+        const draftId = completion && validDrafts.get(completion.draftId) === Number(job.subject_id)
+          ? completion.draftId
+          : null;
+        return {
         leadId: Number(job.subject_id),
         jobId: Number(job.id),
         status: job.status,
         stage: job.stage,
         error: job.error,
+        draftId,
+        evidenceCheckIncomplete: draftId != null && completion?.evidenceCheckIncomplete === true,
         workbenchHref: "/desk/story/" + job.subject_id,
-      })),
+        };
+      }),
     },
   };
 }

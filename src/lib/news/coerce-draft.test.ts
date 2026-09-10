@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { coerceDraft, extractQuoted, looksLikeJsonDraft, unpackStoredDraft } from "./coerce-draft.ts";
+import { coerceDraft, extractQuoted, integrityNoteItems, looksLikeJsonDraft, unpackStoredDraft } from "./coerce-draft.ts";
 
 /*
   Converted from vitest to node:test.
@@ -33,6 +33,23 @@ describe("coerceDraft", () => {
     assert.equal(d.headline, "Council votes on water");
     assert.ok(String(d.body).includes("First paragraph"), `expected to contain "First paragraph"`);
     assert.equal(d.topic, "utilities");
+  });
+
+  it("keeps array integrity warnings as readable separate lines", () => {
+    const d = coerceDraft(JSON.stringify({
+      headline: "Council update",
+      body: "The council met Tuesday.",
+      topic: "council",
+      integrity_notes: ["Verify the vote total.", "Evidence reconciliation was incomplete."],
+    }), FALLBACK);
+    assert.equal(d.integrity_notes, "Verify the vote total.\nEvidence reconciliation was incomplete.");
+    assert.deepEqual(integrityNoteItems(d.integrity_notes), [
+      "Verify the vote total.",
+      "Evidence reconciliation was incomplete.",
+    ]);
+    assert.deepEqual(integrityNoteItems("Historical warning, with comma-separated prose."), [
+      "Historical warning, with comma-separated prose.",
+    ]);
   });
 
   it("pulls body out of JSON with unescaped inner quotes", () => {

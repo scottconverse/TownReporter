@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { DraftBatchResult } from "@/components/draft-batch-result";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { LeadRowView, SEEN_AGAIN_EXPLAINER } from "@/components/desk-leads";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
@@ -371,22 +372,7 @@ function QueuePage() {
             ) : null}
             {batch.data.batch.items.map((item) => {
               const lead = leads.find((candidate) => candidate.id === item.leadId);
-              return (
-                <div className="lead-row" key={item.jobId}>
-                  <div className="lead-main">
-                    <a className="hl-link" href={item.workbenchHref}>
-                      Open {lead?.headline ?? `lead #${item.leadId}`}
-                    </a>
-                    <p className="meta">
-                      <span data-draft-batch-status>
-                        {item.status[0].toUpperCase() + item.status.slice(1)}
-                      </span>{" "}
-                      · {item.stage}
-                    </p>
-                    {item.error ? <Notice kind="err">{item.error}</Notice> : null}
-                  </div>
-                </div>
-              );
+              return <DraftBatchResult key={item.jobId} item={item} headline={lead?.headline ?? `lead #${item.leadId}`} />;
             })}
           </div>
         ) : (
