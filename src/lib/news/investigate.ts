@@ -946,6 +946,7 @@ export function frontierDedupKey(kind: string, rawLabel: string): { label: strin
 type FrontierRow = {
   id: number;
   queries_tried: string;
+  next_steps: string;
   status: string;
   evidence: string;
   closed_reason: string | null;
@@ -962,6 +963,8 @@ export async function persistDiscovery(
     why: string;
     evidence?: string;
     priority?: number;
+    /** Planned searches that have not run yet. Unlike `query`, these are not provenance. */
+    pendingQueries?: string[];
     query?: string;
   },
 ) {
@@ -970,6 +973,16 @@ export async function persistDiscovery(
   const { label: canonLabel, norm } = frontierDedupKey(item.kind, item.label);
   const label = canonLabel.slice(0, 240);
   if (!label) return;
+  const pendingQueries = (item.pendingQueries ?? [])
+    .map((query) => query.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((query, index, all) => all.indexOf(query) === index)
+    .slice(0, 12);
+  const mergePending = (current: string, additions: string[]) =>
+    [...current.split("|").map((query) => query.trim()), ...additions]
+      .filter((query, index, all) => query && all.indexOf(query) === index)
+      .join(" | ")
+      .slice(0, 800);
 
   async function mergeIntoExisting(row: FrontierRow): Promise<void> {
     if (item.query) {
@@ -982,6 +995,10 @@ export async function persistDiscovery(
           where id = ${row.id}
         `;
       }
+    }
+    const mergedNext = pendingQueries.length ? mergePending(row.next_steps, pendingQueries) : row.next_steps;
+    if (mergedNext !== row.next_steps) {
+      await sql`update frontier_items set next_steps = ${mergedNext} where id = ${row.id}`;
     }
     const incoming = (item.evidence ?? "").trim();
     const priorEv = (row.evidence ?? "").trim();
@@ -1018,7 +1035,7 @@ export async function persistDiscovery(
   }
 
   const existing = await sql<FrontierRow>`
-    select id, queries_tried, status, evidence, closed_reason, why from frontier_items
+    select id, queries_tried, next_steps, status, evidence, closed_reason, why from frontier_items
     where investigation_id = ${investigationId} and label_norm = ${norm}
     limit 1
   `;
@@ -1028,7 +1045,7 @@ export async function persistDiscovery(
   }
 
   const budget = strategiesForFrontier(item.kind, label);
-  const next = [...(item.query ? [item.query] : []), ...budget.map((s) => s.query)]
+  const next = [...pendingQueries, ...(item.query ? [item.query] : []), ...budget.map((s) => s.query)]
     .filter((q, i, arr) => q && arr.indexOf(q) === i)
     .join(" | ")
     .slice(0, 800);
@@ -1070,7 +1087,7 @@ export async function persistDiscovery(
     /* no matching unique constraint on this database — fall through */
   }
   const raced = await sql<FrontierRow>`
-    select id, queries_tried, status, evidence, closed_reason, why from frontier_items
+    select id, queries_tried, next_steps, status, evidence, closed_reason, why from frontier_items
     where investigation_id = ${investigationId} and label_norm = ${norm}
     limit 1
   `;
@@ -2147,7 +2164,7 @@ export async function researchLoop(opts: {
         label: f.label,
         why: f.why,
         priority: f.priority,
-        query: (f.queries ?? [])[0],
+        pendingQueries: f.queries,
       });
     }
 
@@ -3136,7 +3153,7 @@ async function persistPlan(
       label: f.label,
       why: f.why,
       priority: f.priority,
-      query: (f.queries ?? [])[0],
+      pendingQueries: f.queries,
     });
   }
   for (const a of plan.anomalies) {

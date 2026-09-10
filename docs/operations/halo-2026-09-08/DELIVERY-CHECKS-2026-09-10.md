@@ -554,3 +554,72 @@ source assertions now follow the actual Publish block, proposal helper, and
 serial argv. Baseline was the three observed failures in CI job 103045277467,
 not a newly invented product defect. Browser-test repairs still await the
 requested permission; full CI/release acceptance remains incomplete.
+
+## Preserve planned investigation queries
+
+The fresh investigation exposed repeated generic frontier-label searches. Source
+inspection found both planner persistence paths passed only the first planned
+query as already-searched provenance. Terra added `pendingQueries`, retaining
+the planner's queries in pending work for new and existing frontier rows without
+marking them tried. Actual discovered `item.query` provenance is unchanged.
+Lead reviewed the two-file diff; no model call or production access was needed.
+
+The preceding lead-executed RED run used:
+`node scripts/with-app-env.mjs node --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 --test-name-pattern="planner" src/lib/news/investigate.loop.test.ts`.
+It failed the new/existing frontier assertions (5 tests, 3 passed, 2 failed).
+The existing-row regression was corrected to retain genuinely searched history,
+rather than incorrectly requiring all search history to be empty.
+
+Lead reran that exact command after implementation, exit 0:
+
+```text
+[with-app-env] DATABASE_URL unset -- PGLite in-memory
+ℹ tests 5
+ℹ suites 1
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11537.982
+```
+
+Then widened once to the entire affected integration file:
+`node scripts/with-app-env.mjs node --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 src/lib/news/investigate.loop.test.ts`.
+Exit 0:
+
+```text
+[with-app-env] DATABASE_URL unset -- PGLite in-memory
+ℹ tests 13
+ℹ suites 1
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11336.5051
+```
+
+Neither run emitted warnings/errors. Both handles exited; tests used injected
+search/planner responses and isolated in-memory data. This proves query retention
+and neighboring loop behaviors, not improved live investigation quality or that
+direct investigative tools are unnecessary. No new endpoints, credentials,
+dependencies, rendering or database migration were introduced. Pending-query
+normalization keeps the existing bounded next_steps representation.
+
+Read-only CI refresh for 422c7b5: both known desk/scan browser lanes remain red;
+main test job still running. Other returned lanes passed, including real-Postgres
+properties, source-to-reader, delete/trash/corrections and model-picker coverage.
+Not an all-green release. This scoped checkpoint does not promote production.
+
+Focused lint command:
+`node node_modules/eslint/bin/eslint.js src/lib/news/investigate.ts src/lib/news/investigate.loop.test.ts`
+Exit 0, with the existing untouched warnings (not expanded into cleanup):
+
+```text
+C:\Users\scott\Desktop\Code\townreporter-dev\src\lib\news\investigate.ts
+    39:3   warning  'PLANNER_TEXT_CAP' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  1922:17  warning  'rec' is assigned a value but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+
+✖ 2 problems (0 errors, 2 warnings)
+```

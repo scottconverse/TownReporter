@@ -681,4 +681,79 @@ describe("researchLoop integration", { timeout: 120000 }, () => {
     assert.equal(claimsA[0]!.version_id, versions[0]!.id);
     assert.equal(leaked.length, 0);
   });
+
+  it("keeps every new planner frontier query pending without marking it tried", async () => {
+    const user = `loop-pending-new-${Date.now()}`;
+    const { sql, id } = await bootInv(user, "Candidate records");
+    const pending = [
+      '"Avery Candidate" endorsements Longmont',
+      '"Avery Candidate" campaign contribution Colorado',
+      '"Avery Candidate" city council votes',
+    ];
+    await researchLoop({
+      userId: user,
+      investigationId: id,
+      hops: 1,
+      planner: async () => ({
+        ...emptyPlan(),
+        frontier: [{
+          kind: "unknown",
+          label: "Candidate political identity and endorsements",
+          why: "Candidate-specific official and campaign records remain unread.",
+          priority: 9,
+          queries: pending,
+        }],
+      }),
+      search: async () => [],
+      fetch: fetchDoc,
+      archives: async () => [],
+    });
+    const [row] = await sql<{ next_steps: string; queries_tried: string }>`
+      select next_steps, queries_tried from frontier_items
+      where investigation_id = ${id} and label = ${"Candidate political identity and endorsements"}
+    `;
+    assert.ok(row, "planner frontier should be retained");
+    for (const query of pending) assert.match(row.next_steps, new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.deepEqual(JSON.parse(row.queries_tried), [], "pending planner actions are not searches already tried");
+  });
+
+  it("merges later planner frontier queries into an existing row without falsely trying them", async () => {
+    const user = `loop-pending-existing-${Date.now()}`;
+    const { sql, id } = await bootInv(user, "Candidate records");
+    const label = "Candidate political identity and endorsements";
+    await sql`
+      insert into frontier_items (user_id, newsroom_id, investigation_id, kind, label, label_norm, why, priority, next_steps, queries_tried)
+      values (${user}, 1, ${id}, ${"unknown"}, ${label}, ${label.toLowerCase()}, ${"Older broad question"}, 9, ${`"${label}" Longmont`}, ${"[]"})
+    `;
+    const pending = [
+      '"Avery Candidate" endorsements Longmont',
+      '"Avery Candidate" campaign contribution Colorado',
+    ];
+    const oldQuery = `"${label}" Longmont`;
+    const searched: string[] = [];
+    await researchLoop({
+      userId: user,
+      investigationId: id,
+      hops: 1,
+      planner: async () => ({
+        ...emptyPlan(),
+        frontier: [{ kind: "unknown", label, why: "Specific candidate records remain unread.", priority: 9, queries: pending }],
+      }),
+      search: async (query) => {
+        searched.push(query);
+        return [];
+      },
+      fetch: fetchDoc,
+      archives: async () => [],
+    });
+    const [row] = await sql<{ next_steps: string; queries_tried: string }>`
+      select next_steps, queries_tried from frontier_items where investigation_id = ${id} and label = ${label}
+    `;
+    assert.ok(row);
+    for (const query of pending) assert.match(row.next_steps, new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.ok(searched.includes(oldQuery), "the pre-existing pending action actually ran");
+    const tried = JSON.parse(row.queries_tried) as string[];
+    assert.ok(tried.includes(oldQuery), "preserve actual searched-query history");
+    for (const query of pending) assert.ok(!tried.includes(query), "a queued planner action is not a completed search");
+  });
 });
