@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -41,6 +41,12 @@ function childOutputAfterDatabaseDiagnostic(stdout) {
   const [diagnostic, ...childOutput] = stdout.split("\n");
   assert.match(diagnostic, /^\[with-app-env\] DATABASE_URL (?:-> |is set but unparseable|unset )/);
   return childOutput.join("\n");
+}
+
+function environmentOutsideNodeTestRunner(overrides = {}) {
+  const env = { ...process.env, ...overrides };
+  delete env.NODE_TEST_CONTEXT;
+  return env;
 }
 
 function makeWorkspace(appEnvJson) {
@@ -151,4 +157,80 @@ test("the CLI still runs when invoked through a symlinked path", SKIP_SYMLINK, a
     PRINT_FLAG,
   ]);
   assert.equal(childOutputAfterDatabaseDiagnostic(stdout), "undefined");
+});
+
+test("a direct Node test through the wrapper cannot inherit a checkout or parent database", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "with-app-env-test-"));
+  const fixture = join(dir, "environment.test.mjs");
+  writeFileSync(
+    fixture,
+    `import assert from "node:assert/strict";
+     import test from "node:test";
+     test("isolated", () => {
+       assert.equal(process.env.DATABASE_URL, "");
+       assert.equal(process.env.TOWNREPORTER_TEST_ENV_VERIFIED, "1");
+     });`,
+  );
+  try {
+    const parentDatabaseRun = await execFileAsync(
+      process.execPath,
+      [WRAPPER, process.execPath, "--test", fixture],
+      {
+        env: environmentOutsideNodeTestRunner({
+          DATABASE_URL: "postgres://sentinel.invalid/must-not-reach-test",
+        }),
+      },
+    );
+    assert.match(`${parentDatabaseRun.stdout}\n${parentDatabaseRun.stderr}`, /pass 1/);
+
+    const checkoutEnvironment = environmentOutsideNodeTestRunner();
+    delete checkoutEnvironment.DATABASE_URL;
+    const checkoutDatabaseRun = await execFileAsync(
+      process.execPath,
+      [WRAPPER, process.execPath, "--test", fixture],
+      { env: checkoutEnvironment },
+    );
+    assert.match(`${checkoutDatabaseRun.stdout}\n${checkoutDatabaseRun.stderr}`, /pass 1/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an explicitly opted-in live-model test keeps its opt-in but not a database", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "with-app-env-live-test-"));
+  const fixture = join(dir, "live-environment.test.mjs");
+  writeFileSync(
+    fixture,
+    `import assert from "node:assert/strict";
+     import test from "node:test";
+     test("isolated live opt-in", () => {
+       assert.equal(process.env.DATABASE_URL, "");
+       assert.equal(process.env.RUN_LIVE_MODEL_TESTS, "1");
+     });`,
+  );
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      [WRAPPER, process.execPath, "--test", fixture],
+      {
+        env: environmentOutsideNodeTestRunner({
+          DATABASE_URL: "postgres://sentinel.invalid/must-not-reach-live-test",
+          RUN_LIVE_MODEL_TESTS: "1",
+        }),
+      },
+    );
+    assert.match(`${stdout}\n${stderr}`, /pass 1/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an ordinary wrapped app command retains its explicit database environment", async () => {
+  const sentinel = "postgres://sentinel.invalid/ordinary-app";
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [WRAPPER, process.execPath, "-e", "process.stdout.write(process.env.DATABASE_URL)"],
+    { env: { ...process.env, DATABASE_URL: sentinel } },
+  );
+  assert.equal(childOutputAfterDatabaseDiagnostic(stdout), sentinel);
 });

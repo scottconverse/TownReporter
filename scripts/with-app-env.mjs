@@ -24,6 +24,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { safeTestEnvironment } from "./test-environment.mjs";
 
 export const APP_ENV_REL_PATH = ".grok/app-env.json";
 
@@ -150,16 +151,30 @@ export function needsShell(command) {
   return !/[\\/]/.test(command);
 }
 
+export function isDirectNodeTestInvocation(command, args) {
+  const normalized = command.replace(/\\/g, "/").split("/").at(-1)?.toLowerCase();
+  if (normalized !== "node" && normalized !== "node.exe") return false;
+  return args.some((arg) => arg === "--test" || arg.startsWith("--test="));
+}
+
 function main(argv) {
   const [command, ...args] = argv;
   if (!command) {
     console.error("usage: node scripts/with-app-env.mjs <command> [args…]");
     process.exit(2);
   }
-  const env = mergeAppEnv(readAppEnv(projectRoot()), {
+  const inheritedEnv = mergeAppEnv(readAppEnv(projectRoot()), {
     ...readDotEnv(projectRoot()),
     ...process.env,
   });
+  const directNodeTest = isDirectNodeTestInvocation(command, args);
+  // `test:live-model` is an explicit paid-provider entry point. Keep that
+  // opt-in, while still preventing a checkout or parent database from
+  // reaching its test process. Ordinary Node tests get the same fail-closed
+  // environment and preload guard as `npm test`.
+  const liveModelTest = directNodeTest && process.env.RUN_LIVE_MODEL_TESTS === "1";
+  const env = directNodeTest ? safeTestEnvironment(inheritedEnv) : inheritedEnv;
+  if (liveModelTest) env.RUN_LIVE_MODEL_TESTS = "1";
   /*
     Say which database this run resolved to, out loud.
 
@@ -189,7 +204,9 @@ function main(argv) {
   // `node` is this very runtime — use its real path rather than a PATH lookup.
   // Avoids the shell entirely (and its DEP0190 warning on every run).
   const resolved = command === "node" ? process.execPath : command;
-  const child = spawn(resolved, args, {
+  const guard = new URL("./test-environment-guard.mjs", import.meta.url).href;
+  const childArgs = directNodeTest && !liveModelTest ? ["--import", guard, ...args] : args;
+  const child = spawn(resolved, childArgs, {
     stdio: "inherit",
     env,
     shell: needsShell(resolved),
