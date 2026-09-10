@@ -47,9 +47,11 @@ export type ScanAiLead = {
  *   - "possible" (GauntletGate QA-1, round 3) -- lexical overlap real enough
  *     to flag but not strong enough to trust blindly (see matchStrength's
  *     doc comment for why a binary decision merged different agenda items).
- *     The candidate is filed as its own new lead, same as a non-match, but
+ *     The candidate is filed as its own lead, but
  *     with `possible_duplicate_of` pointing at the existing lead so the
- *     editor -- not the matcher -- decides. Counts toward `possibleMatched`.
+ *     editor -- not the matcher -- decides. A possible match to a killed
+ *     lead starts held for review, rather than returning to NEW. Other
+ *     possible matches start new. Counts toward `possibleMatched`.
  *     The existing row is NOT stamped.
  *   - no match at all -- insert as a plain new lead, same as before this
  *     feature existed.
@@ -93,6 +95,7 @@ export async function fileScanLeads(
     const matchId = findMatchingLead({ headline: lead.headline, source_urls: candidateUrls }, existing);
 
     let possibleDuplicateOf: number | null = null;
+    let initialStatus = "new";
     if (matchId != null) {
       const matched = existing.find((l) => l.id === matchId)!;
       const strength = matchStrength(
@@ -116,6 +119,7 @@ export async function fileScanLeads(
       // rule somehow disagreed with) -- file it, linked to the match, do
       // NOT stamp the existing row.
       possibleDuplicateOf = matchId;
+      if (matched.status === "killed") initialStatus = "held";
       possibleMatched += 1;
     }
 
@@ -129,7 +133,7 @@ export async function fileScanLeads(
           ${urls},
           ${String(lead.evidence ?? "").slice(0, 2000)},
           ${Number(lead.newsworthiness) || 0},
-          'new',
+          ${initialStatus},
           ${possibleDuplicateOf}
         )
         returning id, status, headline

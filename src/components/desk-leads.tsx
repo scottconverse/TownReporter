@@ -65,21 +65,11 @@ export function LeadRowView({
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const score = lead.newsworthiness ?? 0;
   return (
-    <div className={"lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")}>
+    <div
+      className={"lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")}
+    >
       <Score v={score} />
       <div className="lead-main">
-        {onBatchSelect ? (
-          <label className="meta">
-            <input
-              type="checkbox"
-              checked={batchSelected}
-              disabled={batchDisabled}
-              aria-label={`Select ${lead.headline} for batch drafting`}
-              onChange={(event) => onBatchSelect(event.target.checked)}
-            />{" "}
-            Select for batch drafting
-          </label>
-        ) : null}
         <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="hl-link">
           {lead.headline}
         </Link>
@@ -87,6 +77,36 @@ export function LeadRowView({
         <p className="meta">
           {lead.topic} · {formatAge(lead.created_at)} · {leadOrigin(lead)}
         </p>
+        {onBatchSelect ? (
+          <label className="meta">
+            <input
+              type="checkbox"
+              checked={batchSelected}
+              disabled={batchDisabled}
+              aria-label={`Include ${lead.headline} in the batch draft`}
+              onChange={(event) => onBatchSelect(event.target.checked)}
+            />{" "}
+            Include in batch draft
+          </label>
+        ) : null}
+        {lead.possible_duplicate_of ? (
+          <p className="meta dup-context">
+            {lead.status === "held" ? "Held for review — " : ""}
+            {lead.possible_duplicate ? (
+              <>
+                possible duplicate of{" "}
+                <Link
+                  to="/desk/story/$leadId"
+                  params={{ leadId: String(lead.possible_duplicate.id) }}
+                  className="inline-link"
+                >
+                  {lead.possible_duplicate.headline}
+                </Link>{" "}
+                · {lead.possible_duplicate.status}
+              </>
+            ) : "the earlier lead is unavailable; compare it only if it is restored."}
+          </p>
+        ) : null}
         <div className="lead-actions row-acts">
           <Link
             to="/desk/story/$leadId"
@@ -100,7 +120,10 @@ export function LeadRowView({
               The piece
             </Link>
           ) : null}
-          {lead.status !== "held" && lead.status !== "published" && lead.status !== "killed" && onHold ? (
+          {lead.status !== "held" &&
+          lead.status !== "published" &&
+          lead.status !== "killed" &&
+          onHold ? (
             <InkButton tone="quiet" small onClick={onHold}>
               Hold
             </InkButton>
@@ -154,20 +177,27 @@ export function LeadRowView({
         ) : null}
         {lead.status !== "killed" && lead.status !== "published" && onDraft ? (
           <div className="queue-draft-controls">
-            <ModelPicker
-              value={modelChoice}
-              onChange={setModelChoice}
-              disabled={drafting}
-              compact
-            />
             <InkButton
               small
               disabled={drafting}
               onClick={() => onDraft(modelChoice)}
               ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${lead.headline} with ${modelChoiceLabel(modelChoice)}`}
             >
-              {drafting ? "Queuing…" : lead.status === "drafted" ? "Redraft with AI" : "Draft with AI"}
+              {drafting
+                ? "Queuing…"
+                : lead.status === "drafted"
+                  ? "Redraft with AI"
+                  : "Draft with AI"}
             </InkButton>
+            <details>
+              <summary className="meta">Model: {modelChoiceLabel(modelChoice)} · change</summary>
+              <ModelPicker
+                value={modelChoice}
+                onChange={setModelChoice}
+                disabled={drafting}
+                compact
+              />
+            </details>
           </div>
         ) : null}
         {draftNotice ? <Notice kind={draftNotice.kind}>{draftNotice.text}</Notice> : null}
@@ -197,15 +227,19 @@ export function LeadRowView({
             {lead.last_resurfaced_at ? ` · ${formatShortDate(lead.last_resurfaced_at)}` : ""}
           </span>
         ) : null}
-        {lead.possible_duplicate_of ? (
+        {lead.possible_duplicate ? (
           <Link
             to="/desk/story/$leadId"
-            params={{ leadId: String(lead.possible_duplicate_of) }}
+            params={{ leadId: String(lead.possible_duplicate.id) }}
             className="chip maybe-same"
-            title={`The matcher thinks this might be the same story as lead #${lead.possible_duplicate_of}. Open it to compare.`}
+            title={`Possible duplicate of ${lead.possible_duplicate.headline} (${lead.possible_duplicate.status}). Open it to compare.`}
           >
-            maybe same as #{lead.possible_duplicate_of}
+            Possible duplicate · compare
           </Link>
+        ) : lead.possible_duplicate_of ? (
+          <span className="chip maybe-same" title="The earlier lead is unavailable.">
+            Possible duplicate · unavailable
+          </span>
         ) : null}
       </div>
     </div>

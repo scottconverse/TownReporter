@@ -12,6 +12,7 @@ export type SourceRow = {
 
 export type LeadRow = {
   id: number;
+  scan_run_id?: number | null;
   headline: string;
   why: string;
   topic: string;
@@ -31,6 +32,9 @@ export type LeadRow = {
    * lib/news/lead-match.ts. Points at that existing lead's id; null for a
    * plain new lead or a strong match (which never gets its own new row). */
   possible_duplicate_of?: number | null;
+  /** The prior lead is returned only when it still belongs to this newsroom.
+   * A removed target is deliberately null rather than leaking historical text. */
+  possible_duplicate?: { id: number; headline: string; status: string } | null;
 };
 
 export type DraftRow = {

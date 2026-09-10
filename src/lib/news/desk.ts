@@ -189,11 +189,17 @@ export const listLeads = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const sql = await getSql();
     return sql<LeadRow & { article_slug: string | null; investigation_id: number | null }>`
-      select l.id, l.headline, l.why, l.topic, l.status, l.source_urls, l.evidence,
+      select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.status, l.source_urls, l.evidence,
              l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
-             l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id
+             l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id,
+             l.possible_duplicate_of,
+             case when prior.id is null then null else jsonb_build_object(
+               'id', prior.id, 'headline', prior.headline, 'status', prior.status
+             ) end as possible_duplicate
       from leads l
       left join articles a on a.lead_id = l.id and a.status = 'published'
+      left join leads prior on prior.id = l.possible_duplicate_of
+        and prior.newsroom_id = l.newsroom_id
       where l.newsroom_id = ${owned(context)}
       -- An editor who just filed a lead by hand sinks below the batch first.
       --
@@ -308,8 +314,15 @@ export const getLead = createServerFn({ method: "GET" })
     const sql = await getSql();
     await ensureDraftMemoColumn();
     const leads = await sql<LeadRow>`
-      select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at, investigation_id, notes_json
-      from leads where id = ${id} and newsroom_id = ${owned(context)} limit 1
+      select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
+             l.possible_duplicate_of,
+             case when prior.id is null then null else jsonb_build_object(
+               'id', prior.id, 'headline', prior.headline, 'status', prior.status
+             ) end as possible_duplicate
+      from leads l
+      left join leads prior on prior.id = l.possible_duplicate_of
+        and prior.newsroom_id = l.newsroom_id
+      where l.id = ${id} and l.newsroom_id = ${owned(context)} limit 1
     `;
     const lead = leads[0];
     if (!lead) return null;

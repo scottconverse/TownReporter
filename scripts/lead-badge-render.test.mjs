@@ -170,13 +170,20 @@ test("an open (non-killed) lead with a resurfaced stamp still shows the badge", 
 // discarding or merging it -- this chip is the editor's only way to see that
 // link without opening the lead. See lib/news/lead-match.ts's matchStrength
 // and lib/news/lead-filing.ts's fileScanLeads.
-test('a lead with possible_duplicate_of set shows a "maybe same as #N" chip linking to that lead\'s story page', () => {
+test('a NEW lead with an available possible duplicate shows its prior headline, disposition, and comparison link', () => {
   const html = renderToStaticMarkup(
     createElement(LeadRowView, {
-      lead: baseLead({ status: "new", possible_duplicate_of: 42 }),
+      lead: baseLead({
+        status: "new",
+        possible_duplicate_of: 42,
+        possible_duplicate: { id: 42, headline: "Earlier council executive-session lead", status: "killed" },
+      }),
     }),
   );
-  assert.match(html, /maybe same as #42/);
+  assert.match(html, /Possible duplicate of/);
+  assert.match(html, /Earlier council executive-session lead/);
+  assert.match(html, /· killed/);
+  assert.match(html, /Possible duplicate · compare/);
   const chipIdx = html.indexOf("chip maybe-same");
   assert.ok(chipIdx >= 0, "expected a chip with the maybe-same class");
   // It must be a real link an editor can click through to the other lead,
@@ -188,12 +195,62 @@ test('a lead with possible_duplicate_of set shows a "maybe same as #N" chip link
   assert.match(openingTag, /href="\/desk\/story\/\$leadId"/);
 });
 
-test("a lead with no possible_duplicate_of shows no maybe-same chip", () => {
+test("an unavailable possible duplicate never leaks a removed headline or turns into a comparison link", () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, { lead: baseLead({ status: "new", possible_duplicate_of: 42 }) }),
+  );
+  assert.match(html, /earlier lead is unavailable/i);
+  assert.match(html, /Possible duplicate · unavailable/);
+  assert.doesNotMatch(html, /href="\/desk\/story\/\$leadId"[^>]*>Possible duplicate · unavailable/);
+});
+
+test("a lead with no possible_duplicate_of shows no possible-duplicate chip", () => {
   const html = renderToStaticMarkup(
     createElement(LeadRowView, { lead: baseLead({ possible_duplicate_of: null }) }),
   );
-  assert.doesNotMatch(html, /maybe same as/);
+  assert.doesNotMatch(html, /Possible duplicate/);
   assert.doesNotMatch(html, /maybe-same/);
+});
+
+test("batch selection is separated from the headline and writing keeps its primary action visible", () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, {
+      lead: baseLead({ status: "new" }),
+      onBatchSelect() {},
+      onDraft() {},
+    }),
+  );
+  assert.match(html, /Include in batch draft/);
+  assert.match(html, /aria-label="Include Longmont council[^\"]+ in the batch draft"/);
+  assert.ok(
+    html.indexOf('class="hl-link"') < html.indexOf('type="checkbox"'),
+    "the batch checkbox should follow the headline instead of touching or preceding it",
+  );
+  const draftIndex = html.indexOf(">Draft with AI</button>");
+  const detailsIndex = html.indexOf("<details>");
+  assert.ok(draftIndex >= 0, "the primary Draft with AI action should remain visible");
+  assert.ok(detailsIndex > draftIndex, "only model configuration should be inside the disclosure");
+  assert.match(html, /<summary class="meta">Model: Automatic · change<\/summary>/);
+  assert.ok(
+    html.indexOf('class="model-picker-stub"') > detailsIndex,
+    "the model picker should remain available inside the disclosure",
+  );
+});
+
+test("a held possible duplicate keeps the held-review prefix and names the actual prior disposition", () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, {
+      lead: baseLead({
+        status: "held",
+        possible_duplicate_of: 42,
+        possible_duplicate: { id: 42, headline: "Earlier council executive-session lead", status: "killed" },
+      }),
+      onDraft() {},
+    }),
+  );
+  assert.match(html, /Held for review —/);
+  assert.match(html, /Earlier council executive-session lead/);
+  assert.match(html, /· killed/);
 });
 
 // The "≈ PRINTED" chip used to say only a date on hover -- an editor could
@@ -279,7 +336,7 @@ const deskCopyStub = inlineModule(`
   export function createEditorCopy() { return {}; }
 `);
 
-const { Chip } = await import(
+const { Chip, leadOrigin } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-chrome.tsx", import.meta.url), "utf8"),
     "desk-chrome.tsx",
@@ -297,6 +354,21 @@ const { Chip } = await import(
     },
   )
 );
+
+test("a zero-score lead with a persisted scan run is labelled as scanner-filed", () => {
+  assert.equal(leadOrigin({ scan_run_id: 20, newsworthiness: 0 }), "from the scanner");
+});
+
+test("Dark Desk provenance wins over a persisted scan run", () => {
+  assert.equal(
+    leadOrigin({ investigation_id: 7, scan_run_id: 20, newsworthiness: 0 }),
+    "from Dark Desk",
+  );
+});
+
+test("a genuinely manual zero-score lead remains labelled as editor-filed", () => {
+  assert.equal(leadOrigin({ scan_run_id: null, newsworthiness: 0 }), "filed by you");
+});
 
 test("a held lead renders the HELD chip with the st-held class", () => {
   const html = renderToStaticMarkup(createElement(Chip, { s: "held" }));

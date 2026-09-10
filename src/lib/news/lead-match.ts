@@ -411,8 +411,8 @@ export type MatchCandidateLead = {
  * matchStrength() below can reuse the exact same "is this even a possible
  * match" gate that findMatchingLead has always used (the three paths
  * described in findMatchingLead's doc comment) without duplicating it.
- * findMatchingLead's own behaviour is unchanged by this extraction -- same
- * three paths, same order, same early return on the first hit.
+ * Matching uses these same three paths. Selection prefers a strong match
+ * over an earlier possible match so row order cannot hide an exact repeat.
  */
 function pairMatches(
   candidateHeadline: string,
@@ -444,6 +444,8 @@ export function findMatchingLead(
   const headline = candidate.headline ?? "";
   if (!headline.trim()) return null;
   const cutoff = Date.now() - MATCH_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+  let firstPossible: number | null = null;
+  let firstKilledPossible: number | null = null;
 
   for (const lead of existing) {
     if (!MATCHABLE_STATUSES.has(lead.status)) continue;
@@ -452,10 +454,14 @@ export function findMatchingLead(
       if (Number.isFinite(t) && t < cutoff) continue;
     }
     if (pairMatches(headline, candidate.source_urls ?? [], lead.headline, lead.source_urls ?? [])) {
-      return lead.id;
+      if (matchStrength(candidate, lead) === "strong") return lead.id;
+      firstPossible ??= lead.id;
+      if (lead.status === "killed") firstKilledPossible ??= lead.id;
     }
   }
-  return null;
+  // Without an exact match, keep a prior kill visible to the filing policy.
+  // Otherwise row order could turn another ambiguous rewrite back into NEW.
+  return firstKilledPossible ?? firstPossible;
 }
 /**
  * GauntletGate QA-1, round 3 fix (2026-09-02): findMatchingLead's binary

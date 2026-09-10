@@ -63,3 +63,74 @@ Both exit 0; no warnings in captured output. These rerun the existing Stats
 implementation before committing it. Earlier built report-reader and actual
 beacon evidence remain in the September 9 Stats acceptance documents; their
 limitations have not changed. No claim of new TDD or production activation.
+
+## Custom API delivery
+
+The same pinned build passed `custom-api-ui-acceptance.mjs` at isolated port
+3468, using fresh in-memory PGLite and a fake provider at 3471. Save, model
+discovery, explicit connection test, a clear rejected-credential result, edit,
+disable/re-enable, delete and mobile overflow checks passed. Exactly three
+fake-provider requests occurred; save/edit invoked none. No paid provider call.
+Raw log: `artifacts/resume-custom-api-ui-acceptance.mjs-1789064974434.log`.
+Server 34176 and child 2956 were terminated; driver 32704 exited. A subsequent
+process/listener check found these gone and ports 3468/3471/3472 unused.
+The missing trusted-client-IP warning remained; it was not relabeled a product
+failure or expanded into another repair campaign.
+
+Focused source checks ran serially:
+`node scripts/with-app-env.mjs node --experimental-strip-types --test --test-concurrency=1 src/lib/news/custom-ai-connections.test.ts src/lib/news/custom-ai-settings.test.ts src/lib/news/model-choice.test.ts src/lib/news/opinion-readiness.test.ts src/lib/news/perform-scan-failover.test.ts`
+
+```text
+ℹ tests 46
+ℹ suites 8
+ℹ pass 46
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11558.4905
+```
+
+These ran against the integrated working tree, not a clean checkout of the API
+commit alone. One model-choice check also covers separately uncommitted Dark
+hydration. No real-provider interoperability claim is inferred from the fake
+endpoint. Terra independently reviewed caller propagation; Luna wrote the
+operator guide. The guide was corrected to say Responses API is *not tested*,
+not an observed capability of the Test connection action.
+
+Pushed development commits: `0f19820` (Stats) and `acf66da` (custom API).
+Production remains unchanged by this delivery pass.
+
+## Queue delivery
+
+Focused repeat-lead tests: 10 passed, no failures/skips, 3088.6018 ms.
+`lead-badge-render.test.mjs`: 15 passed, no failures/skips, 492.4163 ms.
+The existing implementation preserves a killed exact repeat, holds an ambiguous
+repeat of a killed lead, and returns the prior headline/status to the queue.
+The checkbox now reads **Include in batch draft** below the headline; Draft
+remains visible and the model controls remain available under **change**.
+These checks used in-memory data and rendered components, not the live queue.
+Existing production duplicates have not been retrospectively reclassified.
+
+## One fresh Dark run — failed, not accepted
+
+The retained election question was entered through the normal UI without an
+answer or source URLs. Dedicated database:
+`townreporter_dark_acceptance_20260909`; investigation 10, job 16.
+Started 2026-09-10T18:34:09.542Z; failed 2026-09-10T18:39:23.417Z.
+Failure: `invalid byte sequence for encoding "UTF8": 0x00`.
+Three rounds were recorded before failure; the file remains paused. Its summary
+mentions certified results and follow-ups, but that is not an accepted finished
+investigation. Source diagnosis is underway. No retry job was created.
+
+The old browser driver needed three setup/monitoring corrections: disregard a
+paused scan policy, skip a disabled Save when settings already match, and read
+`last_model_choice` rather than nonexistent `model_choice` on investigations.
+These are test-driver defects, not three product failures. The first two
+attempts started no investigation. The third created exactly investigation 10;
+subsequent observation created no work. Raw browser receipts contain isolated
+test-session credentials and remain local ignored artifacts, not public commits.
+Server log: `artifacts/dark-r22-server-2026-09-10T18-31-26-482Z.log`.
+The owned server 32784 and child 10260 were stopped after the job failed.
+Subsequent process scan found only the existing TownReporter production pair
+23012/22152 among matching server commands.

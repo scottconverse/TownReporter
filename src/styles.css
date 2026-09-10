@@ -677,7 +677,7 @@
 .desk-ltr .lead-flags .chip.dup {margin:0}
 .desk-ltr .chip.seen-again {border-color:var(--adeep);color:var(--adeep)}
 .desk-ltr .lead-flags .chip.seen-again {margin:0}
-.desk-ltr .chip.maybe-same {border-style:dotted;border-color:var(--adeep);color:var(--adeep);text-decoration:none;display:inline-block}
+.desk-ltr .chip.maybe-same {border-style:dotted;border-color:var(--adeep);color:var(--adeep);text-decoration:none;display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .desk-ltr .chip.maybe-same:hover {color:var(--a)}
 .desk-ltr .lead-flags .chip.maybe-same {margin:0}
 .desk-ltr .score {display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;border:1px solid var(--line);font-family:var(--fd);font-weight:600;font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--mut)}
@@ -756,7 +756,7 @@
 .desk-ltr .gc-wire {grid-area:wire;min-width:0}
 .desk-ltr .lead-list {margin-top:4px}
 .desk-ltr .lead-row {display:grid;grid-template-columns:auto 1fr auto;gap:16px;padding:18px 0;border-bottom:1px solid var(--line);align-items:start}
-.desk-ltr .lead-flags {display:flex;flex-direction:column;align-items:end;gap:4px}
+.desk-ltr .lead-flags {display:flex;flex-direction:column;align-items:end;gap:4px;min-width:0;max-width:11rem}
 .desk-ltr .lead-row.dead {opacity:.5}
 .desk-ltr .lead-main {min-width:0}
 .desk-ltr .hl-link {font-family:var(--fd);font-weight:600;font-size:calc(0.96875rem * var(--ts));line-height:1.25;text-align:left;letter-spacing:-.01em}
@@ -798,6 +798,13 @@
 .desk-ltr .needs {flex-direction:column;align-items:flex-start;gap:8px}
 .desk-ltr .needs-item {white-space:normal;text-align:left}
 .desk-ltr .form-grid {grid-template-columns:1fr}
+}
+/* On a phone, a right-hand badge rail takes the width the actual reporting
+   context needs. Keep score + lead copy together, then let flags use their
+   own full-width wrapped row below the controls. */
+@media (max-width:600px) {
+.desk-ltr .lead-row {grid-template-columns:auto minmax(0,1fr);gap:10px}
+.desk-ltr .lead-flags {grid-column:1 / -1;flex-direction:row;align-items:flex-start;flex-wrap:wrap;max-width:none}
 }
 .desk-ltr .roomy .lead-row {padding:14px 0}
 .desk-ltr .nightpanel {padding:16px 18px 18px;margin-top:6px}
