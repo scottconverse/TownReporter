@@ -480,3 +480,77 @@ Focused ESLint exited 0. Parent ran `node scripts/with-app-env.mjs node --test -
 400.8924 ms, exit 0. Existing 16 non-blocking CI warnings were not expanded
 into a cleanup task. CI also reported a high-severity dependency advisory;
 its affected package and applicability have not yet been inspected.
+
+## Release CI and fresh Dark investigation continuation
+
+At candidate `64854cd`, CI run 34529137503 has three failed script assertions
+and two failed browser lanes. Script failures concern the Publish-button source
+pattern, source-proposal classification moved to `source-seeds.server.ts`, and
+the serial-suite test selecting a diagnostic string instead of the actual argv.
+Browser failures target the old queue checkbox name and attempt to select a
+model before opening its visible disclosure. These failures remain red until
+the corrected checks execute; they are not waived. Luna supplied three narrow
+source-test repairs for lead review. Terra identified the two browser-script
+corrections, but the permission reviewer blocked editing under an inherited
+read-only restriction; a specific owner approval was requested. No product
+behavior was changed to satisfy these failures.
+
+Fresh Dark preflight found one enabled acceptance monitor: id 12, investigation
+10, newsroom 1, staging-editor, for the captured City of Longmont Ward 3 result.
+The lead paused only that monitor in `townreporter_dark_acceptance_20260909`,
+retaining its row and evidence. Repeated preflight at 21:03:47Z confirmed zero
+jobs, monitors, daily scans, routine policies, or automations enabled/running.
+Production was not queried or changed by that operation.
+
+The retained EAF13185 build started on isolated port 3473 with launcher 30668
+and server 39456; log `artifacts/dark-r22-server-2026-09-10T21-04-29-350Z.log`.
+The existing browser driver submitted exactly one fresh question through the
+normal controls, creating investigation 11 / job 17 at 21:04:57Z. Native Codex,
+no separately paid keys, unchanged comparison settings. Last observed running;
+no acceptance outcome claimed yet. Observation deadline does not cancel or
+restart the job. Owned server cleanup is required after its terminal outcome.
+
+Windows run 34529137504 subsequently returned `status: completed`,
+`conclusion: success` for candidate 64854cd. This proves its packaged Windows
+installation/persistence lane, not the still-failing Linux checks or production
+promotion. Investigation observation remains attached to execution session
+90553; isolated server session 50950 owns launcher 30668/server 39456.
+
+### Terminal result and cleanup
+
+Job 17 completed at 21:13:46.383Z, 528.605 seconds after creation, with no
+job error. Investigation 11 paused after five hops. Its summary explicitly
+states that official totals establish a four-candidate contest, not party
+identity or counterfactual vote transfer. Captures include the official
+statement of votes (artifact 156; 402543 text characters), candidate list 155,
+and two Reddit discussions 158/160. A third Reddit fetch returned 429 (159).
+This proves a fresh retrieval run passed the prior PDF-storage failure; it
+does not yet prove efficient investigation, correct complete synthesis, or
+queue handoff. No finding was forced. Raw browser receipt remains local:
+`artifacts/dark-real-acceptance-r18-driver/receipt-2026-09-10T21-04-55.564Z.json`.
+The server log retains PDF font warnings and aborted-request ECONNRESET output.
+After confirming the terminal job and launcher ownership, `taskkill /PID 30668
+/T /F` successfully stopped launcher 30668, server 39456 and conhost 39776.
+Production server 23012/22152 was excluded.
+
+Parent then ran:
+`node scripts/with-app-env.mjs node --test --test-concurrency=1 --test-timeout=60000 scripts/claims-of-absence-gate.test.mjs scripts/newsroom-security.test.mjs scripts/suite-runs-serially.test.mjs`
+
+```text
+[with-app-env] DATABASE_URL unset -- PGLite in-memory
+ℹ tests 33
+ℹ suites 0
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 331.8252
+```
+
+Exit 0, no warnings/errors. Luna's three test-only repairs accepted after
+lead source review and this execution. No product behavior changed; retained
+source assertions now follow the actual Publish block, proposal helper, and
+serial argv. Baseline was the three observed failures in CI job 103045277467,
+not a newly invented product defect. Browser-test repairs still await the
+requested permission; full CI/release acceptance remains incomplete.

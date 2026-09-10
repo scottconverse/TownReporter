@@ -34,13 +34,15 @@ test("the src test group runs with concurrency 1", () => {
   // The command that runs the strip-types src group, isolated from the scripts
   // group so a flag on the wrong half cannot pass this by accident. The safe
   // launcher holds the argv as an array instead of a shell command.
-  const srcCommand = launcher.split("\n").find((line) => line.includes("experimental-strip-types"));
+  const srcCommand = launcher.match(
+    /\["--experimental-strip-types",[\s\S]{0,160}?"src\/\*\*\/\*\.test\.ts"\]/,
+  );
   assert.ok(
     srcCommand,
     `the 'test' script no longer runs the src group with strip-types; got: ${script}`,
   );
   assert.match(
-    srcCommand,
+    srcCommand[0],
     /--test-concurrency=1\b/,
     "the src group is not pinned to --test-concurrency=1; it will flake under " +
       "WASM memory pressure again (TEST-04). If you have made the tests safe to " +

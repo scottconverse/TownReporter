@@ -28,7 +28,7 @@ test("Publish is disabled while a claim of absence is unchecked", () => {
   );
   assert.match(
     story,
-    /disabled=\{[\s\S]{0,200}?openClaims\.length > 0[\s\S]{0,80}?\}[\s\S]{0,200}?Publish to the paper/,
+    /<InkButton[\s\S]{0,1200}?disabled=\{[\s\S]{0,500}?openClaims\.length > 0[\s\S]{0,500}?\}[\s\S]{0,250}?Publish to the paper/,
     "the Publish button must be disabled while a claim of absence is unchecked",
   );
 });

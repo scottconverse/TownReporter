@@ -482,8 +482,10 @@ test("scan does not stamp last_hash until the writing pass succeeds", async () =
 
 test("scan never auto-promotes model URLs to official or Tier A", () => {
   const desk = readFileSync(join(ROOT, "src/lib/news/desk.ts"), "utf8");
-  assert.match(desk, /'discovered', 'unclassified', 'proposed'/);
-  assert.doesNotMatch(desk, /'official', 'B', 'proposed'/);
+  const sourceSeeds = readFileSync(join(ROOT, "src/lib/news/source-seeds.server.ts"), "utf8");
+  assert.match(desk, /insertProposedNewsroomSource/);
+  assert.match(sourceSeeds, /'discovered','unclassified','proposed'/);
+  assert.doesNotMatch(sourceSeeds, /'official','B','proposed'/);
   assert.match(desk, /ingestUrl/);
   assert.doesNotMatch(desk, /tier: 'A', 'accepted'/);
 });
