@@ -702,3 +702,27 @@ This removes the observed stale assertion, not a claim that the full candidate
 CI has passed. Two browser selector repairs and operator-doc edits still have
 unresolved permission-review blocks; explicit owner clarification was requested.
 No production promotion or full-suite restart on the workstation occurred.
+
+## Consolidated source candidate 2fd522a
+
+Parent reviewed and committed the pre-existing formatting in desk.ts and
+editorial.server.ts; no new behavior was introduced. The generated route file
+had no staged content difference. These changes are pushed at 2fd522a.
+The src working tree has no remaining diff. Operator documentation and existing
+untracked evidence/scripts remain outside this scoped commit.
+
+One serialized build (`node artifacts/build-delivery-candidate.mjs`) exited 0,
+log `artifacts/delivery-build-1789077280157.log`. Native model providers were
+disabled, DATABASE_URL empty, and migrations explicitly skipped. Entry hash:
+`67075E5F393BC6C3A920BA49C6DE079B0E2119CFECAE95B01702C014651DEF36`.
+This build includes the physical-venue/virtual-attendance fix missing from the
+previous retained build. Existing DEP0190 and ineffective youtube dynamic-import
+warnings remain. Build PID 34776 exited; the subsequent process inventory found
+only production Node 23012/22152. No server was launched or promoted.
+
+Luna's source-only staging review confirms ops/stage.ps1 would overwrite the
+preserved townreporter_dev database. Use the already documented separately named
+clean-database procedure, not that default script. Correct backup directory is
+`C:\Users\scott\Desktop\Code\townreporter-backups` (the worker's abbreviated
+reply omitted Code; the existing clean-staging record is authoritative).
+Current remote CI was pending when inspected; no release-green claim.
