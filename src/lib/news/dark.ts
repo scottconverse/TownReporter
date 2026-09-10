@@ -2308,11 +2308,33 @@ export async function queueInvestigationFor(
   `;
   const shorten = (value: string, limit: number) =>
     value.length > limit ? `${value.slice(0, limit - 13)} [shortened]` : value;
+  const briefs = await sql<{ brief_json: string }>`
+    select brief_json from investigation_briefs
+    where investigation_id = ${id} and newsroom_id = ${newsroomId} limit 1
+  `;
+  let briefNext = "";
+  try {
+    briefNext = briefs[0] ? parseBrief(JSON.parse(briefs[0].brief_json)).next : "";
+  } catch {
+    // A malformed old brief must not prevent handing off the captured file.
+  }
+  const frontier = await sql<{ next_steps: string }>`
+    select next_steps from frontier_items
+    where investigation_id = ${id} and newsroom_id = ${newsroomId}
+      and status in ('open', 'reopened') and trim(next_steps) <> ''
+    order by priority desc, id asc limit 3
+  `;
+  const nextSteps = [briefNext, ...frontier.map((item) => item.next_steps)]
+    .filter(Boolean)
+    .map((step) => shorten(step, 300));
   const handoff = [
     "DARK DESK notes. Publication is a separate human action.",
     opts.asTip
       ? "Sent unverified, at the editor's direction. Treat it as a tip, not a finding."
       : `${verifiedCount} of ${total} filed signals passed verification; other signals remain unverified.`,
+    nextSteps.length
+      ? `Next steps (not established facts): ${shorten([...new Set(nextSteps)].join("\n"), 600)}\nOpen investigation for all follow-ups.`
+      : "",
     signalNotes.length
       ? `Signal notes: showing ${signalNotes.length} of ${total}. Open investigation for the complete file and unabridged accounts.`
       : "",

@@ -173,3 +173,55 @@ it(
     }
   },
 );
+
+it(
+  "whole-file handoff carries the brief and frontier next steps into the queued lead",
+  { timeout: 60000 },
+  async () => {
+    await ensureInvestigateSchema();
+    await ensureLeadsTable();
+    const user = `qa-next-step-handoff-${Date.now()}`;
+    const opened = await openInvestigationForEditor(
+      user,
+      { paste: "A records question", title: "Next-step handoff" },
+      1,
+    );
+    await queueInvestigationFor(user, 1, 9_999_997); // ensure the real Dark Desk schema
+    const sql = await getSql();
+    const briefNext = "BRIEF_NEXT_STEP_TOKEN: request the signed filing.";
+    const frontierNext = "FRONTIER_NEXT_STEP_TOKEN: compare the amendment log.";
+    await sql`
+      insert into investigation_briefs (investigation_id, newsroom_id, brief_json)
+      values (
+        ${opened.investigationId},
+        1,
+        ${JSON.stringify({ next: briefNext })}
+      )
+    `;
+    await sql`
+      insert into frontier_items (user_id, newsroom_id, investigation_id, kind, label, why, next_steps, priority, status)
+      values (
+        ${user},
+        1,
+        ${opened.investigationId},
+        'url',
+        'Open filing',
+        'The filing may resolve the records question.',
+        ${frontierNext},
+        10,
+        'open'
+      )
+    `;
+    const result = await queueInvestigationFor(user, 1, opened.investigationId, { asTip: true });
+    assert.ok(result.ok);
+    const rows = await sql<{ why: string; evidence: string }>`
+      select why, evidence from leads where id = ${result.leadId}
+    `;
+    assert.equal(rows.length, 1);
+    for (const text of [rows[0]!.why, rows[0]!.evidence]) {
+      assert.match(text, new RegExp(briefNext));
+      assert.match(text, new RegExp(frontierNext));
+      assert.ok(text.length <= 4000);
+    }
+  },
+);
