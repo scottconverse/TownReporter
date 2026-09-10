@@ -1,7 +1,11 @@
-import { ensureNewsroomSources as ensureSeeds } from "./source-seeds.server.ts";
+import {
+  ensureNewsroomSources as ensureSeeds,
+  insertProposedNewsroomSource,
+  saveAcceptedNewsroomSource,
+} from "./source-seeds.server.ts";
 import { selectedScanSources } from "./section-types.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { getSql, type Sql } from "@/lib/db";
+import { getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig } from "./paper-settings";
@@ -109,14 +113,14 @@ async function upsertSource(
   tier: string,
   newsroomId: number = DEFAULT_NEWSROOM_ID,
 ) {
-  const sql = await getSql();
-  const rows = await sql<SourceRow>`
-    insert into sources (user_id, newsroom_id, url, title, kind, tier, status)
-    values (${userId}, ${newsroomId}, ${url}, ${title}, ${kind}, ${tier}, 'accepted')
-    on conflict (user_id, url) do update set title = excluded.title, kind = excluded.kind, tier = excluded.tier, status = 'accepted'
-    returning id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
-  `;
-  return rows[0] ?? null;
+  return saveAcceptedNewsroomSource({
+    userId,
+    newsroomId,
+    url,
+    title,
+    kind,
+    tier,
+  }) as Promise<SourceRow | null>;
 }
 
 export const addSource = createServerFn({ method: "POST" })
@@ -763,13 +767,20 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     for (const p of data.proposed_sources) {
       if (!p.url) continue;
       let url: URL;
-      try { url = assertHttpUrl(p.url); } catch { continue; }
-      await writeSql`
-        insert into sources (user_id, newsroom_id, url, title, kind, tier, status)
-        values (${context.userId}, ${owned(context)}, ${url.toString()}, ${p.title || url.hostname}, 'discovered', 'unclassified', 'proposed')
-        on conflict (user_id, url) do nothing
-      `;
-      proposed += 1;
+      try {
+        url = assertHttpUrl(p.url);
+      } catch {
+        continue;
+      }
+      if (
+        await insertProposedNewsroomSource(writeSql, {
+          userId: context.userId,
+          newsroomId: owned(context),
+          url: url.toString(),
+          title: p.title || url.hostname,
+        })
+      )
+        proposed += 1;
     }
 
     let summary = String(data.editor_summary ?? "").slice(0, 1200);
@@ -800,7 +811,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await deps.beforeScheduledCommit?.();
   const committed = deps.scheduledCommit
     ? await deps.scheduledCommit(commitResults)
-    : await commitResults(sql);
+    : await withTransaction(commitResults);
   if (!deps.scheduledCommit) await audit(context.userId, "scan", `run ${runId} fetched ${fetchedCount} leads ${committed.leadsCreated}`, owned(context));
 });
 

@@ -12,7 +12,11 @@ import { selectedScanSources } from "./section-types.ts";
 import { buildScanUserMessage } from "./desk-copy.ts";
 import { parseScanResult } from "./schema.ts";
 import { coerceDraft } from "./coerce-draft.ts";
-import { ensureNewsroomSources } from "./source-seeds.server.ts";
+import {
+  ensureNewsroomSources,
+  insertProposedNewsroomSource,
+  saveAcceptedNewsroomSource,
+} from "./source-seeds.server.ts";
 import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 import { commitScanForAuthenticatedEditor } from "./model-request-commit.server.ts";
 import { enqueueJob } from "./jobs.ts";
@@ -25,6 +29,9 @@ before(async () => {
   for (const table of ["sources", "articles", "leads", "drafts", "scan_runs"]) {
     await sql.query(`alter table ${table} add column newsroom_id integer not null default 1`);
   }
+  await (
+    await getPglite()
+  ).exec(await readFile(new URL("../../../migrations/0056_newsroom_source_identity.sql", import.meta.url), "utf8"));
   await sql`insert into articles (user_id,newsroom_id,slug,headline,body,topic) values ('section-test',701,'sections-legacy','Legacy','Original body','legacy')`;
   await sql`insert into articles (user_id,newsroom_id,slug,headline,body,topic) values ('section-test',702,'sections-foreign','Foreign','Private body','legacy')`;
   const beforeMigration=await sql`select * from articles order by id`;
@@ -250,6 +257,72 @@ it("seeds sources from the owned onboarded room, never the default paper", async
     url: string;
   }>`select newsroom_id,url from sources where user_id in ('section-seed','section-seed-not-ready')`;
   assert.deepEqual(rows, [{ newsroom_id: 751, url: "https://example.org/riverbend" }]);
+});
+
+it("seeds each configured URL once per newsroom across editors and repeated calls", async () => {
+  await ensurePaperSettingsSchema();
+  const sql = await getSql();
+  const seedSources = JSON.stringify([
+    {
+      url: "https://example.org/shared-calendar",
+      title: "Shared calendar",
+      kind: "official",
+      tier: "A",
+    },
+  ]);
+  await sql`
+    insert into paper_settings(newsroom_id,onboarded,seed_sources)
+    values
+      (753,true,${seedSources}::jsonb),
+      (754,true,${seedSources}::jsonb)
+  `;
+
+  await Promise.all([
+    ensureNewsroomSources("section-seed-owner", 753),
+    ensureNewsroomSources("section-seed-editor", 753),
+  ]);
+  await ensureNewsroomSources("section-seed-owner", 753);
+  await ensureNewsroomSources("section-seed-owner", 754);
+
+  const rows = await sql<{
+    newsroom_id: number;
+    user_id: string;
+    url: string;
+  }>`
+    select newsroom_id,user_id,url
+    from sources
+    where newsroom_id in (753,754)
+      and url='https://example.org/shared-calendar'
+    order by newsroom_id,id
+  `;
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    rows.map(({ newsroom_id, url }) => ({ newsroom_id, url })),
+    [
+      { newsroom_id: 753, url: "https://example.org/shared-calendar" },
+      { newsroom_id: 754, url: "https://example.org/shared-calendar" },
+    ],
+  );
+  assert.ok(
+    ["section-seed-owner", "section-seed-editor"].includes(rows[0]!.user_id),
+    "the first concurrent editor owns the single shared-room seed row",
+  );
+  assert.equal(rows[1]!.user_id, "section-seed-owner");
+});
+
+it("manual saves reuse the newsroom row while discovery preserves rejected decisions", async () => {
+  const sql = await getSql();
+  const url = "https://example.org/manual-shared";
+  const seedSources = JSON.stringify([{ url, title: "Seed title", kind: "official", tier: "A" }]);
+  await sql`insert into paper_settings(newsroom_id,onboarded,seed_sources) values(755,true,${seedSources}::jsonb)`;
+  const first = await saveAcceptedNewsroomSource({ userId: "source-owner", newsroomId: 755, url, title: "Original", kind: "official", tier: "A" });
+  const second = await saveAcceptedNewsroomSource({ userId: "source-editor", newsroomId: 755, url, title: "Updated", kind: "page", tier: "B" });
+  assert.equal(second?.id, first?.id);
+  await sql`update sources set status='rejected' where id=${first!.id}`;
+  await ensureNewsroomSources("source-later-editor", 755);
+  assert.equal(await insertProposedNewsroomSource(sql, { userId: "source-editor", newsroomId: 755, url, title: "Discovery" }), false);
+  const rows = await sql<{ status: string; title: string }>`select status,title from sources where newsroom_id=755 and url=${url}`;
+  assert.deepEqual(rows, [{ status: "rejected", title: "Updated" }]);
 });
 
 it("renames and retires stable keys without deleting article identities or crossing newsrooms", async () => {

@@ -147,3 +147,16 @@ With only the chunk call temporarily reverted to unsanitized pages: 1 failed,
 `invalid byte sequence for encoding "UTF8": 0x00` error at `artifact_chunks`.
 The repaired call was restored immediately afterward. This is a reproduced
 source-path fix, not yet a new built-server or fresh investigation pass.
+
+## Previously approved source ownership repair
+
+The development migration changes source uniqueness from `(user_id, url)` to
+`(user_id, newsroom_id, url)`. It does not remove existing source rows or rewrite
+their approvals. Manual additions, seeding and discovered proposals use the
+matching newsroom-aware paths. Rejected sources are not re-approved by seeding
+or discovery. This is the repair Scott explicitly authorized earlier.
+
+One isolated run of `source-identity-migration.test.ts` and `sections.test.ts`:
+10 passed, no failures/skips, 12574.4862 ms. The migration test applies twice
+and checks all historical rows remain while the same editor can add the same
+URL to a second newsroom. No production migration was run.
