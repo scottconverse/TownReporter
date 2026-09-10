@@ -325,6 +325,25 @@ describe("routine notice manual checks", () => {
     assert.equal(JSON.stringify(result.check.candidates).includes("token-123"), false);
   });
 
+  it("retains and reloads collection bulletin ranges through the saved source workflow", async () => {
+    const url = "https://longmontcolorado.gov/waste-services-trash-recycling-composting/special-services-events/fall-leaf-collection/";
+    const f = await fixture("waste-recycling-schedule", url);
+    const sql = await getSql();
+    await sql.query("update routine_notice_automation_sources set issuer='City of Longmont' where newsroom_id=$1", [f.room]);
+    // Constructed source-shape fixture, not a live capture.
+    const raw = `<div class="content_area"><h2>2026 Collection Schedule</h2><ul><li>Leaves will be collected at residences located North of 9th Avenue Oct. 26 – Oct. 30</li></ul><h2>Guidelines</h2><ul><li>All bags must be out before 7 a.m. on the MONDAY of your scheduled collection week and should be left out the entire week until collected.</li></ul></div>`;
+    const actor = { userId: f.owner, newsroomId: f.room };
+    const result = await checks.checkRoutineNoticeSourceForOwner(actor, f.input, {
+      ingest: async () => htmlDocument(raw),
+    });
+    assert.equal(result.check.state, "parsed");
+    assert.equal(result.check.candidates[0]?.fields.endDate?.value, "2026-10-30");
+    const reloaded = await checks.listRoutineNoticeChecksForOwner(actor, { sourceId: f.sourceId });
+    assert.deepEqual(reloaded[0]?.candidates, result.check.candidates);
+    const captured = await checks.readRoutineNoticeCapturedTextForOwner(actor, { checkId: result.check.checkId });
+    assert.equal(captured.fullText, raw);
+  });
+
   it("keeps the exact approved fetch URL while binding canonical capture identities", async () => {
     const exactUrl = `https://www.example.test/routine/${roomSequence + 1}/?utm_source=desk#events`;
     const f = await fixture("library-notice", exactUrl);

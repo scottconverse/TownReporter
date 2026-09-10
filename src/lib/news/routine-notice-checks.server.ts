@@ -1,5 +1,6 @@
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { parseHTML } from "linkedom";
+import { extractLongmontLeafCollection } from "./routine-notice-waste.ts";
 import { sha256, sha256Bytes } from "./fetch-url.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import { ingestDocument } from "./ingest.ts";
@@ -313,12 +314,14 @@ function adapterResults(
       : extractApplicationDeadlines(content, base);
   if (input.formatKey === "waste-recycling-schedule")
     return ownerContext
-      ? extractRoutineIcs(content, "waste", {
+      ? content.includes("BEGIN:VCALENDAR")
+        ? extractRoutineIcs(content, "waste", {
           provenance: base,
           issuer: ownerContext.issuer,
           locality: ownerContext.locality,
           collectionArea: ownerContext.collectionArea ?? undefined,
         })
+        : extractLongmontLeafCollection(content, { provenance: base, issuer: ownerContext.issuer })
       : missingContext();
   if (input.formatKey === "public-meeting-logistics") {
     if (!ownerContext) return missingContext();
