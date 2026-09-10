@@ -9,8 +9,14 @@ import { provenanceFromUrls, parseFindings, resolvePublicFindings, type Provenan
 import { collapsePrintedDuplicates } from "./desk-copy.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { isOnboarded } from "./paper-settings.ts";
+import { canonicalPublicUrl } from "./fetch-outcome.ts";
 
-function publicArticle(
+function samePublicUrl(left: string, right: string): boolean {
+  try { return canonicalPublicUrl(left) === canonicalPublicUrl(right); }
+  catch { return false; }
+}
+
+export function publicArticle(
   row: ArticleRow,
 ): ArticleRow & { provenance: ProvenanceItem[]; findings: StoryFinding[] } {
   const u = unpackStoredDraft({
@@ -20,16 +26,26 @@ function publicArticle(
     topic: row.topic,
   });
   u.body = stripReporterNotebook(u.body);
+  const publicUrls = parseUrlList(row.source_urls);
   let provenance: ProvenanceItem[] = [];
   try {
     const stored = JSON.parse(row.provenance_json || "[]") as ProvenanceItem[];
-    if (Array.isArray(stored) && stored.length) provenance = stored;
+    if (Array.isArray(stored) && stored.length) {
+      provenance = stored.filter(item => publicUrls.some(url => samePublicUrl(url,item.url)));
+    }
   } catch {
     provenance = [];
   }
-  if (!provenance.length) provenance = provenanceFromUrls(parseUrlList(row.source_urls));
+  if (!provenance.length) provenance = provenanceFromUrls(publicUrls);
   const findings = resolvePublicFindings(parseFindings(row.found_note), provenance);
-  return { ...row, ...u, provenance, findings };
+  return {
+    ...row,
+    ...u,
+    provenance_json: JSON.stringify(provenance),
+    found_note: JSON.stringify(findings),
+    provenance,
+    findings,
+  };
 }
 
 export const listPublishedArticles = createServerFn({ method: "GET" }).handler(

@@ -3,6 +3,53 @@ import assert from "node:assert/strict";
 import { extractArticleText } from "./article-extract.ts";
 
 describe("extractArticleText", () => {
+  it("keeps meaningful expandable council panels when Readability drops them", () => {
+    const html = `<!doctype html><html><head><meta property="og:type" content="article"><title>Mayor and City Council</title></head><body>
+      <header><nav>Departments Services Search</nav></header>
+      <main id="main-content">
+        <div class="page-template-default-side-menu side-menu"><nav>Unrelated department menu</nav>
+        <h1>Mayor and City Council</h1>
+        <button class="accordion-button" aria-expanded="false" aria-controls="mayor-panel">Mayor Julia Hidalgo</button>
+        <div id="mayor-panel" class="accordion-content_content">Contact Mayor Hidalgo about city policy and council matters.</div>
+        <div class="contact">City Hall contact information and office hours.</div>
+        </div>
+      </main><footer>Privacy Sitemap</footer></body></html>`;
+    const result = extractArticleText(html, "https://city.example.gov/mayor-city-council");
+    assert.match(result.text, /Julia Hidalgo/);
+    assert.match(result.text, /city policy and council matters/);
+    assert.doesNotMatch(result.text, /Unrelated department menu/);
+  });
+
+  it("keeps the normal article path when an article contains an expandable control", () => {
+    const body = "The council approved a transportation plan after a public hearing. The plan funds safer crossings and a new bus shelter.";
+    const html = `<html><head><title>Transportation plan approved</title></head><body><article>
+      <h1>Transportation plan approved</h1><button aria-controls="details" aria-expanded="false">Show details</button>
+      <p>${body}</p><div id="details">Additional meeting context.</div>
+    </article></body></html>`;
+    const result = extractArticleText(html, "https://news.example.org/transportation-plan-approved");
+    assert.equal(result.method, "readability");
+    assert.match(result.text, /transportation plan/);
+  });
+
+  it("does not trigger expandable-panel recovery for a plain generic main", () => {
+    const html = `<html><head><title>City contacts</title></head><body><main>
+      <h1>City contacts</h1><p>Call the clerk's office for general information about permits, public meetings, records requests, accessibility services and general questions from residents.</p>
+    </main></body></html>`;
+    const result = extractArticleText(html, "https://city.example.gov/contacts");
+    assert.equal(result.method, "readability");
+    assert.match(result.text, /clerk's office/);
+  });
+
+  it("does not trigger expandable-panel recovery for details outside main", () => {
+    const html = `<!doctype html><html><body>
+      <details><summary>Navigation</summary><p>Hidden navigation content.</p></details>
+      <main><h1>City contacts</h1><p>The city clerk accepts public-record requests during ordinary business hours by email, phone, or in person at the municipal office.</p></main>
+    </body></html>`;
+    const result = extractArticleText(html, "https://example.test/contacts");
+    assert.equal(result.method, "readability");
+    assert.match(result.text, /city clerk/i);
+  });
+
   it("recovers dated static news cards when Readability keeps only listing controls", () => {
     // Reduced from the public /news response observed 2026-09-09: the cards
     // already exist in server HTML; the loading-more marker is not an empty app.

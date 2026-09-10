@@ -40,6 +40,7 @@ export type ExtractedArticle = {
 };
 
 const READABILITY_MIN_CHARS = 60;
+const EXPANDABLE_CONTROLS = "button[aria-controls], button[aria-expanded], .accordion-button, details, summary";
 
 const KILL_SELECTORS = [
   "nav",
@@ -63,6 +64,8 @@ function stripBoilerplate(document: {
     tagName: string;
     getAttribute: (name: string) => string | null;
     remove: () => void;
+    closest?: (sel: string) => unknown;
+    querySelector?: (sel: string) => unknown;
   }>;
   querySelector: (sel: string) => { innerHTML?: string } | null;
   body: { innerHTML?: string } | null;
@@ -75,6 +78,10 @@ function stripBoilerplate(document: {
     // Semantic content roots can carry header-spacing utility classes. Their
     // descendant nav/banner elements were removed above; do not delete the story.
     if (/^(MAIN|ARTICLE)$/i.test(el.tagName)) continue;
+    // Some CMS layouts call the whole content-and-sidebar grid "side-menu".
+    // Actual nav elements were removed above; do not erase substantive panels
+    // inside main just because their containing layout has a navigation name.
+    if (el.closest?.("main") && el.querySelector?.(EXPANDABLE_CONTROLS)) continue;
     const cls = el.getAttribute("class") ?? "";
     const id = el.getAttribute("id") ?? "";
     if (BOILERPLATE_CLASS_ID.test(cls) || BOILERPLATE_CLASS_ID.test(id)) el.remove();
@@ -82,6 +89,43 @@ function stripBoilerplate(document: {
   const main = document.querySelector("main") ?? document.querySelector("article");
   const root = main ?? document.body;
   return root?.innerHTML ?? "";
+}
+
+function expandableMainFallback(html: string, readabilityText: string): string | null {
+  // Generic public-body pages often put real records in collapsed accordion
+  // panels. Readability treats their buttons/links as navigation and can keep
+  // only the panel prose, losing the visible heading. Restrict this recovery
+  // to a semantic main with an expandable control and no nested article: real
+  // news articles keep their existing Readability path.
+  let document: ReturnType<typeof parseHTML>["document"];
+  try {
+    // Readability mutates its input DOM while parsing. Use a fresh document so
+    // this guard observes the original semantic controls and article shape.
+    document = parseHTML(html).document;
+  } catch {
+    return null;
+  }
+  const main = document.querySelector("main") as {
+    innerHTML?: string;
+    querySelectorAll?: (sel: string) => Iterable<unknown>;
+  } | null;
+  if (!main || document.querySelector("main article")) return null;
+  const controls = Array.from(
+    main.querySelectorAll?.(EXPANDABLE_CONTROLS) ?? [],
+  );
+  if (!controls.length) return null;
+  const fallbackHtml = stripBoilerplate(document as Parameters<typeof stripBoilerplate>[0]);
+  const fallbackText = htmlToPlainText(fallbackHtml);
+  const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+  const normalizedFallback = normalize(fallbackText);
+  const fallbackAddsPanelLabel = controls.some((control) => {
+    const label = normalize(String((control as { textContent?: string }).textContent ?? ""));
+    return label.length >= 3 && normalizedFallback.includes(label);
+  });
+  return fallbackText.trim().length >= 60 &&
+    (fallbackText.length > readabilityText.length + 20 || fallbackAddsPanelLabel || controls.length > 1)
+    ? fallbackText
+    : null;
 }
 
 function looksLikeMisparse(text: string): boolean {
@@ -119,7 +163,11 @@ export function extractArticleText(html: string, url?: string): ExtractedArticle
       const text = htmlToPlainText(article.content);
       readabilityTitle = article.title ?? null;
       if (!looksLikeMisparse(text)) {
-        return { text, title: readabilityTitle, method: "readability" };
+        const expandableText = expandableMainFallback(html, text);
+        if (!expandableText) {
+          return { text, title: readabilityTitle, method: "readability" };
+        }
+        return { text: expandableText, title: readabilityTitle, method: "heuristic" };
       }
     }
   } catch {

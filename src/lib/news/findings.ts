@@ -227,23 +227,21 @@ export function resolvePublicFindings(
   findings: StoryFinding[],
   provenance: ProvenanceItem[],
 ): StoryFinding[] {
-  const urls = new Set(provenance.map((p) => p.url));
-  const versions = new Set(
-    provenance.map((p) => p.version_id).filter((id): id is number => id != null),
-  );
-  const captures = new Set(
-    provenance
-      .map((p) => p.capture_event_id)
-      .filter((id): id is number => id != null),
-  );
   return findings
-    .filter((f) => {
-      if (!f.text.trim()) return false;
-      const urlOk = f.source_urls.some((u) => urls.has(u));
-      if (!urlOk) return false;
-      const versionOk = f.artifact_version_ids.some((id) => versions.has(id));
-      const captureOk = f.capture_event_ids.some((id) => captures.has(id));
-      return versionOk || captureOk;
+    .flatMap((f) => {
+      if (!f.text.trim()) return [];
+      const matched = provenance.filter((p) =>
+        f.source_urls.includes(p.url) &&
+        ((p.version_id != null && f.artifact_version_ids.includes(p.version_id)) ||
+          (p.capture_event_id != null && f.capture_event_ids.includes(p.capture_event_id))),
+      );
+      if (!matched.length) return [];
+      return [{
+        ...f,
+        source_urls: [...new Set(matched.map(p => p.url))],
+        artifact_version_ids: [...new Set(matched.map(p => p.version_id).filter((id): id is number => id != null && f.artifact_version_ids.includes(id)))],
+        capture_event_ids: [...new Set(matched.map(p => p.capture_event_id).filter((id): id is number => id != null && f.capture_event_ids.includes(id)))],
+      }];
     })
     /*
       A locator is a note to ourselves, not to a reader.

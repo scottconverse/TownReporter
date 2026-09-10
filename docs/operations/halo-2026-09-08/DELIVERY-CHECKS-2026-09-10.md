@@ -206,3 +206,32 @@ Built entry SHA-256:
 The build retains Node's DEP0190 shell-spawn deprecation warning. It used the
 integrated development tree, including other not-yet-committed feature work;
 it is not a clean release-candidate or production acceptance claim.
+
+### Built desktop UI check
+
+Terra checked the same built SHA using a fresh in-memory PGLite fixture at
+`http://127.0.0.1:3491`. The captured PDF opened; requested range 13–13 and the
+named-model requirement were visible; Automatic disabled submission, while an
+explicit Local selection enabled it and showed the provider. A completed
+page-numbered transcript displayed correctly and was explicitly labeled
+`UI fixture — no OCR provider called`, not a real transcription success.
+No OCR request was submitted in this UI check. The worker persistence proof
+above is a separate test, not this fixture display.
+
+Terra observed the desktop screenshot. Mobile was not tested because its browser
+surface had no viewport override. Owned fixture server PID 3260 was stopped;
+the lead independently found neither PID 3260 nor a listener on port 3491.
+No production database or saved data was used. The fixture helper is local,
+ignored `artifacts/pdf-page-reader-ui-fixture.mjs`, not a production endpoint.
+
+## Existing extraction and publication repairs consolidated
+
+The pending generic-CMS extraction repair retains meaningful council accordion
+panels previously mistaken for navigation. The publication repair limits both
+displayed and serialized citation metadata to the editor's public source list;
+it does not expose unrelated saved research as a public citation.
+
+One isolated run of `article-extract.test.ts`, `evidence.public.test.ts`, and
+`public-evidence-boundary.test.ts`: 22 passed, 5 suites, no failures/skips,
+22688.4498 ms. These are existing repairs being consolidated, not a new
+edge-case expansion. The integrated build above already included these files.

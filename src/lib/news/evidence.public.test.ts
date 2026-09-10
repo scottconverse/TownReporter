@@ -148,6 +148,16 @@ describe("public evidence publication", { timeout: 60000 }, () => {
     );
     assert.equal(urlOnly.length, 0);
 
+    const crossed = resolvePublicFindings(
+      parseFindings({
+        text: "A URL cannot borrow another source's version.",
+        source_urls: [url],
+        artifact_version_ids: [v1[0]!.id],
+      }),
+      [{...kept[0]!,version_id:v2[0]!.id},{...kept[0]!,url:"https://public.example/other",version_id:v1[0]!.id}],
+    );
+    assert.deepEqual(crossed, []);
+
     const diff = describeTextChanges(earlier!.extraction_text, pub!.extraction_text);
     assert.ok(diff.added.length + diff.removed.length > 0);
   });
