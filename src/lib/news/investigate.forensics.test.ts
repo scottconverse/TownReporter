@@ -52,6 +52,34 @@ describe("quote in document", () => {
   });
 });
 
+describe("capture persistence", () => {
+  it("removes a PDF page NUL before writing its evidence chunk", async () => {
+    const user = `forensic-page-nul-${Date.now()}`;
+    const { sql, id } = await bootInv(user, "Scanned packet page cleanup");
+    const pageText = `Council approved the packet${String.fromCharCode(0)} after public comment.`;
+    const capture = await rememberCapture({
+      userId: user,
+      investigationId: id,
+      url: `https://example.org/${user}/packet.pdf`,
+      title: "Scanned packet",
+      text: "Council approved the packet after public comment.",
+      hash: `page-nul-${Date.now()}`,
+      status: 200,
+      outcome: "fetched",
+      pages: [{ page: 14, text: pageText }],
+    });
+
+    const chunks = await sql<{ excerpt: string; page_number: number | null }>`
+      select excerpt, page_number from artifact_chunks
+      where version_id = ${capture.versionId}
+    `;
+    assert.equal(chunks.length, 1);
+    assert.equal(chunks[0]?.page_number, 14);
+    assert.equal(chunks[0]?.excerpt.includes(String.fromCharCode(0)), false);
+    assert.equal(chunks[0]?.excerpt, "Council approved the packet after public comment.");
+  });
+});
+
 describe("forensic chronology", { timeout: 120000 }, () => {
   it("keeps A→B→A→B→missing→restored as capture events while versions stay unique", async () => {
     const user = `forensic-chrono-${Date.now()}`;

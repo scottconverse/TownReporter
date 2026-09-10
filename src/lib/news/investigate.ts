@@ -41,6 +41,7 @@ import {
   ingestDocument,
   type PdfPage,
 } from "./ingest.ts";
+import { storableText } from "./storable-text.ts";
 import {
   searchWithFallback,
   waybackCopies,
@@ -1200,6 +1201,8 @@ export async function rememberCapture(opts: {
     /* keep raw */
   }
   const fullText = (opts.text ?? "").slice(0, ARCHIVE_TEXT_CAP);
+  // Page-aware chunks need the same cleaning as the combined ingestion text.
+  const pages = opts.pages?.map((page) => ({ ...page, text: storableText(page.text) }));
   const extractedHash = opts.hash || (await sha256(fullText || url));
   const rawHash =
     opts.rawBytes && opts.rawBytes.byteLength > 0 ? await sha256Bytes(opts.rawBytes) : null;
@@ -1207,8 +1210,8 @@ export async function rememberCapture(opts: {
   // Embedded-image OCR has no PDF page association. Do not persist its image
   // inventory as a page count; native extraction retains its actual pages.
   const pageCount =
-    opts.pages?.length && opts.pages.every((p) => p.page != null && p.imageIndex == null)
-      ? opts.pages.length
+    pages?.length && pages.every((p) => p.page != null && p.imageIndex == null)
+      ? pages.length
       : null;
   const existing = await sql<{ id: number }>`
     select id from artifact_versions
@@ -1272,7 +1275,7 @@ export async function rememberCapture(opts: {
       select count(*)::int as c from artifact_chunks where version_id = ${versionId} and newsroom_id = ${newsroomId}
     `;
     if ((already[0]?.c ?? 0) === 0) {
-      const chunks = chunksFromEvidence(fullText, opts.pages);
+      const chunks = chunksFromEvidence(fullText, pages);
       for (const c of chunks) {
         await sql`
           insert into artifact_chunks (version_id, user_id, newsroom_id, chunk_index, page_number, section, excerpt, locator)

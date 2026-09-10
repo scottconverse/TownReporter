@@ -134,3 +134,16 @@ Server log: `artifacts/dark-r22-server-2026-09-10T18-31-26-482Z.log`.
 The owned server 32784 and child 10260 were stopped after the job failed.
 Subsequent process scan found only the existing TownReporter production pair
 23012/22152 among matching server commands.
+
+### Focused repair
+
+Individual `PdfPage.text` values bypassed the existing combined-text cleanup
+before insertion into `artifact_chunks`. The repair applies existing
+`storableText` to copied page text for persistence; raw bytes remain unchanged.
+One database-backed regression stores a page-14 chunk containing a NUL.
+With repair: 1 passed, 0 failed/skipped, 13675.7815 ms.
+With only the chunk call temporarily reverted to unsanitized pages: 1 failed,
+0 passed/skipped, 11372.0816 ms, reproducing PostgreSQL error 22021 and the exact
+`invalid byte sequence for encoding "UTF8": 0x00` error at `artifact_chunks`.
+The repaired call was restored immediately afterward. This is a reproduced
+source-path fix, not yet a new built-server or fresh investigation pass.
