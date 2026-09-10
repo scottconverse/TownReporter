@@ -439,3 +439,19 @@ Parent ran `node scripts/with-app-env.mjs node --experimental-strip-types --test
 20112.0958 ms, exit 0. Empty DATABASE_URL/in-memory PGLite confirmed. This
 completes the saved-source extraction slice, not six-family activation or
 live automatic publication. Luna accepted after one correction; usage unknown.
+
+## Draft PR and clean-install repair
+
+Opened draft PR https://github.com/scottconverse/TownReporter/pull/41 without
+merge/deployment. Remote main remained b097d28; branch was 37b29b7. CI run
+34528337288 failed in npm ci before tests: missing lru-cache@11.5.2 in the
+lockfile (job 103042645413). Local npm 11.12.1 did not reproduce the error.
+Using CI's npm 10.9.8 resolved the missing nested optional peer; package.json
+and existing package versions are unchanged. Retained the original canvas
+libc metadata that npm 10 omitted during regeneration. Final lockfile delta:
+one 12-line node_modules/nitro/node_modules/lru-cache entry.
+
+`npm exec --yes --package=npm@10.9.8 -- npm ci --dry-run --ignore-scripts --no-audit --no-fund --loglevel=error`
+exited 0 after the repair. This validates npm 10's lock consistency on Windows;
+the fresh remote CI run must prove Linux installation. No global npm install,
+production database access, or model generation was performed.
