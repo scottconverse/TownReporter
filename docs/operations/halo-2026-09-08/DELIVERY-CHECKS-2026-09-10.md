@@ -235,3 +235,16 @@ One isolated run of `article-extract.test.ts`, `evidence.public.test.ts`, and
 `public-evidence-boundary.test.ts`: 22 passed, 5 suites, no failures/skips,
 22688.4498 ms. These are existing repairs being consolidated, not a new
 edge-case expansion. The integrated build above already included these files.
+
+## Existing search integration consolidated
+
+The optional configured-localhost Gateway search adapter and existing public
+fallback chain remain one TownReporter search path. An unset Gateway leaves
+the default chain unchanged. Relevance-aware research can continue past
+nonempty off-question results instead of treating any result as an answer;
+provider failures and partial coverage remain distinguishable from zero hits.
+
+`halo-search.test.ts` and `search-web.test.ts`: 43 passed, 11 suites, no
+failures/skips, 359.4696 ms. Fetches/provider replies were injected fixtures;
+this was not a live Gateway or external search-provider availability check.
+No Gateway service, settings, or installation was changed.

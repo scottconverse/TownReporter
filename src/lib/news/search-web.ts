@@ -1,22 +1,41 @@
 import { assertPublicHttpUrl, fetchPublicHttp, resolveFetch } from "./fetch-url.ts";
 import { assertHttpUrl } from "./url-guard.ts";
 import { classifySearchHtml, type SearchState } from "./fetch-outcome.ts";
+import { HaloGatewayProviderError, haloGatewaySearch } from "./halo-search.ts";
+import { queryTokens } from "./retrieve.ts";
 
-export type WebHit = { title: string; url: string; snippet: string };
+export type WebHit = { title: string; url: string; snippet: string; provider?: string };
+
+export type SearchRelevanceAssessment = {
+  decision: "relevant" | "degraded" | "not-evaluated";
+  reason: string;
+  meaningfulQueryTokens: string[];
+  selectedUrl?: string;
+};
+
+export type SearchRelevanceOptions = {
+  officialDomains: string[];
+  localityStopwords?: string[];
+};
 
 export type SearchAttempt = {
   state: SearchState;
   hits: WebHit[];
   provider: string;
   error?: string;
+  errorCode?: string;
+  warnings?: string[];
+  available?: number;
+  complete?: boolean;
+  nextCursor?: string;
   lineage?: SearchAttempt[];
+  relevance?: SearchRelevanceAssessment;
 };
 
 export function parseDdgHtml(html: string): WebHit[] {
   const hits: WebHit[] = [];
   const seen = new Set<string>();
-  const re =
-    /uddg=([^&"]+)[^>]*>[\s\S]{0,40}?(?:class="result__a"[^>]*>)?([^<]{0,180})/gi;
+  const re = /uddg=([^&"]+)[^>]*>[\s\S]{0,40}?(?:class="result__a"[^>]*>)?([^<]{0,180})/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
     let url = "";
@@ -147,7 +166,11 @@ export function parseExaBlocks(text: string): WebHit[] {
     hits.push({
       title: title || new URL(url).hostname,
       url,
-      snippet: highlights.replace(/\.\.\./g, " ").replace(/\s+/g, " ").trim().slice(0, 400),
+      snippet: highlights
+        .replace(/\.\.\./g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 400),
     });
     if (hits.length >= 8) break;
   }
@@ -219,6 +242,43 @@ async function searchExa(query: string): Promise<SearchAttempt> {
       hits: [],
       provider,
       error: msg,
+    };
+  }
+}
+
+async function searchHaloGateway(query: string): Promise<SearchAttempt> {
+  const provider = "halo-gateway";
+  try {
+    const result = await haloGatewaySearch(query);
+    return {
+      state: result.hits.length ? "SEARCH_SUCCESS_RESULTS" : "SEARCH_SUCCESS_ZERO_RESULTS",
+      hits: result.hits,
+      provider: result.provider,
+      warnings: result.warnings,
+      available: result.available,
+      complete: result.complete,
+      nextCursor: result.nextCursor,
+    };
+  } catch (error) {
+    if (error instanceof HaloGatewayProviderError) {
+      return {
+        state: "SEARCH_FAILED_PROVIDER",
+        hits: [],
+        provider,
+        error: error.message,
+        errorCode: error.code,
+        warnings: error.warnings,
+        available: error.available,
+        complete: error.complete,
+        nextCursor: error.nextCursor,
+      };
+    }
+    const message = error instanceof Error ? error.message : "Gateway search failed";
+    return {
+      state: /timed out/i.test(message) ? "SEARCH_TIMEOUT" : "SEARCH_FAILED_PROVIDER",
+      hits: [],
+      provider,
+      error: message,
     };
   }
 }
@@ -345,7 +405,10 @@ export function parseBingHtml(html: string): WebHit[] {
       continue;
     }
     seen.add(url);
-    const title = m[2]!.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    const title = m[2]!
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     hits.push({ title: title || url, url, snippet: "" });
     if (hits.length >= 8) break;
   }
@@ -355,7 +418,8 @@ export function parseBingHtml(html: string): WebHit[] {
 export function parseBraveHtml(html: string): WebHit[] {
   const hits: WebHit[] = [];
   const seen = new Set<string>();
-  const re = /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*class="[^"]*heading-serpresult[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+  const re =
+    /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*class="[^"]*heading-serpresult[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
     const url = m[1]!;
@@ -367,7 +431,10 @@ export function parseBraveHtml(html: string): WebHit[] {
       continue;
     }
     seen.add(url);
-    const title = m[2]!.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    const title = m[2]!
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     hits.push({ title: title || url, url, snippet: "" });
     if (hits.length >= 8) break;
   }
@@ -433,16 +500,180 @@ async function searchBrave(query: string): Promise<SearchAttempt> {
 }
 
 /** DDG, then an independent index (Bing, Brave), then Wikipedia. A failure or zero is not "nothing exists." */
-export async function searchWithFallback(query: string): Promise<SearchAttempt> {
+type SearchProvider = (query: string) => Promise<SearchAttempt>;
+
+function normalizedHost(raw: string): string {
+  try {
+    return new URL(raw).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function canonicalHitUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    url.hash = "";
+    url.hostname = url.hostname.toLowerCase();
+    if (url.pathname !== "/") url.pathname = url.pathname.replace(/\/+$/, "");
+    return url.toString();
+  } catch {
+    return raw;
+  }
+}
+
+function isOfficialHit(hit: WebHit, officialDomains: string[]): boolean {
+  const host = normalizedHost(hit.url);
+  return officialDomains.some((raw) => {
+    const official = normalizedHost(raw.includes("://") ? raw : `https://${raw}`);
+    return official && (host === official || host.endsWith(`.${official}`));
+  });
+}
+
+function hitRelevance(hit: WebHit, tokens: string[]): number {
+  let pathname = "";
+  try {
+    pathname = decodeURIComponent(new URL(hit.url).pathname);
+  } catch {
+    pathname = hit.url;
+  }
+  const hitTokens = new Set(queryTokens(`${hit.title} ${hit.snippet} ${pathname}`));
+  return tokens.filter((token) => hitTokens.has(token)).length;
+}
+
+function rankRelevanceHits(hits: WebHit[], tokens: string[], officialDomains: string[]): WebHit[] {
+  const threshold = Math.min(2, tokens.length);
+  return hits
+    .map((hit, index) => ({
+      hit,
+      index,
+      matches: hitRelevance(hit, tokens),
+      official: isOfficialHit(hit, officialDomains),
+    }))
+    .sort((a, b) => {
+      const aRelevant = a.matches >= threshold ? 1 : 0;
+      const bRelevant = b.matches >= threshold ? 1 : 0;
+      return (
+        bRelevant - aRelevant ||
+        (aRelevant ? Number(b.official) - Number(a.official) : 0) ||
+        b.matches - a.matches ||
+        a.index - b.index
+      );
+    })
+    .map(({ hit }) => hit);
+}
+
+function mergeHits(target: WebHit[], attempt: SearchAttempt, tokens: string[]): void {
+  for (const hit of attempt.hits) {
+    const key = canonicalHitUrl(hit.url);
+    const tagged = { ...hit, provider: hit.provider ?? attempt.provider };
+    const existing = target.findIndex((candidate) => canonicalHitUrl(candidate.url) === key);
+    if (existing < 0) {
+      target.push(tagged);
+    } else if (hitRelevance(tagged, tokens) > hitRelevance(target[existing]!, tokens)) {
+      target[existing] = tagged;
+    }
+  }
+}
+
+export async function searchWithFallback(
+  query: string,
+  fallbackProviders: SearchProvider[] = [
+    searchExa,
+    searchDdg,
+    searchDdgLite,
+    searchBing,
+    searchBrave,
+    searchWikipedia,
+  ],
+  relevanceOptions?: SearchRelevanceOptions,
+): Promise<SearchAttempt> {
   const q = query.trim().slice(0, 180);
   if (!q) return { state: "SEARCH_SUCCESS_ZERO_RESULTS", hits: [], provider: "none", lineage: [] };
   const lineage: SearchAttempt[] = [];
-  for (const fn of [searchExa, searchDdg, searchDdgLite, searchBing, searchBrave, searchWikipedia]) {
+  const providers = process.env.TOWNREPORTER_GATEWAY_MCP_URL?.trim()
+    ? [searchHaloGateway, ...fallbackProviders]
+    : fallbackProviders;
+  const locality = new Set((relevanceOptions?.localityStopwords ?? []).flatMap(queryTokens));
+  const meaningfulTokens = relevanceOptions
+    ? [...new Set(queryTokens(q).filter((token) => !locality.has(token)))]
+    : [];
+  const assessRelevance = Boolean(relevanceOptions && meaningfulTokens.length);
+  const collectedHits: WebHit[] = [];
+  let firstResults: SearchAttempt | undefined;
+  for (const fn of providers) {
     const attempt = await fn(q);
     lineage.push(attempt);
-    if (attempt.state === "SEARCH_SUCCESS_RESULTS") return { ...attempt, lineage };
+    if (attempt.state !== "SEARCH_SUCCESS_RESULTS") continue;
+    if (!relevanceOptions) return { ...attempt, lineage };
+    if (!assessRelevance) {
+      return {
+        ...attempt,
+        lineage,
+        relevance: {
+          decision: "not-evaluated",
+          reason:
+            "The query had no meaningful terms after locality words were removed; accepted the provider result without filtering.",
+          meaningfulQueryTokens: [],
+          selectedUrl: attempt.hits[0]?.url,
+        },
+      };
+    }
+    firstResults ??= attempt;
+    mergeHits(collectedHits, attempt, meaningfulTokens);
+    const threshold = Math.min(2, meaningfulTokens.length);
+    if (attempt.hits.some((hit) => hitRelevance(hit, meaningfulTokens) >= threshold)) {
+      const hits = rankRelevanceHits(
+        collectedHits,
+        meaningfulTokens,
+        relevanceOptions.officialDomains,
+      );
+      return {
+        ...attempt,
+        hits,
+        lineage,
+        warnings:
+          firstResults === attempt
+            ? attempt.warnings
+            : [...new Set([...(attempt.warnings ?? []), "IRRELEVANT_RESULTS_CONTINUED"])],
+        relevance: {
+          decision: "relevant",
+          reason: "At least one result matched the investigation question.",
+          meaningfulQueryTokens: meaningfulTokens,
+          selectedUrl: hits[0]?.url,
+        },
+      };
+    }
   }
-  return pickSearchResult(lineage);
+  if (relevanceOptions && firstResults && collectedHits.length) {
+    const hits = rankRelevanceHits(
+      collectedHits,
+      meaningfulTokens,
+      relevanceOptions.officialDomains,
+    );
+    return {
+      ...firstResults,
+      hits,
+      lineage,
+      warnings: [...new Set([...(firstResults.warnings ?? []), "IRRELEVANT_RESULTS_RETAINED"])],
+      relevance: {
+        decision: "degraded",
+        reason: "Providers returned results, but none matched enough investigation-question terms.",
+        meaningfulQueryTokens: meaningfulTokens,
+        selectedUrl: hits[0]?.url,
+      },
+    };
+  }
+  const picked = pickSearchResult(lineage);
+  if (!relevanceOptions) return picked;
+  return {
+    ...picked,
+    relevance: {
+      decision: "not-evaluated",
+      reason: "No provider returned results to assess for relevance.",
+      meaningfulQueryTokens: meaningfulTokens,
+    },
+  };
 }
 
 export async function webSearch(query: string): Promise<WebHit[]> {
