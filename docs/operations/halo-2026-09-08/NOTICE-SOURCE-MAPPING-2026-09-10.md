@@ -91,3 +91,30 @@ Exit0, no warnings/errors:
 Source correction accepted; saved real-source workflow and activation still
 outstanding. The retained development build predates this small correction;
 do not present its hash as including it. Known CI browser failures remain.
+
+## Real PrimeGov saved-source check
+
+Lead reviewed Luna's `artifacts/notice-real-source-check.mjs` and executed it
+once on September 10 at 21:50 UTC. It fetched the public upcoming-meetings
+endpoint once and passed those bytes through the normal owner saved-check
+function with an injected fetch result, in fresh in-memory PGLite. This was
+not a browser-control test or a production check. Native model providers were
+disabled; no model, publication, or scheduler was invoked.
+
+Result: HTTP 200, 12,719 bytes, 12 entries; five parsed candidates, seven
+structural refusals (six at `/`, one at `/documentList`), zero conflicts
+reported by this single-feed check. Capture, artifact-version and blob hashes
+matched `dcd12d8e30417c25f23b5f68ed5f05e129148fbc26465e55848d3ea61ff9a36e`.
+Stored source URL, original text and byte length also matched. Automatic
+editions remained disabled. The test policy allowed checking (`paused=false`);
+the script's introductory comment calling the policy paused is inaccurate.
+
+Receipt: `artifacts/notice-real-source-check/receipt-2026-09-10T21-50-21.508Z.json`.
+Execution session 44112 exited 0. A subsequent Windows process check found
+only the unchanged production Node pair 23012/22152, no test process.
+
+Limit: this does not establish cross-document consistency. Earlier retrieval
+of meetingTemplateId=17256 showed a portal heading of September 15 at midnight
+while the agenda body and API said September 14 at 6 PM. Resolve that source
+discrepancy before enabling publication; zero internal feed conflicts does not
+prove the heading agrees. Registration and waste mappings remain open.
