@@ -50,10 +50,7 @@ describe("saved PrimeGov meeting extraction", () => {
     assert.equal(result.validation.notice.fields.title.locator, "/title");
     assert.equal(result.validation.notice.fields.start.locator, "/dateTime");
     assert.match(result.validation.notice.fields.agendaUrl.value, /meetingTemplateId=16373/);
-    assert.equal(
-      result.validation.notice.fields.agendaUrl.locator,
-      "/documentList/0/templateId",
-    );
+    assert.equal(result.validation.notice.fields.agendaUrl.locator, "/documentList/0/templateId");
   });
 
   it("refuses missing agenda, invalid IDs, and ambiguous time without throwing", () => {
@@ -101,6 +98,66 @@ describe("saved PrimeGov meeting extraction", () => {
 });
 
 describe("saved Schema.org Event extraction", () => {
+  it("uses the exact-source owner issuer when organizer is absent and preserves its provenance", () => {
+    const events = [
+      {
+        "@type": "Event",
+        "@id": "https://longmontcolorado.gov/event/yoga-storytime/2026-09-10/#event",
+        name: "Yoga Storytime",
+        startDate: "2026-09-10T10:00:00-06:00",
+        endDate: "2026-09-10T10:30:00-06:00",
+        eventStatus: "https://schema.org/EventScheduled",
+        location: { name: "Longmont Public Library" },
+      },
+      {
+        "@type": "Event",
+        "@id":
+          "https://longmontcolorado.gov/event/spanish-english-conversation-group-2/2026-09-10/#event",
+        name: "Spanish-English Conversation Group",
+        startDate: "2026-09-10T13:00:00-06:00",
+        endDate: "2026-09-10T14:00:00-06:00",
+        eventStatus: "https://schema.org/EventScheduled",
+        location: { name: "Longmont Public Library" },
+      },
+    ];
+    const results = extractJsonLdEvents(
+      `<script type="application/ld+json">${JSON.stringify(events)}</script>`,
+      {
+        formatKey: "library-notice",
+        provenance,
+        ownerIssuer: { value: "City of Longmont", locator: "OWNER_ISSUER" },
+      },
+    );
+    assert.equal(results.length, 2);
+    for (const result of results) {
+      assert.equal(result.status, "parsed");
+      if (result.status === "parsed" && result.validation.valid)
+        assert.deepEqual(result.validation.notice.fields.issuer, {
+          value: "City of Longmont",
+          locator: "OWNER_ISSUER",
+        });
+    }
+  });
+
+  it("refuses rather than overwriting a structured organizer conflicting with owner issuer", () => {
+    const html = `<script type="application/ld+json">${JSON.stringify({ "@type": "Event", "@id": "conflicting-issuer", name: "Library program", startDate: "2026-09-10T10:00:00-06:00", organizer: { name: "Another Organization" }, location: { name: "Longmont Public Library" } })}</script>`;
+    const [result] = extractJsonLdEvents(html, {
+      formatKey: "library-notice",
+      provenance,
+      ownerIssuer: { value: "City of Longmont", locator: "OWNER_ISSUER" },
+    });
+    assert.equal(result?.status, "refused");
+    assert.equal(result?.code, "structurally-invalid");
+    assert.match(result?.locator ?? "", /organizer\.name$/);
+  });
+
+  it("keeps organizer mandatory when no exact-source owner context is supplied", () => {
+    const html = `<script type="application/ld+json">${JSON.stringify({ "@type": "Event", "@id": "no-owner-context", name: "Library program", startDate: "2026-09-10T10:00:00-06:00", location: { name: "Longmont Public Library" } })}</script>`;
+    const [result] = extractJsonLdEvents(html, { formatKey: "library-notice", provenance });
+    assert.equal(result?.status, "refused");
+    assert.deepEqual(result?.validation?.valid, false);
+  });
+
   it("reads official Event properties in stable script and graph order", () => {
     // Primary property/value shapes: https://schema.org/Event (retrieved 2026-09-08).
     const html = `<script type="application/ld+json">{
@@ -234,7 +291,10 @@ describe("saved Schema.org Event extraction", () => {
         assert.equal(result?.status, "parsed");
         if (result?.status !== "parsed" || !result.validation.valid) continue;
         assert.equal(result.validation.notice.fields.eventStatus?.value, rawStatus);
-        assert.equal(result.validation.notice.fields.eventStatus?.locator.endsWith(".eventStatus"), true);
+        assert.equal(
+          result.validation.notice.fields.eventStatus?.locator.endsWith(".eventStatus"),
+          true,
+        );
         assert.equal(result.validation.notice.normalizedFields.eventStatus, normalized);
       }
     }
@@ -267,10 +327,10 @@ describe("saved Schema.org Event extraction", () => {
       location: { name: "Hall" },
     };
     const resultFor = (row: Record<string, unknown>) =>
-      extractJsonLdEvents(
-        `<script type="application/ld+json">${JSON.stringify(row)}</script>`,
-        { formatKey: "community-arts-event-logistics", provenance },
-      )[0];
+      extractJsonLdEvents(`<script type="application/ld+json">${JSON.stringify(row)}</script>`, {
+        formatKey: "community-arts-event-logistics",
+        provenance,
+      })[0];
 
     assert.equal(resultFor(base)?.status, "parsed");
     for (const eventStatus of [null, 42, {}, [], "   "]) {

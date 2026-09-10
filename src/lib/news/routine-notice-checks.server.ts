@@ -1,4 +1,5 @@
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
+import { parseHTML } from "linkedom";
 import { sha256, sha256Bytes } from "./fetch-url.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import { ingestDocument } from "./ingest.ts";
@@ -29,6 +30,7 @@ import {
 const ADAPTER_KEY = "schema-event-jsonld";
 const ADAPTER_VERSION = 1;
 const MAX_CAPTURE_TEXT = 512 * 1024;
+const MAX_LIBRARY_CATEGORY_HTML_BYTES = 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SUPPORTED = new Set<RoutineNoticeFormatKey>(ROUTINE_NOTICE_FORMAT_KEYS);
 const FORMAT_KEYS = new Set<string>(ROUTINE_NOTICE_FORMAT_KEYS);
@@ -39,6 +41,94 @@ function captureUrlIdentity(url: string) {
   } catch {
     return url;
   }
+}
+
+function isLongmontLibraryCategory(url: string) {
+  try {
+    const parsed = new URL(url);
+    return (
+      (parsed.hostname === "longmontcolorado.gov" ||
+        parsed.hostname === "www.longmontcolorado.gov") &&
+      parsed.pathname.replace(/\/+$/, "") === "/events/category/library"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function visibleClockMinutes(value: string | null | undefined) {
+  const matches = [...(value ?? "").matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)];
+  const match = matches.at(-1);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? "0");
+  if (hour < 1 || hour > 12 || minute > 59) return null;
+  if (hour === 12) hour = 0;
+  if (match[3]!.toLowerCase() === "pm") hour += 12;
+  return hour * 60 + minute;
+}
+
+function structuredLocalParts(value: string | undefined) {
+  const match = value?.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
+  return match ? { date: match[1]!, minutes: Number(match[2]) * 60 + Number(match[3]) } : null;
+}
+
+function prepareLongmontLibraryCategory(
+  html: string,
+  context: Parameters<typeof extractJsonLdEvents>[1],
+): RoutineExtractionResult[] {
+  if (Buffer.byteLength(html, "utf8") > MAX_LIBRARY_CATEGORY_HTML_BYTES) {
+    return [{ status: "refused", code: "content-too-large", locator: "document" }];
+  }
+  const { document } = parseHTML(html);
+  const visible = new Map<
+    string,
+    { date: string; start: number; end: number | null; locator: string }
+  >();
+  const cards = [...document.querySelectorAll("article.tribe-events-calendar-list__event")];
+  for (let index = 0; index < cards.length; index += 1) {
+    const card = cards[index]!;
+    const href = card
+      .querySelector("a.tribe-events-calendar-list__event-title-link")
+      ?.getAttribute("href");
+    const time = card.querySelector("time.tribe-events-calendar-list__event-datetime");
+    const date = time?.getAttribute("datetime")?.slice(0, 10);
+    const start = visibleClockMinutes(time?.querySelector(".tribe-event-date-start")?.textContent);
+    const end = visibleClockMinutes(time?.querySelector(".tribe-event-time")?.textContent);
+    if (href && date && start != null) {
+      visible.set(captureUrlIdentity(href), {
+        date,
+        start,
+        end,
+        locator: `article.tribe-events-calendar-list__event[${index}]`,
+      });
+    }
+  }
+  const scripts = [...document.querySelectorAll('script[type="application/ld+json"]')];
+  const prepared = scripts
+    .map((script) => `<script type="application/ld+json">${script.textContent ?? ""}</script>`)
+    .join("\n");
+  return extractJsonLdEvents(prepared, context).map((result) => {
+    if (result.status !== "parsed" || !result.validation.valid) return result;
+    const notice = result.validation.notice;
+    const card = visible.get(captureUrlIdentity(notice.provenance.externalId));
+    const start = structuredLocalParts(notice.fields.start?.value);
+    const end = structuredLocalParts(notice.fields.end?.value);
+    const matches =
+      card &&
+      start &&
+      card.date === start.date &&
+      card.start === start.minutes &&
+      (!end || (card.end != null && card.end === end.minutes));
+    return matches
+      ? result
+      : {
+          status: "refused" as const,
+          code: "structurally-invalid" as const,
+          locator: card?.locator ?? `${result.locator}.visible-card`,
+          validation: result.validation,
+        };
+  });
 }
 
 export class RoutineNoticeCheckError extends Error {
@@ -200,9 +290,10 @@ function adapterResults(
   provenance: { captureEventId: number; artifactVersionId: number; contentHash: string },
   ownerContext: AdapterOwnerContext,
 ) {
-  const missingContext = () => [
-    { status: "refused", code: "missing-owner-context", locator: "automation-settings" },
-  ] satisfies RoutineExtractionResult[];
+  const missingContext = () =>
+    [
+      { status: "refused", code: "missing-owner-context", locator: "automation-settings" },
+    ] satisfies RoutineExtractionResult[];
   const base = {
     newsroomId: actor.newsroomId,
     sourceId: input.sourceId,
@@ -212,11 +303,13 @@ function adapterResults(
   };
   if (input.formatKey === "registration-deadline")
     return content.includes("BEGIN:VCALENDAR")
-      ? ownerContext ? extractRoutineIcs(content, "deadline", {
-          provenance: base,
-          issuer: ownerContext.issuer,
-          locality: ownerContext.locality,
-        }) : missingContext()
+      ? ownerContext
+        ? extractRoutineIcs(content, "deadline", {
+            provenance: base,
+            issuer: ownerContext.issuer,
+            locality: ownerContext.locality,
+          })
+        : missingContext()
       : extractApplicationDeadlines(content, base);
   if (input.formatKey === "waste-recycling-schedule")
     return ownerContext
@@ -245,7 +338,7 @@ function adapterResults(
       }),
     );
   }
-  const results = extractJsonLdEvents(content, {
+  const jsonLdContext = {
     formatKey: input.formatKey as
       "library-notice" | "parks-recreation-notice" | "community-arts-event-logistics",
     provenance: {
@@ -257,8 +350,19 @@ function adapterResults(
       artifactVersionId: provenance.artifactVersionId,
       contentHash: provenance.contentHash,
     },
-  });
-  if (input.formatKey === "library-notice" && ownerContext)
+    ...(ownerContext
+      ? { ownerIssuer: { value: ownerContext.issuer, locator: "OWNER_ISSUER" } }
+      : {}),
+  };
+  const results =
+    input.formatKey === "library-notice" && isLongmontLibraryCategory(input.sourceUrl)
+      ? prepareLongmontLibraryCategory(content, jsonLdContext)
+      : extractJsonLdEvents(content, jsonLdContext);
+  if (
+    input.formatKey === "library-notice" &&
+    ownerContext &&
+    !isLongmontLibraryCategory(input.sourceUrl)
+  )
     results.push(
       ...(extractLibraryHours(content, {
         provenance: base,
@@ -271,7 +375,8 @@ function adapterResults(
     !ownerContext &&
     content.includes("specialOpeningHoursSpecification") &&
     !results.some((result) => result.status === "parsed")
-  ) return missingContext();
+  )
+    return missingContext();
   return results.length
     ? results
     : ([

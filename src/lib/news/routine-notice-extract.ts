@@ -48,6 +48,8 @@ type PrimeGovContext = {
 type JsonLdContext = {
   formatKey: "library-notice" | "parks-recreation-notice" | "community-arts-event-logistics";
   provenance: BaseProvenance;
+  /** Exact approved-source issuer supplied by saved owner automation settings. */
+  ownerIssuer?: RoutineField;
 };
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -142,16 +144,16 @@ function jsonNodes(
   limitLocator?: string;
 } {
   const nodes: Array<{ row: Record<string, unknown>; locator: string }> = [];
-  type Entry = { kind: "value"; value: unknown; locator: string; depth: number } | {
-    kind: "array";
-    value: unknown[];
-    locator: string;
-    depth: number;
-    index: number;
-  };
-  const stack: Entry[] = [
-    { kind: "value", value, locator, depth: 0 },
-  ];
+  type Entry =
+    | { kind: "value"; value: unknown; locator: string; depth: number }
+    | {
+        kind: "array";
+        value: unknown[];
+        locator: string;
+        depth: number;
+        index: number;
+      };
+  const stack: Entry[] = [{ kind: "value", value, locator, depth: 0 }];
   let traversed = 0;
   while (stack.length) {
     const current = stack.pop()!;
@@ -239,7 +241,7 @@ function eventInput(
   externalId: string,
 ): RoutineNoticeInput {
   const organizer = record(row.organizer);
-  const issuer = field(text(organizer?.name), `${locator}.organizer.name`);
+  const issuer = field(text(organizer?.name), `${locator}.organizer.name`) ?? context.ownerIssuer;
   const title = field(text(row.name), `${locator}.name`);
   const start = field(text(row.startDate), `${locator}.startDate`);
   const end = field(text(row.endDate), `${locator}.endDate`);
@@ -338,6 +340,15 @@ export function extractJsonLdEvents(
         results.push(refused("structurally-invalid", `${node.locator}.eventStatus`));
         continue;
       }
+      const structuredIssuer = text(record(node.row.organizer)?.name);
+      if (
+        structuredIssuer &&
+        context.ownerIssuer &&
+        structuredIssuer !== context.ownerIssuer.value
+      ) {
+        results.push(refused("structurally-invalid", `${node.locator}.organizer.name`));
+        continue;
+      }
       const validation = validateRoutineNotice(
         eventInput(node.row, node.locator, context, externalId),
       );
@@ -348,8 +359,7 @@ export function extractJsonLdEvents(
       );
     }
     if (collected.limit) {
-      const code =
-        collected.limit === "node" ? "node-limit-exceeded" : "traversal-limit-exceeded";
+      const code = collected.limit === "node" ? "node-limit-exceeded" : "traversal-limit-exceeded";
       if (!results.some((result) => result.code === code)) {
         results.push(refused(code, collected.limitLocator ?? locator));
       }

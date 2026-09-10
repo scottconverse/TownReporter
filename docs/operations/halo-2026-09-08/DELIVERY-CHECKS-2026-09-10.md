@@ -424,3 +424,18 @@ changed. Owned server PID 28272 and child 35700 were stopped successfully;
 driver 34912 exited. Server log includes aborted-request ECONNRESET errors and
 a Better Auth client-IP warning. The functional flow passed, not a clean-log
 or generated-reporting-quality claim.
+
+## Library source delivery
+
+Luna's first portable fixture recreated events instead of retaining the capture;
+lead rejected it. The corrected submission preserves 3 original JSON-LD blocks
+and 20 original event cards. Parent compared all 23 blocks with the historical
+capture: identical content after CRLF/LF normalization (not byte-identical).
+Original ignored capture remains unchanged. Tests keep the 19 parsed / 1 refused
+baseline and 18 / 2 result when Yoga Storytime's visible time is contradicted.
+
+Parent ran `node scripts/with-app-env.mjs node --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 src/lib/news/routine-notice-checks.test.ts src/lib/news/routine-notice-extract.test.ts`.
+32 tests / 3 suites / 32 passed / 0 failed, cancelled, skipped, or todo;
+20112.0958 ms, exit 0. Empty DATABASE_URL/in-memory PGLite confirmed. This
+completes the saved-source extraction slice, not six-family activation or
+live automatic publication. Luna accepted after one correction; usage unknown.

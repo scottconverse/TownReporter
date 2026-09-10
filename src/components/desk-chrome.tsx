@@ -514,11 +514,13 @@ export function announceToDesk(text: string): void {
 
 export function leadOrigin(lead: {
   investigation_id?: number | null;
+  scan_run_id?: number | null;
   why?: string;
   newsworthiness?: number | null;
 }) {
   if (lead.investigation_id) return "from Dark Desk";
   if (/DARK DESK/i.test(lead.why ?? "")) return "from Dark Desk";
+  if (lead.scan_run_id != null) return "from the scanner";
   if ((lead.newsworthiness ?? 0) > 0) return "from the scanner";
   return "filed by you";
 }

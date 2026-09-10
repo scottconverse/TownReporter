@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { createServer } from "vite";
 import type { IngestDocument } from "./ingest.ts";
 
@@ -18,7 +19,11 @@ before(async () => {
   // A direct Node import has no import.meta.glob migration transform and can
   // create a separate, unmigrated PGLite instance on this runtime.
   const db = await vite.ssrLoadModule("/src/lib/db.ts");
-  assert.equal(db.getDbSource(), "pglite", "Ordinary routine checks must not use an operator PostgreSQL database");
+  assert.equal(
+    db.getDbSource(),
+    "pglite",
+    "Ordinary routine checks must not use an operator PostgreSQL database",
+  );
   ({ getSql } = db);
   checks = await vite.ssrLoadModule("/src/lib/news/routine-notice-checks.server.ts");
   automation = await vite.ssrLoadModule("/src/lib/news/routine-notice-automation.ts");
@@ -186,6 +191,95 @@ describe("routine notice manual checks", () => {
     );
   });
 
+  it("uses saved exact-source issuer context for a City Library event without organizer", async () => {
+    const f = await fixture();
+    const cityEvent = event({
+      "@id": "https://longmontcolorado.gov/event/yoga-storytime/2026-09-10/#event",
+      name: "Yoga Storytime",
+      startDate: "2026-09-10T10:00:00-06:00",
+      endDate: "2026-09-10T10:30:00-06:00",
+      eventStatus: "https://schema.org/EventScheduled",
+      organizer: undefined,
+      location: { name: "Longmont Public Library" },
+    });
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(page(cityEvent)) },
+    );
+    assert.equal(result.check.state, "parsed");
+    assert.deepEqual(result.check.candidates[0]?.fields.issuer, {
+      value: "Town Library",
+      locator: "OWNER_ISSUER",
+    });
+  });
+
+  it("checks the retained full City Library category against visible card times", async () => {
+    const url = "https://longmontcolorado.gov/events/category/library/";
+    const f = await fixture("library-notice", url);
+    const sql = await getSql();
+    await sql.query(
+      "update routine_notice_automation_sources set issuer='City of Longmont',collection_area='Longmont Public Library' where newsroom_id=$1 and source_id=$2",
+      [f.room, f.sourceId],
+    );
+    const raw = await readFile(new URL("./__fixtures__/city-library-category.html", import.meta.url));
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(new TextDecoder().decode(raw)) },
+    );
+    assert.equal(result.check.state, "parsed");
+    assert.deepEqual(result.check.counts, { parsed: 19, refused: 1, conflicts: 0 });
+    assert.equal(result.check.candidates.length, 19);
+    const [stored] = await sql.query<{ raw_blob_sha256: string }>(
+      "select raw_blob_sha256 from routine_notice_checks where id=$1",
+      [result.check.checkId],
+    );
+    assert.equal(stored?.raw_blob_sha256, createHash("sha256").update(raw).digest("hex"));
+    assert.ok(
+      result.check.candidates.some(
+        (candidate) => candidate.fields.program?.value === "Yoga Storytime",
+      ),
+    );
+  });
+
+  it("refuses an occurrence when the City category visible time disagrees with JSON-LD", async () => {
+    const url = "https://longmontcolorado.gov/events/category/library/";
+    const f = await fixture("library-notice", url);
+    const sql = await getSql();
+    await sql.query(
+      "update routine_notice_automation_sources set issuer='City of Longmont',collection_area='Longmont Public Library' where newsroom_id=$1 and source_id=$2",
+      [f.room, f.sourceId],
+    );
+    const source = await readFile(
+      new URL("./__fixtures__/city-library-category.html", import.meta.url),
+      "utf8",
+    );
+    const changed = source.replace(
+      '<span class="tribe-event-date-start">Thursday, Sep. 10 · 10 am</span>',
+      '<span class="tribe-event-date-start">Thursday, Sep. 10 · 11 am</span>',
+    );
+    assert.notEqual(changed, source, "fixture mutation must alter the real visible Yoga time");
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(changed) },
+    );
+    assert.deepEqual(result.check.counts, { parsed: 18, refused: 2, conflicts: 0 });
+    assert.equal(
+      result.check.candidates.some(
+        (candidate) => candidate.fields.program?.value === "Yoga Storytime",
+      ),
+      false,
+      "the mismatched occurrence must not silently survive",
+    );
+    assert.ok(
+      result.check.refusals
+        .filter((refusal) => refusal.code === "structurally-invalid")
+        .reduce((count, refusal) => count + refusal.count, 0) >= 2,
+    );
+  });
+
   it("treats a later source revision as a new observation rather than a permanent conflict", async () => {
     const f = await fixture("community-arts-event-logistics");
     const run = (title: string) =>
@@ -199,7 +293,10 @@ describe("routine notice manual checks", () => {
     assert.equal(first.check.state, "parsed");
     assert.equal(changed.check.state, "parsed");
     assert.equal(changed.check.candidates[0]?.conflict, false);
-    assert.notEqual(first.check.candidates[0]?.fields.title?.value, changed.check.candidates[0]?.fields.title?.value);
+    assert.notEqual(
+      first.check.candidates[0]?.fields.title?.value,
+      changed.check.candidates[0]?.fields.title?.value,
+    );
   });
 
   it("captures and parses an owner-designated RFC5545 waste area without exposing a personalized feed URL", async () => {
