@@ -236,7 +236,11 @@ export async function fileEditorial(
   const headline = opinionHeadline(ed.headline);
   return withTransaction(async (sql) => {
     if (input.completion) {
-      const [request] = await sql<{ draft_id: number | null; model_choice: string; source_kind: string }>`
+      const [request] = await sql<{
+        draft_id: number | null;
+        model_choice: string;
+        source_kind: string;
+      }>`
         select draft_id, model_choice, source_kind from editorial_requests
         where id = ${input.completion.requestId} and newsroom_id = ${input.newsroomId}
         for update
@@ -248,7 +252,9 @@ export async function fileEditorial(
       }
 
       if (request.source_kind === "legal-removed") {
-        throw new Error("The request's source was legally removed. Review sources and start a new request; stale output was not filed.");
+        throw new Error(
+          "The request's source was legally removed. Review sources and start a new request; stale output was not filed.",
+        );
       }
 
       if (request.draft_id !== null) {
@@ -383,7 +389,9 @@ export async function performEditorialWork(
   if (!req) throw new Error("Editorial request not found");
 
   if (req.source_kind === "legal-removed") {
-    throw new Error("The request's source was legally removed. Review sources and start a new request.");
+    throw new Error(
+      "The request's source was legally removed. Review sources and start a new request.",
+    );
   }
 
   if (req.draft_id !== null) {

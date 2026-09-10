@@ -24,7 +24,11 @@ import {
 } from "./schema";
 import { reportAndDraft } from "./report";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
-import { evidenceNeedsReview, evidenceReviewToken, mayInheritLeadSources } from "./draft-evidence.ts";
+import {
+  evidenceNeedsReview,
+  evidenceReviewToken,
+  mayInheritLeadSources,
+} from "./draft-evidence.ts";
 import { webSearch } from "./search-web";
 import { dropListingUrls, namedSubjects, preferPrimaryUrls } from "./extract";
 import {
@@ -49,7 +53,12 @@ import {
   type NoteTodo,
 } from "./notes";
 import { provenanceFromUrls } from "./findings";
-import { buildScanUserMessage, composeZeroLeadSummary, kindFromSourceUrl, resurfacedSummarySentence } from "./desk-copy";
+import {
+  buildScanUserMessage,
+  composeZeroLeadSummary,
+  kindFromSourceUrl,
+  resurfacedSummarySentence,
+} from "./desk-copy";
 import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
 import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
 import {
@@ -307,7 +316,13 @@ export const fileLead = createServerFn({ method: "POST" })
         return { ok: false as const, error: "That source URL is not a public http(s) address." };
       }
     }
-    return insertLeadWithDraft(context, { headline, why, topic, urls, notesJson: packNotes({ ...parseNotes(null), suppliedUrls: urls }) });
+    return insertLeadWithDraft(context, {
+      headline,
+      why,
+      topic,
+      urls,
+      notesJson: packNotes({ ...parseNotes(null), suppliedUrls: urls }),
+    });
   });
 
 export const getLead = createServerFn({ method: "GET" })
@@ -476,7 +491,7 @@ export const runScan = createServerFn({ method: "POST" })
     return commitScanForAuthenticatedEditor({
       context: { userId: context.userId, newsroomId: owned(context) },
       modelChoice,
-      sectionKey:data.sectionKey,
+      sectionKey: data.sectionKey,
     });
   });
 
@@ -490,7 +505,10 @@ export type PerformScanWorkDeps = {
   setJobStage?: typeof setJobStage;
   ingestUrl?: typeof ingestUrl;
   scheduledGuard?: () => Promise<unknown>;
-  scheduledSnapshot?: { model: { localModel?: { baseUrl: string; id: string } }; sources: SourceRow[] };
+  scheduledSnapshot?: {
+    model: { localModel?: { baseUrl: string; id: string } };
+    sources: SourceRow[];
+  };
   beforeScheduledCommit?: () => Promise<void>;
   scheduledCommit?: <T>(write: (sql: Sql) => Promise<T>) => Promise<T>;
 };
@@ -520,8 +538,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await ensureSeeds(context.userId, owned(context));
   const sql = await getSql();
   let runId = job.subject_id;
-  const {getSections}=await import("./sections.server.ts");
-  const sectionConfig=await getSections(owned(context));
+  const { getSections } = await import("./sections.server.ts");
+  const sectionConfig = await getSections(owned(context));
   if (runId > 0) {
     const existing = await sql<{ id: number }>`
       select id from scan_runs where id = ${runId} and newsroom_id = ${owned(context)} limit 1
@@ -535,17 +553,30 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     runId = runRows[0]!.id;
   }
 
-  const [scanRun]=await sql<{section_snapshot:string|null}>`select section_snapshot from scan_runs where id=${runId} and newsroom_id=${owned(context)}`;
-  const sectionSnapshot=scanRun?.section_snapshot?JSON.parse(scanRun.section_snapshot) as import("./section-types.ts").SectionScanSnapshot:null;
-  const allowedTopics=sectionSnapshot?[sectionSnapshot.key]:sectionConfig.sections.filter(s=>!s.replacementKey&&!["about","opinion"].includes(s.key)).map(s=>s.key);
-  const allSources = deps.scheduledSnapshot?.sources ?? await sql<SourceRow>`
+  const [scanRun] = await sql<{
+    section_snapshot: string | null;
+  }>`select section_snapshot from scan_runs where id=${runId} and newsroom_id=${owned(context)}`;
+  const sectionSnapshot = scanRun?.section_snapshot
+    ? (JSON.parse(scanRun.section_snapshot) as import("./section-types.ts").SectionScanSnapshot)
+    : null;
+  const allowedTopics = sectionSnapshot
+    ? [sectionSnapshot.key]
+    : sectionConfig.sections
+        .filter((s) => !s.replacementKey && !["about", "opinion"].includes(s.key))
+        .map((s) => s.key);
+  const allSources =
+    deps.scheduledSnapshot?.sources ??
+    (await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
       from sources
       where newsroom_id = ${owned(context)} and status = 'accepted'
       order by case tier when 'A' then 0 when 'B' then 1 else 2 end, id asc
-    `;
-  const sources=selectedScanSources(sectionSnapshot,allSources);
-  if(sectionSnapshot&&!sources.length) throw new Error("This section no longer has accepted assigned sources. Review Paper setup and start a new scan.");
+    `);
+  const sources = selectedScanSources(sectionSnapshot, allSources);
+  if (sectionSnapshot && !sources.length)
+    throw new Error(
+      "This section no longer has accepted assigned sources. Review Paper setup and start a new scan.",
+    );
 
   const fetched: { title: string; url: string; text: string; changed: boolean }[] = [];
   const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
@@ -589,7 +620,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           });
           extras.push({ url: extra, text: doc.text });
         } catch (err) {
-          if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(String(err))) throw err;
+          if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(String(err)))
+            throw err;
           /* skip a bad packet */
         }
       }
@@ -598,7 +630,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       const hash = await sha256(text);
       const changed = hash !== src.last_hash;
       if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: null });
-      else await sql`
+      else
+        await sql`
         update sources set last_fetched_at = now(), last_error = null
         where id = ${src.id} and newsroom_id = ${owned(context)}
       `;
@@ -614,26 +647,29 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       const msg = err instanceof Error ? err.message : "fetch failed";
       if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(msg)) throw err;
       if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: msg });
-      else await sql`
+      else
+        await sql`
         update sources set last_error = ${msg}, last_fetched_at = now()
         where id = ${src.id} and newsroom_id = ${owned(context)}
       `;
       if (src.last_hash && /404|410|not found|had almost no/i.test(msg)) {
-        if (deps.scheduledCommit) pendingDisappeared.push({ title: src.title, url: src.url, error: msg });
-        else await sql
-          .query(
-            `insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
+        if (deps.scheduledCommit)
+          pendingDisappeared.push({ title: src.title, url: src.url, error: msg });
+        else
+          await sql
+            .query(
+              `insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
              values ($1, $2, $3, $4, $5, $6)`,
-            [
-              context.userId,
-              owned(context),
-              "disappeared",
-              `Watched source failed after previously succeeding: ${src.title}`,
-              src.url,
-              msg,
-            ],
-          )
-          .catch(() => undefined);
+              [
+                context.userId,
+                owned(context),
+                "disappeared",
+                `Watched source failed after previously succeeding: ${src.title}`,
+                src.url,
+                msg,
+              ],
+            )
+            .catch(() => undefined);
       }
     }
   });
@@ -653,10 +689,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         ? "yes; expanded excerpt for this scan scope"
         : "no; re-read for this scan scope (source hashes are shared across section scans)"
       : reread
-      ? "re-read (previous scan fetched this but filed no leads)"
-      : f.changed
-        ? "yes"
-        : "no (still include if newly newsworthy)";
+        ? "re-read (previous scan fetched this but filed no leads)"
+        : f.changed
+          ? "yes"
+          : "no (still include if newly newsworthy)";
     const block = `SOURCE: ${f.title}\nURL: ${f.url}\nCHANGED: ${changedLine}\nTEXT:\n${excerpt}`;
     const next = payload ? `${payload}\n\n---\n\n${block}` : block;
     if (next.length > PAYLOAD_BUDGET) break;
@@ -664,8 +700,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   }
 
   const userMsg = buildScanUserMessage({
-    topics:allowedTopics,
-    section:sectionSnapshot,
+    topics: allowedTopics,
+    section: sectionSnapshot,
     city: paperConfig.city,
     state: paperConfig.state,
     reread,
@@ -685,7 +721,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const ai = await runScanChatWithFailover({
     job,
     newsroomId: job.newsroom_id,
-    system: scanSystem({ name: paperConfig.name, city: paperConfig.city, state: paperConfig.state }),
+    system: scanSystem({
+      name: paperConfig.name,
+      city: paperConfig.city,
+      state: paperConfig.state,
+    }),
     user: userMsg,
     maxTokens: 3500,
     // Same per-provider budget a Story draft uses (providerBudget().callMs),
@@ -700,7 +740,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     setStage,
   });
   if (!ai.ok) {
-    if (!deps.scheduledCommit) await sql`
+    if (!deps.scheduledCommit)
+      await sql`
         update scan_runs
         set finished_at = now(), sources_fetched = ${fetchedCount}, error = ${ai.error}
         where id = ${runId} and newsroom_id = ${owned(context)}
@@ -710,9 +751,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await deps.scheduledGuard?.();
 
   const raw = parseJsonBlock<unknown>(ai.text);
-  const data = parseScanResult(raw,allowedTopics);
+  const data = parseScanResult(raw, allowedTopics);
   if (!shouldCommitFetchHashes({ aiOk: true, parseError: data.parseError })) {
-    if (!deps.scheduledCommit) await sql`
+    if (!deps.scheduledCommit)
+      await sql`
         update scan_runs
         set finished_at = now(), sources_fetched = ${fetchedCount}, error = ${data.parseError}
         where id = ${runId} and newsroom_id = ${owned(context)}
@@ -748,7 +790,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     }
 
     // Loaded once, not fed to the AI: matching happens in code (findMatchingLead).
-    const existingLeadsRaw = await writeSql<{ id: number; status: string; headline: string; source_urls: string; created_at: string }>`
+    const existingLeadsRaw = await writeSql<{
+      id: number;
+      status: string;
+      headline: string;
+      source_urls: string;
+      created_at: string;
+    }>`
       select id, status, headline, source_urls, created_at
       from leads
       where newsroom_id = ${owned(context)}
@@ -756,12 +804,20 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         and created_at >= now() - (${MATCH_LOOKBACK_DAYS} || ' days')::interval
     `;
     const existingLeads: MatchCandidateLead[] = existingLeadsRaw.map((l) => ({
-      id: l.id, status: l.status, headline: l.headline,
-      source_urls: parseLeadSourceUrls(l.source_urls), created_at: l.created_at,
+      id: l.id,
+      status: l.status,
+      headline: l.headline,
+      source_urls: parseLeadSourceUrls(l.source_urls),
+      created_at: l.created_at,
     }));
 
-    const { leadsCreated, resurfacedKilled, resurfacedOpen, possibleMatched, firstDiscardedHeadline } =
-      await fileScanLeads(writeSql, context, owned(context), runId, data.leads, existingLeads);
+    const {
+      leadsCreated,
+      resurfacedKilled,
+      resurfacedOpen,
+      possibleMatched,
+      firstDiscardedHeadline,
+    } = await fileScanLeads(writeSql, context, owned(context), runId, data.leads, existingLeads);
 
     let proposed = 0;
     for (const p of data.proposed_sources) {
@@ -784,12 +840,20 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     }
 
     let summary = String(data.editor_summary ?? "").slice(0, 1200);
-    if (leadsCreated === 0 && !summary) summary = composeZeroLeadSummary({
-      fetched: fetchedCount, changed: pendingHashes.filter((p) => p.changed).length,
+    if (leadsCreated === 0 && !summary)
+      summary = composeZeroLeadSummary({
+        fetched: fetchedCount,
+        changed: pendingHashes.filter((p) => p.changed).length,
+      });
+    const resurfacedSentence = resurfacedSummarySentence({
+      resurfacedKilled,
+      resurfacedOpen,
+      possibleMatched,
+      filedNew: leadsCreated - possibleMatched,
+      firstDiscardedHeadline,
     });
-    const resurfacedSentence = resurfacedSummarySentence({ resurfacedKilled, resurfacedOpen,
-      possibleMatched, filedNew: leadsCreated - possibleMatched, firstDiscardedHeadline });
-    if (resurfacedSentence) summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;
+    if (resurfacedSentence)
+      summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;
     await writeSql`
       update scan_runs
       set finished_at = now(),
@@ -812,7 +876,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const committed = deps.scheduledCommit
     ? await deps.scheduledCommit(commitResults)
     : await withTransaction(commitResults);
-  if (!deps.scheduledCommit) await audit(context.userId, "scan", `run ${runId} fetched ${fetchedCount} leads ${committed.leadsCreated}`, owned(context));
+  if (!deps.scheduledCommit)
+    await audit(
+      context.userId,
+      "scan",
+      `run ${runId} fetched ${fetchedCount} leads ${committed.leadsCreated}`,
+      owned(context),
+    );
 });
 
 // PerformDraftWorkDeps, failOverAndRetry, and its DraftInput/ReportedDraftResult
@@ -1137,7 +1207,12 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
 
 export const draftLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { leadId: number; modelChoice?: string; researchScope?: "public" | "supplied" }) => input)
+  .validator(
+    (
+      input:
+        number | { leadId: number; modelChoice?: string; researchScope?: "public" | "supplied" },
+    ) => input,
+  )
   .handler(async ({ context, data }) => {
     const leadId = typeof data === "number" ? data : data.leadId;
     const modelChoice = storyModelChoice(typeof data === "number" ? "auto" : data.modelChoice);
@@ -1162,10 +1237,16 @@ export const draftLead = createServerFn({ method: "POST" })
  */
 export const writeStoryFromInput = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { text: string; modelChoice?: string; researchScope?: "public" | "supplied"; sectionKey?: string }) => input)
+  .validator(
+    (input: {
+      text: string;
+      modelChoice?: string;
+      researchScope?: "public" | "supplied";
+      sectionKey?: string;
+    }) => input,
+  )
   .handler(async ({ context, data }) => {
-    const { writeStoryForAuthenticatedEditor } =
-      await import("./model-request-commit.server.ts");
+    const { writeStoryForAuthenticatedEditor } = await import("./model-request-commit.server.ts");
     return writeStoryForAuthenticatedEditor({
       context: { userId: context.userId, newsroomId: owned(context) },
       text: data.text,
@@ -1200,8 +1281,13 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       add: data.add,
       scratch: data.scratch,
     });
-    if (data.researchScope === "supplied" || data.researchScope === "public") notes.researchScope = data.researchScope;
-    if (typeof data.scratch === "string") notes.suppliedUrls = sanitizePublicUrls([...(notes.suppliedUrls ?? []), ...suppliedUrlsFromText(data.scratch)]).slice(0, 8);
+    if (data.researchScope === "supplied" || data.researchScope === "public")
+      notes.researchScope = data.researchScope;
+    if (typeof data.scratch === "string")
+      notes.suppliedUrls = sanitizePublicUrls([
+        ...(notes.suppliedUrls ?? []),
+        ...suppliedUrlsFromText(data.scratch),
+      ]).slice(0, 8);
     const json = packNotes(notes);
     await sql`
       update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
@@ -1358,9 +1444,7 @@ export const pullTodo = createServerFn({ method: "POST" })
           notes = {
             ...notes,
             todo: notes.todo.map((row, i) =>
-              i === data.index
-                ? { ...row, done: false, q: "pull found nothing" }
-                : row,
+              i === data.index ? { ...row, done: false, q: "pull found nothing" } : row,
             ),
           };
         }
@@ -1440,8 +1524,13 @@ export const listFollowUps = createServerFn({ method: "GET" })
 export const createFollowUp = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(
-    (input: { leadId?: number | null; articleId?: number | null; who: string; what: string; dueOn?: string | null }) =>
-      input,
+    (input: {
+      leadId?: number | null;
+      articleId?: number | null;
+      who: string;
+      what: string;
+      dueOn?: string | null;
+    }) => input,
   )
   .handler(async ({ context, data }) => _performCreateFollowUp(context, data));
 
@@ -1531,7 +1620,12 @@ export const performPublish = createServerOnlyFn(async function performPublish(
   );
   const row = drafts[0];
   if (!row) return { ok: false as const, error: "Draft this lead before publishing." };
-  if (evidenceNeedsReview(row, row.body)) return { ok: false as const, error: "The story changed after its evidence was gathered. Review the evidence in the workbench before publishing." };
+  if (evidenceNeedsReview(row, row.body))
+    return {
+      ok: false as const,
+      error:
+        "The story changed after its evidence was gathered. Review the evidence in the workbench before publishing.",
+    };
   const draft = unpackStoredDraft({ ...row });
   draft.body = stripReporterNotebook(draft.body);
 
@@ -1565,21 +1659,25 @@ export const performPublish = createServerOnlyFn(async function performPublish(
   const baseSlug = slugify(draft.headline);
   let slug = baseSlug;
 
-  const published = await withCurrentDraftForPublish({ newsroomId: owned(context) }, leadId, row, async (sql) => {
-    // `articles.slug` is UNIQUE. The old code checked once and, on a clash,
-    // appended the lead id without re-checking — so a second collision (a
-    // headline that slugifies to an existing "<base>-<leadId>", or a
-    // re-publish after the first article was deleted) hit the constraint and
-    // threw a raw 500 out of the server function. Keep looking until free.
-    slug = baseSlug;
-    for (let n = 0; n < 50; n += 1) {
-      const clash = await sql<{ slug: string }>`
+  const published = await withCurrentDraftForPublish(
+    { newsroomId: owned(context) },
+    leadId,
+    row,
+    async (sql) => {
+      // `articles.slug` is UNIQUE. The old code checked once and, on a clash,
+      // appended the lead id without re-checking — so a second collision (a
+      // headline that slugifies to an existing "<base>-<leadId>", or a
+      // re-publish after the first article was deleted) hit the constraint and
+      // threw a raw 500 out of the server function. Keep looking until free.
+      slug = baseSlug;
+      for (let n = 0; n < 50; n += 1) {
+        const clash = await sql<{ slug: string }>`
         select slug from articles where slug = ${slug} limit 1
       `;
-      if (!clash[0]) break;
-      slug = n === 0 ? `${baseSlug}-${leadId}` : `${baseSlug}-${leadId}-${n + 1}`;
-    }
-    const [printed] = await sql<{id:number}>`
+        if (!clash[0]) break;
+        slug = n === 0 ? `${baseSlug}-${leadId}` : `${baseSlug}-${leadId}-${n + 1}`;
+      }
+      const [printed] = await sql<{ id: number }>`
       insert into articles (
         user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
         provenance_json, form, found_note, unanswered, origin_draft_id
@@ -1590,20 +1688,24 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}, ${row.id}
       ) returning id
     `;
-    await sql`
+      await sql`
       update leads set status = 'published' where id = ${leadId} and newsroom_id = ${owned(context)}
     `;
-    const entities = [draft.topic, ...draft.headline.split(/[:,—-]/).slice(0, 2)];
-    for (const entity of entities.map((e) => e.trim()).filter((e) => e.length > 2)) {
-      await sql`
+      const entities = [draft.topic, ...draft.headline.split(/[:,—-]/).slice(0, 2)];
+      for (const entity of entities.map((e) => e.trim()).filter((e) => e.length > 2)) {
+        await sql`
         insert into beat_memory (user_id, newsroom_id, entity, last_angle, article_id)
         values (${context.userId}, ${owned(context)}, ${entity.slice(0, 80)}, ${draft.dek.slice(0, 200)}, ${printed.id})
       `;
-    }
-    return {slug,id:printed.id};
-  });
+      }
+      return { slug, id: printed.id };
+    },
+  );
 
-  await audit(context.userId, "publish", `Article ${published.id}`, owned(context), {kind:"articles",id:published.id});
+  await audit(context.userId, "publish", `Article ${published.id}`, owned(context), {
+    kind: "articles",
+    id: published.id,
+  });
   return { ok: true as const, slug: published.slug };
 });
 
@@ -1617,10 +1719,7 @@ export const addCorrection = createServerFn({ method: "POST" })
   .validator((input: { articleSlug?: string; body: string }) => input)
   .handler(async ({ context, data }) => {
     const { performAddCorrection } = await import("./corrections.ts");
-    return performAddCorrection(
-      { userId: context.userId, newsroomId: owned(context) },
-      data,
-    );
+    return performAddCorrection({ userId: context.userId, newsroomId: owned(context) }, data);
   });
 
 export type DeskPublishedRow = {
@@ -1805,6 +1904,11 @@ export const deleteArticle = createServerFn({ method: "POST" })
       await sql`delete from deleted_items where id = ${trashId}`.catch(() => undefined);
       return { ok: false as const, error: "That story is already gone." };
     }
-    await audit(context.userId, "delete-article", `${slug} — ${gone.headline.slice(0, 100)}`, owned(context));
+    await audit(
+      context.userId,
+      "delete-article",
+      `${slug} — ${gone.headline.slice(0, 100)}`,
+      owned(context),
+    );
     return { ok: true as const, trashId };
   });
