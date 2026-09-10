@@ -623,3 +623,40 @@ C:\Users\scott\Desktop\Code\townreporter-dev\src\lib\news\investigate.ts
 
 ✖ 2 problems (0 errors, 2 warnings)
 ```
+
+## Rebuild after query-retention repair
+
+At 909e788, lead ran `node artifacts/build-delivery-candidate.mjs` after a
+process scan found only the unchanged production server pair 23012/22152.
+The restricted run exited 1 at Nitro tracing:
+`Error: EPERM: operation not permitted, readlink 'C:\Users\scott'`.
+Full failure log: `artifacts/delivery-build-1789075957081.log`.
+That build was terminal before retry, not overlapped or left running.
+
+The same command under approved Windows access exited 0. Owned build PID38076
+exited. Full log: `artifacts/delivery-build-1789075976372.log`.
+The wrapper disables native/model providers, clears API credentials, clears
+DATABASE_URL and skips migrations. The completed entry SHA256 is
+`7DABA2DCF9648043793DE5B91C66333ADD976BE8D36DE566BEC5FE79ABDA42C6`.
+This replaces the previous retained EAF13185 build for subsequent acceptance.
+Existing uncommitted formatting/docs/generated-file changes remain; no claim
+that this is a clean-commit release artifact. No server was launched or promoted.
+
+Successful-build warnings, retained rather than expanded into unrelated fixes:
+
+```text
+(node:34524) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[INEFFECTIVE_DYNAMIC_IMPORT] src/lib/news/youtube.ts is dynamically imported by src/lib/news/fetch-url.ts but also statically imported by src/lib/news/ingest.ts, src/lib/news/paper-settings.ts, src/lib/news/paper-settings.ts?tss-serverfn-split, dynamic import will not move module into another chunk.
+```
+
+`node node_modules/typescript/bin/tsc --noEmit` completed with no diagnostics.
+
+Luna's source-only notice review was checked by the lead against the edition
+planner and adapter dispatcher: all six family contracts and the three edition
+channels already exist. The unfinished delivery is real source mappings,
+configuration and activation proof; do not rebuild the edition engine.
+An isolated source check is not authority to claim live automatic publication.
+
+CI snapshot: 909e788 runs34532640038 (CI) and34532639969 (Windows) were running;
+422c7b5 Windows run34531183013 completed successfully. No all-green claim.
