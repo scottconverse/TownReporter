@@ -11,7 +11,7 @@ test("unverified signals do not claim that adversarial checks never ran", () => 
 });
 
 test("a newly created Dark file keeps the operator's selected model through its initial open payload", () => {
-  const afterOpen = source.match(/function afterOpen\([\s\S]*?\n  }/)?.[0] ?? "";
+  const afterOpen = source.match(/function afterOpen\([\s\S]*?\n {2}}/)?.[0] ?? "";
   const bind = afterOpen.indexOf("pickedFor.current = id");
   const open = afterOpen.indexOf("rememberOpen(id)");
   const start = afterOpen.indexOf("advance.mutate(id)");

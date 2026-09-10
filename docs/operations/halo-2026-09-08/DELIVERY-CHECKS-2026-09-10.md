@@ -455,3 +455,28 @@ one 12-line node_modules/nitro/node_modules/lru-cache entry.
 exited 0 after the repair. This validates npm 10's lock consistency on Windows;
 the fresh remote CI run must prove Linux installation. No global npm install,
 production database access, or model generation was performed.
+
+Repair b290d26 pushed. Current CI run 34528810969 passed npm ci in the
+Linux jobs observed; remaining checks still running. Windows run 34528810857
+tests b290d26. Cancellation requested only for superseded Windows run
+34528337246 (37b29b7), not another project's workflow.
+
+Parent ran `node artifacts/resume-publishing-check.mjs custom-api-ui-acceptance.mjs`
+on the previously recorded EAF13185 build. Exit 0: save/edit caused no provider
+requests; fake endpoint discovery, successful test, clear rejected-credential
+result, disable/enable, edit, delete passed. Browser pageErrors empty, mobile
+overflow false; parent visually inspected desktop/mobile screenshots. Three
+requests used only the synthetic credential. Fresh in-memory PGLite; no paid
+provider or production state. Log:
+`artifacts/resume-custom-api-ui-acceptance.mjs-1789073477556.log`.
+Owned server 39196/child 35360 cleanup succeeded, driver 40620 exited. Better
+Auth logged the local client-IP warning. Not a real-provider generation claim.
+
+Current CI test job 103044202598 then stopped at two ESLint errors in test
+regexes (no-regex-spaces and no-useless-escape), before npm test. Parent changed
+only those regex spellings, preserving assertions and matching semantics.
+Focused ESLint exited 0. Parent ran `node scripts/with-app-env.mjs node --test --test-concurrency=1 --test-timeout=60000 scripts/dark-picker-hydration.test.mjs scripts/lead-badge-render.test.mjs`:
+17 tests / 0 suites / 17 passed / 0 failed, cancelled, skipped, todo;
+400.8924 ms, exit 0. Existing 16 non-blocking CI warnings were not expanded
+into a cleanup task. CI also reported a high-severity dependency advisory;
+its affected package and applicability have not yet been inspected.

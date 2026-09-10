@@ -221,7 +221,7 @@ test("batch selection is separated from the headline and writing keeps its prima
     }),
   );
   assert.match(html, /Include in batch draft/);
-  assert.match(html, /aria-label="Include Longmont council[^\"]+ in the batch draft"/);
+  assert.match(html, /aria-label="Include Longmont council[^"]+ in the batch draft"/);
   assert.ok(
     html.indexOf('class="hl-link"') < html.indexOf('type="checkbox"'),
     "the batch checkbox should follow the headline instead of touching or preceding it",
