@@ -386,3 +386,16 @@ Parent-executed, exit 0; no captured warnings/errors. Native process tests used
 fake child executables/Node and injected transports, not real Codex or Claude
 generations. No paid API, local model, or production database was used. These
 checks consolidate existing changes; no new test-first implementation claimed.
+
+## Reporting checkpoint and discovery regression consolidation
+
+Parent ran `node scripts/with-app-env.mjs node --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 src/lib/news/report.stage.test.ts src/lib/news/report.discovery-query.test.ts`.
+Result: 4 tests, 1 suite, 4 passed, 0 failed/cancelled/skipped/todo,
+22951.8158 ms, exit 0. Wrapper confirmed empty DATABASE_URL and in-memory
+PGLite. Injected model/source responses check retained writer checkpoints,
+truthful progress phases, and exclusion of an unrelated search result; they
+do not establish real reporting quality. These previously untracked tests
+belong with the already committed reporting implementation.
+
+Development commit `5f66df6` was pushed successfully to the existing GitHub
+development branch. No production promotion was performed.
