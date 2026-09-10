@@ -660,3 +660,45 @@ An isolated source check is not authority to claim live automatic publication.
 
 CI snapshot: 909e788 runs34532640038 (CI) and34532639969 (Windows) were running;
 422c7b5 Windows run34531183013 completed successfully. No all-green claim.
+
+## Main CI result and location assertion correction
+
+Job103051996453 (422c7b5) completed with failure, not a hang. npm ci,
+typecheck and lint passed. Main test totals:
+
+```text
+# tests 1825
+# suites 383
+# pass 1779
+# fail 1
+# cancelled 0
+# skipped 45
+# todo 0
+# duration_ms 1139096.348336
+```
+
+The single failure was dark-place.test.ts:48, whose source assertion required
+the former four-argument grokPlanner call. Source now passes place AND newsroomId.
+Parent inspected the actual call and updated the assertion to require both;
+the existing behavioral research-loop/place/Reddit-isolation test is unchanged.
+No runtime behavior was modified. Baseline is the recorded CI assertion failure.
+
+Parent command:
+`node scripts/with-app-env.mjs node --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 src/lib/news/dark-place.test.ts`
+Exit0, no warnings/errors, isolated in-memory PGLite:
+
+```text
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11455.8924
+```
+
+This removes the observed stale assertion, not a claim that the full candidate
+CI has passed. Two browser selector repairs and operator-doc edits still have
+unresolved permission-review blocks; explicit owner clarification was requested.
+No production promotion or full-suite restart on the workstation occurred.

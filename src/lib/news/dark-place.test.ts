@@ -49,7 +49,7 @@ it("runtime planner and synthesis use configured place; Reddit endpoint is newsr
   const dark = readFileSync(new URL("./dark.ts", import.meta.url), "utf8");
   const investigate = readFileSync(new URL("./investigate.ts", import.meta.url), "utf8");
   assert.match(dark, /grokChat\(darkSystemFor\(dials, place\)/);
-  assert.match(investigate, /grokPlanner\(pack, opts.choice, opts.providerOverrides, place\)/);
+  assert.match(investigate, /grokPlanner\(pack, opts.choice, opts.providerOverrides, place, newsroomId\)/);
   assert.doesNotMatch(investigate, /Longmont|Colorado/);
   assert.match(
     dark,
