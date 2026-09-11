@@ -202,3 +202,59 @@ acceptance database. New build contains the source selector and bounded
 retrieval repair. HTTP readiness is not real-provider investigative acceptance;
 that remains the next check. Full-repository tests were not run. No new release,
 production promotion, source approval, or automatic publication was performed.
+
+## Real continuation on the source-selector build
+
+Candidate `f1cdcc0` is running in isolated staging. Through Chrome's ordinary
+Dark Desk controls, opened existing investigation 10 and clicked Keep digging
+with Codex Terra visibly selected. No new source URLs or expected answers were
+supplied. Job 120 was created at 2026-09-11 03:20:58.529394 MDT and confirmed
+running. The staging job queue was empty immediately before the click.
+
+This is a continuation, not another fresh investigation. It deliberately uses
+the prior saved findings and open questions. Acceptance must inspect the new
+post-search selections, actual captures and final result; starting the job is
+not a PASS. Browser tab 1225669178 is retained for this unfinished acceptance.
+
+First-hop observation while job 120 remained running: searches now explicitly
+include `DV-ANNREF-26-00001`. The persisted `post_search_selected` contains the
+City's `ADL20260217.pdf`; `post_search_failure` is empty. The model's recorded
+reason calls it the next productive primary-source read and explicitly states
+that the annexation/zoning proposal does not establish approval or a remaining
+comment deadline. Capture 2485 is that PDF, first in this continuation, version
+1599. Subsequent captures are the waiver form, development-meetings page and
+an unsuccessful assessor URL. This proves real-provider source choice reached
+the existing capture path, not that new decision evidence was found.
+
+### Job 120 terminal result
+
+Started 03:20:58.547918 MDT; finished 03:28:54.961082 MDT, 476.413 seconds.
+Status completed, stage Done, error empty. No queued/running staging jobs
+remained after completion. Eight captures: four classified changed, three
+not-found, one unchanged. These are engine outcomes, not eight new useful
+documents. In particular the first PDF still resolves to version 1599.
+
+Hop 2 selected the same PDF again; the run-level fetched-URL set prevented
+another fetch. Hop 3 recorded an empty selection and no selector failure.
+The new mechanism is live, but repeated source choice consumed a decision
+without obtaining new evidence. Do not count it as an efficiency win.
+
+Browser final headline:
+> 8979 Nelson Road has a documented Longmont annexation-and-MU-E-zoning proposal, but the supplied file does not show a final decision or a remaining public-comment date.
+
+The brief correctly identifies the approximate one-acre annexation/MU-E
+proposal and unchanged religious use; it does not treat a generic waiver form
+or general development-meeting guidance as an address-specific approval or
+comment window. This improves the prior headline's present-tense 'active'
+claim. The necessary later case-file decision remains unlocated. Nothing was
+published or filed as a new queue item in this continuation.
+
+The interface shows 21 records and 204 open follow-ups (previously 13 and 117).
+It also retains earlier contradictory notes and an unproven Founders Block
+association among hypotheses. This growth and stale context mean the result
+does not establish dependable, efficient investigation or the daily-paper
+target. Objective 8 remains partial; objective 7 remains partial. The next
+engineering step must address responsive follow-through on already-read
+evidence and avoid recommending the same read within one run, not start an
+identical benchmark loop. The same candidate must be evaluated on useful
+new evidence, not just another successful job status.
