@@ -4,6 +4,9 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Read routine-event category pages up to 1 MiB, matching the existing library
+  category allowance; individual structured-data and traversal limits remain.
+
 - Preserve original PrimeGov public API response bytes for meeting-notice
   checks instead of substituting the portal's summarized catalog.
 

@@ -98,6 +98,12 @@ describe("saved PrimeGov meeting extraction", () => {
 });
 
 describe("saved Schema.org Event extraction", () => {
+  it("reads events on ordinary category pages with more than 512 KiB of page chrome", () => {
+    const event = { "@type": "Event", "@id": "https://town.example/event/arts", name: "Arts evening", startDate: "2026-09-11T18:00:00-06:00", organizer: { name: "Museum" }, location: { "@type": "Place", name: "Museum" } };
+    const html = `<div>${" ".repeat(570_000)}</div><script type="application/ld+json">${JSON.stringify(event)}</script>`;
+    const result = extractJsonLdEvents(html, { formatKey: "community-arts-event-logistics", provenance });
+    assert.equal(result[0]?.status, "parsed");
+  });
   it("uses the exact-source owner issuer when organizer is absent and preserves its provenance", () => {
     const events = [
       {
@@ -235,7 +241,7 @@ describe("saved Schema.org Event extraction", () => {
 
   it("bounds content and reports malformed or unsupported records explicitly", () => {
     assert.deepEqual(
-      extractJsonLdEvents("x".repeat(524_289), {
+      extractJsonLdEvents("x".repeat(1_048_577), {
         formatKey: "community-arts-event-logistics",
         provenance,
       }),

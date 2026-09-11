@@ -8,7 +8,7 @@ import {
   type UnverifiedRoutineNoticeProvenance,
 } from "./routine-notice-types.ts";
 
-const MAX_HTML_BYTES = 512 * 1024;
+const MAX_HTML_BYTES = 1024 * 1024;
 const MAX_JSON_LD_SCRIPTS = 32;
 const MAX_JSON_LD_SCRIPT_BYTES = 128 * 1024;
 const MAX_JSON_LD_NODES = 100;

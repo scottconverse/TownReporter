@@ -255,3 +255,45 @@ ingest.test processes. Starting replacement tests while those lived violated
 the serialized-lane instruction. The worker's green summary did not establish
 cleanup. No production process was stopped. Rebuilt real-source acceptance
 remains necessary; no full-suite or production completion claim is made.
+
+## Rebuilt meeting and ongoing category acceptance
+
+Built2272ab8 successfully against the isolated staging database; migration up
+to date. Existing DEP0190/browser-externalization warnings remain; build output
+was truncated. Replaced owned stage handle17876 with76259 on3471, models off.
+
+Real browser meeting check9 now parsed6/refused5/conflicts0, capture2411,
+version1555. UI retained agenda URLs, Denver timezone, venue, and September14
+18:00 Transportation Advisory Board time. The five incomplete rows remain
+refused. This closes actual API capture, not automatic publication.
+
+Added ongoing recreation2881 and museum2882 through Sources UI; paired their
+respective formats, saved context through owner form. Automation revision5
+contains all six families, enabled=false. Recreation check10 parsed20/refused0/
+conflicts0, capture2412/version1556. Museum check11 refused content-too-large,
+capture2413/version1557. Source size exceeded generic512KiB (library already
+allows1MiB). Lead raised the generic bound to1MiB, retaining32scripts,
+128KiB/script and existing traversal limits; no new parser or dependency.
+
+Lead test command for baseline, RED, GREEN:
+`$env:DATABASE_URL=''; $env:TOWNREPORTER_TEST_ENV_VERIFIED='1'; node --import ./scripts/test-environment-guard.mjs --experimental-strip-types --test src/lib/news/routine-notice-extract.test.ts`
+
+Baseline: tests16,suites2,pass16,fail0,cancelled0,skipped0,todo0,
+duration_ms219.4016. New570KB page-chrome regression RED: tests17,suites2,
+pass16,fail1,cancelled0,skipped0,todo0,duration_ms214.2186; expected parsed,
+actual refused. Over-limit test updated to1,048,577bytes for the new bound.
+
+```text
+ℹ tests 17
+ℹ suites 2
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 222.9088
+```
+
+All handles exited; no warnings in these tests. Museum's rebuilt browser check
+is still outstanding. Restored staging-editor to editor/room1 after owner-form
+work. Production and automatic publication remain untouched.
