@@ -263,3 +263,33 @@ substantive clarification; school is accurate background but needs a current
 angle. Neither was published. No model retry or new code was used for this
 review. Editor effort was not reliably timed, so this does not close the
 60-minute daily-production target.
+
+## Write a story — ordinary link submission
+
+Confirmed the staging job lane empty, then used Desk > Write a story with only
+the actual City Development Services hours notice URL (the existing captured
+`beginning-sept-2-the-development-services-center-385-kimbark-st-will-be-closed-to-the-public-every-wed-8-11-am`
+page). Explicitly selected Codex Terra; left public research scope unchanged.
+The UI created lead140 and navigated to its workbench. Job124 began04:03:49 MDT,
+completed112seconds later, no error. Only this job ran.
+
+Draft83 is the initial empty form; draft84 is the saved writing checkpoint with
+an incomplete-reconciliation note; draft85 is the final shortened story. The
+terminal job result names checkpoint84, so that field alone is not the final
+draft identifier. The editor visibly presents85 with Save edits, evidence-check
+and publication controls available. No publication was attempted.
+
+Read final85 against its exact retained primary version1511/capture2529. It
+accurately states September2,2026; Wednesday11–5; the other four weekdays8–5;
+planner hours9–noon/1–3 on those days and1–3 Wednesday;385Kimbark; and the listed
+telephone/email contacts. No unsupported reason, appointments promise or
+permit-processing consequence appears. Zero substantive corrections made.
+The body has no inline Markdown links, while source_urls and provenance retain
+the City schedule and development-applications page. Reader rendering of this
+particular draft's source list has not been tested by publishing it.
+
+This proves the separate Write entry point produces an editable, source-backed
+service brief and retains the earlier checkpoint. It is not a new discovery:
+the supplied URL was already known, and another queue lead covered the same
+hours change. Do not count it twice toward daily output. Zero queued/running
+staging jobs remained after the check. No production change or new code.
