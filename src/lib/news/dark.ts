@@ -2452,6 +2452,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       subredditNewFeed,
       subredditSearchFeed,
       pickCivicPosts,
+      redditPostIsAutoFileEligible,
       redditAnomaly,
       classifyRedditPosts,
       selectRotatingQueryGroups,
@@ -2466,7 +2467,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
     const feeds = [subredditNewFeed(sub), ...groups.map((g) => subredditSearchFeed(sub, g.query))];
     const searched = ["newest", ...groups.map((g) => g.label)];
     const sweep = await sweepRedditFeeds(feeds, feeds.length);
-    const picked = pickCivicPosts(sweep.posts);
+    const picked = pickCivicPosts(sweep.posts.filter((post) => redditPostIsAutoFileEligible(post)));
 
     const sql = await getSql();
     let filed = 0;
@@ -2508,6 +2509,9 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       score: p.score,
       url: p.url,
       excerpt: p.excerpt,
+      updated: p.updated,
+      author: p.author,
+      autoFileEligible: p.autoFileEligible,
       state: p.state,
     });
 
@@ -2550,7 +2554,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
 export async function fileRedditTipFor(
   userId: string,
   newsroomId: number,
-  data: { url: string; title: string; excerpt?: string },
+  data: { url: string; title: string; excerpt?: string; updated?: string; author?: string },
 ): Promise<{ ok: true; filed: boolean }> {
   await ensureDarkSchema();
   const sql = await getSql();
@@ -2564,7 +2568,7 @@ export async function fileRedditTipFor(
   }
   const { redditAnomaly } = await import("./reddit.ts");
   const a = redditAnomaly(
-    { title: data.title, url: data.url, updated: "", author: "", excerpt: data.excerpt ?? "" },
+    { title: data.title, url: data.url, updated: data.updated ?? "", author: data.author ?? "", excerpt: data.excerpt ?? "" },
     subredditFromSources([data.url]) ?? "reddit",
   );
   await sql`
@@ -2577,7 +2581,7 @@ export async function fileRedditTipFor(
 
 export const fileRedditTip = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((data: { url: string; title: string; excerpt?: string }) => data)
+  .validator((data: { url: string; title: string; excerpt?: string; updated?: string; author?: string }) => data)
   .handler(async ({ context, data }) => fileRedditTipFor(context.userId, owned(context), data));
 
 /**

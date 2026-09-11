@@ -4,6 +4,10 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Reddit checks automatically file only dated tips from the past 30 days.
+  Older and undated candidates remain visible and manually fileable. Result
+  cards show the available date and author, and manual filing retains them.
+
 - Drafting a lead filed from a page watch reuses the exact captured text and
   source reference, including scanned-PDF OCR. Later failed fetches no longer
   replace that material; retained capture dates and partial-reading limits

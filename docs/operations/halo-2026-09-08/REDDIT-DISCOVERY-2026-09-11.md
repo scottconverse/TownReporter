@@ -34,13 +34,56 @@ registration-fee card also says **undated**, although it came from a feed.
 Useful current discovery is therefore not fully accepted. Do not repeat this
 same check merely to accumulate more identical receipts.
 
-Separately, Luna's read-only inspection identified that `primarySourceQueries`
-in `src/lib/news/extract.ts` always adds the current paper city. Both drafting
-and explicit follow-up searches supply that city. This explains a query-level
-source of Longmont-biased follow-ups for the retained Ramsey historical PDF;
-it does not prove a search-provider ranking defect. A bounded source-aware
-query adjustment remains to be implemented and checked.
+Separately, Luna's initial read-only inspection flagged city-biased queries.
+Lead inspection corrected its scope: `primarySourceQueries` in
+`src/lib/news/extract.ts` generates both a city-qualified subject query AND a
+subject-only query. The first three queries used by drafting include both.
+The Ramsey run's irrelevant Longmont follow-ups remain observed, but this
+function alone does not establish their cause or justify adding the unanchored
+query it already has. No query-construction change is justified by that claim.
 
 Still open under item 6: useful breadth and freshness, a contrasting community,
 and real ordinary-search / configured optional-Gateway acceptance. This receipt
 does not close those requirements or waive curated investigative tools.
+
+## Development repair after the live check
+
+Luna implemented the date/author handoff and a visible 30-day automatic-filing
+window. Old/undated results remain manually fileable. The age filter runs before
+the selection limit. Lead corrected one missed callback type, added a database
+assertion for the filed date/author, and made the window explicit in UI copy.
+No existing stored tips were removed. No production deployment occurred.
+
+Baseline command used the same safe environment launcher below with only
+`src/lib/news/reddit.test.ts`: tests 35, suites 9, pass 35, fail 0, cancelled 0,
+skipped 0, todo 0, duration_ms 113.9162.
+
+Final command:
+```powershell
+node --input-type=module -e "import {spawnSync} from 'node:child_process'; import {safeTestEnvironment} from './scripts/test-environment.mjs'; const r=spawnSync(process.execPath,['--import','./scripts/test-environment-guard.mjs','--experimental-strip-types','--test','--test-concurrency=1','src/lib/news/reddit.test.ts','src/lib/news/reddit-tip-filing.test.ts'],{env:safeTestEnvironment(),stdio:'inherit',windowsHide:true}); process.exit(r.status??1);"
+```
+```text
+ℹ tests 43
+ℹ suites 12
+ℹ pass 43
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11418.295
+```
+
+`npm run typecheck` initially exited 1:
+```text
+src/routes/desk.dark.tsx(807,51): error TS2345: Argument of type '{ url: string; title: string; excerpt: string; }' is not assignable to parameter of type '{ url: string; title: string; excerpt: string; updated: string; author: string; }'.
+  Type '{ url: string; title: string; excerpt: string; }' is missing the following properties from type '{ url: string; title: string; excerpt: string; updated: string; author: string; }': updated, author
+```
+After the callback type correction, `npm run typecheck` exited 0 without
+diagnostics. The final subsequent UI edit was explanatory text only.
+
+These were code-first regression checks, not a demonstrated TDD red/green loop.
+Focused tests used isolated PGLite, not staging or production. No full-suite,
+rebuilt-browser, mobile, or production acceptance is claimed for this repair.
+The running staging build still predates it. No dependency, auth boundary,
+credential handling, or unsafe HTML rendering was added; metadata is ordinary
+React text through the existing authenticated newsroom-scoped action.
