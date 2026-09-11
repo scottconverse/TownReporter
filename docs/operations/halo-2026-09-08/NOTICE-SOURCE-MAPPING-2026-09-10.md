@@ -173,3 +173,28 @@ These supersede the earlier pure-extraction-only status for parks/arts. They
 prove the saved-source path for these actual pages, not reusable calendar
 discovery or the complete operational family. The museum response hash changed
 since the first probe; the retained receipt records the bytes actually checked.
+
+## September 11 meeting discrepancy recheck
+
+Direct current reads of the official upcoming-meetings API and rendered HTML
+agenda agree for meeting3801 / template17256: Transportation Advisory Board,
+September14 2026 at 6:00PM, City Council Chambers, 350 Kimbark Street.
+
+- https://longmont.primegov.com/api/v2/PublicPortal/ListUpcomingMeetings
+  returned dateTime `2026-09-14T18:00:00`, date `Sep 14, 2026`, time `06:00 PM`.
+- https://longmont.primegov.com/Portal/Meeting?meetingTemplateId=17256
+  in Chrome displayed `September 14, 2026 - 6:00 PM` within the agenda heading.
+  A separate raw HTML read also contained that date/time, and no September15
+  or ISO September14/15 heading matched the date-field search.
+
+The previously recorded midnight disagreement was not reproduced on this
+current agenda. This clears that specific current-source discrepancy, not
+all future API/agenda pairs; it does not prove when or why the older heading
+differed. No publication or production policy change occurred. The API's
+unoffset wall time still needs the explicitly configured America/Denver zone.
+
+Halo Gateway web_fetch failed reaching http://127.0.0.1:8765/mcp. Hosted web
+fetch also could not open PrimeGov. Direct public HTTPS plus Chrome supplied
+the evidence above; do not count this as Gateway acceptance. The official
+City Council calendar was also reachable, but its council sessions are not
+the Transportation Advisory Board event and were not substituted for it.
