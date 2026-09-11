@@ -7,19 +7,19 @@ Current release: **0.6.35**.
 - Longmont's front-page navigation includes **Utility Bill Analyzer** beside
   **City council votes**, opening Shakeel Dalal's analyzer page in a new tab.
 
-## 0.6.35 beta — 10 September 2026 (candidate)
+## 0.6.35 beta — 10 September 2026 (published and deployed)
 
 - Operator documentation now describes named custom AI API connections,
   explicit model selection and fallback boundaries, Stats report retention,
-  queue/evidence recovery, and the current unreleased PDF page-reader and Dark
-  Desk handoff limits. These development-candidate features are not claimed as
-  deployed in production 0.6.34.
+  queue/evidence recovery, and the shipped PDF page-reader and Dark Desk
+  handoff limits. Deployment does not establish full real-world PDF reporting
+  or investigative acceptance.
 - Stats counts exactly seven or thirty calendar dates including today, and describes its existing anonymous home/story page-load counts without implying unique visitors or completed reads.
 - Newly generated reporting follow-ups merge whitespace and final-period duplicates while preserving the first wording, distinct questions, amounts, human tasks and historical records.
 
 - Dark Desk stops a failed planner's empty fallback before spending the whole hop budget. If no provider performs research and synthesis also fails, the job is marked failed; ordinary Automatic failover and successful searches with zero results remain available. Historical failed runs are not rewritten.
 - Draft reconciliation reserves bounded source context for the assigned story so a large secondary document cannot take every evidence slot. New discoveries remain in the shared packet; this is evidence coverage, not a factual-accuracy guarantee.
-- The story workbench adds **Check draft against evidence**. After the editor saves any changes and chooses a model, the check evaluates that exact saved version against its captured evidence without restarting discovery or initial writing. A completed check saves a new draft version and retains the original; incomplete checks, failures and edits made while the job runs remain explicit. This feature is a 0.6.35 candidate and is not yet published or deployed.
+- The story workbench adds **Check draft against evidence**. After the editor saves any changes and chooses a model, the check evaluates that exact saved version against its captured evidence without restarting discovery or initial writing. A completed check saves a new draft version and retains the original; incomplete checks, failures and edits made while the job runs remain explicit. This feature shipped in 0.6.35 and is deployed; it remains model-assisted review, not independent fact verification.
 - New array-valued review warnings remain separate readable items instead of collapsing into comma-joined text. Historical prose is retained unchanged.
 - Batch results identify the draft saved by that batch separately from the current story workbench. The built server's duplicated job modules share one process-local concurrency counter; this is not a cross-process scheduler guarantee.
 - Native Codex reporting can opt into `TOWNREPORTER_CODEX_REASONING_EFFORT=high` per application process while the unset default retains native inheritance. Batch reporting now forwards the calculated existing time budget and shows its reporting, writing and evidence-check stages without changing native capabilities.
