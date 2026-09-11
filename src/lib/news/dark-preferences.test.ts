@@ -5,6 +5,16 @@ import {
   resolveResearchPreferences,
   queryWithResearchWindow,
 } from "./dark-preferences.ts";
+test("responsive research is opt-in and its saved decision limit survives a snapshot", () => {
+  assert.equal(validateResearchPreferences({}).executionMode, "batch");
+  assert.equal(validateResearchPreferences({}).actionLimit, 6);
+  const p = resolveResearchPreferences({ executionMode: "responsive", actionLimit: 12, verificationLimit: 4 });
+  assert.equal(p.executionMode, "responsive");
+  assert.equal(p.actionLimit, 12);
+  assert.equal(p.verificationLimit, 4);
+  for (const raw of [{ executionMode: "auto" }, { actionLimit: 0 }, { actionLimit: 25 }])
+    assert.throws(() => validateResearchPreferences(raw));
+});
 test("defaults resolve a 90-day preference and six verification attempts", () => {
   const p = resolveResearchPreferences(undefined, new Date("2026-09-07T12:00:00Z"));
   assert.equal(p.verificationLimit, 6);

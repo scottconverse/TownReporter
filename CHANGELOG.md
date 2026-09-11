@@ -4,6 +4,11 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Dark Desk adds an opt-in responsive research method: the selected model can
+  search, read, follow a captured link, or finish after seeing the previous
+  action's results. Editors set the decision limit in How hard to dig; batch
+  research remains the default. Live reporting acceptance remains outstanding.
+
 - Dark Desk can ask its selected model which sources to read after successful
   search results arrive, retaining the existing read limits and evidence captures.
   A failed source-choice call falls back to the ordinary queue with a notice.

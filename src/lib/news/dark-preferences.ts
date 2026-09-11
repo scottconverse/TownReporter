@@ -5,6 +5,8 @@ export type ResearchPreferences = {
   startDate: string | null;
   endDate: string | null;
   verificationLimit: number;
+  executionMode?: "batch" | "responsive";
+  actionLimit?: number;
 };
 export type ResearchSnapshot = ResearchPreferences & {
   startDate: string;
@@ -17,6 +19,8 @@ export const DEFAULT_RESEARCH_PREFERENCES: ResearchPreferences = {
   startDate: null,
   endDate: null,
   verificationLimit: 6,
+  executionMode: "batch",
+  actionLimit: 6,
 };
 function dateValue(value: unknown): string | null {
   if (value == null || value === "") return null;
@@ -37,6 +41,12 @@ export function validateResearchPreferences(raw: unknown): ResearchPreferences {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw))
     throw new Error("Invalid investigative preferences.");
   const r = raw as Partial<ResearchPreferences>;
+  const executionMode = r.executionMode === undefined ? "batch" : r.executionMode;
+  const actionLimit = r.actionLimit === undefined ? 6 : r.actionLimit;
+  if (executionMode !== "batch" && executionMode !== "responsive")
+    throw new Error("Choose batch or responsive research.");
+  if (!Number.isInteger(actionLimit) || actionLimit < 1 || actionLimit > 24)
+    throw new Error("Research decision limit must be 1–24 per round.");
   const mode = r.mode === undefined ? "lookback" : r.mode;
   if (!["lookback", "range"].includes(mode)) throw new Error("Choose a lookback or a date range.");
   const lookbackDays = r.lookbackDays === undefined ? 90 : r.lookbackDays,
@@ -49,7 +59,7 @@ export function validateResearchPreferences(raw: unknown): ResearchPreferences {
     endDate = dateValue(r.endDate);
   if (mode === "range" && (!startDate || !endDate || startDate > endDate))
     throw new Error("Give both dates, with the start on or before the end.");
-  return { mode, lookbackDays, startDate, endDate, verificationLimit };
+  return { mode, lookbackDays, startDate, endDate, verificationLimit, executionMode, actionLimit };
 }
 const shifted = (date: string, days: number) =>
   new Date(new Date(date + "T00:00:00Z").getTime() + days * 86400000).toISOString().slice(0, 10);

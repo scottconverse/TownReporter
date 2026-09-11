@@ -52,6 +52,12 @@ import { queryTokens, retrieveRelevantChunks } from "./retrieve.ts";
 import { identityKey, isConfirmedSame, resolveEntityName } from "./entity-resolve.ts";
 import { isRedditUrl } from "./reddit.ts";
 import { sanitizePublicUrls } from "./schema.ts";
+import {
+  parseResearchAction,
+  responsiveActionPrompt,
+  type ResearchAction,
+  type ResearchActionReceipt,
+} from "./research-actions.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import {
   queryFingerprint,
@@ -142,6 +148,46 @@ export type FetchFn = (url: string) => Promise<{
 }>;
 export type SearchAttemptFn = (query: string) => Promise<SearchAttempt>;
 export type PlannerFn = (pack: string) => Promise<HopPlan>;
+export type ResearchActionChooser = (context: string) => Promise<ResearchAction>;
+
+export type ResearchLoopResult = {
+  hops: number;
+  artifacts: number;
+  frontier: number;
+  paused: boolean;
+  summary: string;
+  plannerFailures: number;
+  plannerStartupFailures: number;
+  actionDecisions?: number;
+  finished?: boolean;
+};
+
+export type ResearchLoopOptions = {
+  userId: string;
+  investigationId: number;
+  hops?: number;
+  choice?: EffectiveProviderChoice;
+  providerOverrides?: ProviderOverrides | null;
+  search?: SearchFn;
+  searchAttempt?: SearchAttemptFn;
+  fetch?: FetchFn;
+  planner?: PlannerFn;
+  readSelector?: PlannerFn;
+  archives?: (url: string) => Promise<string[]>;
+  newsroomId?: number;
+  place?: Place;
+  officialDomains?: string[];
+  pressDomains?: string[];
+  preferences?: import("./dark-preferences.ts").ResearchSnapshot;
+  /** Explicit opt-in; omission preserves the original batch loop. */
+  executionMode?: "batch" | "responsive";
+  /** Responsive model-decision cap, clamped to 1..24. Default 6. */
+  actionLimit?: number;
+  /** Deterministic test seam; production uses the editor-selected provider. */
+  actionChooser?: ResearchActionChooser;
+  /** Internal one-operation adapter marker; callers should not set this. */
+  _responsiveOperation?: "search" | "read" | "follow";
+};
 
 export type CaptureRecord = {
   versionId: number | null;
@@ -1988,56 +2034,7 @@ export function evidenceAppearsInText(evidence: string, text: string): boolean {
   return text.toLowerCase().replace(/\s+/g, " ").includes(q);
 }
 
-export async function researchLoop(opts: {
-  userId: string;
-  investigationId: number;
-  hops?: number;
-  /**
-   * The writing model this round is pinned to (0.6.2). Threaded to every
-   * planner call so the hop is planned by the provider the editor picked,
-   * and budgeted by that provider's own per-call ceiling.
-   */
-  choice?: EffectiveProviderChoice;
-  /** The paper's stored time-budget overrides, if any. */
-  providerOverrides?: ProviderOverrides | null;
-  search?: SearchFn;
-  searchAttempt?: SearchAttemptFn;
-  fetch?: FetchFn;
-  planner?: PlannerFn;
-  /** Optional bounded post-search read selector; injected tests must opt in explicitly. */
-  readSelector?: PlannerFn;
-  archives?: (url: string) => Promise<string[]>;
-  /**
-   * The investigation's real newsroom (0.6.13). `dark.ts`'s
-   * `executeDarkRun`/`performDarkRound` already resolve this (`owned(context)`
-   * / the local `newsroomId`) before calling in -- it just wasn't being
-   * passed. Threaded to every `rememberCapture`/`flagPatternAnomalies` call
-   * and every inline `anomalies` insert this loop makes directly, so a run
-   * against a newsroom-2 investigation files its evidence and anomaly flags
-   * under newsroom 2, not the hardcoded default (audit-lite 0.6.11,
-   * FINDING-001).
-   */
-  newsroomId?: number;
-  /**
-   * Where the searching is scoped to. Every query this loop runs names the
-   * place — the operator's civic-scanner passes a location on every search,
-   * and an unscoped query comes back with a national explainer rather than a
-   * clue about this town.
-   */
-  place?: Place;
-  /** The paper's own official domains, so the loop can record which tier answered. */
-  officialDomains?: string[];
-  pressDomains?: string[];
-  preferences?: import("./dark-preferences.ts").ResearchSnapshot;
-}): Promise<{
-  hops: number;
-  artifacts: number;
-  frontier: number;
-  paused: boolean;
-  summary: string;
-  plannerFailures: number;
-  plannerStartupFailures: number;
-}> {
+export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchLoopResult> {
   const sql = await getSql();
   const { describeResearchWindow, queryWithResearchWindow } = await import("./dark-preferences.ts");
   const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
@@ -2047,6 +2044,9 @@ export async function researchLoop(opts: {
     select title from investigations where id = ${opts.investigationId} and newsroom_id = ${newsroomId} limit 1
   `;
   const investigationTitle = investigation[0]?.title ?? "";
+  if (opts.executionMode === "responsive" && !opts._responsiveOperation) {
+    return responsiveResearchLoop(opts, investigationTitle, place, newsroomId);
+  }
   const officialDomainList = opts.officialDomains ?? [];
   const pressDomainList = opts.pressDomains ?? [];
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
@@ -2335,7 +2335,7 @@ export async function researchLoop(opts: {
       }
       for (const hit of attempt.hits.slice(0, 6)) {
         const degraded = attempt.relevance?.decision === "degraded";
-        if (!degraded && attempt.state === "SEARCH_SUCCESS_RESULTS") {
+        if (!degraded && attempt.state === "SEARCH_SUCCESS_RESULTS" && opts._responsiveOperation !== "search") {
           toFetch.add(hit.url);
           currentSearchHits.add(hit.url);
         }
@@ -2437,8 +2437,9 @@ export async function researchLoop(opts: {
     const selectedReads = postSearchPlan?.fetch_urls
       .map(canon)
       .filter((url, i, arr) => arr.indexOf(url) === i && !fetchedThisRun.has(url)) ?? [];
-    while (fetchedThisHop.length < FETCHES_PER_HOP) {
-      const discovery = selectedReads[0] ?? (!searchSlotUsed
+    const fetchLimit = opts._responsiveOperation ? 1 : FETCHES_PER_HOP;
+    while (fetchedThisHop.length < fetchLimit) {
+      const discovery = selectedReads[0] ?? (opts._responsiveOperation !== "search" && !searchSlotUsed
         ? sanitizePublicUrls([...currentSearchHits]).map(canon).find((u) => !fetchedThisRun.has(u))
         : undefined);
       const url = [
@@ -2794,6 +2795,215 @@ Planner could not start research: ${[...new Set(plannerFailures)].join("; ")}`
     plannerFailures: plannerFailures.length,
     plannerStartupFailures: plannerStartupFailures.length,
   };
+}
+
+async function defaultResearchActionChooser(
+  context: string,
+  opts: Pick<ResearchLoopOptions, "choice" | "providerOverrides" | "newsroomId">,
+): Promise<ResearchAction> {
+  const { callMs } = providerBudget(opts.choice, opts.providerOverrides);
+  const ai = await grokChat(
+    "You operate TownReporter's bounded responsive research loop. Choose exactly one typed action from the supplied protocol. Never claim evidence from a search snippet.",
+    context.slice(0, PLANNER_INPUT_CAP),
+    900,
+    {
+      timeoutMs: callMs,
+      model: plannerModel(opts.choice),
+      choice: opts.choice,
+      newsroomId: opts.newsroomId,
+      localModel: opts.providerOverrides?.["local-model"]?.localModel,
+      noTools: true,
+    },
+  );
+  if (!ai.ok) throw new Error("error" in ai ? ai.error : "responsive action model returned no response");
+  return parseResearchAction(ai.text);
+}
+
+async function responsiveResearchLoop(
+  opts: ResearchLoopOptions,
+  investigationTitle: string,
+  place: Place,
+  newsroomId: number,
+): Promise<ResearchLoopResult> {
+  const sql = await getSql();
+  const requestedLimit = Number.isFinite(opts.actionLimit) ? Math.trunc(opts.actionLimit!) : 6;
+  const limit = Math.max(1, Math.min(24, requestedLimit));
+  const choose = opts.actionChooser ?? ((context: string) => defaultResearchActionChooser(context, {
+    choice: opts.choice,
+    providerOverrides: opts.providerOverrides,
+    newsroomId,
+  }));
+  const receipts: ResearchActionReceipt[] = [];
+  const contextTerms = [investigationTitle];
+  let aggregateHops = 0;
+  let summary = "";
+
+  async function capturedPageLinks(): Promise<string[]> {
+    const rows = await sql<{ label: string }>`
+      select label from frontier_items
+      where investigation_id = ${opts.investigationId}
+        and why like 'Attachment/document link on %'
+      order by priority desc, id desc limit 24
+    `;
+    return sanitizePublicUrls(rows.map((row) => row.label));
+  }
+
+  async function knownRead(url: string): Promise<boolean> {
+    const rows = await sql<{ c: number }>`
+      select count(*)::int as c from frontier_items
+      where investigation_id = ${opts.investigationId} and label = ${url}
+    `;
+    return (rows[0]?.c ?? 0) > 0;
+  }
+
+  for (let decision = 1; decision <= limit; decision++) {
+    const availableLinks = await capturedPageLinks();
+    const graph = await retrievePack(opts.userId, opts.investigationId, contextTerms.slice(-24));
+    const context = responsiveActionPrompt({
+      investigation: `INVESTIGATION ${opts.investigationId}: ${investigationTitle}. ${place.city}, ${place.state}.\n${graph}`.slice(0, PLANNER_INPUT_CAP),
+      receiptHistory: receipts,
+      availableLinks,
+      decision,
+      limit,
+    });
+    let action: ResearchAction;
+    try {
+      action = await choose(context);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : "responsive action selection failed";
+      receipts.push({ decision, action: { type: "finish", summary: detail, findings: [] }, outcome: "decision-failed", detail, links: [] });
+      summary = `Responsive research stopped because decision ${decision} failed: ${detail}`;
+      break;
+    }
+
+    if (action.type === "finish") {
+      const plan = emptyPlan();
+      plan.summary = action.summary || "Responsive research finished.";
+      plan.stop = true;
+      plan.claims = action.findings.map((finding) => ({
+        text: finding.text,
+        kind: "FACT",
+        evidence: finding.text,
+        source_url: finding.evidenceUrl ?? "",
+      }));
+      await persistPlan(opts.userId, opts.investigationId, plan, newsroomId);
+      summary = durableResponsiveSummary(plan.summary, receipts);
+      const counts = await responsiveCounts(opts.investigationId);
+      await sql`update investigations set status = 'open', pause_reason = null, summary = ${summary.slice(0, 2500)}, updated_at = now() where id = ${opts.investigationId} and newsroom_id = ${newsroomId}`;
+      return { ...counts, hops: aggregateHops, paused: false, summary, plannerFailures: 0, plannerStartupFailures: 0, actionDecisions: decision, finished: true };
+    }
+
+    const safeUrl = action.type === "search" ? "" : sanitizePublicUrls([action.url])[0];
+    if (action.type !== "search" && !safeUrl) {
+      receipts.push({ decision, action, outcome: "invalid-url", detail: "URL was not an allowed public URL", links: [] });
+      continue;
+    }
+    if (action.type === "read" && !(await knownRead(safeUrl!))) {
+      receipts.push({ decision, action, outcome: "not-discovered", detail: "Read target was not present in the app's discovered frontier", links: [] });
+      continue;
+    }
+    if (action.type === "follow" && !availableLinks.includes(safeUrl!)) {
+      receipts.push({ decision, action, outcome: "not-captured-link", detail: "Follow target was not found in a captured page", links: availableLinks });
+      continue;
+    }
+
+    let searchReceipt: Awaited<ReturnType<SearchAttemptFn>> | null = null;
+    let fetchReceipt: Awaited<ReturnType<FetchFn>> | null = null;
+    const plan = emptyPlan();
+    plan.summary = action.reason || `${action.type} action`;
+    contextTerms.push(action.reason);
+    if (action.type === "search") {
+      plan.searches = [action.query];
+      contextTerms.push(action.query);
+    } else plan.fetch_urls = [safeUrl!];
+    const operationResult = await researchLoop({
+      ...opts,
+      executionMode: "batch",
+      hops: 1,
+      readSelector: undefined,
+      planner: async () => plan,
+      _responsiveOperation: action.type,
+      searchAttempt: async (query) => {
+        if (opts.searchAttempt) searchReceipt = await opts.searchAttempt(query);
+        else if (opts.search) {
+          try {
+            const hits = await opts.search(query);
+            searchReceipt = { state: hits.length ? "SEARCH_SUCCESS_RESULTS" : "SEARCH_SUCCESS_ZERO_RESULTS", hits, provider: "injected" };
+          } catch (err) {
+            searchReceipt = { state: "SEARCH_FAILED_NETWORK", hits: [], provider: "injected", error: err instanceof Error ? err.message : "search failed" };
+          }
+        } else {
+          searchReceipt = await searchWithFallback(query, undefined, {
+            officialDomains: opts.officialDomains ?? [],
+            localityStopwords: [place.city, place.state, place.county ?? ""],
+          });
+        }
+        return searchReceipt;
+      },
+      fetch: async (url) => {
+        fetchReceipt = asFetched(await (opts.fetch ?? defaultFetch)(url), url);
+        return fetchReceipt;
+      },
+    });
+    aggregateHops += operationResult.hops;
+    if (action.type === "search") {
+      const attempt = searchReceipt as Awaited<ReturnType<SearchAttemptFn>> | null;
+      receipts.push({
+        decision,
+        action,
+        outcome: attempt?.state ?? "SEARCH_FAILED_NETWORK",
+        detail: attempt?.error ?? `${attempt?.hits.length ?? 0} result(s) discovered; none read`,
+        links: sanitizePublicUrls(attempt?.hits.map((hit) => hit.url) ?? []),
+      });
+    } else {
+      const capture = await sql<{ fetch_outcome: string; http_status: number | null }>`
+        select fetch_outcome, http_status from capture_events
+        where investigation_id = ${opts.investigationId} and newsroom_id = ${newsroomId} and source_url = ${safeUrl}
+        order by id desc limit 1
+      `;
+      const fetched = fetchReceipt as Awaited<ReturnType<FetchFn>> | null;
+      receipts.push({
+        decision,
+        action,
+        outcome: capture[0]?.fetch_outcome ?? fetched?.outcome ?? (fetched?.ok ? "captured" : "fetch-failed"),
+        detail: actionReceiptExcerpt(fetched?.text ?? "", contextTerms) || `HTTP ${capture[0]?.http_status ?? fetched?.status ?? 0}`,
+        links: sanitizePublicUrls(fetched?.extras ?? []),
+      });
+    }
+  }
+
+  const counts = await responsiveCounts(opts.investigationId);
+  summary = durableResponsiveSummary(summary || `Responsive research reached its decision limit ${limit} without an explicit finish.`, receipts);
+  await sql`update investigations set status = 'paused', pause_reason = ${summary}, summary = ${summary.slice(0, 2500)}, updated_at = now() where id = ${opts.investigationId} and newsroom_id = ${newsroomId}`;
+  return { ...counts, hops: aggregateHops, paused: true, summary, plannerFailures: 0, plannerStartupFailures: 0, actionDecisions: receipts.length, finished: false };
+}
+
+function actionReceiptExcerpt(text: string, terms: string[]): string {
+  if (!text) return "";
+  const needles = [...new Set(queryTokens(terms.join(" ")).filter((term) => term.length >= 4))];
+  const lower = text.toLowerCase();
+  const starts = needles.flatMap((needle) => {
+    const at = lower.indexOf(needle.toLowerCase());
+    return at >= 0 ? [Math.max(0, at - 240)] : [];
+  });
+  if (!starts.length) return text.slice(0, 1_500);
+  return [...new Set(starts)].slice(0, 3).map((start) => text.slice(start, start + 500)).join("\n…\n").slice(0, 1_500);
+}
+
+function durableResponsiveSummary(summary: string, receipts: ResearchActionReceipt[]): string {
+  const trail = receipts.map((receipt) =>
+    `${receipt.decision}:${receipt.action.type}:${receipt.outcome} ${receipt.detail.replace(/\s+/g, " ").slice(0, 180)}`,
+  ).join("\n");
+  return `${summary}\n\nResponsive action receipts:\n${trail || "(finish selected before an operation)"}`.slice(0, 2_500);
+}
+
+async function responsiveCounts(investigationId: number): Promise<{ artifacts: number; frontier: number }> {
+  const sql = await getSql();
+  const [artifacts, frontier] = await Promise.all([
+    sql<{ c: number }>`select count(*)::int as c from artifacts where investigation_id = ${investigationId}`,
+    sql<{ c: number }>`select count(*)::int as c from frontier_items where investigation_id = ${investigationId} and status in ('open', 'investigating', 'reopened')`,
+  ]);
+  return { artifacts: artifacts[0]?.c ?? 0, frontier: frontier[0]?.c ?? 0 };
 }
 
 async function resolveProvenance(

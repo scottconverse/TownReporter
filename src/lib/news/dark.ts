@@ -1508,6 +1508,8 @@ async function executeDarkRun(
         officialDomains: where?.official,
         pressDomains: where?.press,
         preferences: snapshot.preferences,
+        executionMode: snapshot.preferences.executionMode ?? "batch",
+        actionLimit: snapshot.preferences.actionLimit ?? 6,
       }),
     });
 
@@ -1979,6 +1981,8 @@ export async function performDarkRound(job: DeskJob) {
           officialDomains: where?.official,
           pressDomains: where?.press,
           preferences: snapshot.preferences,
+          executionMode: snapshot.preferences.executionMode ?? "batch",
+          actionLimit: snapshot.preferences.actionLimit ?? 6,
         }),
       });
       const signals = await synthesizeSignals(

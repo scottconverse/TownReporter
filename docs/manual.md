@@ -39,6 +39,16 @@ at your own city.
 
 ## Current capabilities and remaining work
 
+**Unreleased DEV: responsive investigation.** In Dark Desk, open **How hard to
+dig → Change → Research method**. Batch preserves the existing workflow.
+Responsive lets the selected model search, read, follow a link, or finish,
+using the previous result to choose its next action. Set **Maximum research
+decisions per round** (1–24, initially 6), then **Save**. This is separate from
+the final brief and signal-verification calls. It does not publish anything
+or change your model choice. Captures remain the evidence; search results and
+the model's choice of a source do not establish a fact. Live acceptance of
+this new method is still pending.
+
 The Command Center uses Fable Direction A: composer and queue in the main
 column; Dark Desk, Follow-ups and wire in the rail. Follow-ups record who was
 asked, what is due and when; replies can be added to story reporting notes.
