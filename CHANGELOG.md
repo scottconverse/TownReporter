@@ -4,6 +4,10 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Registration notice checks can read the explicit youth basketball deadline
+  from Longmont's Fall 2026 sports PDF, retaining page references and the original
+  PDF when saved and reopened. Source approval and activation remain separate.
+
 - Preserve citation-bearing Dark Desk connection/support bullets beyond the old
   240-character limit, and save complete brief JSON instead of cutting it mid-field.
 
