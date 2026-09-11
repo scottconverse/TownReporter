@@ -63,3 +63,11 @@ export const DEFAULT_PAPER_IDENTITY: PaperIdentity = {
 export function resolvePaperIdentity(fetched: PaperIdentity | null | undefined): PaperIdentity {
   return fetched ?? DEFAULT_PAPER_IDENTITY;
 }
+
+/** A local reader resource, not a default link for other newspapers. */
+export function utilityBillAnalyzerUrl(paper: Pick<PaperIdentity, "city" | "state">): string | null {
+  return paper.city.trim().toLowerCase() === "longmont" &&
+    ["co", "colorado"].includes(paper.state.trim().toLowerCase())
+    ? "https://shakeeldalal.com/2026/08/30/longmont-utility-bill-analyzer/"
+    : null;
+}

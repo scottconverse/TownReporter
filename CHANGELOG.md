@@ -2,6 +2,11 @@
 
 Current release: **0.6.35**.
 
+## Unreleased
+
+- Longmont's front-page navigation includes **Utility Bill Analyzer** beside
+  **City council votes**, opening Shakeel Dalal's analyzer page in a new tab.
+
 ## 0.6.35 beta — 10 September 2026 (candidate)
 
 - Operator documentation now describes named custom AI API connections,

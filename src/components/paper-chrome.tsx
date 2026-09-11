@@ -10,6 +10,7 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { deskClaimState } from "@/lib/news/claim";
 import { createEditorCopy } from "@/lib/news/desk-copy";
 import { usePublicSections } from "@/lib/use-sections";
+import { utilityBillAnalyzerUrl } from "@/lib/paper-identity";
 
 export function Masthead({ compact = false }: { compact?: boolean }) {
   const paper = usePaper();
@@ -158,6 +159,7 @@ function ArchiveSearch() {
 
 function PaperNav() {
   const paper = usePaper();
+  const analyzerUrl = utilityBillAnalyzerUrl(paper);
   const matchRoute = useMatchRoute();
   /*
     Collapsed behind one "Sections" button on a phone (UX-001).
@@ -277,6 +279,18 @@ function PaperNav() {
           className="inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 border-transparent px-1 transition-[color] duration-150 ease-out hover:text-rust focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rust sm:justify-start"
         >
           City council votes
+          <ExternalLink className="ml-1 size-3" strokeWidth={1.75} aria-hidden />
+          <span className="sr-only">(opens another site)</span>
+        </a>
+        ) : null}
+        {analyzerUrl ? (
+        <a
+          href={analyzerUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex min-h-11 shrink-0 items-center justify-center border-b-2 border-transparent px-1 transition-[color] duration-150 ease-out hover:text-rust focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rust sm:justify-start"
+        >
+          Utility Bill Analyzer
           <ExternalLink className="ml-1 size-3" strokeWidth={1.75} aria-hidden />
           <span className="sr-only">(opens another site)</span>
         </a>
