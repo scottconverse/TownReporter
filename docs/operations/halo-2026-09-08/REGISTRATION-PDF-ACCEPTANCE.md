@@ -281,3 +281,27 @@ $env:DATABASE_URL=''; $env:RUN_LIVE_MODEL_TESTS=''; $env:TOWNREPORTER_TEST_ENV_V
 
 The process exited 0 without test warnings. This verifies the save path on
 isolated test data; rebuilt staging form acceptance and activation remain open.
+
+### Rebuilt waste and meeting owner-form check
+
+Candidate 275261c built successfully with `npm run build` against only
+townreporter_stage_03efb7b_20260911; migration was up to date. Output included
+DEP0190 and browser externalization warnings and was truncated; not a
+warning-free build claim. Stopped owned handle53843 and started handle17876
+on 127.0.0.1:3471, native model providers disabled.
+
+Using Chrome, selected waste2879 and meeting2880, entered issuer/locality and
+public attribution, and clicked Save paused settings. UI confirmed settings
+saved and editions paused. Database confirms revision4, enabled=false, and all
+four sources2877–2880 retained. This closes the demonstrated save defect.
+
+Manual waste check7: parsed2, refused0, conflicts0; capture2409/version1553.
+UI shows North of9th October26–30 and South of9th November2–6,2026, both with
+bags out before7a.m. Monday and left all week. This is structural acceptance,
+not scheduled publication.
+
+Manual meeting check8: capture-failed, parsed0, refused1; capture2410/version1554.
+The failed group is retained, not relabeled successful. Luna is tracing the
+ingestion/raw-capture path before another check. Meeting activation remains open.
+Temporary staging-editor owner assignment to fixture room98911 was restored
+to editor in room1. Production settings and articles were not changed.
