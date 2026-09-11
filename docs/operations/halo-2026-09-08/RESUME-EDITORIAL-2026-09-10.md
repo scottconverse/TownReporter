@@ -323,3 +323,108 @@ GREEN, exit 0, `logs/library-dotted-time-green.log`:
 hour/minute bounds and JSON-LD matching remain intact; no new route, credential,
 dependency, rendering, or permission change. This is DEV verification only.
 The installed parser still needs deployment and a fresh live source check.
+
+## Fresh Dark Desk run: investigation 9, job 109 (in progress)
+
+Started through the installed owner UI at 23:01:34 MDT, September 10. Exact
+assignment: "Did a second Democrat in the 2025 Longmont mayoral race split the
+vote against Shakeel Dalal?" Explicit Codex Terra (`codex-balanced`), no fallback,
+no supplied links, candidate facts, desired answer, or prompt modifications.
+The prior unsubmitted browser tab had closed; this is one actual submission,
+not a restarted investigation. No publication or second model lane was started.
+
+Run 12's persisted settings are dig=3, nerve=8, county scope, 90-day lookback,
+verificationLimit=6. The saved date preference resolves June14–September11,2026;
+the emitted searches use June13/September12 exclusive boundaries. That window
+is poorly suited to this historical question and is an acceptance limitation,
+not evidence that 2025 records were exhaustively searched.
+
+At 23:05 MDT the same job remained running with a current heartbeat. Captures
+include the City certificate (artifact532, 17,041 characters), candidate list
+(536), County certification announcement (537), and results page (538).
+Persisted model claims correctly use the City certificate's combined Boulder
+and Weld totals: Hidalgo-Fahring12,501; Dalal7,799; Crist6,593; Levison5,090.
+They explicitly distinguish those facts from unproved affiliation and causal
+vote-transfer allegations. This proves useful document capture and use during
+the run, not completed investigative acceptance. Final brief still pending.
+
+Luna `dark_run_settings` performed a read-only source diagnosis: the workspace
+"up to5" is the hard-coded legacy `investigations.budget`, whereas execution
+uses `budgetFor` on the run's saved dials (3 hops). No UI repair was attempted
+during acceptance. Actual completed-run summary must settle the hop count.
+
+Candidate PR43 is open at `209b0ddeedf89b5b78a6846fee503ae81322f740`.
+Fourteen hosted checks are successful; source test and Windows installation
+remain running at this checkpoint. Nothing from PR43 has been deployed.
+
+### Finished run and substantive failure
+
+Job109 completed at 23:06:19.814751 MDT, 285.802931 seconds after start,
+error=null. Run12 records Hops3of3,13 artifacts,179 open frontier entries,
+verification eligible0/attempted0. The captured finance article is artifact542.
+The final brief says unknown and correctly distinguishes totals from the
+unproved causal claim. However, its connections field falsely says the City
+certificate puts Crist ahead of Dalal, despite its own accurate totals
+6,593 versus7,799. It also invents a disagreement with the finance article.
+This fails clean reporting acceptance; successful capture is not sufficient.
+The original brief remains unchanged in production. No public article exists.
+
+Luna's read-only follow-up found the missing general comparison instruction in
+BRIEF_SYSTEM; the pack already supplies the captured evidence. Added a general
+numeric-comparison paragraph, with no election names, numbers or expected
+answer. Scope: compare aligned values, not row order; do not call agreeing
+records contradictory; check consistency across JSON fields. No extra model
+call, validator framework, routes, permissions, dependencies or UI changes.
+
+The existing module's baseline command, in guarded blank-DATABASE_URL/no-live-
+model environment, was:
+`node --import ./scripts/test-environment-guard.mjs --experimental-strip-types --test src/lib/news/dark-brief.test.ts`.
+Exit0:
+```text
+ℹ tests 14
+ℹ suites 3
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 91.2017
+```
+Same command with the new prompt-contract test before implementation: exit1,
+`logs/dark-brief-comparison-red.log`, full assertion preserved there:
+```text
+ℹ tests 15
+ℹ suites 3
+ℹ pass 14
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 97.4971
+```
+Failure: AssertionError ERR_ASSERTION, input did not match
+`/compare the actual numeric values/i`. After implementation, same command,
+exit0, `logs/dark-brief-comparison-green.log`:
+```text
+ℹ tests 15
+ℹ suites 3
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 106.4315
+```
+These tests establish prompt-contract presence and unchanged parsing/packing,
+NOT reliable model arithmetic. A real brief through the repaired application
+is still required. Curated investigative tools remain unresolved: this run
+shows the existing loop can find/read decisive records, but its historical
+date limitation and brief error do not justify waiving the entire requirement.
+
+`npm run typecheck` exited0 with no diagnostics after the prompt change. Luna
+reviewed the actual two-file code/test diff and found no material regressions,
+no election-specific steering, and no new tool restriction. This was independent
+source review, not an independently rerun model trial. The production checkout
+remains clean at fe53b6e. Before the next push,15 of16 existing candidate checks
+are green (including Windows installation); the hosted full test job is still
+running. The new prompt requires its own candidate CI and live acceptance.

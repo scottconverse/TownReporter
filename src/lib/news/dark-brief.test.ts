@@ -110,6 +110,14 @@ describe("BRIEF_SYSTEM", () => {
     assert.match(BRIEF_SYSTEM, /unknown/i);
   });
 
+  it("requires numeric comparisons and alleged contradictions to agree with the captured values", () => {
+    assert.match(BRIEF_SYSTEM, /compare the actual numeric values/i);
+    assert.match(BRIEF_SYSTEM, /row order is not rank/i);
+    assert.match(BRIEF_SYSTEM, /same measure, period, and geographic scope/i);
+    assert.match(BRIEF_SYSTEM, /do not call sources contradictory when they agree/i);
+    assert.match(BRIEF_SYSTEM, /across every JSON field/i);
+  });
+
   it("distinguishes an incomplete investigation from a disproved premise", () => {
     assert.match(BRIEF_SYSTEM, /unknown.*decisive records.*not.*read/is);
     assert.match(BRIEF_SYSTEM, /dead.*affirmative evidence/is);

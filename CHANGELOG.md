@@ -4,6 +4,10 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Dark Desk brief instructions explicitly check numeric comparisons across
+  records and avoid treating table row order as rank or agreeing sources as
+  contradictory. This is model guidance, not an automatic factual verifier.
+
 - Library-calendar checks recognize the City's dotted a.m./p.m. time notation,
   while still refusing entries whose visible and structured times disagree.
 
