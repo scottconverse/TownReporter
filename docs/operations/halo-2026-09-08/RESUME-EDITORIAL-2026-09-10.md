@@ -173,3 +173,153 @@ All sixteen requirements remain tracked by the user attachment
 Dark Desk, automation, PDF, daily-target or complete Stats verdict is implied
 by the checks above. No production publication, restart or model configuration
 change occurred during this resumed acceptance.
+
+## Library activation preparation and fresh failure (22:35 MDT)
+
+Added the exact City library category through the signed-in Sources UI:
+`https://longmontcolorado.gov/events/category/library/`, source 2875,
+title `City of Longmont — Library events`. The accepted-source count changed
+151 to 152. Saved only its `library-notice` permission (revision 1), with
+issuer City of Longmont, locality Longmont, Colorado, branch Longmont Public
+Library and the same public attribution URL. Saved inactive edition settings.
+Automatic publication is still off; edition sections still need selection.
+
+One fresh manual check produced **parsed 0 / refused 20 / conflicts 0**.
+Production receipt 1 retains blob 628 and artifact version 1534. Read-only
+inspection of those actual captured bytes found 20 calendar cards in 525,094
+bytes. Their visible times now use nested spans and `10 a.m.` / `10:30 a.m.`;
+the current `visibleClockMinutes` recognizes only undotted `am` / `pm`.
+This is the reason the visible-card map is empty, not a demonstrated timezone
+conflict. The narrow notation repair and regression remain pending here.
+No source times were invented, and no notice or test article was published.
+
+The sole source-suite session 74959 remains live and advancing, with raw output
+at `logs/source-tests-20260910-repair.log`. No replacement suite was started.
+Earlier worker-test setup failed with EPERM while unlinking the DEV Vite cache;
+after DEV write permission was granted, that focused worker test passed
+1/1 and exited. That setup failure was not treated as a product defect.
+
+OpenAI workflow: Luna `/root/scan_score_diagnosis` performed a read-only
+diagnosis while the lead operated the notice UI. No worker tests or edits.
+It confirmed malformed/missing scores deliberately become zero and warned
+that the raw model output is needed before selecting a ranking repair.
+Published context is advisory and deliberately permits genuine developments;
+this source inspection does not prove duplicate suppression in real use.
+
+### Source-suite cancellation failure and owned-child cleanup
+
+The same source suite reported:
+```text
+  ✖ the happy path still kills the real child this process holds (2089.7094ms)
+✖ ENG-06: never taskkill a PID this process does not still hold (2116.1397ms)
+```
+The runner was PID7860; the failing test was PID45204, executing
+`src/lib/news/provider-login.test.ts`. Fresh process inspection identified two
+children, PID3264 and PID27440, both running this repository's
+`scripts/fakes/fake-codex-cli.mjs login --device-auth`. Neither was a real
+provider login. PowerShell Stop-Process failed with
+`Object reference not set to an instance of an object.` Freshly reverified
+PID-scoped Windows taskkill then successfully terminated exactly those two
+children. The existing suite resumed and advanced into later files. This
+manual cleanup does not turn the failed cancellation assertion into a pass.
+
+Luna's follow-up source review found that provider-login's killTree handles
+taskkill spawn errors but ignores nonzero process exits. The existing Claude
+adapter already has an exit-code fallback pattern. The live test does not
+establish why termination failed in this permission environment; retain the
+failure and verify that distinction before selecting a repair. No production
+process was killed or application code changed for this diagnosis.
+
+Prepared the dotted-time regression in
+`scripts/routine-city-library-category-extractor.test.mjs`, using the existing
+versioned City-category fixture rather than requiring an ignored artifact.
+It has not run yet, and the production/parser fix has not been applied.
+The single source suite must finish before the next test is launched.
+
+## Objective 10 disposition — live Stats/report verification complete
+
+The recorded live browser observations above satisfy the requested narrow
+Stats outcome: an individual story visit incremented its count once, a separate
+home-only visit incremented site loads, and installed daily/weekly/monthly saved
+reports all opened. The daily report also reopened in a fresh tab. The persisted
+report implementation retains completed-period files without automatic pruning.
+Counts remain page loads, not unique people or proof of reading. No new tracker,
+recipient subscription, or externally delivered report was requested by item 10.
+This closes that item only; it does not certify editorial quality or the daily
+paper target, and it does not require another Stats testing campaign.
+
+## Completed serial verification and library repair
+
+The original full source command (same guard/environment as above, with
+`--experimental-strip-types --test --test-concurrency=1 'src/**/*.test.ts'`)
+finished with exit 1. Full output, including PDF warnings and all skip reasons:
+`logs/source-tests-20260910-repair.log`.
+```text
+ℹ tests 1839
+ℹ suites 385
+ℹ pass 1793
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 45
+ℹ todo 0
+ℹ duration_ms 1170227.6883
+```
+The sole failure was the recorded owned-child cancellation assertion:
+`AssertionError [ERR_ASSERTION]: cancelling the happy path must actually kill the real child`,
+`true !== false`, at `provider-login.test.ts:535:14`. It is not erased.
+
+Re-ran only that file with host process-termination permission, no source changes,
+blank DATABASE_URL, no live models, and the test environment guard:
+`node --import ./scripts/test-environment-guard.mjs --experimental-strip-types --test src/lib/news/provider-login.test.ts`.
+Exit 0; `logs/provider-login-host-permission-check.log`:
+```text
+ℹ tests 30
+ℹ suites 7
+ℹ pass 30
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11185.1243
+```
+This establishes permission-sensitive behavior for this run, not a repaired
+application lifecycle. No lifecycle code was changed. A final process census
+found no matching source-suite or fake-login processes.
+
+Calendar repair: two lines in `visibleClockMinutes` now accept dotted and
+undotted periods. The saved-source comparison still rejects conflicting times.
+Added the regression to the existing tracked `routine-notice-checks.test.ts`.
+The exploratory untracked script was restored to its previous content. Its first
+attempt and the first source-test mutation incorrectly injected markup into JSON;
+their `parsed 0/refused 1` failures are not valid bug reproductions. The corrected
+fixture mutation touches only visible time spans and reproduces the live failure:
+`parsed 0/refused 20`, versus required `parsed 19/refused 1`.
+
+Exact RED/GREEN command (same guarded blank-database environment):
+`node --import ./scripts/test-environment-guard.mjs --experimental-strip-types --test src/lib/news/routine-notice-checks.test.ts`.
+Valid RED, exit 1, `logs/library-dotted-time-red-valid.log`:
+```text
+ℹ tests 19
+ℹ suites 1
+ℹ pass 18
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 18607.3057
+```
+GREEN, exit 0, `logs/library-dotted-time-green.log`:
+```text
+ℹ tests 19
+ℹ suites 1
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 18262.742
+```
+`npm run typecheck` subsequently exited 0, no diagnostics. Review: existing
+hour/minute bounds and JSON-LD matching remain intact; no new route, credential,
+dependency, rendering, or permission change. This is DEV verification only.
+The installed parser still needs deployment and a fresh live source check.
