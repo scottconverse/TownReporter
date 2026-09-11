@@ -201,3 +201,37 @@ publication, production mutation or additional test process was started.
 This closes this draft's ordinary save/reload observation only. It does not
 establish interrupted-save recovery, batch drafting, a successful evidence
 recheck, or overall article quality. Existing failed drafts remain unchanged.
+
+## Real batch drafting — two existing leads
+
+On the same staging build/database, confirmed zero queued/running jobs, opened
+Queue, explicitly selected Codex Terra, checked parking lead125 and school
+certifications lead132, and clicked Draft selected. Batch1 started through the
+ordinary editor controls. No altered prompt, forced source, publication or
+production write was used.
+
+The lead incorrectly described this as serialized beforehand: the app's existing
+default job lane has concurrency2 (`jobs.ts`), and both jobs started together at
+03:57:33 MDT. No other model/build/test work was started during this batch. This
+was not a serial trial; future acceptance must account for that existing limit
+before launching a batch, rather than promising serialization it cannot provide.
+
+- Job123 / school132: completed104seconds, checkpoint79, final draft81.
+- Job122 / parking125: completed142seconds, checkpoint80, final draft82.
+- Both terminal results have `evidenceCheckIncomplete:false` and no job error.
+- Editor batch results visibly changed to Saved draft81 and Saved draft82.
+- Final staging query confirms zero queued/running jobs.
+
+Read both complete final bodies and their integrity notes. School81 states the
+679 certifications as a district-reported 2024–25 count, not 679 distinct students;
+it retains uncertainty about credential counting and the undated homepage.
+Parking82 contains Tuesday-only shuttle hours and attributes the December2026
+schedule, but its reader body includes an already-past late-summer2026 expected
+completion from the rehabilitation page. That needs editorial attention before
+publication. No factual correction has yet been made to either new draft.
+
+Both retain inline public citations and captured-version provenance. School81
+references versions1614/1451/1447; parking82 references1508/1515/763/765.
+This proves the batch UI, saved checkpoints, final results and links. Comparing
+these latest bodies against those exact captures remains the next quality step;
+job completion and automated checking are not a human reporting-quality verdict.
