@@ -134,6 +134,43 @@ proves saved configuration, not an activated edition or production coverage.
 
 ## Remaining scope
 
+### First real scheduled edition — September 11, approximately 00:20 MDT
+
+In isolated staging room98911, added the official library calendar through
+Sources: https://longmontcolorado.gov/events/category/library/ (source2878).
+Approved its library-notice permission through Server. Supplied authoritative
+issuer City of Longmont Public Library, locality Longmont, Colorado, public
+calendar URL, and branch Longmont Public Library. The initial save correctly
+requested the missing branch; after supplying it, activation succeeded.
+Community remained the destination for all channels. Set 00:01 America/Denver
+and let the built server's normal five-minute scheduler run; no clock injection
+or manual job insertion. Native model providers remained disabled.
+
+Job112 completed, run1 completed: published2, corrected0, needsReview1,
+eligible5. Articles42/43 are Today and Weekend, with two/three library events.
+The December13 registration deadline correctly did not enter a seven-day
+deadline edition. No deadline edition was manufactured for the test.
+
+Paused through Save paused settings after completion. Restored staging-editor
+to editor/room1; confirmed no active fixture job and disabled automation first.
+These are retained acceptance publications in the isolated staging database,
+not public production stories. Original room1 publication rows were not changed.
+
+The Published editor page lists both articles. Following its reader link yields
+"That story is not in this edition": public.ts intentionally serves room1 only,
+whereas the fixture lives in room98911. Do not count this as reader-render proof
+or weaken that boundary to make the test pass.
+
+Actual persisted body exposes a product issue: event dates appear as raw ISO
+timestamps (for example 2026-09-11T10:30:00-06:00), and Stay &amp; Play retains
+an HTML entity. The deterministic edition formatter needs a bounded readable
+date/title correction before production activation. Scheduling success is not
+editorial acceptance. These original articles remain unchanged as evidence.
+
+The exact built source f9554fa's 16 GitHub checks subsequently all completed
+successfully, including main tests and fresh Windows ZIP install. This does
+not apply automatically to future source changes or prove editorial quality.
+
 Production owner source setup and activation remain; built UI verification for
 this source is complete above. This is one
 real brochure mapping, not all registration programs or future brochure layouts.
