@@ -225,3 +225,26 @@ Existing linkedom handles entity decoding; no new dependency, endpoint or
 permissions were added. Source text is not inserted as executable page HTML.
 Reader-page verification on the rebuilt candidate and production activation
 remain outstanding; this does not claim them complete.
+
+### Rebuilt reader check
+
+Built 4bf11b2 with `npm run build`, explicitly targeting only
+`townreporter_stage_03efb7b_20260911`; exit0, migration reported up to date.
+Build output contained DEP0190 and browser-externalization warnings; output was
+truncated by the tool, so this is not a warning-free build claim. Stopped the
+owned previous staging handle35639 and started rebuilt server handle53843 on
+127.0.0.1:3471 with both native model providers disabled.
+
+Added display-only article45, slug `acceptance-readable-edition-4bf11b2`, to
+room1 of that isolated staging database. It is explicitly titled STAGING
+ACCEPTANCE and labeled not a scheduled publication or public-paper story.
+The first insert failed because room1 has no Community section; the successful
+insert used existing About, without changing section rules. Articles42/43 were
+not overwritten. This staging database contains acceptance fixtures.
+
+Chrome reader-page accessibility and visual screenshot inspection confirmed
+all five saved-calendar weekend events display readable times, Stay & Play,
+and the official calendar source link. Body text is visible and does not
+overlap. This closes desktop reader rendering for this formatter, not a new
+scheduler run, mobile acceptance, console verification, or production release.
+Production activation and the remaining source families are still open.
