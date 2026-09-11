@@ -297,3 +297,46 @@ actual refused. Over-limit test updated to1,048,577bytes for the new bound.
 All handles exited; no warnings in these tests. Museum's rebuilt browser check
 is still outstanding. Restored staging-editor to editor/room1 after owner-form
 work. Production and automatic publication remain untouched.
+
+## Six-source scheduled acceptance — September 11, 2026
+
+Supersedes the outstanding museum check above. Built candidate `bec6379`
+served on loopback3471 against `townreporter_stage_03efb7b_20260911`.
+Museum browser check12 parsed20, refused0, conflicts0. The isolated owner
+activated all six saved sources through the UI (automation revision6).
+No clock override, forced job, or accelerated restart was used.
+
+The natural scheduler reserved run2 at01:18:33.976780 MDT and finished at
+01:18:56.267717; desk job113 completed. Database summary:
+`{"published":0,"corrected":2,"needsReview":6,"eligible":5}`.
+
+The scheduled captures, not just earlier manual checks, produced:
+
+| Check | Source | Parsed | Refused |
+|---|---|---:|---:|
+|13|2877 registration PDF|1|0|
+|14|2878 library|19|1|
+|15|2879 leaf collection|2|0|
+|16|2880 PrimeGov meetings|6|5|
+|17|2881 recreation|20|0|
+|18|2882 museum|20|0|
+
+All six sources were read. The six review items correspond to the one library
+and five meeting structural refusals; these were not silently passed.
+Five eligible entries are edition entries, not five distinct stories:
+three Today items and two weekend items. The generated corrections include
+the Museum's 3rd Annual Sunset Soiree (September11,6PM) and library events,
+with readable dates and decoded ampersands. Original article bodies42/43
+remain preserved; the implementation appends `Routine edition update`
+corrections rather than overwriting their bodies. This run proves correction
+creation, not a newly published six-family edition or public-reader acceptance
+of those corrections. Registration and leaf collection are outside today's
+edition windows. Parsing all families is not proof that every family's
+publication timing has been exercised.
+
+After completion, the lead unchecked activation and saved via the UI;
+the UI confirmed paused and the database confirmed enabled=false, revision7.
+Restored only the fixture staging-editor membership to editor/newsroom1.
+No queued/running fixture jobs remained. Production was neither configured
+nor published to. Actual six-family production activation and remaining
+window/reader acceptance are still open.
