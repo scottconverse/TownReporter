@@ -235,3 +235,31 @@ references versions1614/1451/1447; parking82 references1508/1515/763/765.
 This proves the batch UI, saved checkpoints, final results and links. Comparing
 these latest bodies against those exact captures remains the next quality step;
 job completion and automated checking are not a human reporting-quality verdict.
+
+### Exact-capture review of drafts81/82
+
+Read full captured texts1447,1451,1614,1508,1515 and763, not current replacement
+pages. School81's 679 credentials/2024–25, 70-plus programmes, approximately33000
+students, 60 schools/programmes, 13 communities, 2012/2018 Innovation Center dates
+and $59million since2018 all match these sources. No numeric correction needed.
+The source does explicitly say certifications earned, so the private note's
+suggestion that these might be attempts is unnecessarily broad. More importantly,
+this is an undated homepage statistic about an old school year, not proof of a
+new development. Do not count it as a fresh daily-paper item merely because the
+draft is accurate. Further reporting is needed to establish a useful current angle.
+
+Parking82's address, garage45-to87 spaces, December2026 schedule, Tuesday-only
+8:30–11 shuttle, east-lot accessible parking, northwest entrance and court
+request options match captured City material. Version1515 also retains an
+August24–September8 closure and a late-summer expected completion; those are
+not current-status proof on September11. In the ordinary editor, replaced the
+bare late-summer sentence with an explicit statement that the captured material
+does not confirm whether that work has finished. Clicked Save edits. Read-only
+database verification confirms the clarification and its original citation
+are saved in draft82. Checkpoint80 remains the pre-edit model output.
+
+Editorial result: parking is a useful attributed service brief with one
+substantive clarification; school is accurate background but needs a current
+angle. Neither was published. No model retry or new code was used for this
+review. Editor effort was not reliably timed, so this does not close the
+60-minute daily-production target.
