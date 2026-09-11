@@ -4,6 +4,9 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Preserve citation-bearing Dark Desk connection/support bullets beyond the old
+  240-character limit, and save complete brief JSON instead of cutting it mid-field.
+
 - Dark Desk brief instructions explicitly check numeric comparisons across
   records and avoid treating table row order as rank or agreeing sources as
   contradictory. This is model guidance, not an automatic factual verifier.

@@ -154,6 +154,24 @@ it("synthesis keeps an older focus-matching capture and its stored page evidence
   assert.equal((briefPrompt.match(/TARGET_ROW: FILE-4242/g) ?? []).length, 1);
 });
 
+it("stores the complete parsed brief without cutting serialized JSON or citations", async () => {
+  const sql = await getSql();
+  const id = (await sql<{ id: number }>`insert into investigations(user_id,newsroom_id,title)
+    values ('brief-storage',82,'Saved citation record') returning id`)[0]!.id;
+  const citations = Array.from({ length: 6 }, (_, i) =>
+    `${"Captured evidence detail ".repeat(65)}[Record ${i}](https://records.example/item/${i})`);
+  const result = await buildBrief('brief-storage', 82, id, undefined, null,
+    async () => ({ ok: true, text: JSON.stringify({
+      headline: 'Saved citation record', tldr: 'The record is retained.',
+      connections: citations, supports: citations,
+    }) }));
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const rows = await sql<{ brief_json: string }>`select brief_json from investigation_briefs where investigation_id=${id}`;
+  assert.ok(JSON.stringify(result.brief).length > 12_000);
+  assert.deepEqual(JSON.parse(rows[0]!.brief_json), result.brief);
+});
+
 it("keeps readable evidence without focus tokens and collapses duplicate versions before the cap", async () => {
   const sql = await getSql();
   const userId = "synthesis-empty-focus";

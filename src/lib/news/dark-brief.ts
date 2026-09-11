@@ -77,9 +77,12 @@ const visiblyBoundedStr = (v: unknown, max: number) => {
   return `${value.slice(0, max - marker.length).trimEnd()}${marker}`;
 };
 
-const list = (v: unknown, max: number, each: number) =>
+const list = (v: unknown, max: number, each: number, preserveTail = false) =>
   Array.isArray(v)
-    ? v.map((x) => str(x, each)).filter(Boolean).slice(0, max)
+    ? v
+        .map((x) => (preserveTail ? visiblyBoundedStr(x, each) : str(x, each)))
+        .filter(Boolean)
+        .slice(0, max)
     : [];
 
 /**
@@ -98,7 +101,7 @@ export function parseBrief(raw: unknown, now = new Date()): InvestigationBrief {
     verdict: asVerdict(o.verdict),
     why_verdict: str(o.why_verdict, 400),
     next: str(o.next, 300),
-    connections: list(o.connections, 6, 240),
+    connections: list(o.connections, 6, 2_000, true),
     hypothesis: str(o.hypothesis, 400),
     /*
       Clamped, and 0 when absent.
@@ -111,7 +114,7 @@ export function parseBrief(raw: unknown, now = new Date()): InvestigationBrief {
       const n = Number(o.strength);
       return Number.isFinite(n) ? Math.min(1, Math.max(0, Number(n.toFixed(2)))) : 0;
     })(),
-    supports: list(o.supports, 6, 240),
+    supports: list(o.supports, 6, 2_000, true),
     benign: str(o.benign, 400),
     // This can be a multi-clause named-record instruction. Preserve normal
     // answers whole; if hostile/accidental output reaches the defensive 10k

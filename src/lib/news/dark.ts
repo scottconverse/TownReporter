@@ -2769,7 +2769,7 @@ export async function buildBrief(
 
   await sql`
     insert into investigation_briefs (investigation_id, newsroom_id, brief_json, generated_at)
-    values (${id}, ${newsroomId}, ${JSON.stringify(brief).slice(0, 12000)}, now())
+    values (${id}, ${newsroomId}, ${JSON.stringify(brief)}, now())
     on conflict (investigation_id) do update
       set brief_json = excluded.brief_json, generated_at = now()
   `;

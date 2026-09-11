@@ -50,6 +50,14 @@ describe("parseBrief", () => {
     assert.ok(parsed.kills_it.length > 300);
   });
 
+  it("preserves citation-bearing connections and supports beyond the old short limit", () => {
+    const citation = `${"Evidence detail ".repeat(40)}https://records.example/source/long-citation`;
+    const parsed = parseBrief({ connections: [citation], supports: [citation] });
+
+    assert.equal(parsed.connections[0], citation);
+    assert.equal(parsed.supports[0], citation);
+  });
+
   /**
    * A summary panel that breaks the page is worse than no summary panel — it
    * sits above four sections the editor still needs.
