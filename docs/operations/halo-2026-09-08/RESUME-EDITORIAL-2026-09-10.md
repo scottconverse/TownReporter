@@ -98,6 +98,52 @@ retention is indefinite until operator removal, not a promised finite window.
 
 ## Remaining scope
 
+### Integrated focused verification
+
+Command (DEV, blank database and no live model calls):
+```powershell
+$env:DATABASE_URL=''; $env:RUN_LIVE_MODEL_TESTS=''; $env:TOWNREPORTER_TEST_ENV_VERIFIED='1'; node --import ./scripts/test-environment-guard.mjs --experimental-strip-types --test --test-concurrency=1 src/lib/news/desk-copy.test.ts src/lib/news/report.scope.test.ts
+```
+Result, process exited 0:
+```text
+ℹ tests 118
+ℹ suites 16
+ℹ pass 118
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 22542.4176
+```
+These cover prompt construction and existing draft/evidence behavior, not a
+live model's repeat-detection accuracy. The prior typecheck also passed after
+the SQL delimiter correction. The js-yaml lock update is limited to 4.3.2;
+an incidental npm removal of an unrelated optional lru-cache entry was undone.
+Full release verification and deployment remain separate.
+
+### Scheduled run and resumption — later September 10 continuation
+
+The scheduled catch-up completed as reservation 1, scan 20, job 106 for
+2026-09-10. Its two leads repeated published Development Services hours and
+budget coverage; their missing/invalid ranking scores were retained as zero.
+This proves execution, not useful discovery. The repeat-context repair and
+ranking diagnosis remain unfinished.
+
+The lead paused the schedule during a control check; saving settings did not
+resume it. Later, the lead used the actual **Resume daily scan** button on the
+signed-in production Server page. A fresh read-only database check returned
+`1|t|f|06:00|codex-terra|5` for newsroom, enabled, paused, local time, runtime,
+revision. Daily scanning is resumed; source selections and notice-publication
+permissions were not changed.
+
+Integration review found an extra backtick in the unpublished published-story
+SQL template. `npm run typecheck` initially exited 1 with TypeScript
+`Error: Debug Failure. False expression.` in `parseVariableDeclarationList`.
+Removing that extra delimiter made the same command exit 0 with no diagnostics.
+The earlier prompt-builder tests did not cover this SQL wiring. This syntax
+repair is DEV only; no deployment, service restart, or public test publication
+occurred during this continuation. The typecheck process exited.
+
 All sixteen requirements remain tracked by the user attachment
 `654d3aa3-6b3a-4da0-8a86-dcae7b6a0ceb/pasted-text-1.txt`. No broad reporting,
 Dark Desk, automation, PDF, daily-target or complete Stats verdict is implied

@@ -678,6 +678,21 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       select id, entity, last_angle, updated_at from beat_memory
       where newsroom_id = ${owned(context)} order by updated_at desc limit 24
     `;
+  const published = await sql<{ headline: string; dek: string | null; source_urls: string; published_at: string | null }>`
+    select headline, dek, source_urls, published_at::text as published_at
+       from articles
+      where newsroom_id = ${owned(context)} and status = 'published'
+        and published_at >= now() - interval '60 days'
+      order by published_at desc nulls last, id desc
+      limit 100`;
+  const publishedContext = published.map((row) => {
+    let sourceUrls: string[] = [];
+    try {
+      const parsed = JSON.parse(row.source_urls || "[]");
+      if (Array.isArray(parsed)) sourceUrls = parsed.map(String).filter((url) => /^https?:\/\//i.test(url)).slice(0, 4);
+    } catch { /* malformed legacy source metadata is not scan context */ }
+    return { headline: row.headline, dek: row.dek ?? "", source_urls: sourceUrls, published_at: row.published_at ?? "" };
+  });
 
   const ranked = [...fetched].sort((a, b) => Number(b.changed) - Number(a.changed));
   const PAYLOAD_BUDGET = 48000;
@@ -706,6 +721,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     state: paperConfig.state,
     reread,
     memory,
+    published: publishedContext,
     payload,
   });
 

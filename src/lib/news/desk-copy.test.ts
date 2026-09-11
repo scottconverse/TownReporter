@@ -1238,4 +1238,24 @@ describe("buildScanUserMessage resident coverage contract", () => {
     assert.match(prompt, /source-quoted facts, local impact, and dates when present/i);
     assert.match(prompt, /invent new sections, or file filler/i);
   });
+
+  it("passes bounded recent published context while leaving room for genuine new developments", () => {
+    const prompt = buildScanUserMessage({
+      city: "Longmont",
+      state: "CO",
+      reread: false,
+      memory: [],
+      published: [{
+        headline: "Council approves library expansion",
+        dek: "The vote adds two reading rooms.",
+        source_urls: ["https://example.test/library"],
+        published_at: "2026-09-01T12:00:00.000Z",
+      }],
+      payload: "new source text",
+    });
+    assert.match(prompt, /Recently published by this newsroom \(last 60 days/i);
+    assert.match(prompt, /Council approves library expansion \(2026-09-01\)/);
+    assert.match(prompt, /keep genuine new developments/i);
+    assert.match(prompt, /https:\/\/example\.test\/library/);
+  });
 });

@@ -4,6 +4,14 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Scans include recent published coverage alongside beat memory, helping avoid
+  refiling old stories while retaining genuinely new developments.
+- Update the compatible transitive js-yaml dependency to 4.3.2.
+
+- Reporting and saved-draft evidence checks explicitly preserve planned,
+  future and conditional status rather than turning it into a current fact.
+  This strengthens model instructions; editor source review remains necessary.
+
 - Longmont's front-page navigation includes **Utility Bill Analyzer** beside
   **City council votes**, opening Shakeel Dalal's analyzer page in a new tab.
 

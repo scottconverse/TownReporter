@@ -23,6 +23,8 @@ it("distinguishes synthesis from unsupported comparisons, date roles and inverte
   for (const prompt of [REPORT_RESEARCH_SYSTEM, REPORT_WRITE_SYSTEM, REPORT_EDIT_SYSTEM]) {
     assert.match(prompt, /unsupported contrasts.*rankings.*counts/i);
     assert.match(prompt, /publication date.*event date.*capture date/i);
+    assert.match(prompt, /preserve the source's temporal modality and tense/i);
+    assert.match(prompt, /do not turn future, planned, scheduled, anticipated, or conditional statements into present\/current facts/i);
     assert.match(prompt, /direction.*safety advice/i);
   }
   assert.doesNotMatch(REPORT_EDIT_SYSTEM, /evidence or the draft/i);
