@@ -68,3 +68,30 @@ TDD claim. Rebuilt-browser and fresh-owner onboarding checks remain pending;
 the currently running staging build predates this desk-only correction.
 No further model generation is required to verify it. No full-suite or
 production release acceptance is claimed by this development checkpoint.
+
+### Rebuilt desk identity checked
+
+Built revision 9a7a565 with DATABASE_URL empty; `npm run build` exited 0,
+migration skipped. Log `artifacts/desk-identity-build-20260911.log`.
+Restarted only the owned staging server. Temporarily placed the staging editor
+in 98912 (editor role), then reloaded story 139: the rendered link said
+**Burlington acceptance paper** and header **EDITOR'S DESK — BURLINGTON**.
+Clicked View paper: public page remained **TownReporter LONGMONT, COLORADO**.
+Restored the editor to newsroom 1; zero queued/running jobs. Browser document
+title still names the public paper; that cosmetic limit was not expanded into
+another change. Fresh-owner onboarding was not separately exercised here.
+
+### Next-action evidence: live queue changed
+
+Read-only production query after this check found NEW 8, HELD 4, KILLED 97,
+PUBLISHED 39. The earlier queue snapshot must not drive bulk mutation.
+The user's executive-session/YouTube examples remain killed; Hover detour
+lead 140 is held. Museum leads 136 and 146 are both NEW, both use exactly
+`https://longmontcolorado.gov/museum/`, and both describe gallery closure until
+October 17. Both notes_json values are empty. This is a concrete repeat case
+to inspect against the dedup path, not permission to erase either record.
+
+Recent live scan rows: 20 scheduled (Sep 10 22:05:01–22:05:41 MDT, 12 sources,
+2 leads), 21 manual (139 sources, 2 leads), 22 manual (Sep 10 23:58–Sep 11
+00:00:27 MDT, 140 sources, 12 leads). Do not describe the manual scans as
+proof of the intended daily schedule. No production records were changed.
