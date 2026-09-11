@@ -119,5 +119,31 @@ Exit0, complete summary from `logs/brief-citations-integrated-green.log`:
 ```
 `npm run typecheck` exit0, no diagnostics (`logs/brief-citations-typecheck.log`).
 These are deterministic parsing/storage checks, not another live model run.
-The currently running staging build predates this citation change. A rebuilt
-candidate and its own hosted CI remain required before production promotion.
+At that checkpoint the staging build predated this citation change. The rebuild
+and subsequent acceptance are recorded below; production promotion is still pending.
+
+## Rebuilt citation candidate and second real brief
+
+Candidate `de226429df5d473d9ac1f3f06fafa059cb57bdff` built successfully
+(exit 0, `logs/stage-de22642-build.log`). The prior staging server was stopped
+before the rebuilt server started on the same isolated loopback port 3471,
+database and data root. No production service was restarted.
+
+Through the staging editor UI, another explicit Codex Terra rewrite completed
+as job111 (`codex-balanced`, error null), from 2026-09-11T05:40:28.132Z
+to 05:40:56.885Z: 28.753 seconds. Its retained result is
+`artifacts/stage-de22642-brief-result.json`. The brief preserved the correct
+vote ordering and uncertainty about voter transfer. A subsequent read of
+captured artifact542 independently confirmed Crist's $8,379.63 and Levison's
+$13,362.89 figures; Dalal's $17,140 had already been checked in that capture.
+Job111 was completed and the staging database had zero queued/running jobs.
+
+This output used short source labels, so it does not independently exercise
+the greater-than-240-character URL regression. The focused deterministic
+checks above prove that particular parsing/storage behavior. No third model
+rewrite was launched to manufacture that coverage.
+
+Hosted CI for this exact candidate was rechecked: 14 successful checks, with
+the main test and fresh Windows ZIP installation jobs still in progress.
+This remains a development acceptance result, not a production deployment or
+proof that all investigative reporting is reliable.
