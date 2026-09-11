@@ -1,6 +1,6 @@
 {
   "name": "app-builder-workspace",
-  "version": "0.6.34",
+  "version": "0.6.35",
   "private": true,
   "engines": {
     "node": ">=22"

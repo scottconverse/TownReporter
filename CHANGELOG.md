@@ -1,8 +1,8 @@
 # Changelog
 
-Current release: **0.6.34**.
+Current release: **0.6.35**.
 
-## Unreleased
+## 0.6.35 beta — 10 September 2026 (candidate)
 
 - Operator documentation now describes named custom AI API connections,
   explicit model selection and fallback boundaries, Stats report retention,
@@ -14,7 +14,7 @@ Current release: **0.6.34**.
 
 - Dark Desk stops a failed planner's empty fallback before spending the whole hop budget. If no provider performs research and synthesis also fails, the job is marked failed; ordinary Automatic failover and successful searches with zero results remain available. Historical failed runs are not rewritten.
 - Draft reconciliation reserves bounded source context for the assigned story so a large secondary document cannot take every evidence slot. New discoveries remain in the shared packet; this is evidence coverage, not a factual-accuracy guarantee.
-- Next development release: the story workbench adds **Check draft against evidence**. After the editor saves any changes and chooses a model, the check evaluates that exact saved version against its captured evidence without restarting discovery or initial writing. A completed check saves a new draft version and retains the original; incomplete checks, failures and edits made while the job runs remain explicit. This feature is not yet deployed or accepted through R20.
+- The story workbench adds **Check draft against evidence**. After the editor saves any changes and chooses a model, the check evaluates that exact saved version against its captured evidence without restarting discovery or initial writing. A completed check saves a new draft version and retains the original; incomplete checks, failures and edits made while the job runs remain explicit. This feature is a 0.6.35 candidate and is not yet published or deployed.
 - New array-valued review warnings remain separate readable items instead of collapsing into comma-joined text. Historical prose is retained unchanged.
 - Batch results identify the draft saved by that batch separately from the current story workbench. The built server's duplicated job modules share one process-local concurrency counter; this is not a cross-process scheduler guarantee.
 - Native Codex reporting can opt into `TOWNREPORTER_CODEX_REASONING_EFFORT=high` per application process while the unset default retains native inheritance. Batch reporting now forwards the calculated existing time budget and shows its reporting, writing and evidence-check stages without changing native capabilities.
