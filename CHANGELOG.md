@@ -4,6 +4,9 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Editor desk chrome uses the signed-in editor's newsroom identity instead
+  of the public paper's city. Public reader identity is unchanged.
+
 - Reddit checks automatically file only dated tips from the past 30 days.
   Older and undated candidates remain visible and manually fileable. Result
   cards show the available date and author, and manual filing retains them.

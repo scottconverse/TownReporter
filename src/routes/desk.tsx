@@ -7,6 +7,8 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { ScreenPending, EmptyState } from "@/components/states";
 import { myDesk } from "@/lib/news/claim";
 import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
+import { PaperProvider, type PaperIdentity } from "@/lib/paper-context";
+import { getPaperConfigForEditor, type PaperConfig } from "@/lib/news/paper-settings";
 
 export const Route = createFileRoute("/desk")({
   component: DeskGate,
@@ -47,6 +49,16 @@ function SignInLink() {
   );
 }
 
+function editorPaperIdentity(config: PaperConfig): PaperIdentity {
+  const {
+    youtubeChannels: _youtubeChannels,
+    meetingKeywords: _meetingKeywords,
+    seedSources: _seedSources,
+    ...identity
+  } = config;
+  return identity;
+}
+
 function DeskGate() {
   const { user, isPending } = useCurrentUserState();
   /*
@@ -64,6 +76,12 @@ function DeskGate() {
   const desk = useQuery({
     queryKey: ["my-desk"],
     queryFn: () => myDesk(),
+    enabled: Boolean(user),
+    retry: false,
+  });
+  const paper = useQuery({
+    queryKey: ["paper-config-for-setup"],
+    queryFn: () => getPaperConfigForEditor(),
     enabled: Boolean(user),
     retry: false,
   });
@@ -115,10 +133,30 @@ function DeskGate() {
         />
       );
     }
+    if (paper.isPending) {
+      return (
+        <ScreenPending
+          title="Opening the desk"
+          kicker="Editor desk"
+          hint="Loading paper identity…"
+        />
+      );
+    }
+    if (paper.isError || !paper.data) {
+      return (
+        <EmptyState
+          kicker="Editor desk"
+          title="The paper identity could not be loaded"
+          body="Refresh the desk and try again. The newsroom configuration was not changed."
+        />
+      );
+    }
     return (
-      <div className="min-h-dvh">
-        <Outlet />
-      </div>
+      <PaperProvider value={editorPaperIdentity(paper.data)}>
+        <div className="min-h-dvh">
+          <Outlet />
+        </div>
+      </PaperProvider>
     );
   }
 
