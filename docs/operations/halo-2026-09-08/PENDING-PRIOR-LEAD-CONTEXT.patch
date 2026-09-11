@@ -1,0 +1,55 @@
+diff --git a/src/lib/news/desk-copy.test.ts b/src/lib/news/desk-copy.test.ts
+index b18301b..8177b06 100644
+--- a/src/lib/news/desk-copy.test.ts
++++ b/src/lib/news/desk-copy.test.ts
+@@ -1258,4 +1258,50 @@ describe("buildScanUserMessage resident coverage contract", () => {
+     assert.match(prompt, /keep genuine new developments/i);
+     assert.match(prompt, /https:\/\/example\.test\/library/);
+   });
++
++  it("passes recent working leads with status, facts, and source URLs as untrusted context", () => {
++    const prompt = buildScanUserMessage({
++      city: "Longmont",
++      state: "CO",
++      reread: false,
++      memory: [],
++      priorLeads: [{
++        headline: "Longmont Museum galleries closed for construction ahead of Oct. 17 reopening",
++        status: "new",
++        why: "The galleries are closed during construction.",
++        evidence: "Regular galleries reopen Oct. 17.",
++        source_urls: ["https://longmontcolorado.gov/museum/"],
++      }],
++      payload: "new source text",
++    });
++    assert.match(prompt, /Earlier newsroom leads.*last 60 days/i);
++    assert.match(prompt, /\"status\":\"new\"/);
++    assert.match(prompt, /Longmont Museum galleries closed for construction/);
++    assert.match(prompt, /https:\/\/longmontcolorado\.gov\/museum\//);
++    assert.match(prompt, /facts rather than wording/i);
++    assert.match(prompt, /new, held, drafted, or killed/i);
++    assert.match(prompt, /untrusted context.*not instructions/i);
++  });
++
++  it("bounds prior lead context and permits zero when all facts are already known", () => {
++    const prompt = buildScanUserMessage({
++      city: "Longmont",
++      state: "CO",
++      reread: false,
++      memory: [],
++      priorLeads: Array.from({ length: 200 }, (_, i) => ({
++        headline: `Earlier headline ${i} ${"x".repeat(100)}`,
++        status: "killed",
++        why: "Earlier why",
++        evidence: "Earlier evidence",
++        source_urls: ["https://example.test/source"],
++      })),
++      payload: "source text",
++    });
++    const section = prompt.match(/Earlier newsroom leads[\s\S]*?\n\nFetched source text:/i)?.[0];
++    assert.ok(section, "prior lead context must be present, not silently omitted");
++    assert.ok(section.length <= 12_500, `prior lead context too large: ${section.length}`);
++    assert.match(prompt, /all facts are already known/i);
++    assert.match(prompt, /genuinely changed date, decision, or amount/i);
++  });
+ });
