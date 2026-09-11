@@ -208,6 +208,7 @@ async function main() {
   await row.waitFor();
 
   const queueModel = row.getByLabel("Writing model");
+  await row.locator("summary").filter({ hasText: /^Model:.*change$/ }).click();
   if ((await queueModel.locator("option").count()) !== 5 || (await queueModel.inputValue()) !== "auto") {
     throw new Error("Queue row model picker choices/default do not match the product contract");
   }

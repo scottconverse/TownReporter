@@ -355,28 +355,31 @@ async function draftBatchJourney() {
   const batch = page.locator("#draft-batch");
   await batch.getByRole("heading", { name: "Draft selected leads", exact: true }).waitFor();
 
-  await page.getByRole("checkbox", { name: `Select ${first} for batch drafting` }).check();
-  await page.getByRole("checkbox", { name: `Select ${second} for batch drafting` }).check();
+  const batchChoice = (headline) => page.getByRole("checkbox", {
+    name: `Include ${headline} in the batch draft`, exact: true,
+  });
+  await batchChoice(first).check();
+  await batchChoice(second).check();
   await batch.getByLabel("Suggested focus size").selectOption("5");
-  await expect(page.getByRole("checkbox", { name: `Select ${first} for batch drafting` })).toBeChecked();
-  await expect(page.getByRole("checkbox", { name: `Select ${second} for batch drafting` })).toBeChecked();
+  await expect(batchChoice(first)).toBeChecked();
+  await expect(batchChoice(second)).toBeChecked();
   await batch.getByRole("button", { name: /Add suggested focus/ }).click();
-  await expect(page.getByRole("checkbox", { name: `Select ${first} for batch drafting` })).toBeChecked();
-  await expect(page.getByRole("checkbox", { name: `Select ${second} for batch drafting` })).toBeChecked();
-  await expect(page.getByRole("checkbox", { name: `Select ${extras[3]} for batch drafting` })).toBeChecked();
+  await expect(batchChoice(first)).toBeChecked();
+  await expect(batchChoice(second)).toBeChecked();
+  await expect(batchChoice(extras[3])).toBeChecked();
   await batch.getByText("3 of 5 selected").waitFor();
-  await page.getByRole("checkbox", { name: `Select ${extras[3]} for batch drafting` }).uncheck();
+  await batchChoice(extras[3]).uncheck();
   await batch.getByText("2 of 5 selected").waitFor();
   step("suggested focus adds the newest eligible lead while preserving manual selections");
   for (const headline of extras.slice(0, 3)) {
-    await page.getByRole("checkbox", { name: `Select ${headline} for batch drafting` }).check();
+    await batchChoice(headline).check();
   }
   await batch.getByText("5 of 5 selected").waitFor();
   await expect(
-    page.getByRole("checkbox", { name: `Select ${extras[3]} for batch drafting` }),
+    batchChoice(extras[3]),
   ).toBeDisabled();
   for (const headline of extras.slice(0, 3)) {
-    await page.getByRole("checkbox", { name: `Select ${headline} for batch drafting` }).uncheck();
+    await batchChoice(headline).uncheck();
   }
   await batch.getByText("2 of 5 selected").waitFor();
 
@@ -391,8 +394,8 @@ async function draftBatchJourney() {
   await batch.getByText("Draft batch started with Claude Code.").waitFor();
   await page.reload({ waitUntil: "domcontentloaded" });
   await batch.getByText(/Batch #\d+ · Claude Code/).waitFor();
-  await batch.getByRole("link", { name: `Open ${first}` }).waitFor();
-  await batch.getByRole("link", { name: `Open ${second}` }).waitFor();
+  await batch.getByRole("link", { name: `Open current story workbench: ${first}`, exact: true }).waitFor();
+  await batch.getByRole("link", { name: `Open current story workbench: ${second}`, exact: true }).waitFor();
 
   // The offline fake returns valid draft JSON. Polling must stop only after
   // both durable terminal results render, then the queue count must refresh
@@ -401,7 +404,7 @@ async function draftBatchJourney() {
     .poll(
       async () => {
         const states = await batch.locator("[data-draft-batch-status]").allTextContents();
-        return states.length === 2 && states.every((state) => state.trim() === "Completed");
+        return states.length === 2 && states.every((state) => /^Batch saved draft #\d+$/.test(state.trim()));
       },
       { timeout: 45_000 },
     )
