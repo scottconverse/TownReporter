@@ -180,3 +180,24 @@ open; this evidence does not waive them. The full16-item goal remains active.
 Terminal check: job116 elapsed153.23seconds; zero new original-URL capture
 events after its start; zero queued/running staging jobs. Watches140/141 remain
 paused and disabled. Staging server3704 remains available for the next workflow.
+
+## Ordinary save and reload — later staging checkpoint
+
+On the later staging build `284f0ea` at the same loopback address/database,
+opened Queue > existing parking lead125. Changed only its headline from
+“Parking limited at Longmont Safety and Justice Center during garage construction”
+to “Parking limited at Longmont Safety and Justice Center while garage is under
+construction”, then clicked Save edits. The interface reported Saved. A full
+reload retained the exact edited headline.
+
+The draft body still contains its City garage-project Markdown citation; Claims
+and Sources still links the same City records. The recorded-claims inventory
+retains exact captured-version controls, including versions1508 and1516. The
+interface explicitly says the story changed after evidence was gathered and
+keeps earlier reporting private pending review; publication remains disabled.
+This was a real editor save through the UI, not a database patch. No model call,
+publication, production mutation or additional test process was started.
+
+This closes this draft's ordinary save/reload observation only. It does not
+establish interrupted-save recovery, batch drafting, a successful evidence
+recheck, or overall article quality. Existing failed drafts remain unchanged.
