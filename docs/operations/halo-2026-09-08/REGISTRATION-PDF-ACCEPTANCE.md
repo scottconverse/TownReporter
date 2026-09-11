@@ -116,6 +116,22 @@ The older contaminated `townreporter_dev` database was not touched.
 GitHub checks inspected during the walkthrough showed 14 passing checks and
 two pending (main tests and fresh Windows install). This is not a full-CI pass.
 
+## Edition configuration walkthrough
+
+Continued on the same built candidate and isolated room 98911. Through Server's
+normal section editor, added Community (`community`), reviewed and confirmed
+the addition without removing existing sections. Selected Community for Today,
+Weekend and Deadlines. Selected the brochure (source 2877) and supplied City of
+Longmont, Longmont, Colorado, and the exact public brochure URL as attribution.
+Clicked Save paused settings. Reloading preserved all three section choices,
+source selection and attribution; Activate automatic routine editions remained
+unchecked. No code change was needed for this configuration.
+
+Restored staging-editor to editor/room 1 again. Direct database verification:
+automation room98911 enabled=false, revision1, sections community/community/
+community; zero fixture publications and zero queued/running desk jobs. This
+proves saved configuration, not an activated edition or production coverage.
+
 ## Remaining scope
 
 Production owner source setup and activation remain; built UI verification for
