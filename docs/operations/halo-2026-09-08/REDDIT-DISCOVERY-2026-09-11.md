@@ -87,3 +87,43 @@ rebuilt-browser, mobile, or production acceptance is claimed for this repair.
 The running staging build still predates it. No dependency, auth boundary,
 credential handling, or unsafe HTML rendering was added; metadata is ordinary
 React text through the existing authenticated newsroom-scoped action.
+
+## Rebuilt UI and real-provider check
+
+Candidate `ae0e4dd7174fc360ac155272c552a073a84f1227` was built successfully
+with `DATABASE_URL=''` and `npm run build`; migration explicitly skipped.
+Build log: `artifacts/reddit-repair-build-20260911.log`. Existing warning:
+```text
+(node:28488) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+```
+Only the owned staging server was stopped/restarted, on the same port/database.
+
+The rebuilt normal Reddit button completed: 50 posts, two eligible civic
+candidates, zero automatically filed, two already known. Dates/authors and
+the 30-day explanation were visible. June/July posts remained visible with
+manual-only labels. Through **File as tip**, a historical Harvest Junction
+outage became staging anomaly 1364, preserving `Posted 2026-08-06 by
+/u/FruitNCholula`; independently confirmed in the database. Existing tips were
+not deleted. No model jobs were queued/running afterward. This proves the
+rebuilt metadata/freshness surface, not the current news value of that old tip.
+
+Direct real-provider smoke used `searchWithFallback('Longmont city council
+agenda')` from the installed source, via `node scripts/with-app-env.mjs node
+--experimental-strip-types --input-type=module -e ...`, outputting only
+provider/state/counts and public result URLs. Ordinary configuration reported
+Gateway unset, Exa MCP `SEARCH_SUCCESS_RESULTS`, eight hits. First results:
+the official city agenda-management portal, September 8 council meeting page,
+and council-meetings index. No model or database operations are performed by
+this search function; the wrapper's first invocation printed its existing
+development database selection, but that database was not queried or mutated.
+
+The documented Gateway health endpoint on port 8765 refused connection. A
+second smoke explicitly set `DATABASE_URL=''` and a process-local
+`TOWNREPORTER_GATEWAY_MCP_URL=http://127.0.0.1:8765/mcp`. Actual lineage:
+```text
+halo-gateway: SEARCH_FAILED_PROVIDER, 0 hits
+exa-mcp: SEARCH_SUCCESS_RESULTS, 8 hits
+```
+No saved configuration was changed and no Gateway service was started. This
+proves real unavailable-Gateway fallback, not a healthy Gateway integration or
+every downstream search provider. Those acceptance limits remain explicit.
