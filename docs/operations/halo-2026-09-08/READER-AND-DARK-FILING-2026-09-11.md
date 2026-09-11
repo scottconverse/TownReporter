@@ -41,3 +41,21 @@ This is the isolated database's newsroom1, not production. It is not an
 article publication, a new discovery-quality pass or resolution of all
 curated-tool/watch/PDF obligations. No draft generation was requested.
 Staging queued/running job count is zero after these UI actions.
+
+## Manual page watch
+
+Using Dark Desk > Watch a page / view watches, added the real official museum
+category URL with name `STAGING ACCEPTANCE — Museum programme watch`.
+Save watch and capture page completed without a model call. Monitor140 belongs
+to the isolated database's newsroom1. Check1 saved capture2421 (first-capture);
+the ordinary Check now button produced check2/capture2422 (unchanged).
+Expanded the check and Read this captured text: September2026 events and the
+Sunset Soiree description are present. The UI also exposes previous captured
+text, complete-text downloads and the redirect trail.
+
+Clicked Pause. UI confirmed history retained and automatic checks stopped;
+database verifies watch_state=paused, enabled=false, last_outcome=unchanged.
+No source change was fabricated. This proves creation, two real captures,
+readable evidence, unchanged classification and pause persistence. It does not
+prove a real changed-source event or failed-source recovery. No production
+monitor or data was changed, and the acceptance watch is not left running.
