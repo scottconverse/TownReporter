@@ -4,6 +4,9 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Allow the supported public Longmont fall-leaf bulletin to serve as its own
+  waste-notice attribution, so owners can save its routine-edition settings.
+
 - Routine edition copy uses readable dates and event titles instead of raw
   timestamp strings and HTML entities. Date-only deadlines keep their stated day.
 

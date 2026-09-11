@@ -380,6 +380,10 @@ of its own. Budget for a piece, not for a paragraph.
 
 ## The Server page
 
+For the supported Longmont fall-leaf collection bulletin, use the bulletin's
+own public URL as attribution. Other waste calendars still require a separate
+public attribution address. Saving settings does not by itself activate editions.
+
 The owner can manage **Routine notice permissions** and the separate **Automatic routine editions** control here. Automation starts paused. It accepts at most 12 exact approved structured sources across library, parks/recreation, community/arts, application deadlines, designated waste or deadline calendars, and public-meeting logistics. Each active selection requires an owner-entered issuer, locality, and public attribution URL; waste also requires a non-residential collection area, and library structured hours require a branch. Permission-only Event and non-calendar application-deadline checks can run without this automation context. The exact private fetch address and captured source remain private.
 
 After explicit activation, the daily scheduler creates deterministic logistics-only ordinary articles: Today in town on the newsroom-local date, This weekend on Friday for Friday through Sunday, and Deadlines approaching only for new or changed deadlines in the next seven days; it is not a continuous source watch. An approved source change can correct an automation-owned edition on a same-day rerun. A run uses at most five useful items and emits no empty edition. Conflicts, cancellation, unsupported recurrence, risky language, stale permissions or evidence, and edited or unpublished target articles stay for review. Recent runs show their result counts and published-article links. Disable automation or pause routine permissions to stop later reservations. Manual checks remain available and never publish by themselves.

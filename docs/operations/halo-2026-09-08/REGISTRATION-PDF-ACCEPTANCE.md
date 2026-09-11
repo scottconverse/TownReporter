@@ -248,3 +248,36 @@ and the official calendar source link. Body text is visible and does not
 overlap. This closes desktop reader rendering for this formatter, not a new
 scheduler run, mobile acceptance, console verification, or production release.
 Production activation and the remaining source families are still open.
+
+### Waste attribution save repair — September 11
+
+The staging owner form rejected the supported public Longmont fall-leaf bulletin
+with `Waste calendars require a separate public attribution address.` Consequently
+the new settings were not saved and the later manual check correctly reported
+`missing-owner-context`. This was a configuration defect, not an extractor failure.
+
+Luna supplied the narrow existing-source exception and regression. Lead reviewed
+the actual diff against the existing waste extractor. Owner authorization and
+collection-area requirements remain unchanged. No production settings changed.
+
+Worker-reported baseline: 8 passed, 0 failed; new regression RED: 8 passed,
+1 failed with the quoted attribution error; worker GREEN: 9 passed, 0 failed.
+Lead independently ran:
+
+```powershell
+$env:DATABASE_URL=''; $env:RUN_LIVE_MODEL_TESTS=''; $env:TOWNREPORTER_TEST_ENV_VERIFIED='1'; node --import ./scripts/test-environment-guard.mjs --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 src/lib/news/routine-notice-automation.test.ts
+```
+
+```text
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11522.6186
+```
+
+The process exited 0 without test warnings. This verifies the save path on
+isolated test data; rebuilt staging form acceptance and activation remain open.

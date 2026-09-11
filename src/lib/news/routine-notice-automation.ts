@@ -78,6 +78,18 @@ function publicUrl(value: unknown) {
     return null;
   }
 }
+function isSupportedHtmlWasteBulletin(sourceUrl: string) {
+  try {
+    const url = new URL(sourceUrl);
+    return (
+      url.hostname.replace(/^www\./i, "").toLowerCase() === "longmontcolorado.gov" &&
+      url.pathname.replace(/\/+$/, "/") ===
+        "/waste-services-trash-recycling-composting/special-services-events/fall-leaf-collection/"
+    );
+  } catch {
+    return false;
+  }
+}
 function validTimezone(value: unknown) {
   const zone = text(value, 100);
   if (!zone) return null;
@@ -130,7 +142,8 @@ function clean(raw: unknown): SaveRoutineNoticeAutomationInput {
     seen.add(key);
     if (
       s.formatKey === "waste-recycling-schedule" &&
-      s.publicSourceUrl.trim() === s.sourceUrl.trim()
+      s.publicSourceUrl.trim() === s.sourceUrl.trim() &&
+      !isSupportedHtmlWasteBulletin(s.sourceUrl)
     )
       throw new InputError(
         "invalid-input",
