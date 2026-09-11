@@ -82,6 +82,50 @@ was returned for a focused bounded-excerpt correction; no additional model
 job or production change was made. This replay is a helper diagnostic, not
 an exact reconstruction of the historical whole-section truncation.
 
+### Accepted bounded helper repair
+
+The second submission bounds an oversized selected excerpt around its exact
+identifier without increasing the configured character budget. Lead repeated
+the same read-only replay against version 1599: `char:2000-4000`, score 25,
+length 1500, `containsAddress: true`, `boundedContains: true`. The returned
+passage includes the application number, annexation proposal, MU-E zoning and
+unchanged religious-assembly use. The locator names the containing original
+chunk, not the narrower excerpt's exact start and end.
+
+Worker-reported focused verification command:
+
+```powershell
+$env:DATABASE_URL=''; $env:VERCEL=''; $env:VERCEL_ENV=''; $env:RUN_LIVE_MODEL_TESTS=''; $env:TOWNREPORTER_TEST_ENV_VERIFIED='1'; node --import ./scripts/test-environment-guard.mjs --experimental-strip-types --test --test-concurrency=1 src/lib/news/report.test.ts src/lib/news/report.scope.test.ts
+```
+
+```text
+ℹ tests 72
+ℹ pass 72
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 22575.5907
+```
+
+Initial ranking regression was observed RED (52 tests, 51 pass, 1 fail).
+The later long-preamble regression and bounded-excerpt repair were reported
+together; a separate pre-fix test-run RED for that second fixture was not
+provided. Lead's real-document replay supplied the before/after failure
+evidence. Do not describe the entire correction as a fully recorded TDD loop.
+
+Lead reviewed both source changes and independently executed the real-document
+helper replay; the 72-test suite was executed by Luna, not independently rerun.
+No source text was discarded from storage; no provider, prompt, database,
+network endpoint, dependency, or production configuration changed. This is
+accepted as a bounded DEV retrieval fix, not full Dark Desk acceptance.
+
+Lead `npm run typecheck` completed with exit 0 (`tsc --noEmit`), no diagnostics.
+Full-repository tests and a new application build were not run for this small
+checkpoint; the served staging application is still the earlier build. The
+owner's focused-verification/resource constraints remain in force. Publication
+of this DEV commit is not a new release or production deployment.
+
 Current source does retain search/read results across hops. The missing
 capability is responsive model choice after each operation within a hop;
 application queue order currently chooses reads between model decisions.
