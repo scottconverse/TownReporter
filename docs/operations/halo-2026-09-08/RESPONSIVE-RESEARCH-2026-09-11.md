@@ -84,7 +84,8 @@ root's integrated run above was independently executed.
 
 - Source checkpoint `284f0ea` committed and pushed to `feat/utility-bill-analyzer-link`.
 - Built-interface save/reload passed in staging: the saved method remained responsive
-  after reload and displayed six decisions. Actual selected-provider investigation is running.
+  after reload and displayed six decisions. Actual selected-provider investigation finished;
+  it did not obtain primary evidence (see the terminal receipt below).
 - Deterministic fake search/capture tests are not real reporting acceptance.
 - Compact summary is not an unlimited action archive; ordinary captures/search logs
   remain the underlying evidence. No new ledger service was added.
@@ -119,3 +120,40 @@ Via the normal editor form, started fresh job **121**, dark run **15**, at
 The database confirms the run snapshot: responsive, actionLimit 6, dig 3, nerve 8,
 county, 90-day lookback, verificationLimit 6. At this checkpoint the job is running,
 not passed. Poll job 121 and the owned staging handle; do not start a duplicate.
+
+## Terminal result and search diagnosis
+
+Job 121 completed at **03:46:47.251214 MDT**, duration **98.871899 seconds**,
+status completed / Done, no job error. Investigation 11 made five search actions
+then finished on its sixth decision. Its only capture was the initial
+`editor://paste` (version 1598), not a read web source. No primary document was read.
+The final summary explicitly said no relevant captured pages were obtained and
+that the proposal, decisions and resident participation could not be determined.
+This is **not a research acceptance pass**.
+
+Recorded searches included the exact address and City domain. Actual Bing results
+were unrelated hospitals, Halloween recipes, basketball, YouTube help and cinemas.
+A single direct diagnostic call through the same application function:
+```powershell
+node --experimental-strip-types --input-type=module -e "const {searchWithFallback}=await import('./src/lib/news/search-web.ts'); const r=await searchWithFallback('8979 Nelson Road Longmont',undefined,{officialDomains:['longmontcolorado.gov'],localityStopwords:['Longmont','Colorado']}); console.log(JSON.stringify({state:r.state,provider:r.provider,relevance:r.relevance,lineage:r.lineage?.map(x=>({provider:x.provider,state:x.state,error:x.error,hits:x.hits.length})),hits:r.hits.slice(0,3)},null,2));"
+```
+returned Exa `SEARCH_BLOCKED`, **HTTP 429**; DDG HTML/Lite blocked; Bing eight
+irrelevant results; Brave blocked; Wikipedia zero. Aggregate relevance was
+`degraded`, with the explicit reason that none matched enough question terms.
+This diagnostic proves provider state at check time, not the exact historical
+Exa response for each job query (individual lineage is not stored in search_log).
+
+The responsive receipt omitted this available relevance/provider context and
+said only `SEARCH_SUCCESS_RESULTS 8 result(s) discovered; none read`. A bounded
+correction now preserves that context in the next-decision prompt and
+visible action summary. No ranking/provider replacement or forced reading is
+part of that correction. Do not repeat live searches until a usable provider
+is available; preserve this failed trial unchanged.
+
+Root reviewed Sol's two-file patch and independently ran the responsive test
+file through the safe-test-environment wrapper above: **3/3 passed**, zero failures,
+11,269.3376 ms. `npm run typecheck` also exited 0 with no diagnostics. The new
+regression verifies the degraded result, relevance reason, Exa 429 and blocked
+DuckDuckGo context reach the next decision and saved summary. This is a focused
+behavioral check, not a new real-provider acceptance pass. The running staging
+build still predates this narrow correction; production is unchanged.

@@ -2948,11 +2948,12 @@ async function responsiveResearchLoop(
     aggregateHops += operationResult.hops;
     if (action.type === "search") {
       const attempt = searchReceipt as Awaited<ReturnType<SearchAttemptFn>> | null;
+      const described = describeResponsiveSearchReceipt(attempt);
       receipts.push({
         decision,
         action,
-        outcome: attempt?.state ?? "SEARCH_FAILED_NETWORK",
-        detail: attempt?.error ?? `${attempt?.hits.length ?? 0} result(s) discovered; none read`,
+        outcome: described.outcome,
+        detail: described.detail,
         links: sanitizePublicUrls(attempt?.hits.map((hit) => hit.url) ?? []),
       });
     } else {
@@ -2976,6 +2977,27 @@ async function responsiveResearchLoop(
   summary = durableResponsiveSummary(summary || `Responsive research reached its decision limit ${limit} without an explicit finish.`, receipts);
   await sql`update investigations set status = 'paused', pause_reason = ${summary}, summary = ${summary.slice(0, 2500)}, updated_at = now() where id = ${opts.investigationId} and newsroom_id = ${newsroomId}`;
   return { ...counts, hops: aggregateHops, paused: true, summary, plannerFailures: 0, plannerStartupFailures: 0, actionDecisions: receipts.length, finished: false };
+}
+
+function describeResponsiveSearchReceipt(
+  attempt: Awaited<ReturnType<SearchAttemptFn>> | null,
+): { outcome: string; detail: string } {
+  if (!attempt) return { outcome: "SEARCH_FAILED_NETWORK", detail: "Search returned no attempt receipt" };
+  const relevance = attempt.relevance;
+  const outcome = relevance?.decision === "degraded"
+    ? `${attempt.state}_DEGRADED`
+    : attempt.state;
+  const failedProviders = (attempt.lineage ?? [])
+    .filter((step) => step.state !== "SEARCH_SUCCESS_RESULTS" && step.state !== "SEARCH_SUCCESS_ZERO_RESULTS")
+    .slice(0, 4)
+    .map((step) => `${step.provider}:${step.errorCode ?? step.state}${step.error ? ` (${step.error})` : ""}`);
+  const parts = [
+    `${attempt.hits.length} result(s) discovered; none read`,
+    relevance ? `relevance=${relevance.decision}: ${relevance.reason}` : "",
+    failedProviders.length ? `provider failures: ${failedProviders.join("; ")}` : "",
+    attempt.error ? `aggregate error: ${attempt.error}` : "",
+  ].filter(Boolean);
+  return { outcome, detail: parts.join(" | ").slice(0, 1_200) };
 }
 
 function actionReceiptExcerpt(text: string, terms: string[]): string {

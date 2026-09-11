@@ -104,4 +104,50 @@ describe("responsive researchLoop", { timeout: 120_000 }, () => {
     assert.equal(result.finished, false);
     assert.match(result.summary, /decision limit 2/i);
   });
+
+  it("feeds degraded relevance and compact provider failures into the next decision and durable summary", async () => {
+    const user = `responsive-degraded-${Date.now()}`;
+    const { id, sql } = await bootInv(user, "Nelson utility filing");
+    const contexts: string[] = [];
+    const result = await researchLoop({
+      userId: user,
+      investigationId: id,
+      executionMode: "responsive",
+      actionLimit: 2,
+      actionChooser: async (context) => {
+        contexts.push(context);
+        return contexts.length === 1
+          ? { type: "search", query: "Nelson utility filing", reason: "find the filing" }
+          : { type: "finish", summary: "Search sources were degraded; no filing was captured.", findings: [] };
+      },
+      searchAttempt: async () => ({
+        state: "SEARCH_SUCCESS_RESULTS",
+        provider: "bing",
+        hits: [{ title: "Irrelevant result", url: "https://example.com/unrelated", snippet: "unrelated" }],
+        relevance: {
+          decision: "degraded",
+          reason: "No result shared meaningful investigation tokens",
+          meaningfulQueryTokens: ["nelson", "utility", "filing"],
+        },
+        lineage: [
+          { state: "SEARCH_BLOCKED", provider: "exa", hits: [], errorCode: "429", error: "rate limited" },
+          { state: "SEARCH_BLOCKED", provider: "duckduckgo", hits: [], error: "blocked" },
+          { state: "SEARCH_SUCCESS_RESULTS", provider: "bing", hits: [] },
+        ],
+      }),
+      fetch: async () => { throw new Error("degraded search must not fetch"); },
+      planner: async () => emptyPlan(),
+      archives: async () => [],
+    });
+
+    assert.equal(result.finished, true);
+    assert.match(contexts[1]!, /SEARCH_SUCCESS_RESULTS_DEGRADED/);
+    assert.match(contexts[1]!, /No result shared meaningful investigation tokens/);
+    assert.match(contexts[1]!, /exa:429 \(rate limited\)/);
+    assert.match(contexts[1]!, /duckduckgo:SEARCH_BLOCKED/);
+    const saved = await sql<{ summary: string }>`select summary from investigations where id = ${id}`;
+    assert.match(saved[0]!.summary, /1:search:SEARCH_SUCCESS_RESULTS_DEGRADED/);
+    assert.match(saved[0]!.summary, /relevance=degraded/);
+    assert.match(saved[0]!.summary, /exa:429/);
+  });
 });
