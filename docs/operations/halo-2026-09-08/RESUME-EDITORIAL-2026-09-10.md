@@ -100,6 +100,30 @@ retention is indefinite until operator removal, not a promised finite window.
 
 ### Integrated focused verification
 
+Repair checkpoint: local commit `7726ad3`; not yet pushed or deployed.
+Then ran the complete scripts test group serially (the source test group is
+still outstanding for release):
+```powershell
+$env:DATABASE_URL=''; $env:RUN_LIVE_MODEL_TESTS=''; $env:TOWNREPORTER_TEST_ENV_VERIFIED='1'; node --import ./scripts/test-environment-guard.mjs --test --test-concurrency=1 'scripts/**/*.test.mjs'
+```
+Process exited 0:
+```text
+ℹ tests 368
+ℹ suites 0
+ℹ pass 365
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 3
+ℹ todo 0
+ℹ duration_ms 41703.1874
+```
+This is not an all-tests-passed claim: three checks skipped. Captured reasons
+include unavailable authenticated GitHub CLI and Windows symlinks not permitted;
+the initial tool output was truncated, so the third skip's reason was not retained
+in this receipt. The deliberate staging-guard rejection tests printed refusals
+for a production database name and unset DATABASE_URL. No production fixture
+run was authorized. The test process exited; no next suite was left running.
+
 Command (DEV, blank database and no live model calls):
 ```powershell
 $env:DATABASE_URL=''; $env:RUN_LIVE_MODEL_TESTS=''; $env:TOWNREPORTER_TEST_ENV_VERIFIED='1'; node --import ./scripts/test-environment-guard.mjs --experimental-strip-types --test --test-concurrency=1 src/lib/news/desk-copy.test.ts src/lib/news/report.scope.test.ts
