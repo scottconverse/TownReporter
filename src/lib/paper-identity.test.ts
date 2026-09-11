@@ -1,6 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_PAPER_IDENTITY, resolvePaperIdentity, type PaperIdentity } from "./paper-identity.ts";
+import { DEFAULT_PAPER_IDENTITY, resolvePaperIdentity, utilityBillAnalyzerUrl, type PaperIdentity } from "./paper-identity.ts";
+
+describe("utility bill analyzer link", () => {
+  it("links Longmont readers to the requested analyzer", () => {
+    assert.equal(utilityBillAnalyzerUrl({ city: "Longmont", state: "CO" }),
+      "https://shakeeldalal.com/2026/08/30/longmont-utility-bill-analyzer/");
+  });
+  it("does not send other newspapers to Longmont's analyzer", () => {
+    assert.equal(utilityBillAnalyzerUrl({ city: "Boulder", state: "CO" }), null);
+  });
+});
 
 /**
  * A public-page white-screen incident: `__root.tsx`'s loader could resolve
