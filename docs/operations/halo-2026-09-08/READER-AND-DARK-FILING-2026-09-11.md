@@ -293,3 +293,15 @@ service brief and retains the earlier checkpoint. It is not a new discovery:
 the supplied URL was already known, and another queue lead covered the same
 hours change. Do not count it twice toward daily output. Zero queued/running
 staging jobs remained after the check. No production change or new code.
+
+## Recoverable queue deletion and Undo
+
+Used Queue > Delete on only staging lead140, then its Yes, delete confirmation.
+The UI said “Deleted, and kept for 30 days” and offered Undo. Clicked Undo;
+lead140 returned to the queue. Opened it through its restored Open link: the
+final Development Services headline/body were present and editable. Read-only
+database confirmation shows all three draft IDs83,84,85 restored under lead140,
+with final85's two original source URLs retained. No model regeneration or
+direct database repair was used. No production or permanent deletion occurred.
+This proves immediate recoverable deletion/Undo for a drafted lead; it does
+not claim legal erasure, backup purging, or interrupted-save recovery.
