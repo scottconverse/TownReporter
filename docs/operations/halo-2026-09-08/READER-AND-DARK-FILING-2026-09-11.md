@@ -59,3 +59,35 @@ No source change was fabricated. This proves creation, two real captures,
 readable evidence, unchanged classification and pause persistence. It does not
 prove a real changed-source event or failed-source recovery. No production
 monitor or data was changed, and the acceptance watch is not left running.
+
+## Real scanned packet through watch to draft — in progress
+
+Added the public Ramsey July2024 council packet through the same real watch
+form, not a database-seeded artifact. URL:
+https://www.ramsey.gov.im/media/2262/agenda-papers-july-2024-public.pdf
+Monitor141/check3 retained capture2423/version1560. Native Codex Terra read
+12/44 pages, producing23,783 characters. Extraction is explicitly
+`ocr-pages-partial:Codex:12/44`. The stored source content hash matches the
+retained original:14e16cfd9584a413955f915ddd96c56cf31e7d02c8c330cd2f2c374f1add7c20.
+The visible text starts with the July17 meeting agenda and July11 letter.
+No claim that the action-tracker pages beyond12 were read in this capture.
+
+Important observed operational distinction: this OCR path directly calls
+probeCodex and invoked Codex despite TOWNREPORTER_CODEX=0 on the staging
+server. The general drafting availability switch did not disable OCR. Actual
+process command identified gpt-5.6-terra and trd-ocr page images. This was the
+single authorized PDF workflow, not evidence that models remained inactive.
+All its OCR processes exited before subsequent work.
+
+Paused monitor141 through the UI; database confirms paused/enabled=false.
+Created unverified Council lead138 through its captured-record control.
+Stopped owned staging handle72145 after the lane was empty, restarted the
+same build/database on3471 as handle43849 with Codex enabled and Claude off.
+No rebuild or production restart occurred.
+
+The supplied-only scope explicitly says Codex is unsupported; switched back
+to supported Research public sources before submitting. Selected Codex Terra
+explicitly, no fallback. Draft with AI created job114/lead138, observed
+running at Opening source material. Do not restart/requeue it based on this
+checkpoint; inspect that job and handle first. Draft quality and preservation
+of partial-reading limitations remain unproved until its result is reviewed.
