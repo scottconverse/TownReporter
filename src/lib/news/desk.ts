@@ -968,11 +968,13 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const prevNotes = parseNotes(lead.notes_json);
   const researchScope = job.research_scope ?? prevNotes.researchScope ?? "public";
   const sourceInput = draftSourceInputs(urls, prevNotes, researchScope);
+  const { retainedWatchSources } = await import("./retained-watch-source.server.ts");
   const draftInput = {
     userId: context.userId,
     newsroomId: context.newsroomId,
     lead,
     urls: sourceInput.urls,
+    retainedSources: await retainedWatchSources(sql, owned(context), leadId, sourceInput.urls),
     memory,
     extraEvidence: prevNotes.scratch,
     editorialAssignment: prevNotes.editorialAssignment,

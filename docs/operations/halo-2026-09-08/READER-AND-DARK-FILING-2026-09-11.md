@@ -91,3 +91,54 @@ explicitly, no fallback. Draft with AI created job114/lead138, observed
 running at Opening source material. Do not restart/requeue it based on this
 checkpoint; inspect that job and handle first. Draft quality and preservation
 of partial-reading limitations remain unproved until its result is reviewed.
+
+### Job114 result and development repair
+
+Job114 is terminal: completed/Done, checkpointDraftId73. It did not produce
+a usable article. Draft73 used version1561/capture2424 containing `timeout`
+instead of the readable version1560/capture2423. Its unsupported framing of
+"staging acceptance" as a council action is also not a factual result.
+The original failed draft and both captures remain preserved in staging.
+
+The repair carries the exact watch-check capture linked by the editor's
+File as lead action into the shared individual/batch reporting pipeline.
+It does not re-fetch that seed URL or re-label a newer URL snapshot as the
+source used. Capture time and partial-OCR method are carried to the writer;
+reading limits remain in reporting notes even when the model omits them.
+Other public-source research remains available. No prompt contains an
+answer key. This does not claim that all PDF pages or tables were read.
+
+Luna diagnosed the handoff and supplied an integration test; the lead
+implemented and accepted the repair. Luna's follow-up review caught the
+ordinary `changed` capture classification, now included alongside fetched
+and unchanged. Lead corrected the test's initial missing-schema setup to
+use the existing Vite/PGLite fixture pattern. No real database test writes.
+
+Focused verification (single execution lane; no full-suite rerun):
+- Baseline report.test.ts: tests51/suites18/pass51/fail0/cancelled0/skipped0/todo0,
+  duration11338.8365ms.
+- New report regression RED: expected zero refetches, actual1. Second RED:
+  partial-reading notes absent. Both assertions pass after the repair.
+- Reporting suite plus first regression: tests52/suites18/pass52/fail0/
+  cancelled0/skipped0/todo0, duration22587.2214ms.
+- Existing draft-batch-worker tests: all9 passed during the integration run;
+  that run initially failed the new test fixture (missing newsrooms table),
+  not the application. Corrected fixture passed2/2.
+- Changed-capture assertion RED: expected retained original, actual[].
+- Final retained-source and report tests: tests3/suites0/pass3/fail0/
+  cancelled0/skipped0/todo0, duration26525.4891ms.
+- npm run typecheck: exit0.
+- Final npm run build: exit0; DATABASE_URL explicitly empty, migration skipped.
+  artifacts/pdf-handoff-build-final-20260911.log retains the output. Restricted
+  build initially failed Windows readlink EPERM; normal authorized host build
+  passed. Existing Node deprecation warning remains in build output.
+
+Focused tests used this isolated launcher (FILES replaced with the named files):
+`node --input-type=module -e "import {spawnSync} from 'node:child_process'; import {safeTestEnvironment} from './scripts/test-environment.mjs'; const r=spawnSync(process.execPath,['--import','./scripts/test-environment-guard.mjs','--experimental-strip-types','--test','--test-concurrency=1',FILES],{env:safeTestEnvironment(),stdio:'inherit',windowsHide:true}); process.exit(r.status??1);"`
+An initial direct guard invocation refused to run before tests because the
+verified-environment marker was absent; the supported safeTestEnvironment
+launcher above supplied it without any production connection.
+
+Staging was rebuilt only after its old jobs were terminal and its owned
+server stopped. Production remains unchanged. Live retry acceptance follows;
+passing focused tests is not a claim of publishable reporting.

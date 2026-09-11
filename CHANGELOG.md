@@ -4,6 +4,11 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Drafting a lead filed from a page watch reuses the exact captured text and
+  source reference, including scanned-PDF OCR. Later failed fetches no longer
+  replace that material; retained capture dates and partial-reading limits
+  remain in reporting notes.
+
 - Read routine-event category pages up to 1 MiB, matching the existing library
   category allowance; individual structured-data and traversal limits remain.
 

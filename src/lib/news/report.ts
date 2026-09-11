@@ -118,6 +118,11 @@ export type FetchedDoc = {
   capture_event_id?: number | null;
 };
 
+export type RetainedSource = FetchedDoc & {
+  captured_at: string;
+  extraction_method: string;
+};
+
 export type ReportSearchHit = { title: string; url: string; snippet?: string };
 
 export type ReportChat = (
@@ -1184,6 +1189,8 @@ export async function reportAndDraft(
     extraEvidence?: string;
     editorialAssignment?: EditorialAssignment;
     extraUrls?: string[];
+    /** Exact captured material filed by the editor, not the latest URL snapshot. */
+    retainedSources?: RetainedSource[];
     modelChoice?: EffectiveProviderChoice;
     /**
      * The paper's stored deviations from the shipped time budgets (0.6.2).
@@ -1259,8 +1266,12 @@ export async function reportAndDraft(
   };
 
   const seedUrls = sanitizePublicUrls([...opts.urls, ...(opts.extraUrls ?? [])]).slice(0, 6);
-  const docs: FetchedDoc[] = [];
-  const seen = new Set<string>();
+  const retained = (opts.retainedSources ?? []).filter(d => seedUrls.includes(d.url) && d.text.trim());
+  const retainedNotes = retained.map(d => `Used the filed capture of ${d.url} from ${d.captured_at} (${d.extraction_method || "text"}), not a fresh fetch.${d.extraction_method?.includes("partial") ? " Only the indicated pages were read; unread pages are not evidence." : ""}`).join("\n");
+  const docs: FetchedDoc[] = retained.map(d => ({ ...d,
+    text: `RETAINED SOURCE captured ${d.captured_at}; extraction: ${d.extraction_method || "text"}. This is the filed record, not a fresh fetch. Partial OCR does not cover unread pages.\n\n${d.text}`,
+  }));
+  const seen = new Set<string>(docs.map(d => d.url));
 
   const take = async (urls: string[], cap: number, required = false, checkRelevance = false) => {
     if (suppliedOnly) urls = urls.filter(u => seedUrls.includes(u));
@@ -1592,7 +1603,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
       body: passBody,
       topic: opts.lead.topic,
       source_urls: checkpointUrls,
-      integrity_notes: coerced.integrity_notes,
+      integrity_notes: [coerced.integrity_notes, retainedNotes].filter(Boolean).join("\n"),
       form: parsed.form,
       found: checkpointFindings,
       unanswered: parsed.unanswered,
@@ -1760,6 +1771,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     ...trail,
     ...docMeta,
     ...captures,
+    ...retained.map(d => ({ url: d.url, version_id: d.version_id, capture_event_id: d.capture_event_id, captured_at: d.captured_at })),
   ]);
   // Already gated: tool-talk in here was rewritten to what TownReporter has
   // not yet opened, which is the honest version of the same line.
@@ -1816,7 +1828,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     body,
     topic: coerced.topic,
     source_urls: used,
-    integrity_notes: coerced.integrity_notes,
+    integrity_notes: [coerced.integrity_notes, retainedNotes].filter(Boolean).join("\n"),
     memory_entities: coerced.memory_entities,
     form,
     provenance,
