@@ -136,3 +136,69 @@ No new service or uncaptured native-browser substitution is required.
 Curated direct tools remain OPEN. Fixing the demonstrated excerpt-selection
 defect is useful regardless of that integration: a read tool returning the
 same irrelevant excerpt would not solve the observed problem.
+
+## Next implementation: responsive source choice (in progress)
+
+The first integrated operation adds one model decision after successful search
+results are persisted, before the app chooses the hop's reads. The selected
+provider can prioritize returned sources using the actual results, rather than
+guess fetch URLs before searching. Reads still use the existing ingestion,
+capture/version, frontier and provenance paths. Existing search and four-read
+limits are unchanged. Selector failure preserves ordinary queue execution and
+is recorded rather than presented as a successful model decision.
+
+This costs at most one additional planner call per productive hop, using the
+same selected provider and timeout configuration. No background loop, new
+service, paid provider or uncaptured native-browser substitution is introduced.
+Tests inject the selector explicitly; an injected test planner must never
+accidentally activate a real provider.
+
+Luna owns the bounded DEV implementation and focused test lane. Completion
+requires observing that a non-first search hit selected by the model is read
+first and that receipts and limits survive. Integration and live application
+acceptance are still pending. This first operation does not by itself close
+objective 8: choosing follow-up actions after a read remains to be addressed.
+
+### Source-choice integration checks
+
+The source choice is implemented in DEV. Lead reviewed the final diff and
+added the omitted selector-failure regression before accepting it. No claim
+of test-first development is made for that additional coverage. Worker baseline
+was 13/13; worker's reported initial RED was an incorrect expected fetch count,
+not a valid behavioral RED. Preserve that limitation rather than calling it TDD.
+
+Lead executed:
+```powershell
+node --input-type=module -e "import {spawnSync} from 'node:child_process'; import {safeTestEnvironment} from './scripts/test-environment.mjs'; const r=spawnSync(process.execPath,['--import','./scripts/test-environment-guard.mjs','--experimental-strip-types','--test','--test-concurrency=1','src/lib/news/investigate.loop.test.ts'],{env:safeTestEnvironment(),stdio:'inherit',windowsHide:true}); process.exit(r.status??1);"
+```
+```text
+ℹ tests 15
+ℹ suites 1
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11254.8215
+```
+No warnings or errors were emitted. This isolated test confirms the third
+search result can be selected first; failed selection continues ordinary
+fetching, records the error, leaves planner fallback counts unchanged, and
+returns an editor-visible notice. It does not prove real-provider selection.
+Lead `npm run typecheck` also exited 0 without diagnostics.
+
+Owned staging server handle 77813 was stopped after confirming no queued or
+running staging jobs. A new isolated build is in progress; production was not
+stopped. Build log: `artifacts/post-search-selector-build-20260911.log`.
+
+Build completed exit 0. Database migration reported `DATABASE_URL not set —
+skipping`, as intended. Existing Node warning:
+```text
+(node:35848) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+```
+Staging restarted on port 3471 with handle 93456 against the same isolated
+acceptance database. New build contains the source selector and bounded
+retrieval repair. HTTP readiness is not real-provider investigative acceptance;
+that remains the next check. Full-repository tests were not run. No new release,
+production promotion, source approval, or automatic publication was performed.

@@ -2004,6 +2004,8 @@ export async function researchLoop(opts: {
   searchAttempt?: SearchAttemptFn;
   fetch?: FetchFn;
   planner?: PlannerFn;
+  /** Optional bounded post-search read selector; injected tests must opt in explicitly. */
+  readSelector?: PlannerFn;
   archives?: (url: string) => Promise<string[]>;
   /**
    * The investigation's real newsroom (0.6.13). `dark.ts`'s
@@ -2050,10 +2052,12 @@ export async function researchLoop(opts: {
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
   const fetchDoc = opts.fetch ?? defaultFetch;
   const planner = opts.planner;
+  const readSelector = opts.readSelector ?? (!planner ? async (pack: string) => grokPlanner(pack, opts.choice, opts.providerOverrides, place, newsroomId) : undefined);
   const tried = new Set<string>();
   /** Every hop that had to fall back, so the run can say so. */
   const plannerFailures: string[] = [];
   const plannerStartupFailures: string[] = [];
+  const selectorFailures: string[] = [];
   const priorQueries = await sql<{ query: string }>`
     select query from search_log where investigation_id = ${opts.investigationId}
   `;
@@ -2253,6 +2257,8 @@ export async function researchLoop(opts: {
     const selectedThisHop: string[] = [];
     const fetchedThisHop: string[] = [];
     const thisHopEvidenceNames: string[] = [];
+    let postSearchPlan: HopPlan | null = null;
+    let postSearchFailure = "";
 
     for (const q of queries) {
       tried.add(queryFingerprint(q));
@@ -2329,7 +2335,7 @@ export async function researchLoop(opts: {
       }
       for (const hit of attempt.hits.slice(0, 6)) {
         const degraded = attempt.relevance?.decision === "degraded";
-        if (!degraded) {
+        if (!degraded && attempt.state === "SEARCH_SUCCESS_RESULTS") {
           toFetch.add(hit.url);
           currentSearchHits.add(hit.url);
         }
@@ -2399,16 +2405,42 @@ export async function researchLoop(opts: {
       }
     }
 
+    if (readSelector && currentSearchHits.size > 0) {
+      const hitContext = [...currentSearchHits].slice(0, 6).map((url) => `SEARCH RESULT URL: ${url}`).join("\n");
+      try {
+        postSearchPlan = await readSelector([
+          await retrievePack(opts.userId, opts.investigationId, terms),
+          `POST-SEARCH RESULTS (untrusted candidates; read before citing):\n${hitContext}`,
+          "Choose only the next URLs worth reading from these available results. Do not treat result titles or snippets as factual proof. Return no searches; existing search and fetch caps remain in force.",
+        ].join("\n\n"));
+        if (postSearchPlan.planner_error) {
+          postSearchFailure = postSearchPlan.planner_error;
+          selectorFailures.push(postSearchFailure);
+          postSearchPlan = null;
+        }
+        for (const url of postSearchPlan?.fetch_urls.slice(0, FETCHES_PER_HOP) ?? []) {
+          if (sanitizePublicUrls([url]).length) toFetch.add(url);
+        }
+        if (postSearchPlan) await persistPlan(opts.userId, opts.investigationId, postSearchPlan, newsroomId);
+      } catch (err) {
+        postSearchFailure = err instanceof Error ? err.message : "post-search selector failed";
+        selectorFailures.push(postSearchFailure);
+      }
+    }
+
     let redditFetchesThisHop = 0;
     // Give successful discovery one of the existing four fetch opportunities.
     // Otherwise older planner/frontier links can consume every hop indefinitely
     // while the search result the investigation needs stays unread. Remaining
     // slots retain the ordinary queue, including explicit planner fetches.
     let searchSlotUsed = false;
+    const selectedReads = postSearchPlan?.fetch_urls
+      .map(canon)
+      .filter((url, i, arr) => arr.indexOf(url) === i && !fetchedThisRun.has(url)) ?? [];
     while (fetchedThisHop.length < FETCHES_PER_HOP) {
-      const discovery = !searchSlotUsed
+      const discovery = selectedReads[0] ?? (!searchSlotUsed
         ? sanitizePublicUrls([...currentSearchHits]).map(canon).find((u) => !fetchedThisRun.has(u))
-        : undefined;
+        : undefined);
       const url = [
         ...new Set(
           sanitizePublicUrls(discovery ? [discovery, ...toFetch] : [...toFetch])
@@ -2417,7 +2449,10 @@ export async function researchLoop(opts: {
         ),
       ][0];
       if (!url) break;
-      if (url === discovery) searchSlotUsed = true;
+      if (url === discovery) {
+        searchSlotUsed = true;
+        selectedReads.shift();
+      }
       fetchedThisRun.add(url);
       fetchedThisHop.push(url);
 
@@ -2694,6 +2729,9 @@ export async function researchLoop(opts: {
               entities: plan.entities.map((e) => e.name),
               urls: plan.fetch_urls,
               questions: plan.questions,
+              post_search_selected: postSearchPlan?.fetch_urls.slice(0, FETCHES_PER_HOP) ?? [],
+              post_search_failure: postSearchFailure || null,
+              post_search_reason: postSearchPlan?.summary?.slice(0, 400) ?? null,
             }).slice(0, 4000)}
         where investigation_id = ${opts.investigationId} and hop = ${hop + 1}
       `;
@@ -2752,7 +2790,7 @@ Planner could not start research: ${[...new Set(plannerFailures)].join("; ")}`
     artifacts: artsN[0]?.c ?? 0,
     frontier: open[0]?.c ?? 0,
     paused,
-    summary: lastSummary + fellBack,
+    summary: lastSummary + fellBack + (selectorFailures.length ? `\nPost-search read selection fell back to the ordinary queue: ${[...new Set(selectorFailures)].join("; ")}` : ""),
     plannerFailures: plannerFailures.length,
     plannerStartupFailures: plannerStartupFailures.length,
   };

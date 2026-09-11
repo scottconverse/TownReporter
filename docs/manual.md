@@ -334,6 +334,15 @@ Three floors never move, at any setting: no invented claims of paid influence,
 every signal is labelled with how mature the evidence is, and every theory
 carries what would kill it.
 
+### Development preview: choosing sources after search
+
+The unreleased Dark Desk build can ask the selected research model which
+returned sources to read after a successful search. This uses the same
+four-read-per-round limit and retains the ordinary source captures. It adds
+at most one model call per round with useful search results, so such rounds
+can take longer. If source selection fails, the ordinary read queue continues
+and the run reports the fallback. This is not yet deployed to the public paper.
+
 ## Opinion
 
 `/desk/opinion` — the paper's own position.

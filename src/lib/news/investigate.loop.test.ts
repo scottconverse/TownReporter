@@ -260,6 +260,62 @@ describe("researchLoop integration", { timeout: 120000 }, () => {
     assert.equal(fetched.length, 4, "do not solve starvation by expanding the fetch budget");
   });
 
+  it("lets the bounded post-search selector choose a later hit before automatic discovery", async () => {
+    const user = `loop-post-search-selector-${Date.now()}`;
+    const { id } = await bootInv(user, "Investigate award record");
+    const hits = [1, 2, 3].map((n) => ({ title: `Award result ${n}`, url: `https://records.example/result-${n}` }));
+    const fetched: string[] = [];
+    let selectorPack = "";
+    const result = await researchLoop({
+      userId: user, investigationId: id, hops: 1,
+      planner: async () => { const plan = emptyPlan(); plan.searches = ["award record"]; return plan; },
+      readSelector: async (pack) => {
+        selectorPack = pack;
+        const plan = emptyPlan(); plan.fetch_urls = [hits[2]!.url]; return plan;
+      },
+      searchAttempt: async () => ({ state: "SEARCH_SUCCESS_RESULTS", hits, provider: "test" }),
+      fetch: async (url) => { fetched.push(url); return { ok: true, status: 200, text: "Readable award record for residents.", title: "Award", extras: [] }; },
+      archives: async () => [],
+    });
+    assert.match(selectorPack, /POST-SEARCH RESULTS/);
+    assert.match(selectorPack, /result-3/);
+    assert.equal(fetched[0], hits[2]!.url);
+    assert.ok(fetched.length <= 4, "selector does not expand the existing fetch budget");
+    const sql = await getSql();
+    const [{ generated_json: generated }] = await sql<{ generated_json: string }>`select generated_json from search_log where investigation_id=${id} and hop=1 limit 1`;
+    assert.match(generated, /post_search_selected/);
+    assert.match(generated, /result-3/);
+    assert.equal(result.plannerFailures, 0);
+  });
+
+  it("reports selector failure while preserving the ordinary queue and search receipt", async () => {
+    const user = `loop-selector-failure-${Date.now()}`;
+    const { id, sql } = await bootInv(user, "Investigate award record");
+    const source = "https://records.example/real-award";
+    const fetched: string[] = [];
+    let calls = 0;
+    const result = await researchLoop({
+      userId: user, investigationId: id, hops: 1,
+      planner: async () => ({ ...emptyPlan(), searches: ["award record"] }),
+      readSelector: async () => {
+        calls++;
+        return { ...emptyPlan(), planner_error: "selector unavailable", fetch_urls: ["https://records.example/heuristic-not-selected"] };
+      },
+      searchAttempt: async () => ({ state: "SEARCH_SUCCESS_RESULTS", hits: [{ title: "Actual award", url: source }], provider: "test" }),
+      fetch: async (url) => { fetched.push(url); return { ok: true, status: 200, text: "Actual award record.", title: "Award", extras: [] }; },
+      archives: async () => [],
+    });
+    assert.equal(calls, 1);
+    assert.deepEqual(fetched, [source]);
+    assert.equal(result.plannerFailures, 0);
+    assert.match(result.summary, /selection fell back.*selector unavailable/);
+    const [receipt] = await sql<{ generated_json: string; provider: string }>`select generated_json, provider from search_log where investigation_id=${id} and hop=1 limit 1`;
+    const generated = JSON.parse(receipt!.generated_json);
+    assert.equal(receipt!.provider, "test");
+    assert.deepEqual(generated.post_search_selected, []);
+    assert.equal(generated.post_search_failure, "selector unavailable");
+  });
+
   it("follows company → agent → second company → PDF contract → parcel through persisted state", async () => {
     const user = `loop-chain-${Date.now()}`;
     const { sql, id } = await bootInv(user, "FRMS chain");
