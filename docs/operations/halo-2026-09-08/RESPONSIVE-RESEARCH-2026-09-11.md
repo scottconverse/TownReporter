@@ -82,7 +82,9 @@ root's integrated run above was independently executed.
 
 ## Remaining acceptance and limits
 
-- Built-interface save/reload and actual selected-provider investigation are next.
+- Source checkpoint `284f0ea` committed and pushed to `feat/utility-bill-analyzer-link`.
+- Built-interface save/reload passed in staging: the saved method remained responsive
+  after reload and displayed six decisions. Actual selected-provider investigation is running.
 - Deterministic fake search/capture tests are not real reporting acceptance.
 - Compact summary is not an unlimited action archive; ordinary captures/search logs
   remain the underlying evidence. No new ledger service was added.
@@ -91,3 +93,29 @@ root's integrated run above was independently executed.
 - No production settings, schedules, content, databases or running services changed.
 - No new dependencies, authentication routes, browser rendering of model HTML,
   or defaults/fallback-order changes introduced.
+
+## Built staging and live run in progress
+
+Build command: `$env:DATABASE_URL=''; npm run build` (output saved to
+`artifacts/responsive-research-build-20260911.log`). Initial restricted execution
+failed with `EPERM: operation not permitted, readlink 'C:\Users\scott'` from
+`nitro:externals`. Same build retried with host permission: exit 0. Migration
+reported DATABASE_URL not set and skipped. Existing build warning:
+```text
+(node:21964) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+```
+
+Old owned staging handle 93456 was stopped only after its queue was confirmed empty.
+Replacement staging handle 94373 serves port 3471, database
+`townreporter_stage_03efb7b_20260911`, data root `artifacts/stage-03efb7b-data`.
+Production was not restarted or rebuilt.
+
+Via the normal editor form, started fresh job **121**, dark run **15**, at
+**2026-09-11 03:45:08 MDT** with Codex Terra and this question only:
+
+> What is proposed at 8979 Nelson Road in Longmont, what decisions have actually been made, and what can residents still weigh in on? Read the primary documents and distinguish proposals from approved actions.
+
+The database confirms the run snapshot: responsive, actionLimit 6, dig 3, nerve 8,
+county, 90-day lookback, verificationLimit 6. At this checkpoint the job is running,
+not passed. Poll job 121 and the owned staging handle; do not start a duplicate.
