@@ -4,6 +4,9 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Routine edition copy uses readable dates and event titles instead of raw
+  timestamp strings and HTML entities. Date-only deadlines keep their stated day.
+
 - Registration notice checks can read the explicit youth basketball deadline
   from Longmont's Fall 2026 sports PDF, retaining page references and the original
   PDF when saved and reopened. Source approval and activation remain separate.

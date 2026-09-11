@@ -384,6 +384,10 @@ The owner can manage **Routine notice permissions** and the separate **Automatic
 
 After explicit activation, the daily scheduler creates deterministic logistics-only ordinary articles: Today in town on the newsroom-local date, This weekend on Friday for Friday through Sunday, and Deadlines approaching only for new or changed deadlines in the next seven days; it is not a continuous source watch. An approved source change can correct an automation-owned edition on a same-day rerun. A run uses at most five useful items and emits no empty edition. Conflicts, cancellation, unsupported recurrence, risky language, stale permissions or evidence, and edited or unpublished target articles stay for review. Recent runs show their result counts and published-article links. Disable automation or pause routine permissions to stop later reservations. Manual checks remain available and never publish by themselves.
 
+Routine edition event times are displayed in the configured newsroom timezone;
+date-only deadlines remain date-only. Captured source values are retained
+separately from the reader-facing date and title formatting.
+
 `/desk/ops` — everything this machine is doing to keep the paper online.
 
 ![Server](images/11-server.png)

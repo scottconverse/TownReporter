@@ -1,4 +1,5 @@
 import type { StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
+import { parseHTML } from "linkedom";
 
 export type RoutineEditionChannel = "today" | "weekend" | "deadlines";
 export type EligibleRoutineNotice = {
@@ -32,6 +33,44 @@ function date(value: string | undefined, timezone: string) {
   }).formatToParts(instant);
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
+}
+function decodeText(value: string | undefined) {
+  if (!value) return "";
+  const escaped = value.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  return parseHTML(`<span>${escaped}</span>`).document.querySelector("span")?.textContent ?? value;
+}
+function displayDateOnly(value: string) {
+  const instant = new Date(`${value}T12:00:00Z`);
+  return Number.isNaN(instant.valueOf())
+    ? value
+    : new Intl.DateTimeFormat("en-US", {
+        timeZone: "UTC",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }).format(instant);
+}
+function displayWhen(value: string | undefined, timezone: string, sourceTimezone?: string) {
+  if (!value) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return displayDateOnly(value);
+  let instant: Date | null = null;
+  if (/(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.valueOf())) instant = parsed;
+  } else if (sourceTimezone) {
+    instant = namedZoneInstant(value, sourceTimezone);
+  }
+  if (!instant) return value;
+  const rendered = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(instant);
+  return rendered.replace(/, (\d{1,2}:\d{2})/, " at $1");
 }
 function namedZoneInstant(value: string, timezone: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
@@ -67,22 +106,22 @@ function weekendRange(localDate: string) {
   sunday.setUTCDate(friday.getUTCDate() + 2);
   return [friday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10)] as const;
 }
-function logisticsLine(n: StructurallyValidRoutineNotice) {
+function logisticsLine(n: StructurallyValidRoutineNotice, newsroomTimezone: string) {
   const f = n.normalizedFields;
-  const when = (value: string | undefined) => `${value ?? ""}${value?.includes("T") && f.timezone ? ` ${f.timezone}` : ""}`;
+  const when = (value: string | undefined) => `${displayWhen(value, newsroomTimezone, f.timezone)}${value?.includes("T") && f.timezone ? ` ${newsroomTimezone}` : ""}`;
   switch (n.formatKey) {
     case "library-notice":
-      return `${f.program ?? f.branch}: ${when(f.start ?? f.effectiveDate)}${f.location ? ` at ${f.location}` : ""}${f.hours ? ` · ${f.hours}` : ""}${f.closure ? ` · ${f.closure}` : ""}`;
+      return `${decodeText(f.program ?? f.branch)}: ${when(f.start ?? f.effectiveDate)}${f.location ? ` at ${decodeText(f.location)}` : ""}${f.hours ? ` · ${f.hours}` : ""}${f.closure ? ` · ${f.closure}` : ""}`;
     case "parks-recreation-notice":
-      return `${f.program}: ${when(f.start)} at ${f.location}`;
+      return `${decodeText(f.program)}: ${when(f.start)} at ${decodeText(f.location)}`;
     case "community-arts-event-logistics":
-      return `${f.title}: ${when(f.start)}${f.venue ? ` at ${f.venue}` : f.onlineUrl ? " online" : ""}`;
+      return `${decodeText(f.title)}: ${when(f.start)}${f.venue ? ` at ${decodeText(f.venue)}` : f.onlineUrl ? " online" : ""}`;
     case "registration-deadline":
-      return `${f.program}: applications close ${when(f.deadline)}`;
+      return `${decodeText(f.program)}: applications close ${when(f.deadline)}`;
     case "waste-recycling-schedule":
-      return `${f.service}: ${f.serviceDate}${f.endDate ? `–${f.endDate}` : ""} · ${f.area}${f.scheduleChange ? ` · ${f.scheduleChange}` : ""}${f.collectionInstructions ? ` · ${f.collectionInstructions}` : ""}`;
+      return `${decodeText(f.service)}: ${when(f.serviceDate)}${f.endDate ? `–${displayWhen(f.endDate, newsroomTimezone)}` : ""} · ${decodeText(f.area)}${f.scheduleChange ? ` · ${decodeText(f.scheduleChange)}` : ""}${f.collectionInstructions ? ` · ${decodeText(f.collectionInstructions)}` : ""}`;
     case "public-meeting-logistics":
-      return `${f.title}: ${when(f.start)}${f.venue ? ` at ${f.venue}` : ""}`;
+      return `${decodeText(f.title)}: ${when(f.start)}${f.venue ? ` at ${decodeText(f.venue)}` : ""}`;
   }
 }
 export function eligibleRoutineNotices(
@@ -94,7 +133,7 @@ export function eligibleRoutineNotices(
   const eligible: EligibleRoutineNotice[] = [],
     review: StructurallyValidRoutineNotice[] = [];
   for (const notice of notices) {
-    const line = logisticsLine(notice);
+    const line = logisticsLine(notice, timezone);
     if (HIGH_RISK.test(line)) {
       review.push(notice);
       continue;

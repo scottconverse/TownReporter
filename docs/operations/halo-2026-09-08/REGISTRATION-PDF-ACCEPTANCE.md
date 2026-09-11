@@ -178,3 +178,50 @@ Waste bulletin saved acceptance already exists at
 `artifacts/notice-real-source-check/receipt-2026-09-10T22-19-53.448Z.json`:
 two parsed collection windows, no conflicts. Do not rerun that completed check
 just because an older source-mapping paragraph calls it pending.
+
+## Readable edition copy — development correction
+
+Luna implemented the formatter repair; lead reviewed and independently ran:
+
+```powershell
+$env:DATABASE_URL=''; $env:RUN_LIVE_MODEL_TESTS=''; $env:TOWNREPORTER_TEST_ENV_VERIFIED='1'; node --import ./scripts/test-environment-guard.mjs --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 src/lib/news/routine-notice-editions.test.ts
+```
+
+```text
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 205.3601
+```
+
+`node node_modules/typescript/bin/tsc --noEmit` exited 0 with no output.
+Worker-reported baseline was 8/8; regression RED was 8 passed, 2 failed
+(raw timestamp and entity; raw date-only deadline). Lead requested a correction
+to source-zone resolution before accepting. The worker correctly corrected the
+lead's proposed September New York-to-Denver example: 00:30 becomes 22:30 on
+the previous day, not 21:30. The final regression asserts that conversion.
+
+Stored-source replay used `artifacts/stage-03efb7b-calendar-result.json`, source
+2875, through validateRoutineNotice, eligibleRoutineNotices and
+planRoutineEditions at 2026-09-11 / America/Denver. All 19 candidates validated;
+7 channel entries produced two plans, with no review entries. Inputs remained
+byte-equivalent after serialization. Example output:
+
+> All Ages Stay & Play Friday: Sep 11, 2026 at 10:30 AM at Longmont Public Library
+
+The first replay assertion incorrectly expected the later source2878 scheduler's
+five entries; it failed with `7 !== 5`. These are different saved captures, not
+interchangeable acceptance runs. The replay was corrected to check formatting,
+two edition plans and unchanged source values, rather than claiming the later
+run's counts. This is formatter evidence only: synthetic replay provenance is
+not an authority receipt, and no publication, fetch, model or database write
+occurred. Original scheduled articles42/43 remain unchanged.
+
+Existing linkedom handles entity decoding; no new dependency, endpoint or
+permissions were added. Source text is not inserted as executable page HTML.
+Reader-page verification on the rebuilt candidate and production activation
+remain outstanding; this does not claim them complete.
