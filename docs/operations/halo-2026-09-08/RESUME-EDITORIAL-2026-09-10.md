@@ -62,6 +62,40 @@ GitHub release inspection reconfirmed v0.6.35 is a published prerelease with
 the Windows ZIP, JSON manifest and SHA256 assets. README/CHANGELOG corrections
 are documentation updates, not a new release or deployment.
 
+## Daily scan activation and saved editorial correction
+
+Through the owner UI, saved and enabled a daily 06:00 America/Denver scan,
+explicit Codex Terra, source cap 12. Read-only production query confirmed
+enabled=true, paused=false, runtime=codex-terra and selected existing accepted
+source IDs [7,8,9,79,83,85,178,181,183,184,185,1665]. No sources were added or
+approved. The initial next-run display was September 10 at 22:03 MDT (the
+overdue same-day catch-up); successful execution remains to be observed.
+Routine notice publication permissions/settings were not changed.
+
+After preserving the failed model-check result, corrected one sentence in
+lead125 through the normal editor: "The city says additional ADA-accessible
+parking will be available ...". Save and full page reload retained it and
+the citations. This is an explicit human-style editorial correction by Codex,
+not a model success. Nothing was published.
+
+Luna's read-only source review located a missing explicit temporal-modality
+rule in EVIDENCE_RECONCILIATION_RULES (report.ts); existing general date-role
+rules do not say to preserve planned/conditional versus current status.
+A small general prompt correction and focused prompt-contract test remain
+to implement. Older Luna-cited artifact jobs are historical, not job105.
+No new code tests/builds or native model calls ran during this continuation.
+
+README, CHANGELOG and this receipt through the initial check result were
+committed and pushed as 9c89911. Other historical untracked files were not
+blindly included.
+
+Live home-page-only visit moved site loads184 to185 and today15 to16 after
+Stats reload. The previously saved daily report reopened in a fresh Stats
+tab. Full daily/weekly/monthly controls remained listed after reload. Source
+stats-reports.server.ts persists reports under the installation data root,
+one file per completed period, and implements no automatic pruning. Thus
+retention is indefinite until operator removal, not a promised finite window.
+
 ## Remaining scope
 
 All sixteen requirements remain tracked by the user attachment
