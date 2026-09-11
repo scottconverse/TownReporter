@@ -305,3 +305,25 @@ with final85's two original source URLs retained. No model regeneration or
 direct database repair was used. No production or permanent deletion occurred.
 This proves immediate recoverable deletion/Undo for a drafted lead; it does
 not claim legal erasure, backup purging, or interrupted-save recovery.
+
+## Follow-up and manual Opinion walkthrough
+
+On the same isolated staging server/database, added a reporting follow-up to
+lead140: “Confirm whether the Wednesday counter hours remain in effect before
+reusing this service brief.” Reload retained the unchecked YOURS entry and
+PULL control. It was not falsely marked completed and no model was invoked.
+
+Opinion > Paste a piece I wrote accepted an explicitly labelled isolated
+acceptance editorial about making the posted counter hours clear. The UI
+reported “Filed as a draft,” listed **Written by the editor**, and retained
+draft86 after reload. The headline is “OPINION: Clear public hours help
+residents plan.” Its original City source URL remains in the body; the
+structured source_urls field is empty, so this is not evidence of automatic
+source extraction. Nothing was published. A read-only staging query found
+zero queued/running jobs afterward.
+
+AI-written Opinion is not proved by this manual filing. This staging profile
+reports no private-voice file and no available Claude writer. The UI explains
+those limits and leaves manual filing available. No voice was imported, no
+provider enabled, and no production content or settings changed. Other
+functional-walkthrough requirements remain open; this is not a full sign-off.
