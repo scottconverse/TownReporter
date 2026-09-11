@@ -198,3 +198,60 @@ fetch also could not open PrimeGov. Direct public HTTPS plus Chrome supplied
 the evidence above; do not count this as Gateway acceptance. The official
 City Council calendar was also reachable, but its council sessions are not
 the Transportation Advisory Board event and were not substituted for it.
+
+## Reusable parks and arts calendars found — September 11
+
+The official https://longmontcolorado.gov/events/ filter metadata explicitly
+names Museum (slug museum), Recreation Services (recreation-services), and
+Parks and Natural Resources (parks-and-natural-resources). Using the same
+category URL structure as the established library feed, direct HTTPS checks
+returned:
+
+| Candidate | HTTP | Bytes | JSON-LD scripts |
+|---|---:|---:|---:|
+| https://longmontcolorado.gov/events/category/museum/ | 200 | 518939 | 2 |
+| https://longmontcolorado.gov/events/category/recreation-services/ | 200 | 519920 | 2 |
+| https://longmontcolorado.gov/events/category/parks-and-natural-resources/ | 200 | 430069 | 1 |
+
+Museum JSON-LD included Art & Sip: Watercolor Watermelon; recreation included
+Recreation Center Pool Closures. Parks had only the site/breadcrumb names in
+the inspected block, so no current event coverage is claimed for it. These are
+ongoing category sources, unlike the previously tested single-event URLs.
+This is source discovery, not application parser or scheduled-publication proof.
+Next use the museum and recreation categories through normal saved source checks.
+Do not label the mixed citywide /events/ feed as both families and double-count it.
+
+## PrimeGov actual ingestion repair
+
+Staging check8 exposed a gap in the earlier injected-response acceptance:
+ingestPrimeGov normalized API URLs into text/title/extras without rawBytes.
+The real saved-source path therefore failed, even though the injected raw
+response passed. The fix lets PublicPortal API paths fall through to the
+existing HTTP reader; portal and document behavior remains unchanged.
+
+Luna's regression reported RED on missing rawBytes, then GREEN. Lead reviewed
+the two-file diff and independently ran:
+
+```powershell
+$env:DATABASE_URL=''; $env:RUN_LIVE_MODEL_TESTS=''; $env:TOWNREPORTER_TEST_ENV_VERIFIED='1'; node --import ./scripts/test-environment-guard.mjs --experimental-strip-types --test --test-force-exit --test-concurrency=1 --test-timeout=20000 --test-name-pattern='PrimeGov|raw-byte ingestion' src/lib/news/ingest.test.ts src/lib/news/primegov.test.ts
+```
+
+```text
+ℹ tests 4
+ℹ suites 3
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 893.4222
+```
+
+Exit0, no test warnings. This focused run explicitly force-exits after tests;
+it is not proof of natural process shutdown. Before it, lead found three
+worker test groups still alive (parents27492,32164,19956; children28948,32720,
+34144), stopped only the verified children, and confirmed zero remaining
+ingest.test processes. Starting replacement tests while those lived violated
+the serialized-lane instruction. The worker's green summary did not establish
+cleanup. No production process was stopped. Rebuilt real-source acceptance
+remains necessary; no full-suite or production completion claim is made.

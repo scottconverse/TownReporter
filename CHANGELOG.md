@@ -4,6 +4,9 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Preserve original PrimeGov public API response bytes for meeting-notice
+  checks instead of substituting the portal's summarized catalog.
+
 - Allow the supported public Longmont fall-leaf bulletin to serve as its own
   waste-notice attribution, so owners can save its routine-edition settings.
 
