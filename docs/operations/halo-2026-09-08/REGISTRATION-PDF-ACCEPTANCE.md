@@ -82,9 +82,44 @@ Saved/reopened result: parsed1/refused0/conflicts0. Page2 supplies Youth Basketb
 League, Grades3–12, December13,2026 and https://bit.ly/recreationregistration.
 Raw blob/version hashes and original bytes matched; automation stayed disabled.
 
+## Built browser acceptance — 2026-09-11
+
+Built source f9554fa9fdec2e384f3d7e0f93cb31d0c8ffc882 with `npm run build`,
+exit 0. Log: `logs/stage-f9554fa-build.log`. Migration output confirms the exact
+database `townreporter_stage_03efb7b_20260911`, up to date. The existing owned
+staging process serves the build at http://127.0.0.1:3471; both native model
+providers are disabled. No production restart or deployment occurred.
+
+The staging editor could view Server but correctly could not configure owner
+notice permissions. For this exercise only, its membership was moved from
+editor/room 1 to owner of a new empty room 98911, `Isolated notice UI acceptance`.
+The copied real owner's membership was not changed. Database identity, original
+membership, empty fixture ID and no queued/running jobs were checked first.
+
+Through Chrome's actual interface, the lead added the official brochure on
+Sources, selected only its registration-deadline permission, saved it, and clicked
+`Check captured notices`. At approximately 00:09 America/Denver the page showed:
+
+- Parsed structurally: 1 parsed, 0 refused, 0 conflicts.
+- Deadline 2026-12-13; eligibility Grades 3-12; Youth Basketball League.
+- City of Longmont attribution and https://bit.ly/recreationregistration.
+- Page-2 locators and the `Read captured text` control.
+- Automatic routine editions remained unchecked. No publication was performed.
+
+Afterward a guarded transaction restored `staging-editor` to editor/room 1.
+Verification returned zero enabled fixture automations and zero active desk
+jobs. Room 98911 and its source/check evidence are retained as explicitly named
+acceptance data in this staging copy. They are not production data; this copy
+now contains this declared fixture and must not be represented as fixture-free.
+The older contaminated `townreporter_dev` database was not touched.
+
+GitHub checks inspected during the walkthrough showed 14 passing checks and
+two pending (main tests and fresh Windows install). This is not a full-CI pass.
+
 ## Remaining scope
 
-Owner source setup, built UI verification and activation remain. This is one
+Production owner source setup and activation remain; built UI verification for
+this source is complete above. This is one
 real brochure mapping, not all registration programs or future brochure layouts.
 Waste bulletin saved acceptance already exists at
 `artifacts/notice-real-source-check/receipt-2026-09-10T22-19-53.448Z.json`:
