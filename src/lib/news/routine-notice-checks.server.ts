@@ -58,14 +58,14 @@ function isLongmontLibraryCategory(url: string) {
 }
 
 function visibleClockMinutes(value: string | null | undefined) {
-  const matches = [...(value ?? "").matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)];
+  const matches = [...(value ?? "").matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b\.?/gi)];
   const match = matches.at(-1);
   if (!match) return null;
   let hour = Number(match[1]);
   const minute = Number(match[2] ?? "0");
   if (hour < 1 || hour > 12 || minute > 59) return null;
   if (hour === 12) hour = 0;
-  if (match[3]!.toLowerCase() === "pm") hour += 12;
+  if (match[3]!.toLowerCase() === "p") hour += 12;
   return hour * 60 + minute;
 }
 

@@ -4,6 +4,9 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Library-calendar checks recognize the City's dotted a.m./p.m. time notation,
+  while still refusing entries whose visible and structured times disagree.
+
 - Scans include recent published coverage alongside beat memory, helping avoid
   refiling old stories while retaining genuinely new developments.
 - Update the compatible transitive js-yaml dependency to 4.3.2.
