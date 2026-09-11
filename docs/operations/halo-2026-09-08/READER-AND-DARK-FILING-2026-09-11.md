@@ -142,3 +142,41 @@ launcher above supplied it without any production connection.
 Staging was rebuilt only after its old jobs were terminal and its owned
 server stopped. Production remains unchanged. Live retry acceptance follows;
 passing focused tests is not a claim of publishable reporting.
+
+### Retried PDF handoff: job116 completed
+
+Code commit7917c10 is pushed to github/feat/utility-bill-analyzer-link.
+Job115 failed before generation because the staging server was launched under
+the restricted execution runner and could not write its Codex state folder.
+Stopped that owned server; started the same build on3471 with normal Windows
+permissions, Claude off and Codex on (owned handle3704). No app permission
+configuration was altered. Original drafts73 (checkpoint) and74 (job114 final)
+remain unchanged. The first report incorrectly inspected only checkpoint73;
+the final74 was also unusable and cited the timeout version1561.
+
+Clicked ordinary Redraft, explicitly Codex Terra/no fallback, with the same
+lead, no pasted answer or model briefing changes. Job116 completed/Done and
+created checkpoint75 and final draft76. The visible editor recovered the result
+and re-enabled its controls. It shows the correct retained version1560 and
+capture2423, with the newer timeout snapshot offered separately for review,
+not substituted. No publication was attempted.
+
+Read draft76 against retained OCR: July11 agenda date, July17 scheduled meeting
+at7pm, printed tracker-page references11-15, the separate June19 minutes,
+June13 tracker reference and Mooragh Park signage discussion all match the
+captured text. No substantive factual correction was made to this final
+historical synopsis. Its notes explicitly retain12/44 partial OCR and do not
+claim to know July tracker contents, the meeting outcome or a Longmont link.
+This is a successful captured-PDF-to-sourced-draft handoff, NOT a current
+Longmont publication candidate or proof that the action tracker was read.
+The earlier selected physical-page13 test remains a separate receipt.
+
+Remaining PDF limits: source discovery still fetched irrelevant Longmont
+follow-ups for this foreign historical record, and some additional scanned
+PDFs logged JBig2 initialization warnings. No invented outcome or corrective
+rerun was used to hide those limitations. Curated investigative tools remain
+open; this evidence does not waive them. The full16-item goal remains active.
+
+Terminal check: job116 elapsed153.23seconds; zero new original-URL capture
+events after its start; zero queued/running staging jobs. Watches140/141 remain
+paused and disabled. Staging server3704 remains available for the next workflow.
