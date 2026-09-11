@@ -26,11 +26,22 @@ The verified label is a completed software protocol, not a substitute for
 checking sources. The five-topic live acceptance exercise remains outstanding.
 
 Local models can be discovered on LM Studio, Ollama or llama.cpp and selected
-individually. Scanned PDF OCR supports embedded JPEG/PNG images, with limits of
-12 extracted images, 2 MiB each and 10 minutes total. The extractor does not
-establish PDF page order: new OCR records identify images, not PDF pages.
-Historical stored OCR page labels require re-ingest or operator review if cited. Unsupported fax-style scans, failed
-transcription and partial reads are reported rather than treated as complete.
+individually. **Unreleased development change:** scanned PDF OCR renders the
+actual pages in document order, so new page-aware captures can cite the real
+PDF page number. It attempts the first 12 pages, with a 2 MiB rendered-image
+limit per page and a cooperative 10-minute processing budget. A running page
+render cannot be forcibly interrupted by that budget. Omitted or failed pages
+are explicitly marked incomplete; a partial packet is not a complete read.
+Older extracted-image OCR records remain labeled as unordered images and need
+re-ingestion before their image numbers can be treated as PDF page numbers.
+This is tested in development, not yet deployed or proved across real packets.
+The separate retained-PDF page reader has one bounded built-UI proof: an
+explicit request read real page 13 of a 44-page PDF and saved a page-numbered
+transcript without changing the 16,254,338-byte original or its hash. Direct
+comparison matched the main table rows and key dates, but omitted color-only
+RAG status and had a minor verb error. Full-packet and table-perfect quality
+remain unproven; compare every transcript with the original. See
+[Read selected PDF pages](pdf-page-reading.md).
 
 Configurable sections are available in Paper setup (see Newspaper sections below).
 Manual investigative page watching is available in Dark Desk; see the workflow below. The owner-only legal-removal workflow is documented below; ordinary Delete does not implement it. [The canonical queue](../TODO.md) records current work.
@@ -228,8 +239,9 @@ A meeting on the calendar is not automatically a story. A five-hour council tape
 
 The scanner never throws a lead away. If a new lead looks nearly identical to
 one already on the desk, the old one is stamped "seen again." If it only
-looks similar, the new lead is filed and tagged "maybe same as #N" so you
-decide.
+looks similar, the candidate is linked to the earlier lead so you decide.
+When that earlier lead was killed, the candidate starts in **Held**, not New.
+You can compare it and return it to New if it contains a genuine development.
 
 **Nearly identical — "seen again."** Killing a lead never deletes it and
 never hides it. If the scanner comes back across what is confidently the same
@@ -255,8 +267,9 @@ a source link, a date, a dollar figure, some of the same wording — without
 being confidently the same story: two different agenda items from the same
 meeting page often share a date and a figure and nothing else. When the
 overlap is real but not that strong, the scanner no longer guesses either
-way. It files the new lead normally, on the queue, and adds a dotted
-**MAYBE SAME AS #N** chip pointing at the existing lead it resembles — click
+way. It keeps the candidate on the queue (Held when the earlier lead was
+killed, otherwise New), and adds a dotted
+**Possible duplicate · compare #N** chip pointing at the existing lead it resembles — click
 it to open that lead and compare. Nothing is merged, stamped, or hidden;
 you make the call.
 
@@ -290,6 +303,8 @@ Before **Draft with AI**, choose **Drafting scope**. **Research public sources**
 
 Supplied-only drafting supports Claude and local/API models. Codex is refused for this scope because its native tools do not provide that restriction; choose a supported model. The draft fills the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
 
+During public-source reporting, a captured recurring record such as an agenda, meeting page, report, packet or RFP can start an automatic background watch for later changes or disappearance. The watch does not draft or publish. This automatic behavior is separate from the editor-created watches under **Dark Desk → Watch a page / view watches**; that manual-watch panel does not currently provide management controls for automatic watches.
+
 Changing the body of a draft with reporting evidence requires a new evidence review before publishing. Check the sources against the revised story, then choose **I checked: keep this evidence** or **Remove old evidence from public story**. Removal clears the old public source list and reporting metadata, while retaining the original in the private draft archive. It does not remove links you have written into the body. A concurrent edit invalidates an older review; reload and review the current draft.
 
 The picker beside it controls this run. **Automatic** uses a configured
@@ -312,6 +327,16 @@ When the reporting hangs on another newsroom, the draft should name them and lin
 A second box under the story, **Pulled notes**, does not print. **Pull** next to a still-to-pull line searches that item, opens what it finds, and drops the excerpt there for you to cut into the story. Redraft reads that box. The checkbox only strikes the line.
 
 Draft is allowed to be wrong. Read it against the documents.
+
+### Check a saved draft against its evidence (next development release)
+
+**Check draft against evidence** applies to the exact draft version currently saved for the story. Save any headline, dek, topic or body edits first, then choose the model in the workbench picker and start the check. The control stays unavailable while edits are unsaved, a save is pending or another check is active. The queued job records the model selection and does not restart discovery or initial writing.
+
+Queued, running and failed states remain visible. A successful job writes a new saved draft version while retaining the original version; it does not publish or approve either one. If the saved captures do not provide enough evidence to complete the pass, the result is marked incomplete and still needs editor review rather than being presented as checked.
+
+Typing while the check or its final reload is running does not silently replace the editor's local text. The checked version is loaded automatically only when the fields still match the snapshot taken at the click. Otherwise the workbench preserves the unsaved buffer and offers an explicit **Reload checked draft** action, which intentionally replaces those local edits.
+
+This describes source work for the next development release. It has not yet been deployed or accepted through R20.
 
 Reporter-notebook leftovers (`What is solid`, `Next checks are…`) are stripped from the body so they cannot leak onto the paper. If you need that thinking, put it in notes.
 
@@ -424,6 +449,8 @@ Start digging **moves** a card from To look at onto the desk. The card stays on 
 
 A research round is a short batch, then a stop. Remaining pages stay on the file. That stop is **not a failure** and not “too many leads.” Keep digging reads the next batch.
 
+Keep the file open while its research job is running and Dark Desk refreshes that file through later synthesis, verification and brief writing, even after the round counter has paused. The final brief or a persistent run error appears without a manual reload. This watches only the file currently open; if you switch files, reopen the first one to read its latest saved result.
+
 ### Which model digs
 
 Next to **Keep digging** there is a **Digging model** picker, the same one the
@@ -505,7 +532,6 @@ Daily checks require the existing local scheduler. **Check now** uses the same g
 
 For a readable capture, choose an active reporting section and **Create unverified lead**, or choose a file and **Attach captured record**. Feedback links to the lead or investigation; the capture's history keeps that outcome after a refresh. **Dismiss change** retains the capture. A removed handoff target is reported as removed instead of being silently recreated. No check automatically creates a lead, drafts or publishes. **Pause**, **Resume** and **Stop watching** retain history; paused and stopped watches do not run checks. An interrupted check can be retried after its 30-minute lease expires. These investigative watches are separate from accepting an ordinary source for story scanning.
 
-
 ### Choose an investigative search window and verification limit
 
 On Dark Desk, open **How hard to dig → Change**. Choose a lookback of 1–3650 inclusive UTC calendar days (default90; one day means today in UTC) or an inclusive start/end UTC calendar range, then choose 1–24 signals to verify per round (default6). **Save** confirms the stored settings; reload to verify a save whose response failed. A validation error explains the rejected value. A settings-read failure offers **Retry settings** instead of showing invented defaults.
@@ -567,6 +593,24 @@ Explicit Local model makes one writing call using the supplied material; it
 does not run the frontier research pass. The row
 shows a clock counting up and a moving rule; at 3:40 that is normal, not stuck.
 The page rechecks every twenty seconds.
+
+### Add your own AI API
+
+Owner editors can open **Server → Add your own AI API** to save a named
+OpenAI-compatible endpoint. Enter its base URL, optionally enter a key for
+server-side storage, then discover models or type a model id manually. Save
+before discovery, and use **Test connection** when the endpoint is enabled;
+the result shows the tested chat-completions capability alongside response and
+model-discovery status. These are diagnostics, not a guarantee that a later
+run will finish.
+
+Use **Edit** to change the name, URL or model; leave the key blank to retain it
+or explicitly remove it. **Disable** keeps the record but removes it from
+pickers and actions; **Enable** restores it. **Delete** is permanent. Selecting
+the saved name in a Scan, Story, Opinion or Dark Desk picker pins that endpoint
+to the queued run, with no fallback to another provider. The Opinion voice is
+private to the explicitly selected endpoint. This is a development-candidate
+workflow and is not yet deployed; see [the detailed connection guide](custom-ai-connections.md).
 
 An editorial is a **draft**. Read it, edit it in the story workbench, and
 publish it like any other piece — or don't. It will happily conclude that your
@@ -650,16 +694,18 @@ Owners also have:
 
 Read-only, editor-only. Right after Server in the nav.
 
-Shows raw page views, not unique visitors — no cookies, no fingerprinting,
-just a count of how many times a page loaded. Three things:
+Shows anonymous page loads, not unique people or completed reads — no cookies,
+no fingerprinting, just a count of how many times an instrumented page loaded.
+Two things:
 
-- **Site** — all-time total, last 7 days, and last 30 days, added across
-  every public page.
-- **Stories** — every published story, ranked by all-time views, linking
-  straight to the story.
+- **Site** — all-time total, last 7 calendar dates including today, and last
+  30 calendar dates including today, added across the home page and published
+  story pages. Other public pages are not included.
+- **Stories** — every published story, ranked by all-time story-page loads,
+  linking straight to the story.
 
 A view is counted by a small beacon that fires from the reader's browser
-*after* the page has already loaded, so it can never slow the paper down —
+_after_ the page has already loaded, so it can never slow the paper down —
 and if counting ever fails for any reason, the public page is completely
 unaffected; this page just shows nothing new until it recovers. Views are
 scoped to your newsroom.
@@ -703,8 +749,8 @@ starts the sign-in and takes you straight to this panel with the link waiting.
 
 ### How long a model may take
 
-Each model in this panel has a **Time per call** field: *how long the desk
-waits for one answer before giving up.* It shows a number of seconds and, next
+Each model in this panel has a **Time per call** field: _how long the desk
+waits for one answer before giving up._ It shows a number of seconds and, next
 to it, the number this desk ships with, so a changed value reads as a decision
 rather than as the way it has always been. **Save** stores it; **Reset** — which
 only appears once you have stored something — puts the shipped number back.
@@ -821,28 +867,28 @@ How we report, in public: `/how-we-report`.
 
 ## Common trouble
 
-| You see                                     | Likely                                                                                  | What to do                                                                                                                                                               |
-| ------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Automatic says no model is ready            | Configured gateway failed, or every Automatic provider failed readiness                 | Fix the configured gateway; otherwise sign in to Codex, or sign in/configure Claude ([setup.md](setup.md#per-run-picker))                                                |
-| Codex is missing or signed out              | Codex CLI/OAuth is unavailable on the server machine                                    | Install/open Codex, sign in, and try again; check `CODEX_CLI_PATH` / `CODEX_HOME` only for unusual layouts                                                               |
-| Claude is missing or signed out             | Claude Code CLI login is unavailable                                                    | Install/open Claude Code and sign in, or configure the Claude API path                                                                                                   |
-| An Opinion row says Failed with no draft    | The provider errored, declined, or returned something that was not a complete editorial | Read the error on the row. Retry Claude after fixing its error, or explicitly choose Local model; nothing was filed or published                                  |
-| Scan fetched, filed nothing                 | Nothing new, or the model declined                                                      | Read the summary. Not automatically a bug.                                                                                                                               |
-| Draft with AI ran, form still empty         | The click died; the writing pass may still be finishing                                 | Stay on the page. It fills when the draft lands. Reload only if you left.                                                                                                |
-| Redraft shows a sign-in / setCookie error   | Cookie helper threw even though you are signed in                                       | Click Redraft again. Fixed in 0.3.7.                                                                                                                                     |
-| Start digging does nothing                  | The card was hidden after a failed open (fixed in 0.3.8)                                | Reload. The card should be back. Click again — it stays until the file exists.                                                                                           |
-| Draft is a rewrite of the Leader            | The pass never opened the company page                                                  | Pull the still-to-pull line for their press release, then redraft.                                                                                                       |
-| Meeting has no transcript                   | Livestream hasn’t ended, or Playwright missing                                          | Wait for the 6-hour recheck, or operator installs Chromium                                                                                                               |
-| Names in a draft are wrong                  | Auto-captions                                                                           | Check the packet. Fix the draft. Do not publish the caption.                                                                                                             |
-| Dates look a day ahead                      | Paper timezone is wrong or missing                                                      | Owner: open Server → Paper setup and save the correct IANA timezone.                                                                                                     |
-| Two nearly identical headlines on the paper | Same news, two drafts published                                                         | The paper collapses overlapping headlines and keeps the longer body.                                                                                                     |
-| Second person gets 403                      | They signed up without a valid invite, or used the wrong email                          | Owner: create a fresh link under Server → Invite an editor and have them use the exact invited address.                                                                  |
-| Editorial says Failed with a timeout        | The piece ran past the writer's limit                                                   | Ask again. If it repeats, the operator can raise `EDITORIAL_TIMEOUT_MS`. Nothing is lost but the run.                                                                    |
-| Editorial never starts, says no voice       | `TOWNREPORTER_VOICE_FILE` is unset or points nowhere                                    | Operator: set it to an absolute path outside the repo                                                                                                                    |
-| A public address is down but the local desk works | Public hosting or routing may have failed | Ask the operator to check the public host/tunnel. The Windows package has no tunnel or automatic repair; legacy controls require configured ownership. |
-| An editorial has no Edit button             | It has not finished, or it failed                                                       | Only a finished piece can be edited. A failed row can still be deleted.                                                                                                  |
-| Desk wants sign-in again                    | Session expired                                                                         | `/login`                                                                                                                                                                 |
-| Notebook language on the paper              | Strip failed or you pasted it                                                           | Edit the story. Kill if needed. Tell the operator.                                                                                                                       |
+| You see                                           | Likely                                                                                  | What to do                                                                                                                                             |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Automatic says no model is ready                  | Configured gateway failed, or every Automatic provider failed readiness                 | Fix the configured gateway; otherwise sign in to Codex, or sign in/configure Claude ([setup.md](setup.md#per-run-picker))                              |
+| Codex is missing or signed out                    | Codex CLI/OAuth is unavailable on the server machine                                    | Install/open Codex, sign in, and try again; check `CODEX_CLI_PATH` / `CODEX_HOME` only for unusual layouts                                             |
+| Claude is missing or signed out                   | Claude Code CLI login is unavailable                                                    | Install/open Claude Code and sign in, or configure the Claude API path                                                                                 |
+| An Opinion row says Failed with no draft          | The provider errored, declined, or returned something that was not a complete editorial | Read the error on the row. Retry Claude after fixing its error, or explicitly choose Local model; nothing was filed or published                       |
+| Scan fetched, filed nothing                       | Nothing new, or the model declined                                                      | Read the summary. Not automatically a bug.                                                                                                             |
+| Draft with AI ran, form still empty               | The click died; the writing pass may still be finishing                                 | Stay on the page. It fills when the draft lands. Reload only if you left.                                                                              |
+| Redraft shows a sign-in / setCookie error         | Cookie helper threw even though you are signed in                                       | Click Redraft again. Fixed in 0.3.7.                                                                                                                   |
+| Start digging does nothing                        | The card was hidden after a failed open (fixed in 0.3.8)                                | Reload. The card should be back. Click again — it stays until the file exists.                                                                         |
+| Draft is a rewrite of the Leader                  | The pass never opened the company page                                                  | Pull the still-to-pull line for their press release, then redraft.                                                                                     |
+| Meeting has no transcript                         | Livestream hasn’t ended, or Playwright missing                                          | Wait for the 6-hour recheck, or operator installs Chromium                                                                                             |
+| Names in a draft are wrong                        | Auto-captions                                                                           | Check the packet. Fix the draft. Do not publish the caption.                                                                                           |
+| Dates look a day ahead                            | Paper timezone is wrong or missing                                                      | Owner: open Server → Paper setup and save the correct IANA timezone.                                                                                   |
+| Two nearly identical headlines on the paper       | Same news, two drafts published                                                         | The paper collapses overlapping headlines and keeps the longer body.                                                                                   |
+| Second person gets 403                            | They signed up without a valid invite, or used the wrong email                          | Owner: create a fresh link under Server → Invite an editor and have them use the exact invited address.                                                |
+| Editorial says Failed with a timeout              | The piece ran past the writer's limit                                                   | Ask again. If it repeats, the operator can raise `EDITORIAL_TIMEOUT_MS`. Nothing is lost but the run.                                                  |
+| Editorial never starts, says no voice             | `TOWNREPORTER_VOICE_FILE` is unset or points nowhere                                    | Operator: set it to an absolute path outside the repo                                                                                                  |
+| A public address is down but the local desk works | Public hosting or routing may have failed                                               | Ask the operator to check the public host/tunnel. The Windows package has no tunnel or automatic repair; legacy controls require configured ownership. |
+| An editorial has no Edit button                   | It has not finished, or it failed                                                       | Only a finished piece can be edited. A failed row can still be deleted.                                                                                |
+| Desk wants sign-in again                          | Session expired                                                                         | `/login`                                                                                                                                               |
+| Notebook language on the paper                    | Strip failed or you pasted it                                                           | Edit the story. Kill if needed. Tell the operator.                                                                                                     |
 
 ---
 

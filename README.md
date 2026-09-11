@@ -37,6 +37,7 @@ It is not the Longmont Times-Call, not the city, and not a replacement for eithe
 | **Everyone — the full manual**, with architecture drawings | [docs/manual.md](docs/manual.md)                                                                |
 | Editors, with screenshots and no code                      | [docs/editor.md](docs/editor.md)                                                                |
 | Operators (clone, env, Postgres, models, city swap)        | [docs/setup.md](docs/setup.md)                                                                  |
+| Add and use a named AI API connection                       | [docs/custom-ai-connections.md](docs/custom-ai-connections.md)                                  |
 | Dark Desk UI contract                                      | [docs/dark-desk-editor.md](docs/dark-desk-editor.md)                                            |
 | Local models, measured on real prompts                     | [docs/local-models.md](docs/local-models.md)                                                    |
 | Marketing / GitHub Pages landing                           | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
@@ -189,6 +190,20 @@ Full detail, including the newsletter and rate-limiter fixes, is in [CHANGELOG.m
 - **Jobs wake up.** Scan / Draft / Keep digging persist, then finish in this process or on the monitors ping (`CRON_SECRET`).
 - **Historical OCR behavior (0.4.x).** Image-only PDFs were unread. Since 0.6.23, supported embedded JPEG/PNG scan images can be transcribed by a vision-capable provider; unsupported formats and partial reads remain explicit.
 
+> **Current unreleased DEV OCR work.** New scanned-PDF ingestion renders ordered PDF pages before OCR (up to 12 pages, 2 MiB rendered-image cap, and a cooperative 10-minute render-and-OCR budget). New records can retain numeric page citations; legacy extracted-image records remain explicitly unordered. Built-runtime rendering is proven with mock transcription, and one source-path Codex/Terra ingestion run read 11 of 44 pages from a scanned council packet (pages 1 and 3 visually checked). Page 10 failed and pages 13–44 were capped; that ingestion run did not prove full-packet or packet-quality acceptance.
+
+That ingestion cap is separate from the retained-PDF page reader: in the
+development candidate, an editor can open a captured PDF in Dark Desk, choose
+an explicit model and request any 1-based inclusive range of up to 12 pages,
+including pages beyond page 12. The reader adds page-numbered evidence beside
+the unchanged original; it does not refetch a missing PDF. See
+[Read selected PDF pages](docs/pdf-page-reading.md). A bounded built-UI proof
+read real page 13 of a 44-page PDF and preserved the 16,254,338-byte original
+and its hash. The main table rows and key dates matched, but color-only RAG
+status was omitted and a minor verb differed; this is not full-packet or
+table-perfect acceptance, and the editor must compare the transcript with the
+original.
+
 Also in 0.3.3–0.3.8: Mountain Time masthead, overlapping printed headlines collapse, Draft with AI paints without a reload, Redraft survives the cookie glitch, Start digging keeps the card on a failed open.
 
 ### Meetings, tapes, packets
@@ -305,6 +320,14 @@ LLM_MODEL=claude-sonnet-4-5
 If `LLM_BASE_URL` is set — or `LLM_API_KEY` and `LLM_MODEL` are both set —
 that configured gateway wins over Grok for configured-provider features and is
 the exclusive Story Automatic provider.
+
+For a per-run, editor-selected endpoint instead of changing the configured
+provider, use **Server → Add your own AI API**. Save a name, base URL, optional
+server-side key and either a discovered or manually entered model, then use
+**Test connection** before selecting it in Scan, Story, Opinion or Dark Desk.
+Disable, edit or delete saved connections from the same panel. This is an
+explicit opt-in and does not change Automatic or fallback defaults. See the
+[connection guide](docs/custom-ai-connections.md).
 
 ---
 

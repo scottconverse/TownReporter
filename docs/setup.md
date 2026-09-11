@@ -216,6 +216,19 @@ LLM_MODEL=claude-sonnet-4-5
 
 Resolution lives in `src/lib/news/ai.ts` (`resolveProvider()`); the Claude Code path is `ai-claude-code.server.ts`.
 
+#### Named custom connections
+
+For an endpoint used only when an editor explicitly selects it, open
+**Server → Add your own AI API**. Save a recognizable name, an HTTP(S) base
+URL, an optional key (stored server-side), and a model discovered from `/models`
+or entered manually. **Test connection** checks the saved chat-completions
+path and reports capability information; it does not change Automatic. The
+same panel supports **Edit**, **Disable/Enable**, and irreversible **Delete**.
+An explicitly selected connection is pinned to that run and never falls back;
+review what leaves the machine with the endpoint operator. The full operator
+walkthrough, including the optional LiteLLM example, is in
+[custom-ai-connections.md](custom-ai-connections.md).
+
 #### Per-run picker
 
 Each picker includes a **Set up a writing model** disclosure with official
@@ -253,6 +266,10 @@ Compatibility overrides:
 ```env
 TOWNREPORTER_CODEX_TERRA_MODEL=gpt-5.6-terra
 TOWNREPORTER_CODEX_SOL_MODEL=gpt-5.6-sol
+
+# Optional local Halo Research Gateway MCP search provider; unset keeps the
+# built-in fallback chain. Use only the unauthenticated loopback MCP endpoint.
+# TOWNREPORTER_GATEWAY_MCP_URL=http://127.0.0.1:8765/mcp
 ```
 
 Set `CODEX_CLI_PATH` or `CODEX_HOME` only if normal discovery cannot find the
@@ -272,17 +289,40 @@ creates no draft. The completed request and job store the provider that
 finished.
 
 **Scanned PDFs** (a council packet with no text layer) can be transcribed by whichever
-model you picked, the same way a person would: the model looks directly at
-the extracted images and transcribes them (`src/lib/news/ocr.ts`). These are
-image indices, not verified PDF page numbers or page order. The display names
-that limitation; historical stored OCR page labels need re-ingest or operator
-review before being relied on as citations. Claude
-Opus (API or CLI) and Codex provide vision paths when their prerequisites are met; a reachable provider is not a guarantee that a particular scan can be read. A local model can only do it
-if it is a *vision* model -- pick one marked **`· vision`** in the picker (or
-in the Server page's local-model table). See
+model you picked. **Unreleased DEV work** first renders each actual PDF page
+through the local PDF renderer, including scan encodings that cannot be found
+by lifting a JPEG/PNG stream, then sends that page image to the chosen vision
+provider (`src/lib/news/ocr.ts`). Newly rendered records carry numeric PDF
+page order for citations. The bounded pass attempts only the first 12 PDF
+pages, rejects rendered PNGs over 2 MiB, and shares a cooperative 10-minute
+budget across render and transcription. A failed, skipped, oversized, or
+over-cap page is explicitly incomplete; the renderer cannot forcibly interrupt
+one page already running. Legacy stored `ocr:` records remain extracted-image
+records: their labels continue to say that PDF page order is not established,
+so they need re-ingest or operator review before page citation. Claude Opus
+(API or CLI) and Codex provide vision paths when their prerequisites are met;
+a reachable provider is not a guarantee that a particular scan can be read. A
+local model can only do it if it is a *vision* model -- pick one marked
+**`· vision`** in the picker (or in the Server page's local-model table).
+The DEV built-runtime renderer is proven with mock transcription. A single
+source-path Codex/Terra run read 11 of 44 pages from a scanned council packet;
+pages 1 and 3 were visually checked, page 10 failed, and pages 13–44 were
+not attempted under the existing cap. That ingestion run did not prove
+full-packet or packet-quality acceptance. See
 [local-models.md](local-models.md#scanned-pdfs-and-why-they-need-a-vision-model)
-for the full picture, including the one scan format (fax-style CCITT/JBIG2
-compression) this cannot read yet.
+for the full picture.
+
+This first-12-pages limit applies to ingestion OCR. A separate development
+candidate, **Read selected PDF pages**, lets an editor open a retained PDF in
+Dark Desk, choose an explicit model, and request any 1-based inclusive range
+of up to 12 pages, including later pages such as page 13. The result is
+page-numbered additional evidence alongside the unchanged original and does
+not refetch a missing PDF. See [pdf-page-reading.md](pdf-page-reading.md).
+A bounded built-UI proof read real page 13 of a 44-page PDF and preserved the
+16,254,338-byte original and its hash. It matched the main table rows and key
+dates but omitted color-only RAG status and had a minor verb error, so full
+packet and table-perfect quality remain unproven; compare every result with the
+original before relying on it. This development candidate is not deployed.
 
 ### The Opinion voice
 
