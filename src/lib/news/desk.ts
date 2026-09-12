@@ -971,7 +971,10 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const researchScope = job.research_scope ?? prevNotes.researchScope ?? "public";
   const sourceInput = draftSourceInputs(urls, prevNotes, researchScope);
   const { retainedWatchSources } = await import("./retained-watch-source.server.ts");
+  const {readStoryDocuments}=await import("./story-documents.server.ts");
+  const documentEvidence=await readStoryDocuments(owned(context),leadId,job.model_choice as import("./ai.ts").EffectiveProviderChoice,prevNotes.editorialAssignment?.text || lead.headline, message=>setStage(job.id,message), sourceInput.urls, context.userId, researchScope === "supplied");
   const draftInput = {
+    documentEvidence,
     userId: context.userId,
     newsroomId: context.newsroomId,
     lead,
@@ -1260,6 +1263,7 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
   .validator(
     (input: {
       text: string;
+      documentIds?: string[];
       modelChoice?: string;
       researchScope?: "public" | "supplied";
       sectionKey?: string;
@@ -1270,6 +1274,7 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
     return writeStoryForAuthenticatedEditor({
       context: { userId: context.userId, newsroomId: owned(context) },
       text: data.text,
+      documentIds: data.documentIds,
       sectionKey: data.sectionKey,
       modelChoice: data.modelChoice,
       researchScope: data.researchScope,

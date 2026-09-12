@@ -238,6 +238,7 @@ function QueuePage() {
 
       <details className="file-form">
         <summary>File a lead yourself</summary>
+        <p>Have a transcript, packet or documents? <Link to="/desk">Write a story from text or uploaded documents on the Desk.</Link></p>
         <form
           onSubmit={(event) => {
             event.preventDefault();

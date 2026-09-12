@@ -500,6 +500,13 @@ export async function renderPdfPages(
  * resolves to. See this module's top doc comment for the four transports
  * and provider-registry.ts for how "the editor's picker choice" is honoured.
  */
+export async function transcribeDocumentImage(image: PageImage, opts: OcrOptions = {}): Promise<string> {
+  const plan = await resolvePlan(opts);
+  if ("needsOcr" in plan) throw new Error(plan.reason);
+  await opts.beforeModelCall?.();
+  return stripNarration(await transcribePage(plan, image, 180000, opts.adapters as OcrAdapters | undefined));
+}
+
 export const productionOcr: OcrImpl = async (buf, opts = {}) => {
   const started = Date.now();
   const rendered = await renderPdfPages(buf, started, opts.pageRange);
