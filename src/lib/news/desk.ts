@@ -972,7 +972,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const sourceInput = draftSourceInputs(urls, prevNotes, researchScope);
   const { retainedWatchSources } = await import("./retained-watch-source.server.ts");
   const {readStoryDocuments}=await import("./story-documents.server.ts");
-  const documentEvidence=await readStoryDocuments(owned(context),leadId,job.model_choice as import("./ai.ts").EffectiveProviderChoice,prevNotes.editorialAssignment?.text || lead.headline, message=>setStage(job.id,message), sourceInput.urls, context.userId, researchScope === "supplied");
+  const documentEvidence=await readStoryDocuments(owned(context),leadId,job.model_choice as import("./ai.ts").EffectiveProviderChoice,prevNotes.editorialAssignment?.text || lead.headline, message=>setStage(job.id,message), prevNotes.suppliedUrls ?? [], context.userId, researchScope === "supplied");
   const draftInput = {
     documentEvidence,
     userId: context.userId,
