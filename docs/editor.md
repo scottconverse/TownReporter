@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Current release: [0.6.36](https://github.com/scottconverse/TownReporter/pull/43) — document intake update; deployment is recorded separately.** The [stable release](https://github.com/scottconverse/TownReporter/releases/latest) is available separately. Halo's 0.6.35 deployment is recorded in the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md); later development work is not automatically deployed. How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.37](https://github.com/scottconverse/TownReporter/commits/main/) — editor interface update; deployment is recorded separately.** The [stable release](https://github.com/scottconverse/TownReporter/releases/latest) is available separately. Halo's 0.6.35 deployment is recorded in the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md); later development work is not automatically deployed. How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
@@ -11,6 +11,12 @@ Other images are historical Longmont screens from 29 August; their old
 Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). The whole system, including how it is built, is [manual.md](manual.md). This page is the newsroom, in the order you use it.
 
 ---
+
+## Starting and finding a story
+
+Open **Desk → Write a story**. Click **Add documents** or drop files into the document area. Paste URLs or transcripts in **Links or source text**, and put the angle in **What story do you want?** Choose the writing model and click **Write draft**.
+
+The story editor opens when the job is created. A banner at its top shows progress. If you leave, the Desk has **Open your story** for running jobs and **Your recent drafts** for drafts you can reopen and edit. Research scope and section are in **Research & section**. Drafts are not published until you publish them.
 
 ## Current capabilities and remaining work
 
@@ -116,7 +122,7 @@ Scan does not publish. Draft does not publish. Dark Desk does not publish. **Pub
 
 ## Write a story from a link or your own notes
 
-**Write a story**, on the desk landing page, is the fast path into steps 3–5 above when you already know what the story is: paste a URL, a chunk of text, or just the idea into the one box, pick a model, and click **Write**. The desk parses whatever you gave it — every link becomes a source, the first line or sentence becomes the headline, and the whole thing you pasted is kept as the lead's Reporting notes, so the draft reads it as evidence the same way it would if you had typed it into the workbench by hand. You land straight on the story page and watch it draft.
+**Write a story**, on the desk landing page, is the fast path into steps 3–5 above when you already know what the story is: paste URLs or source text into **Links or source text**, add the angle in **What story do you want?**, pick a model, and click **Write draft**. The desk parses whatever you gave it — every link becomes a source, the first line or sentence becomes the headline, and the whole thing you pasted is kept as the lead's Reporting notes, so the draft reads it as evidence the same way it would if you had typed it into the workbench by hand. You land straight on the story page and watch it draft.
 
 **Development candidate (not yet deployed):** an optional Section selector uses your newspaper's configured reporting sections. Choose the section before writing to keep the story there through the draft pass. Leaving it blank keeps the existing text-based guess, which can fall back to Council; you can still refile afterward. An explicit opening instruction such as “Write a short local item about…” is retained as the editorial assignment, separately from source evidence. This helps preserve the requested subject and brief form, but does not verify facts. If one editing pass cannot shorten an overlong brief, the draft remains available with a warning rather than being discarded.
 
@@ -904,6 +910,6 @@ You are the publisher. The software is the library, the tape machine, and a very
 
 ### Import a transcript or document packet
 
-Open **Desk → Write a story**. Use **Attach documents** to select one or several Markdown/text, Word (.doc/.docx), PDF, PNG/JPEG/WebP, CSV/TSV or subtitle (.srt/.vtt) files. Add the story assignment in the text box, select the writing model, and click **Write**. Website, PDF and YouTube video URLs can go in the same text box; accessible video captions are retained as a transcript.
+Open **Desk → Write a story**. Use **Add documents** to select one or several Markdown/text, Word (.doc/.docx), PDF, PNG/JPEG/WebP, CSV/TSV or subtitle (.srt/.vtt) files. Add the story assignment in **What story do you want?**, select the writing model, and click **Write draft**. Website, PDF and YouTube video URLs go in **Links or source text**; accessible video captions are retained as a transcript.
 
 Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original remains private in the story; the reader extracts PDF pages, uses OCR for scanned pages/images, and processes long text in sections. The story lists reading progress and downloads of the original and full extracted text. Extracted text is limited to 20 million characters per document; larger text must be split into volumes. Reading errors are shown and originals are kept. Review OCR, names and quotations before publishing.

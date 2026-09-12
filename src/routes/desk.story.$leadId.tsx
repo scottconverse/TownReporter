@@ -692,6 +692,13 @@ function StoryPage() {
 
   return (
     <DeskShell title={data.lead.headline} kicker="Workbench" hideTitle>
+      {data.job && (data.job.status === "queued" || data.job.status === "running") ? (
+        <section className="story-running-banner" aria-label="Draft progress" role="status">
+          <strong>{data.job.status === "queued" ? "Your story is queued" : "Your story is being written"}</strong>
+          <p>{data.job.stage || "Preparing your sources…"}</p>
+          <span>Your submission is saved. The draft will appear here automatically. You can return from <Link to="/desk">Desk → Your recent drafts</Link>.</span>
+        </section>
+      ) : null}
       <Link to="/desk/queue" className="crumb">
         ← Queue
       </Link>

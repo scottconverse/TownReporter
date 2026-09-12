@@ -1,6 +1,12 @@
 # Changelog
 
-Current release: **0.6.36**.
+Current release: **0.6.37**.
+
+## 0.6.37 — 2026-09-12
+
+- The Desk has a prominent Add documents button with hover and keyboard focus, a file drop area, upload progress, and individually removable saved documents. Source text and story instructions have separate fields.
+- Running stories have an Open your story banner; Your recent drafts shows persistent links and current status. The story editor shows drafting progress at the top.
+- The composer, queue, and monitoring panels have clearer spacing and boundaries, with responsive layouts and light/dark theme support.
 
 ## 0.6.36 — 2026-09-12
 

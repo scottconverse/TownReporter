@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Upload, FileText, Check, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import {
   uploadStoryDocument,
@@ -20,16 +21,27 @@ export function StoryDocumentUpload({
 }) {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+  const uploadLock = useRef(false);
+  const [dragging, setDragging] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [failed, setFailed] = useState(false);
   async function upload(files: File[]) {
+    if (disabled || uploadLock.current || !files.length) return;
+    setFailed(false);
     if (documents.length + files.length > 20) {
+      setFailed(true);
       setStatus("Choose up to 20 documents per story.");
       return;
     }
     const saved = [...documents];
+    uploadLock.current = true;
+    setProgress(0);
     setBusy(true);
     onBusy(true);
     try {
       for (const file of files) {
+        setProgress(0);
         documentKind(file.name);
         if (file.size > DOCUMENT_FILE_LIMIT)
           throw new Error(`${file.name} exceeds 100 MB. Split it into volumes before uploading.`);
@@ -42,6 +54,9 @@ export function StoryDocumentUpload({
           form.append("offset", String(offset));
           form.append("id", result?.id ?? "");
           result = await uploadStoryDocument({ data: form });
+          setProgress(
+            Math.round((Math.min(file.size, offset + 4 * 1024 * 1024) / file.size) * 100),
+          );
           setStatus(
             "Uploading " +
               file.name +
@@ -54,20 +69,57 @@ export function StoryDocumentUpload({
         saved.push(result);
         onChange([...saved]);
       }
-      setStatus("Documents saved. Add your instructions, choose a model, then click Write.");
+      setStatus("Documents saved. Ready to draft when you are.");
     } catch (e) {
+      setFailed(true);
       setStatus(e instanceof Error ? e.message : String(e));
     } finally {
+      uploadLock.current = false;
       setBusy(false);
       onBusy(false);
     }
   }
   return (
-    <div className="my-4 space-y-2">
-      <label className="block font-bold">
-        Attach documents
+    <div className="document-upload">
+      <div
+        className={
+          "document-dropzone" +
+          (dragging ? " is-dragging" : "") +
+          (busy || disabled ? " is-busy" : "")
+        }
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!busy && !disabled) setDragging(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          void upload(Array.from(e.dataTransfer.files));
+        }}
+      >
+        <Upload className="document-upload-icon" size={28} aria-hidden="true" />
+        <h3>Start with your documents</h3>
+        <p>Drop meeting packets, transcripts or notes here.</p>
+        <button
+          type="button"
+          className="document-add-button"
+          disabled={disabled || busy}
+          onClick={() => picker.current?.click()}
+        >
+          <Upload size={18} aria-hidden="true" />{" "}
+          {busy
+            ? "Uploading documents…"
+            : documents.length
+              ? "Add more documents"
+              : "Add documents"}
+        </button>
         <input
-          className="mt-2 block w-full"
+          ref={picker}
+          className="document-file-input"
+          tabIndex={-1}
           aria-label="Attach documents"
           type="file"
           multiple
@@ -79,28 +131,52 @@ export function StoryDocumentUpload({
             void upload(files);
           }}
         />
-      </label>
-      <p className="text-sm">
-        Up to 20 files, 100 MB each. Word (.doc/.docx), PDF, images, Markdown, text, CSV and
-        transcripts. Originals are saved in full. PDFs and images use OCR when needed; long
-        documents are read in sections. You can also paste website, PDF or YouTube URLs in the box
-        above.
-      </p>
+        <p className="document-formats">
+          PDF · Word · Markdown · Text · Images · CSV · Transcripts
+        </p>
+        <p className="document-limits">Up to 20 files · 100 MB each · OCR included</p>
+      </div>
+      {busy && (
+        <progress
+          className="document-progress"
+          value={progress}
+          max={100}
+          aria-label="Document upload progress"
+        />
+      )}
+      {status && (
+        <p
+          className={"document-status" + (failed ? " is-error" : "")}
+          role={failed ? "alert" : "status"}
+        >
+          {status}
+        </p>
+      )}
+      {documents.length > 0 && (
+        <p className="document-count">
+          {documents.length} document{documents.length === 1 ? "" : "s"} attached
+        </p>
+      )}
       {documents.map((d) => (
-        <div key={d.id} className="flex items-center gap-3">
-          <span>
-            {d.filename} · {(d.size / 1024 / 1024).toFixed(1)} MB · saved
-          </span>
+        <div key={d.id} className="document-file-row">
+          <FileText size={20} aria-hidden="true" />
+          <div className="document-file-detail">
+            <strong>{d.filename}</strong>
+            <span>
+              <Check size={14} aria-hidden="true" /> Saved · {(d.size / 1024 / 1024).toFixed(1)} MB
+            </span>
+          </div>
           <button
             type="button"
+            className="document-remove"
+            aria-label={"Remove " + d.filename + " from this story"}
             disabled={busy || disabled}
             onClick={() => onChange(documents.filter((x) => x.id !== d.id))}
           >
-            Remove from this story
+            <X size={16} aria-hidden="true" /> Remove
           </button>
         </div>
       ))}
-      {status && <p role="status">{status}</p>}
     </div>
   );
 }
