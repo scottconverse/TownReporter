@@ -345,11 +345,11 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
     else dialog.current?.close();
   }, [open]);
   const query = term.trim().toLocaleLowerCase();
-  const pages = [...LINKS, { to: "/desk/dark", label: "Dark Desk" }].filter((l) =>
+  const pages = [...LINKS, { to: "/desk/dark", label: "Dark Desk" }, { to: "/desk/follow-ups", label: "Follow-ups" }].filter((l) =>
     l.label.toLocaleLowerCase().includes(query),
   );
   const matches = (leads.data ?? [])
-    .filter((l) => `${l.headline} ${l.why} ${l.topic}`.toLocaleLowerCase().includes(query))
+    .filter((l) => `${l.story_headline ?? ""} ${l.headline} ${l.why} ${l.topic}`.toLocaleLowerCase().includes(query))
     .slice(0, 30);
   return (
     <dialog
@@ -400,7 +400,7 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
               onClick={onClose}
             >
               <span>
-                {l.headline}
+                {l.story_headline || l.headline}
                 <small>
                   {l.topic} · {l.status}
                 </small>

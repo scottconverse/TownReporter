@@ -300,11 +300,12 @@ async function fileQueueLead(headline, why) {
   await form.getByLabel("Headline").fill(headline);
   await form.getByLabel("Why now").fill(why);
   await form.getByRole("button", { name: "File lead" }).click();
-  await page.getByRole("heading", { name: headline, exact: true }).waitFor();
+  await expect(page.getByRole("textbox", { name: "Headline", exact: true })).toHaveValue(headline);
 }
 
 async function persistSuppliedScope(headline, why) {
   await fileQueueLead(headline, why);
+  await page.getByRole("tab", { name: "Reporting", exact: true }).click();
 
   // Draft performs the real saveReportingNotes call first. Hold only its
   // second, model-bearing draftLead request and abort it: the stored scope is
