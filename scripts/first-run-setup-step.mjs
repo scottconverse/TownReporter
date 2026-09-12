@@ -49,7 +49,7 @@ export async function completeFirstRunSetup(page, base, opts = {}) {
     try {
       await Promise.all([
         page.getByLabel("Paper name", { exact: true }).waitFor({ state: "hidden", timeout: 60_000 }),
-        page.getByRole("heading", { level: 1, name: "The desk", exact: true }).waitFor({ timeout: 60_000 }),
+        page.getByRole("heading", { level: 1, name: "A clear desk. A good story.", exact: true }).waitFor({ timeout: 60_000 }),
       ]);
       break;
     } catch {
