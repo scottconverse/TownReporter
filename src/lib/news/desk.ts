@@ -4,6 +4,7 @@ import {
   saveAcceptedNewsroomSource,
 } from "./source-seeds.server.ts";
 import { selectedScanSources } from "./section-types.ts";
+import { scanSourceExcerpt } from "./scan-source-excerpt.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
@@ -578,7 +579,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       "This section no longer has accepted assigned sources. Review Paper setup and start a new scan.",
     );
 
-  const fetched: { title: string; url: string; text: string; changed: boolean }[] = [];
+  const fetched: { title: string; url: string; text: string; extras: { url: string; text: string }[]; changed: boolean }[] = [];
   const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
   const pendingSourceTouches: { id: number; error: string | null }[] = [];
   const pendingDisappeared: { title: string; url: string; error: string }[] = [];
@@ -640,7 +641,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       fetched.push({
         title: src.tier === "C" ? `[discovery] ${src.title}` : src.title,
         url: src.url,
-        text: text.slice(0, 4500),
+        text: bundle.text.slice(0, 4500),
+        extras,
         changed,
       });
     } catch (err) {
@@ -698,7 +700,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const PAYLOAD_BUDGET = 48000;
   let payload = "";
   for (const f of ranked) {
-    const excerpt = f.text.slice(0, expandForScope || reread || f.changed ? 2800 : 800);
+    const excerpt = scanSourceExcerpt(f.text, f.extras, expandForScope || reread || f.changed ? 2800 : 800);
     const changedLine = expandForScope
       ? f.changed
         ? "yes; expanded excerpt for this scan scope"

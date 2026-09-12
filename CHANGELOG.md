@@ -4,6 +4,10 @@ Current release: **0.6.35**.
 
 ## Unreleased
 
+- Scanning retains separately attributed excerpts from fetched attachments
+  even when a long parent page would previously crowd them out. The existing
+  excerpt limits remain, and document excerpts are marked as partial reads.
+
 - Dark Desk adds an opt-in responsive research method: the selected model can
   search, read, follow a captured link, or finish after seeing the previous
   action's results. Editors set the decision limit in How hard to dig; batch

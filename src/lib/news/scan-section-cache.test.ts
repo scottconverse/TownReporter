@@ -10,6 +10,7 @@ import { ingestUrl } from "./ingest.ts";
 import { sha256 } from "./url-guard.ts";
 import type { DeskJob } from "./jobs.ts";
 import type { SectionScanSnapshot } from "./section-types.ts";
+import { scanSourceExcerpt } from "./scan-source-excerpt.ts";
 
 // This test executes desk.ts itself. Resolve its Vite alias/extensionless imports
 // inside this isolated Node test process; no production loader is changed.
@@ -54,6 +55,7 @@ async function modelPack(
   priorSection: boolean,
   priorGeneral = false,
   changed = false,
+  attachment = false,
 ) {
   const sql = await getSql();
   const room = roomCounter++;
@@ -93,6 +95,22 @@ async function modelPack(
       model_choice_source: "editor",
     } as DeskJob,
     {
+      ...(attachment
+        ? {
+            ingestUrl: async (requested: string) =>
+              requested.endsWith("/packet.pdf")
+                ? {
+                    text: "PACKET_ONLY_FACT: The board will consider expanded after-school places on September 15.",
+                    titleHint: "School board packet",
+                    extras: [],
+                  }
+                : {
+                    text: "Public meeting archive and navigation. ".repeat(160),
+                    titleHint: "Shared report",
+                    extras: [url + "/packet.pdf"],
+                  },
+          }
+        : {}),
       grokChat: async (_system, userMessage) => {
         pack = userMessage;
         return {
@@ -127,4 +145,29 @@ it("expanded section excerpts preserve the actual changed-source signal", async 
   const pack = await modelPack(true, false, false, true);
   assert.match(pack, /CHANGED: yes; expanded excerpt for this scan scope/);
   assert.ok(pack.includes(marker));
+});
+it("a fetched attachment reaches the scan model even after a long parent page", async () => {
+  const pack = await modelPack(true, false, false, true, true);
+  assert.match(pack, /DOCUMENT https:\/\/93\.184\.216\.34\/scope-\d+\/packet\.pdf/);
+  assert.match(pack, /PACKET_ONLY_FACT/);
+  assert.match(pack, /Public meeting archive and navigation/);
+});
+it("four fetched documents keep separate attribution within either existing scan budget", () => {
+  const extras = Array.from({ length: 4 }, (_, i) => ({
+    url: `https://example.org/packet-${i}.pdf`,
+    text: `DOCUMENT_FACT_${i}. ` + "More captured evidence. ".repeat(200),
+  }));
+  for (const budget of [800, 2800]) {
+    const excerpt = scanSourceExcerpt(
+      "PARENT_FACT. " + "Parent page text. ".repeat(200),
+      extras,
+      budget,
+    );
+    assert.ok(excerpt.length <= budget);
+    assert.match(excerpt, /Partial excerpts/);
+    assert.match(excerpt, /PARENT_FACT/);
+    for (const [i, extra] of extras.entries()) {
+      assert.ok(excerpt.includes(`DOCUMENT ${extra.url}\nEXCERPT:\nDOCUMENT_FACT_${i}`));
+    }
+  }
 });
