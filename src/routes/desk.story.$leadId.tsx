@@ -1,3 +1,4 @@
+import { StoryDocumentList } from "@/components/story-documents";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import {
   evidenceNeedsReview,
@@ -753,6 +754,7 @@ function StoryPage() {
         </aside>
 
         <section className="story-work">
+          <StoryDocumentList leadId={id} />
           {!locked && !onPaper ? (
             <DraftScopePicker
               value={researchScope}
@@ -967,7 +969,7 @@ function StoryPage() {
             <Busy
               label={
                 slowWait
-                  ? "The click dropped. The writing pass is still finishing — this page is pulling the draft in."
+                  ? "The writing pass is still running. This page will show the draft when it is ready."
                   : researchScope === "supplied"
                     ? "Drafting from your supplied material. Stay on this page."
                     : "Reporting first — following the trail, then drafting. Stay on this page."

@@ -24,6 +24,8 @@ describe("fileRedditTipFor (Check r/longmont: File as tip)", () => {
       url,
       title: "City council votes on the budget shortfall",
       excerpt: "The packet shows a $2.1M shortfall.",
+      updated: "2026-09-10T12:00:00Z",
+      author: "/u/local_reader",
     });
     assert.deepEqual(res, { ok: true, filed: true });
 
@@ -34,6 +36,7 @@ describe("fileRedditTipFor (Check r/longmont: File as tip)", () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0]!.kind, "reddit-tip");
     assert.match(rows[0]!.details, /UNVERIFIED/);
+    assert.match(rows[0]!.details, /Posted 2026-09-10 by \/u\/local_reader/);
   });
 
   it("skips a post already on the desk and reports filed: false, without a duplicate row", async () => {

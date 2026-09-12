@@ -243,6 +243,26 @@ describe("routine notice manual checks", () => {
     );
   });
 
+  it("reads the City category's dotted a.m. and p.m. notation inside nested spans", async () => {
+    const f = await fixture("library-notice", "https://longmontcolorado.gov/events/category/library/");
+    const sql = await getSql();
+    await sql.query(
+      "update routine_notice_automation_sources set issuer='City of Longmont',collection_area='Longmont Public Library' where newsroom_id=$1 and source_id=$2",
+      [f.room, f.sourceId],
+    );
+    const source = await readFile(new URL("./__fixtures__/city-library-category.html", import.meta.url), "utf8");
+    // Derived from the retained fixture using the notation seen in live blob 628.
+    const dotted = source.replace(/(\b\d{1,2}(?::\d{2})?\s+)([ap])m(?=<\/span>)/g, (_match, clock, period) =>
+      `${clock}<span class="notranslate">${period}.m.</span>`,
+    );
+    assert.notEqual(dotted, source);
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room }, f.input,
+      { ingest: async () => htmlDocument(dotted) },
+    );
+    assert.deepEqual(result.check.counts, { parsed: 19, refused: 1, conflicts: 0 });
+  });
+
   it("refuses an occurrence when the City category visible time disagrees with JSON-LD", async () => {
     const url = "https://longmontcolorado.gov/events/category/library/";
     const f = await fixture("library-notice", url);

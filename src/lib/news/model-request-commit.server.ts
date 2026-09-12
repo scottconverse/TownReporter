@@ -400,13 +400,16 @@ export async function writeStoryForAuthenticatedEditor(
   input: {
     context: AuthenticatedEditorContext;
     text: string;
+    documentIds?: string[];
     researchScope?: "public" | "supplied";
     modelChoice?: string;
     sectionKey?: string;
   },
   deps: WriteStoryCommitDeps = {},
 ) {
-  const parsed = parseWriteStoryInput(input.text);
+  if ((input.documentIds?.length??0)>20 || new Set(input.documentIds??[]).size!==(input.documentIds?.length??0)) return {ok:false as const,error:"Choose up to 20 different documents."};
+  if (input.text.length > 20_000_000) return {ok:false as const,error:"Pasted text exceeds 20 million characters. Attach it in separate volumes."};
+  const parsed = parseWriteStoryInput(input.text || (input.documentIds?.length ? "Write a story from the attached documents." : ""));
   if (!parsed.ok) return { ok: false as const, error: parsed.error };
   const { headline, why, urls, scratch, editorialAssignment } = parsed.value;
   let topic = parsed.value.topic;
@@ -426,6 +429,11 @@ export async function writeStoryForAuthenticatedEditor(
   await sql.query(
     "alter table leads add column if not exists notes_json text not null default '{}'",
   );
+  if(input.documentIds?.length){
+    const {ensureStoryDocuments}=await import('./story-documents.server.ts');await ensureStoryDocuments(sql);
+    const available=await sql.query("select id from story_documents where id=any($1) and newsroom_id=$2 and user_id=$3 and lead_id is null and status='uploaded'",[input.documentIds,input.context.newsroomId,input.context.userId]);
+    if(available.length!==input.documentIds.length)return {ok:false as const,error:"One of these uploads is incomplete or already attached. Select it again before writing."};
+  }
   const notesJson = packNotes({ ...appendScratch(parseNotes(null), scratch), editorialAssignment, suppliedUrls: urls, researchScope: input.researchScope === "supplied" ? "supplied" : "public" });
   const urlsJson = JSON.stringify(urls);
   const rows = await sql<{ id: number }>`
@@ -456,6 +464,17 @@ export async function writeStoryForAuthenticatedEditor(
     input.context.newsroomId,
   );
 
+  const {linkStoryDocuments,storeStoryDocument}=await import("./story-documents.server.ts");
+  const documentIds=[...(input.documentIds??[])];
+  if(input.text.length>4000){
+    const stored=await storeStoryDocument(input.context.newsroomId,input.context.userId,"Pasted source text.txt","text/plain",new TextEncoder().encode(input.text));
+    documentIds.push(stored.id);
+  }
+  if(urls.length){
+    const links=await storeStoryDocument(input.context.newsroomId,input.context.userId,"Supplied source links.txt","application/x-townreporter-source-links",new TextEncoder().encode(urls.join('\n')));
+    documentIds.push(links.id);
+  }
+  await linkStoryDocuments(sql,input.context.newsroomId,input.context.userId,leadId,documentIds);
   const modelChoice = storyModelChoice(input.modelChoice);
   const commit = await commitStoryDraftForAuthenticatedEditor(
     { context: input.context, leadId, modelChoice, researchScope: input.researchScope },

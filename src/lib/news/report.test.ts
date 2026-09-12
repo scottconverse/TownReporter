@@ -24,7 +24,7 @@ import {
   type ProvenanceItem,
 } from "./report.ts";
 import type { LeadRow } from "./types.ts";
-import { describeTextChanges, retrieveRelevantChunks } from "./retrieve.ts";
+import { describeTextChanges, retrieveRelevantChunks, scoreExcerpt } from "./retrieve.ts";
 import { rankWorthItems } from "./worth-a-look.ts";
 
 it("supplies the configured topic key to writing and reconciliation as authoritative metadata", async () => {
@@ -484,6 +484,22 @@ describe("brief challenge", () => {
 });
 
 describe("large-document retrieval", () => {
+  it("ranks a specific street number above verbose generic commercial language", () => {
+    const target = "Preamble to the packet. ".repeat(64) + "Connection Church, 8979 Nelson Road. The proposal would add a parking lot and residents asked the city to approve the site plan.";
+    const unrelated = "The commercial project proposal includes decisions for residents, primary documents, approved actions, a contract, review, amendment, prior meeting discussion, public notice, and construction schedule. " + "Residents discussed the proposal and city process. ".repeat(6);
+    assert.ok(scoreExcerpt(target, ["8979 Nelson Road proposal decisions residents primary documents approved actions"]) > scoreExcerpt(unrelated, ["8979 Nelson Road proposal decisions residents primary documents approved actions"]));
+    assert.ok(scoreExcerpt("The 18979 Nelson Road project was discussed in 2026.", ["8979 Nelson Road"]) < scoreExcerpt(target, ["8979 Nelson Road"]));
+    const chunks = retrieveRelevantChunks(
+      [{ url: "https://example.test/adl.pdf", title: "ADL packet", text: unrelated + "\n\n" + target }],
+      ["8979 Nelson Road proposal decisions residents primary documents approved actions"],
+      { budgetChars: 1500, perDoc: 6 },
+    );
+    const selected = chunks.find((chunk) => /8979 Nelson Road/.test(chunk.excerpt));
+    assert.ok(selected, "specific address row must survive retrieval");
+    assert.ok(selected.excerpt.length <= 1500);
+    assert.match(selected.excerpt, /parking lot and residents asked the city/i);
+  });
+
   it("pulls cost, amendment and contradiction from deep pages, not only the prefix", () => {
     const pages = Array.from({ length: 200 }, (_, i) => {
       const page = i + 1;

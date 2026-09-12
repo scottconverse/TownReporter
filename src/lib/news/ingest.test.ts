@@ -8,12 +8,27 @@ import {
   encodeOcrExtractionMethod,
   extractPdfBetter,
   extractPdfText,
+  ingestDocument,
   ingestUrl,
   mapLimit,
   parseRssItems,
   withRetry,
 } from "./ingest.ts";
 import { setFetchImplForTests } from "./fetch-url.ts";
+
+describe("PrimeGov API capture", () => {
+  it("keeps the approved JSON endpoint on the raw-byte ingestion path", async () => {
+    const raw = JSON.stringify([{ id: 3781, title: "Council", dateTime: "2026-09-11T18:00:00", location: "Chambers", documentList: [{ id: 1, templateId: 2, templateName: "Agenda" }] }]);
+    setFetchImplForTests(async () => new Response(raw, { headers: { "content-type": "application/json" } }));
+    try {
+      const result = await ingestDocument("https://longmont.primegov.com/api/v2/PublicPortal/ListUpcomingMeetings");
+      assert.equal(result.rawBytes && new TextDecoder().decode(result.rawBytes), raw);
+      assert.equal(result.extractionMethod, "heuristic");
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+});
 
 describe("ingestUrl HTML scanner path", () => {
   for (const contentType of [undefined, "application/json"]) {

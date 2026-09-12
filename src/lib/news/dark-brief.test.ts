@@ -50,6 +50,14 @@ describe("parseBrief", () => {
     assert.ok(parsed.kills_it.length > 300);
   });
 
+  it("preserves citation-bearing connections and supports beyond the old short limit", () => {
+    const citation = `${"Evidence detail ".repeat(40)}https://records.example/source/long-citation`;
+    const parsed = parseBrief({ connections: [citation], supports: [citation] });
+
+    assert.equal(parsed.connections[0], citation);
+    assert.equal(parsed.supports[0], citation);
+  });
+
   /**
    * A summary panel that breaks the page is worse than no summary panel — it
    * sits above four sections the editor still needs.
@@ -108,6 +116,14 @@ describe("BRIEF_SYSTEM", () => {
     assert.match(BRIEF_SYSTEM, /same record/i);
     assert.match(BRIEF_SYSTEM, /adjacent/i);
     assert.match(BRIEF_SYSTEM, /unknown/i);
+  });
+
+  it("requires numeric comparisons and alleged contradictions to agree with the captured values", () => {
+    assert.match(BRIEF_SYSTEM, /compare the actual numeric values/i);
+    assert.match(BRIEF_SYSTEM, /row order is not rank/i);
+    assert.match(BRIEF_SYSTEM, /same measure, period, and geographic scope/i);
+    assert.match(BRIEF_SYSTEM, /do not call sources contradictory when they agree/i);
+    assert.match(BRIEF_SYSTEM, /across every JSON field/i);
   });
 
   it("distinguishes an incomplete investigation from a disproved premise", () => {

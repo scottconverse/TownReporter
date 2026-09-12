@@ -63,12 +63,38 @@ export function scoreExcerpt(excerpt: string, queries: string[]): number {
   for (const t of uniq) {
     if (blob.includes(t)) score += t.length > 7 ? 2 : 1;
   }
+  // Long numeric identifiers (street numbers, project IDs) are much more
+  // discriminating than the generic document language below. Do not let a
+  // common calendar year become a decisive match, and require token
+  // boundaries so 8979 cannot match inside 18979.
+  const identifiers = uniq.filter((t) => {
+    const digits = t.match(/\d/g)?.length ?? 0;
+    return digits >= 3 && !/^(?:19|20)\d{2}$/.test(t) || digits >= 3 && /[a-z]/i.test(t);
+  });
+  for (const identifier of identifiers) {
+    const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, "i").test(excerpt)) score += 20;
+  }
   if (/\$[\d,]+/.test(excerpt)) score += 3;
   if (/\b(20\d{2}|january|february|march|april|may|june|july|august|september|october|november|december)\b/i.test(excerpt)) {
     score += 2;
   }
   if (/\b(amendment|contract|delay|contradict|previous|prior)\b/i.test(excerpt)) score += 2;
   return score;
+}
+
+function boundedRelevantExcerpt(excerpt: string, queries: string[], maxChars: number): string {
+  if (excerpt.length <= maxChars) return excerpt;
+  const identifiers = [...new Set(queries.flatMap(queryTokens))].filter((t) => {
+    const digits = t.match(/\d/g)?.length ?? 0;
+    return digits >= 3 && !/^(?:19|20)\d{2}$/.test(t) || digits >= 3 && /[a-z]/i.test(t);
+  });
+  const match = identifiers
+    .map((id) => ({ id, at: excerpt.toLowerCase().search(new RegExp(`(?<![a-z0-9])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9])`, "i")) }))
+    .find((item) => item.at >= 0);
+  if (!match) return excerpt.slice(0, maxChars);
+  const start = Math.max(0, Math.min(match.at - Math.floor(maxChars * 0.45), excerpt.length - maxChars));
+  return excerpt.slice(start, start + maxChars);
 }
 
 /**
@@ -144,8 +170,9 @@ export function retrieveRelevantChunks(
     if (seen.has(key)) continue;
     if (used + c.excerpt.length > budget && out.length) continue;
     seen.add(key);
-    out.push(c);
-    used += c.excerpt.length;
+    const excerpt = boundedRelevantExcerpt(c.excerpt, queries, Math.max(1, budget - used));
+    out.push({ ...c, excerpt });
+    used += excerpt.length;
   }
   return out;
 }

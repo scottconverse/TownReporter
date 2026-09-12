@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.35](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35) — beta candidate (not yet published).** Stable Windows acquisition remains [0.6.30](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.30). Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.36](https://github.com/scottconverse/TownReporter/pull/43) — document intake update; deployment is recorded separately.** The release at `6f603ec` was deployed to Halo; the subsequent Utility Bill Analyzer navigation change is deployed at `fe53b6e`. The published 0.6.35 Windows installation ZIP is available from that release; the [latest stable release](https://github.com/scottconverse/TownReporter/releases/latest) remains available separately. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Halo operators can use the [0.6.35 local staging and promotion prompt](docs/HALO-UPDATE-0.6.35.md) after the exact beta release is published.
+Halo deployment evidence for 0.6.35 is recorded in [the deployment receipt](docs/operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -49,7 +49,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-For beta testing, download the Windows installation ZIP from the direct [0.6.35 beta release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35) once published. The [latest stable release](https://github.com/scottconverse/TownReporter/releases/latest) remains available separately. Extract the chosen ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
+For beta testing, download the Windows installation ZIP from the published [0.6.35 beta release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35). The [latest stable release](https://github.com/scottconverse/TownReporter/releases/latest) remains available separately. Extract the chosen ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first editorial workflow within an hour with working internet and an available AI account or endpoint; release evidence records the measured result and its limits. Public hosting is separate from this local installation.
 
@@ -94,7 +94,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
-- **0.6.35 beta candidate** — Editor delivery includes the story evidence-check workbench, Stats reports, named custom AI connections, draft recovery and reconciliation, PDF/page-aware evidence, ownership-preserving research and queue improvements, and retained routine-notice editor controls. Candidate acceptance, publication and deployment remain pending.
+- **0.6.35 beta** — Editor delivery includes the story evidence-check workbench, Stats reports, named custom AI connections, draft recovery and reconciliation, PDF/page-aware evidence, ownership-preserving research and queue improvements, and retained routine-notice editor controls. Published and deployed to Halo at `6f603ec`; the PDF/page-aware OCR and Dark Desk work retain the bounded acceptance limits described below.
 - **0.6.34 beta** — Dark Desk selects relevant captured records across the full inventory before shared selection builds separately bounded inputs for stage-one signal synthesis and the final brief. The release receipt records runtime proof and its limits.
 - **0.6.33 beta** — Packaged installations can start the native Codex CLI from their extracted, non-Git application directory. See the release receipt for native and application verification.
 - **0.6.32 beta** — Evidence review groups duplicate views of the same available captured version while retaining its artifact and capture-event identities, uses singular claim counts, distinguishes editor-selected records from draft citations, and simplifies current-beta release links.

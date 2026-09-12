@@ -5,9 +5,11 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
   civicScore,
+  classifyRedditPosts,
   parseRedditFeed,
   pickCivicPosts,
   redditAnomaly,
+  redditPostIsAutoFileEligible,
   selectRotatingQueryGroups,
   subredditNewFeed,
   subredditSearchFeed,
@@ -170,6 +172,29 @@ describe("redditAnomaly", () => {
   it("says 'undated' rather than inventing a date", () => {
     const a = redditAnomaly({ ...post, updated: "" }, "longmont");
     assert.match(a.details, /Posted undated/);
+  });
+});
+
+describe("Reddit automatic filing window", () => {
+  it("allows dated posts within 30 days and refuses old or unknown dates", () => {
+    const now = Date.parse("2026-09-11T12:00:00.000Z");
+    assert.equal(redditPostIsAutoFileEligible({ updated: "2026-08-12T12:00:00.000Z" }, now), true);
+    assert.equal(redditPostIsAutoFileEligible({ updated: "2026-08-11T11:59:59.000Z" }, now), false);
+    assert.equal(redditPostIsAutoFileEligible({ updated: "" }, now), false);
+    assert.equal(redditPostIsAutoFileEligible({ updated: "not-a-date" }, now), false);
+  });
+
+  it("carries feed date and author through scored cards", () => {
+    const [card] = classifyRedditPosts([{
+      title: "Council vote",
+      url: "https://www.reddit.com/r/longmont/comments/date/test/",
+      updated: "2026-09-10T12:00:00.000Z",
+      author: "u/reporter",
+      excerpt: "The city council voted on a permit.",
+    }], [], [], 0);
+    assert.equal(card?.updated, "2026-09-10T12:00:00.000Z");
+    assert.equal(card?.author, "u/reporter");
+    assert.equal(card?.autoFileEligible, true);
   });
 });
 

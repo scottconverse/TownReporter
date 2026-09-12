@@ -1,25 +1,92 @@
 # Changelog
 
-Current release: **0.6.35**.
+Current release: **0.6.36**.
 
-## Unreleased
+## 0.6.36 — 2026-09-12
+
+- Write a story accepts up to 20 documents of 100 MB each using multipart transfers. Markdown/text, Word DOC/DOCX, PDF, images and subtitle files are retained privately with full extracted text.
+- Long pasted sources are retained as documents instead of silently clipped. Documents are read in sections, and their evidence reaches research, writing and final editing. PDF/image OCR and website/PDF/YouTube URL intake feed the same workflow.
+- The story page shows document reading progress and original/extracted-text downloads. Unsupported types, incomplete uploads and extraction errors are visible. Extracted text above 20 million characters must be split into volumes.
+
+
+- Scanning retains separately attributed excerpts from fetched attachments
+  even when a long parent page would previously crowd them out. The existing
+  excerpt limits remain, and document excerpts are marked as partial reads.
+
+- Dark Desk adds an opt-in responsive research method: the selected model can
+  search, read, follow a captured link, or finish after seeing the previous
+  action's results. Editors set the decision limit in How hard to dig; batch
+  research remains the default. Live reporting acceptance remains outstanding.
+
+- Dark Desk can ask its selected model which sources to read after successful
+  search results arrive, retaining the existing read limits and evidence captures.
+  A failed source-choice call falls back to the ordinary queue with a notice.
+
+- Keep exact street and project identifiers in bounded document excerpts, so
+  generic passages do not crowd out the relevant record before the model reads it.
+
+- Editor desk chrome uses the signed-in editor's newsroom identity instead
+  of the public paper's city. Public reader identity is unchanged.
+
+- Reddit checks automatically file only dated tips from the past 30 days.
+  Older and undated candidates remain visible and manually fileable. Result
+  cards show the available date and author, and manual filing retains them.
+
+- Drafting a lead filed from a page watch reuses the exact captured text and
+  source reference, including scanned-PDF OCR. Later failed fetches no longer
+  replace that material; retained capture dates and partial-reading limits
+  remain in reporting notes.
+
+- Read routine-event category pages up to 1 MiB, matching the existing library
+  category allowance; individual structured-data and traversal limits remain.
+
+- Preserve original PrimeGov public API response bytes for meeting-notice
+  checks instead of substituting the portal's summarized catalog.
+
+- Allow the supported public Longmont fall-leaf bulletin to serve as its own
+  waste-notice attribution, so owners can save its routine-edition settings.
+
+- Routine edition copy uses readable dates and event titles instead of raw
+  timestamp strings and HTML entities. Date-only deadlines keep their stated day.
+
+- Registration notice checks can read the explicit youth basketball deadline
+  from Longmont's Fall 2026 sports PDF, retaining page references and the original
+  PDF when saved and reopened. Source approval and activation remain separate.
+
+- Preserve citation-bearing Dark Desk connection/support bullets beyond the old
+  240-character limit, and save complete brief JSON instead of cutting it mid-field.
+
+- Dark Desk brief instructions explicitly check numeric comparisons across
+  records and avoid treating table row order as rank or agreeing sources as
+  contradictory. This is model guidance, not an automatic factual verifier.
+
+- Library-calendar checks recognize the City's dotted a.m./p.m. time notation,
+  while still refusing entries whose visible and structured times disagree.
+
+- Scans include recent published coverage alongside beat memory, helping avoid
+  refiling old stories while retaining genuinely new developments.
+- Update the compatible transitive js-yaml dependency to 4.3.2.
+
+- Reporting and saved-draft evidence checks explicitly preserve planned,
+  future and conditional status rather than turning it into a current fact.
+  This strengthens model instructions; editor source review remains necessary.
 
 - Longmont's front-page navigation includes **Utility Bill Analyzer** beside
   **City council votes**, opening Shakeel Dalal's analyzer page in a new tab.
 
-## 0.6.35 beta — 10 September 2026 (candidate)
+## 0.6.35 beta — 10 September 2026 (published and deployed)
 
 - Operator documentation now describes named custom AI API connections,
   explicit model selection and fallback boundaries, Stats report retention,
-  queue/evidence recovery, and the current unreleased PDF page-reader and Dark
-  Desk handoff limits. These development-candidate features are not claimed as
-  deployed in production 0.6.34.
+  queue/evidence recovery, and the shipped PDF page-reader and Dark Desk
+  handoff limits. Deployment does not establish full real-world PDF reporting
+  or investigative acceptance.
 - Stats counts exactly seven or thirty calendar dates including today, and describes its existing anonymous home/story page-load counts without implying unique visitors or completed reads.
 - Newly generated reporting follow-ups merge whitespace and final-period duplicates while preserving the first wording, distinct questions, amounts, human tasks and historical records.
 
 - Dark Desk stops a failed planner's empty fallback before spending the whole hop budget. If no provider performs research and synthesis also fails, the job is marked failed; ordinary Automatic failover and successful searches with zero results remain available. Historical failed runs are not rewritten.
 - Draft reconciliation reserves bounded source context for the assigned story so a large secondary document cannot take every evidence slot. New discoveries remain in the shared packet; this is evidence coverage, not a factual-accuracy guarantee.
-- The story workbench adds **Check draft against evidence**. After the editor saves any changes and chooses a model, the check evaluates that exact saved version against its captured evidence without restarting discovery or initial writing. A completed check saves a new draft version and retains the original; incomplete checks, failures and edits made while the job runs remain explicit. This feature is a 0.6.35 candidate and is not yet published or deployed.
+- The story workbench adds **Check draft against evidence**. After the editor saves any changes and chooses a model, the check evaluates that exact saved version against its captured evidence without restarting discovery or initial writing. A completed check saves a new draft version and retains the original; incomplete checks, failures and edits made while the job runs remain explicit. This feature shipped in 0.6.35 and is deployed; it remains model-assisted review, not independent fact verification.
 - New array-valued review warnings remain separate readable items instead of collapsing into comma-joined text. Historical prose is retained unchanged.
 - Batch results identify the draft saved by that batch separately from the current story workbench. The built server's duplicated job modules share one process-local concurrency counter; this is not a cross-process scheduler guarantee.
 - Native Codex reporting can opt into `TOWNREPORTER_CODEX_REASONING_EFFORT=high` per application process while the unset default retains native inheritance. Batch reporting now forwards the calculated existing time budget and shows its reporting, writing and evidence-check stages without changing native capabilities.

@@ -93,7 +93,7 @@ test("keeps a multi-day collection range and source instructions in the edition"
   const Wednesday = eligibleRoutineNotices([notice], "2026-10-28", "America/Denver");
   assert.deepEqual(Wednesday.eligible.map((item) => item.channel), ["today", "weekend"]);
   assert.equal(Wednesday.eligible[0]!.channel, "today");
-  assert.match(Wednesday.eligible[0]!.line, /2026-10-26.*2026-10-30/);
+  assert.match(Wednesday.eligible[0]!.line, /Oct 26, 2026.*Oct 30, 2026/);
   assert.match(Wednesday.eligible[0]!.line, /Bags before 7 AM Monday; leave them out all week/);
 
   const Friday = eligibleRoutineNotices([notice], "2026-10-30", "America/Denver");
@@ -106,7 +106,7 @@ test("converts named-zone wall times into the newsroom day and labels the source
   const notice = n("registration-deadline", { issuer: "City", program: "Permit", deadline: "2026-09-09T00:30:00", registrationUrl: "https://city.example/apply", timezone: "America/New_York" }, "zone");
   const result = eligibleRoutineNotices([notice], "2026-09-08", "America/Denver");
   assert.equal(result.eligible[0]?.channel, "deadlines");
-  assert.match(result.eligible[0]!.line, /America\/New_York/);
+  assert.match(result.eligible[0]!.line, /Sep 8, 2026 at 10:30 PM America\/Denver/);
 });
 test("routes allegation-like free text to review and never renders it", () => {
   const risky = n(
@@ -143,4 +143,37 @@ test("uses the validator's normalized scheduled status while retaining cancelled
     assert.equal(result.eligible.length, expected);
     assert.equal(result.review.length, expected ? 0 : 1);
   }
+});
+
+test("renders decoded titles and newsroom-local human dates", () => {
+  const notice = n(
+    "community-arts-event-logistics",
+    {
+      issuer: "City",
+      title: "All Ages Stay &amp; Play Friday",
+      start: "2026-09-11T16:30:00Z",
+      venue: "Longmont Public Library",
+    },
+    "decoded-title",
+  );
+  const result = eligibleRoutineNotices([notice], "2026-09-11", "America/Denver");
+  assert.match(result.eligible[0]!.line, /All Ages Stay & Play Friday/);
+  assert.match(result.eligible[0]!.line, /Sep 11, 2026 at 10:30 AM/);
+  assert.doesNotMatch(result.eligible[0]!.line, /&amp;|2026-09-11T16:30:00Z/);
+});
+
+test("does not shift date-only deadline values across timezones", () => {
+  const notice = n(
+    "registration-deadline",
+    {
+      issuer: "City",
+      program: "Permit",
+      deadline: "2026-09-12",
+      registrationUrl: "https://city.example/apply",
+    },
+    "date-only-display",
+  );
+  const result = eligibleRoutineNotices([notice], "2026-09-12", "America/Los_Angeles");
+  assert.match(result.eligible[0]!.line, /Sep 12, 2026/);
+  assert.doesNotMatch(result.eligible[0]!.line, /Sep 11, 2026/);
 });

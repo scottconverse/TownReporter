@@ -77,9 +77,12 @@ const visiblyBoundedStr = (v: unknown, max: number) => {
   return `${value.slice(0, max - marker.length).trimEnd()}${marker}`;
 };
 
-const list = (v: unknown, max: number, each: number) =>
+const list = (v: unknown, max: number, each: number, preserveTail = false) =>
   Array.isArray(v)
-    ? v.map((x) => str(x, each)).filter(Boolean).slice(0, max)
+    ? v
+        .map((x) => (preserveTail ? visiblyBoundedStr(x, each) : str(x, each)))
+        .filter(Boolean)
+        .slice(0, max)
     : [];
 
 /**
@@ -98,7 +101,7 @@ export function parseBrief(raw: unknown, now = new Date()): InvestigationBrief {
     verdict: asVerdict(o.verdict),
     why_verdict: str(o.why_verdict, 400),
     next: str(o.next, 300),
-    connections: list(o.connections, 6, 240),
+    connections: list(o.connections, 6, 2_000, true),
     hypothesis: str(o.hypothesis, 400),
     /*
       Clamped, and 0 when absent.
@@ -111,7 +114,7 @@ export function parseBrief(raw: unknown, now = new Date()): InvestigationBrief {
       const n = Number(o.strength);
       return Number.isFinite(n) ? Math.min(1, Math.max(0, Number(n.toFixed(2)))) : 0;
     })(),
-    supports: list(o.supports, 6, 240),
+    supports: list(o.supports, 6, 2_000, true),
     benign: str(o.benign, 400),
     // This can be a multi-clause named-record instruction. Preserve normal
     // answers whole; if hostile/accidental output reaches the defensive 10k
@@ -141,6 +144,8 @@ You are writing the read-me-first block above an investigation file for ONE edit
 The file below is four dense lists. The editor can read them. What they cannot do quickly is see ACROSS them, and what they most need is an answer to: is there actually something here?
 
 TABLES AND LISTS: A captured excerpt can contain adjacent records or split one record across locators. Attribute an applicant, owner, dollar figure, acreage, or other field only when the same record explicitly pairs that value with the subject. A name merely before or after the subject is not a connection. A continuation must repeat the subject or carry an unambiguous same-record label; otherwise say the attribute is unknown and name the record to check.
+
+NUMERIC COMPARISONS: Before asserting ahead/behind, more/less, a rank, a difference, or a contradiction, compare the actual numeric values paired with each subject. Row order is not rank. Compare the same measure, period, and geographic scope; do not mix a subtotal with a combined total. Do not call sources contradictory when they agree. An alleged discrepancy needs the two incompatible source statements, not an inference from their layout. Check comparisons across every JSON field against the numbers in DOCUMENTS READ and against one another. If a comparison cannot be established, omit that comparison and state what remains unknown; do not invent an inconsistency to make a connection interesting.
 
 Your job, in order:
 

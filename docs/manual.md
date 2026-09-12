@@ -2,7 +2,9 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.35 · beta candidate · 10 September 2026**
+**Version 0.6.36 · document intake update · deployment is recorded separately**
+
+The [published release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35) has been deployed to Halo; see the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md). Later development work and acceptance results do not by themselves mean that another release has been deployed.
 
 **Documentation scope:** The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images are
 development examples; the other screens are historical Longmont captures from
@@ -38,6 +40,16 @@ at your own city.
 # Part 1 — What it is
 
 ## Current capabilities and remaining work
+
+**Unreleased DEV: responsive investigation.** In Dark Desk, open **How hard to
+dig → Change → Research method**. Batch preserves the existing workflow.
+Responsive lets the selected model search, read, follow a link, or finish,
+using the previous result to choose its next action. Set **Maximum research
+decisions per round** (1–24, initially 6), then **Save**. This is separate from
+the final brief and signal-verification calls. It does not publish anything
+or change your model choice. Captures remain the evidence; search results and
+the model's choice of a source do not establish a fact. Live acceptance of
+this new method is still pending.
 
 The Command Center uses Fable Direction A: composer and queue in the main
 column; Dark Desk, Follow-ups and wire in the rail. Follow-ups record who was
@@ -334,6 +346,15 @@ Three floors never move, at any setting: no invented claims of paid influence,
 every signal is labelled with how mature the evidence is, and every theory
 carries what would kill it.
 
+### Development preview: choosing sources after search
+
+The unreleased Dark Desk build can ask the selected research model which
+returned sources to read after a successful search. This uses the same
+four-read-per-round limit and retains the ordinary source captures. It adds
+at most one model call per round with useful search results, so such rounds
+can take longer. If source selection fails, the ordinary read queue continues
+and the run reports the fallback. This is not yet deployed to the public paper.
+
 ## Opinion
 
 `/desk/opinion` — the paper's own position.
@@ -380,9 +401,17 @@ of its own. Budget for a piece, not for a paragraph.
 
 ## The Server page
 
+For the supported Longmont fall-leaf collection bulletin, use the bulletin's
+own public URL as attribution. Other waste calendars still require a separate
+public attribution address. Saving settings does not by itself activate editions.
+
 The owner can manage **Routine notice permissions** and the separate **Automatic routine editions** control here. Automation starts paused. It accepts at most 12 exact approved structured sources across library, parks/recreation, community/arts, application deadlines, designated waste or deadline calendars, and public-meeting logistics. Each active selection requires an owner-entered issuer, locality, and public attribution URL; waste also requires a non-residential collection area, and library structured hours require a branch. Permission-only Event and non-calendar application-deadline checks can run without this automation context. The exact private fetch address and captured source remain private.
 
 After explicit activation, the daily scheduler creates deterministic logistics-only ordinary articles: Today in town on the newsroom-local date, This weekend on Friday for Friday through Sunday, and Deadlines approaching only for new or changed deadlines in the next seven days; it is not a continuous source watch. An approved source change can correct an automation-owned edition on a same-day rerun. A run uses at most five useful items and emits no empty edition. Conflicts, cancellation, unsupported recurrence, risky language, stale permissions or evidence, and edited or unpublished target articles stay for review. Recent runs show their result counts and published-article links. Disable automation or pause routine permissions to stop later reservations. Manual checks remain available and never publish by themselves.
+
+Routine edition event times are displayed in the configured newsroom timezone;
+date-only deadlines remain date-only. Captured source values are retained
+separately from the reader-facing date and title formatting.
 
 `/desk/ops` — everything this machine is doing to keep the paper online.
 
@@ -1092,3 +1121,10 @@ Fresh public article/feed/sitemap reads stop returning removed stories. Existing
 ---
 
 MIT licensed. Copyright (c) 2026 Scott Converse.
+
+
+### Import a transcript or document packet
+
+Open **Desk → Write a story**. Use **Attach documents** to select one or several Markdown/text, Word (.doc/.docx), PDF, PNG/JPEG/WebP, CSV/TSV or subtitle (.srt/.vtt) files. Add the story assignment in the text box, select the writing model, and click **Write**. Website, PDF and YouTube video URLs can go in the same text box; accessible video captions are retained as a transcript.
+
+Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original remains private in the story; the reader extracts PDF pages, uses OCR for scanned pages/images, and processes long text in sections. The story lists reading progress and downloads of the original and full extracted text. Extracted text is limited to 20 million characters per document; larger text must be split into volumes. Reading errors are shown and originals are kept. Review OCR, names and quotations before publishing.

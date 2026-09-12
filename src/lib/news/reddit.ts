@@ -25,6 +25,17 @@ export type RedditPost = {
   excerpt: string;
 };
 
+export const REDDIT_AUTO_FILE_DAYS = 30;
+
+/** Only dated posts from the explicit rolling window may be filed automatically. */
+export function redditPostIsAutoFileEligible(post: Pick<RedditPost, "updated">, now = Date.now()): boolean {
+  if (!post.updated) return false;
+  const at = Date.parse(post.updated);
+  if (!Number.isFinite(at)) return false;
+  const age = now - at;
+  return age >= 0 && age <= REDDIT_AUTO_FILE_DAYS * 24 * 60 * 60 * 1000;
+}
+
 /**
  * True for reddit.com (any subdomain) and the redd.it short-link host.
  *
@@ -327,6 +338,9 @@ export type ScoredRedditPost = {
   score: number;
   url: string;
   excerpt: string;
+  updated: string;
+  author: string;
+  autoFileEligible: boolean;
   state: RedditPostState;
 };
 
@@ -354,7 +368,7 @@ export function classifyRedditPosts(
       const score = civicScore(p);
       const state: RedditPostState =
         score < minScore ? "below-line" : filed.has(p.url) ? "filed" : known.has(p.url) ? "already-known" : "below-line";
-      return { title: p.title, score, url: p.url, excerpt: p.excerpt, state };
+      return { title: p.title, score, url: p.url, excerpt: p.excerpt, updated: p.updated, author: p.author, autoFileEligible: redditPostIsAutoFileEligible(p), state };
     })
     .sort((a, b) => b.score - a.score);
 }

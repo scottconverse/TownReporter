@@ -102,8 +102,47 @@ export function DarkDialsPanel() {
         searches; they do not certify source dates or completeness.
       </p>
 
+      <p className="mt-2 text-sm">
+        Saved research method: {q.data.preferences.executionMode === "responsive"
+          ? `Responsive — up to ${q.data.preferences.actionLimit ?? 6} research decisions per round`
+          : "Batch — plan searches and reads in rounds"}.
+      </p>
       {open ? (
         <div className="mt-4 space-y-6">
+          <div>
+            <label className="f">
+              <span>Research method</span>
+              <select
+                aria-label="Research method"
+                value={preferences.executionMode ?? "batch"}
+                onChange={(e) => setPreference({ executionMode: e.target.value as "batch" | "responsive" })}
+              >
+                <option value="batch">Batch — plan searches and reads in rounds</option>
+                <option value="responsive">Responsive — search, read and follow results</option>
+              </select>
+            </label>
+            <p className="mt-2 text-sm text-muted">
+              Responsive research lets the selected model choose its next action after each result.
+              It can finish early. Captured sources remain the evidence; choosing a link is not proof.
+            </p>
+            {preferences.executionMode === "responsive" ? (
+              <label className="f mt-3">
+                <span>Maximum research decisions per round (1–24)</span>
+                <input
+                  aria-label="Maximum research decisions per round"
+                  type="number"
+                  min={1}
+                  max={24}
+                  value={preferences.actionLimit ?? 6}
+                  onChange={(e) => setPreference({ actionLimit: Number(e.target.value) })}
+                />
+                <span className="text-sm text-muted">
+                  Each decision can search, read, follow a link, or finish. More decisions can take
+                  longer. The final brief and signal verification use separate model calls.
+                </span>
+              </label>
+            ) : null}
+          </div>
           <div>
             <label
               className="block text-[11px] tracking-[0.14em] text-muted uppercase"
@@ -257,8 +296,9 @@ export function DarkDialsPanel() {
           <div className="border-t border-rule pt-4">
             <p className="text-ink-2">{describeDials(d, q.data?.place)}</p>
             <p className="mt-1 text-sm text-muted">
-              A round at this setting takes roughly {estimateMinutes(d)} minute
-              {estimateMinutes(d) === 1 ? "" : "s"}.
+              {preferences.executionMode === "responsive"
+                ? `Responsive research allows up to ${preferences.actionLimit ?? 6} decisions. Time depends on the selected model and sources; the batch estimate does not apply.`
+                : `A batch round at this setting takes roughly ${estimateMinutes(d)} minute${estimateMinutes(d) === 1 ? "" : "s"}.`}
             </p>
             <p className="mt-2 text-sm text-muted">
               Nerve never relaxes the three floors: no invented claims of paid deception, no

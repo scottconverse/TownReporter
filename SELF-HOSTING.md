@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.35** (candidate; not yet published).
+Repository documentation version: **0.6.36** (candidate; not yet published).
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 

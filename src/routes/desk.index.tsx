@@ -1,5 +1,6 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import { useEditorSections } from "@/lib/use-sections";
+import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -171,6 +172,8 @@ function DeskHome() {
     text kept so the draft reads it as evidence.
   */
   const [storyText, setStoryText] = useState("");
+  const [storyDocuments,setStoryDocuments]=useState<StoryUpload[]>([]);
+  const [uploadingDocuments,setUploadingDocuments]=useState(false);
   const [storyScope, setStoryScope] = useState<"public" | "supplied">("public");
   const [storySection, setStorySection] = useState("");
   const [storyModel, setStoryModel] = useState<StoryModelChoice>("auto");
@@ -180,7 +183,7 @@ function DeskHome() {
     authDetail?: string | null;
   } | null>(null);
   const writeStory = useMutation({
-    mutationFn: () => writeStoryFromInput({ data: { text: storyText, modelChoice: storyModel, researchScope: storyScope, sectionKey: storySection || undefined } }),
+    mutationFn: () => writeStoryFromInput({ data: { text: storyText, documentIds: storyDocuments.map(d=>d.id), modelChoice: storyModel, researchScope: storyScope, sectionKey: storySection || undefined } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         const raw = res?.error ?? "That did not file.";
@@ -298,12 +301,12 @@ function DeskHome() {
       <section className="mt-8 composer">
         <SecHead
           title="Write a story"
-          sub="Paste a link, a chunk of text, or just the idea. The desk files it as a lead and drafts it with the model you pick. You edit, then publish."
+          sub="Attach documents or paste source text, then say what story you want. Full originals are saved; documents are read in sections before drafting. You edit, then publish."
         />
         <div className="mt-4 space-y-3">
           <label className="block">
             <span className="text-sm tracking-[0.14em] text-muted uppercase">
-              Link, text, or idea
+              Instructions, link, or pasted source text
             </span>
             <textarea
               className={areaClass + " mt-1 w-full"}
@@ -315,7 +318,7 @@ function DeskHome() {
               onKeyDown={(e) => {
                 if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !writeStory.isPending) {
                   e.preventDefault();
-                  if (storyText.trim().length >= 8) writeStory.mutate();
+                  if (!uploadingDocuments && (storyText.trim().length >= 8 || storyDocuments.length)) writeStory.mutate();
                 }
               }}
               placeholder={
@@ -331,6 +334,7 @@ function DeskHome() {
             reading as narrower than it is; putting Write beside it uses
             that space instead of below it.
           */}
+          <StoryDocumentUpload documents={storyDocuments} onChange={setStoryDocuments} onBusy={setUploadingDocuments} disabled={writeStory.isPending} />
           <DraftScopePicker value={storyScope} onChange={setStoryScope} disabled={writeStory.isPending} />
           <label className="my-3 block text-sm">
             <span className="mb-1 block">Section (optional)</span>
@@ -354,7 +358,7 @@ function DeskHome() {
               <InkButton
                 tone="solid"
                 onClick={() => writeStory.mutate()}
-                disabled={writeStory.isPending || storyText.trim().length < 8}
+                disabled={writeStory.isPending || uploadingDocuments || (storyText.trim().length < 8 && !storyDocuments.length)}
               >
                 {writeStory.isPending ? "Writing…" : "Write"}
               </InkButton>

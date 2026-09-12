@@ -173,3 +173,170 @@ These supersede the earlier pure-extraction-only status for parks/arts. They
 prove the saved-source path for these actual pages, not reusable calendar
 discovery or the complete operational family. The museum response hash changed
 since the first probe; the retained receipt records the bytes actually checked.
+
+## September 11 meeting discrepancy recheck
+
+Direct current reads of the official upcoming-meetings API and rendered HTML
+agenda agree for meeting3801 / template17256: Transportation Advisory Board,
+September14 2026 at 6:00PM, City Council Chambers, 350 Kimbark Street.
+
+- https://longmont.primegov.com/api/v2/PublicPortal/ListUpcomingMeetings
+  returned dateTime `2026-09-14T18:00:00`, date `Sep 14, 2026`, time `06:00 PM`.
+- https://longmont.primegov.com/Portal/Meeting?meetingTemplateId=17256
+  in Chrome displayed `September 14, 2026 - 6:00 PM` within the agenda heading.
+  A separate raw HTML read also contained that date/time, and no September15
+  or ISO September14/15 heading matched the date-field search.
+
+The previously recorded midnight disagreement was not reproduced on this
+current agenda. This clears that specific current-source discrepancy, not
+all future API/agenda pairs; it does not prove when or why the older heading
+differed. No publication or production policy change occurred. The API's
+unoffset wall time still needs the explicitly configured America/Denver zone.
+
+Halo Gateway web_fetch failed reaching http://127.0.0.1:8765/mcp. Hosted web
+fetch also could not open PrimeGov. Direct public HTTPS plus Chrome supplied
+the evidence above; do not count this as Gateway acceptance. The official
+City Council calendar was also reachable, but its council sessions are not
+the Transportation Advisory Board event and were not substituted for it.
+
+## Reusable parks and arts calendars found — September 11
+
+The official https://longmontcolorado.gov/events/ filter metadata explicitly
+names Museum (slug museum), Recreation Services (recreation-services), and
+Parks and Natural Resources (parks-and-natural-resources). Using the same
+category URL structure as the established library feed, direct HTTPS checks
+returned:
+
+| Candidate | HTTP | Bytes | JSON-LD scripts |
+|---|---:|---:|---:|
+| https://longmontcolorado.gov/events/category/museum/ | 200 | 518939 | 2 |
+| https://longmontcolorado.gov/events/category/recreation-services/ | 200 | 519920 | 2 |
+| https://longmontcolorado.gov/events/category/parks-and-natural-resources/ | 200 | 430069 | 1 |
+
+Museum JSON-LD included Art & Sip: Watercolor Watermelon; recreation included
+Recreation Center Pool Closures. Parks had only the site/breadcrumb names in
+the inspected block, so no current event coverage is claimed for it. These are
+ongoing category sources, unlike the previously tested single-event URLs.
+This is source discovery, not application parser or scheduled-publication proof.
+Next use the museum and recreation categories through normal saved source checks.
+Do not label the mixed citywide /events/ feed as both families and double-count it.
+
+## PrimeGov actual ingestion repair
+
+Staging check8 exposed a gap in the earlier injected-response acceptance:
+ingestPrimeGov normalized API URLs into text/title/extras without rawBytes.
+The real saved-source path therefore failed, even though the injected raw
+response passed. The fix lets PublicPortal API paths fall through to the
+existing HTTP reader; portal and document behavior remains unchanged.
+
+Luna's regression reported RED on missing rawBytes, then GREEN. Lead reviewed
+the two-file diff and independently ran:
+
+```powershell
+$env:DATABASE_URL=''; $env:RUN_LIVE_MODEL_TESTS=''; $env:TOWNREPORTER_TEST_ENV_VERIFIED='1'; node --import ./scripts/test-environment-guard.mjs --experimental-strip-types --test --test-force-exit --test-concurrency=1 --test-timeout=20000 --test-name-pattern='PrimeGov|raw-byte ingestion' src/lib/news/ingest.test.ts src/lib/news/primegov.test.ts
+```
+
+```text
+ℹ tests 4
+ℹ suites 3
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 893.4222
+```
+
+Exit0, no test warnings. This focused run explicitly force-exits after tests;
+it is not proof of natural process shutdown. Before it, lead found three
+worker test groups still alive (parents27492,32164,19956; children28948,32720,
+34144), stopped only the verified children, and confirmed zero remaining
+ingest.test processes. Starting replacement tests while those lived violated
+the serialized-lane instruction. The worker's green summary did not establish
+cleanup. No production process was stopped. Rebuilt real-source acceptance
+remains necessary; no full-suite or production completion claim is made.
+
+## Rebuilt meeting and ongoing category acceptance
+
+Built2272ab8 successfully against the isolated staging database; migration up
+to date. Existing DEP0190/browser-externalization warnings remain; build output
+was truncated. Replaced owned stage handle17876 with76259 on3471, models off.
+
+Real browser meeting check9 now parsed6/refused5/conflicts0, capture2411,
+version1555. UI retained agenda URLs, Denver timezone, venue, and September14
+18:00 Transportation Advisory Board time. The five incomplete rows remain
+refused. This closes actual API capture, not automatic publication.
+
+Added ongoing recreation2881 and museum2882 through Sources UI; paired their
+respective formats, saved context through owner form. Automation revision5
+contains all six families, enabled=false. Recreation check10 parsed20/refused0/
+conflicts0, capture2412/version1556. Museum check11 refused content-too-large,
+capture2413/version1557. Source size exceeded generic512KiB (library already
+allows1MiB). Lead raised the generic bound to1MiB, retaining32scripts,
+128KiB/script and existing traversal limits; no new parser or dependency.
+
+Lead test command for baseline, RED, GREEN:
+`$env:DATABASE_URL=''; $env:TOWNREPORTER_TEST_ENV_VERIFIED='1'; node --import ./scripts/test-environment-guard.mjs --experimental-strip-types --test src/lib/news/routine-notice-extract.test.ts`
+
+Baseline: tests16,suites2,pass16,fail0,cancelled0,skipped0,todo0,
+duration_ms219.4016. New570KB page-chrome regression RED: tests17,suites2,
+pass16,fail1,cancelled0,skipped0,todo0,duration_ms214.2186; expected parsed,
+actual refused. Over-limit test updated to1,048,577bytes for the new bound.
+
+```text
+ℹ tests 17
+ℹ suites 2
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 222.9088
+```
+
+All handles exited; no warnings in these tests. Museum's rebuilt browser check
+is still outstanding. Restored staging-editor to editor/room1 after owner-form
+work. Production and automatic publication remain untouched.
+
+## Six-source scheduled acceptance — September 11, 2026
+
+Supersedes the outstanding museum check above. Built candidate `bec6379`
+served on loopback3471 against `townreporter_stage_03efb7b_20260911`.
+Museum browser check12 parsed20, refused0, conflicts0. The isolated owner
+activated all six saved sources through the UI (automation revision6).
+No clock override, forced job, or accelerated restart was used.
+
+The natural scheduler reserved run2 at01:18:33.976780 MDT and finished at
+01:18:56.267717; desk job113 completed. Database summary:
+`{"published":0,"corrected":2,"needsReview":6,"eligible":5}`.
+
+The scheduled captures, not just earlier manual checks, produced:
+
+| Check | Source | Parsed | Refused |
+|---|---|---:|---:|
+|13|2877 registration PDF|1|0|
+|14|2878 library|19|1|
+|15|2879 leaf collection|2|0|
+|16|2880 PrimeGov meetings|6|5|
+|17|2881 recreation|20|0|
+|18|2882 museum|20|0|
+
+All six sources were read. The six review items correspond to the one library
+and five meeting structural refusals; these were not silently passed.
+Five eligible entries are edition entries, not five distinct stories:
+three Today items and two weekend items. The generated corrections include
+the Museum's 3rd Annual Sunset Soiree (September11,6PM) and library events,
+with readable dates and decoded ampersands. Original article bodies42/43
+remain preserved; the implementation appends `Routine edition update`
+corrections rather than overwriting their bodies. This run proves correction
+creation, not a newly published six-family edition or public-reader acceptance
+of those corrections. Registration and leaf collection are outside today's
+edition windows. Parsing all families is not proof that every family's
+publication timing has been exercised.
+
+After completion, the lead unchecked activation and saved via the UI;
+the UI confirmed paused and the database confirmed enabled=false, revision7.
+Restored only the fixture staging-editor membership to editor/newsroom1.
+No queued/running fixture jobs remained. Production was neither configured
+nor published to. Actual six-family production activation and remaining
+window/reader acceptance are still open.

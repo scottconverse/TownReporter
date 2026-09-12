@@ -232,6 +232,7 @@ export function catalogAndExtras(
 export async function ingestPrimeGov(url: URL): Promise<{ text: string; title: string; extras: string[] } | null> {
   if (!isPrimeGovUrl(url)) return null;
   const origin = portalOrigin(url);
+  if (/\/api\/v\d+\/PublicPortal\//i.test(url.pathname)) return null;
   if (/\/Public\/CompiledDocument/i.test(url.pathname) || /\/Portal\/Meeting/i.test(url.pathname)) {
     return null;
   }

@@ -516,7 +516,7 @@ function DarkPage() {
   });
 
   const fileTip = useMutation({
-    mutationFn: (post: { url: string; title: string; excerpt: string }) =>
+    mutationFn: (post: { url: string; title: string; excerpt: string; updated: string; author: string }) =>
       fileRedditTip({ data: post }),
     onSuccess: (res, post) => {
       if (!res?.ok) return;
@@ -985,7 +985,7 @@ function RedditTipRows({
   filingUrl,
 }: {
   posts: RedditScanResult["topScores"];
-  onFileTip: (post: { url: string; title: string; excerpt: string }) => void;
+  onFileTip: (post: { url: string; title: string; excerpt: string; updated: string; author: string }) => void;
   filingUrl: string | null;
 }) {
   return (
@@ -996,16 +996,19 @@ function RedditTipRows({
         return (
           <div key={p.url} className="tip-row">
             <Score v={p.score} />
-            <a href={p.url} target="_blank" rel="noopener" className="inline-link tip-title">
-              {p.title}
-            </a>
+            <div>
+              <a href={p.url} target="_blank" rel="noopener" className="inline-link tip-title">
+                {p.title}
+              </a>
+              <span className="np-meta block">{p.updated ? `Posted ${p.updated.slice(0, 10)}` : "Posted date unknown"}{p.author ? ` · ${p.author}` : ""}{!p.autoFileEligible ? " · older/undated — manual file only" : ""}</span>
+            </div>
             <span className={"chip st-" + p.state}>{redditPostStateLabel(p.state)}</span>
             {canFile ? (
               <InkButton
                 tone="quiet"
                 small
                 disabled={filing}
-                onClick={() => onFileTip({ url: p.url, title: p.title, excerpt: p.excerpt })}
+                onClick={() => onFileTip({ url: p.url, title: p.title, excerpt: p.excerpt, updated: p.updated, author: p.author })}
               >
                 {filing ? "Filing…" : "File as tip"}
               </InkButton>
@@ -1039,13 +1042,14 @@ function RedditResultPanel({
   result: RedditScanResult;
   announce: string;
   onDismiss: () => void;
-  onFileTip: (post: { url: string; title: string; excerpt: string }) => void;
+  onFileTip: (post: { url: string; title: string; excerpt: string; updated: string; author: string }) => void;
   filingUrl: string | null;
 }) {
   return (
     <div className="reddit-result">
       <p className="worth-t">Reddit read finished</p>
       <p className="reddit-headline">{redditResultHeadline(result)}</p>
+      <p className="reddit-sub">Automatic filing uses dated posts from the past 30 days. Older or undated results remain available to file by hand.</p>
       {result.searched.length > 0 ? (
         <p className="reddit-searched">Searched: {result.searched.join(" · ")}</p>
       ) : null}
@@ -1059,8 +1063,8 @@ function RedditResultPanel({
       ) : null}
       {result.read > 0 && result.civic === 0 ? (
         <p className="reddit-empty">
-          None of these scored 6 or more on the civic word test. Posts that came close are listed so
-          you can file one by hand.
+          No posts qualified for automatic filing: a civic score of at least 6 and a date within
+          the past 30 days are required. You can still file a listed post by hand.
         </p>
       ) : null}
       {result.topScores.length > 0 ? (

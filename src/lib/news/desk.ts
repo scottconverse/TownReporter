@@ -4,6 +4,7 @@ import {
   saveAcceptedNewsroomSource,
 } from "./source-seeds.server.ts";
 import { selectedScanSources } from "./section-types.ts";
+import { scanSourceExcerpt } from "./scan-source-excerpt.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
@@ -578,7 +579,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       "This section no longer has accepted assigned sources. Review Paper setup and start a new scan.",
     );
 
-  const fetched: { title: string; url: string; text: string; changed: boolean }[] = [];
+  const fetched: { title: string; url: string; text: string; extras: { url: string; text: string }[]; changed: boolean }[] = [];
   const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
   const pendingSourceTouches: { id: number; error: string | null }[] = [];
   const pendingDisappeared: { title: string; url: string; error: string }[] = [];
@@ -640,7 +641,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       fetched.push({
         title: src.tier === "C" ? `[discovery] ${src.title}` : src.title,
         url: src.url,
-        text: text.slice(0, 4500),
+        text: bundle.text.slice(0, 4500),
+        extras,
         changed,
       });
     } catch (err) {
@@ -678,12 +680,27 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       select id, entity, last_angle, updated_at from beat_memory
       where newsroom_id = ${owned(context)} order by updated_at desc limit 24
     `;
+  const published = await sql<{ headline: string; dek: string | null; source_urls: string; published_at: string | null }>`
+    select headline, dek, source_urls, published_at::text as published_at
+       from articles
+      where newsroom_id = ${owned(context)} and status = 'published'
+        and published_at >= now() - interval '60 days'
+      order by published_at desc nulls last, id desc
+      limit 100`;
+  const publishedContext = published.map((row) => {
+    let sourceUrls: string[] = [];
+    try {
+      const parsed = JSON.parse(row.source_urls || "[]");
+      if (Array.isArray(parsed)) sourceUrls = parsed.map(String).filter((url) => /^https?:\/\//i.test(url)).slice(0, 4);
+    } catch { /* malformed legacy source metadata is not scan context */ }
+    return { headline: row.headline, dek: row.dek ?? "", source_urls: sourceUrls, published_at: row.published_at ?? "" };
+  });
 
   const ranked = [...fetched].sort((a, b) => Number(b.changed) - Number(a.changed));
   const PAYLOAD_BUDGET = 48000;
   let payload = "";
   for (const f of ranked) {
-    const excerpt = f.text.slice(0, expandForScope || reread || f.changed ? 2800 : 800);
+    const excerpt = scanSourceExcerpt(f.text, f.extras, expandForScope || reread || f.changed ? 2800 : 800);
     const changedLine = expandForScope
       ? f.changed
         ? "yes; expanded excerpt for this scan scope"
@@ -706,6 +723,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     state: paperConfig.state,
     reread,
     memory,
+    published: publishedContext,
     payload,
   });
 
@@ -952,11 +970,16 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const prevNotes = parseNotes(lead.notes_json);
   const researchScope = job.research_scope ?? prevNotes.researchScope ?? "public";
   const sourceInput = draftSourceInputs(urls, prevNotes, researchScope);
+  const { retainedWatchSources } = await import("./retained-watch-source.server.ts");
+  const {readStoryDocuments}=await import("./story-documents.server.ts");
+  const documentEvidence=await readStoryDocuments(owned(context),leadId,job.model_choice as import("./ai.ts").EffectiveProviderChoice,prevNotes.editorialAssignment?.text || lead.headline, message=>setStage(job.id,message), prevNotes.suppliedUrls ?? [], context.userId, researchScope === "supplied");
   const draftInput = {
+    documentEvidence,
     userId: context.userId,
     newsroomId: context.newsroomId,
     lead,
     urls: sourceInput.urls,
+    retainedSources: await retainedWatchSources(sql, owned(context), leadId, sourceInput.urls),
     memory,
     extraEvidence: prevNotes.scratch,
     editorialAssignment: prevNotes.editorialAssignment,
@@ -1240,6 +1263,7 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
   .validator(
     (input: {
       text: string;
+      documentIds?: string[];
       modelChoice?: string;
       researchScope?: "public" | "supplied";
       sectionKey?: string;
@@ -1250,6 +1274,7 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
     return writeStoryForAuthenticatedEditor({
       context: { userId: context.userId, newsroomId: owned(context) },
       text: data.text,
+      documentIds: data.documentIds,
       sectionKey: data.sectionKey,
       modelChoice: data.modelChoice,
       researchScope: data.researchScope,

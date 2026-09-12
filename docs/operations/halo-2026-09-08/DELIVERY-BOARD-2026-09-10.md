@@ -1,5 +1,13 @@
 # TownReporter delivery board — 2026-09-10
 
+> Historical snapshot, not the current deployment or task inventory. Rechecked
+> September 11: production checkout is fe53b6e (0.6.35 plus the Utility Bill
+> Analyzer link), not the 0.6.34 checkout described below. Active development is
+> feat/utility-bill-analyzer-link, PR43. Preserve the dated claims below as history;
+> do not reopen completed work from this table. Current notice progress is in
+> REGISTRATION-PDF-ACCEPTANCE.md and NOTICE-SOURCE-MAPPING-2026-09-10.md. The
+> owner's authoritative 16-item scope remains the active goal attachment.
+
 **Scope:** all 16 authorized areas remain in scope. This is an actionable
 development board, not a completion claim. **PHASE:** `OPENAI_ONLY` ·
 **MODE:** `OPEN_MULTI_AGENT` · **DELEGATION:** `VERIFIED`.

@@ -477,6 +477,40 @@ test("saved permissions remain dormant until an owner explicitly activates an ex
   assert.equal(count!.n, 1);
 });
 
+test("allows the supported Longmont HTML waste bulletin to use its own public attribution", async () => {
+  const sql = await getSql();
+  const sourceUrl = "https://longmontcolorado.gov/waste-services-trash-recycling-composting/special-services-events/fall-leaf-collection/";
+  const [source] = await sql.query<{ id: number }>(
+    "insert into sources(user_id,newsroom_id,url,title,status) values($1,$2,$3,'Fall leaf bulletin','accepted') returning id",
+    [owner, room, sourceUrl],
+  );
+  await saveRoutineNoticePolicyFor(owner, room, {
+    expectedRevision: 0,
+    paused: false,
+    approvals: [{ sourceId: source!.id, sourceUrl, formatKey: "waste-recycling-schedule" }],
+  });
+  const saved = await saveRoutineNoticeAutomationFor(owner, room, {
+    expectedRevision: 0,
+    enabled: true,
+    timezone: "America/Denver",
+    localTime: "06:15",
+    sections: { today: "news", weekend: "events", deadlines: "deadlines" },
+    sources: [
+      {
+        sourceId: source!.id,
+        sourceUrl,
+        publicSourceUrl: sourceUrl,
+        formatKey: "waste-recycling-schedule",
+        issuer: "City of Longmont",
+        locality: "Longmont",
+        collectionArea: "North of 9th Avenue",
+      },
+    ],
+  });
+  assert.equal(saved.enabled, true);
+  assert.equal(saved.sources[0]?.publicSourceUrl, sourceUrl);
+});
+
 test("nonowners cannot activate and a removed approval cascades the automation selection", async () => {
   const sql = await getSql();
   await sql.query(

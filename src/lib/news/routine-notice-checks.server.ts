@@ -3,7 +3,8 @@ import { parseHTML } from "linkedom";
 import { extractLongmontLeafCollection } from "./routine-notice-waste.ts";
 import { sha256, sha256Bytes } from "./fetch-url.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
-import { ingestDocument } from "./ingest.ts";
+import { ingestDocument, extractPdfBetter, type PdfPage } from "./ingest.ts";
+import { extractLongmontSportsRegistrationDeadlines, isLongmontSportsBrochure } from "./routine-notice-registration.ts";
 import { rememberCapture } from "./investigate.ts";
 import { ensureLegalSchema } from "./legal-removal-schema.ts";
 import {
@@ -58,14 +59,14 @@ function isLongmontLibraryCategory(url: string) {
 }
 
 function visibleClockMinutes(value: string | null | undefined) {
-  const matches = [...(value ?? "").matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)];
+  const matches = [...(value ?? "").matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b\.?/gi)];
   const match = matches.at(-1);
   if (!match) return null;
   let hour = Number(match[1]);
   const minute = Number(match[2] ?? "0");
   if (hour < 1 || hour > 12 || minute > 59) return null;
   if (hour === 12) hour = 0;
-  if (match[3]!.toLowerCase() === "pm") hour += 12;
+  if (match[3]!.toLowerCase() === "p") hour += 12;
   return hour * 60 + minute;
 }
 
@@ -290,6 +291,7 @@ function adapterResults(
   actor: Actor,
   provenance: { captureEventId: number; artifactVersionId: number; contentHash: string },
   ownerContext: AdapterOwnerContext,
+  pdfPages?: PdfPage[],
 ) {
   const missingContext = () =>
     [
@@ -302,6 +304,8 @@ function adapterResults(
     policyRevision: input.expectedPolicyRevision,
     ...provenance,
   };
+  if (input.formatKey === "registration-deadline" && pdfPages)
+    return extractLongmontSportsRegistrationDeadlines({ pages: pdfPages }, base);
   if (input.formatKey === "registration-deadline")
     return content.includes("BEGIN:VCALENDAR")
       ? ownerContext
@@ -496,6 +500,11 @@ export async function checkRoutineNoticeSourceForOwner(
     document.outcome !== "soft-404"
       ? new TextDecoder().decode(document.rawBytes)
       : null;
+  const pdfPages = rawContent && input.formatKey === "registration-deadline" &&
+    isLongmontSportsBrochure(input.sourceUrl) && document.rawBytes &&
+    Buffer.from(document.rawBytes.subarray(0, 5)).toString() === "%PDF-"
+    ? (await extractPdfBetter(document.rawBytes, null)).pages
+    : undefined;
 
   const checkId = await withTransaction(async (tx) => {
     await assertOwner(tx, actor, true);
@@ -533,6 +542,7 @@ export async function checkRoutineNoticeSourceForOwner(
             contentHash: "preflight",
           },
           ownerContext,
+          pdfPages,
         )
       : [];
     const hasParsed = preliminary.some((result) => parsedNotice(result));
@@ -645,6 +655,7 @@ export async function checkRoutineNoticeSourceForOwner(
         contentHash: rawHash,
       },
       ownerContext,
+      pdfPages,
     );
     const candidates = [] as Array<{
       ordinal: number;
@@ -818,7 +829,11 @@ async function boundRawEvidence(sql: Sql, actor: Actor, row: CheckRow) {
     (await sha256(evidence.full_text)) !== row.captured_text_digest
   )
     return null;
-  return { ...evidence, bytes, html: new TextDecoder().decode(bytes) };
+  const pdfPages = row.format_key === "registration-deadline" &&
+    isLongmontSportsBrochure(row.source_url) && bytes.subarray(0, 5).toString() === "%PDF-"
+    ? (await extractPdfBetter(bytes, null)).pages
+    : undefined;
+  return { ...evidence, bytes, html: new TextDecoder().decode(bytes), pdfPages };
 }
 
 /** Revalidates and locks the private evidence behind a scheduled publication. */
@@ -921,6 +936,7 @@ async function loadCheck(
         contentHash: row.captured_content_hash!,
       },
       context,
+      evidence.pdfPages,
     );
     for (const ref of refs) {
       const result = results[ref.ordinal];
