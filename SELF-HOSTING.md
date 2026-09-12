@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.37** (candidate; not yet published).
+Repository documentation version: **0.6.38** (candidate; not yet published).
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -342,3 +342,4 @@ NITRO_PRESET=vercel npm run build
 
 Note that Vercel disables the Chromium page reader and chops up the background
 jobs. That is why self-hosting is the default.
+

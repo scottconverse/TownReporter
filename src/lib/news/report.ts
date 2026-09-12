@@ -35,7 +35,7 @@ import type { EffectiveProviderChoice } from "./ai.ts";
 import { stripReporterNotebook } from "./strip-draft.ts";
 import { titlesOverlap } from "./desk-copy.ts";
 import type { EditorialAssignment } from "./write-story.ts";
-import { checkStoryNames } from "./name-check-work.ts";
+import { checkStoryNames, replaceName } from "./name-check-work.ts";
 import { nameCheckNotes, nameCheckText, type NameCheck } from "./name-check.ts";
 
 export { stripReporterNotebook } from "./strip-draft.ts";
@@ -884,6 +884,7 @@ async function defaultCapture(userId: string, newsroomId: number, doc: FetchedDo
       classification: "discovered",
       triggerKind: "draft",
       pages: doc.pages,
+      extractionMethod: doc.extraction_method,
       newsroomId,
     });
     return { version_id: rec.versionId, capture_event_id: rec.captureEventId };
@@ -1766,6 +1767,8 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
   coerced.headline = names.draft.headline;
   coerced.dek = names.draft.dek;
   body = names.draft.body;
+  for (const row of names.check.rows.filter(row => row.status === "corrected"))
+    coerced.memory_entities = coerced.memory_entities.map(entity => replaceName(entity, row.name, row.spelling));
   coerced.integrity_notes = [coerced.integrity_notes, nameCheckNotes(names.check)].filter(Boolean).join("\n");
 
   const used = preferStoryUrls(

@@ -67,11 +67,11 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     return Number.isInteger(id) && id > 0 && /^https?:\/\//i.test(url) ? [{id,url,captureEventId:Number.isInteger(captureEventId) && captureEventId > 0 ? captureEventId : null}] : [];
   }) : [];
   const versionIds = refs.map(ref => ref.id);
-  const exact = versionIds.length ? await sql<{url:string;title:string;full_text:string;id:number;captured_at:string}>`select id,url,title,full_text,captured_at::text as captured_at from artifact_versions where newsroom_id=${job.newsroom_id} and id=any(${versionIds}) order by id` : [];
+  const exact = versionIds.length ? await sql<{url:string;title:string;full_text:string;extraction_method:string;id:number;captured_at:string}>`select id,url,title,full_text,coalesce(to_jsonb(artifact_versions)->>'extraction_method','') as extraction_method,captured_at::text as captured_at from artifact_versions where newsroom_id=${job.newsroom_id} and id=any(${versionIds}) order by id` : [];
   for (const ref of refs) if (!exact.some(row => row.id === ref.id && sameCaptureUrl(row.url,ref.url))) throw new Error("A saved evidence capture is missing or no longer matches this newsroom. The draft was preserved.");
   const referencedUrls = refs.map(ref => ref.url);
   const fallbackUrls = urls.filter(url => !referencedUrls.some(reference => sameCaptureUrl(reference,url)));
-  const fallback = fallbackUrls.length ? await sql<{url:string;title:string;full_text:string;id:number;captured_at:string}>`select distinct on(url) id,url,title,full_text,captured_at::text as captured_at from artifact_versions where newsroom_id=${job.newsroom_id} and url=any(${fallbackUrls}) order by url,captured_at desc,id desc` : [];
+  const fallback = fallbackUrls.length ? await sql<{url:string;title:string;full_text:string;extraction_method:string;id:number;captured_at:string}>`select distinct on(url) id,url,title,full_text,coalesce(to_jsonb(artifact_versions)->>'extraction_method','') as extraction_method,captured_at::text as captured_at from artifact_versions where newsroom_id=${job.newsroom_id} and url=any(${fallbackUrls}) order by url,captured_at desc,id desc` : [];
   const captures = [...exact,...fallback];
   if (!captures.length) throw new Error("No matching saved capture is available for this draft. The draft was preserved without calling the model.");
   await (deps.stage ?? setJobStage)(job.id, "Checking the saved draft against the evidence");
@@ -88,7 +88,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
   const parsed = parseJsonBlock<Record<string,unknown>>(response.text) ?? {};
   const names = await checkStoryNames({
     draft: edited, city: "Use the locality identified in the saved draft and sources", domains: [],
-    docs: captures.map(capture => ({ url: capture.url, title: capture.title, text: capture.full_text, version_id: capture.id, extras: [] })),
+    docs: captures.map(capture => ({ url: capture.url, title: capture.title, text: capture.full_text, extraction_method: capture.extraction_method, version_id: capture.id, extras: [] })),
     searchAllowed: false, search: async () => [], open: async () => {},
     timeLeft: () => budget.wallMs - (Date.now() - started),
     stage: text => (deps.stage ?? setJobStage)(job.id, text),

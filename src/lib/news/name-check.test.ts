@@ -10,6 +10,7 @@ test("a correction requires a saved exact written passage and contextual identit
   assert.equal(validateNameEvidence(person, candidate, [doc]).status, "corrected");
   for (const changes of [{excerpt:"Eugene Mei, mayor"}, {url:"https://invented.example/"}, {samePerson:false}, {authority:"none"}, {spelling:"Eugene Meier"}]) assert.equal(validateNameEvidence(person, {...candidate,...changes}, [doc]).status, "unresolved");
   assert.equal(validateNameEvidence(person, candidate, [{...doc,version_id:null}]).status, "unresolved");
+  assert.equal(validateNameEvidence(person, candidate, [{...doc,extraction_method:"pdf-ocr"}]).status, "unresolved");
   const url="https://www.youtube.com/watch?v=abc";
   assert.equal(validateNameEvidence(person,{...candidate,url},[{...doc,url}]).status,"unresolved");
 });
