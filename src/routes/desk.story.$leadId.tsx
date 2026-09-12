@@ -1,3 +1,4 @@
+import { StoryBody } from "@/components/story-body";
 import { StoryDocumentList } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
@@ -94,6 +95,9 @@ function answered<T>(res: T | undefined | null): res is T {
 }
 
 function StoryPage() {
+  const [inspector, setInspector] = useState<"checks" | "sources" | "reporting">("checks");
+  const preview = useRef<HTMLDialogElement>(null);
+  const bodyField = useRef<HTMLTextAreaElement>(null);
   const { sections } = useEditorSections();
   const TOPICS = sections.map((s) => s.key);
   const { formatShortDate } = usePaperDateFormatters();
@@ -103,6 +107,19 @@ function StoryPage() {
   const [headline, setHeadline] = useState("");
   const [dek, setDek] = useState("");
   const [body, setBody] = useState("");
+  useEffect(() => {
+    const resize = () => {
+      for (const el of document.querySelectorAll<HTMLTextAreaElement>(
+        ".astra-headline,.astra-dek,.astra-story-body",
+      )) {
+        el.style.height = "auto";
+        el.style.height = `${Math.max(el === bodyField.current ? 480 : 50, el.scrollHeight)}px`;
+      }
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, [body, headline, dek]);
   const [topic, setTopic] = useState("council");
   const [scratch, setScratch] = useState("");
   const [researchScope, setResearchScope] = useState<"public" | "supplied">("public");
@@ -695,82 +712,376 @@ function StoryPage() {
     <DeskShell title={data.lead.headline} kicker="Workbench" hideTitle>
       {data.job && (data.job.status === "queued" || data.job.status === "running") ? (
         <section className="story-running-banner" aria-label="Draft progress" role="status">
-          <strong>{data.job.status === "queued" ? "Your story is queued" : "Your story is being written"}</strong>
+          <strong>
+            {data.job.status === "queued" ? "Your story is queued" : "Your story is being written"}
+          </strong>
           <p>{data.job.stage || "Preparing your sources…"}</p>
-          <span>Your submission is saved. The draft will appear here automatically. You can return from <Link to="/desk">Desk → Your recent drafts</Link>.</span>
+          <span>
+            Your submission is saved. The draft will appear here automatically. You can return from{" "}
+            <Link to="/desk">Desk → Your recent drafts</Link>.
+          </span>
         </section>
       ) : null}
       <Link to="/desk/queue" className="crumb">
         ← Queue
       </Link>
-      <div className="story-grid">
-        <aside className="story-side">
-          <Chip s={data.lead.status} />
-          <p className="kick">{fromDark ? "Working notes from Dark Desk" : "The lead"}</p>
-          <h2 className="side-h">{data.lead.headline}</h2>
-          <p className="side-why">{data.lead.why}</p>
-          <p className="meta">
-            {data.lead.topic} · filed {formatShortDate(data.lead.created_at)} · scored {score}/20 ·{" "}
-            {leadOrigin(data.lead)}
-            {data.lead.investigation_id ? (
+      <div className="astra-story-heading">
+        <div>
+          <p className="kick">Your newsroom</p>
+          <h1 className="h1">Story workspace</h1>
+        </div>
+        <Chip s={data.lead.status} />
+      </div>
+      <div className="work-bar astra-story-actions">
+        <button
+          className="btn"
+          onClick={() => {
+            setInspector("reporting");
+            document.getElementById("story-inspector")?.scrollIntoView({ block: "start" });
+          }}
+        >
+          Model & research
+        </button>
+        <span className="astra-save-state" role="status">
+          {onPaper ? "Published story" : hasUnsavedDraftEdits ? "Unsaved changes" : "Saved draft"}
+        </span>
+        {body && (
+          <InkButton tone="ghost" onClick={() => preview.current?.showModal()}>
+            Preview
+          </InkButton>
+        )}
+        <a className="btn astra-checks-jump" href="#story-inspector">
+          Checks & sources
+        </a>
+        {!locked && !onPaper ? (
+          <>
+            <InkButton
+              disabled={waiting || reconcileActive}
+              onClick={() => {
+                if (waiting) return;
+                draft.mutate();
+              }}
+            >
+              {jobState === "recovering"
+                ? "Recovering…"
+                : waiting
+                  ? "Drafting…"
+                  : data.draft?.body
+                    ? "Redraft"
+                    : "Draft with AI"}
+            </InkButton>
+          </>
+        ) : null}
+        {data.draft && !locked && !onPaper ? (
+          <>
+            <InkButton
+              tone="ghost"
+              disabled={save.isPending || reconcileActive}
+              onClick={() => save.mutate()}
+            >
+              Save edits
+            </InkButton>
+            <DraftReconcileControl
+              status={reconcileStatus.data}
+              active={reconcileActive}
+              disabled={waiting || reconcileActive || savePending || hasUnsavedDraftEdits}
+              dirty={hasUnsavedDraftEdits}
+              note={reconcileNote}
+              noteError={reconcileNoteError}
+              noteWarning={reconcileNoteWarning}
+              checkedDraftReady={checkedDraftReady}
+              checkedDraftStale={checkedDraftStale}
+              onStart={() => reconcile.mutate()}
+              onReload={() => {
+                const resultDraftId = reconcileStatus.data?.resultDraftId;
+                if (!resultDraftId) return;
+                void applyCheckedDraft(resultDraftId, undefined, true).catch((cause) => {
+                  setReconcileNote(
+                    cause instanceof Error
+                      ? cause.message
+                      : "The checked draft could not be loaded.",
+                  );
+                  setReconcileNoteError(true);
+                  setReconcileNoteWarning(false);
+                });
+              }}
+            />
+            {canPublish ? (
+              confirmingPublish ? (
+                <>
+                  <span className="note">
+                    This puts the story on the public paper and in the feed, under your name, now.
+                    Corrections are published, not silent edits.
+                  </span>
+                  {uncredited.length > 0 ? (
+                    <span className="note">
+                      {uncredited.length === 1
+                        ? `The body never names ${uncredited[0]}, though it's in the sources. If the story leans on their reporting, we said we'd say so.`
+                        : `The body never names ${uncredited.join(" or ")}, though they're in the sources. If the story leans on their reporting, we said we'd say so.`}
+                    </span>
+                  ) : null}
+                  <InkButton
+                    disabled={
+                      publish.isPending ||
+                      evidenceStale ||
+                      reviewEvidence.isPending ||
+                      reconcileActive
+                    }
+                    onClick={() => {
+                      setConfirmingPublish(false);
+                      publish.mutate();
+                    }}
+                  >
+                    {publish.isPending ? "Publishing…" : "Yes, print it"}
+                  </InkButton>
+                  <InkButton tone="quiet" onClick={() => setConfirmingPublish(false)}>
+                    Not yet
+                  </InkButton>
+                </>
+              ) : (
+                <>
+                  <InkButton
+                    disabled={
+                      publish.isPending ||
+                      !headline.trim() ||
+                      !body.trim() ||
+                      openClaims.length > 0 ||
+                      evidenceStale ||
+                      reviewEvidence.isPending ||
+                      reconcileActive
+                    }
+                    onClick={() => setConfirmingPublish(true)}
+                  >
+                    Publish to the paper
+                  </InkButton>
+                  {/*
+                        A greyed button with no sentence beside it is a dead
+                        end -- the editor cannot tell whether it is broken,
+                        still loading, or refusing on purpose. The reason is
+                        text, not opacity, and it points at the work.
+                      */}
+                  {blockedReason ? (
+                    <span className="note publish-blocked">
+                      {blockedReason}.{" "}
+                      <button
+                        type="button"
+                        className="inline-link"
+                        onClick={() => {
+                          setInspector("reporting");
+                          document
+                            .getElementById("story-inspector")
+                            ?.scrollIntoView({ block: "start" });
+                        }}
+                      >
+                        Open reporting notes
+                      </button>
+                    </span>
+                  ) : null}
+                </>
+              )
+            ) : null}
+          </>
+        ) : null}
+        {onPaper ? (
+          <p className="note">
+            On the paper.{" "}
+            <Link to="/desk/published" className="inline-link">
+              See it under Published
+            </Link>
+            {publishedSlug ? (
               <>
                 {" · "}
-                <Link
-                  to="/desk/dark"
-                  className="inline-link"
-                  onClick={() => {
-                    try {
-                      sessionStorage.setItem(
-                        "townreporter.dark.openId",
-                        String(data.lead.investigation_id),
-                      );
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
-                >
-                  Open investigation
+                <Link to="/articles/$slug" params={{ slug: publishedSlug }} className="inline-link">
+                  Read it on the paper
                 </Link>
               </>
             ) : null}
           </p>
-          {fromDark ? (
-            <p className="side-note">
-              This trail came from Dark Desk. Draft privately here; printing is a separate click and
-              every claim still needs evidence.
-            </p>
-          ) : null}
-          {sources.length > 0 ? (
-            <div className="side-block">
-              <p className="side-label">Sources on the lead</p>
-              {sources.map((u) => (
-                <p key={u} className="side-url">
-                  <a href={u} target="_blank" rel="noreferrer" className="inline-link">
-                    {u}
-                  </a>
-                </p>
-              ))}
+        ) : null}
+      </div>
+      <div className="story-grid">
+        <aside
+          className="story-side astra-inspector"
+          id="story-inspector"
+          aria-label="Story checks and sources"
+        >
+          <div className="astra-inspector-tabs" role="tablist" aria-label="Story inspector">
+            {(["checks", "sources", "reporting"] as const).map((tab) => (
+              <button
+                key={tab}
+                id={`inspector-tab-${tab}`}
+                role="tab"
+                aria-selected={inspector === tab}
+                aria-controls={`inspector-${tab}`}
+                tabIndex={inspector === tab ? 0 : -1}
+                onClick={() => setInspector(tab)}
+                onKeyDown={(e) => {
+                  const tabs = ["checks", "sources", "reporting"] as const;
+                  if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
+                    e.preventDefault();
+                    const i = tabs.indexOf(tab);
+                    const next =
+                      tabs[
+                        e.key === "Home"
+                          ? 0
+                          : e.key === "End"
+                            ? 2
+                            : (i + (e.key === "ArrowRight" ? 1 : 2)) % 3
+                      ];
+                    setInspector(next);
+                    document.getElementById(`inspector-tab-${next}`)?.focus();
+                  }
+                }}
+              >
+                {tab === "checks" ? "Checks" : tab === "sources" ? "Sources" : "Reporting"}
+              </button>
+            ))}
+          </div>
+          <section
+            id="inspector-checks"
+            role="tabpanel"
+            aria-labelledby="inspector-tab-checks"
+            hidden={inspector !== "checks"}
+          >
+            <h2>Before you publish</h2>
+            <p className="meta">Review names, claims and supporting records for this draft.</p>
+            {data.draft ? (
+              <DeskNameCheck
+                research={data.draft.research_json}
+                headline={headline}
+                dek={dek}
+                body={body}
+              />
+            ) : (
+              <p>Name checks appear after the first draft.</p>
+            )}
+            <div className="astra-check-action">
+              <h3>Claims & evidence</h3>
+              <p>
+                {evidenceStale
+                  ? "The story changed. Review its evidence."
+                  : "Open the reporting trail and supporting sources."}
+              </p>
+              <a
+                href="#finding-evidence-review"
+                className="btn"
+                onClick={() => {
+                  const details = document.getElementById("evidence-review")?.closest("details");
+                  if (details) details.open = true;
+                }}
+              >
+                Review claims and sources
+              </a>
             </div>
-          ) : null}
-          <ReportingNotesPane
-            leadId={id}
-            notes={notes}
-            hasDraft={Boolean(data.draft)}
-            locked={locked || onPaper}
-            openedExtractionByUrl={data.openedExtractionByUrl ?? {}}
-          />
+            <div className="astra-check-action">
+              <h3>Claims of absence</h3>
+              <p>
+                {openClaims.length
+                  ? `${openClaims.length} claim${openClaims.length === 1 ? " needs" : "s need"} your confirmation.`
+                  : "No outstanding claims of absence."}
+              </p>
+              <button
+                className="btn"
+                onClick={() => {
+                  setInspector("reporting");
+                  const detail = document.getElementById("evidence-review")?.closest("details");
+                  if (detail) detail.open = true;
+                }}
+              >
+                Open reporting notes
+              </button>
+            </div>
+          </section>
+          <section
+            id="inspector-sources"
+            role="tabpanel"
+            aria-labelledby="inspector-tab-sources"
+            hidden={inspector !== "sources"}
+          >
+            <h2>Your source material</h2>
+            <StoryDocumentList leadId={id} />
+            {sources.length > 0 ? (
+              <div className="side-block">
+                <p className="side-label">Sources on the lead</p>
+                {sources.map((u) => (
+                  <p key={u} className="side-url">
+                    <a href={u} target="_blank" rel="noreferrer" className="inline-link">
+                      {u}
+                    </a>
+                  </p>
+                ))}
+              </div>
+            ) : null}
+
+            {!sources.length && <p className="meta">No source links are attached to this lead.</p>}
+          </section>
+          <section
+            id="inspector-reporting"
+            role="tabpanel"
+            aria-labelledby="inspector-tab-reporting"
+            hidden={inspector !== "reporting"}
+          >
+            {!locked && !onPaper ? (
+              <ModelPicker
+                value={modelChoice}
+                onChange={setModelChoice}
+                disabled={waiting || reconcileActive || savePending}
+                compact
+              />
+            ) : null}
+            <Chip s={data.lead.status} />
+            <p className="kick">{fromDark ? "Working notes from Dark Desk" : "The lead"}</p>
+            <h2 className="side-h">{data.lead.headline}</h2>
+            <p className="side-why">{data.lead.why}</p>
+            <p className="meta">
+              {data.lead.topic} · filed {formatShortDate(data.lead.created_at)} · scored {score}/20
+              · {leadOrigin(data.lead)}
+              {data.lead.investigation_id ? (
+                <>
+                  {" · "}
+                  <Link
+                    to="/desk/dark"
+                    className="inline-link"
+                    onClick={() => {
+                      try {
+                        sessionStorage.setItem(
+                          "townreporter.dark.openId",
+                          String(data.lead.investigation_id),
+                        );
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                  >
+                    Open investigation
+                  </Link>
+                </>
+              ) : null}
+            </p>
+            {fromDark ? (
+              <p className="side-note">
+                This trail came from Dark Desk. Draft privately here; printing is a separate click
+                and every claim still needs evidence.
+              </p>
+            ) : null}
+            {!locked && !onPaper ? (
+              <DraftScopePicker
+                value={researchScope}
+                onChange={setResearchScope}
+                disabled={waiting}
+              />
+            ) : null}
+            <ReportingNotesPane
+              leadId={id}
+              notes={notes}
+              hasDraft={Boolean(data.draft)}
+              locked={locked || onPaper}
+              openedExtractionByUrl={data.openedExtractionByUrl ?? {}}
+            />
+          </section>
         </aside>
 
         <section className="story-work">
-          {data.draft ? <DeskNameCheck research={data.draft.research_json} headline={headline} dek={dek} body={body} /> : null}
-          <StoryDocumentList leadId={id} />
-          {!locked && !onPaper ? (
-            <DraftScopePicker
-              value={researchScope}
-              onChange={setResearchScope}
-              disabled={waiting}
-            />
-          ) : null}
           {evidenceStale && !onPaper ? (
             <div className="note publish-blocked" role="status">
               <p>
@@ -781,6 +1092,10 @@ function StoryPage() {
                 href="#evidence-review"
                 className="inline-link"
                 onClick={() => {
+                  setInspector("reporting");
+                  requestAnimationFrame(() =>
+                    document.getElementById("story-inspector")?.scrollIntoView({ block: "start" }),
+                  );
                   const details = document.getElementById("evidence-review")?.closest("details");
                   if (details) details.open = true;
                 }}
@@ -818,151 +1133,6 @@ function StoryPage() {
               </p>
             </div>
           ) : null}
-          <div className="work-bar">
-            {!locked && !onPaper ? (
-              <>
-                <ModelPicker
-                  value={modelChoice}
-                  onChange={setModelChoice}
-                  disabled={waiting || reconcileActive || savePending}
-                  compact
-                />
-                <InkButton
-                  disabled={waiting || reconcileActive}
-                  onClick={() => {
-                    if (waiting) return;
-                    draft.mutate();
-                  }}
-                >
-                  {jobState === "recovering"
-                    ? "Recovering…"
-                    : waiting
-                      ? "Drafting…"
-                      : data.draft?.body
-                        ? "Redraft"
-                        : "Draft with AI"}
-                </InkButton>
-              </>
-            ) : null}
-            {data.draft && !locked && !onPaper ? (
-              <>
-                <InkButton
-                  tone="ghost"
-                  disabled={save.isPending || reconcileActive}
-                  onClick={() => save.mutate()}
-                >
-                  Save edits
-                </InkButton>
-                <DraftReconcileControl
-                  status={reconcileStatus.data}
-                  active={reconcileActive}
-                  disabled={waiting || reconcileActive || savePending || hasUnsavedDraftEdits}
-                  dirty={hasUnsavedDraftEdits}
-                  note={reconcileNote}
-                  noteError={reconcileNoteError}
-                  noteWarning={reconcileNoteWarning}
-                  checkedDraftReady={checkedDraftReady}
-                  checkedDraftStale={checkedDraftStale}
-                  onStart={() => reconcile.mutate()}
-                  onReload={() => {
-                    const resultDraftId = reconcileStatus.data?.resultDraftId;
-                    if (!resultDraftId) return;
-                    void applyCheckedDraft(resultDraftId, undefined, true).catch((cause) => {
-                      setReconcileNote(
-                        cause instanceof Error
-                          ? cause.message
-                          : "The checked draft could not be loaded.",
-                      );
-                      setReconcileNoteError(true);
-                      setReconcileNoteWarning(false);
-                    });
-                  }}
-                />
-                {canPublish ? (
-                  confirmingPublish ? (
-                    <>
-                      <span className="note">
-                        This puts the story on the public paper and in the feed, under your name,
-                        now. Corrections are published, not silent edits.
-                      </span>
-                      {uncredited.length > 0 ? (
-                        <span className="note">
-                          {uncredited.length === 1
-                            ? `The body never names ${uncredited[0]}, though it's in the sources. If the story leans on their reporting, we said we'd say so.`
-                            : `The body never names ${uncredited.join(" or ")}, though they're in the sources. If the story leans on their reporting, we said we'd say so.`}
-                        </span>
-                      ) : null}
-                      <InkButton
-                        disabled={
-                          publish.isPending ||
-                          evidenceStale ||
-                          reviewEvidence.isPending ||
-                          reconcileActive
-                        }
-                        onClick={() => {
-                          setConfirmingPublish(false);
-                          publish.mutate();
-                        }}
-                      >
-                        {publish.isPending ? "Publishing…" : "Yes, print it"}
-                      </InkButton>
-                      <InkButton tone="quiet" onClick={() => setConfirmingPublish(false)}>
-                        Not yet
-                      </InkButton>
-                    </>
-                  ) : (
-                    <>
-                      <InkButton
-                        disabled={
-                          publish.isPending ||
-                          !headline.trim() ||
-                          !body.trim() ||
-                          openClaims.length > 0 ||
-                          evidenceStale ||
-                          reviewEvidence.isPending ||
-                          reconcileActive
-                        }
-                        onClick={() => setConfirmingPublish(true)}
-                      >
-                        Publish to the paper
-                      </InkButton>
-                      {/*
-                        A greyed button with no sentence beside it is a dead
-                        end -- the editor cannot tell whether it is broken,
-                        still loading, or refusing on purpose. The reason is
-                        text, not opacity, and it points at the work.
-                      */}
-                      {blockedReason ? (
-                        <span className="note publish-blocked">
-                          {blockedReason} — see “Claims of absence” in reporting notes.
-                        </span>
-                      ) : null}
-                    </>
-                  )
-                ) : null}
-              </>
-            ) : null}
-            {onPaper ? (
-              <p className="note">
-                On the paper.{" "}
-                <Link to="/desk/published" className="inline-link">
-                  See it under Published
-                </Link>
-                {publishedSlug ? (
-                  <>
-                    {" · "}
-                    <Link
-                      to="/articles/$slug"
-                      params={{ slug: publishedSlug }}
-                      className="inline-link"
-                    >
-                      Read it on the paper
-                    </Link>
-                  </>
-                ) : null}
-              </p>
-            ) : null}
-          </div>
           {/*
             One message for the whole "a draft job is open" span, chosen by
             resolveDraftJobState so it can never contradict the button above:
@@ -1002,14 +1172,22 @@ function StoryPage() {
           {data.draft || body ? (
             <form className="work-form" onSubmit={(e) => e.preventDefault()}>
               <Field label="Headline">
-                <input
+                <textarea
+                  rows={2}
+                  className="astra-headline"
                   value={headline}
                   onChange={(e) => setHeadline(e.target.value)}
                   disabled={onPaper}
                 />
               </Field>
               <Field label="Dek">
-                <input value={dek} onChange={(e) => setDek(e.target.value)} disabled={onPaper} />
+                <textarea
+                  rows={2}
+                  className="astra-dek"
+                  value={dek}
+                  onChange={(e) => setDek(e.target.value)}
+                  disabled={onPaper}
+                />
               </Field>
               <Field label="Topic">
                 <select value={topic} onChange={(e) => setTopic(e.target.value)} disabled={onPaper}>
@@ -1025,6 +1203,8 @@ function StoryPage() {
               </Field>
               <Field label="Body">
                 <textarea
+                  ref={bodyField}
+                  className="astra-story-body"
                   rows={16}
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
@@ -1073,6 +1253,26 @@ function StoryPage() {
           ) : null}
         </section>
       </div>
+      <dialog
+        ref={preview}
+        className="astra-dialog astra-preview"
+        aria-labelledby="story-preview-title"
+      >
+        <div className="astra-dialog-head">
+          <h2 id="story-preview-title">Draft preview</h2>
+          <button className="btn" onClick={() => preview.current?.close()}>
+            Close preview
+          </button>
+        </div>
+        <article className="astra-dialog-body">
+          <p className="kick">{topic} · Draft for review</p>
+          <h1>{headline}</h1>
+          <p className="astra-preview-dek">{dek}</p>
+          <div className="astra-preview-body">
+            <StoryBody body={body} />
+          </div>
+        </article>
+      </dialog>
     </DeskShell>
   );
 }

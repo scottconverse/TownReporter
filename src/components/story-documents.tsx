@@ -212,15 +212,15 @@ export function StoryDocumentList({ leadId }: { leadId: number }) {
         publication.
       </p>
       {query.data.map((d) => (
-        <div key={d.id} className="mt-3">
+        <div key={d.id} className="astra-source-document mt-3">
           <b>{d.filename}</b> · {d.status}
           {d.total_parts > 0 ? ` · ${d.read_parts}/${d.total_parts} parts read` : ""}
           <p>{d.detail}</p>
-          <button type="button" onClick={() => void download(d.id)}>
+          <button className="btn small" type="button" onClick={() => void download(d.id)}>
             Download original
           </button>
           {d.characters > 0 && (
-            <button className="ml-4" type="button" onClick={() => void download(d.id, true)}>
+            <button className="btn small" type="button" onClick={() => void download(d.id, true)}>
               Download full extracted text
             </button>
           )}

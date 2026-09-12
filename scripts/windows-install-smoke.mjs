@@ -262,7 +262,7 @@ async function main() {
     await lifecycle("Start");
     await assertListening(config);
     await page.goto(`${base}/desk`, { waitUntil: "networkidle" });
-    await page.getByRole("heading", { level: 1, name: "The desk", exact: true }).waitFor();
+    await page.getByRole("heading", { level: 1, name: "A clear desk. A good story.", exact: true }).waitFor();
     assert.ok(!page.url().includes("/login"), "Persistent session was lost on restart");
     await page.goto(articleUrl, { waitUntil: "networkidle" });
     await page.getByRole("heading", { level: 1, name: headline, exact: true }).waitFor();
@@ -275,7 +275,7 @@ async function main() {
     await fresh.getByLabel("Email").fill(email);
     await fresh.getByLabel("Password", { exact: true }).fill(password);
     await fresh.getByRole("button", { name: "Sign in with email", exact: true }).click();
-    await fresh.getByRole("heading", { level: 1, name: "The desk", exact: true }).waitFor();
+    await fresh.getByRole("heading", { level: 1, name: "A clear desk. A good story.", exact: true }).waitFor();
     assert.deepEqual(clientErrors, [], "Browser raised an uncaught application error");
     receipt.checks.push(
       "Idempotent stop/start, existing session, fresh owner sign-in and article persisted",

@@ -39,7 +39,7 @@ function inlineModule(source) {
 
 const routerStub = inlineModule(`
   import { createElement } from "react";
-  export function Link({ to, children, ...rest }) {
+  export function Link({ to, children, activeOptions: _activeOptions, ...rest }) {
     return createElement("a", { href: String(to ?? "#"), ...rest }, children);
   }
   export function useMatchRoute() {
@@ -54,6 +54,7 @@ const routerStub = inlineModule(`
 `);
 
 const reactQueryStub = inlineModule(`
+  export function useQuery() { return { data: [], isPending: false, isError: false }; }
   export function useMutation(opts) {
     return { mutate: () => {}, isError: false, isPending: false, error: null };
   }
@@ -113,24 +114,36 @@ const { DeskShell, deskShellClassName } = await import(
       "@/lib/auth/use-current-user": useCurrentUserStub,
       "@/lib/news/claim": claimStub,
       "@/lib/news/desk-copy": deskCopyStub,
+      "lucide-react": import.meta.resolve("lucide-react"),
+      "@/lib/news/desk": inlineModule("export async function listLeads() { return []; }"),
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },
   )
 );
 
-test("the desk header shows a Text: Normal / Large control next to Light/Dark", () => {
+test("the desk exposes accessible appearance and text size controls alongside every section", () => {
   const html = renderToStaticMarkup(
     createElement(DeskShell, { title: "Queue" }, createElement("p", null, "body")),
   );
-  assert.match(html, /Light/);
-  assert.match(html, /Dark/);
-  assert.match(html, /Text: Normal/);
-  assert.match(html, /Large/);
-  // Two <button> elements with real aria-pressed semantics, not decoration.
-  assert.match(html, /aria-label="Text size"/);
-  assert.match(html, /aria-pressed="true"[^>]*>Text: Normal/);
-  assert.match(html, /aria-pressed="false"[^>]*>Large/);
+  assert.match(html, /aria-label="Switch to dark appearance"/);
+  assert.match(html, /<select aria-label="Text size"/);
+  assert.match(html, /<option value="normal" selected="">Normal/);
+  assert.match(html, /<option value="large">Large/);
+  for (const route of [
+    "/desk",
+    "/desk/sources",
+    "/desk/scan",
+    "/desk/queue",
+    "/desk/published",
+    "/desk/opinion",
+    "/desk/ops",
+    "/desk/stats",
+    "/desk/dark",
+    "/desk/follow-ups",
+  ])
+    assert.ok(html.includes(`href="${route}"`), route);
+  assert.match(html, /id="desk-announcer"[^>]*aria-live="polite"/);
 });
 
 test("the Text size control still renders on a forced-night page (Dark Desk), which hides Light/Dark", () => {
@@ -142,18 +155,9 @@ test("the Text size control still renders on a forced-night page (Dark Desk), wh
 });
 
 test("deskShellClassName adds .large only when size is large, independent of theme", () => {
-  assert.equal(
-    deskShellClassName({ mode: "light", size: "normal" }),
-    "desk-ltr",
-  );
-  assert.equal(
-    deskShellClassName({ mode: "light", size: "large" }),
-    "desk-ltr large",
-  );
-  assert.equal(
-    deskShellClassName({ mode: "dark", size: "large" }),
-    "desk-ltr night large",
-  );
+  assert.equal(deskShellClassName({ mode: "light", size: "normal" }), "desk-ltr");
+  assert.equal(deskShellClassName({ mode: "light", size: "large" }), "desk-ltr large");
+  assert.equal(deskShellClassName({ mode: "dark", size: "large" }), "desk-ltr night large");
   assert.equal(
     deskShellClassName({ night: true, mode: "light", size: "large" }),
     "desk-ltr night large",

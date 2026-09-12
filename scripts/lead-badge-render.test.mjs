@@ -142,12 +142,17 @@ test("a lead with resurfaced_count > 0 shows the seen-again badge with its count
   const seenAgainIdx = html.indexOf('class="chip seen-again"');
   assert.ok(flagsIdx >= 0 && flagsIdx < statusChipIdx && statusChipIdx < seenAgainIdx);
   const metaIdx = html.indexOf('class="meta"');
-  assert.ok(metaIdx >= 0 && metaIdx < flagsIdx, "meta line should render before the lead-flags rail");
+  assert.ok(
+    metaIdx >= 0 && metaIdx < flagsIdx,
+    "meta line should render before the lead-flags rail",
+  );
 });
 
 test("a lead with resurfaced_count of 0 shows no seen-again badge", () => {
   const html = renderToStaticMarkup(
-    createElement(LeadRowView, { lead: baseLead({ resurfaced_count: 0, last_resurfaced_at: null }) }),
+    createElement(LeadRowView, {
+      lead: baseLead({ resurfaced_count: 0, last_resurfaced_at: null }),
+    }),
   );
   assert.doesNotMatch(html, /seen again/);
 });
@@ -170,13 +175,17 @@ test("an open (non-killed) lead with a resurfaced stamp still shows the badge", 
 // discarding or merging it -- this chip is the editor's only way to see that
 // link without opening the lead. See lib/news/lead-match.ts's matchStrength
 // and lib/news/lead-filing.ts's fileScanLeads.
-test('a NEW lead with an available possible duplicate shows its prior headline, disposition, and comparison link', () => {
+test("a NEW lead with an available possible duplicate shows its prior headline, disposition, and comparison link", () => {
   const html = renderToStaticMarkup(
     createElement(LeadRowView, {
       lead: baseLead({
         status: "new",
         possible_duplicate_of: 42,
-        possible_duplicate: { id: 42, headline: "Earlier council executive-session lead", status: "killed" },
+        possible_duplicate: {
+          id: 42,
+          headline: "Earlier council executive-session lead",
+          status: "killed",
+        },
       }),
     }),
   );
@@ -243,7 +252,11 @@ test("a held possible duplicate keeps the held-review prefix and names the actua
       lead: baseLead({
         status: "held",
         possible_duplicate_of: 42,
-        possible_duplicate: { id: 42, headline: "Earlier council executive-session lead", status: "killed" },
+        possible_duplicate: {
+          id: 42,
+          headline: "Earlier council executive-session lead",
+          status: "killed",
+        },
       }),
       onDraft() {},
     }),
@@ -276,7 +289,9 @@ test('a lead with a printed-duplicate match names and links the matched story ne
   assert.match(html, /Bohn Farm rezoning heads to planning board with staff blessing/);
   assert.match(html, /published/);
   // ...and it must be a real link to the published story, not color-only text.
-  const headlineIdx = html.indexOf("Bohn Farm rezoning heads to planning board with staff blessing");
+  const headlineIdx = html.indexOf(
+    "Bohn Farm rezoning heads to planning board with staff blessing",
+  );
   const tagStart = html.lastIndexOf("<a", headlineIdx);
   assert.ok(tagStart >= 0, "the matched headline should render inside an <a> link");
   const tagEnd = html.indexOf(">", tagStart);
@@ -312,6 +327,7 @@ const reactRouterStubForChrome = inlineModule(`
   export function useRouterState() { return "/"; }
 `);
 const reactQueryStub = inlineModule(`
+  export function useQuery() { return { data: [] }; }
   export function useMutation() { return { mutate() {}, isPending: false, isError: false }; }
   export function useQueryClient() { return { invalidateQueries: async () => {} }; }
 `);
@@ -349,6 +365,8 @@ const { Chip, leadOrigin } = await import(
       "@/lib/auth/use-current-user": currentUserStub,
       "@/lib/news/claim": claimStub,
       "@/lib/news/desk-copy": deskCopyStub,
+      "lucide-react": import.meta.resolve("lucide-react"),
+      "@/lib/news/desk": inlineModule("export async function listLeads() { return []; }"),
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },
@@ -388,7 +406,11 @@ test("set-aside, closed, and exhausted leads each render their own labelled, sty
   ];
   for (const { s, cls, label } of cases) {
     const html = renderToStaticMarkup(createElement(Chip, { s }));
-    assert.match(html, new RegExp(`class="chip ${cls}"`), `expected ${s} to render class chip ${cls}`);
+    assert.match(
+      html,
+      new RegExp(`class="chip ${cls}"`),
+      `expected ${s} to render class chip ${cls}`,
+    );
     assert.match(html, new RegExp(`>${label}<`), `expected ${s} to render the label "${label}"`);
   }
 });

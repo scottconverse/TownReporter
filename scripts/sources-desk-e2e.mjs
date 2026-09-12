@@ -81,6 +81,7 @@ async function theScreenRenders() {
   await page.getByRole("heading", { level: 1, name: "Sources", exact: true }).waitFor({ timeout: 30_000 });
   step("the Sources page renders its own heading");
 
+  await page.getByText("Add a source", { exact: true }).click();
   await page.getByLabel("URL", { exact: true }).waitFor({ timeout: 30_000 });
   await page.getByLabel("Name", { exact: true }).waitFor({ timeout: 30_000 });
   await page.getByRole("button", { name: "Add source" }).waitFor({ timeout: 30_000 });
@@ -115,12 +116,14 @@ async function droppingThenRestoringUpdatesTheList() {
   await row.getByRole("button", { name: "Drop" }).click();
 
   // Dropped moves the row out of On watch and into Rejected.
+  await page.getByRole("button", { name: /^Dropped / }).click();
   await page.getByRole("heading", { name: "Rejected", exact: true }).waitFor({ timeout: 30_000 });
   const rejectedSection = page.locator("section.src-sec", { hasText: "Rejected" });
   await rejectedSection.locator("tr.lead-tr", { hasText: sourceUrl }).waitFor({ timeout: 30_000 });
   step("Drop removes the source from On watch and files it under Rejected");
 
   await page.reload({ waitUntil: "networkidle" });
+  await page.getByRole("button", { name: /^Dropped / }).click();
   const stillRejected = page
     .locator("section.src-sec", { hasText: "Rejected" })
     .locator("tr.lead-tr", { hasText: sourceUrl });
@@ -128,6 +131,7 @@ async function droppingThenRestoringUpdatesTheList() {
   step("the rejected state survives a reload too");
 
   await stillRejected.getByRole("button", { name: "Accept" }).click();
+  await page.getByRole("button", { name: /^On watch / }).click();
   await page.getByRole("heading", { name: "On watch", exact: true }).waitFor({ timeout: 30_000 });
   await rowFor(sourceUrl).waitFor({ timeout: 30_000 });
   step("Accept moves the source back onto the watch list");

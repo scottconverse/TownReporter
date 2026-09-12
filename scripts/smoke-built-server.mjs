@@ -116,7 +116,7 @@ async function checkInBrowser() {
     const deskText = await page.locator("body").innerText();
     if (/Create the desk|Sign in|password/i.test(deskText)) {
       ok("/desk sends an unauthenticated visitor to sign-in");
-    } else if (/Command center|The desk/i.test(deskText)) {
+    } else if (/Command center|The desk|A clear desk/i.test(deskText)) {
       bad("/desk rendered the desk to an unauthenticated visitor");
     } else {
       ok("/desk did not render the desk");

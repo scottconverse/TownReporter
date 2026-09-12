@@ -1,13 +1,44 @@
 import { Link, useMatchRoute, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { usePaper, usePaperDateFormatters } from "@/lib/paper-context";
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { usePaper } from "@/lib/paper-context";
 import { UserButton } from "@/lib/auth/gates";
 import { signOut } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { leaveEditor } from "@/lib/news/claim";
 import { createEditorCopy } from "@/lib/news/desk-copy";
 
+import {
+  LayoutDashboard,
+  Library,
+  Radar,
+  Inbox,
+  Newspaper,
+  PenLine,
+  Settings,
+  ChartNoAxesCombined,
+  Search,
+  Plus,
+  Moon,
+  Sun,
+  Menu,
+  X,
+  ArrowUpRight,
+  Telescope,
+  MessagesSquare,
+} from "lucide-react";
+import { listLeads } from "@/lib/news/desk";
+
+const NAV_ICONS = [
+  LayoutDashboard,
+  Library,
+  Radar,
+  Inbox,
+  Newspaper,
+  PenLine,
+  Settings,
+  ChartNoAxesCombined,
+];
 const LINKS = [
   { to: "/desk", label: "Desk", exact: true },
   { to: "/desk/sources", label: "Sources" },
@@ -113,111 +144,276 @@ export function DeskShell({
   hideTitle?: boolean;
 }) {
   const paper = usePaper();
-  const { formatDate } = usePaperDateFormatters();
   const { user, isPending } = useCurrentUserState();
   const { mode, choose } = useDeskMode();
   const { size, choose: chooseSize } = useDeskTextSize();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [mobile, setMobile] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [pathname]);
-
+    const media = window.matchMedia("(max-width: 700px)");
+    const changed = () => setMobile(media.matches);
+    changed();
+    media.addEventListener("change", changed);
+    return () => media.removeEventListener("change", changed);
+  }, []);
+  useEffect(() => {
+    if (!mobile || !menuOpen) return;
+    const sidebar = document.getElementById("desk-navigation");
+    const items = () =>
+      Array.from(
+        sidebar?.querySelectorAll<HTMLElement>("a[href],button:not(:disabled),select") ?? [],
+      );
+    items()[0]?.focus();
+    const trap = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+        menuButton.current?.focus();
+      }
+      if (event.key !== "Tab") return;
+      const all = items();
+      const first = all[0];
+      const last = all.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    document.addEventListener("keydown", trap);
+    return () => document.removeEventListener("keydown", trap);
+  }, [mobile, menuOpen]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const hash = useRouterState({ select: (s) => s.location.hash });
+  const current =
+    LINKS.find((l) => l.to === pathname)?.label ??
+    (pathname.includes("story/") ? "Story workspace" : night ? "Dark Desk" : title);
+  useEffect(() => {
+    setMenuOpen(false);
+    if (!hash) window.scrollTo(0, 0);
+  }, [pathname, hash]);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, []);
   return (
-    <div className={deskShellClassName({ night, mode, size })}>
-      <a href="#desk" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-20 focus:bg-paper focus:px-3 focus:py-2 focus:text-sm focus:text-ink">
+    <div
+      className={deskShellClassName({ night, mode, size }) + " astra"}
+      data-desk-page={pathname.split("/")[2] || "home"}
+    >
+      <a href="#desk" className="astra-skip">
         Skip to desk
       </a>
-      <header className="masthead">
-        <div className="mast-row">
-          <div className="mast-brand">
-            <Link to="/" className="brand">
-              {paper.name}
-            </Link>
-            <span className="brand-sub">
-              {night ? "Dark Desk — investigates, never prints" : `Editor's desk — ${paper.city}`}
-            </span>
-          </div>
-          <div className="mast-date">{formatDate(new Date())}</div>
-          <div className="mast-tools">
-            <Link to="/" className="mast-link">
-              View paper
-            </Link>
-            {night ? null : (
-            <div className="seg" role="group" aria-label="Light or dark">
-              <button
-                type="button"
-                className={"seg-opt" + (mode === "light" ? " on" : "")}
-                aria-pressed={mode === "light"}
-                onClick={() => choose("light")}
-              >
-                Light
-              </button>
-              <button
-                type="button"
-                className={"seg-opt" + (mode === "dark" ? " on" : "")}
-                aria-pressed={mode === "dark"}
-                onClick={() => choose("dark")}
-              >
-                Dark
-              </button>
-            </div>
-            )}
-            {/*
-              Text: Normal / Large. Shown even on the Dark Desk (which forces
-              `night` and hides the Light/Dark seg above) -- readability is
-              not the same axis as theme, and an editor on the Dark Desk at
-              2am has the same eyes. See useDeskTextSize and the `.large`
-              class / `--ts` custom property in styles.css.
-            */}
-            <div className="seg" role="group" aria-label="Text size">
-              <button
-                type="button"
-                className={"seg-opt" + (size === "normal" ? " on" : "")}
-                aria-pressed={size === "normal"}
-                onClick={() => chooseSize("normal")}
-              >
-                Text: Normal
-              </button>
-              <button
-                type="button"
-                className={"seg-opt" + (size === "large" ? " on" : "")}
-                aria-pressed={size === "large"}
-                onClick={() => chooseSize("large")}
-              >
-                Large
-              </button>
-            </div>
-            {isPending ? <span className="mast-user" aria-hidden /> : user ? <span className="mast-account"><UserButton /></span> : null}
-          </div>
+      {menuOpen && (
+        <button
+          className="astra-scrim"
+          aria-label="Close navigation"
+          onClick={() => setMenuOpen(false)}
+        />
+      )}
+      <aside
+        id="desk-navigation"
+        inert={mobile && !menuOpen}
+        aria-label="Newsroom navigation"
+        role={mobile && menuOpen ? "dialog" : undefined}
+        aria-modal={mobile && menuOpen ? true : undefined}
+        className={"astra-sidebar" + (menuOpen ? " is-open" : "")}
+      >
+        <button
+          className="astra-icon astra-sidebar-close"
+          aria-label="Close navigation"
+          onClick={() => {
+            setMenuOpen(false);
+            menuButton.current?.focus();
+          }}
+        >
+          <X size={20} />
+        </button>
+        <Link to="/desk" className="astra-brand">
+          <strong>TownReporter</strong>
+          <span>EDITOR'S DESK · {paper.city}</span>
+        </Link>
+        <Link
+          to="/desk"
+          hash="story-composer"
+          activeOptions={{ exact: true, includeHash: true }}
+          className="btn solid astra-new"
+          onClick={() => setMenuOpen(false)}
+        >
+          <Plus size={18} aria-hidden /> New story
+        </Link>
+        <DeskNav onNavigate={() => setMenuOpen(false)} />
+        <div className="astra-account">
+          <label className="astra-size">
+            Text size{" "}
+            <select
+              aria-label="Text size"
+              value={size}
+              onChange={(e) => chooseSize(e.target.value as "normal" | "large")}
+            >
+              <option value="normal">Normal</option>
+              <option value="large">Large</option>
+            </select>
+          </label>
+          {isPending ? <span aria-hidden /> : user ? <UserButton /> : null}
         </div>
-        <div className="rule2" />
-        <DeskNav />
-        <div className="rule1" />
-      </header>
-      {/*
-        An always-mounted live region.
-
-        A screen reader announces a polite region reliably when the region was
-        already in the document and only its text changed. Notices that mount
-        together with their message often go unspoken, which is how async
-        success and error feedback ended up inconsistently announced (UIUX-03).
-        This region exists from first paint on every desk page; anything that
-        wants to be heard can write into it.
-      */}
-      <div id="desk-announcer" className="sr-only" role="status" aria-live="polite" aria-atomic="true" />
-      <main id="desk" className="deskmain">
-        {!hideTitle ? (
-          <div className="ov-head">
-            <div>
-              <p className="kick">{kicker ?? "Newsroom"}</p>
-              <h1 className="h1">{title}</h1>
-            </div>
-            {lede ? <div className="dark-lede">{lede}</div> : null}
+      </aside>
+      <div className="astra-workspace">
+        <header className="astra-topbar">
+          <button
+            ref={menuButton}
+            className="astra-icon astra-menu"
+            aria-label="Open navigation"
+            aria-expanded={menuOpen}
+            aria-controls="desk-navigation"
+            onClick={() => setMenuOpen(!menuOpen)}
+          >
+            <Menu size={20} />
+          </button>
+          <div className="astra-breadcrumb">
+            <span>{paper.name}</span>
+            <span aria-hidden>/</span>
+            <b>{current}</b>
           </div>
-        ) : null}
-        {children}
-      </main>
+          <div className="astra-top-actions">
+            <button
+              className="astra-search-trigger"
+              aria-label="Find anything"
+              onClick={() => setSearchOpen(true)}
+            >
+              <Search size={17} />
+              <span>Find anything</span>
+              <kbd>Ctrl K</kbd>
+            </button>
+            {!night && (
+              <button
+                className="astra-icon"
+                aria-label={
+                  mode === "dark" ? "Switch to light appearance" : "Switch to dark appearance"
+                }
+                onClick={() => choose(mode === "dark" ? "light" : "dark")}
+              >
+                {mode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+            )}
+            <Link to="/" className="astra-paper-link">
+              View paper <ArrowUpRight size={15} />
+            </Link>
+          </div>
+        </header>
+        <div
+          id="desk-announcer"
+          className="sr-only"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        />
+        <main id="desk" className="deskmain" tabIndex={-1}>
+          {!hideTitle && (
+            <div className="ov-head">
+              <div>
+                <p className="kick">{kicker ?? "Newsroom"}</p>
+                <h1 className="h1">{title}</h1>
+              </div>
+              {lede && <div className="dark-lede">{lede}</div>}
+            </div>
+          )}
+          {children}
+        </main>
+      </div>
+      <DeskSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
+  );
+}
+
+function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [term, setTerm] = useState("");
+  const leads = useQuery({ queryKey: ["leads"], queryFn: () => listLeads(), enabled: open });
+  useEffect(() => {
+    if (open) dialog.current?.showModal();
+    else dialog.current?.close();
+  }, [open]);
+  const query = term.trim().toLocaleLowerCase();
+  const pages = [...LINKS, { to: "/desk/dark", label: "Dark Desk" }].filter((l) =>
+    l.label.toLocaleLowerCase().includes(query),
+  );
+  const matches = (leads.data ?? [])
+    .filter((l) => `${l.headline} ${l.why} ${l.topic}`.toLocaleLowerCase().includes(query))
+    .slice(0, 30);
+  return (
+    <dialog
+      ref={dialog}
+      className="astra-dialog"
+      onClose={onClose}
+      aria-labelledby="desk-search-title"
+    >
+      <div className="astra-dialog-head">
+        <h2 id="desk-search-title">Find a story or screen</h2>
+        <button className="astra-icon" aria-label="Close search" onClick={onClose}>
+          <X size={20} />
+        </button>
+      </div>
+      <div className="astra-dialog-body">
+        <label className="field">
+          <span>Search your newsroom</span>
+          <input
+            autoFocus
+            type="search"
+            value={term}
+            onChange={(e) => setTerm(e.target.value)}
+            placeholder="Headlines, topics, queue, settings…"
+          />
+        </label>
+        <nav aria-label="Search results">
+          {pages.map((l) => (
+            <Link key={l.to} to={l.to} className="astra-search-result" onClick={onClose}>
+              {l.label}
+              <ArrowUpRight size={16} />
+            </Link>
+          ))}
+          {leads.isError && (
+            <p role="alert">
+              Stories could not load.{" "}
+              <button className="btn" onClick={() => void leads.refetch()}>
+                Try again
+              </button>
+            </p>
+          )}
+          {leads.isPending && <p role="status">Loading stories…</p>}
+          {matches.map((l) => (
+            <Link
+              key={l.id}
+              to="/desk/story/$leadId"
+              params={{ leadId: String(l.id) }}
+              className="astra-search-result"
+              onClick={onClose}
+            >
+              <span>
+                {l.headline}
+                <small>
+                  {l.topic} · {l.status}
+                </small>
+              </span>
+              <ArrowUpRight size={16} />
+            </Link>
+          ))}
+          {!leads.isPending && !leads.isError && !matches.length && !pages.length && (
+            <p>No matches. Try a name, topic or part of a headline.</p>
+          )}
+        </nav>
+      </div>
+    </dialog>
   );
 }
 
@@ -310,50 +506,43 @@ export function LeaveEditorControl({ email }: { email: string }) {
   );
 }
 
-function DeskNav() {
+function DeskNav({ onNavigate }: { onNavigate: () => void }) {
   const matchRoute = useMatchRoute();
-  /*
-    Folded behind one "Menu" button on a phone (UX-001).
-
-    At 375px the eight desk links wrapped to two rows of chrome between the
-    masthead and the page heading — an editor triaging a scan from a phone
-    paid that tax on every screen. Folded is not hidden: one tap shows every
-    link, stacked; from 640px up the nav renders exactly as before.
-  */
-  const [open, setOpen] = useState(false);
-  return (
-    <nav className={"deskname" + (open ? " nav-open" : "")}>
-      <button
-        type="button"
-        className="nav-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+  function item(l: (typeof LINKS)[number], index: number) {
+    const Icon = NAV_ICONS[index];
+    const active = Boolean(matchRoute({ to: l.to, fuzzy: !("exact" in l && l.exact) }));
+    return (
+      <Link
+        key={l.to}
+        to={l.to}
+        activeOptions={{ exact: true }}
+        onClick={onNavigate}
+        aria-current={active ? "page" : undefined}
+        className={"astra-nav" + (active ? " active" : "")}
       >
-        Menu {open ? "▴" : "▾"}
-      </button>
-      {LINKS.map((l) => {
-        const active = Boolean(
-          matchRoute({ to: l.to, fuzzy: !("exact" in l && l.exact) }),
-        );
-        return (
-          <Link
-            key={l.to}
-            to={l.to}
-            onClick={() => setOpen(false)}
-            className={"nav-item" + (active ? " on" : "")}
-          >
-            {l.label}
-          </Link>
-        );
-      })}
-      <span className="nav-sep" aria-hidden />
+        <Icon size={18} aria-hidden />
+        <span>{l.label}</span>
+      </Link>
+    );
+  }
+  return (
+    <nav className="astra-navigation" aria-label="Editor's desk">
+      <p className="astra-nav-label">Newsroom</p>
+      {LINKS.slice(0, 6).map(item)}
+      <p className="astra-nav-label">Reporting</p>
       <Link
         to="/desk/dark"
-        onClick={() => setOpen(false)}
-        className={"nav-item nav-dark" + (matchRoute({ to: "/desk/dark" }) ? " on" : "")}
+        onClick={onNavigate}
+        className={"astra-nav" + (matchRoute({ to: "/desk/dark" }) ? " active" : "")}
       >
-        Dark Desk
+        <Telescope size={18} aria-hidden />
+        <span>Dark Desk</span>
       </Link>
+      <Link to="/desk/follow-ups" onClick={onNavigate} className="astra-nav">
+        <MessagesSquare size={18} aria-hidden />
+        <span>Follow-ups</span>
+      </Link>
+      <div className="astra-nav-bottom">{LINKS.slice(6).map((l, i) => item(l, i + 6))}</div>
     </nav>
   );
 }
@@ -396,7 +585,13 @@ export function InkButton({
     (tone === "quiet" || tone === "quiet-danger" ? " quiet" : "") +
     (small ? " small" : "");
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={cls} aria-label={ariaLabel}>
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className={cls}
+      aria-label={ariaLabel}
+    >
       {children}
     </button>
   );

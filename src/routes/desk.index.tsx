@@ -305,29 +305,112 @@ function DeskHome() {
   const bootFailed = (leads.isError && !leads.data) || (sources.isError && !sources.data);
 
   return (
-    <DeskShell title="The desk" kicker="Your newsroom">
-      <div className="desk-home">
-        {recentStories.data
-          ?.filter((story) => story.status === "running" || story.status === "queued")
-          .map((story) => (
-            <div className="desk-active-story" key={story.id}>
-              <div>
-                <strong>
-                  Your story is {story.status === "queued" ? "queued" : "being written"}
-                </strong>
-                <p>{story.stage || "Preparing your sources…"}</p>
-              </div>
-              <Link
-                className="btn solid"
-                to="/desk/story/$leadId"
-                params={{ leadId: String(story.lead_id) }}
-              >
-                Open your story
-              </Link>
+    <DeskShell title="A clear desk. A good story." kicker="Your newsroom">
+      {recentStories.data
+        ?.filter((story) => story.status === "running" || story.status === "queued")
+        .map((story) => (
+          <div className="desk-active-story" key={story.id}>
+            <div>
+              <strong>
+                Your story is {story.status === "queued" ? "queued" : "being written"}
+              </strong>
+              <p>{story.stage || "Preparing your sources…"}</p>
             </div>
-          ))}
+            <Link
+              className="btn solid"
+              to="/desk/story/$leadId"
+              params={{ leadId: String(story.lead_id) }}
+            >
+              Open your story
+            </Link>
+          </div>
+        ))}
 
-        <section className="composer story-composer" aria-labelledby="story-composer-title">
+      <div className="astra-metrics" aria-label="Newsroom at a glance">
+        <Link to="/desk/queue">
+          <strong>{drafted}</strong>
+          <span>Drafts to review</span>
+        </Link>
+        <Link to="/desk/queue">
+          <strong>{queue.length}</strong>
+          <span>Leads in your queue</span>
+        </Link>
+        <Link to="/desk" hash="desk-followups">
+          <strong>{followUps.data?.length ?? 0}</strong>
+          <span>Open follow-ups</span>
+        </Link>
+        <Link to="/desk/published">
+          <strong>{published.data?.length ?? 0}</strong>
+          <span>Published stories</span>
+        </Link>
+      </div>
+      <div className="desk-home">
+        <section className="recent-story-work" aria-labelledby="recent-stories-title">
+          <div className="recent-story-heading">
+            <h2 id="recent-stories-title">Your recent drafts</h2>
+            <Link to="/desk/queue" className="inline-link">
+              View full queue
+            </Link>
+          </div>
+          <p>Stories you start appear here. Open one to follow its progress or edit the draft.</p>
+          {recentStories.isError ? (
+            <p role="alert">
+              Recent drafts could not load.{" "}
+              <button type="button" className="btn" onClick={() => void recentStories.refetch()}>
+                Try again
+              </button>
+            </p>
+          ) : recentStories.isPending ? (
+            <p role="status">Loading your drafts…</p>
+          ) : !recentStories.data?.length ? (
+            <p>No drafts started yet. Add your sources below to begin.</p>
+          ) : (
+            recentStories.data.map((story) => (
+              <div className="recent-story-row" key={story.id}>
+                <div>
+                  <span className="recent-story-status">
+                    {story.status === "completed"
+                      ? "Ready to edit"
+                      : story.status === "failed"
+                        ? "Needs attention"
+                        : story.status === "queued"
+                          ? "Queued"
+                          : "Writing in progress"}
+                  </span>
+                  <Link
+                    to="/desk/story/$leadId"
+                    params={{ leadId: String(story.lead_id) }}
+                    className="recent-story-title"
+                  >
+                    {story.headline}
+                  </Link>
+                  <p>
+                    {story.status === "completed"
+                      ? "Draft saved. Review it before publishing."
+                      : story.status === "failed"
+                        ? "Open the story to see what stopped and resume."
+                        : story.stage || "Waiting to start"}
+                  </p>
+                </div>
+                <Link
+                  to="/desk/story/$leadId"
+                  params={{ leadId: String(story.lead_id) }}
+                  className="btn"
+                >
+                  {story.status === "running" || story.status === "queued"
+                    ? "View progress"
+                    : "Open draft"}
+                </Link>
+              </div>
+            ))
+          )}
+        </section>
+
+        <section
+          id="story-composer"
+          className="composer story-composer"
+          aria-labelledby="story-composer-title"
+        >
           <header className="story-composer-heading">
             <div>
               <p className="composer-eyebrow">Start a draft</p>
@@ -468,67 +551,6 @@ function DeskHome() {
               <ProviderSignInButton detail={storyNotice.authDetail} />
             ) : null}
           </div>
-        </section>
-
-        <section className="recent-story-work" aria-labelledby="recent-stories-title">
-          <div className="recent-story-heading">
-            <h2 id="recent-stories-title">Your recent drafts</h2>
-            <Link to="/desk/queue" className="inline-link">
-              View full queue
-            </Link>
-          </div>
-          <p>Stories you start appear here. Open one to follow its progress or edit the draft.</p>
-          {recentStories.isError ? (
-            <p role="alert">
-              Recent drafts could not load.{" "}
-              <button type="button" className="btn" onClick={() => void recentStories.refetch()}>
-                Try again
-              </button>
-            </p>
-          ) : recentStories.isPending ? (
-            <p role="status">Loading your drafts…</p>
-          ) : !recentStories.data?.length ? (
-            <p>No drafts started yet. Add your sources above to begin.</p>
-          ) : (
-            recentStories.data.map((story) => (
-              <div className="recent-story-row" key={story.id}>
-                <div>
-                  <span className="recent-story-status">
-                    {story.status === "completed"
-                      ? "Ready to edit"
-                      : story.status === "failed"
-                        ? "Needs attention"
-                        : story.status === "queued"
-                          ? "Queued"
-                          : "Writing in progress"}
-                  </span>
-                  <Link
-                    to="/desk/story/$leadId"
-                    params={{ leadId: String(story.lead_id) }}
-                    className="recent-story-title"
-                  >
-                    {story.headline}
-                  </Link>
-                  <p>
-                    {story.status === "completed"
-                      ? "Draft saved. Review it before publishing."
-                      : story.status === "failed"
-                        ? "Open the story to see what stopped and resume."
-                        : story.stage || "Waiting to start"}
-                  </p>
-                </div>
-                <Link
-                  to="/desk/story/$leadId"
-                  params={{ leadId: String(story.lead_id) }}
-                  className="btn"
-                >
-                  {story.status === "running" || story.status === "queued"
-                    ? "View progress"
-                    : "Open draft"}
-                </Link>
-              </div>
-            ))
-          )}
         </section>
 
         {needs.length > 0 ? (
@@ -710,7 +732,7 @@ function DeskHome() {
               )}
             </section>
 
-            <section className="gc-followups">
+            <section id="desk-followups" className="gc-followups">
               <SecHead
                 title={`Follow-ups · ${followUps.data?.length ?? 0}`}
                 aside={
