@@ -1,3 +1,4 @@
+import { NAME_INVENTORY_SYSTEM } from "./name-check-work.ts";
 import { it } from "node:test";
 import assert from "node:assert/strict";
 import { reportAndDraft, REPORT_RESEARCH_SYSTEM, REPORT_WRITE_SYSTEM, REPORT_EDIT_SYSTEM, linkOutletInBody, type FetchedDoc } from "./report.ts";
@@ -213,6 +214,7 @@ it("honors an explicit short assignment over the research angle and carries dati
   const passes: { system: string; user: string }[] = [];
   const longBody = Array.from({length: 400}, (_, i) => `word${i}`).join(" ");
   deps.chat = async (system, user) => {
+    if (system === NAME_INVENTORY_SYSTEM) return { ok: true, text: JSON.stringify({ complete: true, people: [] }) };
     passes.push({ system, user });
     return { ok: true, text: JSON.stringify(system.includes('"fetch_urls"')
       ? { news: "Fundraising promotion", angle: "Membership prices", form: "reported", unknowns: ["Donation match year unknown; banner may be stale"] }
@@ -235,6 +237,7 @@ it("keeps a useful overlong draft with an honest form and visible length warning
   const deps = dependencies(log);
   let calls = 0;
   deps.chat = async (system) => {
+    if (system === NAME_INVENTORY_SYSTEM) return { ok: true, text: JSON.stringify({ complete: true, people: [] }) };
     calls++;
     return { ok: true, text: JSON.stringify(system.includes('"fetch_urls"')
       ? { news: lead.headline, form: "reported" }

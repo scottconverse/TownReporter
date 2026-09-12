@@ -1244,7 +1244,7 @@ export async function reportAndDraft(
   const limits = providerBudget(effectiveModelChoice, opts.providerOverrides);
   const budget = deps.budgetMs ?? limits.wallMs;
   const reserve = deps.budgetMs ? DRAFT_WRITE_RESERVE_MS : limits.reserveMs;
-  const nameReserve = Math.min(limits.callMs, Math.floor(budget * 0.3));
+  const nameReserve = budget >= 20_000 ? Math.min(limits.callMs, Math.floor(budget * 0.3)) : 0;
   const timeLeft = () => budget - (Date.now() - started);
   const canFollow = () => !suppliedOnly && timeLeft() > reserve + nameReserve + 4_000;
   const ingest = deps.ingest ?? defaultIngest;
