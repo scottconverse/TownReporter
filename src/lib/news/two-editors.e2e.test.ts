@@ -298,6 +298,8 @@ describe("two editors on one story", () => {
       cookie -- not merely that the UI declines to render the button.
     */
       await editorPage.goto(`${BASE_URL}/desk/ops`, { waitUntil: "domcontentloaded" });
+      await editorPage.getByRole("navigation", { name: "Server settings" })
+        .getByRole("button", { name: "Server health", exact: true }).click();
 
       // getOpsHealth: the Health section's own query has no role gate in the
       // React tree (it fires for every desk member), so an editor session must
@@ -310,6 +312,8 @@ describe("two editors on one story", () => {
       // Obtain a real owner-generated RPC for an available action, then replay it
       // with the editor's own cookie jar. Migrations target only this disposable DB.
       await ownerPage.goto(`${BASE_URL}/desk/ops`, { waitUntil: "domcontentloaded" });
+      await ownerPage.getByRole("navigation", { name: "Server settings" })
+        .getByRole("button", { name: "Server health", exact: true }).click();
       const row = ownerPage.locator("li", { hasText: "Apply database migrations" });
       const pending = ownerPage.waitForRequest(
         (request) =>
