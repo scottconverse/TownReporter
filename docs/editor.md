@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Current release: [0.6.35](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35) — published beta.** The [stable release](https://github.com/scottconverse/TownReporter/releases/latest) is available separately. Halo's 0.6.35 deployment is recorded in the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md); later development work is not automatically deployed. How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.36](https://github.com/scottconverse/TownReporter/pull/43) — document intake update; deployment is recorded separately.** The [stable release](https://github.com/scottconverse/TownReporter/releases/latest) is available separately. Halo's 0.6.35 deployment is recorded in the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md); later development work is not automatically deployed. How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
@@ -900,3 +900,10 @@ How we report, in public: `/how-we-report`.
 - It will not invent a city's sources. The owner supplies them in Paper setup and can maintain them under Sources.
 
 You are the publisher. The software is the library, the tape machine, and a very fast intern who still has to be edited.
+
+
+### Import a transcript or document packet
+
+Open **Desk → Write a story**. Use **Attach documents** to select one or several Markdown/text, Word (.doc/.docx), PDF, PNG/JPEG/WebP, CSV/TSV or subtitle (.srt/.vtt) files. Add the story assignment in the text box, select the writing model, and click **Write**. Website, PDF and YouTube video URLs can go in the same text box; accessible video captions are retained as a transcript.
+
+Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original remains private in the story; the reader extracts PDF pages, uses OCR for scanned pages/images, and processes long text in sections. The story lists reading progress and downloads of the original and full extracted text. Extracted text is limited to 20 million characters per document; larger text must be split into volumes. Reading errors are shown and originals are kept. Review OCR, names and quotations before publishing.

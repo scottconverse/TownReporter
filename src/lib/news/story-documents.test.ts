@@ -5,7 +5,7 @@ import { extractStoryDocument } from "./story-documents.server.ts";
 import { readFileSync } from "node:fs";
 it("reads a 15-page PDF through its final page, beyond the old 12-page OCR limit", async () => {
   const bytes = readFileSync(
-    new URL("../../../artifacts/document-import-fixtures/packet.pdf", import.meta.url),
+    new URL("./fixtures/story-documents/packet.pdf", import.meta.url),
   );
   const result = await extractStoryDocument(
     {
@@ -49,7 +49,7 @@ it("preserves every character in a long transcript and every reading chunk", asy
 });
 it("extracts Word body text without dropping the final paragraph", async () => {
   const bytes = readFileSync(
-    new URL("../../../artifacts/document-import-fixtures/word-notes.docx", import.meta.url),
+    new URL("./fixtures/story-documents/word-notes.docx", import.meta.url),
   );
   const result = await extractStoryDocument(
     {

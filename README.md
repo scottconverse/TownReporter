@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.35](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35) — published beta.** The release at `6f603ec` was deployed to Halo; the subsequent Utility Bill Analyzer navigation change is deployed at `fe53b6e`. The published 0.6.35 Windows installation ZIP is available from that release; the [latest stable release](https://github.com/scottconverse/TownReporter/releases/latest) remains available separately. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.36](https://github.com/scottconverse/TownReporter/pull/43) — document intake update; deployment is recorded separately.** The release at `6f603ec` was deployed to Halo; the subsequent Utility Bill Analyzer navigation change is deployed at `fe53b6e`. The published 0.6.35 Windows installation ZIP is available from that release; the [latest stable release](https://github.com/scottconverse/TownReporter/releases/latest) remains available separately. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 Halo deployment evidence for 0.6.35 is recorded in [the deployment receipt](docs/operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md).

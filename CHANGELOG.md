@@ -1,8 +1,13 @@
 # Changelog
 
-Current release: **0.6.35**.
+Current release: **0.6.36**.
 
-## Unreleased
+## 0.6.36 — 2026-09-12
+
+- Write a story accepts up to 20 documents of 100 MB each using multipart transfers. Markdown/text, Word DOC/DOCX, PDF, images and subtitle files are retained privately with full extracted text.
+- Long pasted sources are retained as documents instead of silently clipped. Documents are read in sections, and their evidence reaches research, writing and final editing. PDF/image OCR and website/PDF/YouTube URL intake feed the same workflow.
+- The story page shows document reading progress and original/extracted-text downloads. Unsupported types, incomplete uploads and extraction errors are visible. Extracted text above 20 million characters must be split into volumes.
+
 
 - Scanning retains separately attributed excerpts from fetched attachments
   even when a long parent page would previously crowd them out. The existing

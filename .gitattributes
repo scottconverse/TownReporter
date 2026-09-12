@@ -1,2 +1,2 @@
-artifacts/document-import-fixtures/*.pdf binary
-artifacts/document-import-fixtures/*.docx binary
+src/lib/news/fixtures/story-documents/*.pdf binary
+src/lib/news/fixtures/story-documents/*.docx binary
