@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.39 · editor interface update · deployment is recorded separately**
+**Version 0.6.40 · editor interface update · deployment is recorded separately**
 
 The [published release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35) has been deployed to Halo; see the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md). Later development work and acceptance results do not by themselves mean that another release has been deployed.
 
