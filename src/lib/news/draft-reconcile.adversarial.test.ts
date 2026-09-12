@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
 import type { DeskJob } from "./jobs.ts";
+import { NAME_INVENTORY_SYSTEM } from "./name-check-work.ts";
 
 let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;
@@ -20,7 +21,15 @@ before(async () => {
   });
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
   ({ ensureJobsSchema } = await vite.ssrLoadModule("/src/lib/news/jobs.ts"));
-  ({ performDraftReconcileWork } = await vite.ssrLoadModule("/src/lib/news/draft-reconcile.server.ts"));
+  const module = await vite.ssrLoadModule("/src/lib/news/draft-reconcile.server.ts");
+  // These fixtures contain no people. Keep their adversarial edit callbacks
+  // attached to the editing pass, rather than repeating their side effects
+  // when the separate name inventory runs.
+  performDraftReconcileWork = (job, deps = {}) => module.performDraftReconcileWork(job, {
+    ...deps,
+    chat: deps.chat ? (system: string, ...args: Parameters<NonNullable<typeof deps.chat>> extends [string, ...infer Rest] ? Rest : never) =>
+      system === NAME_INVENTORY_SYSTEM ? Promise.resolve({ ok: true, text: '{"complete":true,"people":[]}' }) : deps.chat!(system, ...args) : undefined,
+  });
   await ensureJobsSchema();
   const sql = await getSql();
   await sql.query("create table if not exists newsrooms(id integer primary key,name text not null)");

@@ -1,6 +1,12 @@
 # Changelog
 
-Current release: **0.6.37**.
+Current release: **0.6.38**.
+
+## 0.6.38 — 2026-09-12
+
+- Drafting now checks people’s name spellings against opened written sources after the final rewrite, saving source passages and capture references. Unsupported identities remain marked for editor review; transcript/OCR text cannot certify its own spellings.
+- The story editor displays Names and spellings above the draft, with visible unresolved names and expandable source receipts. Edits mark earlier checks out of date. Saved-evidence reconciliation also records a name check using its retained captures.
+- Restored the 14px minimum informational font size in the new document intake and recent-draft panels.
 
 ## 0.6.37 — 2026-09-12
 

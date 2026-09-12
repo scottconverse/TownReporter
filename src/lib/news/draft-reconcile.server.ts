@@ -13,6 +13,8 @@ import { readProviderOverrides } from "./provider-settings.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import type { DraftRow } from "./types.ts";
+import { checkStoryNames } from "./name-check-work.ts";
+import { nameCheckNotes } from "./name-check.ts";
 
 type ReconcileDeps = {
   chat?: ReportChat;
@@ -42,6 +44,7 @@ function sameCaptureUrl(left: string, right: string): boolean {
 }
 
 export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDeps = {}): Promise<void> {
+  const started = Date.now();
   if (job.kind !== "reconcile") throw new Error("Expected a reconcile job.");
   const sql = await getSql();
   const [member] = await sql<{user_id:string}>`select user_id from newsroom_members where newsroom_id=${job.newsroom_id} and user_id=${job.user_id} and role in ('owner','editor')`;
@@ -83,6 +86,15 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
   const edited = coerceDraft(response.text, {headline:draft.headline,dek:draft.dek,topic:draft.topic});
   if (!edited.body) throw new Error("Evidence reconciliation returned an unreadable draft. The saved draft was preserved.");
   const parsed = parseJsonBlock<Record<string,unknown>>(response.text) ?? {};
+  const names = await checkStoryNames({
+    draft: edited, city: "Use the locality identified in the saved draft and sources", domains: [],
+    docs: captures.map(capture => ({ url: capture.url, title: capture.title, text: capture.full_text, version_id: capture.id, extras: [] })),
+    searchAllowed: false, search: async () => [], open: async () => {},
+    timeLeft: () => budget.wallMs - (Date.now() - started),
+    stage: text => (deps.stage ?? setJobStage)(job.id, text),
+    chat: (system, user, maxTokens) => runChat(system, user, maxTokens, choice, { timeoutMs: Math.min(budget.callMs, Math.max(6000, budget.wallMs - (Date.now() - started) - 2000)) }),
+  });
+  Object.assign(edited, names.draft);
   await withClaimedLeadDraftLock(job, draft.lead_id, async tx => {
     const [current] = await tx<DraftRow>`select * from drafts where lead_id=${draft.lead_id} and newsroom_id=${job.newsroom_id} order by updated_at desc,id desc limit 1 for update`;
     if (!current || current.id !== draft.id || String(current.updated_at) !== snapshotUpdated || evidenceReviewToken(current) !== snapshotToken) throw new Error("The draft or its evidence changed while reconciliation was running. The saved draft was preserved.");
@@ -109,7 +121,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     const priorNotes = String(draft.integrity_notes ?? "").split(/\r?\n/).map(line => line.trim()).filter(line =>
       line && line !== obsoleteCheckpointNote && !(configuredTopic && line === staleMissingTopicNote),
     );
-    const integrityNotes = [...new Set([...priorNotes, edited.integrity_notes].map(value => String(value ?? "").trim()).filter(Boolean))].join("\n");
+    const integrityNotes = [...new Set([...priorNotes, edited.integrity_notes, nameCheckNotes(names.check)].map(value => String(value ?? "").trim()).filter(Boolean))].join("\n");
     const allowedCaptureUrls = captures.map(capture => capture.url);
     // Claims describe this newly edited body. Missing output cannot safely
     // inherit claims recorded for the older body, even when their URLs remain valid.
@@ -133,7 +145,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     const form = typeof parsed.form === "string" && (STORY_FORMS as readonly string[]).includes(parsed.form.trim()) ? parsed.form.trim() : draft.form;
     const { writerCheckpoint: _completedWriterCheckpoint, ...currentResearch } = research;
     const [saved] = await tx<{id:number}>`insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json)
-      values(${job.user_id},${job.newsroom_id},${draft.lead_id},${edited.headline},${edited.dek},${edited.body},${draft.topic},${sourceUrls},${integrityNotes},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(unanswered)},${JSON.stringify({...currentResearch,reportedClaims:{version:1,rows:claims},evidenceReconciledAt:new Date().toISOString()})}) returning id`;
+      values(${job.user_id},${job.newsroom_id},${draft.lead_id},${edited.headline},${edited.dek},${edited.body},${draft.topic},${sourceUrls},${integrityNotes},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(unanswered)},${JSON.stringify({...currentResearch,nameCheck:names.check,reportedClaims:{version:1,rows:claims},evidenceReconciledAt:new Date().toISOString()})}) returning id`;
     await tx`update desk_jobs set result_json=${JSON.stringify({originalDraftId:draft.id,newDraftId:saved.id,evidenceCheckIncomplete:false})} where id=${job.id} and claim_token=${job.claim_token}`;
   });
 }

@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Current release: [0.6.37](https://github.com/scottconverse/TownReporter/commits/main/) — editor interface update; deployment is recorded separately.** The [stable release](https://github.com/scottconverse/TownReporter/releases/latest) is available separately. Halo's 0.6.35 deployment is recorded in the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md); later development work is not automatically deployed. How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.38](https://github.com/scottconverse/TownReporter/commits/main/) — editor interface update; deployment is recorded separately.** The [stable release](https://github.com/scottconverse/TownReporter/releases/latest) is available separately. Halo's 0.6.35 deployment is recorded in the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md); later development work is not automatically deployed. How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
@@ -11,6 +11,10 @@ Other images are historical Longmont screens from 29 August; their old
 Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). The whole system, including how it is built, is [manual.md](manual.md). This page is the newsroom, in the order you use it.
 
 ---
+
+## Names and spellings
+
+New drafts run a separate name check after writing and editing. The story editor shows unresolved people above the draft and provides a written-source link and passage for each matched or corrected spelling. Transcripts, captions and OCR do not confirm their own name spellings. A source match checks spelling, not attendance, quotes or other claims. Missing evidence, incomplete checks and changes after checking stay visible. The editor retains the publishing decision. Saved-evidence checks use only the retained sources; public research during drafting can search written rosters and official records.
 
 ## Starting and finding a story
 
