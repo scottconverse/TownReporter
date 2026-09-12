@@ -90,6 +90,7 @@ describe("reportAndDraft progress stages", { timeout: 30_000 }, () => {
       "Planning the reporting",
       "Writing the draft",
       "Checking the draft against the evidence",
+      "Checking people's names against written sources",
     ];
     const successStages: string[] = [];
     const successChat: ReportChat = async (system) => {
