@@ -1258,6 +1258,22 @@ export const draftLead = createServerFn({ method: "POST" })
  * then hands off to the same commit boundary Story uses so a provider
  * refusal comes back structured and nothing is spent.
  */
+export const listRecentStoryWork = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    const { ensureJobsSchema } = await import("./jobs.ts");
+    await ensureJobsSchema();
+    const sql = await getSql();
+    return sql<{ id: number; lead_id: number; headline: string; status: string; stage: string; updated_at: string }>`
+      select * from (
+        select distinct on (j.subject_id) j.id, j.subject_id as lead_id, coalesce((select nullif(d.headline, '') from drafts d where d.lead_id=l.id and d.newsroom_id=l.newsroom_id order by d.updated_at desc,d.id desc limit 1), l.headline) as headline, j.status, j.stage, j.updated_at
+        from desk_jobs j join leads l on l.id=j.subject_id and l.newsroom_id=j.newsroom_id
+        where j.newsroom_id=${owned(context)} and j.kind='draft' and l.status in ('new','drafted','held')
+        order by j.subject_id,j.id desc
+      ) recent order by updated_at desc limit 5
+    `;
+  });
+
 export const writeStoryFromInput = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(

@@ -158,10 +158,10 @@ async function main() {
   await page.getByRole("heading", { name: "Write a story", exact: true }).waitFor();
   step("Write a story renders on the desk landing page");
 
-  await page
-    .getByPlaceholder(/paste a packet/i)
+  await page.getByRole("button", { name: "Add documents", exact: true }).waitFor();
+  await page.getByLabel("Links or source text", { exact: true })
     .fill(`https://example.org/agenda-${stamp} ${writeStoryHeadline}`);
-  const writeStoryBtn = page.getByRole("button", { name: "Write", exact: true });
+  const writeStoryBtn = page.getByRole("button", { name: "Write draft", exact: true });
   await writeStoryBtn.click();
   if (/\/desk\/story\//.test(page.url())) {
     step("Write a story lands on the new story's page");

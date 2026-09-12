@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.36 · document intake update · deployment is recorded separately**
+**Version 0.6.37 · editor interface update · deployment is recorded separately**
 
 The [published release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35) has been deployed to Halo; see the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md). Later development work and acceptance results do not by themselves mean that another release has been deployed.
 
@@ -1125,6 +1125,6 @@ MIT licensed. Copyright (c) 2026 Scott Converse.
 
 ### Import a transcript or document packet
 
-Open **Desk → Write a story**. Use **Attach documents** to select one or several Markdown/text, Word (.doc/.docx), PDF, PNG/JPEG/WebP, CSV/TSV or subtitle (.srt/.vtt) files. Add the story assignment in the text box, select the writing model, and click **Write**. Website, PDF and YouTube video URLs can go in the same text box; accessible video captions are retained as a transcript.
+Open **Desk → Write a story**. Use **Add documents** to select one or several Markdown/text, Word (.doc/.docx), PDF, PNG/JPEG/WebP, CSV/TSV or subtitle (.srt/.vtt) files. Add the story assignment in **What story do you want?**, select the writing model, and click **Write draft**. Website, PDF and YouTube video URLs go in **Links or source text**; accessible video captions are retained as a transcript.
 
 Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original remains private in the story; the reader extracts PDF pages, uses OCR for scanned pages/images, and processes long text in sections. The story lists reading progress and downloads of the original and full extracted text. Extracted text is limited to 20 million characters per document; larger text must be split into volumes. Reading errors are shown and originals are kept. Review OCR, names and quotations before publishing.
