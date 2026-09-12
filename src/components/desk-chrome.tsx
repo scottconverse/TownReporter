@@ -239,7 +239,7 @@ export function DeskShell({
         >
           <X size={20} />
         </button>
-        <Link to="/desk" className="astra-brand">
+        <Link to="/" className="astra-brand" title="Public news page">
           <strong>TownReporter</strong>
           <span>EDITOR'S DESK · {paper.city}</span>
         </Link>
@@ -281,7 +281,7 @@ export function DeskShell({
             <Menu size={20} />
           </button>
           <div className="astra-breadcrumb">
-            <span>{paper.name}</span>
+            <Link to="/" title="Public news page">{paper.name}</Link>
             <span aria-hidden>/</span>
             <b>{current}</b>
           </div>
@@ -307,7 +307,7 @@ export function DeskShell({
               </button>
             )}
             <Link to="/" className="astra-paper-link">
-              View paper <ArrowUpRight size={15} />
+              Public news page <ArrowUpRight size={15} aria-hidden />
             </Link>
           </div>
         </header>

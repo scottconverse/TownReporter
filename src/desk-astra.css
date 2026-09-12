@@ -215,17 +215,30 @@
   font-size: 12px;
   color: var(--mut);
   min-width: 0;
+  overflow: hidden;
 }
 .desk-ltr.astra .astra-breadcrumb b {
   font-weight: 500;
   color: var(--fg);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.desk-ltr.astra .astra-breadcrumb > a {
+  color: var(--mut);
+  white-space: nowrap;
+  text-decoration: none;
+}
+.desk-ltr.astra .astra-breadcrumb > a:hover {
+  color: var(--a);
+  text-decoration: underline;
 }
 .desk-ltr.astra .astra-top-actions {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-shrink: 0;
 }
 .desk-ltr.astra .astra-search-trigger {
   display: flex;
@@ -263,8 +276,19 @@
   align-items: center;
   gap: 7px;
   white-space: nowrap;
-  font-size: 12px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
   text-decoration: none;
+}
+.desk-ltr.astra .astra-paper-link:hover {
+  background: var(--hover);
+  border-color: var(--a);
 }
 .desk-ltr.astra .astra-menu {
   display: none;
@@ -1240,10 +1264,7 @@
   .desk-ltr.astra .astra-checks-jump {
     display: inline-flex;
   }
-  .desk-ltr.astra .astra-paper-link {
-    display: none;
-  }
-  .desk-ltr.astra .astra-breadcrumb > span:first-child {
+  .desk-ltr.astra .astra-breadcrumb > a:first-child {
     display: none;
   }
   .desk-ltr.astra .astra-settings {
@@ -1294,8 +1315,7 @@
     gap: 9px;
   }
   .desk-ltr.astra .astra-breadcrumb {
-    font-size: 11px;
-    gap: 6px;
+    display: none;
   }
   .desk-ltr.astra .astra-search-trigger kbd {
     display: none;

@@ -1,6 +1,11 @@
 # Changelog
 
-Current release: **0.6.39**.
+Current release: **0.6.40**.
+
+## 0.6.40 — 2026-09-12
+
+- Fixed the desk’s return link disappearing below 960px. A labeled Public news page button now remains visible on desktop, narrow panels and phones, with a clear border and hover state.
+- The top-left TownReporter logo and the newspaper name in the breadcrumb now link to the public news page. The separate Desk navigation item continues to open the editor desk.
 
 ## 0.6.39 — 2026-09-12
 
