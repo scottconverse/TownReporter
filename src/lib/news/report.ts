@@ -1244,8 +1244,9 @@ export async function reportAndDraft(
   const limits = providerBudget(effectiveModelChoice, opts.providerOverrides);
   const budget = deps.budgetMs ?? limits.wallMs;
   const reserve = deps.budgetMs ? DRAFT_WRITE_RESERVE_MS : limits.reserveMs;
+  const nameReserve = Math.min(limits.callMs, Math.floor(budget * 0.3));
   const timeLeft = () => budget - (Date.now() - started);
-  const canFollow = () => !suppliedOnly && timeLeft() > reserve + 4_000;
+  const canFollow = () => !suppliedOnly && timeLeft() > reserve + nameReserve + 4_000;
   const ingest = deps.ingest ?? defaultIngest;
   const search = suppliedOnly ? async (_q: string) => [] : deps.search ?? (async (q: string) => webSearch(q));
   const capture = deps.capture ?? ((userId, doc) => defaultCapture(userId, newsroomId, doc));
@@ -1261,8 +1262,8 @@ export async function reportAndDraft(
         localModel: opts.providerOverrides?.["local-model"]?.localModel,
       });
     });
-  const chat: ReportChat = (system, user, maxTokens) => {
-    const remaining = timeLeft();
+  const timedChat = (reserveMs: number): ReportChat => (system, user, maxTokens) => {
+    const remaining = timeLeft() - reserveMs;
     // Keep the provider's minimum useful call and the two-second handoff
     // margin inside the draft wall; injected batch adapters get this same cap.
     if (remaining < 8_000) {
@@ -1271,6 +1272,8 @@ export async function reportAndDraft(
     const timeoutMs = Math.min(limits.callMs, Math.max(6_000, remaining - 2_000));
     return providerChat(system, user, maxTokens, effectiveModelChoice, { timeoutMs });
   };
+  const chat = timedChat(nameReserve);
+  const nameChat = timedChat(0);
 
   const seedUrls = sanitizePublicUrls([...opts.urls, ...(opts.extraUrls ?? [])]).slice(0, 6);
   const retained = (opts.retainedSources ?? []).filter(d => seedUrls.includes(d.url) && d.text.trim());
@@ -1622,7 +1625,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
       captures: checkpointCaptures,
     });
     let reconciled = false;
-    if (timeLeft() > 10_000) {
+    if (timeLeft() > nameReserve + 10_000) {
       const claimRows = Array.isArray(parsed.claims) ? parsed.claims : [];
       const editQueries = [coerced.headline, passBody, ...claimRows.map(row => row && typeof row === "object" ? String((row as Record<string, unknown>).fact ?? "") : "")];
       const priorityUrls = docs
@@ -1761,7 +1764,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
   const names = await checkStoryNames({
     draft: { headline: coerced.headline, dek: coerced.dek, body },
     city: paper.city, domains: cityDomains, docs, searchAllowed: !suppliedOnly,
-    chat, search, timeLeft, stage: deps.onStage,
+    chat: nameChat, search, timeLeft, stage: deps.onStage,
     open: urls => take(urls, 8, true),
   });
   coerced.headline = names.draft.headline;
