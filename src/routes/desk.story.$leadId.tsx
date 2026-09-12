@@ -1,4 +1,5 @@
 import { StoryDocumentList } from "@/components/story-documents";
+import { DeskNameCheck } from "@/components/desk-name-check";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import {
   evidenceNeedsReview,
@@ -761,6 +762,7 @@ function StoryPage() {
         </aside>
 
         <section className="story-work">
+          {data.draft ? <DeskNameCheck research={data.draft.research_json} headline={headline} dek={dek} body={body} /> : null}
           <StoryDocumentList leadId={id} />
           {!locked && !onPaper ? (
             <DraftScopePicker

@@ -1,3 +1,4 @@
+import { NAME_INVENTORY_SYSTEM } from "./name-check-work.ts";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -75,6 +76,7 @@ it("supplies the configured topic key to writing and reconciliation as authorita
       capture: async () => ({ version_id: 1, capture_event_id: 2 }),
       hydrate: async () => [],
       chat: async (system, user) => {
+        if (system === NAME_INVENTORY_SYSTEM) return { ok: true, text: JSON.stringify({ complete: true, people: [] }) };
         packets.push({ system, user });
         if (system.includes('"fetch_urls"')) {
           return { ok: true, text: JSON.stringify({ news: lead.headline, form: "brief" }) };

@@ -35,6 +35,8 @@ import type { EffectiveProviderChoice } from "./ai.ts";
 import { stripReporterNotebook } from "./strip-draft.ts";
 import { titlesOverlap } from "./desk-copy.ts";
 import type { EditorialAssignment } from "./write-story.ts";
+import { checkStoryNames, replaceName } from "./name-check-work.ts";
+import { nameCheckNotes, nameCheckText, type NameCheck } from "./name-check.ts";
 
 export { stripReporterNotebook } from "./strip-draft.ts";
 
@@ -87,6 +89,7 @@ export type StoryClaim = {
 };
 
 export type ResearchMemo = {
+  nameCheck?: NameCheck;
   news: string;
   why_it_matters: string;
   angle: string;
@@ -116,6 +119,7 @@ export type FetchedDoc = {
   pages?: PdfPage[];
   version_id?: number | null;
   capture_event_id?: number | null;
+  extraction_method?: string;
 };
 
 export type RetainedSource = FetchedDoc & {
@@ -880,6 +884,7 @@ async function defaultCapture(userId: string, newsroomId: number, doc: FetchedDo
       classification: "discovered",
       triggerKind: "draft",
       pages: doc.pages,
+      extractionMethod: doc.extraction_method,
       newsroomId,
     });
     return { version_id: rec.versionId, capture_event_id: rec.captureEventId };
@@ -950,6 +955,7 @@ async function defaultIngest(url: string): Promise<FetchedDoc> {
       extras: got.extras ?? [],
       notices: got.notices ?? [],
       pages: got.pages,
+      extraction_method: got.extractionMethod,
     };
   } catch {
     return { url, title: describeSourceUrl(url).title, text: "", extras: [] };
@@ -1238,8 +1244,9 @@ export async function reportAndDraft(
   const limits = providerBudget(effectiveModelChoice, opts.providerOverrides);
   const budget = deps.budgetMs ?? limits.wallMs;
   const reserve = deps.budgetMs ? DRAFT_WRITE_RESERVE_MS : limits.reserveMs;
+  const nameReserve = Math.min(limits.callMs, Math.floor(budget * 0.3));
   const timeLeft = () => budget - (Date.now() - started);
-  const canFollow = () => !suppliedOnly && timeLeft() > reserve + 4_000;
+  const canFollow = () => !suppliedOnly && timeLeft() > reserve + nameReserve + 4_000;
   const ingest = deps.ingest ?? defaultIngest;
   const search = suppliedOnly ? async (_q: string) => [] : deps.search ?? (async (q: string) => webSearch(q));
   const capture = deps.capture ?? ((userId, doc) => defaultCapture(userId, newsroomId, doc));
@@ -1255,8 +1262,8 @@ export async function reportAndDraft(
         localModel: opts.providerOverrides?.["local-model"]?.localModel,
       });
     });
-  const chat: ReportChat = (system, user, maxTokens) => {
-    const remaining = timeLeft();
+  const timedChat = (reserveMs: number): ReportChat => (system, user, maxTokens) => {
+    const remaining = timeLeft() - reserveMs;
     // Keep the provider's minimum useful call and the two-second handoff
     // margin inside the draft wall; injected batch adapters get this same cap.
     if (remaining < 8_000) {
@@ -1265,6 +1272,8 @@ export async function reportAndDraft(
     const timeoutMs = Math.min(limits.callMs, Math.max(6_000, remaining - 2_000));
     return providerChat(system, user, maxTokens, effectiveModelChoice, { timeoutMs });
   };
+  const chat = timedChat(nameReserve);
+  const nameChat = timedChat(0);
 
   const seedUrls = sanitizePublicUrls([...opts.urls, ...(opts.extraUrls ?? [])]).slice(0, 6);
   const retained = (opts.retainedSources ?? []).filter(d => seedUrls.includes(d.url) && d.text.trim());
@@ -1607,7 +1616,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
       body: passBody,
       topic: opts.lead.topic,
       source_urls: checkpointUrls,
-      integrity_notes: [coerced.integrity_notes, retainedNotes].filter(Boolean).join("\n"),
+      integrity_notes: [coerced.integrity_notes, retainedNotes, "NAME CHECK: Not yet completed. This saved writer checkpoint has not had its names checked against written sources."].filter(Boolean).join("\n"),
       form: parsed.form,
       found: checkpointFindings,
       unanswered: parsed.unanswered,
@@ -1616,7 +1625,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
       captures: checkpointCaptures,
     });
     let reconciled = false;
-    if (timeLeft() > 10_000) {
+    if (timeLeft() > nameReserve + 10_000) {
       const claimRows = Array.isArray(parsed.claims) ? parsed.claims : [];
       const editQueries = [coerced.headline, passBody, ...claimRows.map(row => row && typeof row === "object" ? String((row as Record<string, unknown>).fact ?? "") : "")];
       const priorityUrls = docs
@@ -1750,6 +1759,21 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
   });
   let body = gateOut.body;
 
+  // Run after every possible rewrite. A transcript repeated by an editor model
+  // is not independent evidence for how a person's name is spelled.
+  const names = await checkStoryNames({
+    draft: { headline: coerced.headline, dek: coerced.dek, body },
+    city: paper.city, domains: cityDomains, docs, searchAllowed: !suppliedOnly,
+    chat: nameChat, search, timeLeft, stage: deps.onStage,
+    open: urls => take(urls, 8, true),
+  });
+  coerced.headline = names.draft.headline;
+  coerced.dek = names.draft.dek;
+  body = names.draft.body;
+  for (const row of names.check.rows.filter(row => row.status === "corrected"))
+    coerced.memory_entities = coerced.memory_entities.map(entity => replaceName(entity, row.name, row.spelling));
+  coerced.integrity_notes = [coerced.integrity_notes, nameCheckNotes(names.check)].filter(Boolean).join("\n");
+
   const used = preferStoryUrls(
     sanitizePublicUrls(
       Array.isArray(coerced.source_urls) && coerced.source_urls.length
@@ -1760,6 +1784,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     opts.lead.headline,
   );
   body = linkOutletInBody(body, used);
+  names.check.checkedText = nameCheckText({ headline: coerced.headline, dek: coerced.dek, body });
   const captures = await hydrate(opts.userId, used);
   const trail = parseTrail(parsed.reporting_trail);
   const docMeta: Partial<ProvenanceItem>[] = docs
@@ -1841,6 +1866,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     unanswered,
     claims,
     research_memo: {
+      nameCheck: names.check,
       news: String(research?.news ?? opts.lead.headline).slice(0, 500),
       why_it_matters: String(research?.why_it_matters ?? opts.lead.why).slice(0, 800),
       angle: String(research?.angle ?? opts.lead.headline).slice(0, 400),
