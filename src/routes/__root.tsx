@@ -1,9 +1,4 @@
-import {
-  createRootRoute,
-  HeadContent,
-  Outlet,
-  Scripts,
-} from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
@@ -11,6 +6,7 @@ import { siteUrl } from "@/lib/paper";
 import { DEFAULT_PAPER_IDENTITY, PaperProvider, resolvePaperIdentity } from "@/lib/paper-context";
 import { getPaperIdentityFn } from "@/lib/news/paper-settings";
 import appCss from "../styles.css?url";
+import deskCss from "../desk-astra.css?url";
 import { useState } from "react";
 
 /*
@@ -88,7 +84,7 @@ export const Route = createRootRoute({
         { name: "twitter:image", content: siteUrl("/og.jpg") },
       ],
       links: [
-      /*
+        /*
         The fonts are served from this origin, not from Google.
 
         Linking `fonts.googleapis.com` meant every reader's browser announced
@@ -97,13 +93,14 @@ export const Route = createRootRoute({
         live in `public/fonts` and the @font-face rules in `src/fonts.css`;
         regenerate with `node scripts/fetch-fonts.mjs`.
       */
-      { rel: "stylesheet", href: appCss },
-      { rel: "manifest", href: "/__grok/manifest.webmanifest" },
-      { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
-      // Without an explicit icon the browser falls back to /favicon.ico, which
-      // does not exist — a 404 on every page load and a blank tab icon.
-      // public/favicon.svg was shipped but never referenced.
-      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+        { rel: "stylesheet", href: appCss },
+        { rel: "stylesheet", href: deskCss },
+        { rel: "manifest", href: "/__grok/manifest.webmanifest" },
+        { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
+        // Without an explicit icon the browser falls back to /favicon.ico, which
+        // does not exist — a 404 on every page load and a blank tab icon.
+        // public/favicon.svg was shipped but never referenced.
+        { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
       ],
     };
   },
@@ -178,7 +175,7 @@ function Root() {
         <script
           dangerouslySetInnerHTML={{
             __html:
-              'setTimeout(function(){var e=document.querySelector(' +
+              "setTimeout(function(){var e=document.querySelector(" +
               '"[data-awaiting-session]:not([data-session-hydrated])");' +
               'if(e)document.documentElement.setAttribute("data-stranded","");},8000);',
           }}

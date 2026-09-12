@@ -1,6 +1,14 @@
 # Changelog
 
-Current release: **0.6.38**.
+Current release: **0.6.39**.
+
+## 0.6.39 — 2026-09-12
+
+- Implemented the approved Astra editor design across Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats, with matching Dark Desk and story workspaces. The public newspaper retains its existing appearance.
+- Added a persistent sidebar, New story entry point, keyboard newsroom search, light/dark appearance, accessible mobile navigation and the existing Normal/Large text preference.
+- Recent drafts precede the document composer. The composer keeps full document uploads, OCR, pasted text and URL intake, separate instructions, research scope and every writing model choice.
+- The story workspace presents a reading-sized writing surface beside Checks, Sources and Reporting tabs. Save, preview, redraft and publish actions retain existing evidence and draft-concurrency behavior; inspector tabs preserve their state.
+- Sources has On watch, Proposed and Dropped tabs. Server settings are organized into nine named panels, retaining provider connections, schedules, routine notice permissions, identity, sections, health/actions/logs, trash recovery and editor access.
 
 ## 0.6.38 — 2026-09-12
 

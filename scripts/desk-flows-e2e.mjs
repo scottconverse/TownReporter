@@ -248,9 +248,10 @@ async function main() {
   await page.getByText(/Deleted, and kept for 30 days/).waitFor({ timeout: 20_000 });
 
   await page.goto(`${base}/desk/ops`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "Server", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "Server & newsroom", exact: true }).waitFor();
   step("Server page renders");
 
+  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Recently deleted", exact: true }).click();
   await page.getByRole("heading", { name: "Recently deleted" }).waitFor({ timeout: 20_000 });
   const trashRow = page.locator("li", { hasText: leadHeadline }).first();
   await trashRow.waitFor({ timeout: 20_000 });

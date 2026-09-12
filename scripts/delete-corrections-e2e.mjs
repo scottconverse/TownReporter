@@ -860,8 +860,8 @@ async function main() {
   await page
     .locator("#finding-evidence-review")
     .screenshot({ path: join(evidenceArtifactDir, "finding-evidence-review-desktop.png") });
-  await page.getByRole("button", { name: "Dark", exact: true }).click();
-  await page.getByRole("button", { name: "Large", exact: true }).click();
+  await page.getByRole("button", { name: "Switch to dark appearance", exact: true }).click();
+  await page.getByRole("combobox", { name: "Text size", exact: true }).selectOption("large");
   await page.setViewportSize({ width: 390, height: 844 });
   if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)))
     throw new Error("finding evidence review overflows at 390px dark large text");
@@ -870,9 +870,9 @@ async function main() {
     .screenshot({
       path: join(evidenceArtifactDir, "finding-evidence-review-mobile-dark-large.png"),
     });
-  await page.getByRole("button", { name: "Light", exact: true }).click();
-  await page.getByRole("button", { name: "Text: Normal", exact: true }).click();
+  await page.getByRole("button", { name: "Switch to light appearance", exact: true }).click();
   if (originalViewport) await page.setViewportSize(originalViewport);
+  await page.getByRole("combobox", { name: "Text size", exact: true }).selectOption("normal");
   const queuedDraftJob = await pool.query(
     `insert into desk_jobs(newsroom_id,user_id,kind,subject_id,status,stage,claim_token,started_at,updated_at)
      values($1,$2,'draft',$3,'running','drafting',$4,now(),now()) returning id`,
@@ -1107,6 +1107,7 @@ async function main() {
   // restoring will bring back, and "with 1 correction" only appears if the
   // snapshot actually captured the correction row before the delete ran.
   await page.goto(`${base}/desk/ops`, { waitUntil: "networkidle" });
+  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Recently deleted", exact: true }).click();
   await page.getByRole("heading", { name: "Recently deleted" }).waitFor({ timeout: 20_000 });
   const trashRow = page.locator("li", { hasText: leadHeadline }).first();
   await trashRow.waitFor({ timeout: 20_000 });

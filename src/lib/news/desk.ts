@@ -202,9 +202,12 @@ export const listLeads = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
     const sql = await getSql();
-    return sql<LeadRow & { article_slug: string | null; investigation_id: number | null }>`
+    return sql<LeadRow & { article_slug: string | null; investigation_id: number | null; story_headline: string | null }>`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.status, l.source_urls, l.evidence,
              l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
+             coalesce(a.headline, (select nullif(d.headline, '') from drafts d
+               where d.lead_id=l.id and d.newsroom_id=l.newsroom_id
+               order by d.updated_at desc,d.id desc limit 1)) as story_headline,
              l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id,
              l.possible_duplicate_of,
              case when prior.id is null then null else jsonb_build_object(

@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -102,7 +102,26 @@ function StateDot({ state }: { state: HealthState }) {
   );
 }
 
+const SETTINGS_PANELS = [
+  "Writing models",
+  "Custom connections",
+  "Daily scan",
+  "Routine notices",
+  "Paper identity",
+  "Sections",
+  "Server health",
+  "Recently deleted",
+  "Editors & access",
+] as const;
 function OpsPage() {
+  const [panel, setPanel] = useState<string>("Writing models");
+  const { signin } = Route.useSearch();
+  const hash = useRouterState({ select: (s) => s.location.hash });
+  useEffect(() => {
+    if (signin) setPanel("Writing models");
+    else if (hash === "custom-ai-connections") setPanel("Custom connections");
+    else if (hash.includes("section")) setPanel("Sections");
+  }, [signin, hash]);
   const qc = useQueryClient();
   const [confirming, setConfirming] = useState<OpsActionId | null>(null);
   const [message, setMessage] = useState<string>("");
@@ -154,7 +173,7 @@ function OpsPage() {
 
   return (
     <DeskShell
-      title="Server"
+      title="Server & newsroom"
       kicker="Editor desk"
       lede={
         <>
@@ -164,147 +183,183 @@ function OpsPage() {
         </>
       }
     >
-      <WritingModels />
-      <CustomAiSettings />
-
-      <DailyScanSettings />
-      <RoutineNoticePermissions />
-
-      <section className="mt-12">
-        <SecHead
-          title="Health"
-          aside={
-            <span className="flex items-center gap-4">
-              <StateDot state={state} />
-              <InkButton
-                tone="quiet"
-                small
-                onClick={() => void health.refetch()}
-                disabled={health.isFetching}
-              >
-                {health.isFetching ? "Checking…" : "Check now"}
-              </InkButton>
-            </span>
-          }
-          sub={
-            health.data ? `${health.data.host} · read ${formatAgo(health.data.takenAt)}` : undefined
-          }
-        />
-
-        {health.isPending ? (
-          <ListSkeleton />
-        ) : health.isError ? (
-          <p className="mt-4 text-rust">Could not read the server. {String(health.error)}</p>
-        ) : (
-          <ul className="mt-4 divide-y divide-rule border-y border-rule">
-            {checks.map((c) => (
-              <li key={c.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-3">
-                <span className="w-40 shrink-0 text-sm tracking-[0.14em] text-muted uppercase">
-                  {c.label}
-                </span>
-                <span className="min-w-0 flex-1 break-words">{c.value}</span>
-                <StateDot state={c.state} />
-                {c.note ? <p className="w-full text-sm text-ink-2">{c.note}</p> : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="mt-12">
-        <SecHead
-          title="Actions"
-          sub="Each one says what it does before it does it. The two that interrupt the paper ask twice."
-        />
-        <ul className="mt-4 space-y-3">
-          {OPS_ACTIONS.map((rawAction) => {
-            const a = installAction(rawAction, Boolean(health.data?.managedInstall));
-            const unavailable = health.data?.unavailableActions?.[a.id];
-            const isConfirming = confirming === a.id;
-            const isRunning = running === a.id;
-            return (
-              <li key={a.id} className="border border-rule p-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-3">
-                  <h3 className="font-display text-lg font-semibold">
-                    {a.label}
-                    {a.interrupts ? (
-                      <span className="ml-2 text-sm tracking-[0.14em] text-rust uppercase">
-                        interrupts
-                      </span>
-                    ) : null}
-                  </h3>
-                  {isConfirming ? (
-                    <span className="flex gap-2">
-                      <InkButton
-                        tone="danger"
-                        small
-                        disabled={isRunning || Boolean(unavailable) || !health.data}
-                        onClick={() => act.mutate(a.id)}
-                      >
-                        {isRunning ? "Running…" : "Yes, do it"}
-                      </InkButton>
-                      <InkButton tone="quiet" small onClick={() => setConfirming(null)}>
-                        Cancel
-                      </InkButton>
-                    </span>
-                  ) : (
-                    <InkButton
-                      tone={a.interrupts ? "ghost" : "solid"}
-                      small
-                      disabled={Boolean(running) || Boolean(unavailable) || !health.data}
-                      onClick={() => (a.interrupts ? setConfirming(a.id) : act.mutate(a.id))}
-                    >
-                      {isRunning ? "Running…" : "Run"}
-                    </InkButton>
-                  )}
-                </div>
-                <p className="mt-2 max-w-2xl text-ink-2">
-                  {health.data ? a.detail : "Checking installation ownership…"}
-                </p>
-                {unavailable ? <p className="mt-2 text-sm">Unavailable: {unavailable}</p> : null}
-                <p className="mt-1 text-sm text-muted">Takes about {a.expectSeconds} seconds.</p>
-              </li>
-            );
-          })}
-        </ul>
-        {message ? (
-          <pre className="mt-4 max-h-72 overflow-auto border border-rule bg-paper-2 p-3 text-sm whitespace-pre-wrap">
-            {message}
-          </pre>
-        ) : null}
-      </section>
-
-      <RecentlyDeleted />
-
-      <section className="mt-12">
-        <SecHead title="Logs" sub="The last few lines of each. Newest at the bottom." />
-        <div className="mt-4 space-y-6">
-          {(health.data?.logs ?? []).map((l) => (
-            <div key={l.path}>
-              <h3 className="text-sm tracking-[0.14em] text-muted uppercase">{l.name}</h3>
-              {l.error ? (
-                <p className="mt-1 text-sm text-muted">{l.error}</p>
-              ) : l.lines.length === 0 ? (
-                <p className="mt-1 text-sm text-muted">Nothing logged.</p>
-              ) : (
-                <pre className="mt-1 max-h-56 overflow-auto border border-[var(--line)] bg-[var(--bg2)] p-3 text-sm whitespace-pre-wrap text-[var(--fg)]">
-                  {l.lines.join("\n")}
-                </pre>
-              )}
-            </div>
+      <div className="astra-settings">
+        <nav className="astra-settings-nav" aria-label="Server settings">
+          {SETTINGS_PANELS.map((name) => (
+            <button
+              key={name}
+              aria-current={panel === name ? "page" : undefined}
+              onClick={() => setPanel(name)}
+            >
+              {name}
+            </button>
           ))}
+        </nav>
+        <div className="astra-settings-body">
+          <div hidden={panel !== "Writing models"}>
+            <WritingModels />
+          </div>
+          <div hidden={panel !== "Custom connections"}>
+            <CustomAiSettings />
+          </div>
+          <div hidden={panel !== "Daily scan"}>
+            <DailyScanSettings />
+          </div>
+          <div hidden={panel !== "Routine notices"}>
+            <RoutineNoticePermissions />
+          </div>
+          <div hidden={panel !== "Paper identity"}>
+            <PaperSetup />
+          </div>
+          <div hidden={panel !== "Sections"}>
+            <SectionsSetup />
+          </div>
+          <div hidden={panel !== "Server health"}>
+            <section className="mt-12">
+              <SecHead
+                title="Health"
+                aside={
+                  <span className="flex items-center gap-4">
+                    <StateDot state={state} />
+                    <InkButton
+                      tone="quiet"
+                      small
+                      onClick={() => void health.refetch()}
+                      disabled={health.isFetching}
+                    >
+                      {health.isFetching ? "Checking…" : "Check now"}
+                    </InkButton>
+                  </span>
+                }
+                sub={
+                  health.data
+                    ? `${health.data.host} · read ${formatAgo(health.data.takenAt)}`
+                    : undefined
+                }
+              />
+
+              {health.isPending ? (
+                <ListSkeleton />
+              ) : health.isError ? (
+                <p className="mt-4 text-rust">Could not read the server. {String(health.error)}</p>
+              ) : (
+                <ul className="mt-4 divide-y divide-rule border-y border-rule">
+                  {checks.map((c) => (
+                    <li key={c.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-3">
+                      <span className="w-40 shrink-0 text-sm tracking-[0.14em] text-muted uppercase">
+                        {c.label}
+                      </span>
+                      <span className="min-w-0 flex-1 break-words">{c.value}</span>
+                      <StateDot state={c.state} />
+                      {c.note ? <p className="w-full text-sm text-ink-2">{c.note}</p> : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="mt-12">
+              <SecHead
+                title="Actions"
+                sub="Each one says what it does before it does it. The two that interrupt the paper ask twice."
+              />
+              <ul className="mt-4 space-y-3">
+                {OPS_ACTIONS.map((rawAction) => {
+                  const a = installAction(rawAction, Boolean(health.data?.managedInstall));
+                  const unavailable = health.data?.unavailableActions?.[a.id];
+                  const isConfirming = confirming === a.id;
+                  const isRunning = running === a.id;
+                  return (
+                    <li key={a.id} className="border border-rule p-4">
+                      <div className="flex flex-wrap items-baseline justify-between gap-3">
+                        <h3 className="font-display text-lg font-semibold">
+                          {a.label}
+                          {a.interrupts ? (
+                            <span className="ml-2 text-sm tracking-[0.14em] text-rust uppercase">
+                              interrupts
+                            </span>
+                          ) : null}
+                        </h3>
+                        {isConfirming ? (
+                          <span className="flex gap-2">
+                            <InkButton
+                              tone="danger"
+                              small
+                              disabled={isRunning || Boolean(unavailable) || !health.data}
+                              onClick={() => act.mutate(a.id)}
+                            >
+                              {isRunning ? "Running…" : "Yes, do it"}
+                            </InkButton>
+                            <InkButton tone="quiet" small onClick={() => setConfirming(null)}>
+                              Cancel
+                            </InkButton>
+                          </span>
+                        ) : (
+                          <InkButton
+                            tone={a.interrupts ? "ghost" : "solid"}
+                            small
+                            disabled={Boolean(running) || Boolean(unavailable) || !health.data}
+                            onClick={() => (a.interrupts ? setConfirming(a.id) : act.mutate(a.id))}
+                          >
+                            {isRunning ? "Running…" : "Run"}
+                          </InkButton>
+                        )}
+                      </div>
+                      <p className="mt-2 max-w-2xl text-ink-2">
+                        {health.data ? a.detail : "Checking installation ownership…"}
+                      </p>
+                      {unavailable ? (
+                        <p className="mt-2 text-sm">Unavailable: {unavailable}</p>
+                      ) : null}
+                      <p className="mt-1 text-sm text-muted">
+                        Takes about {a.expectSeconds} seconds.
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+              {message ? (
+                <pre className="mt-4 max-h-72 overflow-auto border border-rule bg-paper-2 p-3 text-sm whitespace-pre-wrap">
+                  {message}
+                </pre>
+              ) : null}
+            </section>
+
+            <section className="mt-12">
+              <SecHead title="Logs" sub="The last few lines of each. Newest at the bottom." />
+              <div className="mt-4 space-y-6">
+                {(health.data?.logs ?? []).map((l) => (
+                  <div key={l.path}>
+                    <h3 className="text-sm tracking-[0.14em] text-muted uppercase">{l.name}</h3>
+                    {l.error ? (
+                      <p className="mt-1 text-sm text-muted">{l.error}</p>
+                    ) : l.lines.length === 0 ? (
+                      <p className="mt-1 text-sm text-muted">Nothing logged.</p>
+                    ) : (
+                      <pre className="mt-1 max-h-56 overflow-auto border border-[var(--line)] bg-[var(--bg2)] p-3 text-sm whitespace-pre-wrap text-[var(--fg)]">
+                        {l.lines.join("\n")}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <p className="mt-12 max-w-2xl text-sm text-muted">
+              {health.data?.managedInstall
+                ? "This page runs inside the paper. If the server is down, use Start TownReporter.cmd and the logs in your private data folder. This local installation has no automatic Windows watchdog or startup task."
+                : "This page runs inside the paper, so it cannot report when the server is down. Use your installation's external controls. Automatic recovery is available only when its operator has separately configured and verified it."}
+            </p>
+          </div>
+          <div hidden={panel !== "Recently deleted"}>
+            <RecentlyDeleted />
+          </div>
+          <div hidden={panel !== "Editors & access"}>
+            <InviteAnEditor />
+            <GiveUpTheDesk />
+          </div>
         </div>
-      </section>
-
-      <p className="mt-12 max-w-2xl text-sm text-muted">
-        {health.data?.managedInstall
-          ? "This page runs inside the paper. If the server is down, use Start TownReporter.cmd and the logs in your private data folder. This local installation has no automatic Windows watchdog or startup task."
-          : "This page runs inside the paper, so it cannot report when the server is down. Use your installation's external controls. Automatic recovery is available only when its operator has separately configured and verified it."}
-      </p>
-
-      <PaperSetup />
-      <InviteAnEditor />
-      <GiveUpTheDesk />
+      </div>
     </DeskShell>
   );
 }
@@ -328,20 +383,43 @@ function OpsPage() {
  */
 function CustomAiSettings() {
   const qc = useQueryClient();
-  const connections = useQuery({ queryKey: ["custom-ai-connections"], queryFn: () => getCustomAiConnectionsFn() });
-  async function refresh() { await qc.invalidateQueries({ queryKey: ["custom-ai-connections"] }); }
+  const connections = useQuery({
+    queryKey: ["custom-ai-connections"],
+    queryFn: () => getCustomAiConnectionsFn(),
+  });
+  async function refresh() {
+    await qc.invalidateQueries({ queryKey: ["custom-ai-connections"] });
+  }
   return (
     <div id="custom-ai-connections" className="mt-12 min-w-0 border-t border-rule pt-8">
-      {connections.isPending ? <p role="status">Loading your API connections…</p> : connections.isError ? (
-        <div role="alert"><p>Could not load your API connections. Existing writing models are unchanged.</p><InkButton tone="quiet" onClick={() => void connections.refetch()}>Try again</InkButton></div>
-      ) : <CustomAiConnections
-        connections={connections.data ?? []}
-        onSave={async (data) => { await saveCustomAiConnectionFn({ data }); await refresh(); }}
-        onEnable={async (id, enabled) => { await enableCustomAiConnectionFn({ data: { id, enabled } }); await refresh(); }}
-        onDelete={async (id) => { await deleteCustomAiConnectionFn({ data: { id } }); await refresh(); }}
-        onDiscover={(id) => discoverCustomAiModelsFn({ data: { id } })}
-        onTest={(id) => testCustomAiConnectionFn({ data: { id } })}
-      />}
+      {connections.isPending ? (
+        <p role="status">Loading your API connections…</p>
+      ) : connections.isError ? (
+        <div role="alert">
+          <p>Could not load your API connections. Existing writing models are unchanged.</p>
+          <InkButton tone="quiet" onClick={() => void connections.refetch()}>
+            Try again
+          </InkButton>
+        </div>
+      ) : (
+        <CustomAiConnections
+          connections={connections.data ?? []}
+          onSave={async (data) => {
+            await saveCustomAiConnectionFn({ data });
+            await refresh();
+          }}
+          onEnable={async (id, enabled) => {
+            await enableCustomAiConnectionFn({ data: { id, enabled } });
+            await refresh();
+          }}
+          onDelete={async (id) => {
+            await deleteCustomAiConnectionFn({ data: { id } });
+            await refresh();
+          }}
+          onDiscover={(id) => discoverCustomAiModelsFn({ data: { id } })}
+          onTest={(id) => testCustomAiConnectionFn({ data: { id } })}
+        />
+      )}
     </div>
   );
 }
@@ -938,7 +1016,6 @@ function PaperSetup() {
         them added once, the first time they visit.
       </p>
       {current.isPending ? null : <PaperSetupForm initial={current.data} submitLabel="Save" />}
-      <SectionsSetup />
       {me.data?.role === "owner" ? <DarkDeskCounty /> : null}
     </section>
   );

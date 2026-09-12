@@ -148,6 +148,7 @@ function futureDenverTime() {
 async function addAcceptedSource() {
   const sourceUrl = `https://daily-settings-${stamp}.example.test/agenda`;
   await page.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
+  await page.getByText("Add a source", { exact: true }).click();
   await page.getByLabel("URL", { exact: true }).fill(sourceUrl);
   await page.getByLabel("Name", { exact: true }).fill("Daily settings source");
   await page.getByRole("button", { name: "Add source" }).click();
@@ -157,6 +158,7 @@ async function addAcceptedSource() {
 
 async function addRoutineNoticeFixtureSource() {
   await page.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
+  await page.getByText("Add a source", { exact: true }).click();
   await page.getByLabel("URL", { exact: true }).fill(routineNoticeFixtureUrl);
   await page.getByLabel("Name", { exact: true }).fill("Routine notice fixture source");
   await page.getByRole("button", { name: "Add source" }).click();
@@ -167,6 +169,7 @@ async function addRoutineNoticeFixtureSource() {
 async function dailySettingsJourney(context, observePage) {
   const originalPage = page;
   await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Daily scan", exact: true }).click();
   const panel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
   await panel.getByRole("heading", { name: "Daily scan", exact: true }).waitFor();
   const enabled = panel.getByRole("checkbox", { name: /Run once each day/ });
@@ -204,6 +207,7 @@ async function dailySettingsJourney(context, observePage) {
 
   await addAcceptedSource();
   await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Daily scan", exact: true }).click();
   const freshPanel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
   await freshPanel.getByText(/Accepted community sources \(1\)/).waitFor();
   await freshPanel.getByRole("checkbox", { name: /Daily settings source/ }).check();
@@ -228,6 +232,7 @@ async function dailySettingsJourney(context, observePage) {
   await freshPanel.getByRole("button", { name: "Save daily scan" }).click();
   await freshPanel.getByText("Daily scan settings saved.").waitFor();
   await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Daily scan", exact: true }).click();
   const persistedPanel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
   if ((await persistedPanel.getByLabel("Local time").inputValue()) !== future) throw new Error("saved local time did not persist");
   if ((await persistedPanel.getByLabel("Runtime").inputValue()) !== "claude-cli") throw new Error("saved runtime did not persist");
@@ -238,6 +243,7 @@ async function dailySettingsJourney(context, observePage) {
   observePage(other, "daily-second-tab");
   other.setDefaultTimeout(45_000);
   await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  await other.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Daily scan", exact: true }).click();
   const otherPanel = other.locator("section", { has: other.getByRole("heading", { name: "Daily scan", exact: true }) });
   await otherPanel.getByRole("heading", { name: "Daily scan", exact: true }).waitFor();
   await otherPanel.getByLabel("Daily source limit").fill("3");
@@ -265,13 +271,17 @@ async function dailySettingsJourney(context, observePage) {
     throw new Error("daily scan panel has horizontal overflow at 390px");
   }
   await otherPanel.screenshot({ path: join(evidenceDir, "daily-scan-settings-mobile.png") });
-  await other.getByRole("button", { name: "Dark", exact: true }).click();
-  await other.getByRole("button", { name: "Large", exact: true }).click();
+  const darkToggleother = other.getByRole("button", { name: "Switch to dark appearance", exact: true });
+  if (await darkToggleother.count()) await darkToggleother.click();
+  await other.getByRole("button", { name: "Open navigation", exact: true }).click();
+  await other.getByRole("combobox", { name: "Text size", exact: true }).selectOption("large");
+  await other.getByRole("dialog", { name: "Newsroom navigation" }).getByRole("button", { name: "Close navigation", exact: true }).click();
   if (!(await other.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
     throw new Error("daily scan panel has horizontal overflow at 390px in dark large-text mode");
   }
   await otherPanel.screenshot({ path: join(evidenceDir, "daily-scan-settings-mobile-dark-large.png") });
   await other.reload({ waitUntil: "domcontentloaded" });
+  await other.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Daily scan", exact: true }).click();
   const cleanupPanel = other.locator("section", { has: other.getByRole("heading", { name: "Daily scan", exact: true }) });
   await cleanupPanel.getByRole("button", { name: "Resume daily scan" }).click();
   await cleanupPanel.getByText("Daily scan resumed.").waitFor();
@@ -290,11 +300,12 @@ async function fileQueueLead(headline, why) {
   await form.getByLabel("Headline").fill(headline);
   await form.getByLabel("Why now").fill(why);
   await form.getByRole("button", { name: "File lead" }).click();
-  await page.getByRole("heading", { name: headline, exact: true }).waitFor();
+  await expect(page.getByRole("textbox", { name: "Headline", exact: true })).toHaveValue(headline);
 }
 
 async function persistSuppliedScope(headline, why) {
   await fileQueueLead(headline, why);
+  await page.getByRole("tab", { name: "Reporting", exact: true }).click();
 
   // Draft performs the real saveReportingNotes call first. Hold only its
   // second, model-bearing draftLead request and abort it: the stored scope is
@@ -421,6 +432,7 @@ async function draftBatchJourney() {
 async function routineNoticePermissionsJourney(context, observePage) {
   await addRoutineNoticeFixtureSource();
   await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Routine notices", exact: true }).click();
   const panel = page.locator("#routine-notice-permissions");
   await panel.getByRole("heading", { name: "Routine notice permissions", exact: true }).waitFor();
   await panel
@@ -452,6 +464,7 @@ async function routineNoticePermissionsJourney(context, observePage) {
     )
     .waitFor();
   await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Routine notices", exact: true }).click();
   const reloaded = page.locator("#routine-notice-permissions");
   if (
     !(await reloaded
@@ -506,8 +519,11 @@ async function routineNoticePermissionsJourney(context, observePage) {
   if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
     throw new Error("manual notice checks have horizontal overflow at 390px");
   }
-  await page.getByRole("button", { name: "Dark", exact: true }).click();
-  await page.getByRole("button", { name: "Large", exact: true }).click();
+  const darkTogglepage = page.getByRole("button", { name: "Switch to dark appearance", exact: true });
+  if (await darkTogglepage.count()) await darkTogglepage.click();
+  await page.getByRole("button", { name: "Open navigation", exact: true }).click();
+  await page.getByRole("combobox", { name: "Text size", exact: true }).selectOption("large");
+  await page.getByRole("dialog", { name: "Newsroom navigation" }).getByRole("button", { name: "Close navigation", exact: true }).click();
   if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
     throw new Error("manual notice checks have horizontal overflow at 390px in dark large-text mode");
   }
@@ -517,6 +533,7 @@ async function routineNoticePermissionsJourney(context, observePage) {
   observePage(other, "routine-second-tab");
   other.setDefaultTimeout(45_000);
   await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  await other.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Routine notices", exact: true }).click();
   const otherPanel = other.locator("#routine-notice-permissions");
   await otherPanel
     .getByRole("heading", { name: "Routine notice permissions", exact: true })
@@ -538,9 +555,12 @@ async function routineNoticePermissionsJourney(context, observePage) {
   await other.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
   const sourceRow = other.locator("tr", { hasText: "Daily settings source" });
   await sourceRow.getByRole("button", { name: "Drop", exact: true }).click();
+  await other.getByRole("button", { name: /^Dropped / }).click();
   await other.getByRole("heading", { name: "Rejected", exact: true }).waitFor();
   await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
+  await other.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Routine notices", exact: true }).click();
   await other.reload({ waitUntil: "domcontentloaded" });
+  await other.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Routine notices", exact: true }).click();
   await otherPanel.getByText("Saved permissions need attention").waitFor();
   await otherPanel
     .getByText(/Saved address: https:\/\/daily-settings-/)
@@ -618,8 +638,11 @@ async function routineNoticePermissionsJourney(context, observePage) {
     throw new Error("routine notice permissions have horizontal overflow at 390px");
   }
   await otherPanel.screenshot({ path: join(evidenceDir, "routine-notice-permissions-mobile.png") });
-  await other.getByRole("button", { name: "Dark", exact: true }).click();
-  await other.getByRole("button", { name: "Large", exact: true }).click();
+  const darkToggleother = other.getByRole("button", { name: "Switch to dark appearance", exact: true });
+  if (await darkToggleother.count()) await darkToggleother.click();
+  await other.getByRole("button", { name: "Open navigation", exact: true }).click();
+  await other.getByRole("combobox", { name: "Text size", exact: true }).selectOption("large");
+  await other.getByRole("dialog", { name: "Newsroom navigation" }).getByRole("button", { name: "Close navigation", exact: true }).click();
   if (!(await other.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
     throw new Error(
       "routine notice permissions have horizontal overflow at 390px in dark large-text mode",

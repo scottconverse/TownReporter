@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Current release: [0.6.38](https://github.com/scottconverse/TownReporter/commits/main/) — editor interface update; deployment is recorded separately.** The [stable release](https://github.com/scottconverse/TownReporter/releases/latest) is available separately. Halo's 0.6.35 deployment is recorded in the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md); later development work is not automatically deployed. How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.39](https://github.com/scottconverse/TownReporter/commits/main/) — editor interface update; deployment is recorded separately.** The [stable release](https://github.com/scottconverse/TownReporter/releases/latest) is available separately. Halo's 0.6.35 deployment is recorded in the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md); later development work is not automatically deployed. How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
 
 The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images show development examples.
 Other images are historical Longmont screens from 29 August; their old
@@ -917,3 +917,13 @@ You are the publisher. The software is the library, the tape machine, and a very
 Open **Desk → Write a story**. Use **Add documents** to select one or several Markdown/text, Word (.doc/.docx), PDF, PNG/JPEG/WebP, CSV/TSV or subtitle (.srt/.vtt) files. Add the story assignment in **What story do you want?**, select the writing model, and click **Write draft**. Website, PDF and YouTube video URLs go in **Links or source text**; accessible video captions are retained as a transcript.
 
 Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original remains private in the story; the reader extracts PDF pages, uses OCR for scanned pages/images, and processes long text in sections. The story lists reading progress and downloads of the original and full extracted text. Extracted text is limited to 20 million characters per document; larger text must be split into volumes. Reading errors are shown and originals are kept. Review OCR, names and quotations before publishing.
+
+## Astra editor desk (0.6.39)
+
+The sidebar keeps Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats available, with Dark Desk and Follow-ups alongside them. On a phone, use the navigation button in the top bar. Find anything (Ctrl+K) searches newsroom leads and screen names. Appearance is in the top bar; Normal/Large text remains in the sidebar.
+
+**Start a story:** choose New story, then Add documents or drag files into the document area. Paste URLs or source text in the large text area, give the angle, and choose Write it. Existing document limits, OCR, URL/YouTube ingestion, section and research options, and writing models remain available. Recent drafts sit at the top of Desk; opening one shows its progress or saved draft.
+
+**Edit and review:** the story workspace keeps headline, summary and body on the writing surface. Its toolbar has Save, Preview, Redraft, Check draft against evidence and Publish. Checks contains the existing name results and evidence entry points; Sources contains documents and download links; Reporting contains the model/research choices, reporting notes and claim-of-absence controls. The full finding/evidence review remains below the editor. Preview shows the current text without publishing it. Existing evidence and publication checks still apply.
+
+**Manage the newsroom:** Sources has Add a source and Import a source registry controls, followed by On watch, Proposed and Dropped groups. Server has nine panels: Writing models, Custom connections, Daily scan, Routine notices, Paper identity, Sections, Server health, Recently deleted, and Editors & access. Opening another panel preserves unsaved settings in the current page.

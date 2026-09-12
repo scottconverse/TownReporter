@@ -78,13 +78,13 @@ try {
   await confirmEvidence.waitFor({ state: "visible" });
   const originalViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("link", { name: "Review claims and sources" }).click();
+  await page.locator(".publish-blocked").getByRole("link", { name: "Review claims and sources" }).click();
   const reportingNotesTarget = page.locator("#evidence-review");
   if (
     (await reportingNotesTarget.count()) !== 1 ||
     new URL(page.url()).hash !== "#evidence-review" ||
     !(await reportingNotesTarget.isVisible()) ||
-    !(await reportingNotesTarget.evaluate((node) => node.closest("details")?.open === true))
+    !(await reportingNotesTarget.evaluate((node) => { const disclosure = node.closest("details"); return !disclosure || disclosure.open; }))
   ) throw new Error("the evidence-review link did not target the original reporting notes");
   if (originalViewport) await page.setViewportSize(originalViewport);
   await confirmEvidence.click();
