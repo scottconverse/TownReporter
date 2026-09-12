@@ -23,7 +23,7 @@ test("supplied-only name checking performs no search and leaves an unsupported c
   let calls=0;
   const result=await checkStoryNames({draft,city:"Longmont",domains:["longmontcolorado.gov"],docs:[doc],searchAllowed:false,timeLeft:()=>100000,
     search:async()=>{throw new Error("must not search");},open:async()=>{throw new Error("must not fetch");},
-    chat:async()=>({ok:true,text:JSON.stringify(++calls===1 ? {complete:true,people:[person,{name:"Penny Hodes",role:"citizen",context:"Penny Hodes spoke."}]} : {checks:[candidate,{name:"Penny Hodes",status:"unresolved",reason:"No written speaker list identified this speaker."}]})}),
+    chat:async()=>({ok:true,text:JSON.stringify(++calls===1 ? {complete:true,people:[{...person,context:"A paraphrase rather than an exact draft passage"},{name:"Penny Hodes",role:"citizen",context:""}]} : {checks:[candidate,{name:"Penny Hodes",status:"unresolved",reason:"No written speaker list identified this speaker."}]})}),
   });
   assert.match(result.draft.body,/Eugene Mei/);
   assert.equal(result.check.rows[1].status,"unresolved");
