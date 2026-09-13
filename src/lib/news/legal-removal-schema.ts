@@ -74,11 +74,14 @@ export const LEGAL_SCHEMA = [
     else authority:=regexp_replace(authority,':80$',''); end if;
     return lower(parts[1])||'://'||authority||legal_decode_url_path(parts[3]);
    end $$`,
-  `create or replace function legal_search_article_urls(value jsonb) returns setof text language plpgsql immutable as $$
+  String.raw`create or replace function legal_search_article_urls(value jsonb) returns setof text language plpgsql immutable as $$
    declare field text; payload jsonb;
    begin
     foreach field in array array['results_json','selected_json','fetched_json','generated_json'] loop
-      begin payload:=coalesce(value->>field,'[]')::jsonb;
+      -- Captured PDF/binary text can contain JSON-escaped NUL characters.
+      -- PostgreSQL jsonb rejects them; replace only actual NUL escapes while
+      -- retaining every URL and leaving escaped literal backslashes intact.
+      begin payload:=regexp_replace(coalesce(value->>field,'[]'), '(?<!\\)((\\\\)*)\\u0000', '\1\\ufffd', 'g')::jsonb;
       exception when invalid_text_representation then continue; end;
       return query select distinct legal_article_url_identity(v #>> '{}') from jsonb_path_query(payload,'$.**') v
         where jsonb_typeof(v)='string' and legal_article_url_identity(v #>> '{}') is not null;

@@ -13,9 +13,14 @@ export const Route = createFileRoute("/desk/published")({ component: PublishedPa
 function PublishedPage() {
   const { formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
-  const deskRole = useQuery({queryKey:["my-desk"],queryFn:()=>myDesk()});
+  const deskRole = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
-  const { isError: pubIsError, error: pubError, refetch: pubRefetch, isRefetching: pubRefetching } = published;
+  const {
+    isError: pubIsError,
+    error: pubError,
+    refetch: pubRefetch,
+    isRefetching: pubRefetching,
+  } = published;
   const memory = useQuery({ queryKey: ["memory"], queryFn: () => listMemory() });
   const [corrFor, setCorrFor] = useState<string | null>(null);
   const [corrBySlug, setCorrBySlug] = useState<Record<string, string>>({});
@@ -90,6 +95,8 @@ function PublishedPage() {
       );
       void qc.invalidateQueries({ queryKey: ["published-desk"] });
       void qc.invalidateQueries({ queryKey: ["trash"] });
+      void qc.invalidateQueries({ queryKey: ["leads"] });
+      void qc.invalidateQueries({ queryKey: ["articles"] });
     },
     onError: (err) =>
       setNote({
@@ -102,7 +109,18 @@ function PublishedPage() {
 
   return (
     <DeskShell title="Published" kicker="The record">
-      {deskRole.data?.role==="owner"&&<p className="mb-4"><Link to="/desk/legal-removals" search={{article:undefined,case:undefined}} className="underline">Legal removal cases</Link> — retained-copy access and external cleanup records.</p>}
+      {deskRole.data?.role === "owner" && (
+        <p className="mb-4">
+          <Link
+            to="/desk/legal-removals"
+            search={{ article: undefined, case: undefined }}
+            className="underline"
+          >
+            Legal removal cases
+          </Link>{" "}
+          — retained-copy access and external cleanup records.
+        </p>
+      )}
       <p className="lede">
         What is live on the paper, with its corrections. Corrections are public.
       </p>
@@ -126,7 +144,9 @@ function PublishedPage() {
       ) : null}
       {pubIsError && !rows.length ? (
         <ScreenError
-          message={pubError instanceof Error ? pubError.message : "Could not load what's published."}
+          message={
+            pubError instanceof Error ? pubError.message : "Could not load what's published."
+          }
           onRetry={() => void pubRefetch()}
           retrying={pubRefetching}
         />
@@ -158,10 +178,9 @@ function PublishedPage() {
                 ))}
                 {killFor === p.slug ? (
                   <p className="pub-corr del-warn">
-                    <b>This takes it off the paper.</b> Its URL becomes a 404, the
-                    feed and the sitemap drop it, and anyone holding a link has a
-                    dead link. Its corrections go too. Consider a correction
-                    instead — that is what the paper normally does.
+                    <b>This takes it off the paper.</b> Its URL becomes a 404, the feed and the
+                    sitemap drop it, and anyone holding a link has a dead link. Its corrections go
+                    too. Consider a correction instead — that is what the paper normally does.
                   </p>
                 ) : null}
                 {corrFor === p.slug ? (
@@ -193,7 +212,11 @@ function PublishedPage() {
                 <Link to="/articles/$slug" params={{ slug: p.slug }} className="btn quiet small">
                   Read on the paper
                 </Link>
-                {deskRole.data?.ok && deskRole.data.role === "owner" && <a className="btn quiet small" href={`/desk/legal-removals?article=${p.id}`}>Legal removal</a>}
+                {deskRole.data?.ok && deskRole.data.role === "owner" && (
+                  <a className="btn quiet small" href={`/desk/legal-removals?article=${p.id}`}>
+                    Legal removal
+                  </a>
+                )}
                 <InkButton tone="quiet" small onClick={() => setCorrFor(p.slug)}>
                   Post correction
                 </InkButton>
@@ -222,6 +245,7 @@ function PublishedPage() {
         </div>
       )}
 
+      <div id="beat-memory" />
       <SecHead
         title="Beat memory"
         count={memory.data?.length ?? 0}
@@ -241,16 +265,20 @@ function PublishedPage() {
               <td className="td-hl" data-label="Entity">
                 <span className="src-t">{m.entity}</span>
               </td>
-              <td className="td-meta wide" data-label="Last angle">{m.last_angle}</td>
-              <td className="td-meta" data-label="Updated">{formatShortDate(m.updated_at)}</td>
+              <td className="td-meta wide" data-label="Last angle">
+                {m.last_angle}
+              </td>
+              <td className="td-meta" data-label="Updated">
+                {formatShortDate(m.updated_at)}
+              </td>
             </tr>
           ))}
           {/* A header-only table read as broken, not empty (UX-002). */}
           {(memory.data ?? []).length === 0 ? (
             <tr>
               <td className="td-meta" colSpan={3}>
-                Nothing tracked yet. Beat memory fills in once a story publishes
-                and mentions an entity.
+                Nothing tracked yet. Beat memory fills in once a story publishes and mentions an
+                entity.
               </td>
             </tr>
           ) : null}

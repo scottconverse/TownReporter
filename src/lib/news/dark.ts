@@ -1034,8 +1034,11 @@ export const getArtifact = createServerFn({ method: "GET" })
       fetch_outcome: string | null;
       fetch_status: number | null;
       created_at: string;
+      retained_pdf: boolean;
     }>`
-      select id, url, title, left(full_text, 120000) as full_text, fetch_outcome, fetch_status, created_at
+      select id, url, title, left(full_text, 120000) as full_text, fetch_outcome, fetch_status, created_at,
+        exists(select 1 from artifact_blobs b where b.version_id=artifacts.version_id
+          and b.newsroom_id=artifacts.newsroom_id and b.mime ilike '%pdf%' and b.body_b64<>'') as retained_pdf
       from artifacts
       where id = ${id} and newsroom_id = ${owned(context)}
       limit 1
@@ -1079,6 +1082,7 @@ export const queueArtifactOcr = createServerFn({ method: "POST" })
       select a.id from artifacts a
       join artifact_blobs b on b.version_id = a.version_id and b.newsroom_id = a.newsroom_id
       where a.id = ${data.artifactId} and a.newsroom_id = ${owned(context)}
+        and b.mime ilike '%pdf%' and b.body_b64<>''
       limit 1
     `;
     if (!retained[0]) return { ok: false as const, error: "The original PDF bytes were not retained; this read will not refetch the live URL." };

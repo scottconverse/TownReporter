@@ -1427,7 +1427,7 @@ function InvestigationWorkspace({
       }
       {signals.length > 0 && queuedLead == null ? (
         <p className="of-stop" role="status">
-          <b>{queueBlocked ? "Not ready for the queue:" : "Ready for the queue:"}</b>{" "}
+          <b>{sendUnverified ? "Filing as an unverified tip:" : queueBlocked ? "Not ready for the queue:" : "Ready for the queue:"}</b>{" "}
           {queueBlocked
             ? queueBlockedReason
             : `${verifiedSignals.length} of ${signals.length} signal${signals.length === 1 ? "" : "s"} on this file passed all four gates.`}{" "}
@@ -1693,12 +1693,12 @@ function OpenedRecords({
     queryFn: () => getArtifact({ data: selected!.id }),
     enabled: selected != null,
   });
-  const [pageStart, setPageStart] = useState("13");
-  const [pageEnd, setPageEnd] = useState("13");
+  const [pageStart, setPageStart] = useState("1");
+  const [pageEnd, setPageEnd] = useState("1");
   const mustChooseReader = modelChoice === "auto";
   useEffect(() => {
-    setPageStart("13");
-    setPageEnd("13");
+    setPageStart("1");
+    setPageEnd("1");
   }, [selected?.id]);
   const pageRead = useQuery({
     queryKey: ["artifact-ocr-job", selected?.id ?? 0],
@@ -1829,7 +1829,7 @@ function OpenedRecords({
               Next
             </button>
           </p>
-          <form
+          {body.data?.retained_pdf ? <form
             className="read-acts"
             onSubmit={(event) => {
               event.preventDefault();
@@ -1861,7 +1861,7 @@ function OpenedRecords({
               {pageRead.data?.status === "queued" || pageRead.data?.status === "running" ? "Reading retained PDF…" : "Read selected pages"}
             </button>
             <span className="np-meta">{mustChooseReader ? "Choose a named model in the Dark Desk picker before sending retained PDF pages." : `Uses ${modelChoiceLabel(modelChoice)} · up to 12 pages · original retained PDF only`}</span>
-          </form>
+          </form> : null}
           {requestPageRead.error ? <p className="note err">{requestPageRead.error.message}</p> : null}
           {pageRead.data?.error ? <p className="note err">{pageRead.data.error}</p> : null}
           {pageRead.data?.stage && (pageRead.data.status === "queued" || pageRead.data.status === "running") ? (

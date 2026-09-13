@@ -1,6 +1,14 @@
 # Changelog
 
-Current release: **0.6.40**.
+Current release: **0.6.41**.
+
+## 0.6.41 — 2026-09-12
+
+- Removed silent Queue, Published and Opinion archive limits so older work remains available and searchable. Desk search now includes saved opinion pieces; headline links on the Desk open the actual article, and Beat memory links scroll to its section.
+- Restoring a published article also restores its lead's published status and refreshes related desk lists.
+- A provider refusal after filing now shows a link to the saved story and clears the already-saved composer input, preventing accidental duplicate filing on retry.
+- Legal removal previews handle captured document text containing escaped null characters while preserving related URLs. Clarified the editor invitation's description of owner-only functions.
+- Dark Desk offers PDF page reading only for retained PDFs, starts at page 1, labels unverified-tip handoffs explicitly, and wraps long investigation titles on phones. Opening newsroom search now focuses its input.
 
 ## 0.6.40 — 2026-09-12
 

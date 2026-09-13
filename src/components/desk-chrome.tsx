@@ -28,6 +28,7 @@ import {
   MessagesSquare,
 } from "lucide-react";
 import { listLeads } from "@/lib/news/desk";
+import { listEditorials } from "@/lib/news/opinion";
 
 const NAV_ICONS = [
   LayoutDashboard,
@@ -281,7 +282,9 @@ export function DeskShell({
             <Menu size={20} />
           </button>
           <div className="astra-breadcrumb">
-            <Link to="/" title="Public news page">{paper.name}</Link>
+            <Link to="/" title="Public news page">
+              {paper.name}
+            </Link>
             <span aria-hidden>/</span>
             <b>{current}</b>
           </div>
@@ -338,18 +341,40 @@ export function DeskShell({
 
 function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
   const [term, setTerm] = useState("");
   const leads = useQuery({ queryKey: ["leads"], queryFn: () => listLeads(), enabled: open });
+  const editorials = useQuery({
+    queryKey: ["editorials"],
+    queryFn: () => listEditorials(),
+    enabled: open,
+  });
   useEffect(() => {
-    if (open) dialog.current?.showModal();
-    else dialog.current?.close();
+    if (open) {
+      dialog.current?.showModal();
+      searchInput.current?.focus();
+    } else dialog.current?.close();
   }, [open]);
   const query = term.trim().toLocaleLowerCase();
-  const pages = [...LINKS, { to: "/desk/dark", label: "Dark Desk" }, { to: "/desk/follow-ups", label: "Follow-ups" }].filter((l) =>
-    l.label.toLocaleLowerCase().includes(query),
-  );
+  const pages = [
+    ...LINKS,
+    { to: "/desk/dark", label: "Dark Desk" },
+    { to: "/desk/follow-ups", label: "Follow-ups" },
+    { to: "/desk/memory", label: "Beat memory" },
+  ].filter((l) => l.label.toLocaleLowerCase().includes(query));
   const matches = (leads.data ?? [])
-    .filter((l) => `${l.story_headline ?? ""} ${l.headline} ${l.why} ${l.topic}`.toLocaleLowerCase().includes(query))
+    .filter((l) =>
+      `${l.story_headline ?? ""} ${l.headline} ${l.why} ${l.topic}`
+        .toLocaleLowerCase()
+        .includes(query),
+    )
+    .slice(0, 30);
+  const opinionMatches = (editorials.data ?? [])
+    .filter(
+      (r) =>
+        r.draft_id &&
+        `${r.headline ?? ""} ${r.subject} opinion`.toLocaleLowerCase().includes(query),
+    )
     .slice(0, 30);
   return (
     <dialog
@@ -368,6 +393,7 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
         <label className="field">
           <span>Search your newsroom</span>
           <input
+            ref={searchInput}
             autoFocus
             type="search"
             value={term}
@@ -391,6 +417,14 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
             </p>
           )}
           {leads.isPending && <p role="status">Loading stories…</p>}
+          {editorials.isError && (
+            <p role="alert">
+              Editorials could not load.{" "}
+              <button className="btn" onClick={() => void editorials.refetch()}>
+                Try again
+              </button>
+            </p>
+          )}
           {matches.map((l) => (
             <Link
               key={l.id}
@@ -408,9 +442,28 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
               <ArrowUpRight size={16} />
             </Link>
           ))}
-          {!leads.isPending && !leads.isError && !matches.length && !pages.length && (
-            <p>No matches. Try a name, topic or part of a headline.</p>
-          )}
+          {opinionMatches.map((r) => (
+            <Link
+              key={`opinion-${r.id}`}
+              to="/desk/story/draft/$draftId"
+              params={{ draftId: String(r.draft_id) }}
+              className="astra-search-result"
+              onClick={onClose}
+            >
+              <span>
+                {r.headline || r.subject}
+                <small>opinion · {r.published_slug ? "published" : "draft"}</small>
+              </span>
+              <ArrowUpRight size={16} />
+            </Link>
+          ))}
+          {!leads.isPending &&
+            !editorials.isPending &&
+            !leads.isError &&
+            !editorials.isError &&
+            !matches.length &&
+            !opinionMatches.length &&
+            !pages.length && <p>No matches. Try a name, topic or part of a headline.</p>}
         </nav>
       </div>
     </dialog>

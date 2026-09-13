@@ -26,6 +26,21 @@ before(async () => {
   await ensureLegalSchema();
 });
 let roomCounter = 901;
+it("finds article URLs beside captured NUL text without changing literal escaped backslashes", async () => {
+  const sql = await getSql();
+  const url = "https://townreporter.test/articles/captured-copy";
+  const payload = JSON.stringify({
+    results_json: JSON.stringify([
+      { text: "PDF\u0000capture", url },
+      { url: "/articles/literal\\u0000" },
+    ]),
+  });
+  const rows = await sql<{
+    url: string;
+  }>`select legal_search_article_urls(${payload}::jsonb) as url`;
+  assert.ok(rows.some((r) => r.url === url));
+  assert.ok(rows.some((r) => r.url === "/articles/literal\\u0000"));
+});
 async function fixture() {
   const sql = await getSql();
   const room = roomCounter++;
@@ -129,7 +144,9 @@ it("retained removal deletes connected copies, denies editors/foreign owners, ex
 it("legal removal detaches a hash-only routine publication receipt without retaining article text", async () => {
   const f = await fixture();
   await f.sql`insert into newsrooms(id,name) values(${f.room},${`Legal room ${f.room}`}) on conflict(id) do nothing`;
-  const [run] = await f.sql<{ id: number }>`insert into routine_notice_runs(newsroom_id,local_date,automation_revision,policy_revision,status,actor) values(${f.room},'2026-09-08',1,1,'completed',${f.user}) returning id`;
+  const [run] = await f.sql<{
+    id: number;
+  }>`insert into routine_notice_runs(newsroom_id,local_date,automation_revision,policy_revision,status,actor) values(${f.room},'2026-09-08',1,1,'completed',${f.user}) returning id`;
   await f.sql`insert into routine_notice_publications(newsroom_id,run_id,channel,issue_date,article_id,content_fingerprint,candidate_keys_json,article_body_hash) values(${f.room},${run.id},'today','2026-09-08',${f.article.id},'fingerprint','["candidate-hash"]','body-hash')`;
   const preview = await previewLegalRemoval(f.user, f.selection);
   await removeLegally(f.user, {
@@ -138,7 +155,10 @@ it("legal removal detaches a hash-only routine publication receipt without retai
     policy: "retain",
     caseRef: "ROUTINE-RECEIPT",
   });
-  const [receipt] = await f.sql<{ article_id: number | null; candidate_keys_json: string }>`select article_id,candidate_keys_json from routine_notice_publications where run_id=${run.id}`;
+  const [receipt] = await f.sql<{
+    article_id: number | null;
+    candidate_keys_json: string;
+  }>`select article_id,candidate_keys_json from routine_notice_publications where run_id=${run.id}`;
   assert.deepEqual(receipt, { article_id: null, candidate_keys_json: '["candidate-hash"]' });
   assert.equal(JSON.stringify(receipt).includes(f.secret), false);
 });
