@@ -22,11 +22,11 @@ The story editor opens when the job is created. A banner at its top shows progre
 
 ## Current capabilities and remaining work
 
-The Command Center uses Fable Direction A: composer and queue in the main
-column; Dark Desk, Follow-ups and wire in the rail. Follow-ups record who was
+The Astra desk uses persistent navigation, recent drafts and shared document
+intake. The story workspace places the writing surface beside Checks, Sources
+and Reporting tabs and adapts to narrow screens. Follow-ups record who was
 asked, what is due and when; replies can be added to story reporting notes.
-The story workbench stacks below 1024px. Historical screenshots elsewhere in
-this guide illustrate workflows, not the current layout.
+Historical screenshots illustrate workflows, not the current layout.
 
 Dark Desk now separates speculative Black Desk signals (confidence ≤0.5) from
 structured Dark Signal verification. See [the doctrine and its limits](dark-desk.md).
