@@ -558,8 +558,8 @@ Type a subject, a sentence, or paste a URL, and press **Write an editorial**. A
 pasted link gets opened and read before anything is written.
 
 Choose **Automatic**, **Claude Opus**, **Codex Terra**, **Codex Sol** or
-**Local model**; saved custom connections are offered too. Automatic tries
-Claude Opus, then Codex Terra once if Claude is unavailable. An explicit choice
+**Local model**; saved custom connections are offered too. Codex Sol is selected by default. Automatic tries
+Claude Opus, then Codex Sol once if Claude is unavailable. An explicit choice
 stays selected. Claude reads the private voice by file path; Codex uses a
 separately authorized stdin handoff.
 Readiness lists every missing prerequisite — voice file, installation, or
@@ -588,7 +588,7 @@ The desk checks that the delivery is actually an editorial before it files
 anything. A provider refusal, limitation note, neutral-summary substitute,
 implausible headline, or incomplete body makes the row **Failed** and creates no
 draft. There is then no Read, Edit, or Publish action to mistake for success.
-Automatic can move from Claude Opus to Codex Terra once; a named choice stays
+Automatic can move from Claude Opus to Codex Sol once; a named choice stays
 with that provider. A
 finished row names the provider that actually delivered the piece.
 

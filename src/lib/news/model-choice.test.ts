@@ -85,12 +85,12 @@ describe("model choice contract", () => {
     assert.equal(modelChoiceLabel("configured"), "Configured gateway");
   });
 
-  it("round-trips Opinion choices and narrows invalid input to Automatic", () => {
+  it("round-trips Opinion choices and defaults missing or invalid input to Sol", () => {
     for (const value of ["auto", "claude-frontier", "codex-balanced", "codex-frontier", "local-model"] as const) {
       assert.equal(opinionModelChoice(value), value);
     }
     for (const invalid of ["local", "zen", "codex", undefined, null, {}]) {
-      assert.equal(opinionModelChoice(invalid), "auto");
+      assert.equal(opinionModelChoice(invalid), "codex-frontier");
     }
   });
 
@@ -109,7 +109,7 @@ describe("model choice contract", () => {
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
-      "Tries Claude Opus, then Codex Terra. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.",
+      "Tries Claude Opus, then Codex Sol. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),

@@ -57,7 +57,9 @@ export function isCustomModelChoice(value: unknown): value is CustomModelChoice 
 export type EffectiveStoryModelChoice = StoryModelChoice | "configured";
 
 /* Opinion uses the same native subscription providers as Story. Automatic
-   tries Claude and then Codex Terra; an explicit pick never falls through. */
+   tries Claude and then Codex Sol; an explicit pick never falls through. */
+export const DEFAULT_OPINION_MODEL = "codex-frontier" as const;
+export const OPINION_AUTOMATIC_LADDER = ["claude-frontier", "codex-frontier"] as const;
 export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = STORY_MODEL_CHOICES.filter(
   (choice) => choice.value === "auto" || providerEntry(choice.value)?.offeredFor.opinion,
 );
@@ -91,7 +93,7 @@ export function opinionModelChoice(value: unknown): OpinionModelChoice {
   if (isCustomModelChoice(value)) return value;
   return OPINION_MODEL_CHOICES.some((choice) => choice.value === value)
     ? (value as OpinionModelChoice)
-    : "auto";
+    : DEFAULT_OPINION_MODEL;
 }
 
 /** Same narrowing as Opinion's, against the Dark list. */
@@ -127,8 +129,8 @@ export function modelChoiceLabel(value: unknown): string {
  * -- which is exactly what happened when Zen and Local Qwen were removed
  * from the ladder in 0.6.1 and three help strings still named them.
  */
-function ladderSentence(): string {
-  const labels = automaticLadder().map((id) => providerEntry(id)?.label ?? id);
+function ladderSentence(ladder: readonly string[] = automaticLadder()): string {
+  const labels = ladder.map((id) => providerEntry(id)?.label ?? id);
   if (labels.length === 0) return "nothing (no model is set up)";
   if (labels.length === 1) return labels[0];
   return `${labels.slice(0, -1).join(", ")}, then ${labels[labels.length - 1]}`;
@@ -157,7 +159,7 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
     return `Uses only ${selected.label} for this run; no fallback.`;
   }
   if (scope === "opinion") {
-    return `Tries ${ladderSentence()}. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.`;
+    return `Tries ${ladderSentence(OPINION_AUTOMATIC_LADDER)}. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.`;
   }
   const noun = scope === "dark" ? "round" : "draft";
   return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first one's login has lapsed or it does not respond in time, the ${noun} moves to the next.`;

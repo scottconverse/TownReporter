@@ -555,10 +555,10 @@ describe("Opinion runs one Claude pair", () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     const runtime = claudeRuntime(events, { ok: false, error: "429 Claude session limit" });
-    runtime.runCodexPair = async () => { events.push("codex"); return { ok: true, text: DELIVERED }; };
+    runtime.runCodexPair = async ({ input }) => { assert.equal(input.modelChoice, "codex-frontier"); events.push("codex"); return { ok: true, text: DELIVERED }; };
     const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
     assert.equal(result.ok, true, result.ok ? "" : result.error);
-    if (result.ok) assert.equal(result.modelChoice, "codex-balanced");
+    if (result.ok) assert.equal(result.modelChoice, "codex-frontier");
     assert.deepEqual(events, ["voice:locate", "claude", "codex", "file"]);
   });
 

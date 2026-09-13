@@ -1,5 +1,6 @@
 import {
   opinionModelChoice,
+  OPINION_AUTOMATIC_LADDER,
   opinionProviderProblem,
   type OpinionModelChoice,
 } from "./model-choice.ts";
@@ -76,7 +77,7 @@ export async function checkOpinionReadiness(
   // Automatic may start when either signed-in subscription provider is ready.
   // Explicit choices probe only themselves and remain fixed at runtime.
   const candidates: readonly CandidateChoice[] =
-    choice === "auto" ? (["claude-frontier", "codex-balanced"] as const) : ([choice] as const);
+    choice === "auto" ? OPINION_AUTOMATIC_LADDER : ([choice] as const);
   let selected: CandidateProbe | undefined;
   const providerProblems: string[] = [];
   const probeCandidate = deps.probeCandidate ?? defaultCandidateProbe;
