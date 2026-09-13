@@ -97,9 +97,9 @@ async function main() {
   step("Opinion desk renders");
 
   // Opinion uses the shared native provider registry: Automatic, Claude Opus,
-  // Codex Terra, Codex Sol, and Local model.
+  // Codex Terra, Codex Sol, and Local model, with Sol selected by default.
   const opinionModel = page.getByLabel("Writing model");
-  if ((await opinionModel.locator("option").count()) !== 5 || (await opinionModel.inputValue()) !== "auto") {
+  if ((await opinionModel.locator("option").count()) !== 5 || (await opinionModel.inputValue()) !== "codex-frontier") {
     throw new Error("Opinion model picker choices/default do not match the product contract");
   }
   step("Opinion exposes Automatic, Claude Opus, Codex Terra, Codex Sol, and Local model");
