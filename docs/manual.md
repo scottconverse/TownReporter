@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.42 · editor interface update · deployment is recorded separately**
+**Version 0.6.43 · editor interface update · deployment is recorded separately**
 
 The [published release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35) has been deployed to Halo; see the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md). Later development work and acceptance results do not by themselves mean that another release has been deployed.
 
@@ -366,10 +366,11 @@ the headline and there is no byline, because an unsigned editorial is the
 paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
 
-Opinion shows Automatic and Claude Opus (both use Claude Opus), plus Local model. Codex is
-not offered here: its model declines to write an editorial that takes a
-position on a local policy question, so it stays on the Story picker. Claude
-Code reads the voice by file path for the writing pass. The page
+Opinion shows Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
+plus saved custom connections. Automatic tries Claude Opus, then Codex Terra
+once if Claude is unavailable; explicit choices stay selected. Claude Code
+reads the voice by file path and Codex uses a separately authorized stdin
+handoff. The page
 lists every missing voice, installation, or login prerequisite and stays
 disabled while readiness is unknown.
 

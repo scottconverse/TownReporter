@@ -3,6 +3,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
+import { DeskNameCheck } from "@/components/desk-name-check";
 import { Notice, WorkbenchSkeleton, EmptyState, ScreenError } from "@/components/states";
 import {
   deleteEditorial,
@@ -158,6 +159,8 @@ function EditorialPage() {
           ← Opinion
         </Link>
       </p>
+
+      <DeskNameCheck research={q.data.research_json} headline={headline} dek={dek} body={body} />
 
       {evidenceStale && !onPaper ? <div className="note publish-blocked" role="status">
         <strong>The story changed. Review its retained evidence before publishing.</strong>

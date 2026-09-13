@@ -268,7 +268,7 @@ export async function commitOpinionForAuthenticatedEditor(
   if (sourceText.length > 20_000_000 || askedFor.length > 20_000_000) {
     return { ok: false as const, error: "Opinion material exceeds 20 million characters. Split it into separate volumes before starting." };
   }
-  if (sourceText.length < 6 && !input.documentIds?.length) {
+  if (sourceText.length < 6 && !input.documentIds?.length && !input.retryRequestId) {
     return { ok: false as const, error: "Give it a subject, a URL, or a sentence to work from." };
   }
   // Keep the card/list label compact without confusing it with the source.
@@ -284,6 +284,20 @@ export async function commitOpinionForAuthenticatedEditor(
   // alone spend rate budget, insert a request, write an audit row, or enqueue.
   await (deps.ensureEditorialRequestSchema ?? ensureEditorialRequestSchemaDefault)();
   const sql = await (deps.getSql ?? getSql)();
+  if (input.retryRequestId) {
+    const retryable = await sql.query(
+      `select old.id from editorial_requests old
+       where old.id=$1 and old.newsroom_id=$2 and old.user_id=$3
+         and old.finished_at is not null and old.error is not null and old.draft_id is null
+         and exists (select 1 from story_documents d where d.editorial_request_id=old.id
+           and d.newsroom_id=old.newsroom_id and d.user_id=old.user_id)
+       limit 1`,
+      [input.retryRequestId, input.context.newsroomId, input.context.userId],
+    );
+    if (!retryable.length) {
+      return { ok: false as const, error: "That failed request has no retained attachments to restore." };
+    }
+  }
   const pointers: { what: string; url?: string }[] = [];
   let ourStory: { headline: string; url: string; dek?: string } | undefined;
   let sourceKind = "paste";

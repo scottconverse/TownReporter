@@ -96,14 +96,13 @@ async function main() {
   await page.getByRole("heading", { name: "Opinion", exact: true }).waitFor();
   step("Opinion desk renders");
 
-  // Opinion is Claude and Local only: Automatic, Claude Opus, Local model.
-  // Codex's model refuses editorials that take a position, so it is offered
-  // for Story drafts only.
+  // Opinion uses the shared native provider registry: Automatic, Claude Opus,
+  // Codex Terra, Codex Sol, and Local model.
   const opinionModel = page.getByLabel("Writing model");
-  if ((await opinionModel.locator("option").count()) !== 3 || (await opinionModel.inputValue()) !== "auto") {
+  if ((await opinionModel.locator("option").count()) !== 5 || (await opinionModel.inputValue()) !== "auto") {
     throw new Error("Opinion model picker choices/default do not match the product contract");
   }
-  step("Opinion exposes Automatic, Claude Opus, and Local model, nothing else");
+  step("Opinion exposes Automatic, Claude Opus, Codex Terra, Codex Sol, and Local model");
 
   // UIUX-03: a live region has to exist before its content changes, or the
   // announcement is frequently never made.
