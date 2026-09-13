@@ -26,7 +26,7 @@ import { editorDraftError, stalledRunCopy } from "@/lib/news/desk-copy";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { ModelPicker } from "@/components/model-picker";
-import type { OpinionModelChoice } from "@/lib/news/model-choice";
+import { DEFAULT_OPINION_MODEL, type OpinionModelChoice } from "@/lib/news/model-choice";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
@@ -62,7 +62,7 @@ function OpinionPage() {
   const [documents, setDocuments] = useState<StoryUpload[]>([]);
   const [documentsBusy, setDocumentsBusy] = useState(false);
   const [retryRequestId, setRetryRequestId] = useState<number | undefined>();
-  const [modelChoice, setModelChoice] = useState<OpinionModelChoice>("auto");
+  const [modelChoice, setModelChoice] = useState<OpinionModelChoice>(DEFAULT_OPINION_MODEL);
   const [openId, setOpenId] = useState<number | null>(null);
   /*
     Where the opened piece is drawn, so it can be scrolled to.

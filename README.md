@@ -293,7 +293,7 @@ The CLI is slower than an API — it reloads a fixed preamble per call, so a dra
 
 **Opinion offers the native providers and local model.** The picker offers
 Automatic, Claude Opus, Codex Terra, Codex Sol and Local model, plus saved
-custom connections. Automatic tries Claude Opus first and moves to Codex Terra
+custom connections. Codex Sol is selected by default. Automatic tries Claude Opus first and moves to Codex Sol
 once if Claude is unavailable; an explicit choice stays selected. The writer
 reads the configured private voice file, and a provider refusal or invalid
 delivery leaves the request failed without a draft.

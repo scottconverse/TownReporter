@@ -48,7 +48,7 @@ on an editor's action:
 
 | What               | Triggered by                                      | Where it goes                                                                                                                                                                                                                                                                                    |
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Story, Scan and Dark Desk use their per-run choices. Automatic uses configured `LLM_*` exclusively when present; otherwise it tries Claude Opus, then Codex Terra, before enqueue. Opinion Automatic follows the same Claude-then-Terra readiness path; explicit Claude, Codex Terra, Codex Sol, Local model or custom choices stay selected.              |
+| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Story, Scan and Dark Desk use their per-run choices. Automatic uses configured `LLM_*` exclusively when present; otherwise it tries Claude Opus, then Codex Terra, before enqueue. Opinion defaults to Codex Sol; Opinion Automatic follows a Claude-then-Sol readiness path; explicit Claude, Codex Terra, Codex Sol, Local model or custom choices stay selected.              |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
 | **Searches**       | Public-source research, PULL, and Dark Desk hops  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key. Drafting scope **Use only supplied material** skips discovery/search for that draft, but still opens URLs you supply. PULL and Dark Desk remain separate external-research actions. |
 
@@ -282,7 +282,7 @@ the signed-in account can reach. The newsroom prompt still travels over stdin,
 and its task remains the scope of the requested run.
 
 Opinion displays Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
-plus saved custom connections. Automatic tries Claude Opus, then Codex Terra
+plus saved custom connections. Codex Sol is selected by default. Automatic tries Claude Opus, then Codex Sol
 once if Claude is unavailable; explicit choices stay selected. An invalid
 delivery -- a refusal, an assistant note, an incomplete piece --
 creates no draft. The completed request and job store the provider that

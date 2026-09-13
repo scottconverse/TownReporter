@@ -9,7 +9,7 @@ import {
 } from "./editorial-orchestration.ts";
 import { findVoiceFile, readVoiceTextForLocalModel, readVoiceTextForOpenAiCodex } from "./voice.server.ts";
 import { getPaperConfig } from "./paper-settings.ts";
-import { opinionModelChoice } from "./model-choice.ts";
+import { opinionModelChoice, OPINION_AUTOMATIC_LADDER } from "./model-choice.ts";
 import { setJobStage } from "./jobs.ts";
 import {
   persistEditorialCompletion,
@@ -511,7 +511,7 @@ export async function performEditorialWork(
   const readEditorialDocuments = deps.readEditorialDocuments ?? (await import("./story-documents.server.ts")).readEditorialDocuments;
   const requestedChoice = opinionModelChoice(req.model_choice);
   const readingChoices = requestedChoice === "auto"
-    ? (["claude-frontier", "codex-balanced"] as const)
+    ? OPINION_AUTOMATIC_LADDER
     : ([requestedChoice] as const);
   let readingFailure: unknown;
   for (const choice of readingChoices) {

@@ -367,7 +367,7 @@ paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
 
 Opinion shows Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
-plus saved custom connections. Automatic tries Claude Opus, then Codex Terra
+plus saved custom connections. Codex Sol is selected by default. Automatic tries Claude Opus, then Codex Sol
 once if Claude is unavailable; explicit choices stay selected. Claude Code
 reads the voice by file path and Codex uses a separately authorized stdin
 handoff. The page
@@ -562,7 +562,7 @@ the registry is the canonical picker definition; provider adapters still impleme
 | **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Codex Terra/Sol, Claude Opus, or Local model                                                                    |
 | Dark Desk synthesis and brief         | the one you pick beside **Keep digging**; Automatic behaves as it does for Draft, with one mid-run failover at the round level                                                                                                                                           | the one you picked                                                                                              |
 | Dark Desk **planner**                 | the one you pick                                                                                                                                                                                                                                                         | a cheaper model from the SAME provider: Haiku on Claude, Terra on either Codex, and your own model on a gateway |
-| **Opinion (editorials)**              | Automatic: Claude Opus → Codex Terra once when needed; explicit Claude Opus, Codex Terra, Codex Sol, Local model or custom choice stays selected                                                                                                                        | The selected provider                                                                                           |
+| **Opinion (editorials)**              | Default: Codex Sol. Automatic: Claude Opus → Codex Sol once when needed; explicit Claude Opus, Codex Terra, Codex Sol, Local model or custom choice stays selected                                                                                                                        | The selected provider                                                                                           |
 
 **Opinion provider behavior.** An editorial uses the paper's configured voice
 and frontier research. Opinion's picker offers Automatic, Claude Opus, Codex

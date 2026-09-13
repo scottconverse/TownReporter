@@ -8,6 +8,7 @@ import {
 import {
   isCustomModelChoice,
   opinionModelChoice,
+  OPINION_AUTOMATIC_LADDER,
   type OpinionModelChoice,
 } from "./model-choice.ts";
 
@@ -178,8 +179,8 @@ export async function orchestrateEditorial(
   };
 
   const requested = opinionModelChoice(input.modelChoice);
-  const candidates: EffectiveOpinionModelChoice[] =
-    requested === "auto" ? ["claude-frontier", "codex-balanced"] : [requested];
+  const candidates: readonly EffectiveOpinionModelChoice[] =
+    requested === "auto" ? OPINION_AUTOMATIC_LADDER : [requested];
   const failures: string[] = [];
 
   for (const candidate of candidates) {
