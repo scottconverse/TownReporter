@@ -518,6 +518,12 @@ function providerSignInCopy(raw: string, again: string): string {
 export function editorDraftError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  const reset = t.match(/resets?\s+(?:at\s+)?([^.,;]+(?:\s+[AP]M\s+[A-Z]{2,5})?)/i)?.[1]?.trim();
+  if (/429|usage limit|session limit|quota/i.test(t)) {
+    return reset
+      ? `The writing model's usage limit was reached. It resets ${reset}. Your saved material can be restored from the failed Opinion request and retried after then.`
+      : "The writing model's usage limit was reached. Your saved material can be restored from the failed Opinion request and retried after the limit resets.";
+  }
   // Login first: a 401 also contains "API Error" and "Claude Code", and the
   // generic branch below would turn it into "click again".
   if (looksLikeProviderAuthFailure(t) && !/timed out|timeout/i.test(t)) {
@@ -543,7 +549,10 @@ export function editorDraftError(raw: string | null | undefined): string | null 
     return "No writing model is set up yet. Sign in to Claude Code on this machine, or set ANTHROPIC_API_KEY — docs/setup.md has both. Nothing is spent until one of them answers.";
   }
   if (/declined this request/i.test(t)) {
-    return "The writing model declined this request. Clicking again will not change that; try rewording the lead, or draft it yourself.";
+    const reason = t.match(/declined to produce the requested editorial:\s*([^.]*(?:\.[^N]*)?)/i)?.[1]?.trim();
+    return reason
+      ? `The writing model declined this request: ${reason}`
+      : "The writing model declined this request. Clicking again will not change that; try rewording the lead, or draft it yourself.";
   }
   if (
     /403/.test(t) ||

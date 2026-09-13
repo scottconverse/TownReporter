@@ -35,8 +35,9 @@ import type { EffectiveProviderChoice } from "./ai.ts";
 import { stripReporterNotebook } from "./strip-draft.ts";
 import { titlesOverlap } from "./desk-copy.ts";
 import type { EditorialAssignment } from "./write-story.ts";
-import { checkStoryNames, replaceName } from "./name-check-work.ts";
+import { checkStoryNames, replaceName, type UploadedNameEvidence } from "./name-check-work.ts";
 import { nameCheckNotes, nameCheckText, type NameCheck } from "./name-check.ts";
+import { parseDocumentClaims, type DocumentReportedClaim } from "./document-reconcile-evidence.ts";
 
 export { stripReporterNotebook } from "./strip-draft.ts";
 
@@ -80,6 +81,7 @@ export type ReportedDraft = {
   unanswered: string[];
   research_memo: ResearchMemo;
   claims: StoryClaim[];
+  documentClaims?: DocumentReportedClaim[];
 };
 
 export type StoryClaim = {
@@ -285,7 +287,7 @@ Headline: the actual news. Specific nouns, active verbs, a number/location/deadl
 Lede: the most important new fact immediately. A reader who stops after paragraph one knows what happened and why it matters.
 Nut graf: within the first few paragraphs, why someone in ${p.city} should care.
 Body: details, impact, money, people affected, history, disagreement or uncertainty, what happens next. Order of reader value, not the order of the press release.
-Each load-bearing number, name, date, and quote is attributed, with the source URL in source_urls. If you cannot point to a URL, put the claim in unanswered instead of the body.
+Each load-bearing number, name, date, and quote is attributed. Use the source URL in source_urls for public evidence. For an uploaded document, use its filename and page/character locator in prose and return an exact receipt in document_claims; never invent a URL. If neither kind of evidence supports the claim, put it in unanswered instead of the body.
 Do not write a "Next checks are…" closer. Do not write "What is solid / What is not solid yet". Those belong in reporting notes, never in the story.
 Each paragraph must add information. Never restate the same fact in consecutive paragraphs to create length.
 Ban filler: "This development marks…", "The announcement comes as…", "Residents are encouraged to…", "This initiative underscores…", "In a move that…", "It remains to be seen…" unless the sentence contains actual reporting.
@@ -313,7 +315,8 @@ memory_entities,
 form,
 found (null, or {text, source_urls, locators} for something TownReporter itself located in a captured record — every URL must be one you actually used),
 unanswered (array),
-claims (array of {fact, url, kind} — every load-bearing number, name, date, quote. kind is primary | record | news. A claim with no URL does not belong here; it belongs in unanswered.),
+claims (array of {fact, url, kind} — every load-bearing number, name, date, quote supported by URL evidence. kind is primary | record | news.),
+document_claims (array of {fact, kind, documentId, excerpt} for load-bearing claims supported by an uploaded document; copy the exact private document ID and an exact verbatim supporting passage. Never invent a URL for an upload.),
 reporting_trail (array of {title, organization, document_date, url, role}).
 Keep the exact Topic key supplied with this lead. It is the editor's configured newspaper section; do not invent or rename it.
 Body: markdown paragraphs, no h1, not JSON. Do not print the claims list in the body.`;
@@ -336,8 +339,9 @@ Checklist:
 9. If a company press release is in the evidence, did we use it for their claims, or did we only rewrite another paper?
 10. Delete any sentence about tools, permissions, sessions, fetching, searching or what was "unavailable" — those words describe the software, not the city, and they have no place in a story.
 11. Delete any sentence claiming a document does not exist, was not published, was not obtained, or is unverified. Not having opened a document is not evidence about the world; move the ask to unanswered.
+12. A supplied excerpt establishes what that excerpt discusses. It does not establish that a different policy, benefit, event or action did not exist elsewhere. Phrase scope narrowly ("this discussion addressed X") unless the evidence affirmatively supports the negative claim.
 Factual vocabulary that appears in the sources is not plagiarism. Near-verbatim copying is.
-Return ONLY JSON with the same keys as the draft: headline, dek, body, topic, source_urls, integrity_notes, memory_entities, form, found, unanswered, claims, reporting_trail.`;
+Return ONLY JSON with the same keys as the draft: headline, dek, body, topic, source_urls, integrity_notes, memory_entities, form, found, unanswered, claims, document_claims, reporting_trail.`;
 
 export function describeSourceUrl(url: string): { title: string; organization: string } {
   try {
@@ -1194,6 +1198,8 @@ export async function reportAndDraft(
     researchScope?: "public" | "supplied";
     extraEvidence?: string;
     documentEvidence?: string;
+    /** Authorized retained originals used only for spelling receipts. */
+    documentNameEvidence?: UploadedNameEvidence[];
     editorialAssignment?: EditorialAssignment;
     extraUrls?: string[];
     /** Exact captured material filed by the editor, not the latest URL snapshot. */
@@ -1649,10 +1655,11 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
           found: parsed.found,
           unanswered: parsed.unanswered,
           reporting_trail: parsed.reporting_trail,
+          document_claims: parsed.document_claims,
         }).slice(
           0,
           12000,
-        )}\n\nURL-LABELED EVIDENCE MATCHED TO DRAFT:\n${editEvidence}\n\nEDITOR-SUPPLIED DOCUMENT EVIDENCE (filenames and locators are valid citations for private uploads; a public URL is not required):\n${opts.documentEvidence ?? ""}`,
+        )}\n\nURL-LABELED EVIDENCE MATCHED TO DRAFT:\n${editEvidence}\n\nEDITOR-SUPPLIED DOCUMENT EVIDENCE (filenames and tight page/character locators are valid citations for private uploads; a public URL is not required. Cite the smallest passage that supports the sentence, never an entire-document character range merely because the name appears somewhere inside it):\n${opts.documentEvidence ?? ""}`,
         1800,
       ).catch(() => ({ ok: false as const, error: "Editing did not complete." }));
       if (editAi.ok) {
@@ -1763,7 +1770,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
   // is not independent evidence for how a person's name is spelled.
   const names = await checkStoryNames({
     draft: { headline: coerced.headline, dek: coerced.dek, body },
-    city: paper.city, domains: cityDomains, docs, searchAllowed: !suppliedOnly,
+    city: paper.city, domains: cityDomains, docs: [...docs, ...(opts.documentNameEvidence ?? [])], searchAllowed: !suppliedOnly,
     chat: nameChat, search, timeLeft, stage: deps.onStage,
     open: urls => take(urls, 8, true),
   });
@@ -1817,6 +1824,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     .map(f => ({ ...f, source_urls: f.source_urls.filter(u => used.includes(u)) }))
     .filter(f => f.source_urls.length > 0);
   const claims = parseClaims(parsed.claims).filter(c => used.includes(c.url));
+  const documentClaims = parseDocumentClaims(parsed.document_claims, (opts.documentNameEvidence ?? []).map(doc => ({id:doc.documentId,filename:doc.filename,status:"read",full_text:doc.text})));
   for (const f of findings) {
     const fromDocs = docs.filter((d) => f.source_urls.includes(d.url));
     if (!f.artifact_version_ids.length) {
@@ -1865,6 +1873,7 @@ ${opts.extraEvidence ? `\nEditor pull box (does not print — use as evidence):\
     findings,
     unanswered,
     claims,
+    documentClaims,
     research_memo: {
       nameCheck: names.check,
       news: String(research?.news ?? opts.lead.headline).slice(0, 500),

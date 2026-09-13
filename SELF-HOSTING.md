@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.42** (candidate; not yet published).
+Repository documentation version: **0.6.43** (candidate; not yet published).
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -202,7 +202,7 @@ the run.
 | Scan and Dark Desk  | per-run picker; Automatic uses configured gateway or readiness ladder                                                      | repair the configured endpoint/key or sign back into Claude Code                                              |
 | Story — Automatic   | configured `LLM_*` exclusively when present; otherwise Claude Opus → Codex Terra readiness ladder            | repair the provider named on the failed job; a run stays pinned to one provider                               |
 | Story — explicit    | Codex Terra, Codex Sol, Claude Opus, or Local model; no fallback                                             | open and sign into the named CLI, or set `LLM_BASE_URL` for Local model                                        |
-| Opinion             | Claude Opus or Local model, through the signed-in Claude Code session for Claude; Codex is not offered for editorials | open Claude Code and renew its login; the completed row records the provider that delivered              |
+| Opinion             | Automatic: Claude Opus → Codex Terra once when needed; explicit Claude Opus, Codex Terra, Codex Sol, Local model or custom choice stays selected | repair or sign into the selected provider; the completed row records the provider that delivered              |
 
 For ordinary Story calls, Codex reuses the signed-in user's native configuration and full available
 Windows access. TownReporter does not disable search, shell/files,
@@ -213,9 +213,9 @@ the spawned PID tree. If OAuth expires, open Codex and sign in again; the app
 does not read or store the token.
 
 Opinion rejects provider refusals, assistant notes, implausible headlines, and
-incomplete bodies before draft storage. Codex is not offered for editorials
-because its model declines to write a piece that takes a position; the
-Opinion picker offers Claude and Local model. A failed request has no draft
+incomplete bodies before draft storage. The Opinion picker offers Automatic,
+Claude Opus, Codex Terra, Codex Sol, Local model and custom connections;
+Automatic can move to Codex Terra once when Claude is unavailable. A failed request has no draft
 or Publish action.
 
 `npm test` makes no model call and costs nothing: it runs the whole suite with

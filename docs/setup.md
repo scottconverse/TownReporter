@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.42](https://github.com/scottconverse/TownReporter/commits/main/) — editor interface update; deployment is recorded separately.** The [stable release](https://github.com/scottconverse/TownReporter/releases/latest) is available separately. Halo's 0.6.35 deployment is recorded in the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md); later development work is not automatically deployed. Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.6.43](https://github.com/scottconverse/TownReporter/commits/main/) — editor interface update; deployment is recorded separately.** The [stable release](https://github.com/scottconverse/TownReporter/releases/latest) is available separately. Halo's 0.6.35 deployment is recorded in the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md); later development work is not automatically deployed. Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 
@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
 | **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
-| **A model**                 | Story, Scan and Dark Desk offer per-run provider choices, including configured gateways and signed-in Codex/Claude CLIs. Opinion offers signed-in Claude or Local model.     |
+| **A model**                 | Story, Scan and Dark Desk offer per-run provider choices, including configured gateways and signed-in Codex/Claude CLIs. Opinion offers Automatic, Claude Opus, Codex Terra, Codex Sol, Local model and saved custom connections.     |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 
@@ -48,7 +48,7 @@ on an editor's action:
 
 | What               | Triggered by                                      | Where it goes                                                                                                                                                                                                                                                                                    |
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Story, Scan and Dark Desk use their per-run choices. Automatic uses configured `LLM_*` exclusively when present; otherwise it tries Claude Opus, then Codex Terra, before enqueue. Opinion is Claude Opus or Local model; Codex is not offered for editorials.              |
+| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Story, Scan and Dark Desk use their per-run choices. Automatic uses configured `LLM_*` exclusively when present; otherwise it tries Claude Opus, then Codex Terra, before enqueue. Opinion Automatic follows the same Claude-then-Terra readiness path; explicit Claude, Codex Terra, Codex Sol, Local model or custom choices stay selected.              |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
 | **Searches**       | Public-source research, PULL, and Dark Desk hops  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key. Drafting scope **Use only supplied material** skips discovery/search for that draft, but still opens URLs you supply. PULL and Dark Desk remain separate external-research actions. |
 
@@ -281,10 +281,10 @@ multi-agent capabilities remain available. TownReporter launches Codex with
 the signed-in account can reach. The newsroom prompt still travels over stdin,
 and its task remains the scope of the requested run.
 
-Opinion displays Automatic and Claude Opus (both use Claude Opus), plus an explicit Local model choice. Codex
-is not offered for editorials: its model declines to write a piece that takes
-a position on a local policy question, so it stays on the Story picker. An
-invalid delivery -- a refusal, an assistant note, an incomplete piece --
+Opinion displays Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
+plus saved custom connections. Automatic tries Claude Opus, then Codex Terra
+once if Claude is unavailable; explicit choices stay selected. An invalid
+delivery -- a refusal, an assistant note, an incomplete piece --
 creates no draft. The completed request and job store the provider that
 finished.
 
@@ -521,10 +521,11 @@ Two things stop working there, both by design:
 
 Also note there is normally no Codex or Claude Code CLI on a serverless host —
 set `ANTHROPIC_API_KEY` or the `LLM_*` trio for Scan, Dark Desk, and Story
-instead. Opinion Automatic requires a signed-in Claude Code CLI and the
-configured voice file. Explicit Local model can use a reachable model server
-and that voice file, but has no separate research pass. Codex is not offered
-for Opinion. These provider options do not remove serverless job-lifetime limits.
+instead. Opinion Automatic requires a signed-in Claude Code CLI or a ready
+Codex Terra fallback and the configured voice file. Explicit Claude, Codex
+Terra, Codex Sol, Local model or custom choices stay selected. Explicit Local
+model has no separate research pass. These provider options do not remove
+serverless job-lifetime limits.
 
 Scan, Draft, and Dark Keep digging persist a job and return. This long-lived process drains waiting jobs. A Vercel serverless invocation may freeze after the click returns — those jobs finish when the monitors ping (`GET /api/cron/monitors` with `CRON_SECRET`) hits. The paper and a typed draft still deploy without that ping; Scan / Draft / Keep digging need it on a host that sleeps.
 

@@ -28,5 +28,8 @@ export function reconcileDraftEvidence(draft: Partial<DraftRow>, body: string, d
   // Retain the original material privately. Subsequent edits cannot overwrite it.
   const archive = oldReview?.original ?? { body: draft.body, ...fields };
   const review = { required: !decision, decision: decision ?? oldReview?.decision ?? null, original: archive };
-  return { ...(decision === "remove" ? { source_urls: "[]", provenance_json: "[]", found_note: "", unanswered: "[]" } : fields), research_json: JSON.stringify({ ...previous, evidenceReview: review }) };
+  const retainedResearch = decision === "remove"
+    ? Object.fromEntries(Object.entries(previous).filter(([key]) => key !== "reportedDocumentClaims" && key !== "documentEvidenceReview"))
+    : previous;
+  return { ...(decision === "remove" ? { source_urls: "[]", provenance_json: "[]", found_note: "", unanswered: "[]" } : fields), research_json: JSON.stringify({ ...retainedResearch, evidenceReview: review }) };
 }

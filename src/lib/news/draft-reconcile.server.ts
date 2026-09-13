@@ -14,9 +14,9 @@ import type { ProviderOverrides } from "./provider-registry.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import type { DraftRow } from "./types.ts";
 import { checkStoryNames } from "./name-check-work.ts";
-import { nameCheckNotes } from "./name-check.ts";
+import { nameCheckNotes, nameCheckText } from "./name-check.ts";
 import { ensureStoryDocuments } from "./story-documents.server.ts";
-import { documentReviewManifest, prepareDocumentReconcileEvidence, type ReconcileDocument } from "./document-reconcile-evidence.ts";
+import { documentReviewManifest, parseDocumentClaims, prepareDocumentReconcileEvidence, type ReconcileDocument } from "./document-reconcile-evidence.ts";
 
 type ReconcileDeps = {
   chat?: ReportChat;
@@ -94,7 +94,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
   const draftToEdit = JSON.stringify({headline:draft.headline,dek:draft.dek,body:draft.body,topic:draft.topic,source_urls:json(draft.source_urls),form:draft.form,found:json(draft.found_note),unanswered:json(draft.unanswered)});
   const documentEvidence = await prepareDocumentReconcileEvidence(documents, draftToEdit, runChat, choice, text => (deps.stage ?? setJobStage)(job.id, text), budget.callMs);
   await (deps.stage ?? setJobStage)(job.id, "Reconciling the draft with the saved evidence");
-  const prompt = `RESEARCH QUESTIONS AND UNKNOWNS ARE NOT EVIDENCE. Reconcile only against the saved captures and original document text below. Do not search, fetch, research, or rewrite from outside material. Uploaded documents are valid evidence without public URLs. Cite their filenames and locators in prose; never expose private document IDs, download paths or invented URLs in the story or source_urls. Remove or qualify unsupported claims and retain unresolved OCR/name uncertainty.\n\nDraft JSON to edit:\n${draftToEdit}\n\nSAVED URL-LABELED EVIDENCE:\n${evidence}\n\nRETAINED UPLOADED DOCUMENT EVIDENCE:\n${documentEvidence.text}`;
+  const prompt = `RESEARCH QUESTIONS AND UNKNOWNS ARE NOT EVIDENCE. Reconcile only against the saved captures and original document text below. Do not search, fetch, research, or rewrite from outside material. Uploaded documents are valid evidence without public URLs. Cite their filenames and the tightest page/character locator around the supporting passage; never cite an entire document range merely because a name appears somewhere inside it. Never expose private document IDs, download paths or invented URLs in the story or source_urls. A supplied segment establishes what that segment discusses, not that a different policy, benefit, event or action did not exist elsewhere; narrow negative language to the scope of the evidence unless a source affirmatively supports the negative. Remove or qualify unsupported claims and retain unresolved OCR/name uncertainty. Return document_claims for selected load-bearing claims supported by uploads as [{"fact":"claim","kind":"primary|record","documentId":"exact private document ID from the evidence label","excerpt":"exact supporting passage"}]. This is a verified passage inventory, not a claim that every sentence was exhaustively inventoried. Do not put an uploaded document in URL-based claims and do not invent a URL.\n\nDraft JSON to edit:\n${draftToEdit}\n\nSAVED URL-LABELED EVIDENCE:\n${evidence}\n\nRETAINED UPLOADED DOCUMENT EVIDENCE:\n${documentEvidence.text}`;
   const response = await runChat(REPORT_EDIT_SYSTEM, prompt, 1800, choice, {timeoutMs:budget.callMs});
   if (!response.ok) throw new Error(response.error);
   const edited = coerceDraft(response.text, {headline:draft.headline,dek:draft.dek,topic:draft.topic});
@@ -103,7 +103,10 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
   const nameCheckStarted = Date.now();
   const names = await checkStoryNames({
     draft: edited, city: "Use the locality identified in the saved draft and sources", domains: [],
-    docs: captures.map(capture => ({ url: capture.url, title: capture.title, text: capture.full_text, extraction_method: capture.extraction_method, version_id: capture.id, extras: [] })),
+    docs: [
+      ...captures.map(capture => ({ url: capture.url, title: capture.title, text: capture.full_text, extraction_method: capture.extraction_method, version_id: capture.id, extras: [] })),
+      ...documents.map(doc => ({evidenceKind:"uploaded-document" as const,documentId:doc.id,filename:doc.filename,mime:doc.mime,text:doc.full_text ?? "",sourceUrl:doc.source_url})),
+    ],
     searchAllowed: false, search: async () => [], open: async () => {},
     timeLeft: () => budget.wallMs - (Date.now() - nameCheckStarted),
     stage: text => (deps.stage ?? setJobStage)(job.id, text),
@@ -144,6 +147,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     // inherit claims recorded for the older body, even when their URLs remain valid.
     const claimsInput = Array.isArray(parsed.claims) ? parsed.claims : [];
     const claims = parseClaims(claimsInput).filter(claim => allowedCaptureUrls.some(url => sameCaptureUrl(url,claim.url)));
+    const documentClaims = parseDocumentClaims(parsed.document_claims, documents);
     const findings = parseFindings(parsed.found).flatMap(finding => {
       const sourceUrls = finding.source_urls.filter(url => allowedCaptureUrls.some(allowed => sameCaptureUrl(allowed,url)));
       if (!sourceUrls.length) return [];
@@ -162,7 +166,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     const form = typeof parsed.form === "string" && (STORY_FORMS as readonly string[]).includes(parsed.form.trim()) ? parsed.form.trim() : draft.form;
     const { writerCheckpoint: _completedWriterCheckpoint, ...currentResearch } = research;
     const [saved] = await tx<{id:number}>`insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json)
-      values(${job.user_id},${job.newsroom_id},${draft.lead_id},${edited.headline},${edited.dek},${edited.body},${draft.topic},${sourceUrls},${integrityNotes},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(unanswered)},${JSON.stringify({...currentResearch,...(documents.length ? {documentEvidenceReview:documentEvidence.receipt} : {}),nameCheck:names.check,reportedClaims:{version:1,rows:claims},evidenceReconciledAt:new Date().toISOString()})}) returning id`;
+      values(${job.user_id},${job.newsroom_id},${draft.lead_id},${edited.headline},${edited.dek},${edited.body},${draft.topic},${sourceUrls},${integrityNotes},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(unanswered)},${JSON.stringify({...currentResearch,...(documents.length ? {documentEvidenceReview:documentEvidence.receipt,reportedDocumentClaims:{version:1,checkedText:nameCheckText(names.draft),rows:documentClaims}} : {}),nameCheck:names.check,reportedClaims:{version:1,rows:claims},evidenceReconciledAt:new Date().toISOString()})}) returning id`;
     await tx`update desk_jobs set result_json=${JSON.stringify({originalDraftId:draft.id,newDraftId:saved.id,evidenceCheckIncomplete:false})} where id=${job.id} and claim_token=${job.claim_token}`;
   });
 }

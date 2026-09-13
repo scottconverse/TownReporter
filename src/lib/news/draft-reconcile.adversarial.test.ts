@@ -385,6 +385,23 @@ test("document-only drafts use retained text and store private identity/coverage
   assert.deepEqual(review.locators,[{documentId:id,start:0,end:review.documents[0].characters}]);
 });
 
+test("document claims retain exact private filename and locator without fabricating a public URL", async () => {
+  const f=await fixture();
+  await f.sql.query("update drafts set source_urls='[]',provenance_json='[]',research_json=$1 where id=$2",[JSON.stringify({researchScope:'supplied'}),f.draftId]);
+  const text="SIGNED RECORD: The council approved $25."; const id=await attachUpload(f,undefined,text);
+  let call=0;
+  await performDraftReconcileWork(f.job,{stage:async()=>{},chat:async(_system)=>{
+    call++;
+    if(call===1) return {ok:true,text:JSON.stringify({...JSON.parse(reply),document_claims:[{fact:"The council approved $25.",kind:"record",documentId:id,excerpt:text}],source_urls:["https://invented.example/private"]})};
+    return {ok:true,text:JSON.stringify(call===2?{complete:true,people:[]}:{checks:[]})};
+  }});
+  const [saved]=await f.sql.query<{source_urls:string;research_json:string}>("select source_urls,research_json from drafts where lead_id=$1 order by id desc limit 1",[f.leadId]);
+  assert.deepEqual(JSON.parse(saved.source_urls),[]);
+  const documentClaims=JSON.parse(saved.research_json).reportedDocumentClaims;
+  assert.equal(typeof documentClaims.checkedText,"string");
+  assert.deepEqual(documentClaims.rows,[{fact:"The council approved $25.",kind:"record",documentId:id,filename:"packet.pdf",locator:`characters 1-${text.length}`,excerpt:text}]);
+});
+
 test("mixed evidence includes both an exact web version and the uploaded original",async()=>{
   const f=await fixture(); const version=await attachExactCapture(f); await attachUpload(f);
   await performDraftReconcileWork(f.job,{stage:async()=>{},chat:async(_system,prompt)=>{

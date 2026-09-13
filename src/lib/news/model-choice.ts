@@ -56,22 +56,8 @@ export function isCustomModelChoice(value: unknown): value is CustomModelChoice 
 }
 export type EffectiveStoryModelChoice = StoryModelChoice | "configured";
 
-/*
-  Opinion Automatic uses Claude; an explicit Local model is also offered.
-  The 2026-09-02 decision below removed Codex, not subsequent local support.
-
-  Codex was offered here too, and its model refuses the job: asked for an
-  editorial that takes a position on a local policy question, gpt-5.6-sol
-  returned "EDITORIAL_REFUSAL: I can't provide an editorial that advocates a
-  position on a local government policy issue" -- twice, with the real voice,
-  on a real subject. That is the provider's policy, not a bug, and working
-  around it would mean prompting against their rules. Codex stays on the
-  Story picker, where it drafts reporting and works.
-
-  That decision now lives on the registry entries as `offeredFor.opinion`,
-  and this list is the same option OBJECTS the Story list holds, filtered --
-  so the two can never drift into showing different labels for one provider.
-*/
+/* Opinion uses the same native subscription providers as Story. Automatic
+   tries Claude and then Codex Terra; an explicit pick never falls through. */
 export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = STORY_MODEL_CHOICES.filter(
   (choice) => choice.value === "auto" || providerEntry(choice.value)?.offeredFor.opinion,
 );
@@ -171,7 +157,7 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
     return `Uses only ${selected.label} for this run; no fallback.`;
   }
   if (scope === "opinion") {
-    return "Claude Opus writes the whole editorial. Codex is offered for Story drafts only: its model declines to write an editorial that takes a position.";
+    return `Tries ${ladderSentence()}. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.`;
   }
   const noun = scope === "dark" ? "round" : "draft";
   return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first one's login has lapsed or it does not respond in time, the ${noun} moves to the next.`;

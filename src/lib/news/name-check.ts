@@ -7,6 +7,10 @@ export type NameCheckRow = {
   url: string;
   excerpt: string;
   captureId: number | null;
+  evidenceKind?: "public-capture" | "uploaded-document";
+  documentId?: string;
+  filename?: string;
+  locator?: string;
 };
 export type NameCheck = {
   version: 1;
@@ -28,6 +32,6 @@ export function readNameCheck(raw: string | null | undefined): NameCheck | null 
 export function nameCheckNotes(check: NameCheck): string {
   return ["NAME CHECK: " + check.note, ...check.rows.map(row =>
     row.status === "unresolved" ? `Name needs review: ${row.name} (${row.role || "person"}). ${row.reason}` :
-      `Name ${row.status}: ${row.name}${row.name !== row.spelling ? ` → ${row.spelling}` : ""}. ${row.url} — ${row.excerpt}`,
+      `Name ${row.status}: ${row.name}${row.name !== row.spelling ? ` → ${row.spelling}` : ""}. ${row.evidenceKind === "uploaded-document" ? `${row.filename}, ${row.locator}` : row.url} — ${row.excerpt}`,
   )].join("\n");
 }

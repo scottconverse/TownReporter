@@ -1,6 +1,14 @@
 # Changelog
 
-Current release: **0.6.42**.
+Current release: **0.6.43**.
+
+## 0.6.43 — 2026-09-12
+
+- Opinion uses the same multi-document uploader, extraction, OCR and section-by-section reader as Write a story. Full pasted material is retained separately from the compact request title, and failed requests can restore their material.
+- Automatic Opinion tries Claude then Codex Terra on failure; explicit provider choices stay selected. Quota details and writing progress appear on the request. A provider refusal remains a failed request, never a publishable draft.
+- Name checks can use authoritative written documents as well as saved public records, apply supported corrections, and show exact private evidence passages. Transcript and OCR spellings require written confirmation.
+- Document-based stories retain verified private claim passages and locators through drafting and evidence checks.
+- Restored readable desk labels and consistent Large text scaling across the editor interface.
 
 ## 0.6.42 — 2026-09-12
 

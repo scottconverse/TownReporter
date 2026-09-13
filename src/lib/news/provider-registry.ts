@@ -230,17 +230,9 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     plannerModel: CODEX_TERRA_MODEL,
     enabled: () => notSwitchedOff("TOWNREPORTER_CODEX"),
     offSwitchEnv: "TOWNREPORTER_CODEX",
-    /*
-      Opinion offers Claude only. Decided 2026-09-02.
-
-      Codex was offered there too, and its model refuses the job: asked for an
-      editorial that takes a position on a local policy question, gpt-5.6-sol
-      returned "EDITORIAL_REFUSAL: I can't provide an editorial that advocates
-      a position on a local government policy issue" -- twice, with the real
-      voice, on a real subject. That is the provider's policy, not a bug, and
-      working around it would mean prompting against their rules.
-    */
-    offeredFor: { story: true, scan: true, opinion: false, dark: true },
+    // Earlier refusals remain delivery failures; they were not a reason to
+    // erase an otherwise available native subscription provider.
+    offeredFor: EVERY_SURFACE,
     ladderRank: 2,
   },
   {
@@ -256,7 +248,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     plannerModel: CODEX_TERRA_MODEL,
     enabled: () => notSwitchedOff("TOWNREPORTER_CODEX"),
     offSwitchEnv: "TOWNREPORTER_CODEX",
-    offeredFor: { story: true, scan: true, opinion: false, dark: true },
+    offeredFor: EVERY_SURFACE,
     // No ladderRank: Automatic never reaches for the frontier model on its
     // own. Choosing Sol is a decision an editor makes deliberately.
   },

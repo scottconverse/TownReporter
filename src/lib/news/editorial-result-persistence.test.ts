@@ -19,6 +19,11 @@ const TEST_EDITORIAL: Editorial = {
   factSheet: "The archive is publicly funded.",
   imagePrompt: "A public archive reading room.",
 };
+const skipNameCheck = async (opts: Parameters<typeof import("./editorial-name-check.ts").checkEditorialNames>[0]) => ({
+  editorial: opts.editorial,
+  nameCheck: { version: 1 as const, checkedAt: new Date(0).toISOString(), checkedText: "", complete: true, note: "Test name check.", rows: [] },
+  integrityNotes: opts.integrityNotes ?? "",
+});
 
 function uniqueUser(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random()}`;
@@ -45,6 +50,8 @@ async function ensureCompletionSchema() {
       updated_at timestamptz not null default now()
     )
   `);
+  await sql.query("alter table drafts add column if not exists integrity_notes text not null default ''");
+  await sql.query("alter table drafts add column if not exists research_json text not null default '{}'");
 }
 
 async function insertRequest(
@@ -73,6 +80,34 @@ async function cleanCompletionFixture(sql: Sql, userId: string) {
 }
 
 describe("Automatic Opinion provider persistence", () => {
+  it("makes an all-provider document-reading failure terminal while retaining the request", async () => {
+    const sql = await getSql();
+    await ensureCompletionSchema();
+    const userId = uniqueUser("opinion-document-failure");
+    const request = await insertRequest(sql, { userId, modelChoice: "auto" });
+    const job = await enqueueJob({ userId, newsroomId: 1, kind: "editorial", subjectId: request.id, modelChoice: "auto", kick: false });
+    const choices: string[] = [];
+    try {
+      await assert.rejects(
+        performEditorialWork(job, {
+          readEditorialDocuments: async (_room, _request, choice) => {
+            choices.push(choice);
+            throw new Error(`${choice} reading unavailable`);
+          },
+          writeEditorial: async () => assert.fail("writing must not start without the retained document reading"),
+        }),
+        /codex-balanced reading unavailable/,
+      );
+      assert.deepEqual(choices, ["claude-frontier", "codex-balanced"]);
+      const [stored] = await sql<{ error: string; finished: boolean; subject: string }>`
+        select error,(finished_at is not null) as finished,subject from editorial_requests where id=${request.id}
+      `;
+      assert.equal(stored?.finished, true);
+      assert.match(stored?.error ?? "", /codex-balanced reading unavailable/);
+      assert.equal(stored?.subject, "Keep local history public");
+    } finally { await cleanCompletionFixture(sql, userId); }
+  });
+
   it("replaces auto with the provider that actually completed the full pair", async () => {
     const sql = await getSql();
     await ensureJobsSchema();
@@ -176,6 +211,7 @@ describe("Opinion completion commit", () => {
         },
         TEST_EDITORIAL,
         "claude-frontier",
+        { checkEditorialNames: skipNameCheck, setJobStage: async () => undefined },
       );
       assert.equal(result.ok, true);
       if (!result.ok) assert.fail(result.error);
@@ -226,6 +262,7 @@ describe("Opinion completion commit", () => {
           },
           TEST_EDITORIAL,
           "claude-frontier",
+          { checkEditorialNames: skipNameCheck, setJobStage: async () => undefined },
         ),
         /editorial job .* not found/i,
       );
@@ -330,6 +367,7 @@ describe("Opinion completion commit", () => {
     const failureMayFinish = new Promise<void>((resolve) => (releaseFailure = resolve));
     const workerStarted = new Promise<void>((resolve) => (signalStarted = resolve));
     const delayedWork = performEditorialWork(job, {
+      readEditorialDocuments: async () => "",
       writeEditorial: async () => {
         signalStarted();
         await failureMayFinish;
@@ -339,7 +377,12 @@ describe("Opinion completion commit", () => {
     const delayedFailure = assert.rejects(delayedWork, /stale provider eventually failed/);
 
     try {
-      await workerStarted;
+      await Promise.race([
+        workerStarted,
+        delayedFailure.then(() => {
+          throw new Error("the delayed worker failed before reaching the test handshake");
+        }),
+      ]);
       const filed = await fileEditorial(
         {
           userId,
@@ -352,6 +395,7 @@ describe("Opinion completion commit", () => {
         },
         TEST_EDITORIAL,
         "claude-frontier",
+        { checkEditorialNames: skipNameCheck, setJobStage: async () => undefined },
       );
       assert.equal(filed.ok, true);
       if (!filed.ok) assert.fail(filed.error);

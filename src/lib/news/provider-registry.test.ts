@@ -96,15 +96,12 @@ describe("the provider registry is the one description of a writing model", () =
     }
   });
 
-  it("offers Opinion Claude and the local model, because Codex alone declines to write editorials", () => {
-    // The provider's own policy, recorded on the entries: gpt-5.6-sol returned
-    // "EDITORIAL_REFUSAL: I can't provide an editorial that advocates a
-    // position on a local government policy issue" -- twice, on a real subject.
-    // The local model has no such policy, and "anywhere an AI acts, the editor
-    // can pick the model" applies to Opinion too -- it is offered everywhere.
+  it("offers Opinion the supported Codex, Claude and local writing providers", () => {
+    // Availability and successful delivery are separate: content refusals
+    // remain failed requests, while editors can select each supported runtime.
     assert.deepEqual(
       providersFor("opinion").map((entry) => entry.id),
-      ["claude-frontier", "local-model"],
+      ["codex-balanced", "codex-frontier", "claude-frontier", "local-model"],
     );
     // Everything Opinion offers, Story and Dark offer too.
     for (const entry of providersFor("opinion")) {

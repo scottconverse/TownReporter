@@ -30,11 +30,10 @@ import { test } from "node:test";
  *
  * Three checks:
  *
- *   1. Parse every rule in styles.css whose selector contains ".desk-ltr"
- *      (including ones nested inside @media blocks) and fail on any
- *      font-size that resolves to less than 14px at --ts: 1 -- unless the
- *      declaration carries an explicit "decorative" comment marking it
- *      exempt (there should be none needed).
+ *   1. Parse every rule in the base and active Astra stylesheets whose
+ *      selector contains ".desk-ltr" (including ones nested inside @media
+ *      blocks), inspecting both font-size declarations and font shorthands.
+ *      Fail on any size below 14px at --ts: 1.
  *   2. The selectors this pass scaled for Text: Large all read --ts.
  *   3. Desk-rendered .tsx files (see FILE_GLOBS below) do not use the
  *      banned sub-14px Tailwind utilities, and do not hardcode a bare
@@ -51,12 +50,14 @@ import { test } from "node:test";
  */
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const CSS_PATH = join(ROOT, "src", "styles.css");
+const CSS_PATHS = [join(ROOT, "src", "styles.css"), join(ROOT, "src", "desk-astra.css")];
 const FLOOR_PX = 14;
 
 function pxOf(value) {
   const rem = value.match(/^calc\(\s*([\d.]+)rem\s*\*\s*var\(--ts\)\s*\)$/);
   if (rem) return parseFloat(rem[1]) * 16;
+  const scaledPx = value.match(/^calc\(\s*([\d.]+)px\s*\*\s*var\(--ts\)\s*\)$/);
+  if (scaledPx) return parseFloat(scaledPx[1]);
   const remPlain = value.match(/^([\d.]+)rem$/);
   if (remPlain) return parseFloat(remPlain[1]) * 16;
   const px = value.match(/^([\d.]+)px$/);
@@ -122,22 +123,27 @@ function deskFontSizeDeclarations(css) {
   for (const rule of parseRules(css)) {
     if (!rule.selector.includes(".desk-ltr")) continue;
     const fsMatch = rule.body.match(/font-size:\s*([^;]+?)\s*(?:;|$)/);
-    if (!fsMatch) continue;
+    // Also inspect shorthand `font` declarations: Astra uses these for many
+    // labels and body blocks, and a font floor must guard the size in them.
+    const fontMatch = rule.body.match(/(?:^|[;\n])\s*font:\s*(?:[^;]*?\s)?((?:calc\([^;]+\)|[\d.]+(?:px|rem)))\s*(?:\/[^;\s]+)?\s+[^;]+/);
+    const fontSize = fsMatch?.[1]?.trim() ?? fontMatch?.[1]?.trim();
+    if (!fontSize) continue;
     if (/decorative/.test(rule.body)) continue;
-    out.push({ selector: rule.selector, line: rule.line, fontSize: fsMatch[1].trim() });
+    out.push({ selector: rule.selector, line: rule.line, fontSize });
   }
   return out;
 }
 
 test("no .desk-ltr rule resolves a font-size below the 14px informational floor", () => {
-  const css = readFileSync(CSS_PATH, "utf8");
-  const decls = deskFontSizeDeclarations(css);
+  const decls = CSS_PATHS.flatMap((cssPath) =>
+    deskFontSizeDeclarations(readFileSync(cssPath, "utf8")).map((d) => ({ ...d, file: cssPath })),
+  );
   assert.ok(decls.length > 20, "sanity check: expected many .desk-ltr font-size declarations to be found");
   const failures = decls
     .map((d) => ({ ...d, px: pxOf(d.fontSize) }))
     .filter((d) => d.px !== null && d.px < FLOOR_PX);
   assert.deepEqual(
-    failures.map((f) => `styles.css:${f.line} ${f.selector} -> ${f.fontSize} (${f.px}px)`),
+    failures.map((f) => `${f.file.endsWith("desk-astra.css") ? "desk-astra.css" : "styles.css"}:${f.line} ${f.selector} -> ${f.fontSize} (${f.px}px)`),
     [],
     "these .desk-ltr rules resolve below the 14px floor at Normal text size",
   );
@@ -147,6 +153,10 @@ test("the brace-depth-aware CSS parser catches a font-size that spans multiple l
   const fixture = [
     "",
     ".desk-ltr .totally-fine { font-size: calc(0.875rem * var(--ts)); }",
+    ".desk-ltr .scaled-px-offender { font-size: calc(12px * var(--ts)); }",
+    ".desk-ltr .scaled-px-fine { font-size: calc(14px * var(--ts)); }",
+    ".desk-ltr .font-shorthand-offender { font: 400 calc(12px * var(--ts))/1.5 sans-serif; }",
+    ".desk-ltr .font-shorthand-fine { font: 400 calc(14px * var(--ts))/1.5 sans-serif; }",
     ".desk-ltr .multiline-offender {",
     "  display: inline-flex;",
     "  font-size:12px;",
@@ -164,32 +174,33 @@ test("the brace-depth-aware CSS parser catches a font-size that spans multiple l
   const decls = deskFontSizeDeclarations(fixture);
   const bySelector = Object.fromEntries(decls.map((d) => [d.selector, d.fontSize]));
   assert.equal(bySelector[".desk-ltr .totally-fine"], "calc(0.875rem * var(--ts))");
+  assert.equal(bySelector[".desk-ltr .scaled-px-offender"], "calc(12px * var(--ts))");
+  assert.equal(bySelector[".desk-ltr .scaled-px-fine"], "calc(14px * var(--ts))");
+  assert.equal(bySelector[".desk-ltr .font-shorthand-offender"], "calc(12px * var(--ts))");
+  assert.equal(bySelector[".desk-ltr .font-shorthand-fine"], "calc(14px * var(--ts))");
   assert.equal(bySelector[".desk-ltr .multiline-offender"], "12px");
   assert.equal(bySelector[".desk-ltr .nested-multiline-offender"], "11px");
   const failures = decls.map((d) => ({ ...d, px: pxOf(d.fontSize) })).filter((d) => d.px < FLOOR_PX);
-  assert.equal(failures.length, 2, "both the top-level and @media-nested multiline offenders must be caught");
+  assert.equal(failures.length, 4, "scaled px and shorthand offenders plus top-level and nested offenders must be caught");
 });
 
 const SCALED_SELECTORS = [
   ".h1",
-  ".sec-title",
-  ".hl-link",
-  ".np-title",
-  ".pipe-v",
-  ".of-title",
-  ".worth-t",
-  ".read-doc-title",
-  ".read-full",
-  ".art-body",
-  ".feat-body",
+  ".astra-metrics strong",
+  ".work-form .astra-headline",
+  ".work-form .astra-dek",
+  ".work-form .astra-story-body",
+  ".astra-preview h1",
+  ".astra-preview-dek",
+  ".astra-preview-body",
 ];
 
 test("Large text reaches headline and reading-pane type: the listed selectors scale with --ts", () => {
-  const css = readFileSync(CSS_PATH, "utf8");
+  const css = readFileSync(CSS_PATHS[1], "utf8");
   const decls = deskFontSizeDeclarations(css);
   for (const sel of SCALED_SELECTORS) {
-    const rule = decls.find((d) => d.selector === `.desk-ltr ${sel}`);
-    assert.ok(rule, `expected a .desk-ltr ${sel} font-size declaration`);
+    const rule = decls.find((d) => d.selector.endsWith(` ${sel}`));
+    assert.ok(rule, `expected an Astra ${sel} font-size declaration`);
     assert.match(
       rule.fontSize,
       /var\(--ts\)/,
@@ -263,7 +274,7 @@ test("desk-rendered files do not hardcode a sub-14px font-size or use a banned s
 // future edit that drops or renames it fails loudly instead of quietly
 // reintroducing the invisible-border bug.
 test(".btn.quiet.danger (Kill) resolves a real, non-transparent warn border regardless of declaration order", () => {
-  const css = readFileSync(CSS_PATH, "utf8");
+  const css = readFileSync(CSS_PATHS[0], "utf8");
   const rules = parseRules(css);
   const rule = rules.find(
     (r) => r.selector.split(",").map((s) => s.trim()).includes(".desk-ltr .btn.quiet.danger"),

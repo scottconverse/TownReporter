@@ -159,7 +159,7 @@ test("the Dark Desk picker offers the registry's dark providers, and says it dig
   assert.match(html, /the round moves to the next/);
 });
 
-test("the Opinion picker offers only the registry's opinion providers", () => {
+test("the Opinion picker offers the registry's opinion providers, including Codex Terra and Sol", () => {
   const html = render({ scope: "opinion" });
   const expected = [
     "Automatic",
@@ -167,13 +167,9 @@ test("the Opinion picker offers only the registry's opinion providers", () => {
   ];
   const rendered = [...html.matchAll(/<option[^>]*>([^<—]+)—/g)].map((m) => m[1].trim());
   assert.deepEqual(rendered, expected);
-  /*
-    Codex is not an OPTION here, but it is named in the help text and in the
-    setup steps -- deliberately, because an editor who sees it on the Story
-    picker and not this one deserves to be told why rather than left to guess.
-    So this asserts the option list, not the absence of the word.
-  */
-  assert.ok(!rendered.some((label) => /codex/i.test(label)));
+  assert.ok(rendered.includes("Codex Terra"), "Opinion must offer Codex Terra");
+  assert.ok(rendered.includes("Codex Sol"), "Opinion must offer Codex Sol");
+  assert.doesNotMatch(html, /Local Qwen|Zen MiMo/);
 });
 
 test("Opinion setup help explains its voice prerequisite without advertising Story-only models", () => {

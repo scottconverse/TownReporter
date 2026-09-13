@@ -7,12 +7,10 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 
-test("current operator docs describe Opinion validation, Claude Automatic and explicit Local", () => {
+test("current operator docs describe Opinion validation and provider routing", () => {
   /*
-    Opinion offered Codex for one release candidate and its model refused
-    every editorial that took a position. Automatic uses Claude now; a
-    doc that still promises a Codex-then-Claude ladder promises a button
-    that fails. Explicit Local model was subsequently added; Automatic remains Claude.
+    Opinion uses the shared provider registry. Automatic starts with Claude
+    and can fall back to Codex Terra once; explicit choices remain selected.
   */
   for (const rel of [
     "README.md",
@@ -25,13 +23,13 @@ test("current operator docs describe Opinion validation, Claude Automatic and ex
     const text = read(rel);
     assert.match(text, /(?:provider )?(?:refusal|declines?)/i, rel);
     assert.match(text, /(?:no\s+draft|never\s+becomes\s+a\s+draft|before\s+draft storage)/i, rel);
-    assert.match(text, /Codex\s+is\s+not\s+offered\s+(?:for|here)/i, rel);
+    assert.match(text, /Codex\s+(?:Terra|Sol)/i, rel);
     assert.match(text, /Local model/i, rel);
     assert.match(text, /Automatic[\s\S]{0,200}Claude Opus/i, rel);
     assert.doesNotMatch(
       text,
-      /Automatic (?:tries|runs)[^.\n]{0,80}Codex Sol/i,
-      `${rel} still describes the withdrawn Codex Opinion ladder`,
+      /Codex\s+is\s+not\s+offered\s+(?:for|here)/i,
+      `${rel} still describes the withdrawn Codex Opinion restriction`,
     );
   }
 });

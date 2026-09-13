@@ -5,6 +5,7 @@ import { getSql } from "../db.ts";
 import { ensureJobsSchema, enqueueJob } from "./jobs.ts";
 import { ensureNewsroomSchema, requireEditor } from "./membership.ts";
 import { checkOpinionReadiness } from "./opinion-readiness.ts";
+import { ensureStoryDocuments } from "./story-documents.server.ts";
 import {
   commitOpinionForAuthenticatedEditor,
   commitScanForAuthenticatedEditor,
@@ -57,6 +58,7 @@ async function ensureCommitBoundarySchema() {
       user_id text not null,
       newsroom_id integer not null default 1,
       subject text not null,
+      source_text text not null default '',
       source_kind text not null default 'paste',
       source_ref text not null default '',
       asked_for text not null default '',
@@ -111,12 +113,85 @@ async function ensureCommitBoundarySchema() {
     await sql.query(ddl[0]);
     await sql.query(`alter table ${table} add column if not exists newsroom_id integer not null default 1`);
   }
+  await sql.query(`create table if not exists drafts (
+    id serial primary key,user_id text not null,newsroom_id integer not null default 1,
+    lead_id integer,headline text not null default '',dek text not null default '',
+    body text not null default '',topic text not null default 'council',
+    source_urls text not null default '[]',form text not null default 'reported'
+  )`);
   await sql.query("alter table drafts add column if not exists topic text not null default 'council'");
   await sql.query("alter table scan_runs add column if not exists section_snapshot text");
   return sql;
 }
 
 describe("authenticated Codex commit boundary", () => {
+  const readyOpinionDeps = {
+    checkReadiness: async () => ({ ready: true, why: "", problems: [], effectiveChoice: "auto" as const }),
+    ensureEditorialRequestSchema: async () => undefined,
+    assertRate: async () => undefined,
+    enqueueJob: (opts: Parameters<typeof enqueueJob>[0]) => enqueueJob({ ...opts, kick: false }),
+    audit: async () => undefined,
+  };
+
+  it("retries an attachments-only failed Opinion from its retained document", async () => {
+    const sql = await ensureCommitBoundarySchema();
+    await ensureStoryDocuments(sql);
+    const userId = `opinion-retry-attachment-${Date.now()}-${Math.random()}`;
+    const [old] = await sql<{ id: number }>`insert into editorial_requests
+      (user_id,newsroom_id,subject,source_text,error,finished_at)
+      values(${userId},1,'Editorial from attached documents','','quota',now()) returning id`;
+    const documentId = `retry-attachment-${Date.now()}-${Math.random()}`;
+    await sql.query(`insert into story_documents
+      (id,newsroom_id,user_id,editorial_request_id,filename,mime,original,status)
+      values($1,1,$2,$3,'minutes.pdf','application/pdf',$4,'uploaded')`,
+      [documentId, userId, old.id, Buffer.from("retained attachment")]);
+    const result = await commitOpinionForAuthenticatedEditor({
+      context: { userId, newsroomId: 1 }, subject: "", retryRequestId: old.id, modelChoice: "auto",
+    }, readyOpinionDeps);
+    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    if (result.ok) {
+      const [doc] = await sql<{ editorial_request_id: number }>`select editorial_request_id from story_documents where id=${documentId}`;
+      assert.equal(doc?.editorial_request_id, result.requestId);
+      await sql`delete from desk_jobs where id=${result.jobId}`;
+    }
+    await sql`delete from editorial_requests where user_id=${userId}`;
+    await sql`delete from story_documents where user_id=${userId}`;
+  });
+
+  it("uses edited restored text and preserves a same-named user upload", async () => {
+    const sql = await ensureCommitBoundarySchema();
+    await ensureStoryDocuments(sql);
+    const userId = `opinion-retry-edited-${Date.now()}-${Math.random()}`;
+    const oldText = "The old saved Opinion paste.";
+    const editedText = "The editor replaced the restored text with this complete new argument.";
+    const [old] = await sql<{ id: number }>`insert into editorial_requests
+      (user_id,newsroom_id,subject,source_text,error,finished_at)
+      values(${userId},1,'Old Opinion',${oldText},'quota',now()) returning id`;
+    const generatedId = `old-generated-${Date.now()}-${Math.random()}`;
+    const userUploadId = `same-name-user-${Date.now()}-${Math.random()}`;
+    await sql.query(`insert into story_documents
+      (id,newsroom_id,user_id,editorial_request_id,filename,mime,original,status) values
+      ($1,1,$3,$5,'Opinion desk pasted material.txt','text/plain',$6,'uploaded'),
+      ($2,1,$3,$5,'Opinion desk pasted material.txt','text/plain',$4,'uploaded')`,
+      [generatedId, userUploadId, userId, Buffer.from("independent user attachment"), old.id, Buffer.from(oldText)]);
+    const result = await commitOpinionForAuthenticatedEditor({
+      context: { userId, newsroomId: 1 }, subject: editedText, retryRequestId: old.id, modelChoice: "auto",
+    }, readyOpinionDeps);
+    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    if (result.ok) {
+      const docs = await sql.query<{ id: string; text: string }>(
+        "select id,convert_from(original,'UTF8') as text from story_documents where editorial_request_id=$1 order by id",
+        [result.requestId],
+      );
+      assert.ok(docs.some((doc) => doc.id === userUploadId && doc.text === "independent user attachment"));
+      assert.ok(docs.some((doc) => doc.text === editedText));
+      assert.ok(!docs.some((doc) => doc.id === generatedId || doc.text === oldText));
+      await sql`delete from desk_jobs where id=${result.jobId}`;
+    }
+    await sql`delete from editorial_requests where user_id=${userId}`;
+    await sql`delete from story_documents where user_id=${userId}`;
+  });
+
   it("refuses expired OAuth before Story or Opinion writes, then enqueues exactly once after refresh", async () => {
     const sql = await getSql();
     await ensureNewsroomSchema();
@@ -154,6 +229,7 @@ describe("authenticated Codex commit boundary", () => {
         user_id text not null,
         newsroom_id integer not null default 1,
         subject text not null,
+        source_text text not null default '',
         source_kind text not null default 'paste',
         source_ref text not null default '',
         asked_for text not null default '',

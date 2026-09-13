@@ -254,16 +254,26 @@ export async function commitOpinionForAuthenticatedEditor(
     subject: string;
     askedFor?: string;
     articleSlug?: string;
+    documentIds?: string[];
+    retryRequestId?: number;
     modelChoice: OpinionModelChoice;
   },
   deps: OpinionCommitDeps = {},
 ) {
-  const subject = String(input.subject ?? "")
-    .trim()
-    .slice(0, 400);
-  if (subject.length < 6) {
+  if ((input.documentIds?.length ?? 0) > 20 || new Set(input.documentIds ?? []).size !== (input.documentIds?.length ?? 0)) {
+    return { ok: false as const, error: "Choose up to 20 different documents." };
+  }
+  const sourceText = String(input.subject ?? "").trim();
+  const askedFor = String(input.askedFor ?? "").trim();
+  if (sourceText.length > 20_000_000 || askedFor.length > 20_000_000) {
+    return { ok: false as const, error: "Opinion material exceeds 20 million characters. Split it into separate volumes before starting." };
+  }
+  if (sourceText.length < 6 && !input.documentIds?.length && !input.retryRequestId) {
     return { ok: false as const, error: "Give it a subject, a URL, or a sentence to work from." };
   }
+  // Keep the card/list label compact without confusing it with the source.
+  // The complete editor-authored material lives in source_text below.
+  const subject = (sourceText.split(/\r?\n/).find((line) => line.trim())?.trim() || "Editorial from attached documents").slice(0, 400);
 
   const readiness = await (deps.checkReadiness ?? checkOpinionReadiness)(input.modelChoice, {}, input.context.newsroomId);
   if (!readiness.ready) return { ok: false as const, error: readiness.why };
@@ -274,12 +284,26 @@ export async function commitOpinionForAuthenticatedEditor(
   // alone spend rate budget, insert a request, write an audit row, or enqueue.
   await (deps.ensureEditorialRequestSchema ?? ensureEditorialRequestSchemaDefault)();
   const sql = await (deps.getSql ?? getSql)();
+  if (input.retryRequestId) {
+    const retryable = await sql.query(
+      `select old.id from editorial_requests old
+       where old.id=$1 and old.newsroom_id=$2 and old.user_id=$3
+         and old.finished_at is not null and old.error is not null and old.draft_id is null
+         and exists (select 1 from story_documents d where d.editorial_request_id=old.id
+           and d.newsroom_id=old.newsroom_id and d.user_id=old.user_id)
+       limit 1`,
+      [input.retryRequestId, input.context.newsroomId, input.context.userId],
+    );
+    if (!retryable.length) {
+      return { ok: false as const, error: "That failed request has no retained attachments to restore." };
+    }
+  }
   const pointers: { what: string; url?: string }[] = [];
   let ourStory: { headline: string; url: string; dek?: string } | undefined;
   let sourceKind = "paste";
-  let sourceRef = subject;
+  let sourceRef = "pasted into the Opinion desk";
 
-  for (const match of subject.matchAll(/https?:\/\/\S+/g)) {
+  for (const match of sourceText.matchAll(/https?:\/\/\S+/g)) {
     try {
       pointers.push({ what: "pasted by the editor", url: assertHttpUrl(match[0]).toString() });
     } catch {
@@ -316,15 +340,51 @@ export async function commitOpinionForAuthenticatedEditor(
 
   const rows = await sql<{ id: number }>`
     insert into editorial_requests
-      (user_id, newsroom_id, subject, source_kind, source_ref, asked_for,
+      (user_id, newsroom_id, subject, source_text, source_kind, source_ref, asked_for,
        pointers_json, our_story_json, model_choice)
-    values (${input.context.userId}, ${input.context.newsroomId}, ${subject}, ${sourceKind},
-            ${sourceRef}, ${String(input.askedFor ?? "").slice(0, 600)},
-            ${JSON.stringify(pointers).slice(0, 8000)},
+    values (${input.context.userId}, ${input.context.newsroomId}, ${subject}, ${sourceText}, ${sourceKind},
+            ${sourceRef}, ${askedFor},
+            ${JSON.stringify(pointers)},
             ${ourStory ? JSON.stringify(ourStory) : null}, ${effectiveChoice})
     returning id
   `;
   const requestId = rows[0]!.id;
+  const documentIds = [...(input.documentIds ?? [])];
+  let generatedPasteId: string | undefined;
+  if (sourceKind === "paste" && sourceText) {
+    const { storeStoryDocument } = await import("./story-documents.server.ts");
+    const pasted = await storeStoryDocument(input.context.newsroomId, input.context.userId,
+      "Opinion desk pasted material.txt", "text/plain", new TextEncoder().encode(sourceText));
+    documentIds.push(pasted.id);
+    generatedPasteId = pasted.id;
+  }
+  if (documentIds.length) {
+    const { linkEditorialDocuments } = await import("./story-documents.server.ts");
+    try {
+      await linkEditorialDocuments(sql, input.context.newsroomId, input.context.userId, requestId, documentIds);
+    } catch (error) {
+      if (generatedPasteId) await sql`delete from story_documents where id=${generatedPasteId} and newsroom_id=${input.context.newsroomId} and user_id=${input.context.userId} and lead_id is null and editorial_request_id is null`;
+      await sql`delete from editorial_requests where id=${requestId} and newsroom_id=${input.context.newsroomId}`;
+      return { ok: false as const, error: error instanceof Error ? error.message : "Documents could not be attached." };
+    }
+  }
+  if (input.retryRequestId) {
+    const moved = await sql.query(
+      `update story_documents set editorial_request_id=$1 where editorial_request_id=$2
+       and newsroom_id=$3 and user_id=$4 and exists (
+         select 1 from editorial_requests old where old.id=$2 and old.newsroom_id=$3
+           and old.user_id=$4 and old.finished_at is not null and old.error is not null and old.draft_id is null
+       ) and not (
+         filename = 'Opinion desk pasted material.txt' and mime = 'text/plain'
+         and original = convert_to((select old.source_text from editorial_requests old where old.id=$2), 'UTF8')
+       ) returning id`,
+      [requestId, input.retryRequestId, input.context.newsroomId, input.context.userId],
+    );
+    if (!moved.length && !generatedPasteId) {
+      await sql`delete from editorial_requests where id=${requestId} and newsroom_id=${input.context.newsroomId}`;
+      return { ok: false as const, error: "The saved attachments could not be restored. Open the failed request and restore them again." };
+    }
+  }
   let job: Awaited<ReturnType<typeof enqueueJob>>;
   try {
     job = await (deps.enqueueJob ?? enqueueJob)({
@@ -431,7 +491,7 @@ export async function writeStoryForAuthenticatedEditor(
   );
   if(input.documentIds?.length){
     const {ensureStoryDocuments}=await import('./story-documents.server.ts');await ensureStoryDocuments(sql);
-    const available=await sql.query("select id from story_documents where id=any($1) and newsroom_id=$2 and user_id=$3 and lead_id is null and status='uploaded'",[input.documentIds,input.context.newsroomId,input.context.userId]);
+    const available=await sql.query("select id from story_documents where id=any($1) and newsroom_id=$2 and user_id=$3 and lead_id is null and editorial_request_id is null and status='uploaded'",[input.documentIds,input.context.newsroomId,input.context.userId]);
     if(available.length!==input.documentIds.length)return {ok:false as const,error:"One of these uploads is incomplete or already attached. Select it again before writing."};
   }
   const notesJson = packNotes({ ...appendScratch(parseNotes(null), scratch), editorialAssignment, suppliedUrls: urls, researchScope: input.researchScope === "supplied" ? "supplied" : "public" });

@@ -55,13 +55,10 @@ describe("model choice contract", () => {
     assert.match(STORY_MODEL_CHOICES[0].detail, /recommended/i);
   });
 
-  it("limits Opinion to Automatic, Claude, and the local model -- Codex is a Story-only provider", () => {
-    // Codex's model refuses editorials that take a position; see the note on
-    // OPINION_MODEL_CHOICES. Offering it here would offer a button that fails.
-    // The local model carries no such refusal and is offered everywhere.
+  it("offers the signed-in Codex providers on Opinion", () => {
     assert.deepEqual(
       OPINION_MODEL_CHOICES.map((choice) => choice.value),
-      ["auto", "claude-frontier", "local-model"],
+      ["auto", "codex-balanced", "codex-frontier", "claude-frontier", "local-model"],
     );
     assert.ok(OPINION_MODEL_CHOICES.every((choice) => STORY_MODEL_CHOICES.includes(choice)));
   });
@@ -88,11 +85,11 @@ describe("model choice contract", () => {
     assert.equal(modelChoiceLabel("configured"), "Configured gateway");
   });
 
-  it("round-trips Opinion choices and narrows Story-only or invalid input to Automatic", () => {
-    for (const value of ["auto", "claude-frontier", "local-model"] as const) {
+  it("round-trips Opinion choices and narrows invalid input to Automatic", () => {
+    for (const value of ["auto", "claude-frontier", "codex-balanced", "codex-frontier", "local-model"] as const) {
       assert.equal(opinionModelChoice(value), value);
     }
-    for (const invalid of ["local", "zen", "codex-balanced", "codex-frontier", "codex", undefined, null, {}]) {
+    for (const invalid of ["local", "zen", "codex", undefined, null, {}]) {
       assert.equal(opinionModelChoice(invalid), "auto");
     }
   });
@@ -112,7 +109,7 @@ describe("model choice contract", () => {
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
-      "Claude Opus writes the whole editorial. Codex is offered for Story drafts only: its model declines to write an editorial that takes a position.",
+      "Tries Claude Opus, then Codex Terra. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),

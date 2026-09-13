@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.42](https://github.com/scottconverse/TownReporter/commits/main/) — Astra editor desk; deployment is recorded separately.** The release at `6f603ec` was deployed to Halo; the subsequent Utility Bill Analyzer navigation change is deployed at `fe53b6e`. The published 0.6.35 Windows installation ZIP is available from that release; the [latest stable release](https://github.com/scottconverse/TownReporter/releases/latest) remains available separately. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.43](https://github.com/scottconverse/TownReporter/commits/main/) — Astra editor desk; deployment is recorded separately.** The release at `6f603ec` was deployed to Halo; the subsequent Utility Bill Analyzer navigation change is deployed at `fe53b6e`. The published 0.6.35 Windows installation ZIP is available from that release; the [latest stable release](https://github.com/scottconverse/TownReporter/releases/latest) remains available separately. Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 Halo deployment evidence for 0.6.35 is recorded in [the deployment receipt](docs/operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md).
@@ -291,12 +291,12 @@ For **Automatic**, a configured gateway wins; named choices in Story, Scan and D
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
-**Opinion offers Claude and the local model.** The picker offers Automatic,
-Claude Opus, and Local model (through discovery or configured `LLM_BASE_URL`). Claude Code runs
-its own research pass, then loads the editorial voice by file path for the
-writing pass. Codex is not offered for editorials: its model declines to
-write a piece that takes a position on a local policy question, so it stays
-on the Story picker, where it drafts reporting.
+**Opinion offers the native providers and local model.** The picker offers
+Automatic, Claude Opus, Codex Terra, Codex Sol and Local model, plus saved
+custom connections. Automatic tries Claude Opus first and moves to Codex Terra
+once if Claude is unavailable; an explicit choice stays selected. The writer
+reads the configured private voice file, and a provider refusal or invalid
+delivery leaves the request failed without a draft.
 
 ### Other models — one OpenAI-compatible URL
 

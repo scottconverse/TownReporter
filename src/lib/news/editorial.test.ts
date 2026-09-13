@@ -351,6 +351,10 @@ function claudeRuntime(events: string[], reply: EditorialChatResult) {
       events.push("claude");
       return reply;
     },
+    async runCodexPair() {
+      events.push("codex");
+      return reply;
+    },
     // Poison pill: Automatic and an explicit "claude-frontier" pick must
     // never reach for the local pair. See audit finding "Opinion 'Local
     // model' pick silently uses Claude" -- the fix for that bug runs in the
@@ -477,7 +481,7 @@ describe("Opinion runs one Claude pair", () => {
     assert.deepEqual(events, ["voice:locate", "claude", "file"]);
   });
 
-  it("a stored Codex choice from the withdrawn picker lands on Claude instead of failing", async () => {
+  it("an explicit Codex choice runs Codex and never Claude", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     const result = await orchestrateEditorial(
@@ -486,7 +490,8 @@ describe("Opinion runs one Claude pair", () => {
     );
     assert.equal(result.ok, true);
     if (!result.ok) assert.fail(result.error);
-    assert.equal(result.modelChoice, "claude-frontier");
+    assert.equal(result.modelChoice, "codex-frontier");
+    assert.deepEqual(events, ["voice:locate", "codex", "file"]);
   });
 
   it("does not file when the voice file is missing", async () => {
@@ -546,17 +551,27 @@ describe("Opinion runs one Claude pair", () => {
     assert.equal(events.includes("file"), true);
   });
 
-  it("the Opinion path carries no Codex runtime at all", async () => {
-    const src = await import("node:fs").then((fs) =>
-      ["./editorial.server.ts", "./editorial-orchestration.ts"]
-        .map((file) => fs.readFileSync(new URL(file, import.meta.url), "utf8"))
-        .join("\n"),
+  it("Automatic falls back to Codex after a Claude quota failure", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const runtime = claudeRuntime(events, { ok: false, error: "429 Claude session limit" });
+    runtime.runCodexPair = async () => { events.push("codex"); return { ok: true, text: DELIVERED }; };
+    const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
+    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    if (result.ok) assert.equal(result.modelChoice, "codex-balanced");
+    assert.deepEqual(events, ["voice:locate", "claude", "codex", "file"]);
+  });
+
+  it("Automatic does not use another provider to bypass a refusal", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const result = await orchestrateEditorial(
+      ORCHESTRATION_INPUT,
+      claudeRuntime(events, { ok: true, text: "EDITORIAL_REFUSAL: This requested political advocacy is not supported." }),
     );
-    assert.doesNotMatch(
-      src,
-      /codexChat|readVoiceTextForOpenAiCodex|codexModel|ai-codex\.server/,
-      "Codex has no seat on the Opinion desk; if it returns, its refusal problem returns with it",
-    );
+    assert.equal(result.ok, false);
+    assert.deepEqual(events, ["voice:locate", "claude"]);
+    if (!result.ok) assert.match(result.error, /political advocacy/i);
   });
 });
 
