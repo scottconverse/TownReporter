@@ -1,6 +1,12 @@
 # Changelog
 
-Current release: **0.6.41**.
+Current release: **0.6.42**.
+
+## 0.6.42 — 2026-09-12
+
+- Check draft against evidence now reads retained uploaded documents as well as saved web captures. Document-only stories can be checked without public URLs, with private document hashes and exact character references retained for the checked version.
+- Long packets are checked section by section; only verbatim passages verified against the retained text reach the final edit. Incomplete reading or invalid passages preserve the existing draft instead of reporting success.
+- Changes to attached files, their extracted text or the draft while a check runs prevent a stale result from replacing the editor's work. OCR and transcript name spellings remain subject to written-source verification.
 
 ## 0.6.41 — 2026-09-12
 

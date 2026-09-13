@@ -15,6 +15,8 @@ import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import type { DraftRow } from "./types.ts";
 import { checkStoryNames } from "./name-check-work.ts";
 import { nameCheckNotes } from "./name-check.ts";
+import { ensureStoryDocuments } from "./story-documents.server.ts";
+import { documentReviewManifest, prepareDocumentReconcileEvidence, type ReconcileDocument } from "./document-reconcile-evidence.ts";
 
 type ReconcileDeps = {
   chat?: ReportChat;
@@ -44,7 +46,6 @@ function sameCaptureUrl(left: string, right: string): boolean {
 }
 
 export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDeps = {}): Promise<void> {
-  const started = Date.now();
   if (job.kind !== "reconcile") throw new Error("Expected a reconcile job.");
   const sql = await getSql();
   const [member] = await sql<{user_id:string}>`select user_id from newsroom_members where newsroom_id=${job.newsroom_id} and user_id=${job.user_id} and role in ('owner','editor')`;
@@ -56,6 +57,16 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
   const snapshotToken = evidenceReviewToken(draft);
   const snapshotUpdated = String(draft.updated_at);
   const research = object(draft.research_json);
+  await ensureStoryDocuments(sql);
+  // The lead and newsroom are server-authorized above. Never look up uploads
+  // by filename or by model-supplied identifiers, and never use reading notes
+  // as if they were the retained source text.
+  const documents = await sql<ReconcileDocument>`select id,filename,mime,status,full_text,md5(original) as original_hash,source_url from story_documents where newsroom_id=${job.newsroom_id} and lead_id=${draft.lead_id} and mime <> 'application/x-townreporter-source-links' order by id`;
+  const documentSnapshot = JSON.stringify(documentReviewManifest(documents));
+  const priorDocumentReview = research.documentEvidenceReview as {documents?: {id:string}[]} | undefined;
+  if (Array.isArray(priorDocumentReview?.documents) && priorDocumentReview.documents.some(ref => !documents.some(doc => doc.id === ref.id))) {
+    throw new Error("A previously checked uploaded document is no longer attached to this story. The draft was preserved.");
+  }
   const provenance = json(draft.provenance_json);
   const publicUrls = urlsFrom(json(draft.source_urls));
   const publicResearchUrls = urlsFrom(research.captured);
@@ -73,31 +84,37 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
   const fallbackUrls = urls.filter(url => !referencedUrls.some(reference => sameCaptureUrl(reference,url)));
   const fallback = fallbackUrls.length ? await sql<{url:string;title:string;full_text:string;extraction_method:string;id:number;captured_at:string}>`select distinct on(url) id,url,title,full_text,coalesce(to_jsonb(artifact_versions)->>'extraction_method','') as extraction_method,captured_at::text as captured_at from artifact_versions where newsroom_id=${job.newsroom_id} and url=any(${fallbackUrls}) order by url,captured_at desc,id desc` : [];
   const captures = [...exact,...fallback];
-  if (!captures.length) throw new Error("No matching saved capture is available for this draft. The draft was preserved without calling the model.");
+  if (!captures.length && !documents.length) throw new Error("No matching saved capture or uploaded document is available for this draft. The draft was preserved without calling the model.");
   await (deps.stage ?? setJobStage)(job.id, "Checking the saved draft against the evidence");
   const evidence = captures.map(c => `SOURCE ${c.url}\nCAPTURE VERSION ${c.id}\nCAPTURED ${c.captured_at}\n${c.title}\n${c.full_text}`).join("\n\n") || "(No saved captured evidence matched this draft.)";
-  const prompt = `RESEARCH QUESTIONS AND UNKNOWNS ARE NOT EVIDENCE. Reconcile only against the saved captures below. Do not search, fetch, research, or rewrite from outside material.\n\nDraft JSON to edit:\n${JSON.stringify({headline:draft.headline,dek:draft.dek,body:draft.body,topic:draft.topic,source_urls:json(draft.source_urls),form:draft.form,found:json(draft.found_note),unanswered:json(draft.unanswered),research})}\n\nSAVED URL-LABELED EVIDENCE:\n${evidence}`;
   const choice = effectiveStoryModelChoice(job.model_choice);
   const overrides: ProviderOverrides = await readProviderOverrides(job.newsroom_id).catch(() => ({}));
   const budget = providerBudget(choice, overrides);
   const runChat: ReportChat = deps.chat ?? ((system,user,maxTokens,modelChoice,options) => grokChat(system,user,maxTokens,{choice:modelChoice,newsroomId:job.newsroom_id,timeoutMs:options?.timeoutMs,noTools:true,localModel:overrides["local-model"]?.localModel}));
+  const draftToEdit = JSON.stringify({headline:draft.headline,dek:draft.dek,body:draft.body,topic:draft.topic,source_urls:json(draft.source_urls),form:draft.form,found:json(draft.found_note),unanswered:json(draft.unanswered)});
+  const documentEvidence = await prepareDocumentReconcileEvidence(documents, draftToEdit, runChat, choice, text => (deps.stage ?? setJobStage)(job.id, text), budget.callMs);
+  await (deps.stage ?? setJobStage)(job.id, "Reconciling the draft with the saved evidence");
+  const prompt = `RESEARCH QUESTIONS AND UNKNOWNS ARE NOT EVIDENCE. Reconcile only against the saved captures and original document text below. Do not search, fetch, research, or rewrite from outside material. Uploaded documents are valid evidence without public URLs. Cite their filenames and locators in prose; never expose private document IDs, download paths or invented URLs in the story or source_urls. Remove or qualify unsupported claims and retain unresolved OCR/name uncertainty.\n\nDraft JSON to edit:\n${draftToEdit}\n\nSAVED URL-LABELED EVIDENCE:\n${evidence}\n\nRETAINED UPLOADED DOCUMENT EVIDENCE:\n${documentEvidence.text}`;
   const response = await runChat(REPORT_EDIT_SYSTEM, prompt, 1800, choice, {timeoutMs:budget.callMs});
   if (!response.ok) throw new Error(response.error);
   const edited = coerceDraft(response.text, {headline:draft.headline,dek:draft.dek,topic:draft.topic});
   if (!edited.body) throw new Error("Evidence reconciliation returned an unreadable draft. The saved draft was preserved.");
   const parsed = parseJsonBlock<Record<string,unknown>>(response.text) ?? {};
+  const nameCheckStarted = Date.now();
   const names = await checkStoryNames({
     draft: edited, city: "Use the locality identified in the saved draft and sources", domains: [],
     docs: captures.map(capture => ({ url: capture.url, title: capture.title, text: capture.full_text, extraction_method: capture.extraction_method, version_id: capture.id, extras: [] })),
     searchAllowed: false, search: async () => [], open: async () => {},
-    timeLeft: () => budget.wallMs - (Date.now() - started),
+    timeLeft: () => budget.wallMs - (Date.now() - nameCheckStarted),
     stage: text => (deps.stage ?? setJobStage)(job.id, text),
-    chat: (system, user, maxTokens) => runChat(system, user, maxTokens, choice, { timeoutMs: Math.min(budget.callMs, Math.max(6000, budget.wallMs - (Date.now() - started) - 2000)) }),
+    chat: (system, user, maxTokens) => runChat(system, user, maxTokens, choice, { timeoutMs: Math.min(budget.callMs, Math.max(6000, budget.wallMs - (Date.now() - nameCheckStarted) - 2000)) }),
   });
   Object.assign(edited, names.draft);
   await withClaimedLeadDraftLock(job, draft.lead_id, async tx => {
     const [current] = await tx<DraftRow>`select * from drafts where lead_id=${draft.lead_id} and newsroom_id=${job.newsroom_id} order by updated_at desc,id desc limit 1 for update`;
     if (!current || current.id !== draft.id || String(current.updated_at) !== snapshotUpdated || evidenceReviewToken(current) !== snapshotToken) throw new Error("The draft or its evidence changed while reconciliation was running. The saved draft was preserved.");
+    const currentDocuments = await tx<ReconcileDocument>`select id,filename,mime,status,full_text,md5(original) as original_hash,source_url from story_documents where newsroom_id=${job.newsroom_id} and lead_id=${draft.lead_id} and mime <> 'application/x-townreporter-source-links' order by id for share`;
+    if (JSON.stringify(documentReviewManifest(currentDocuments)) !== documentSnapshot) throw new Error("The uploaded documents changed while reconciliation was running. The saved draft was preserved.");
     const mayAddPublicResearch = publicUrls.size > 0 && research.researchScope === "public" && !publicEvidenceWasRemoved(draft);
     const acceptedSourceUrls = Array.isArray(parsed.source_urls)
       ? (edited.source_urls as unknown[]).map(String).filter(url =>
@@ -145,7 +162,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     const form = typeof parsed.form === "string" && (STORY_FORMS as readonly string[]).includes(parsed.form.trim()) ? parsed.form.trim() : draft.form;
     const { writerCheckpoint: _completedWriterCheckpoint, ...currentResearch } = research;
     const [saved] = await tx<{id:number}>`insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json)
-      values(${job.user_id},${job.newsroom_id},${draft.lead_id},${edited.headline},${edited.dek},${edited.body},${draft.topic},${sourceUrls},${integrityNotes},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(unanswered)},${JSON.stringify({...currentResearch,nameCheck:names.check,reportedClaims:{version:1,rows:claims},evidenceReconciledAt:new Date().toISOString()})}) returning id`;
+      values(${job.user_id},${job.newsroom_id},${draft.lead_id},${edited.headline},${edited.dek},${edited.body},${draft.topic},${sourceUrls},${integrityNotes},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(unanswered)},${JSON.stringify({...currentResearch,...(documents.length ? {documentEvidenceReview:documentEvidence.receipt} : {}),nameCheck:names.check,reportedClaims:{version:1,rows:claims},evidenceReconciledAt:new Date().toISOString()})}) returning id`;
     await tx`update desk_jobs set result_json=${JSON.stringify({originalDraftId:draft.id,newDraftId:saved.id,evidenceCheckIncomplete:false})} where id=${job.id} and claim_token=${job.claim_token}`;
   });
 }

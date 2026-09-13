@@ -38,6 +38,8 @@ before(async () => {
   await sql.query("create table if not exists drafts(id serial primary key,user_id text,newsroom_id integer,lead_id integer,headline text,dek text,body text,topic text,source_urls text default '[]',integrity_notes text,updated_at timestamptz default now(),provenance_json text,form text,found_note text,unanswered text,research_json text)");
   await sql.query("create table if not exists artifact_versions(id serial primary key,user_id text,newsroom_id integer,url text,content_hash text,title text default '',full_text text default '',fetch_status integer,fetch_outcome text,captured_at timestamptz default now())");
   await sql.query("create table if not exists newsroom_sections(newsroom_id integer,key text,name text,position integer,visible boolean,replacement_key text,primary key(newsroom_id,key))");
+  const { ensureStoryDocuments } = await vite.ssrLoadModule("/src/lib/news/story-documents.server.ts");
+  await ensureStoryDocuments(sql);
 });
 
 after(async () => vite?.close());
@@ -353,4 +355,90 @@ test("a failed model call retains the original without saving a replacement", as
     /fake provider failure/,
   );
   assert.deepEqual(await draftRows(f), [{id:f.draftId, headline:"Original headline", body:"Original body", integrity_notes:"Prior independent warning"}]);
+});
+
+async function attachUpload(f: Awaited<ReturnType<typeof fixture>>, id = `packet-${f.newsroomId}`, text = "The council approved $25, not $250. FINAL PAGE FACT.", room = f.newsroomId, lead: number | null = f.leadId) {
+  await f.sql.query("insert into story_documents(id,newsroom_id,user_id,lead_id,filename,mime,original,full_text,evidence,status) values($1,$2,$3,$4,'packet.pdf','application/pdf',$5,$6,'WRONG CONDENSED NOTES: $250','read')", [id,room,f.userId,lead,Buffer.from(text),text]);
+  return id;
+}
+
+test("document-only drafts use retained text and store private identity/coverage receipts without publishing URLs", async () => {
+  const f = await fixture();
+  await f.sql.query("update drafts set source_urls='[]',provenance_json='[]',research_json=$1 where id=$2", [JSON.stringify({researchScope:'supplied'}),f.draftId]);
+  const id = await attachUpload(f);
+  await attachUpload(f,`foreign-${f.newsroomId}`,"FOREIGN ROOM SECRET",f.newsroomId+100000);
+  await attachUpload(f,`unattached-${f.newsroomId}`,"UNATTACHED SECRET",f.newsroomId,null);
+  let prompt = '';
+  await performDraftReconcileWork(f.job,{stage:async()=>{},chat:async(_system,user)=>{prompt=user;return {ok:true,text:JSON.stringify({...JSON.parse(reply),source_urls:['https://invented.example/packet.pdf']})};}});
+  assert.match(prompt,/The council approved \$25, not \$250/);
+  assert.match(prompt,/FINAL PAGE FACT/);
+  assert.match(prompt,/packet.pdf/);
+  assert.doesNotMatch(prompt,/WRONG CONDENSED NOTES|FOREIGN ROOM SECRET|UNATTACHED SECRET/);
+  const rows = await f.sql.query<{body:string;source_urls:string;research_json:string}>("select body,source_urls,research_json from drafts where lead_id=$1 order by id",[f.leadId]);
+  assert.equal(rows.length,2);
+  assert.equal(rows[0].body,'Original body');
+  assert.deepEqual(JSON.parse(rows[1].source_urls),[]);
+  const review = JSON.parse(rows[1].research_json).documentEvidenceReview;
+  assert.equal(review.mode,'full-text');
+  assert.deepEqual(review.documents.map((doc:{id:string})=>doc.id),[id]);
+  assert.equal(review.documents[0].textHash.length,64);
+  assert.deepEqual(review.locators,[{documentId:id,start:0,end:review.documents[0].characters}]);
+});
+
+test("mixed evidence includes both an exact web version and the uploaded original",async()=>{
+  const f=await fixture(); const version=await attachExactCapture(f); await attachUpload(f);
+  await performDraftReconcileWork(f.job,{stage:async()=>{},chat:async(_system,prompt)=>{
+    assert.match(prompt,new RegExp(`CAPTURE VERSION ${version}`));
+    assert.match(prompt,/FINAL PAGE FACT/);
+    return {ok:true,text:reply};
+  }});
+  assert.equal((await draftRows(f)).length,2);
+});
+
+test("an unread attachment blocks a partial evidence check before any model call",async()=>{
+  const f=await fixture(); await attachExactCapture(f); const id=await attachUpload(f);
+  await f.sql.query("update story_documents set status='failed',full_text=null where id=$1",[id]);
+  let calls=0;
+  await assert.rejects(performDraftReconcileWork(f.job,{stage:async()=>{},chat:async()=>{calls++;return {ok:true,text:reply};}}),/has not finished reading/);
+  assert.equal(calls,0); assert.equal((await draftRows(f)).length,1);
+});
+
+for (const mutation of ['text','original','remove','add'] as const) test(`uploaded evidence ${mutation} during the check preserves the original draft`,async()=>{
+  const f=await fixture(); const id=await attachUpload(f);
+  await assert.rejects(performDraftReconcileWork(f.job,{stage:async()=>{},chat:async()=>{
+    if(mutation==='text') await f.sql.query("update story_documents set full_text='CHANGED' where id=$1",[id]);
+    if(mutation==='original') await f.sql.query("update story_documents set original=$1 where id=$2",[Buffer.from('CHANGED'),id]);
+    if(mutation==='remove') await f.sql.query("delete from story_documents where id=$1",[id]);
+    if(mutation==='add') await attachUpload(f,`added-${id}`);
+    return {ok:true,text:reply};
+  }}),/uploaded documents changed/i);
+  assert.equal((await draftRows(f)).length,1);
+});
+
+test("a missing previously reviewed upload cannot silently fall back to web captures",async()=>{
+  const f=await fixture();await attachExactCapture(f);
+  await f.sql.query("update drafts set research_json=$1 where id=$2",[JSON.stringify({documentEvidenceReview:{documents:[{id:'missing'}]}}),f.draftId]);
+  let calls=0;
+  await assert.rejects(performDraftReconcileWork(f.job,{stage:async()=>{},chat:async()=>{calls++;return {ok:true,text:reply};}}),/previously checked uploaded document/);
+  assert.equal(calls,0);
+});
+
+test("large packets read every section, including late counterevidence, and pass only exact extracts to the editor",async()=>{
+  const {prepareDocumentReconcileEvidence,DOCUMENT_REVIEW_SYSTEM}=await vite.ssrLoadModule('/src/lib/news/document-reconcile-evidence.ts');
+  const text='Unrelated background. '.repeat(5000)+'FINAL CORRECTION: the vote failed, 2 to 3.';
+  let calls=0;
+  const result=await prepareDocumentReconcileEvidence([{id:'large',filename:'long.md',mime:'text/markdown',status:'read',full_text:text,original_hash:'hash',source_url:null}], 'The motion passed.',async(system:string,prompt:string)=>{
+    assert.equal(system,DOCUMENT_REVIEW_SYSTEM);calls++;
+    return {ok:true,text:JSON.stringify({complete:true,quotes:prompt.includes('FINAL CORRECTION')?['FINAL CORRECTION: the vote failed, 2 to 3.']:[]})};
+  },'local-model',async()=>{},1000);
+  assert.equal(calls,Math.ceil(text.length/24000));
+  assert.equal(result.receipt.sectionsRead,calls);
+  assert.match(result.text,/FINAL CORRECTION: the vote failed, 2 to 3/);
+  const last=result.receipt.locators.at(-1);
+  assert.equal(text.slice(last.start,last.end),'FINAL CORRECTION: the vote failed, 2 to 3.');
+});
+
+for(const invalid of [{complete:false,quotes:[]},{complete:true,quotes:['FABRICATED PASSAGE']}]) test(`large-document selection rejects ${JSON.stringify(invalid)}`,async()=>{
+  const {prepareDocumentReconcileEvidence}=await vite.ssrLoadModule('/src/lib/news/document-reconcile-evidence.ts');
+  await assert.rejects(prepareDocumentReconcileEvidence([{id:'large',filename:'long.md',mime:'text/markdown',status:'read',full_text:'x'.repeat(90000),original_hash:'hash',source_url:null}], 'Draft',async()=>({ok:true,text:JSON.stringify(invalid)}),'local-model',async()=>{},1000),/draft was preserved/i);
 });
