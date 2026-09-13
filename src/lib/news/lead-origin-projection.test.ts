@@ -61,7 +61,8 @@ test("real queue and story projections carry persisted scanner provenance", asyn
       resurfaced_count integer default 0, last_resurfaced_at timestamptz,
       last_resurfaced_scan_run_id integer, possible_duplicate_of integer
     );
-    create table articles (id integer primary key, lead_id integer, status text, slug text);
+    create table articles (id integer primary key, lead_id integer, status text, slug text, headline text);
+    create table drafts (id integer primary key, lead_id integer, newsroom_id integer, headline text, updated_at timestamptz);
     insert into leads(id,newsroom_id,scan_run_id,headline,why,topic,status,source_urls,newsworthiness,created_at)
     values(1,1,20,'Scanner lead','Why','council','new','[]',0,now());
   `);
