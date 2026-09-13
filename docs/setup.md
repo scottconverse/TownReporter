@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.43](https://github.com/scottconverse/TownReporter/commits/main/) — editor interface update; deployment is recorded separately.** The [stable release](https://github.com/scottconverse/TownReporter/releases/latest) is available separately. Halo's 0.6.35 deployment is recorded in the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md); later development work is not automatically deployed. Editors who only write and publish should start at [editor.md](editor.md). The short clone-and-run is in the [README](../README.md).
+**Current release: [0.6.44](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.44).** See the [release guide](releases/0.6.44.md) for changes, installation and deployment evidence. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 
@@ -278,7 +278,7 @@ signed-in Windows configuration: user and repository rules, search, local
 shell/file access, browser/computer tools, apps, plugins, hooks, skills and
 multi-agent capabilities remain available. TownReporter launches Codex with
 `danger-full-access`, not a read-only sandbox, so it can reach every `C:\` path
-the signed-in account can reach. The newsroom prompt still travels over stdin,
+the signed-in account can reach. The assignment still travels over stdin; Opinion loads the full voice separately through the native instruction-file setting,
 and its task remains the scope of the requested run.
 
 Opinion displays Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
@@ -289,7 +289,7 @@ creates no draft. The completed request and job store the provider that
 finished.
 
 **Scanned PDFs** (a council packet with no text layer) can be transcribed by whichever
-model you picked. **Unreleased DEV work** first renders each actual PDF page
+model you picked. TownReporter first renders each actual PDF page
 through the local PDF renderer, including scan encodings that cannot be found
 by lifting a JPEG/PNG stream, then sends that page image to the chosen vision
 provider (`src/lib/news/ocr.ts`). Newly rendered records carry numeric PDF
@@ -304,7 +304,7 @@ so they need re-ingest or operator review before page citation. Claude Opus
 a reachable provider is not a guarantee that a particular scan can be read. A
 local model can only do it if it is a *vision* model -- pick one marked
 **`· vision`** in the picker (or in the Server page's local-model table).
-The DEV built-runtime renderer is proven with mock transcription. A single
+A historical built-runtime renderer check was performed with mock transcription. A single
 source-path Codex/Terra run read 11 of 44 pages from a scanned council packet;
 pages 1 and 3 were visually checked, page 10 failed, and pages 13–44 were
 not attempted under the existing cap. That ingestion run did not prove
@@ -312,8 +312,7 @@ full-packet or packet-quality acceptance. See
 [local-models.md](local-models.md#scanned-pdfs-and-why-they-need-a-vision-model)
 for the full picture.
 
-This first-12-pages limit applies to ingestion OCR. A separate development
-candidate, **Read selected PDF pages**, lets an editor open a retained PDF in
+This first-12-pages limit applies to captured-source OCR, not the shared large-document uploader. The **Read selected PDF pages** action lets an editor open a retained PDF in
 Dark Desk, choose an explicit model, and request any 1-based inclusive range
 of up to 12 pages, including later pages such as page 13. The result is
 page-numbered additional evidence alongside the unchanged original and does
@@ -322,7 +321,7 @@ A bounded built-UI proof read real page 13 of a 44-page PDF and preserved the
 16,254,338-byte original and its hash. It matched the main table rows and key
 dates but omitted color-only RAG status and had a minor verb error, so full
 packet and table-perfect quality remain unproven; compare every result with the
-original before relying on it. This development candidate is not deployed.
+original before relying on it.
 
 ### The Opinion voice
 
@@ -337,10 +336,10 @@ Rules the app enforces, not conventions:
 - The path must be absolute. A relative path is refused.
 - A path **inside this repository** is refused. The voice is meant to stay out
   of version control.
-- On Claude, only the path reaches the CLI; Claude Code reads the file.
+- Claude uses its native system-prompt-file option; Codex uses `model_instructions_file`. Both read the complete validated file. The assignment and retained evidence are separate input, and the writer keeps its research tools.
 - For explicit Local model, TownReporter reads the validated file and sends
   its text as a system message to the selected model server. It does not enter
-  command-line arguments. Codex is not an Opinion choice.
+  command-line arguments. Saved custom connections similarly receive the voice through their selected API endpoint.
 - A path long enough to look like an inlined prompt is refused outright.
 
 Without the variable, the Opinion desk says so and spends nothing. Everything
@@ -361,8 +360,7 @@ voice researches before it writes. Three measured runs:
 
 `EDITORIAL_TIMEOUT_MS` sets a ceiling **per research or writing pass**, not per
 editorial, and defaults to 45 minutes. A complete provider pair can therefore
-take about 90 minutes plus orchestration overhead. Automatic currently uses
-only the Claude pair; it does not fall back to Local model. Explicit Local
+take about 90 minutes plus orchestration overhead. Automatic can try the Codex Sol pair after Claude fails, increasing the total duration; it does not fall back to Local model. Explicit Local
 model makes one writing call from supplied material, with no separate research
 pass. The
 historical timings above are not a current maximum. The desk enqueues a job and
@@ -522,7 +520,7 @@ Two things stop working there, both by design:
 Also note there is normally no Codex or Claude Code CLI on a serverless host —
 set `ANTHROPIC_API_KEY` or the `LLM_*` trio for Scan, Dark Desk, and Story
 instead. Opinion Automatic requires a signed-in Claude Code CLI or a ready
-Codex Terra fallback and the configured voice file. Explicit Claude, Codex
+Codex Sol fallback and the configured voice file. Explicit Claude, Codex
 Terra, Codex Sol, Local model or custom choices stay selected. Explicit Local
 model has no separate research pass. These provider options do not remove
 serverless job-lifetime limits.
@@ -629,3 +627,7 @@ TownReporter/
 - **Second Google account on a self-host box** → cannot create an account once the desk is claimed. See [A second editor](#a-second-editor).
 - **`VITE_AUTH_ENABLED=false` on the public internet** → the desk is open. Don’t.
 - **Captions in a published story as if they were minutes** → that’s on the editor. The software will not save you. See [editor.md](editor.md#meetings-and-tapes).
+
+## Current Opinion document and review workflow
+
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.

@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.43** (candidate; not yet published).
+Repository documentation version: **0.6.44**. See the [release guide](docs/releases/0.6.44.md).
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -11,11 +11,7 @@ remote development machine as production. The paper is hosted at
 **https://townreporter.org** on the Halo box in Longmont, through a Cloudflare
 Tunnel. “This machine” below refers to Halo.
 
-The latest preserved operator receipt reports **v0.6.23** promoted on
-2026-09-06, with served-version checks and 30 published stories preserved.
-See [the dated receipt](HANDOFF-SESSION-2026-09-04.md). This remote takeover
-has not independently checked the running deployment. A newer repository
-version, GitHub tag or release does not establish production version.
+Production was independently checked on 2026-09-13 at source `c926fc48e8e11ebce437a47bc0fd3c990671ecb8` before packaging 0.6.44. The local and public app answered, the served version matched the build, and published articles were preserved. The [current release record](docs/releases/0.6.44.md) links the release and its dated deployment evidence. A repository version, GitHub tag or release does not establish production version. Earlier machine inventories and receipts below describe their observation dates.
 
 Current development boundaries and queue: [handoff](HANDOFF-NEXT-AGENT.md),
 [TODO](TODO.md). Staging and promotion below require a Halo-local operator.
@@ -202,13 +198,13 @@ the run.
 | Scan and Dark Desk  | per-run picker; Automatic uses configured gateway or readiness ladder                                                      | repair the configured endpoint/key or sign back into Claude Code                                              |
 | Story — Automatic   | configured `LLM_*` exclusively when present; otherwise Claude Opus → Codex Terra readiness ladder            | repair the provider named on the failed job; a run stays pinned to one provider                               |
 | Story — explicit    | Codex Terra, Codex Sol, Claude Opus, or Local model; no fallback                                             | open and sign into the named CLI, or set `LLM_BASE_URL` for Local model                                        |
-| Opinion             | Automatic: Claude Opus → Codex Terra once when needed; explicit Claude Opus, Codex Terra, Codex Sol, Local model or custom choice stays selected | repair or sign into the selected provider; the completed row records the provider that delivered              |
+| Opinion             | Automatic: Claude Opus → Codex Terra once when needed; explicit Claude Opus, Codex Sol, Codex Sol, Local model or custom choice stays selected | repair or sign into the selected provider; the completed row records the provider that delivered              |
 
 For ordinary Story calls, Codex reuses the signed-in user's native configuration and full available
 Windows access. TownReporter does not disable search, shell/files,
 browser/computer tools, apps, plugins, hooks, skills, user rules, repository
 instructions, or multi-agent capability, and it launches with
-`danger-full-access`. Prompts travel over stdin and timeout cleanup targets only
+`danger-full-access`. Assignments travel over stdin; Opinion loads the complete voice through the native instruction-file setting. Timeout cleanup targets only
 the spawned PID tree. If OAuth expires, open Codex and sign in again; the app
 does not read or store the token.
 
@@ -343,3 +339,7 @@ NITRO_PRESET=vercel npm run build
 Note that Vercel disables the Chromium page reader and chops up the background
 jobs. That is why self-hosting is the default.
 
+
+## Current Opinion document and review workflow
+
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.

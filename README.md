@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.43](https://github.com/scottconverse/TownReporter/commits/main/) — Astra editor desk; deployment is recorded separately.** The release at `6f603ec` was deployed to Halo; the subsequent Utility Bill Analyzer navigation change is deployed at `fe53b6e`. The published 0.6.35 Windows installation ZIP is available from that release; the [latest stable release](https://github.com/scottconverse/TownReporter/releases/latest) remains available separately. Changelog: [CHANGELOG.md](CHANGELOG.md).
+**Current release: [0.6.44](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.44) — Astra editor desk, document reporting and native Opinion integration.** [Release guide](docs/releases/0.6.44.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Halo deployment evidence for 0.6.35 is recorded in [the deployment receipt](docs/operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md).
+Release source, installation checks and deployment evidence are recorded separately in the [release guide](docs/releases/0.6.44.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -13,7 +13,7 @@ MIT licensed. Clone it. Point it at your city.
 
 ---
 
-> **Read this first.** Drafts are AI-assisted. Models invent facts, misattribute quotes, and mangle names — especially from auto-captions. TownReporter does **not** fact-check for you. Captions are not minutes. Dark Desk never prints. You are solely responsible for everything that appears on the paper. This is not a substitute for professional journalism, not legal advice, and not the city.
+> **Read this first.** Drafts are AI-assisted. Models invent facts, misattribute quotes, and mangle names — especially from auto-captions. TownReporter checks names and evidence, but those checks do **not** replace editorial verification. Captions are not minutes. Dark Desk never prints. You are solely responsible for everything that appears on the paper. This is not a substitute for professional journalism, not legal advice, and not the city.
 
 ---
 
@@ -35,6 +35,7 @@ It is not the Longmont Times-Call, not the city, and not a replacement for eithe
 | Audience                                                   | Document                                                                                        |
 | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | **Everyone — the full manual**, with architecture drawings | [docs/manual.md](docs/manual.md)                                                                |
+| Editors — current desk workflow                          | [docs/editor-desk.md](docs/editor-desk.md) |
 | Editors, with screenshots and no code                      | [docs/editor.md](docs/editor.md)                                                                |
 | Operators (clone, env, Postgres, models, city swap)        | [docs/setup.md](docs/setup.md)                                                                  |
 | Add and use a named AI API connection                       | [docs/custom-ai-connections.md](docs/custom-ai-connections.md)                                  |
@@ -49,7 +50,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-For beta testing, download the Windows installation ZIP from the published [0.6.35 beta release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35). The [latest stable release](https://github.com/scottconverse/TownReporter/releases/latest) remains available separately. Extract the chosen ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
+Download the Windows installation ZIP from [TownReporter 0.6.44](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.44) or the [latest release](https://github.com/scottconverse/TownReporter/releases/latest). Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first editorial workflow within an hour with working internet and an available AI account or endpoint; release evidence records the measured result and its limits. Public hosting is separate from this local installation.
 
@@ -93,6 +94,8 @@ Same six moves the paper itself describes at `/how-we-report`:
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
 ### Recent releases
+
+- **0.6.44** — Packages the Astra desk, shared large-document and URL intake, private-document evidence checks, supported name corrections, saved Opinion material, Sol default and native voice-file integration for both subscription writers. See [the release guide](docs/releases/0.6.44.md).
 
 - **0.6.35 beta** — Editor delivery includes the story evidence-check workbench, Stats reports, named custom AI connections, draft recovery and reconciliation, PDF/page-aware evidence, ownership-preserving research and queue improvements, and retained routine-notice editor controls. Published and deployed to Halo at `6f603ec`; the PDF/page-aware OCR and Dark Desk work retain the bounded acceptance limits described below.
 - **0.6.34 beta** — Dark Desk selects relevant captured records across the full inventory before shared selection builds separately bounded inputs for stage-one signal synthesis and the final brief. The release receipt records runtime proof and its limits.
@@ -159,7 +162,7 @@ Current development status and remaining features: [TODO.md](TODO.md). Remote ta
 - **The newsroom watches itself.** The paper was offline for hours and nothing said so. A watchdog now checks the app, the tunnel and the public URL every five minutes and restarts what is down. A [Server page](docs/manual.md#the-server-page) shows all of it.
 - **Fonts are self-hosted, and the reader's page stays self-contained.** A third-party script was removed from every page, and a cold load of the paper makes zero outside requests.
 - **Stories are shareable.** Per-story titles, descriptions, canonical URLs and social cards — they all used to share one blurb. Plus a sitemap.
-- **An Opinion desk.** A subject, a sentence or a URL becomes an unsigned editorial: OPINION in the headline, no byline, receipts in an appendix at the end. The writer fetches its own records first, so it takes ten to forty minutes.
+- **An Opinion desk.** A subject, pasted source text, uploaded documents or a URL becomes an unsigned editorial: OPINION in the headline, no byline, receipts in an appendix at the end. The writer fetches its own records first, so it takes ten to forty minutes.
 - **Dark Desk has two dials.** _Dig_ — how far it chases. _Nerve_ — how speculative it may be. The panel says in plain words what the current setting will do.
 - **Dark Desk's planner had never run.** Its budget was 45 seconds against a call that needs 150, and every failure fell back to keyword matching in silence. The database held zero entities, claims or hypotheses.
 - **Confidence is capped by the label in code**, not requested in a prompt, and a FACT with no citation is downgraded.
@@ -191,10 +194,9 @@ Full detail, including the newsletter and rate-limiter fixes, is in [CHANGELOG.m
 - **Jobs wake up.** Scan / Draft / Keep digging persist, then finish in this process or on the monitors ping (`CRON_SECRET`).
 - **Historical OCR behavior (0.4.x).** Image-only PDFs were unread. Since 0.6.23, supported embedded JPEG/PNG scan images can be transcribed by a vision-capable provider; unsupported formats and partial reads remain explicit.
 
-> **Current unreleased DEV OCR work.** New scanned-PDF ingestion renders ordered PDF pages before OCR (up to 12 pages, 2 MiB rendered-image cap, and a cooperative 10-minute render-and-OCR budget). New records can retain numeric page citations; legacy extracted-image records remain explicitly unordered. Built-runtime rendering is proven with mock transcription, and one source-path Codex/Terra ingestion run read 11 of 44 pages from a scanned council packet (pages 1 and 3 visually checked). Page 10 failed and pages 13–44 were capped; that ingestion run did not prove full-packet or packet-quality acceptance.
+> **Captured-PDF OCR.** New scanned-PDF ingestion renders ordered PDF pages before OCR (up to 12 pages, 2 MiB rendered-image cap, and a cooperative 10-minute render-and-OCR budget). New records can retain numeric page citations; legacy extracted-image records remain explicitly unordered. Built-runtime rendering is proven with mock transcription, and one source-path Codex/Terra ingestion run read 11 of 44 pages from a scanned council packet (pages 1 and 3 visually checked). Page 10 failed and pages 13–44 were capped; that ingestion run did not prove full-packet or packet-quality acceptance.
 
-That ingestion cap is separate from the retained-PDF page reader: in the
-development candidate, an editor can open a captured PDF in Dark Desk, choose
+That ingestion cap is separate from the retained-PDF page reader: an editor can open a captured PDF in Dark Desk, choose
 an explicit model and request any 1-based inclusive range of up to 12 pages,
 including pages beyond page 12. The reader adds page-numbered evidence beside
 the unchanged original; it does not refetch a missing PDF. See
@@ -468,3 +470,7 @@ Deterministic, offline and free by default — no provider is contacted and noth
 [MIT](LICENSE). Copyright (c) 2026 Scott Converse.
 
 Created by **Scott Converse**. Companion civic tools: [civic-transparency-toolkit](https://github.com/scottconverse/civic-transparency-toolkit), [civic-newsroom](https://github.com/scottconverse/civic-newsroom).
+
+## Current Opinion document and review workflow
+
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.

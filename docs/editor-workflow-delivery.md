@@ -1,10 +1,6 @@
 # Queue and draft workflow
 
-**Development candidate — NOT YET DEPLOYED.** These controls are present in
-the development tree and remain subject to deployment and operator acceptance.
-They do not replace the existing model pickers, queue actions, evidence review,
-or publication gate. This guide describes workflow behavior, not a claim that
-AI reporting quality has passed.
+Included in [TownReporter 0.6.44](releases/0.6.44.md). This guide describes the controls and their limits; completed processing does not establish reporting accuracy.
 
 ## Repeated and possible-duplicate leads
 
@@ -48,8 +44,7 @@ On the story workbench:
 
 1. Select **Save edits** before checking. Unsaved text cannot be checked.
 2. Choose the model in the existing picker and select **Check draft against
-   evidence**. The queued check uses the current saved draft and its captured
-   evidence; it does not restart discovery or the initial writing pass.
+   evidence**. The queued check uses the current saved draft and its saved web captures and retained uploaded documents; it does not restart discovery or the initial writing pass.
 3. While queued or running, wait for the status shown by the workbench. A
    failed check leaves the saved draft available and reports the failure.
 4. When the check finishes, review the result. A complete check can offer
@@ -57,7 +52,7 @@ On the story workbench:
    control instead says **Load checked version for review**; loading it is an
    explicit editor choice.
 
-If no matching saved capture is available, the workbench says the check was
+If no matching saved web or document evidence is available, the workbench says the check was
 incomplete and keeps the draft marked for review. Reconciliation can edit or
 remove unsupported assertions only from the supplied saved evidence; it does
 not silently invent evidence. Publication remains separate: the editor must

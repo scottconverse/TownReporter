@@ -1,6 +1,14 @@
 # Changelog
 
-Current release: **0.6.43**.
+Current release: **0.6.44**.
+
+## 0.6.44 — 2026-09-13
+
+- Codex Opinion now loads the complete configured voice through its native instruction-file setting, matching Claude's file-based integration. The writing pass retains native web and local tools, and receives the assignment separately.
+- Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Saved material can be restored after failure, and the final provider failure takes precedence over an earlier quota error.
+- Claims-and-sources omissions retain a usable draft with an explicit review warning and publication block. Name verification uses opened written evidence and applies supported corrections; unresolved names remain visible.
+- Packages all editor desk, document intake, OCR, URL, evidence-check and navigation changes from 0.6.36–0.6.43 into a Windows release.
+- Reconciles download links, current manuals, operator guidance and the documentation website. Dated acceptance and deployment records remain historical evidence.
 
 ## 0.6.43 — 2026-09-12
 

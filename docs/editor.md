@@ -2,11 +2,9 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Current release: [0.6.43](https://github.com/scottconverse/TownReporter/commits/main/) — editor interface update; deployment is recorded separately.** The [stable release](https://github.com/scottconverse/TownReporter/releases/latest) is available separately. Halo's 0.6.35 deployment is recorded in the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md); later development work is not automatically deployed. How to run the desk. You do not need to clone the repo to read this; you do need a running copy and an editor account. Operators who set the box up should start at [setup.md](setup.md).
+**Current release: [0.6.44](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.44).** See the [release guide](releases/0.6.44.md) for changes, installation and deployment evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
-The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images show development examples.
-Other images are historical Longmont screens from 29 August; their old
-**Leave as editor** header link is now **Give up the desk** on the Server page.
+**Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
 
 Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). The whole system, including how it is built, is [manual.md](manual.md). This page is the newsroom, in the order you use it.
 
@@ -24,11 +22,11 @@ The story editor opens when the job is created. A banner at its top shows progre
 
 ## Current capabilities and remaining work
 
-The Command Center uses Fable Direction A: composer and queue in the main
-column; Dark Desk, Follow-ups and wire in the rail. Follow-ups record who was
+The Astra desk uses persistent navigation, recent drafts and shared document
+intake. The story workspace places the writing surface beside Checks, Sources
+and Reporting tabs and adapts to narrow screens. Follow-ups record who was
 asked, what is due and when; replies can be added to story reporting notes.
-The story workbench stacks below 1024px. Historical screenshots elsewhere in
-this guide illustrate workflows, not the current layout.
+Historical screenshots illustrate workflows, not the current layout.
 
 Dark Desk now separates speculative Black Desk signals (confidence ≤0.5) from
 structured Dark Signal verification. See [the doctrine and its limits](dark-desk.md).
@@ -36,7 +34,7 @@ The verified label is a completed software protocol, not a substitute for
 checking sources. The five-topic live acceptance exercise remains outstanding.
 
 Local models can be discovered on LM Studio, Ollama or llama.cpp and selected
-individually. **Unreleased development change:** scanned PDF OCR renders the
+individually. **Captured-PDF OCR:** scanned PDF OCR renders the
 actual pages in document order, so new page-aware captures can cite the real
 PDF page number. It attempts the first 12 pages, with a 2 MiB rendered-image
 limit per page and a cooperative 10-minute processing budget. A running page
@@ -44,7 +42,7 @@ render cannot be forcibly interrupted by that budget. Omitted or failed pages
 are explicitly marked incomplete; a partial packet is not a complete read.
 Older extracted-image OCR records remain labeled as unordered images and need
 re-ingestion before their image numbers can be treated as PDF page numbers.
-This is tested in development, not yet deployed or proved across real packets.
+This bounded reader can leave pages unread; it does not establish full-packet accuracy.
 The separate retained-PDF page reader has one bounded built-UI proof: an
 explicit request read real page 13 of a 44-page PDF and saved a page-numbered
 transcript without changing the 16,254,338-byte original or its hash. Direct
@@ -128,9 +126,9 @@ Scan does not publish. Draft does not publish. Dark Desk does not publish. **Pub
 
 **Write a story**, on the desk landing page, is the fast path into steps 3–5 above when you already know what the story is: paste URLs or source text into **Links or source text**, add the angle in **What story do you want?**, pick a model, and click **Write draft**. The desk parses whatever you gave it — every link becomes a source, the first line or sentence becomes the headline, and the whole thing you pasted is kept as the lead's Reporting notes, so the draft reads it as evidence the same way it would if you had typed it into the workbench by hand. You land straight on the story page and watch it draft.
 
-**Development candidate (not yet deployed):** an optional Section selector uses your newspaper's configured reporting sections. Choose the section before writing to keep the story there through the draft pass. Leaving it blank keeps the existing text-based guess, which can fall back to Council; you can still refile afterward. An explicit opening instruction such as “Write a short local item about…” is retained as the editorial assignment, separately from source evidence. This helps preserve the requested subject and brief form, but does not verify facts. If one editing pass cannot shorten an overlong brief, the draft remains available with a warning rather than being discarded.
+**Assignment and section selection:** an optional Section selector uses your newspaper's configured reporting sections. Choose the section before writing to keep the story there through the draft pass. Leaving it blank keeps the existing text-based guess, which can fall back to Council; you can still refile afterward. An explicit opening instruction such as “Write a short local item about…” is retained as the editorial assignment, separately from source evidence. This helps preserve the requested subject and brief form, but does not verify facts. If one editing pass cannot shorten an overlong brief, the draft remains available with a warning rather than being discarded.
 
-The candidate also uses the existing editing pass to compare ordinary drafts with URL-labeled evidence. If that pass fails or runs out of time, the draft is retained with a review warning. This is not an independent fact-check: review dates, practical instructions and exact citations before publishing. Explicitly cited dashboards/watched source pages are retained; an explicitly empty citation list in a new report-backed draft is not filled from discovery URLs during publication. These changes do not retroactively repair older saved drafts.
+The story writer also uses the existing editing pass to compare ordinary drafts with URL-labeled evidence. If that pass fails or runs out of time, the draft is retained with a review warning. This is not an independent fact-check: review dates, practical instructions and exact citations before publishing. Explicitly cited dashboards/watched source pages are retained; an explicitly empty citation list in a new report-backed draft is not filled from discovery URLs during publication. These changes do not retroactively repair older saved drafts.
 
 It fills the same fields **File a lead yourself** (Queue) asks for by hand, so use whichever is faster: this box when you have a link or notes to paste, the Queue form when you are typing a lead from nothing. Either way, nothing publishes until you click **Publish** on the workbench.
 
@@ -346,7 +344,7 @@ Queued, running and failed states remain visible. A successful job writes a new 
 
 Typing while the check or its final reload is running does not silently replace the editor's local text. The checked version is loaded automatically only when the fields still match the snapshot taken at the click. Otherwise the workbench preserves the unsaved buffer and offers an explicit **Reload checked draft** action, which intentionally replaces those local edits.
 
-This describes source work for the next development release. It has not yet been deployed or accepted through R20.
+These controls are included in this release. A saved draft or completed check still needs editorial review.
 
 Reporter-notebook leftovers (`What is solid`, `Next checks are…`) are stripped from the body so they cannot leak onto the paper. If you need that thinking, put it in notes.
 
@@ -554,23 +552,21 @@ These controls are independent of dig, nerve, map and county. Presets retain you
 
 Where the paper says what it thinks.
 
-Type a subject, a sentence, or paste a URL, and press **Write an editorial**. A
-pasted link gets opened and read before anything is written.
+Use **Add documents** or drop files into **Start with your documents**, paste source text, or supply URLs. Keep the writing instruction separate from the evidence. Then press **Write an editorial**. See the [current desk guide](editor-desk.md) for limits, progress, recovery and where the finished draft appears.
 
 Choose **Automatic**, **Claude Opus**, **Codex Terra**, **Codex Sol** or
 **Local model**; saved custom connections are offered too. Codex Sol is selected by default. Automatic tries
 Claude Opus, then Codex Sol once if Claude is unavailable. An explicit choice
-stays selected. Claude reads the private voice by file path; Codex uses a
-separately authorized stdin handoff.
+stays selected. Claude and Codex both read the complete configured voice through their native instruction-file options.
 Readiness lists every missing prerequisite — voice file, installation, or
 login — before the button is enabled, and the server checks again when you
 click. If OAuth expires, open the named provider on this machine and sign in;
 nothing is queued or spent until the next readiness check succeeds.
 
-For Story runs, the Codex path uses the same native configuration and full machine capabilities
+The Codex path uses the same native configuration and full machine capabilities
 as the signed-in Windows user, including search and every accessible `C:\`
 path; TownReporter does not replace them with a read-only or tool-disabled
-mode. Claude keeps its separate research-tools/voice-writing boundary.
+mode. Opinion gives the writer its full voice and research tools together; both subscription writers can open sources while writing.
 
 What comes back:
 
@@ -619,8 +615,8 @@ or explicitly remove it. **Disable** keeps the record but removes it from
 pickers and actions; **Enable** restores it. **Delete** is permanent. Selecting
 the saved name in a Scan, Story, Opinion or Dark Desk picker pins that endpoint
 to the queued run, with no fallback to another provider. The Opinion voice is
-private to the explicitly selected endpoint. This is a development-candidate
-workflow and is not yet deployed; see [the detailed connection guide](custom-ai-connections.md).
+private to the explicitly selected endpoint. This is a supported connection
+workflow; see [the detailed connection guide](custom-ai-connections.md).
 
 An editorial is a **draft**. Read it, edit it in the story workbench, and
 publish it like any other piece — or don't. It will happily conclude that your
@@ -932,3 +928,7 @@ The sidebar keeps Desk, Sources, Scan, Queue, Published, Opinion, Server and Sta
 ### Recheck a draft against uploaded documents
 
 In the story workspace, use **Check draft against evidence**. The check reads the retained extracted text of every attached document, alongside any saved web captures. Private files are cited by filename and page or character location; they do not need a public URL. Long packets are read in sections, and exact supporting or conflicting passages are checked against the retained text before the editing pass. A successful check saves a new draft version and loads it in the editor. Incomplete reading, excessive relevant evidence for a single edit, or files changed during the check preserve the previous draft and show an explanation. The check does not independently authenticate a document or verify OCR/transcript name spellings.
+
+## Current Opinion document and review workflow
+
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.

@@ -1,4 +1,4 @@
-> **Historical UI brief, with continuing reading-list requirements.** Current doctrine and verification behavior are in [dark-desk.md](dark-desk.md); current work is in [../TODO.md](../TODO.md). The 0.5.1 implementation descriptions and “engine off-limits” scope below applied to that earlier design pass. They do not override the 2026-09-06 authorized engine review or the later Fable Direction A decision.
+> **Historical UI brief, with continuing reading-list requirements.** Current doctrine and verification behavior are in [dark-desk.md](dark-desk.md); the current Astra interface is in [editor-desk.md](editor-desk.md), and current work is in [../TODO.md](../TODO.md). The 0.5.1 implementation descriptions and “engine off-limits” scope below applied to that earlier design pass. They do not override subsequent engine work or the current Astra design.
 
 # Dark Desk — editor UI brief (for design)
 
