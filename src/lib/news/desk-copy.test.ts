@@ -891,6 +891,12 @@ describe("Opinion refusal recovery", () => {
   it("continues to give reset advice for an actual quota-only failure", () => {
     assert.match(editorDraftError("Claude Code error 429: usage limit reached, resets 11:30pm (America/Denver).")!, /resets 11:30pm/);
   });
+
+  it("recognizes the older refusal wording with terminal punctuation", () => {
+    const message = editorDraftError("Claude Code declined this request.");
+    assert.match(message!, /model declined this request/);
+    assert.doesNotMatch(message!, /Click Draft with AI again|try rewording/);
+  });
 });
 
 describe("a lapsed provider login is a sign-in problem, not a retry", () => {

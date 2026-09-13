@@ -520,9 +520,12 @@ export function editorDraftError(raw: string | null | undefined): string | null 
   const t = raw.trim();
   // A final refusal takes precedence over an earlier provider's quota or
   // transport failure in saved Automatic-run errors. A reset cannot resolve it.
-  const refusal = t.match(/(?:The (?:selected|writing) model )?declined (?:to produce the requested editorial|this request)(?::\s*([\s\S]*?))?(?=\.?\s*Nothing was filed\b|$)/i);
+  const refusal = t.match(/declined (?:to produce the requested editorial|this request)\b/i);
   if (refusal) {
-    const reason = refusal[1]?.trim().replace(/[.!?]+$/, "");
+    const after = t.slice(refusal.index! + refusal[0].length).trim();
+    const reason = after.startsWith(":")
+      ? after.slice(1).split(/\bNothing was filed\b/i)[0]!.trim().replace(/[.!?]+$/, "")
+      : "";
     return `The writing model declined this request${reason ? `: ${reason}` : ""}. No draft was created. You can still write the piece yourself and file it as an editorial draft.`;
   }
   const reset = t.match(/resets?\s+(?:at\s+)?([^.,;]+(?:\s+[AP]M\s+[A-Z]{2,5})?)/i)?.[1]?.trim();
