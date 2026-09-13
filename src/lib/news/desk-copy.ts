@@ -518,6 +518,13 @@ function providerSignInCopy(raw: string, again: string): string {
 export function editorDraftError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  // A final refusal takes precedence over an earlier provider's quota or
+  // transport failure in saved Automatic-run errors. A reset cannot resolve it.
+  const refusal = t.match(/(?:The (?:selected|writing) model )?declined (?:to produce the requested editorial|this request)(?::\s*([\s\S]*?))?(?=\.?\s*Nothing was filed\b|$)/i);
+  if (refusal) {
+    const reason = refusal[1]?.trim().replace(/[.!?]+$/, "");
+    return `The writing model declined this request${reason ? `: ${reason}` : ""}. No draft was created. You can still write the piece yourself and file it as an editorial draft.`;
+  }
   const reset = t.match(/resets?\s+(?:at\s+)?([^.,;]+(?:\s+[AP]M\s+[A-Z]{2,5})?)/i)?.[1]?.trim();
   if (/429|usage limit|session limit|quota/i.test(t)) {
     return reset
@@ -547,12 +554,6 @@ export function editorDraftError(raw: string | null | undefined): string | null 
     // one journalist on her own machine: she IS the operator, so the line
     // told her to go and ask herself. Name the step instead.
     return "No writing model is set up yet. Sign in to Claude Code on this machine, or set ANTHROPIC_API_KEY — docs/setup.md has both. Nothing is spent until one of them answers.";
-  }
-  if (/declined this request/i.test(t)) {
-    const reason = t.match(/declined to produce the requested editorial:\s*([^.]*(?:\.[^N]*)?)/i)?.[1]?.trim();
-    return reason
-      ? `The writing model declined this request: ${reason}`
-      : "The writing model declined this request. Clicking again will not change that; try rewording the lead, or draft it yourself.";
   }
   if (
     /403/.test(t) ||

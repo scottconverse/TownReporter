@@ -874,6 +874,25 @@ describe("Worth a Look presentation", () => {
 });
 
 
+describe("Opinion refusal recovery", () => {
+  it("keeps the final refusal above an earlier provider quota reset", () => {
+    const message = editorDraftError("Claude Code error 429: usage limit reached, resets 11:30pm (America/Denver). The selected model declined to produce the requested editorial. Nothing was filed.");
+    assert.match(message!, /model declined this request/);
+    assert.match(message!, /No draft was created/);
+    assert.doesNotMatch(message!, /11:30|retried after|try rewording/i);
+  });
+
+  it("retains the model's reason without treating quota words inside it as a quota failure", () => {
+    const message = editorDraftError("The selected model declined to produce the requested editorial: I cannot write this request. A quota reset will not change this.. Nothing was filed.");
+    assert.match(message!, /I cannot write this request\. A quota reset will not change this\./);
+    assert.doesNotMatch(message!, /usage limit was reached|this\.\./);
+  });
+
+  it("continues to give reset advice for an actual quota-only failure", () => {
+    assert.match(editorDraftError("Claude Code error 429: usage limit reached, resets 11:30pm (America/Denver).")!, /resets 11:30pm/);
+  });
+});
+
 describe("a lapsed provider login is a sign-in problem, not a retry", () => {
   // 2026-09-02, live desk, job 41: preflight passed, the saved Claude token
   // expired before the call, and the editor was told to click again.
