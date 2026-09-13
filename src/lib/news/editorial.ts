@@ -35,6 +35,17 @@ export type Editorial = {
   imagePrompt: string;
 };
 
+/** Structural completeness only; a URL alone never proves a claim is true. */
+export function editorialSourcesError(appendix: string): string | null {
+  if (!appendix.trim() || /(?:claims\s+)?appendix\s+(?:is\s+)?omitted|no web verification available|no URL was fetched/i.test(appendix)) {
+    return "Claims and sources are incomplete. This draft is saved, but every op-ed needs a sourced claims appendix before publication.";
+  }
+  if (!/https?:\/\/[^\s<>]+/i.test(appendix) && !/\b[^\n]+\.(?:pdf|docx?|txt|md|rtf)\b[^\n]{0,180}\b(?:page|section|paragraph|characters)\s+[\w.-]+/i.test(appendix)) {
+    return "Claims and sources need supporting links or document filenames with page or section locators. The draft is saved.";
+  }
+  return null;
+}
+
 const HEAD = {
   appendix: /^\s*(CLAIMS AND SOURCES(?: APPENDIX)?)\s*$/im,
   factSheet: /^\s*(EDITOR'?S FACT SHEET)\s*$/im,
@@ -250,32 +261,8 @@ export function buildEditorialPack(input: {
 /** The tools the gathering pass needs. Its receipts posture collapses without them. */
 export const EDITORIAL_TOOLS = ["WebSearch", "WebFetch"];
 
-/**
- * Instructions for the gathering pass. Inline, not a file — nothing secret
- * lives here, unlike the voice.
- *
- * ENG-107: the voice used to research and write in one call, which put the
- * operator's private editorial voice in the same context as pages fetched
- * from URLs an editor — or the piece's own subject — supplied, while the
- * model held a network-egress tool. A page could carry instructions and the
- * model could act on them with the same tool that read them: a complete
- * exfiltration channel for the one asset this product calls confidential.
- *
- * The fix is two calls. This one has the tools and never sees the voice; it
- * runs on the cheap planner model, because it is retrieval, not writing. Its
- * output is plain text handed to the writing pass below. Claude's writing
- * call has no explicitly allowed research tools. Codex, when selected, keeps
- * its native signed-in capabilities; TownReporter does not narrow them.
- *
- * What this does NOT close: the gathered text can still try to steer what
- * the writing pass *writes* — a prompt-injection attempt embedded in a
- * fetched page could survive summarization and land in the piece. The
- * instructions below tell this pass to treat fetched content as material,
- * not commands, and `buildWritingPack` repeats that warning to the writing
- * pass with the gathered text clearly labelled as another model's summary of
- * outside pages. Neither is a hard guarantee — no prompt-level instruction
- * is — so this is a mitigation, not a closure, for that residual risk.
- */
+/** The gathering pass supplies leads without the private editorial voice.
+ * The writer can independently verify these leads using web tools. */
 export const RESEARCH_INSTRUCTIONS = `You are the research pass for a TownReporter editorial. A separate pass, with
 its own voice, will write the piece from what you return here.
 You never see that voice and you are not writing the editorial.
@@ -356,6 +343,10 @@ export function buildWritingPack(input: {
   parts.push(
     "",
     "Write the complete editorial now. Begin with its real headline, not a note to the editor.",
+    "The editor requires CLAIMS AND SOURCES on EVERY op-ed. This overrides any optional-appendix or no-web exception in the voice guide.",
+    "Open and verify the sources yourself using the available web tools. Include each checkable factual claim with its supporting source URL, or an exact supplied document filename and page/section locator.",
+    "A research memo, model memory, a search snippet, or an instruction to verify later is not a source. Do not invent citations or claim a page was opened when it was not.",
+    "If a claim cannot be supported, remove or qualify that claim. Never substitute an appendix-omitted notice for claims and sources.",
     "If you cannot deliver the complete editorial, return",
     "EDITORIAL_REFUSAL: <concise reason>",
     "and nothing else. Never format a refusal as a headline or article. The same rule applies",

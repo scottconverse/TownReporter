@@ -112,7 +112,7 @@ export async function checkStoryNames(opts: Options): Promise<{ draft: Draft; ch
     }
     if (opts.timeLeft() < 8_000) return { draft, check };
     // Include name-centered passages, not just the beginning of long directory pages.
-    const evidence = opts.docs.filter(doc => doc.text && ("evidenceKind" in doc || doc.version_id != null)).slice(-20).map(doc => {
+    const buildEvidence = () => opts.docs.filter(doc => doc.text && ("evidenceKind" in doc || doc.version_id != null)).slice(-20).map(doc => {
       const text = doc.text;
       const windows = [text.slice(0, 1800)];
       for (const p of people) {
@@ -126,12 +126,54 @@ export async function checkStoryNames(opts: Options): Promise<{ draft: Draft; ch
         : `SOURCE ${doc.url}\nTITLE ${doc.title}`;
       return `${source}\n${[...new Set(windows)].join("\n[…]\n").slice(0, 8000)}`;
     }).join("\n\n").slice(0, 65000);
-    const answer = await opts.chat(NAME_EVIDENCE_SYSTEM, `LOCALITY: ${opts.city}\nPEOPLE: ${JSON.stringify(people.slice(0, 30))}\nOPENED WRITTEN EVIDENCE:\n${evidence}`, 3000);
+    const answer = await opts.chat(NAME_EVIDENCE_SYSTEM, `LOCALITY: ${opts.city}\nPEOPLE: ${JSON.stringify(people.slice(0, 30))}\nOPENED WRITTEN EVIDENCE:\n${buildEvidence()}`, 3000);
     if (!answer.ok) return { draft, check };
     const result = parseJsonBlock<Record<string, unknown>>(answer.text);
     if (!Array.isArray(result?.checks)) return { draft, check };
     const rows = result.checks.filter((r): r is Record<string, unknown> => Boolean(r && typeof r === "object"));
     check.rows = people.map(person => validateNameEvidence(person, rows.find(row => row.name === person.name), opts.docs));
+    // A model may paraphrase a roster into a quotation that never appeared.
+    // Give unresolved names one bounded repair pass with verbatim passages
+    // selected by the application. An ID selects the exact saved text; the
+    // model still has to establish authority and contextual identity.
+    const unresolvedPeople = people.filter(person => check.rows.some(row => row.name === person.name && row.status === "unresolved"));
+    if (unresolvedPeople.length && opts.timeLeft() > 15_000) {
+      await opts.stage?.("Resolving names against exact written passages");
+      if (opts.searchAllowed) {
+        const queries = [...new Set(unresolvedPeople.slice(0, 4).map(person => `${opts.city} "${person.name}" ${person.role} official written record`))];
+        const hits = await Promise.allSettled(queries.map(query => opts.search(query)));
+        const urls = [...new Set(hits.flatMap(hit => hit.status === "fulfilled" ? hit.value.slice(0, 2).map(item => item.url) : []))];
+        if (opts.timeLeft() > 12_000) await opts.open(urls.filter(url => !opts.docs.some(doc => !("evidenceKind" in doc) && doc.url === url)).slice(0, 4));
+      }
+      if (opts.timeLeft() > 8_000) {
+        const passages: { id: number; url: string; documentId: string; title: string; excerpt: string }[] = [];
+        for (const doc of opts.docs.filter(doc => doc.text && ("evidenceKind" in doc || doc.version_id != null)).slice(-20)) {
+          for (const person of unresolvedPeople) {
+            const prior = rows.find(row => row.name === person.name);
+            for (const spelling of new Set([person.name, String(prior?.spelling ?? "")].filter(Boolean))) {
+              const match = sourceExcerpt(doc.text, spelling);
+              if (!match) continue;
+              const excerpt = doc.text.slice(Math.max(0, match.start - 140), match.end + 220);
+              passages.push({id: passages.length + 1, url: "evidenceKind" in doc ? "" : doc.url, documentId: "evidenceKind" in doc ? doc.documentId : "", title: "evidenceKind" in doc ? doc.filename : doc.title, excerpt});
+            }
+          }
+        }
+        const repair = await opts.chat(NAME_EVIDENCE_SYSTEM + '\nFor this repair, select passageId from the supplied exact passages instead of composing an excerpt. Keep the other fields, including authority and samePerson. A matching name without contextual identity remains unresolved.',
+          `LOCALITY: ${opts.city}\nPEOPLE: ${JSON.stringify(unresolvedPeople)}\nEXACT SAVED PASSAGES: ${JSON.stringify(passages).slice(0, 50000)}\nOTHER OPENED EVIDENCE:\n${buildEvidence().slice(0, 12000)}`, 3000);
+        if (repair.ok) {
+          const repaired = parseJsonBlock<Record<string, unknown>>(repair.text);
+          if (Array.isArray(repaired?.checks)) {
+            for (const person of unresolvedPeople) {
+              const candidate = repaired.checks.find((row: Record<string, unknown>) => row?.name === person.name);
+              const passage = passages.find(passage => passage.id === candidate?.passageId);
+              if (!candidate || !passage) continue;
+              const verified = validateNameEvidence(person, {...candidate, url: passage.url, documentId: passage.documentId, excerpt: passage.excerpt}, opts.docs);
+              if (verified.status !== "unresolved") check.rows[people.indexOf(person)] = verified;
+            }
+          }
+        }
+      }
+    }
     for (const row of [...check.rows].sort((a, b) => b.name.length - a.name.length)) {
       if (row.status !== "corrected") continue;
       for (const key of ["headline", "dek", "body"] as const) draft[key] = replaceName(draft[key], row.name, row.spelling);

@@ -23,7 +23,7 @@ for(const id of [1,2]) for (const action of ['read','edit','publish'] as const) 
 });
 it('Opinion refuses another newsroom and requires evidence review after a material edit',async()=>{
  await assert.rejects(withEditorialDraft(82,3,async(_tx,d)=>d),/standalone editorial/);
- const data={draftId:3,headline:'Edited',dek:'',body:'Different body',topic:'opinion'};
+ const data={draftId:3,headline:'Edited',dek:'',body:'Different body\n\nCLAIMS AND SOURCES\n\nRecord: https://example.org/record',topic:'opinion'};
  await saveOpinionDraft(81,data);
  const sql=await getSql();const [edited]=await sql<DraftRow>`select * from drafts where id=3`;
  assert.equal(JSON.parse(edited.research_json!).evidenceReview.original.body,'Original body');
@@ -32,11 +32,11 @@ it('Opinion refuses another newsroom and requires evidence review after a materi
  await saveOpinionDraft(81,{...data,evidenceDecision:'keep',evidenceToken:evidenceReviewToken(edited)});
  await withEditorialDraft(81,3,async(tx,d)=>{assertOpinionEvidenceReady(d);await tx`insert into articles(body,source_urls) values(${d.body},${d.source_urls})`;});
  const articles=await sql<{body:string;source_urls:string}>`select * from articles`;
- assert.deepEqual(articles.map(a=>a.body),['Different body']);assert.match(articles[0].source_urls,/example.org/);
+ assert.deepEqual(articles.map(a=>a.body),['Different body\n\nCLAIMS AND SOURCES\n\nRecord: https://example.org/record']);assert.match(articles[0].source_urls,/example.org/);
 });
 it('removing outdated Opinion evidence preserves the private original',async()=>{
  const sql=await getSql();const[d]=await sql<DraftRow>`select * from drafts where id=4`;
- await saveOpinionDraft(81,{draftId:4,headline:'Changed',dek:'',body:'New body',topic:'opinion',evidenceDecision:'remove',evidenceToken:evidenceReviewToken(d)});
+ await saveOpinionDraft(81,{draftId:4,headline:'Changed',dek:'',body:'New body\n\nCLAIMS AND SOURCES\n\nNew record: https://example.org/new',topic:'opinion',evidenceDecision:'remove',evidenceToken:evidenceReviewToken(d)});
  await withEditorialDraft(81,4,async(_tx,current)=>{assertOpinionEvidenceReady(current);assert.equal(current.source_urls,'[]');assert.match(JSON.parse(current.research_json!).evidenceReview.original.source_urls,/example.org/);});
 });
 

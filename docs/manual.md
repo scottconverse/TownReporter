@@ -570,7 +570,9 @@ Terra, Codex Sol, Local model and custom connections. Automatic tries Claude
 Opus then Codex Terra once when needed; explicit choices stay selected. (Zen MiMo and the earlier, model-specific
 Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
 brought a generic local pick back.) Claude Code
-receives the voice by file path, and its writing pass is tool-free. The
+receives the voice by file path, and its writing pass can search and open sources.
+Every op-ed requires a claims-and-sources appendix. An incomplete draft is retained
+and flagged for completion before publication. The
 explicit Local model path sends validated voice text as a system message to
 the selected model server. It uses supplied material without a separate
 research pass; the writing pack records that no gathering pass ran.
@@ -924,7 +926,7 @@ flowchart LR
         VOICE["The voice file<br/>~/.townreporter/voice/*.md"]
     end
 
-    CLI["Claude Code CLI<br/>path-only voice, tool-free writing"]
+    CLI["Claude Code CLI<br/>path-only voice, web-enabled writing"]
 
     UI --> PACK
     PACK -->|"over stdin"| CLI
