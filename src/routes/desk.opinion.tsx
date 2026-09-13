@@ -30,6 +30,7 @@ import { DEFAULT_OPINION_MODEL, type OpinionModelChoice } from "@/lib/news/model
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
+import { editorialSourcesError, parseEditorial } from "@/lib/news/editorial";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 import {
   editorialAttribution,
@@ -628,6 +629,11 @@ function OpinionPage() {
               <pre className="max-w-3xl text-base leading-7 whitespace-pre-wrap">
                 {piece.data.body}
               </pre>
+              {editorialSourcesError(parseEditorial(`${piece.data.headline}\n\n${piece.data.body}`).appendix) ? (
+                <p role="alert" className="rounded-lg border border-rust/30 bg-rust/5 p-3 text-rust">
+                  {editorialSourcesError(parseEditorial(`${piece.data.headline}\n\n${piece.data.body}`).appendix)}
+                </p>
+              ) : null}
               <DeskNameCheck
                 research={piece.data.research_json}
                 headline={piece.data.headline}

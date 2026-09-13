@@ -234,23 +234,7 @@ export async function claudeCodeChat(opts: {
    */
   noTools?: boolean;
 }): Promise<ClaudeCodeResult> {
-  /*
-    The voice-and-tools invariant, made structural (ENG-107).
-
-    A call that hands over a private system-prompt file AND a tool that can
-    reach the network is a complete exfiltration channel for whatever that
-    file contains: the model can be told, by something it fetched, to act on
-    the file it is holding. The editorial writer used to be exactly that
-    call. It is now two calls — a gathering pass with tools and no file, a
-    writing pass with the file and no tools — and this check is what keeps
-    that split from quietly reopening. Every caller of this function goes
-    through here, so a future edit that adds a tool back to the writing pass,
-    or adds tools to some other call that also starts passing a voice-like
-    file, fails loudly on its very first run instead of shipping silently.
-
-    Checked before `findClaudeCli()` so the refusal never depends on whether
-    a CLI binary happens to be installed on this machine.
-  */
+  // Research capability is selected by the caller, including editorial writing.
   /*
     A long prompt must never become an argument, no matter which caller
     forgot to plan for it.
@@ -285,15 +269,9 @@ export async function claudeCodeChat(opts: {
     });
   };
 
-  if (systemPromptFile && (opts.allowedTools?.length ?? 0) > 0) {
-    cleanupTempDir();
-    throw new Error(
-      "Refusing to combine systemPromptFile with any allowedTools in one Claude Code call: " +
-        "a private system prompt and network-capable tools must never share a call " +
-        "(ENG-107). Split into a tool-enabled pass with no systemPromptFile and a " +
-        "systemPromptFile pass with no allowedTools.",
-    );
-  }
+  // The editor authorizes research with the editorial voice loaded. A prompt
+  // file is a transport mechanism, not a reason to remove requested web tools.
+  // Fetched pages remain untrusted evidence, never instructions.
 
   if (opts.noTools && (opts.allowedTools?.length ?? 0) > 0) {
     cleanupTempDir();
@@ -435,8 +413,7 @@ export async function claudeCodeChat(opts: {
  * This is intentionally a separate, narrower function rather than a new
  * flag on `claudeCodeChat`: that function's whole contract is "no live
  * tool, ever, except the editorial writer's explicit `allowedTools`", and
- * ENG-107's checks exist to keep a private system prompt away from any
- * call that can also act. This call never takes a `systemPromptFile` and
+ * page transcription has a different input contract. This call never takes a `systemPromptFile` and
  * never takes `allowedTools` — it has exactly one tool, exposed on
  * purpose, for exactly one file.
  */

@@ -20,6 +20,7 @@ import {
   RESEARCH_INSTRUCTIONS,
   buildWritingPack,
   opinionHeadline,
+  editorialSourcesError,
   type Editorial,
   type EditorialPointer,
 } from "./editorial.ts";
@@ -29,26 +30,10 @@ import { officialDomains } from "./absence-gate.ts";
 
 export type { WriteEditorialInput, WriteEditorialResult } from "./editorial-orchestration.ts";
 
-/**
- * Writing an editorial, and filing it as a draft.
- *
- * Two model calls, not one — ENG-107. Research and writing used to be a
- * single call with WebSearch/WebFetch on AND the voice file loaded, which put
- * the operator's private editorial voice in the same context as pages an
- * editor — or the piece's own subject — pointed it at, while it held a tool
- * that could send data back out. Now: a gathering pass has the tools and
- * never sees the voice, on the cheap planner model; its plain-text output
- * feeds a writing pass on the expensive model. On the Claude path,
- * `claudeCodeChat` in ai-claude-code.server.ts refuses to combine
- * `systemPromptFile` with Claude's explicitly allowed research tools.
- *
- * Claude receives only the voice path. The operator has separately authorized
- * OpenAI Codex Opinion, so that path reads the validated voice text and sends
- * it through stdin. Codex keeps the signed-in Windows user's native config,
- * rules, search, skills, plugins, and local-machine capabilities in both
- * passes; TownReporter does not impose a second capability policy. The voice
- * is never placed in argv or TownReporter logs.
- */
+/** Research supplies leads; the writer independently opens sources and files an
+ * editorial with claims and sources. Both subscription writers retain web
+ * research during writing. The private voice travels by file (Claude) or
+ * stdin (Codex), never in argv or application logs. */
 
 /**
  * Editorials take tens of minutes, not seconds. The voice researches first.
@@ -69,8 +54,8 @@ export type { WriteEditorialInput, WriteEditorialResult } from "./editorial-orch
  *
  * ENG-107 split research and writing into two calls (see `writeEditorial`),
  * so this ceiling now applies PER PASS, not once. The gathering pass is the
- * one these measurements describe; the Claude writing pass has no research
- * tools and is expected to be faster, but reuses the same generous ceiling rather than a
+ * one these measurements describe; the writing pass verifies sources too
+ * and reuses the same generous ceiling rather than a
  * separately tuned one — one knob for the operator, and the two runs above
  * were the whole spread this ceiling was set from in the first place. Worst
  * case, a piece now takes up to roughly double the wall-clock time this
@@ -150,6 +135,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
       return claudeCodeChat({
         system: "",
         systemPromptFile: found.voice.path,
+        allowedTools: EDITORIAL_TOOLS,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
@@ -276,7 +262,7 @@ export async function fileEditorial(
   }
 
   let nameCheck: NameCheck | undefined;
-  let integrityNotes = "";
+  let integrityNotes = editorialSourcesError(ed.appendix) ?? "";
   if (input.completion && modelChoice) {
     await (deps.setJobStage ?? setJobStage)(input.completion.jobId, "Checking names and spellings");
     const checkEditorialNames = deps.checkEditorialNames ?? (await import("./editorial-name-check.ts")).checkEditorialNames;
@@ -375,7 +361,7 @@ export async function fileEditorial(
       draftId,
       headline,
       words: ed.body.split(/\s+/).filter(Boolean).length,
-      hadAppendix: Boolean(ed.appendix),
+      hadAppendix: editorialSourcesError(ed.appendix) === null,
     };
     if (input.completion) {
       await persistEditorialSuccess(sql, {

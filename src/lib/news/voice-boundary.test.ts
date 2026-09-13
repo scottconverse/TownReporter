@@ -160,15 +160,11 @@ describe("the voice never becomes a command-line argument", () => {
 });
 
 /**
- * ENG-107: the voice must never be in a call that has any tool enabled.
+ * The editor-authorized writer must retain its web research capability.
  *
- * This used to be true only because `writeEditorial` happened to write it
- * that way — nothing stopped a future edit from putting `allowedTools` back
- * on the same call as `systemPromptFile`, the way it originally shipped
- * (research and writing were one call, with WebSearch/WebFetch on AND the
- * voice loaded). `claudeCodeChat` in ai-claude-code.server.ts now refuses
- * outright when both are present on the same call, so the invariant holds
- * for every current and future caller, not just the one that motivated it.
+ * A previous voice-and-tools restriction produced an editorial that could
+ * not verify sources and omitted its claims appendix. Prompt file transport
+ * must not silently remove tools that the writing task requires.
  *
  * These are behavioural, not textual: they call the real exported function
  * with real option objects and check what it actually does, so they cannot
@@ -178,7 +174,7 @@ describe("the voice never becomes a command-line argument", () => {
  * exist, so a call that gets PAST the invariant check resolves to
  * `CLAUDE_CLI_MISSING` rather than spawning anything.
  */
-describe("the voice and a tool can never share a Claude Code call", () => {
+describe("the editorial voice can use the editor-authorized research tools", () => {
   const originalCliPath = process.env.CLAUDE_CLI_PATH;
   const originalClaudeCode = process.env.TOWNREPORTER_CLAUDE_CODE;
 
@@ -207,40 +203,12 @@ describe("the voice and a tool can never share a Claude Code call", () => {
     resetClaudeCliCache();
   });
 
-  it("refuses a call that combines systemPromptFile with a non-empty allowedTools", async () => {
+  it("allows voice plus research to reach CLI lookup", async () => {
     useMissingCli();
-    await assert.rejects(
-      claudeCodeChat({
-        system: "",
-        systemPromptFile: join(tmpdir(), "irrelevant-voice-path.txt"),
-        user: "write the piece",
-        model: "claude-opus-5",
-        timeoutMs: 1_000,
-        allowedTools: ["WebFetch"],
-      }),
-      /systemPromptFile.*allowedTools|allowedTools.*systemPromptFile/is,
-      "a call with both the voice file and a tool must be refused before it can run",
-    );
+    const result = await claudeCodeChat({system:"", systemPromptFile:join(tmpdir(),"voice.txt"), user:"Verify sources", model:"claude-opus-5", timeoutMs:1000, allowedTools:["WebSearch","WebFetch"]});
+    assert.equal(result.ok,false);
+    if(!result.ok) assert.match(result.error,/Claude Code CLI not found/);
   });
-
-  it(
-    "the EXACT mutation that must turn the test above red: restoring the pre-fix single call " +
-      "(systemPromptFile AND allowedTools: EDITORIAL_TOOLS together, as writeEditorial's one " +
-      "claudeCodeChat call did before ENG-107) is the shape asserted rejects here — reverting " +
-      "editorial.server.ts to that shape, or deleting the guard above, makes this pass instead",
-    async () => {
-      useMissingCli();
-      const result = claudeCodeChat({
-        system: "",
-        systemPromptFile: join(tmpdir(), "irrelevant-voice-path.txt"),
-        user: "write the piece",
-        model: "claude-opus-5",
-        timeoutMs: 1_000,
-        allowedTools: ["WebSearch", "WebFetch"],
-      });
-      await assert.rejects(result);
-    },
-  );
 
   it("still allows a tools-only call (the gathering pass) to reach CLI lookup", async () => {
     useMissingCli();
@@ -280,7 +248,7 @@ describe("the voice and a tool can never share a Claude Code call", () => {
     }
   });
 
-  it("writeEditorial's writing-pass call site never passes allowedTools alongside systemPromptFile", () => {
+  it("the editorial writer receives web research alongside its voice", () => {
     const src = readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8");
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     const writeCallStart = code.indexOf("systemPromptFile: found.voice.path");
@@ -288,10 +256,10 @@ describe("the voice and a tool can never share a Claude Code call", () => {
     // The call object closes at the next top-level `});` after the marker.
     const callEnd = code.indexOf("});", writeCallStart);
     const callSlice = code.slice(writeCallStart, callEnd === -1 ? undefined : callEnd);
-    assert.doesNotMatch(
+    assert.match(
       callSlice,
-      /allowedTools/,
-      "the writing-pass call object must not mention allowedTools at all",
+      /allowedTools: EDITORIAL_TOOLS/,
+      "the writer must be able to verify its sources",
     );
   });
 });

@@ -1,6 +1,7 @@
 import { withTransaction } from "../db.ts";
 import { evidenceNeedsReview, evidenceReviewToken, reconcileDraftEvidence, type EvidenceDecision } from "./draft-evidence.ts";
 import type { DraftRow } from "./types.ts";
+import { editorialSourcesError, parseEditorial } from "./editorial.ts";
 /** Standalone Opinion drafts only. Reporting drafts must use the lead-fenced workbench. */
 export async function withEditorialDraft<T>(newsroomId: number, draftId: number, run: (sql: Awaited<ReturnType<typeof import("../db.ts").getSql>>, draft: DraftRow) => Promise<T>) {
   return withTransaction(async sql => {
@@ -20,4 +21,6 @@ export async function saveOpinionDraft(newsroomId: number, data: {draftId:number
 }
 export function assertOpinionEvidenceReady(draft: DraftRow) {
   if (evidenceNeedsReview(draft,draft.body)) throw new Error("Review the retained evidence before publishing this edited editorial.");
+  const sourcesError = editorialSourcesError(parseEditorial(`${draft.headline}\n\n${draft.body}`).appendix);
+  if (sourcesError) throw new Error(sourcesError);
 }

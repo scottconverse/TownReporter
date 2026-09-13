@@ -6,6 +6,21 @@ import { nameCheckText, readNameCheck } from "./name-check.ts";
 const person = { name: "Eugene May", role: "Longmont City Attorney", context: "City Attorney Eugene May spoke." };
 const doc = { url: "https://longmontcolorado.gov/city-attorney/staff/", title: "City Attorney staff", text: "Eugene Mei, City Attorney for Longmont", extras: [], version_id: 42 };
 const candidate = { name: person.name, status: "corrected", spelling: "Eugene Mei", url: doc.url, excerpt: doc.text, authority: "official-directory", samePerson: true, reason: "The written city roster identifies the same Longmont city attorney." };
+test("an invented roster quotation is repaired from an exact saved passage before editor review", async () => {
+  const mayor={name:"Brian Bagley",role:"former Mayor of Longmont",context:""};
+  const source={...doc,url:"https://longmontcolorado.gov/government/mayors-of-longmont",title:"Mayors of Longmont",text:"Mayors of Longmont\n\nBrian Bagley\n\n2017 - 2021"};
+  let calls=0;
+  const result=await checkStoryNames({draft:{headline:"A historical record",dek:"",body:"Former mayor Brian Bagley appears in the city archive."},city:"Longmont",domains:["longmontcolorado.gov"],docs:[source],searchAllowed:false,timeLeft:()=>100000,search:async()=>[],open:async()=>{},chat:async(_system,user)=>{
+    calls++;
+    if(calls===1) return {ok:true,text:JSON.stringify({complete:true,people:[mayor]})};
+    const checked={name:mayor.name,status:"matched",spelling:mayor.name,url:source.url,excerpt:"Brian Bagley, Mayor of Longmont (2017–2021)",authority:"official-record",samePerson:true,reason:"The city mayor history identifies the same former mayor."};
+    if(calls===3) { assert.match(user,/EXACT SAVED PASSAGES/); return {ok:true,text:JSON.stringify({checks:[{...checked,passageId:1}]})}; }
+    return {ok:true,text:JSON.stringify({checks:[checked]})};
+  }});
+  assert.equal(calls,3); assert.equal(result.check.rows[0].status,"matched");
+  assert.equal(result.check.rows[0].excerpt,source.text);
+  assert.equal(result.check.rows[0].captureId,42);
+});
 test("a correction requires a saved exact written passage and contextual identity", () => {
   assert.equal(validateNameEvidence(person, candidate, [doc]).status, "corrected");
   for (const changes of [{excerpt:"Eugene Mei, mayor"}, {url:"https://invented.example/"}, {samePerson:false}, {authority:"none"}, {spelling:"Eugene Meier"}]) assert.equal(validateNameEvidence(person, {...candidate,...changes}, [doc]).status, "unresolved");
