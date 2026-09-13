@@ -567,10 +567,12 @@ the registry is the canonical picker definition; provider adapters still impleme
 **Opinion provider behavior.** An editorial uses the paper's configured voice
 and frontier research. Opinion's picker offers Automatic, Claude Opus, Codex
 Terra, Codex Sol, Local model and custom connections. Automatic tries Claude
-Opus then Codex Terra once when needed; explicit choices stay selected. (Zen MiMo and the earlier, model-specific
+Opus then Codex Sol once when needed; explicit choices stay selected. (Zen MiMo and the earlier, model-specific
 Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
 brought a generic local pick back.) Claude Code
-receives the voice by file path, and its writing pass can search and open sources.
+receives the voice through `--system-prompt-file`; Codex uses
+`model_instructions_file`. Both writing passes load the complete voice file
+and can research sources while writing. The editorial assignment is sent separately.
 Every op-ed requires a claims-and-sources appendix. An incomplete draft is retained
 and flagged for completion before publication. The
 explicit Local model path sends validated voice text as a system message to
@@ -616,10 +618,14 @@ seconds; the time budgets adjust on their own.
 
 Your own `CLAUDE.md`, skills and plugins are **not** loaded into news prompts.
 Claude strips settings with `--setting-sources ""`. Codex is deliberately the
-opposite: it loads the user's native configuration, rules, repository
-instructions, skills and plugins, keeps search and local tools available, and
+opposite: it retains the user's native configuration, rules, skills and plugins,
+keeps search and local tools available, and
 runs with `danger-full-access` rather than a TownReporter-imposed read-only
 sandbox. It has the same available access to `C:\` as the signed-in account.
+The Opinion writer runs from the temporary directory, as Claude does, so the
+application checkout's repository instructions are not part of its writing context.
+Its voice file supplies the native model instructions. Other Codex calls retain
+their existing working directory and prompt handling.
 
 ## The Opinion voice
 
@@ -630,7 +636,8 @@ TOWNREPORTER_VOICE_FILE=C:/Users/you/.townreporter/voice/your-voice.md
 ```
 
 The file is deliberately outside the repository, and the app refuses a path
-inside it. On Claude, only the **path** reaches the CLI. For explicit Local
+inside it. On Claude and Codex, only the **path** reaches the CLI's arguments;
+the CLI opens the complete file. For explicit Local
 model, TownReporter reads the validated file and sends its text as a system
 message to the selected model server. The voice is not a command-line argument.
 Without the file, the Opinion desk says so and spends nothing.

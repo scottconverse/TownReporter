@@ -158,8 +158,8 @@ export async function readVoiceTextForOpenAiCodex(): Promise<
  * A local server speaks the OpenAI-compatible chat-completions protocol
  * only -- there is no `--system-prompt-file` equivalent over HTTP -- so its
  * voice travels as an ordinary system-message string instead of a file path,
- * the same way the Codex path above already sends it over stdin rather than
- * a file. Destination-named for the same reason `readVoiceTextForOpenAiCodex`
+ * while the Claude and Codex writers load the file by path.
+ * Destination-named for the same reason `readVoiceTextForOpenAiCodex`
  * is: so a future provider cannot inherit this authorization accidentally.
  */
 export async function readVoiceTextForLocalModel(): Promise<

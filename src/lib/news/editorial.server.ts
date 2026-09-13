@@ -7,7 +7,7 @@ import {
   type WriteEditorialInput,
   type WriteEditorialResult,
 } from "./editorial-orchestration.ts";
-import { findVoiceFile, readVoiceTextForLocalModel, readVoiceTextForOpenAiCodex } from "./voice.server.ts";
+import { findVoiceFile, readVoiceTextForLocalModel } from "./voice.server.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { opinionModelChoice, OPINION_AUTOMATIC_LADDER } from "./model-choice.ts";
 import { setJobStage } from "./jobs.ts";
@@ -32,8 +32,8 @@ export type { WriteEditorialInput, WriteEditorialResult } from "./editorial-orch
 
 /** Research supplies leads; the writer independently opens sources and files an
  * editorial with claims and sources. Both subscription writers retain web
- * research during writing. The private voice travels by file (Claude) or
- * stdin (Codex), never in argv or application logs. */
+ * research during writing. Both CLIs load the complete voice by file path,
+ * never as prompt text in argv or application logs. */
 
 /**
  * Editorials take tens of minutes, not seconds. The voice researches first.
@@ -147,7 +147,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
         timeoutMs: editorialTimeoutMs(),
       });
     },
-    runCodexPair: async ({ input: editorialInput, researchPack }) => {
+    runCodexPair: async ({ input: editorialInput, found, researchPack }) => {
       const { codexChat } = await import("./ai-codex.server.ts");
       const choice = editorialInput.modelChoice === "codex-frontier" ? "codex-frontier" : "codex-balanced";
       const entry = providerEntry(choice)!;
@@ -160,11 +160,9 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
       });
       if (!research.ok) return research;
       if (editorialInput.completion) await setJobStage(editorialInput.completion.jobId, "Writing the editorial");
-      const voice = await readVoiceTextForOpenAiCodex();
-      if (!voice.ok) return voice;
       return codexChat({
         system: "",
-        systemPromptText: voice.text,
+        systemPromptFile: found.voice.path,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
