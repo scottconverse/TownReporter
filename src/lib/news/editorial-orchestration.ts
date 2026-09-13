@@ -15,6 +15,8 @@ export type WriteEditorialInput = {
   userId: string;
   newsroomId: number;
   subject: string;
+  /** Complete private material pasted by the editor. */
+  sourceText?: string;
   pointers: EditorialPointer[];
   ourStory?: { headline: string; url: string; dek?: string };
   askedFor?: string;
@@ -53,6 +55,11 @@ export type EditorialOrchestrationRuntime = {
     { ok: true; voice: { path: string; bytes: number } } | { ok: false; error: string }
   >;
   runClaudePair: (context: {
+    input: WriteEditorialInput;
+    found: { ok: true; voice: { path: string; bytes: number } };
+    researchPack: string;
+  }) => Promise<ChatResult>;
+  runCodexPair?: (context: {
     input: WriteEditorialInput;
     found: { ok: true; voice: { path: string; bytes: number } };
     researchPack: string;
@@ -116,7 +123,8 @@ export function validateEditorialDelivery(raw: string, editorial: Editorial): st
   });
 
   if (refused) {
-    return "The selected model declined to produce the requested editorial. Nothing was filed.";
+    const reason = String(raw).match(/EDITORIAL_REFUSAL\s*:\s*([^\r\n]{1,500})/i)?.[1]?.trim();
+    return `The selected model declined to produce the requested editorial${reason ? `: ${reason}` : ""}. Nothing was filed.`;
   }
   const headline = editorial.headline.trim();
   if (!headline) return "The selected model returned no usable headline. Nothing was filed.";
@@ -147,27 +155,22 @@ export async function orchestrateEditorial(
   const researchPack = buildEditorialPack({
     paper: input.paper,
     subject: input.subject,
+    sourceText: input.sourceText,
     pointers: input.pointers,
     ourStory: input.ourStory,
     askedFor: input.askedFor,
   });
 
-  /*
-    One provider, one pair -- but WHICH provider is the editor's own pick, not
-    always Claude. Opinion offers Claude and Local model (see
-    OPINION_MODEL_CHOICES for why Codex left this ladder); an explicit pick of
-    either one runs only that candidate, never a substitute -- audit finding
-    "Opinion 'Local model' pick silently uses Claude" was exactly this
-    function always calling `runtime.runClaudePair()` regardless of
-    `input.modelChoice`. Automatic still probes Claude only: Local model has
-    no `ladderRank` (see provider-registry.ts), so Automatic must not reach
-    for it on its own. A stored request that still says "codex-frontier"
-    (none exist in production) normalises to Automatic via
-    `opinionModelChoice` and lands on the Claude rung rather than failing.
-  */
+  /* Automatic tries the two signed-in subscription providers in order.
+     Explicit Claude, Codex, local, and custom choices run only themselves. */
   const runPair = async (candidate: EffectiveOpinionModelChoice): Promise<ChatResult> => {
     if (isCustomModelChoice(candidate)) {
       return runtime.runCustomPair({ input, found, researchPack });
+    }
+    if (candidate === "codex-balanced" || candidate === "codex-frontier") {
+      return runtime.runCodexPair
+        ? runtime.runCodexPair({ input: { ...input, modelChoice: candidate }, found, researchPack })
+        : { ok: false, error: "Codex is unavailable." };
     }
     return candidate === "local-model"
       ? runtime.runLocalPair({ input, found, researchPack })
@@ -176,7 +179,7 @@ export async function orchestrateEditorial(
 
   const requested = opinionModelChoice(input.modelChoice);
   const candidates: EffectiveOpinionModelChoice[] =
-    requested === "auto" ? ["claude-frontier"] : [requested];
+    requested === "auto" ? ["claude-frontier", "codex-balanced"] : [requested];
   const failures: string[] = [];
 
   for (const candidate of candidates) {
@@ -189,6 +192,9 @@ export async function orchestrateEditorial(
     const editorial = parseEditorial(out.text);
     const invalid = validateEditorialDelivery(out.text, editorial);
     if (invalid) {
+      if (/declined to produce the requested editorial/i.test(invalid)) {
+        return { ok: false, error: invalid };
+      }
       failures.push(invalid);
       continue;
     }
@@ -202,7 +208,7 @@ export async function orchestrateEditorial(
   const detail = failures.filter(Boolean).join(" ");
   return {
     ok: false,
-    error: `Claude Opus could not produce an editorial. ${detail} Nothing was filed.`
+    error: `No automatic Opinion provider could produce an editorial. ${detail} Nothing was filed.`
       .replace(/\s+/g, " ")
       .trim(),
   };

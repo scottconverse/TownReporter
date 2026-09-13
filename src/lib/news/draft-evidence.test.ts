@@ -34,3 +34,9 @@ it("removing stale public evidence preserves a private audit copy and prevents r
 it("whitespace-only editing does not require a repeated evidence review", () => {
   assert.equal(evidenceNeedsReview(original, " Vendor announces   testing software. "), false);
 });
+it("removing evidence clears private document claim receipts",()=>{
+  const draft={body:"Original",source_urls:"[]",provenance_json:"[]",found_note:"",unanswered:"[]",research_json:JSON.stringify({reportedDocumentClaims:{version:1,checkedText:"Original",rows:[{fact:"Claim"}]},documentEvidenceReview:{documents:[{id:"private"}]}})};
+  const removed=reconcileDraftEvidence(draft,"Changed","remove");
+  const research=JSON.parse(removed.research_json);
+  assert.equal(research.reportedDocumentClaims,undefined); assert.equal(research.documentEvidenceReview,undefined);
+});

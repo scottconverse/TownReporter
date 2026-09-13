@@ -19,6 +19,7 @@ export async function ensureStoryDocuments(sql: Sql) {
   )`);
   await sql.query("alter table story_documents add column if not exists source_url text");
   await sql.query("alter table story_documents add column if not exists expected_size integer");
+  await sql.query("alter table story_documents add column if not exists editorial_request_id integer");
 }
 export async function storeStoryDocument(
   room: number,
@@ -97,16 +98,38 @@ export async function linkStoryDocuments(
   if (!ids.length) return;
   const found = await sql<{
     id: string;
-  }>`select id from story_documents where id=any(${ids}) and newsroom_id=${room} and user_id=${user} and lead_id is null and status='uploaded'`;
+  }>`select id from story_documents where id=any(${ids}) and newsroom_id=${room} and user_id=${user} and lead_id is null and editorial_request_id is null and status='uploaded'`;
   if (found.length !== ids.length)
     throw new Error(
       "One of these documents is unavailable or already attached. Reload its upload before retrying.",
     );
   const linked = await sql<{
     id: string;
-  }>`update story_documents set lead_id=${lead} where id=any(${ids}) and newsroom_id=${room} and user_id=${user} and lead_id is null returning id`;
+  }>`update story_documents set lead_id=${lead} where id=any(${ids}) and newsroom_id=${room} and user_id=${user} and lead_id is null and editorial_request_id is null returning id`;
   if (linked.length !== ids.length)
     throw new Error("A document was attached by another request. Please reload.");
+}
+
+export async function linkEditorialDocuments(
+  sql: Sql, room: number, user: string, requestId: number, ids: string[],
+) {
+  await ensureStoryDocuments(sql);
+  if (ids.length > 21 || new Set(ids).size !== ids.length) throw new Error("Choose up to 20 different documents.");
+  if (!ids.length) return;
+  const linked = await sql.query(
+    `with eligible as materialized (
+       select id from story_documents where id=any($2) and newsroom_id=$3 and user_id=$4
+         and lead_id is null and editorial_request_id is null and status='uploaded'
+       for update
+     )
+     update story_documents set editorial_request_id=$1
+     where id in (select id from eligible)
+       and lead_id is null and editorial_request_id is null and status='uploaded'
+       and (select count(*) from eligible)=$5
+     returning id`,
+    [requestId, ids, room, user, ids.length],
+  );
+  if (linked.length !== ids.length) throw new Error("One of these documents is unavailable or already attached. Select it again before writing.");
 }
 
 type StoredDocument = {
@@ -173,7 +196,7 @@ export async function extractStoryDocument(
     await progress(`Reading image: ${doc.filename}`);
     return {
       text: validateDocumentText(
-        await transcribeDocumentImage(
+        `[${doc.filename}, page 1, OCR extraction]\n` + await transcribeDocumentImage(
           { bytes: canvas.toBuffer("image/png"), mime: "image/png" },
           { provider: choice, newsroomId: String(room) },
         ),
@@ -194,7 +217,9 @@ export async function extractStoryDocument(
           "str" in item ? item.str + ("hasEOL" in item && item.hasEOL ? "\n" : " ") : "",
         )
         .join("");
+      let usedOcr = false;
       if (text.trim().length < 40) {
+        usedOcr = true;
         const { renderPdfPages } = await import("./ocr.ts");
         const rendered = await renderPdfPages(new Uint8Array(doc.original), Date.now(), {
           start: page,
@@ -208,7 +233,7 @@ export async function extractStoryDocument(
         });
         if (!text.trim()) text = "[No readable text detected on this page; review the original.]";
       }
-      parts.push(`[${doc.filename}, page ${page}]\n${text}`);
+      parts.push(`[${doc.filename}, page ${page}, ${usedOcr ? "OCR extraction" : "native text extraction"}]\n${text}`);
       if (parts.reduce((n, p) => n + p.length, 0) > 20_000_000)
         throw new Error(
           "Extracted text exceeds 20 million characters. Original retained; split into volumes.",
@@ -230,12 +255,16 @@ export async function readStoryDocuments(
   urls: string[] = [],
   user = "",
   suppliedOnly = false,
+  editorialRequestId?: number,
 ) {
   const sql = await getSql();
   await ensureStoryDocuments(sql);
+  const association = editorialRequestId
+    ? ["editorial_request_id=$2", editorialRequestId] as const
+    : ["lead_id=$2", lead] as const;
   const intake = await sql.query(
-    "select id from story_documents where newsroom_id=$1 and lead_id=$2 limit 1",
-    [room, lead],
+    `select id from story_documents where newsroom_id=$1 and ${association[0]} limit 1`,
+    [room, association[1]],
   );
   if (!intake.length) return "";
   for (const url of urls) {
@@ -264,8 +293,10 @@ export async function readStoryDocuments(
     );
     await sql`update story_documents set lead_id=${lead},source_url=${url} where id=${stored.id} and newsroom_id=${room}`;
   }
-  const rows =
-    await sql<StoredDocument>`select id,filename,mime,original,full_text,pages,source_url from story_documents where newsroom_id=${room} and lead_id=${lead} order by created_at,id`;
+  const rows = await sql.query(
+    `select id,filename,mime,original,full_text,pages,source_url from story_documents where newsroom_id=$1 and ${association[0]} order by created_at,id`,
+    [room, association[1]],
+  ) as StoredDocument[];
   if (!rows.length) return "";
   const ready = await probeProvider(choice);
   if (!ready.ok) throw new Error(ready.error);
@@ -331,4 +362,11 @@ export async function readStoryDocuments(
     combined = next;
   }
   return `EDITOR-SUPPLIED DOCUMENTS. All extracted text was processed in sections; the notes below are a condensed reading, not verbatim complete documents. Cite filenames and page/character locators; never invent a public URL for an uploaded file. Originals and full extracted text are retained privately in the story. Verify quotations against the originals.\n${combined}`;
+}
+
+export function readEditorialDocuments(
+  room: number, requestId: number, choice: EffectiveProviderChoice, assignment: string,
+  onStage: (message: string) => Promise<void>, user = "",
+) {
+  return readStoryDocuments(room, 0, choice, assignment, onStage, [], user, true, requestId);
 }

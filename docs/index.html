@@ -1062,12 +1062,10 @@ npm run dev
                 configured provider for Scan and Dark Desk.
               </p>
               <p>
-                Opinion offers Claude and the local model. Automatic and Claude Opus both mean
-                Claude Opus through your signed-in Claude Code session, which reads the editorial
-                voice by file path and keeps its tool-free writing boundary; Local model is
-                offered too, through local discovery or configured <code>LLM_BASE_URL</code>. Codex is not offered for editorials:
-                its model declines to write a piece that takes a position on a local policy
-                question, so it stays on the Story picker. A refusal, assistant note, implausible
+                Opinion offers Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
+                plus saved custom connections. Automatic tries Claude Opus, then Codex Terra once
+                if needed; explicit choices stay selected. Claude reads the editorial voice by
+                file path, while Codex uses a separately authorized stdin handoff. A refusal, assistant note, implausible
                 headline or incomplete body is marked failed and never becomes a draft.
               </p>
               <p>

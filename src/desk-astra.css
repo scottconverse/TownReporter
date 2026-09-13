@@ -115,7 +115,7 @@
 }
 .desk-ltr.astra .astra-brand span {
   display: block;
-  font-size: 10px;
+  font-size: calc(14px * var(--ts));
   letter-spacing: 1.6px;
   color: var(--mut);
   margin-top: 8px;
@@ -131,7 +131,7 @@
   flex: 1;
 }
 .desk-ltr.astra .astra-nav-label {
-  font-size: 10px;
+  font-size: calc(14px * var(--ts));
   text-transform: uppercase;
   letter-spacing: 1.45px;
   color: var(--mut);
@@ -150,7 +150,7 @@
   min-height: 44px;
   font-weight: 500;
   color: var(--mut);
-  font-size: calc(13px * var(--ts));
+  font-size: calc(14px * var(--ts));
   transition: background 0.15s;
 }
 .desk-ltr.astra .astra-nav:hover {
@@ -170,14 +170,14 @@
   border-top: 1px solid var(--line);
   margin-top: 16px;
   padding: 14px 5px 0;
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra .astra-account > div {
   flex-wrap: wrap;
   gap: 7px;
 }
 .desk-ltr.astra .astra-account .text-sm {
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra .astra-size {
   display: flex;
@@ -185,13 +185,13 @@
   justify-content: space-between;
   color: var(--mut);
   margin-bottom: 14px;
-  font-size: 11px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra .astra-size select {
   padding: 5px 8px;
   min-height: 32px;
   width: auto;
-  font-size: 11px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra .astra-workspace {
   min-width: 0;
@@ -212,7 +212,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
   color: var(--mut);
   min-width: 0;
   overflow: hidden;
@@ -248,10 +248,10 @@
   border: 0;
   padding: 10px 0;
   color: var(--mut);
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra kbd {
-  font: 10px var(--fb);
+  font: 400 calc(14px * var(--ts)) var(--fb);
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 2px 5px;
@@ -282,7 +282,7 @@
   border-radius: 8px;
   background: var(--surface);
   color: var(--fg);
-  font-size: 13px;
+  font-size: calc(14px * var(--ts));
   font-weight: 600;
   text-decoration: none;
 }
@@ -311,21 +311,21 @@
   flex-wrap: wrap;
 }
 .desk-ltr.astra .kick {
-  font: 650 10px var(--fb);
+  font: 650 calc(14px * var(--ts)) var(--fb);
   letter-spacing: 1.6px;
   text-transform: uppercase;
   color: var(--a);
   margin: 0 0 12px;
 }
 .desk-ltr.astra .h1 {
-  font: 400 38px/1.15 var(--fd);
+  font: 400 calc(38px * var(--ts))/1.15 var(--fd);
   letter-spacing: -1.3px;
   margin: 0;
   text-wrap: balance;
 }
 .desk-ltr.astra .dark-lede,
 .desk-ltr.astra .lede {
-  font: 400 calc(13px * var(--ts))/1.7 var(--fb);
+  font: 400 calc(14px * var(--ts))/1.7 var(--fb);
   color: var(--mut);
   max-width: 760px;
   margin: 0 0 22px;
@@ -338,7 +338,7 @@
 .desk-ltr.astra :is(.meta, .wire-sum, .note, .side-note, .src-url, .meta-inline) {
   font-family: var(--fb);
   font-style: normal;
-  font-size: calc(12px * var(--ts));
+  font-size: calc(14px * var(--ts));
   line-height: 1.65;
   color: var(--mut);
 }
@@ -363,7 +363,7 @@
   border-radius: 8px;
   background: var(--surface);
   color: var(--fg);
-  font: 600 calc(12px * var(--ts))/1.4 var(--fb);
+  font: 600 calc(14px * var(--ts))/1.4 var(--fb);
   text-decoration: none;
   transition:
     background 0.15s,
@@ -405,7 +405,7 @@
 .desk-ltr.astra .btn.small {
   min-height: 36px;
   padding: 7px 11px;
-  font-size: calc(12px * var(--ts));
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra
   :where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea, select) {
@@ -416,7 +416,7 @@
   padding: 11px 12px;
   min-height: 42px;
   max-width: 100%;
-  font: 400 calc(13px * var(--ts))/1.6 var(--fb);
+  font: 400 calc(14px * var(--ts))/1.6 var(--fb);
 }
 .desk-ltr.astra textarea {
   resize: vertical;
@@ -437,14 +437,14 @@
   margin-bottom: 16px;
 }
 .desk-ltr.astra :is(.field > span, .field > label, .field-label) {
-  font: 600 calc(12px * var(--ts))/1.5 var(--fb);
+  font: 600 calc(14px * var(--ts))/1.5 var(--fb);
   text-transform: none;
   letter-spacing: 0;
   color: var(--fg);
   margin-bottom: 8px;
 }
 .desk-ltr.astra :is(.field small, .hint) {
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
   color: var(--mut);
   font-style: normal;
 }
@@ -462,7 +462,7 @@
   display: list-item;
   min-height: 28px;
   line-height: 28px;
-  font: 600 calc(13px * var(--ts))/28px var(--fb);
+  font: 600 calc(14px * var(--ts))/28px var(--fb);
   color: var(--a);
 }
 .desk-ltr.astra .file-form[open] summary {
@@ -482,7 +482,7 @@
   border-bottom: 2px solid transparent;
   background: none;
   color: var(--mut);
-  font: 500 calc(12px * var(--ts))/1.6 var(--fb);
+  font: 500 calc(14px * var(--ts))/1.6 var(--fb);
   letter-spacing: 0;
   text-transform: none;
   min-height: 44px;
@@ -501,7 +501,7 @@
   border-radius: 5px;
   background: var(--accent-soft);
   color: var(--a);
-  font: 600 11px/1.5 var(--fb);
+  font: 600 calc(14px * var(--ts))/1.5 var(--fb);
   letter-spacing: 0.3px;
 }
 .desk-ltr.astra .score {
@@ -514,7 +514,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font: 600 13px var(--fb);
+  font: 600 calc(14px * var(--ts)) var(--fb);
 }
 .desk-ltr.astra .astra-metrics {
   display: flex;
@@ -535,13 +535,13 @@
 }
 .desk-ltr.astra .astra-metrics strong {
   display: block;
-  font-size: 25px;
+  font-size: calc(25px * var(--ts));
   font-weight: 500;
   line-height: 1.4;
   margin-bottom: 5px;
 }
 .desk-ltr.astra .astra-metrics span {
-  font-size: 11px;
+  font-size: calc(14px * var(--ts));
   color: var(--mut);
 }
 .desk-ltr.astra .desk-home {
@@ -612,7 +612,7 @@
   padding: 10px 0;
   border: 0;
   border-top: 1px solid var(--line);
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
   text-decoration: none;
   color: var(--a);
 }
@@ -628,10 +628,10 @@
   margin: 0;
 }
 .desk-ltr.astra .recent-story-heading a {
-  font-size: 11px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra .recent-story-work > p {
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
   color: var(--mut);
   margin-bottom: 14px;
 }
@@ -660,13 +660,13 @@
   text-decoration: none;
 }
 .desk-ltr.astra .recent-story-status {
-  font: 600 10px var(--fb);
+  font: 600 calc(14px * var(--ts)) var(--fb);
   color: var(--a);
   margin-bottom: 5px;
   display: block;
 }
 .desk-ltr.astra .recent-story-row p {
-  font-size: 11px;
+  font-size: calc(14px * var(--ts));
   color: var(--mut);
   margin: 7px 0 0;
 }
@@ -675,7 +675,7 @@
   margin: 6px 0;
 }
 .desk-ltr.astra .composer-heading p {
-  font: 400 12px/1.7 var(--fb);
+  font: 400 calc(14px * var(--ts))/1.7 var(--fb);
   color: var(--mut);
 }
 .desk-ltr.astra .composer-sources {
@@ -706,12 +706,12 @@
 }
 .desk-ltr.astra .document-dropzone h3 {
   grid-column: 2;
-  font: 600 13px var(--fb);
+  font: 600 calc(14px * var(--ts)) var(--fb);
   margin: 0 0 6px;
 }
 .desk-ltr.astra .document-dropzone p {
   grid-column: 2;
-  font: 400 11px/1.6 var(--fb);
+  font: 400 calc(14px * var(--ts))/1.6 var(--fb);
   color: var(--mut);
   margin: 0;
 }
@@ -723,7 +723,7 @@
 .desk-ltr.astra .document-dropzone .document-limits {
   grid-column: 1 / -1;
   margin: 4px 0 0;
-  font-size: 10px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra .document-file-row {
   border: 1px solid var(--line);
@@ -735,14 +735,14 @@
   align-items: center;
 }
 .desk-ltr.astra .document-file-detail strong {
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra .document-file-detail span {
-  font-size: 10px;
+  font-size: calc(14px * var(--ts));
   color: var(--mut);
 }
 .desk-ltr.astra .document-remove {
-  font-size: 11px;
+  font-size: calc(14px * var(--ts));
   min-height: 36px;
   color: var(--warn);
 }
@@ -753,11 +753,11 @@
 }
 .desk-ltr.astra :is(.composer-pasted, .composer-instructions) label {
   display: block;
-  font: 600 12px var(--fb);
+  font: 600 calc(14px * var(--ts)) var(--fb);
   margin-bottom: 8px;
 }
 .desk-ltr.astra :is(.composer-pasted, .composer-instructions) > p {
-  font: 400 11px/1.6 var(--fb);
+  font: 400 calc(14px * var(--ts))/1.6 var(--fb);
   color: var(--mut);
   margin-bottom: 9px;
 }
@@ -776,7 +776,7 @@
   background: none;
 }
 .desk-ltr.astra .composer-options summary {
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
   color: var(--fg);
 }
 .desk-ltr.astra .composer-footer {
@@ -790,7 +790,7 @@
   background: none;
 }
 .desk-ltr.astra .composer-submit p {
-  font-size: 10px;
+  font-size: calc(14px * var(--ts));
   color: var(--mut);
   margin-top: 7px;
 }
@@ -837,7 +837,7 @@
   margin-top: 14px;
 }
 .desk-ltr.astra .pub-dek {
-  font: 400 13px/1.7 var(--fb);
+  font: 400 calc(14px * var(--ts))/1.7 var(--fb);
   color: var(--mut);
 }
 .desk-ltr.astra .pub-acts {
@@ -858,12 +858,12 @@
   padding: 0;
 }
 .desk-ltr.astra .ltable {
-  font: 400 12px/1.6 var(--fb);
+  font: 400 calc(14px * var(--ts))/1.6 var(--fb);
   width: 100%;
   background: var(--surface);
 }
 .desk-ltr.astra .ltable th {
-  font: 500 10px/1.5 var(--fb);
+  font: 500 calc(14px * var(--ts))/1.5 var(--fb);
   letter-spacing: 0.7px;
   text-transform: uppercase;
   color: var(--mut);
@@ -876,7 +876,7 @@
   border-bottom: 1px solid var(--line);
 }
 .desk-ltr.astra .src-t {
-  font: 600 13px var(--fb);
+  font: 600 calc(14px * var(--ts)) var(--fb);
 }
 .desk-ltr.astra .scan-bar {
   background: var(--surface);
@@ -905,7 +905,7 @@
   gap: 20px;
 }
 .desk-ltr.astra .crumb {
-  font: 500 12px var(--fb);
+  font: 500 calc(14px * var(--ts)) var(--fb);
   margin-bottom: 18px;
 }
 .desk-ltr.astra .story-grid {
@@ -950,7 +950,7 @@
   border: 0;
   border-bottom: 2px solid transparent;
   padding: 15px 0;
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
   min-height: 46px;
   color: var(--mut);
 }
@@ -967,7 +967,7 @@
   margin-bottom: 10px;
 }
 .desk-ltr.astra .astra-inspector p {
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
   line-height: 1.65;
 }
 .desk-ltr.astra .astra-inspector .side-h {
@@ -978,7 +978,7 @@
 }
 .desk-ltr.astra .astra-inspector .btn {
   padding: 8px 10px;
-  font-size: 11px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra .astra-check-action {
   border-top: 1px solid var(--line);
@@ -1002,7 +1002,7 @@
   position: relative;
 }
 .desk-ltr.astra .astra-save-state {
-  font-size: 11px;
+  font-size: calc(14px * var(--ts));
   color: var(--mut);
   margin-right: auto;
 }
@@ -1030,13 +1030,13 @@
   color: var(--fg);
 }
 .desk-ltr.astra .work-form .astra-headline {
-  font-size: 30px;
+  font-size: calc(30px * var(--ts));
   line-height: 1.3;
   min-height: 88px;
   letter-spacing: -0.4px;
 }
 .desk-ltr.astra .work-form .astra-dek {
-  font-size: 18px;
+  font-size: calc(18px * var(--ts));
   line-height: 1.5;
   min-height: 64px;
   color: var(--mut);
@@ -1070,7 +1070,7 @@
   text-align: left;
   background: none;
   color: var(--mut);
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
   min-height: 42px;
 }
 .desk-ltr.astra .astra-settings-nav button:hover {
@@ -1111,7 +1111,7 @@
 }
 .desk-ltr.astra[data-desk-page="stats"] table {
   font-family: var(--fb);
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra[data-desk-page="stats"] .font-display.text-3xl {
   font-family: var(--fb);
@@ -1177,7 +1177,7 @@
   text-decoration: none;
   border-radius: 8px;
   color: var(--fg);
-  font-size: 13px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra .astra-search-result:hover {
   background: var(--hover);
@@ -1185,22 +1185,22 @@
 .desk-ltr.astra .astra-search-result small {
   display: block;
   color: var(--mut);
-  font-size: 11px;
+  font-size: calc(14px * var(--ts));
   margin-top: 4px;
 }
 .desk-ltr.astra .astra-preview {
   width: min(880px, calc(100vw - 32px));
 }
 .desk-ltr.astra .astra-preview h1 {
-  font: 400 36px/1.25 var(--fd);
+  font: 400 calc(36px * var(--ts))/1.25 var(--fd);
   margin: 20px 0;
 }
 .desk-ltr.astra .astra-preview-dek {
-  font: 400 21px/1.5 var(--fd);
+  font: 400 calc(21px * var(--ts))/1.5 var(--fd);
   color: var(--mut);
 }
 .desk-ltr.astra .astra-preview-body {
-  font: 400 18px/1.85 var(--fd);
+  font: 400 calc(18px * var(--ts))/1.85 var(--fd);
   white-space: pre-wrap;
   margin-top: 28px;
   overflow-wrap: anywhere;
@@ -1279,7 +1279,7 @@
     white-space: nowrap;
   }
   .desk-ltr.astra .h1 {
-    font-size: 33px;
+    font-size: calc(33px * var(--ts));
   }
 }
 @media (max-width: 700px) {
@@ -1328,7 +1328,7 @@
     gap: 18px;
   }
   .desk-ltr.astra .h1 {
-    font-size: 32px;
+    font-size: calc(32px * var(--ts));
   }
   .desk-ltr.astra .astra-metrics {
     gap: 16px;
@@ -1337,7 +1337,7 @@
     padding: 0 16px 0 0;
   }
   .desk-ltr.astra .astra-metrics strong {
-    font-size: 22px;
+    font-size: calc(22px * var(--ts));
   }
   .desk-ltr.astra
     :is(.story-composer, .recent-story-work, .gc-queue, .gc-darkdesk, .gc-followups, .gc-wire) {
@@ -1355,7 +1355,7 @@
     padding: 24px 20px;
   }
   .desk-ltr.astra .work-form .astra-headline {
-    font-size: 27px;
+    font-size: calc(27px * var(--ts));
     min-height: 130px;
   }
   .desk-ltr.astra .work-bar.astra-story-actions {
@@ -1410,7 +1410,7 @@
   align-items: center;
 }
 .desk-ltr.astra .sec-sub {
-  font: 400 12px/1.65 var(--fb);
+  font: 400 calc(14px * var(--ts))/1.65 var(--fb);
   color: var(--mut);
   font-style: normal;
 }
@@ -1431,7 +1431,7 @@
 .desk-ltr.astra .nightpanel.gc-darkdesk :is(.np-kind, .np-meta, .np-n, .worth-sub) {
   color: var(--mut);
   font-family: var(--fb);
-  font-size: 11px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra .nightpanel.gc-darkdesk :is(.worth-t, .deskfile .worth-t) {
   font: 500 15px/1.5 var(--fd);
@@ -1484,7 +1484,7 @@
 .desk-ltr.astra[data-desk-page="opinion"] main > section .tracking-\[0\.14em\] {
   letter-spacing: 0;
   text-transform: none;
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
   font-weight: 600;
 }
 .desk-ltr.astra[data-desk-page="dark"] :is(.tipbox.top, .nightpanel, .deskfile, .of-grid) {
@@ -1507,7 +1507,7 @@
   white-space: normal;
 }
 .desk-ltr.astra .astra-preview-body > div {
-  font: 400 18px/1.85 var(--fd);
+  font: 400 calc(18px * var(--ts))/1.85 var(--fd);
 }
 @media (max-width: 960px) {
   .desk-ltr.astra .desk-home .story-composer {
@@ -1538,7 +1538,7 @@
   display: block;
 }
 .desk-ltr.astra .f > span {
-  font: 600 12px/1.5 var(--fb);
+  font: 600 calc(14px * var(--ts))/1.5 var(--fb);
   letter-spacing: 0;
   text-transform: none;
   color: var(--mut);
@@ -1552,12 +1552,12 @@
   margin: 6px 0;
 }
 .desk-ltr.astra .story-composer-heading > p {
-  font: 400 12px/1.7 var(--fb);
+  font: 400 calc(14px * var(--ts))/1.7 var(--fb);
   color: var(--mut);
   margin-top: 8px;
 }
 .desk-ltr.astra .story-composer-heading .composer-kicker {
-  font: 650 10px var(--fb);
+  font: 650 calc(14px * var(--ts)) var(--fb);
   letter-spacing: 1.5px;
   color: var(--a);
 }
@@ -1596,23 +1596,23 @@
 }
 .desk-ltr.astra .story-name-check li {
   margin: 14px 0;
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
   line-height: 1.65;
 }
 .desk-ltr.astra .story-name-check strong {
-  font-size: 12px;
+  font-size: calc(14px * var(--ts));
 }
 .desk-ltr.astra .model-picker {
   min-width: 0;
   max-width: 100%;
 }
 .desk-ltr.astra .model-picker-label {
-  font: 600 11px var(--fb);
+  font: 600 calc(14px * var(--ts)) var(--fb);
   text-transform: none;
   letter-spacing: 0;
 }
 .desk-ltr.astra .model-picker-help {
-  font: 400 11px/1.6 var(--fb);
+  font: 400 calc(14px * var(--ts))/1.6 var(--fb);
 }
 .desk-ltr.astra .astra-inspector .model-picker {
   display: flex;

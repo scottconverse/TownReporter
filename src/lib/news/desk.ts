@@ -974,9 +974,18 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const sourceInput = draftSourceInputs(urls, prevNotes, researchScope);
   const { retainedWatchSources } = await import("./retained-watch-source.server.ts");
   const {readStoryDocuments}=await import("./story-documents.server.ts");
-  const documentEvidence=await readStoryDocuments(owned(context),leadId,job.model_choice as import("./ai.ts").EffectiveProviderChoice,prevNotes.editorialAssignment?.text || lead.headline, message=>setStage(job.id,message), prevNotes.suppliedUrls ?? [], context.userId, researchScope === "supplied");
+  const documentReadingEvidence=await readStoryDocuments(owned(context),leadId,job.model_choice as import("./ai.ts").EffectiveProviderChoice,prevNotes.editorialAssignment?.text || lead.headline, message=>setStage(job.id,message), prevNotes.suppliedUrls ?? [], context.userId, researchScope === "supplied");
+  const retainedNameDocuments = await sql<{id:string;filename:string;mime:string;full_text:string;source_url:string|null}>`
+    select id,filename,mime,full_text,source_url from story_documents
+    where newsroom_id=${owned(context)} and lead_id=${leadId} and status='read'
+      and full_text is not null and mime <> 'application/x-townreporter-source-links'
+    order by created_at,id`;
+  const documentEvidence = retainedNameDocuments.length
+    ? `PRIVATE DOCUMENT IDENTITIES (internal evidence labels only; never print IDs in the story):\n${retainedNameDocuments.map(doc=>`DOCUMENT ID ${doc.id} | FILENAME ${doc.filename}`).join("\n")}\n\n${documentReadingEvidence}`
+    : documentReadingEvidence;
   const draftInput = {
     documentEvidence,
+    documentNameEvidence: retainedNameDocuments.map(doc => ({evidenceKind:"uploaded-document" as const,documentId:doc.id,filename:doc.filename,mime:doc.mime,text:doc.full_text,sourceUrl:doc.source_url})),
     userId: context.userId,
     newsroomId: context.newsroomId,
     lead,
@@ -1123,6 +1132,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     citationPolicy: "explicit",
     researchScope: draftInput.researchScope,
     reportedClaims: { version: 1, rows: reported.claims },
+    reportedDocumentClaims: { version: 1, checkedText: [reported.headline,reported.dek,reported.body].join("\n\n"), rows: reported.documentClaims ?? [] },
   });
   const yours = keepHumanTodos(prevNotes);
   /*

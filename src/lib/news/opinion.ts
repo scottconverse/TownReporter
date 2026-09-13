@@ -36,6 +36,8 @@ export type EditorialRow = {
   headline: string | null;
   words: number | null;
   published_slug: string | null;
+  /** Latest durable desk job stage for an open request (for live progress UI). */
+  stage?: string;
   /**
    * True when the row looks like it is still being written (no finished_at,
    * no error) but the desk_jobs heartbeat behind it is cold or missing --
@@ -45,6 +47,24 @@ export type EditorialRow = {
    */
   stalled?: boolean;
 };
+
+export const getFailedEditorialMaterial = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((requestId: number) => requestId)
+  .handler(async ({ context, data: requestId }) => {
+    const { ensureEditorialRequestSchema } = await import("./editorial.server");
+    await ensureEditorialRequestSchema();
+    const sql = await getSql();
+    const [row] = await sql<{ source_text: string; asked_for: string; error: string | null; finished_at: string | null; draft_id: number | null }>`
+      select source_text, asked_for, error, finished_at, draft_id from editorial_requests
+      where id=${requestId} and newsroom_id=${owned(context)} limit 1
+    `;
+    if (!row || !row.finished_at || !row.error || row.draft_id !== null) return { ok: false as const, error: "That failed request has no restorable material." };
+    const [docs] = await sql<{ count: number }>`select count(*) as count from story_documents where editorial_request_id=${requestId} and newsroom_id=${owned(context)}`;
+    const attachmentCount = Number(docs?.count ?? 0);
+    if (!row.source_text && !attachmentCount) return { ok: false as const, error: "This older request was saved before full-paste recovery existed; its missing text cannot be reconstructed." };
+    return { ok: true as const, requestId, sourceText: row.source_text, askedFor: row.asked_for, attachmentCount };
+  });
 
 export const opinionReadiness = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
@@ -92,6 +112,7 @@ export const listEditorials = createServerFn({ method: "GET" })
         kind: "editorial",
         subjectId: row.id,
       });
+      row.stage = job?.stage || undefined;
       row.stalled = runLooksStalled({ runOpen: true, job });
     }
     return rows;
@@ -109,12 +130,14 @@ export const getEditorial = createServerFn({ method: "GET" })
       headline: string;
       body: string;
       topic: string;
+      dek: string;
+      research_json: string | null;
       fact_sheet: string | null;
       image_prompt: string | null;
       source_kind: string | null;
       source_ref: string | null;
     }>`
-      select d.id, d.headline, d.body, d.topic,
+      select d.id, d.headline, d.body, d.topic, d.dek, d.research_json,
              e.fact_sheet, e.image_prompt, e.source_kind, e.source_ref
       from drafts d
       left join editorial_extras e on e.draft_id = d.id
@@ -134,7 +157,7 @@ export const getEditorial = createServerFn({ method: "GET" })
 export const startEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(
-    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string }) =>
+    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; documentIds?: string[]; retryRequestId?: number }) =>
       input,
   )
   .handler(async ({ context, data }) => {
@@ -147,6 +170,8 @@ export const startEditorial = createServerFn({ method: "POST" })
       askedFor: data.askedFor,
       articleSlug: data.articleSlug,
       modelChoice,
+      documentIds: data.documentIds,
+      retryRequestId: data.retryRequestId,
     });
   });
 

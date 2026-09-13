@@ -375,9 +375,9 @@ disabled while readiness is unknown.
 
 A successful process exit is not enough to file a piece. TownReporter rejects
 provider refusals, assistant notes, implausible headlines, and incomplete
-bodies before draft storage. Automatic currently uses Claude only; a failed
-run reports the failure without switching to Local model. An explicit choice
-also never switches providers. A
+bodies before draft storage. A provider refusal or invalid delivery reports a
+failed run without creating a draft. Automatic can move from Claude Opus to
+Codex Terra once; an explicit choice never switches providers. A
 failed row has no Read, Edit, or Publish action; a finished row shows the
 provider that actually delivered it.
 
@@ -561,13 +561,12 @@ the registry is the canonical picker definition; provider adapters still impleme
 | **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Codex Terra/Sol, Claude Opus, or Local model                                                                    |
 | Dark Desk synthesis and brief         | the one you pick beside **Keep digging**; Automatic behaves as it does for Draft, with one mid-run failover at the round level                                                                                                                                           | the one you picked                                                                                              |
 | Dark Desk **planner**                 | the one you pick                                                                                                                                                                                                                                                         | a cheaper model from the SAME provider: Haiku on Claude, Terra on either Codex, and your own model on a gateway |
-| **Opinion (editorials)**              | Claude Opus, through the signed-in Claude Code session, or Local model; Codex is not offered for editorials                                                                                                                                                              | Claude Opus, or Local model                                                                                     |
+| **Opinion (editorials)**              | Automatic: Claude Opus → Codex Terra once when needed; explicit Claude Opus, Codex Terra, Codex Sol, Local model or custom choice stays selected                                                                                                                        | The selected provider                                                                                           |
 
-**Why Opinion excludes Codex.** An editorial uses the paper's configured
-voice and frontier research; Codex is not offered for editorials because
-its model declines to write a piece that takes a position. The local
-model carries no such refusal, so Opinion's picker offers Automatic,
-Claude Opus, and Local model. (Zen MiMo and the earlier, model-specific
+**Opinion provider behavior.** An editorial uses the paper's configured voice
+and frontier research. Opinion's picker offers Automatic, Claude Opus, Codex
+Terra, Codex Sol, Local model and custom connections. Automatic tries Claude
+Opus then Codex Terra once when needed; explicit choices stay selected. (Zen MiMo and the earlier, model-specific
 Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
 brought a generic local pick back.) Claude Code
 receives the voice by file path, and its writing pass is tool-free. The
@@ -603,7 +602,8 @@ failure every time.
 
 Pointing `LLM_BASE_URL` at a local model sends Scan, Dark Desk, and Story
 Automatic to that gateway. An explicit Story choice still forces its named
-provider. Opinion offers Claude Opus or Local model.
+provider. Opinion offers Automatic, Claude Opus, Codex Terra, Codex Sol, Local
+model and saved custom connections.
 What that actually costs in quality was measured on this machine:
 [docs/local-models.md](local-models.md).
 

@@ -73,18 +73,10 @@ export async function checkOpinionReadiness(
   const voice = await (deps.findVoice ?? defaultVoiceProbe)();
   if (!voice.ok) problems.push(voice.error);
 
-  /*
-    Automatic has always been Claude-only for Opinion (see
-    OPINION_MODEL_CHOICES and local-model's missing `ladderRank` in
-    provider-registry.ts): it probes the same single rung an explicit
-    "claude-frontier" pick would. An explicit pick of any other offered
-    candidate (today just "local-model"; Codex is excluded, see
-    OPINION_MODEL_CHOICES) probes THAT candidate, and only that candidate --
-    never a substitute. This is the fix for the bug documented on
-    `defaultCandidateProbe` above.
-  */
+  // Automatic may start when either signed-in subscription provider is ready.
+  // Explicit choices probe only themselves and remain fixed at runtime.
   const candidates: readonly CandidateChoice[] =
-    choice === "auto" ? (["claude-frontier"] as const) : ([choice] as const);
+    choice === "auto" ? (["claude-frontier", "codex-balanced"] as const) : ([choice] as const);
   let selected: CandidateProbe | undefined;
   const providerProblems: string[] = [];
   const probeCandidate = deps.probeCandidate ?? defaultCandidateProbe;

@@ -7,9 +7,10 @@ import {
   type WriteEditorialInput,
   type WriteEditorialResult,
 } from "./editorial-orchestration.ts";
-import { findVoiceFile, readVoiceTextForLocalModel } from "./voice.server.ts";
+import { findVoiceFile, readVoiceTextForLocalModel, readVoiceTextForOpenAiCodex } from "./voice.server.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { opinionModelChoice } from "./model-choice.ts";
+import { setJobStage } from "./jobs.ts";
 import {
   persistEditorialCompletion,
   persistEditorialSuccess,
@@ -22,6 +23,9 @@ import {
   type Editorial,
   type EditorialPointer,
 } from "./editorial.ts";
+import { plannerModelFor, providerEntry, providerModel } from "./provider-registry.ts";
+import { nameCheckText, type NameCheck } from "./name-check.ts";
+import { officialDomains } from "./absence-gate.ts";
 
 export type { WriteEditorialInput, WriteEditorialResult } from "./editorial-orchestration.ts";
 
@@ -116,7 +120,14 @@ export async function ensureEditorialSchema() {
 
 export async function writeEditorial(input: WriteEditorialInput): Promise<WriteEditorialResult> {
   const cfg = await getPaperConfig(input.newsroomId);
-  input = { ...input, paper: { name: cfg.name, city: cfg.city } };
+  input = {
+    ...input,
+    paper: {
+      name: cfg.name,
+      city: cfg.city,
+      officialDomains: officialDomains(cfg.city, input.pointers.map((pointer) => pointer.url)),
+    },
+  };
   return orchestrateEditorial(input, {
     findVoiceFile,
     runClaudePair: async ({ input: editorialInput, found, researchPack }) => {
@@ -135,6 +146,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
         timeoutMs: editorialTimeoutMs(),
       });
       if (!research.ok) return research;
+      if (editorialInput.completion) await setJobStage(editorialInput.completion.jobId, "Writing the editorial");
       return claudeCodeChat({
         system: "",
         systemPromptFile: found.voice.path,
@@ -146,6 +158,35 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
           research: research.text,
         }),
         model: process.env.TOWNREPORTER_EDITORIAL_MODEL?.trim() || "claude-opus-5",
+        timeoutMs: editorialTimeoutMs(),
+      });
+    },
+    runCodexPair: async ({ input: editorialInput, researchPack }) => {
+      const { codexChat } = await import("./ai-codex.server.ts");
+      const choice = editorialInput.modelChoice === "codex-frontier" ? "codex-frontier" : "codex-balanced";
+      const entry = providerEntry(choice)!;
+      const research = await codexChat({
+        system: RESEARCH_INSTRUCTIONS,
+        user: researchPack,
+        model: plannerModelFor(choice),
+        timeoutMs: editorialTimeoutMs(),
+        webSearch: true,
+      });
+      if (!research.ok) return research;
+      if (editorialInput.completion) await setJobStage(editorialInput.completion.jobId, "Writing the editorial");
+      const voice = await readVoiceTextForOpenAiCodex();
+      if (!voice.ok) return voice;
+      return codexChat({
+        system: "",
+        systemPromptText: voice.text,
+        user: buildWritingPack({
+          paper: editorialInput.paper,
+          subject: editorialInput.subject,
+          ourStory: editorialInput.ourStory,
+          askedFor: editorialInput.askedFor,
+          research: research.text,
+        }),
+        model: providerModel(entry),
         timeoutMs: editorialTimeoutMs(),
       });
     },
@@ -182,7 +223,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: "",
+          research: editorialInput.sourceText ?? "",
         }),
         4_000,
         { timeoutMs: editorialTimeoutMs(), choice: "local-model", localModel },
@@ -199,7 +240,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: "",
+          research: editorialInput.sourceText ?? "",
         }),
         4_000,
         {
@@ -224,16 +265,42 @@ export async function fileEditorial(
   input: WriteEditorialInput,
   ed: Editorial,
   modelChoice?: EffectiveOpinionModelChoice,
+  deps: {
+    checkEditorialNames?: typeof import("./editorial-name-check.ts").checkEditorialNames;
+    setJobStage?: typeof setJobStage;
+  } = {},
 ): Promise<FiledEditorialResult> {
   await ensureEditorialSchema();
   if (input.completion && !modelChoice) {
     throw new Error("A queued editorial completion requires the provider that produced it.");
   }
 
+  let nameCheck: NameCheck | undefined;
+  let integrityNotes = "";
+  if (input.completion && modelChoice) {
+    await (deps.setJobStage ?? setJobStage)(input.completion.jobId, "Checking names and spellings");
+    const checkEditorialNames = deps.checkEditorialNames ?? (await import("./editorial-name-check.ts")).checkEditorialNames;
+    const checked = await checkEditorialNames({
+      newsroomId: input.newsroomId,
+      editorialRequestId: input.completion.requestId,
+      modelChoice,
+      userId: input.userId,
+      publicResearchAllowed: true,
+      officialDomains: input.paper?.officialDomains ?? [],
+      editorial: ed,
+      integrityNotes,
+      city: input.paper?.city ?? "",
+    });
+    ed = checked.editorial;
+    nameCheck = checked.nameCheck;
+    integrityNotes = checked.integrityNotes;
+  }
+
   // Receipts at the end of the piece, where the reader can reach them.
   const body = ed.appendix ? `${ed.body}\n\n---\n\nCLAIMS AND SOURCES\n\n${ed.appendix}` : ed.body;
 
   const headline = opinionHeadline(ed.headline);
+  if (nameCheck) nameCheck = { ...nameCheck, checkedText: nameCheckText({ headline, dek: "", body }) };
   return withTransaction(async (sql) => {
     if (input.completion) {
       const [request] = await sql<{
@@ -284,10 +351,11 @@ export async function fileEditorial(
     }
 
     const rows = await sql<{ id: number }>`
-      insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, form)
+      insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, form, integrity_notes, research_json)
       values (
         ${input.userId}, ${input.newsroomId}, ${input.leadId ?? null},
-        ${headline}, ${""}, ${body}, ${"opinion"}, ${"[]"}, ${"editorial"}
+        ${headline}, ${""}, ${body}, ${"opinion"}, ${"[]"}, ${"editorial"},
+        ${integrityNotes}, ${JSON.stringify(nameCheck ? { nameCheck } : {})}
       )
       returning id
     `;
@@ -337,6 +405,7 @@ export async function ensureEditorialRequestSchema() {
       user_id text not null,
       newsroom_id integer not null default 1,
       subject text not null,
+      source_text text not null default '',
       source_kind text not null default 'paste',
       source_ref text not null default '',
       asked_for text not null default '',
@@ -352,10 +421,14 @@ export async function ensureEditorialRequestSchema() {
   await sql.query(
     `alter table editorial_requests add column if not exists model_choice text not null default 'auto'`,
   );
+  await sql.query(
+    `alter table editorial_requests add column if not exists source_text text not null default ''`,
+  );
 }
 
 type EditorialWorkDeps = {
   writeEditorial?: (input: WriteEditorialInput) => Promise<WriteEditorialResult>;
+  readEditorialDocuments?: typeof import("./story-documents.server.ts").readEditorialDocuments;
 };
 
 export async function performEditorialWork(
@@ -372,6 +445,7 @@ export async function performEditorialWork(
   const rows = await sql<{
     id: number;
     subject: string;
+    source_text: string;
     source_kind: string;
     source_ref: string;
     asked_for: string;
@@ -380,7 +454,7 @@ export async function performEditorialWork(
     model_choice: string;
     draft_id: number | null;
   }>`
-    select id, subject, source_kind, source_ref, asked_for, pointers_json, our_story_json,
+    select id, subject, source_text, source_kind, source_ref, asked_for, pointers_json, our_story_json,
            model_choice, draft_id
     from editorial_requests
     where id = ${job.subject_id} and newsroom_id = ${job.newsroom_id} limit 1
@@ -433,10 +507,37 @@ export async function performEditorialWork(
     ourStory = undefined;
   }
 
+  let documentEvidence = "";
+  const readEditorialDocuments = deps.readEditorialDocuments ?? (await import("./story-documents.server.ts")).readEditorialDocuments;
+  const requestedChoice = opinionModelChoice(req.model_choice);
+  const readingChoices = requestedChoice === "auto"
+    ? (["claude-frontier", "codex-balanced"] as const)
+    : ([requestedChoice] as const);
+  let readingFailure: unknown;
+  for (const choice of readingChoices) {
+    try {
+      documentEvidence = await readEditorialDocuments(
+        job.newsroom_id, req.id,
+        choice as Parameters<typeof readEditorialDocuments>[2],
+        [req.subject, req.asked_for].filter(Boolean).join("\n"),
+        (stage) => setJobStage(job.id, stage), job.user_id,
+      );
+      readingFailure = undefined;
+      break;
+    } catch (error) { readingFailure = error; }
+  }
+  if (readingFailure) {
+    const detail = readingFailure instanceof Error ? readingFailure.message : String(readingFailure);
+    await sql`update editorial_requests set error=${detail.slice(0, 800)},finished_at=now()
+      where id=${req.id} and newsroom_id=${job.newsroom_id} and draft_id is null`;
+    throw readingFailure;
+  }
+  await setJobStage(job.id, "Researching the editorial");
   const result = await (deps.writeEditorial ?? writeEditorial)({
     userId: job.user_id,
     newsroomId: job.newsroom_id,
     subject: req.subject,
+    sourceText: documentEvidence || req.source_text || req.subject,
     pointers,
     ourStory,
     askedFor: req.asked_for,

@@ -16,6 +16,7 @@ import {
   discardEditorialRequest,
   fileWrittenEditorial,
   getEditorial,
+  getFailedEditorialMaterial,
   listEditorials,
   opinionReadiness,
   publishEditorial,
@@ -27,6 +28,8 @@ import { usePaperDateFormatters } from "@/lib/paper-context";
 import { ModelPicker } from "@/components/model-picker";
 import type { OpinionModelChoice } from "@/lib/news/model-choice";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
+import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
+import { DeskNameCheck } from "@/components/desk-name-check";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 import {
   editorialAttribution,
@@ -56,6 +59,9 @@ function OpinionPage() {
   const qc = useQueryClient();
   const [subject, setSubject] = useState("");
   const [askedFor, setAskedFor] = useState("");
+  const [documents, setDocuments] = useState<StoryUpload[]>([]);
+  const [documentsBusy, setDocumentsBusy] = useState(false);
+  const [retryRequestId, setRetryRequestId] = useState<number | undefined>();
   const [modelChoice, setModelChoice] = useState<OpinionModelChoice>("auto");
   const [openId, setOpenId] = useState<number | null>(null);
   /*
@@ -163,7 +169,7 @@ function OpinionPage() {
   });
 
   const start = useMutation({
-    mutationFn: () => startEditorial({ data: { subject, askedFor, modelChoice } }),
+    mutationFn: () => startEditorial({ data: { subject, askedFor, modelChoice, documentIds: documents.map((d) => d.id), retryRequestId } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         const raw = res?.error ?? "That did not start.";
@@ -172,6 +178,8 @@ function OpinionPage() {
       }
       setSubject("");
       setAskedFor("");
+      setDocuments([]);
+      setRetryRequestId(undefined);
       setInfo("Writing. It fetches its own records first, so give it 10–40 minutes.");
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
@@ -179,6 +187,19 @@ function OpinionPage() {
       const raw = err instanceof Error ? err.message : "That did not start.";
       setError(editorDraftError(raw) ?? raw, raw);
     },
+  });
+
+  const restoreMaterial = useMutation({
+    mutationFn: (requestId: number) => getFailedEditorialMaterial({ data: requestId }),
+    onSuccess: (res) => {
+      if (!res.ok) { setError(res.error); return; }
+      setSubject(res.sourceText);
+      setAskedFor(res.askedFor);
+      setRetryRequestId(res.requestId);
+      setSuccess(`The complete saved material is back in the form above.${res.attachmentCount ? ` ${res.attachmentCount} retained attachment${res.attachmentCount === 1 ? " is" : "s are"} ready for retry.` : ""}`);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    },
+    onError: () => setError("The saved material could not be restored. Nothing was changed."),
   });
 
   /*
@@ -247,7 +268,7 @@ function OpinionPage() {
       <section className="mt-8">
         <SecHead
           title="Write one"
-          sub="A subject, a URL, or a sentence. A pasted link gets opened and read before anything is written."
+          sub="Paste your source material, add documents, or give it a subject and links. The writer reads the material before drafting."
         />
         {ready.isPending || ready.isFetching ? (
           <p
@@ -283,7 +304,7 @@ function OpinionPage() {
         <div className="mt-4 max-w-2xl space-y-3">
           <label className="block">
             <span className="text-sm tracking-[0.14em] text-muted uppercase">
-              Subject or link
+              Subject, source text, or links
             </span>
             <textarea
               className={areaClass + " mt-1 w-full"}
@@ -291,17 +312,26 @@ function OpinionPage() {
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               placeholder="The rail district wants a second tax for the same tracks — or paste a URL"
+              maxLength={20_000_000}
             />
           </label>
+          <StoryDocumentUpload
+            documents={documents}
+            onChange={setDocuments}
+            onBusy={setDocumentsBusy}
+            disabled={start.isPending}
+          />
           <label className="block">
             <span className="text-sm tracking-[0.14em] text-muted uppercase">
               Anything you want it to know (optional)
             </span>
-            <input
+            <textarea
               className={inputClass + " mt-1 w-full"}
+              rows={6}
               value={askedFor}
               onChange={(e) => setAskedFor(e.target.value)}
               placeholder="Angle, a document to start from, a length"
+              maxLength={20_000_000}
             />
           </label>
           <ModelPicker
@@ -319,7 +349,8 @@ function OpinionPage() {
                 ready.isPending ||
                 ready.isFetching ||
                 ready.isError ||
-                subject.trim().length < 6 ||
+                (subject.trim().length < 6 && documents.length === 0) ||
+                documentsBusy ||
                 !ready.data?.ready
               }
             >
@@ -446,10 +477,10 @@ function OpinionPage() {
                     <span className="text-sm tracking-[0.14em] text-rust uppercase">
                       Stalled
                     </span>
-                  ) : !r.finished_at ? (
-                    // Fifteen minutes of a static word reads as hung. The rule
-                    // animates, and the clock counts up, so it is visibly alive.
-                    <Elapsed since={r.created_at} />
+                ) : !r.finished_at ? (
+                    <span className="text-sm text-muted">
+                      {r.stage || "Working…"} · <Elapsed since={r.created_at} />
+                    </span>
                   ) : r.error ? (
                     <span className="text-sm tracking-[0.14em] text-rust uppercase">
                       Failed
@@ -521,16 +552,21 @@ function OpinionPage() {
                   <p className="mt-2 max-w-md text-sm text-rust">{stalledRunCopy("editorial")}</p>
                 ) : !r.finished_at ? (
                   <div className="mt-2 max-w-md">
-                    <Busy label="Reading the records before it writes a word" />
+                    <Busy label={r.stage || "Working…"} />
                   </div>
                 ) : null}
                 {r.error ? (
-                  <p className="mt-1 text-sm text-rust">
+                  <div className="mt-1 text-sm text-rust">
                     {editorDraftError(r.error) ?? r.error}
                     {looksLikeProviderAuthFailure(r.error) ? (
                       <ProviderSignInButton detail={r.error} />
                     ) : null}
-                  </p>
+                    {!r.draft_id ? (
+                      <button type="button" className="inline-link ml-2" disabled={restoreMaterial.isPending} onClick={() => restoreMaterial.mutate(r.id)}>
+                        {restoreMaterial.isPending ? "Restoring…" : "Restore saved material"}
+                      </button>
+                    ) : null}
+                  </div>
                 ) : null}
                 {confirmId === r.id ? (
                   <p className="mt-1 text-sm text-rust">
@@ -592,6 +628,12 @@ function OpinionPage() {
               <pre className="max-w-3xl text-base leading-7 whitespace-pre-wrap">
                 {piece.data.body}
               </pre>
+              <DeskNameCheck
+                research={piece.data.research_json}
+                headline={piece.data.headline}
+                dek={piece.data.dek}
+                body={piece.data.body}
+              />
               {piece.data.fact_sheet ? (
                 <div>
                   <div className="flex flex-wrap items-center justify-between gap-2">

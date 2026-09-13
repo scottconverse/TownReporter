@@ -291,12 +291,12 @@ For **Automatic**, a configured gateway wins; named choices in Story, Scan and D
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
-**Opinion offers Claude and the local model.** The picker offers Automatic,
-Claude Opus, and Local model (through discovery or configured `LLM_BASE_URL`). Claude Code runs
-its own research pass, then loads the editorial voice by file path for the
-writing pass. Codex is not offered for editorials: its model declines to
-write a piece that takes a position on a local policy question, so it stays
-on the Story picker, where it drafts reporting.
+**Opinion offers the native providers and local model.** The picker offers
+Automatic, Claude Opus, Codex Terra, Codex Sol and Local model, plus saved
+custom connections. Automatic tries Claude Opus first and moves to Codex Terra
+once if Claude is unavailable; an explicit choice stays selected. The writer
+reads the configured private voice file, and a provider refusal or invalid
+delivery leaves the request failed without a draft.
 
 ### Other models — one OpenAI-compatible URL
 

@@ -557,11 +557,11 @@ Where the paper says what it thinks.
 Type a subject, a sentence, or paste a URL, and press **Write an editorial**. A
 pasted link gets opened and read before anything is written.
 
-Choose **Automatic** or **Claude Opus** first; both mean Claude Opus through
-your signed-in Claude Code session. **Local model** is offered too, through discovery or a configured
-`LLM_BASE_URL`. Codex is not offered for
-editorials -- its model declines to write a piece that takes a position --
-so it stays on the Story picker.
+Choose **Automatic**, **Claude Opus**, **Codex Terra**, **Codex Sol** or
+**Local model**; saved custom connections are offered too. Automatic tries
+Claude Opus, then Codex Terra once if Claude is unavailable. An explicit choice
+stays selected. Claude reads the private voice by file path; Codex uses a
+separately authorized stdin handoff.
 Readiness lists every missing prerequisite — voice file, installation, or
 login — before the button is enabled, and the server checks again when you
 click. If OAuth expires, open the named provider on this machine and sign in;
@@ -588,8 +588,8 @@ The desk checks that the delivery is actually an editorial before it files
 anything. A provider refusal, limitation note, neutral-summary substitute,
 implausible headline, or incomplete body makes the row **Failed** and creates no
 draft. There is then no Read, Edit, or Publish action to mistake for success.
-Automatic currently uses Claude only; a failed run does not switch to Local
-model. A named choice also stays with that provider. A
+Automatic can move from Claude Opus to Codex Terra once; a named choice stays
+with that provider. A
 finished row names the provider that actually delivered the piece.
 
 **Edit** opens the piece in its own editor. That is where you change the

@@ -61,7 +61,7 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
     }
   });
 
-  it("Automatic probes Claude and only Claude -- Opinion has one provider", async () => {
+  it("Automatic accepts Claude first without probing the fallback", async () => {
     const probed: string[] = [];
     const result = await checkOpinionReadiness("auto", {
       findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
