@@ -1,6 +1,6 @@
 # Editor desk: current workflow
 
-For [TownReporter 0.6.44](releases/0.6.44.md). The sidebar contains Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats. New story opens document intake. Dark Desk opens investigations; the TownReporter logo, breadcrumb and Public news page control return to the public newspaper. On narrow screens, open the navigation menu.
+For [TownReporter 0.6.45](releases/0.6.45.md). The sidebar contains Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats. New story opens document intake. Dark Desk opens investigations; the TownReporter logo, breadcrumb and Public news page control return to the public newspaper. On narrow screens, open the navigation menu.
 
 ## Start with evidence
 

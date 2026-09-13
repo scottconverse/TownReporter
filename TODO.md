@@ -2,7 +2,7 @@
 
 ## Current release work — 2026-09-13
 
-The current source and operator guide is [0.6.44](docs/releases/0.6.44.md), which supersedes the deployment and feature-status snapshots below. The Astra desk, shared Opinion/document intake, private-document evidence checks, and native Codex voice-file integration are implemented. Packaging, published-install checks and production deployment are recorded with the release. Original political-editorial refusal and the broader daily newsroom quality target are not claimed solved. Historical staging fixtures and private operator material remain preserved.
+The current source and operator guide is [0.6.45](docs/releases/0.6.45.md), which supersedes the deployment and feature-status snapshots below. The Astra desk, shared Opinion/document intake, private-document evidence checks, and native Codex voice-file integration are implemented. Packaging, published-install checks and production deployment are recorded with the release. Original political-editorial refusal and the broader daily newsroom quality target are not claimed solved. Historical staging fixtures and private operator material remain preserved.
 
 ## Historical work record
 
