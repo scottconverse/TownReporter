@@ -928,7 +928,7 @@ flowchart LR
         VOICE["The voice file<br/>~/.townreporter/voice/*.md"]
     end
 
-    CLI["Claude Code CLI<br/>path-only voice, web-enabled writing"]
+    CLI["Claude or Codex CLI<br/>native voice file, web-enabled writing"]
 
     UI --> PACK
     PACK -->|"over stdin"| CLI
@@ -939,10 +939,10 @@ flowchart LR
     style VOICE fill:#7a2d2d,color:#fff
 ```
 
-The diagram shows the Claude path. Claude receives the voice file by path.
+The diagram shows both subscription writers. Claude and Codex receive the complete voice through their native instruction-file options. The writing pass retains research tools.
 The explicit Local model alternative reads the validated voice into a system
 message for the selected model server and uses the supplied material without
-a separate research pass. Neither path places the voice text in argv. A relative path, or any path inside the public
+a separate research pass. None of these paths places the voice text in argv. A relative path, or any path inside the public
 repository, is rejected.
 
 ## Keeping it online
