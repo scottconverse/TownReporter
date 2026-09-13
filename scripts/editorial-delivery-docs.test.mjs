@@ -10,7 +10,7 @@ const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 test("current operator docs describe Opinion validation and provider routing", () => {
   /*
     Opinion uses the shared provider registry. Automatic starts with Claude
-    and can fall back to Codex Terra once; explicit choices remain selected.
+    and can fall back to Codex Sol once; explicit choices remain selected.
   */
   for (const rel of [
     "README.md",
@@ -47,12 +47,8 @@ test("self-hosting separates repository version from attributed deployment evide
   // manufacture a matching production claim just to keep this check green.
   const version = JSON.parse(read("package.json")).version.replace(/\./g, "\\.");
   assert.match(text, new RegExp(`Repository documentation version: \\*\\*${version}\\*\\*`, "i"));
-  assert.match(
-    text,
-    /operator receipt reports \*\*v\d+\.\d+\.\d+\*\* promoted on\s+\d{4}-\d{2}-\d{2}/i,
-  );
-  assert.match(text, /\[the dated receipt\]\(HANDOFF-SESSION-2026-09-04\.md\)/);
-  assert.match(text, /has not independently checked the running deployment/i);
+  assert.match(text, /Production was independently checked on \d{4}-\d{2}-\d{2}/i);
+  assert.match(text, /\[current release record\]\(docs\/releases\/\d+\.\d+\.\d+\.md\)/);
   assert.match(text, /release does not establish production version/i);
   assert.doesNotMatch(text, /tagged[^\n]+build, which is what the production checkout runs/i);
 });

@@ -647,11 +647,9 @@
               approved routine notices use fixed templates and approved sources.
             </p>
             <p class="cap">
-              Repository release: <b>0.6.43</b> — beta candidate, not yet published. Direct beta tag:
-              <a href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35">0.6.35</a>.
-              Stable Windows acquisition remains <a href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.30">0.6.30</a>.
-              Deployment is a separate operator step;
-              current capabilities and remaining work are distinguished below.
+              Repository release: <b>0.6.44</b> — Astra editor desk, large-document reporting and native Opinion integration.
+              <a href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.44">Download the Windows release</a>.
+              <a href="https://github.com/scottconverse/TownReporter/blob/main/docs/releases/0.6.44.md">Release guide and verification</a>.
             </p>
             <div class="cta-row">
               <a class="btn" href="#start">Run it yourself</a>
@@ -1005,7 +1003,7 @@
           The installation target is under an hour; the release records measured timings and limits.
         </p>
         <p>
-          <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35">Windows beta download · 0.6.35</a>
+          <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.44">Windows download · 0.6.44</a>
           <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/latest">Latest stable Windows</a>
           <a class="btn" href="https://github.com/scottconverse/TownReporter/blob/main/docs/windows-install.md">Installation guide</a>
         </p>
@@ -1063,9 +1061,8 @@ npm run dev
               </p>
               <p>
                 Opinion offers Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
-                plus saved custom connections. Automatic tries Claude Opus, then Codex Terra once
-                if needed; explicit choices stay selected. Claude reads the editorial voice by
-                file path, while Codex uses a separately authorized stdin handoff. A refusal, assistant note, implausible
+                plus saved custom connections. Codex Sol is the default. Automatic tries Claude Opus, then Codex Sol once
+                if needed; explicit choices stay selected. Both Claude and Codex read the complete editorial voice through native instruction-file options, with research tools available while writing. A refusal, assistant note, implausible
                 headline or incomplete body is marked failed and never becomes a draft.
               </p>
               <p>
@@ -1146,11 +1143,11 @@ npm run dev
             meeting channels or local title vocabulary from a city name. The owner supplies them.
           </li>
           <li><b>Dark Desk has no publish button.</b> Its speculative signals and structured verification still require editorial judgment. Five live investigations remain an acceptance exercise.</li>
-          <li><b>0.6.35 beta candidate scope:</b> Editor delivery includes the story evidence-check workbench, Stats reports, named custom AI connections, draft recovery and reconciliation, PDF/page-aware evidence, ownership-preserving research and queue improvements, and retained routine-notice editor controls. Candidate acceptance, publication and deployment remain pending.</li>
+          <li><b>0.6.44:</b> The Astra editor desk retains all eight sections, shared document upload and OCR, long pasted text, URL and YouTube intake, private-document evidence checks, supported name corrections, saved Opinion material and native voice-file integration. Missing claims and sources keep an editorial marked for review; provider refusals never become drafts. See the release guide for verification and limits.</li>
           <li><b>0.6.34 beta scope:</b> Dark Desk selects relevant captured records across the full inventory before shared selection builds separately bounded inputs for stage-one signal synthesis and the final brief. The release receipt records runtime proof and its limits.</li>
           <li><b>0.6.33 beta scope:</b> Packaged installations can start the native Codex CLI from an extracted, non-Git application directory; release receipts distinguish native launch checks from application and reporting-quality checks.</li>
-          <li><b>0.6.32 beta scope:</b> Evidence review groups duplicate views of the same available captured version while retaining artifact and capture-event identities, uses singular claim counts, distinguishes editor-selected records from draft citations, and simplifies current-beta release links. The 0.6.31 Queue focus, six source-opt-in structured resident formats, claim/manual corroboration and daily routine editions remain included.</li>
-          <li><b>0.6.30:</b> Editors can start explicit draft batches and review all section changes before saving. Owners can prepare exact source-and-format permissions for routine notices. Automatic notice publication is still being developed.</li>
+          <li><b>0.6.32 beta scope:</b> Evidence review groups duplicate views of the same available captured version while retaining artifact and capture-event identities, uses singular claim counts, distinguishes editor-selected records from draft citations, and simplifies release links. The 0.6.31 Queue focus, six source-opt-in structured resident formats, claim/manual corroboration and daily routine editions remain included.</li>
+          <li><b>0.6.30:</b> Editors can start explicit draft batches and review all section changes before saving. Owners can prepare exact source-and-format permissions for routine notices. Later releases add owner-approved routine notice publication.</li>
           <li><b>New in 0.6.29:</b> Owners can schedule a daily scan of selected sources using a subscription or local runtime. The story workbench supports private recorded-finding evidence review, with stronger draft saving and recovery. Scheduled scans file leads only; publication remains an editor action.</li>
           <li><b>New in 0.6.28:</b> Corrections attach only to published stories in the editor's newsroom. Reddit requests retain the required eight-second elapsed-time gap even when the system clock changes.</li>
           <li><b>New in 0.6.27:</b> Windows installation with private persistent storage and owned start/stop controls. Drafting scope can limit a story to supplied material; changed story text requires review of its existing evidence before publishing. Ordinary trailing-slash redirects no longer mark a watched page as moved.</li>

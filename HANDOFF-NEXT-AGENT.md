@@ -1,5 +1,13 @@
 # TownReporter — current development handoff
 
+## Current release work — 2026-09-13
+
+The current source and operator guide is [0.6.44](docs/releases/0.6.44.md), which supersedes the deployment and feature-status snapshots below. The Astra desk, shared Opinion/document intake, private-document evidence checks, and native Codex voice-file integration are implemented. Packaging, published-install checks and production deployment are recorded with the release. Original political-editorial refusal and the broader daily newsroom quality target are not claimed solved. Historical staging fixtures and private operator material remain preserved.
+
+## Historical work record
+
+The dated entries below retain their original evidence and constraints; they are not current production-state assertions.
+
 ## Current Halo ownership update — 2026-09-08
 
 Latest execution result and next work: [Owner work report](docs/operations/halo-2026-09-08/OWNER-WORK-REPORT.md). It supersedes the earlier status-only snapshot below, while preserving dated release receipts.

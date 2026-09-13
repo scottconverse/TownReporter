@@ -1,9 +1,6 @@
 # Read selected PDF pages
 
-**Development candidate — NOT YET DEPLOYED.** This page-reader workflow is
-implemented in the development tree. It is not a claim that TownReporter has
-passed real-world transcription acceptance or that every PDF will be read
-successfully.
+Included in [TownReporter 0.6.44](releases/0.6.44.md). This guide describes the controls and their limits; completed processing does not establish reporting accuracy.
 
 ## Use it from Dark Desk
 

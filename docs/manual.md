@@ -2,14 +2,11 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.43 · editor interface update · deployment is recorded separately**
+**Version 0.6.44 · editor interface update · deployment is recorded separately**
 
-The [published release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.35) has been deployed to Halo; see the [deployment receipt](operations/halo-2026-09-08/DEPLOYMENT-0635-2026-09-10.md). Later development work and acceptance results do not by themselves mean that another release has been deployed.
+[Download 0.6.44](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.44) · [Release guide and verification](releases/0.6.44.md). A source release and a running production deployment are separate facts.
 
-**Documentation scope:** The Command Center and Dark Desk images are current local development captures. Queue, workbench, Opinion and Paper setup images are
-development examples; the other screens are historical Longmont captures from
-29 August. Their old **Leave as editor** header link now lives as **Give up
-the desk** on the Server page.
+**Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
 
 TownReporter is a civic newsroom you run yourself. A public paper on the front,
 a signed-in editor's desk behind it. It watches a city's meetings, packets,
@@ -41,7 +38,7 @@ at your own city.
 
 ## Current capabilities and remaining work
 
-**Unreleased DEV: responsive investigation.** In Dark Desk, open **How hard to
+**Responsive investigation.** In Dark Desk, open **How hard to
 dig → Change → Research method**. Batch preserves the existing workflow.
 Responsive lets the selected model search, read, follow a link, or finish,
 using the previous result to choose its next action. Set **Maximum research
@@ -63,7 +60,7 @@ The verified label is a completed software protocol, not a substitute for
 checking sources. The five-topic live acceptance exercise remains outstanding.
 
 Local models can be discovered on LM Studio, Ollama or llama.cpp and selected
-individually. **Unreleased DEV work** renders scanned PDFs as actual PDF pages
+individually. **Captured-PDF OCR** renders scanned PDFs as actual PDF pages
 before OCR, so newly ingested rendered records keep numeric PDF page order and
 can cite those pages. It attempts at most 12 pages, caps a rendered PNG at 2
 MiB, and uses one cooperative 10-minute budget across rendering and OCR; a
@@ -313,7 +310,7 @@ Public-source reporting can also turn a captured recurring record—such as an a
 
 For the next development release, **Check draft against evidence** runs a separate review of the exact saved draft against its already captured evidence. Save dirty edits first, choose the model in the workbench picker, then start the check; it does not restart discovery or initial writing. The workbench shows queued, running, completed, incomplete and failed outcomes. A completed check creates a new draft version and keeps the original. An incomplete result means the available captures could not support a complete pass and still requires editor review; neither outcome publishes or approves the story.
 
-If the editor types while the check or its reload is in progress, the workbench keeps that unsaved text instead of silently replacing it. **Reload checked draft** is the explicit choice to replace the local buffer with the new saved version. This feature is not yet deployed or accepted through R20.
+If the editor types while the check or its reload is in progress, the workbench keeps that unsaved text instead of silently replacing it. **Reload checked draft** is the explicit choice to replace the local buffer with the new saved version. A checked version still needs editorial review.
 
 ## Dark Desk
 
@@ -348,12 +345,12 @@ carries what would kill it.
 
 ### Development preview: choosing sources after search
 
-The unreleased Dark Desk build can ask the selected research model which
+Dark Desk can ask the selected research model which
 returned sources to read after a successful search. This uses the same
 four-read-per-round limit and retains the ordinary source captures. It adds
 at most one model call per round with useful search results, so such rounds
 can take longer. If source selection fails, the ordinary read queue continues
-and the run reports the fallback. This is not yet deployed to the public paper.
+and the run reports the fallback. This is an editor research action; it does not publish to the paper.
 
 ## Opinion
 
@@ -361,7 +358,7 @@ and the run reports the fallback. This is not yet deployed to the public paper.
 
 ![Opinion](images/10-opinion.png)
 
-A subject, a sentence or a URL becomes an unsigned editorial. `OPINION` goes in
+Uploaded documents, pasted source text, a subject or URLs can become an unsigned editorial. Opinion uses the same document intake and section-by-section reader as Write a story. `OPINION` goes in
 the headline and there is no byline, because an unsigned editorial is the
 paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
@@ -369,8 +366,7 @@ at the end, where a reader who dislikes the piece can check them.
 Opinion shows Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
 plus saved custom connections. Codex Sol is selected by default. Automatic tries Claude Opus, then Codex Sol
 once if Claude is unavailable; explicit choices stay selected. Claude Code
-reads the voice by file path and Codex uses a separately authorized stdin
-handoff. The page
+and Codex both read the complete configured voice through their native instruction-file options. The page
 lists every missing voice, installation, or login prerequisite and stays
 disabled while readiness is unknown.
 
@@ -378,7 +374,7 @@ A successful process exit is not enough to file a piece. TownReporter rejects
 provider refusals, assistant notes, implausible headlines, and incomplete
 bodies before draft storage. A provider refusal or invalid delivery reports a
 failed run without creating a draft. Automatic can move from Claude Opus to
-Codex Terra once; an explicit choice never switches providers. A
+Codex Sol once; an explicit choice never switches providers. A
 failed row has no Read, Edit, or Publish action; a finished row shows the
 provider that actually delivered it.
 
@@ -390,7 +386,7 @@ It fetches records before it writes. Historical runs took **ten to forty
 minutes** — two finished at 9m53s and 24m06s, and one was still going at 30.
 Those are observations, not a deadline: `EDITORIAL_TIMEOUT_MS` now applies to
 each research or writing pass, with a default of 45 minutes per pass. A pair
-can take about 90 minutes. Automatic currently runs the Claude pair only.
+can take about 90 minutes, excluding document intake. Automatic can try a Codex Sol pair after Claude fails, so its total can be longer.
 Explicit Local model performs one writing call using the supplied material;
 it does not run the frontier research pass. The page shows a
 running clock and checks every twenty seconds. Editorials remain drafts until
@@ -463,8 +459,7 @@ fallback), so back up that directory with the newsroom data. These reports
 describe anonymous page-load counts, not unique readers or completed reads;
 refreshed views count, while opening a report from the desk does not. Only
 the last completed periods are generated; the system does not promise to fill
-all historical downtime. This report surface is a development candidate, not
-yet deployed.
+all historical downtime. These reports are included in the release.
 
 ## Published
 
@@ -1138,3 +1133,7 @@ MIT licensed. Copyright (c) 2026 Scott Converse.
 Open **Desk → Write a story**. Use **Add documents** to select one or several Markdown/text, Word (.doc/.docx), PDF, PNG/JPEG/WebP, CSV/TSV or subtitle (.srt/.vtt) files. Add the story assignment in **What story do you want?**, select the writing model, and click **Write draft**. Website, PDF and YouTube video URLs go in **Links or source text**; accessible video captions are retained as a transcript.
 
 Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original remains private in the story; the reader extracts PDF pages, uses OCR for scanned pages/images, and processes long text in sections. The story lists reading progress and downloads of the original and full extracted text. Extracted text is limited to 20 million characters per document; larger text must be split into volumes. Reading errors are shown and originals are kept. Review OCR, names and quotations before publishing.
+
+## Current Opinion document and review workflow
+
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
