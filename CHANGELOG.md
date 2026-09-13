@@ -9,6 +9,7 @@ Current release: **0.6.41**.
 - A provider refusal after filing now shows a link to the saved story and clears the already-saved composer input, preventing accidental duplicate filing on retry.
 - Legal removal previews handle captured document text containing escaped null characters while preserving related URLs. Clarified the editor invitation's description of owner-only functions.
 - Dark Desk offers PDF page reading only for retained PDFs, starts at page 1, labels unverified-tip handoffs explicitly, and wraps long investigation titles on phones. Opening newsroom search now focuses its input.
+- JSON and plain-text document responses no longer launch an unnecessary browser just because their host serves JavaScript-heavy pages.
 
 ## 0.6.40 — 2026-09-12
 
