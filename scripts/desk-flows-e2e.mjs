@@ -111,11 +111,14 @@ async function main() {
   }
   step("the desk carries a persistent live region");
 
-  // UIUX-04: page heading is h1, section headings are h2. A jump to h3 reads
-  // as a missing level to anyone navigating by heading.
-  const h3s = await page.locator("main h3").count();
-  if (h3s > 0) throw new Error(`${h3s} section heading(s) still skip to h3`);
-  step("section headings are h2, with no skipped level");
+  // UIUX-04: subsections such as the shared uploader may use h3 after h2.
+  // Reject actual skipped levels instead of prohibiting nested headings.
+  const headingLevels = await page.locator("main h1, main h2, main h3, main h4, main h5, main h6")
+    .evaluateAll((headings) => headings.map((heading) => Number(heading.tagName.slice(1))));
+  if (headingLevels[0] !== 1 || headingLevels.some((level, index) => index > 0 && level > headingLevels[index - 1] + 1)) {
+    throw new Error(`Opinion heading levels skip a level: ${headingLevels.join(", ")}`);
+  }
+  step("page and subsection headings have no skipped level");
 
   // UIUX-05: the dependency is visible before anything is typed.
   const notReady = await page.getByText(/This desk cannot write yet/i).count();
