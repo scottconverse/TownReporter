@@ -96,14 +96,14 @@ describe("Automatic Opinion provider persistence", () => {
           },
           writeEditorial: async () => assert.fail("writing must not start without the retained document reading"),
         }),
-        /codex-balanced reading unavailable/,
+        /codex-frontier reading unavailable/,
       );
-      assert.deepEqual(choices, ["claude-frontier", "codex-balanced"]);
+      assert.deepEqual(choices, ["claude-frontier", "codex-frontier"]);
       const [stored] = await sql<{ error: string; finished: boolean; subject: string }>`
         select error,(finished_at is not null) as finished,subject from editorial_requests where id=${request.id}
       `;
       assert.equal(stored?.finished, true);
-      assert.match(stored?.error ?? "", /codex-balanced reading unavailable/);
+      assert.match(stored?.error ?? "", /codex-frontier reading unavailable/);
       assert.equal(stored?.subject, "Keep local history public");
     } finally { await cleanCompletionFixture(sql, userId); }
   });
