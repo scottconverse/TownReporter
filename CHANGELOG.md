@@ -1,6 +1,11 @@
 # Changelog
 
-Current release: **0.6.44**.
+Current release: **0.6.45**.
+
+## 0.6.45 — 2026-09-13
+
+- Corrected the remaining `.env.example` comment that incorrectly described Opinion as Claude-only. The template now documents Sol as the default, Automatic as Claude then Sol, and native instruction-file integration for both subscription writers.
+- Runtime behavior is unchanged from 0.6.44; application version and current acquisition links identify this corrected package.
 
 ## 0.6.44 — 2026-09-13
 
