@@ -781,7 +781,14 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: IngestOptions): Promi
     let outTitle = extracted.title || title;
     let method = extracted.method === "readability" ? "readability" : "heuristic";
     const rawHtmlAccepted = ocrOptions?.acceptRawHtml?.(body) === true;
+    // API/text responses on a JavaScript-heavy host are already complete.
+    // Rendering them starts an unnecessary browser and can replace the raw
+    // document with an unrelated portal page.
+    const mediaType = ctype.split(";", 1)[0]?.trim();
+    const structuredText = mediaType === "text/plain" ||
+      mediaType === "application/json" || mediaType?.endsWith("+json");
     if (
+      !structuredText &&
       !rawHtmlAccepted &&
       needsRenderedFetch(url, text, body, outText.length) &&
       typeof window === "undefined"

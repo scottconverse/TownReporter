@@ -71,11 +71,11 @@ export const listEditorials = createServerFn({ method: "GET" })
              end as words,
              a.slug as published_slug
       from editorial_requests r
-      left join drafts d on d.id = r.draft_id
+      left join drafts d on d.id = r.draft_id and d.newsroom_id = r.newsroom_id
       left join articles a on a.headline = d.headline and a.status = 'published'
+        and a.newsroom_id = r.newsroom_id
       where r.newsroom_id = ${owned(context)}
       order by r.id desc
-      limit 30
     `.catch(() => []);
     /*
       Only rows that still look open are worth a job lookup. A piece writes

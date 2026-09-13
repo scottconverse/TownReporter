@@ -300,6 +300,7 @@ async function fileQueueLead(headline, why) {
   await form.getByLabel("Headline").fill(headline);
   await form.getByLabel("Why now").fill(why);
   await form.getByRole("button", { name: "File lead" }).click();
+  await expect(page).toHaveURL(/\/desk\/story\/\d+$/);
   await expect(page.getByRole("textbox", { name: "Headline", exact: true })).toHaveValue(headline);
 }
 

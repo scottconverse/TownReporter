@@ -1131,6 +1131,14 @@ async function main() {
   // only knew how to reinsert one row.
   await page.getByText(correctionText).waitFor({ timeout: 20_000 });
   step("the restored story's own page shows its correction again");
+  const restoredLead = await pool.query(
+    "select l.status from leads l join articles a on a.lead_id=l.id and a.newsroom_id=l.newsroom_id where a.slug=$1",
+    [slug],
+  );
+  if (restoredLead.rows[0]?.status !== "published") {
+    throw new Error("restoring the article left its lead on the draft queue");
+  }
+  step("the restored article's lead is published, so it does not reappear as an unfinished draft");
 
   await page.goto(`${base}/corrections`, { waitUntil: "networkidle" });
   await page.getByText(correctionText).waitFor({ timeout: 20_000 });

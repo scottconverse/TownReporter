@@ -244,7 +244,6 @@ export const listLeads = createServerFn({ method: "GET" })
                date_trunc('minute', l.created_at) desc,
                l.newsworthiness desc,
                l.id desc
-      limit 80
     `;
   });
 
@@ -1798,7 +1797,6 @@ export const listPublishedDesk = createServerFn({ method: "GET" })
       left join leads l on l.id = a.lead_id
       where a.newsroom_id = ${owned(context)} and a.status = ${"published"}
       order by a.published_at desc nulls last, a.id desc
-      limit 40
     `;
     if (!arts.length) return [] as DeskPublishedRow[];
     const corrs = await sql<{ article_id: number | null; body: string; created_at: string }>`

@@ -198,6 +198,7 @@ function DeskHome() {
     text: string;
     kind: "error" | "info";
     authDetail?: string | null;
+    leadId?: number;
   } | null>(null);
   const writeStory = useMutation({
     mutationFn: () =>
@@ -213,7 +214,21 @@ function DeskHome() {
     onSuccess: (res) => {
       if (!res?.ok) {
         const raw = res?.error ?? "That did not file.";
-        setStoryNotice({ text: editorDraftError(raw) ?? raw, kind: "error", authDetail: raw });
+        const leadId = res && "leadId" in res ? res.leadId : undefined;
+        setStoryNotice({
+          text: editorDraftError(raw) ?? raw,
+          kind: "error",
+          authDetail: raw,
+          leadId,
+        });
+        if (leadId) {
+          // Filing succeeded even when the provider refused. Keep one saved
+          // story and make its recovery path visible instead of filing twice.
+          setStoryText("");
+          setStoryInstructions("");
+          setStoryDocuments([]);
+          void qc.invalidateQueries({ queryKey: ["leads"] });
+        }
         return;
       }
       setStoryText("");
@@ -546,6 +561,19 @@ function DeskHome() {
           </footer>
           <div role="alert" aria-live="assertive" aria-atomic="true" className="composer-error">
             {storyNotice?.kind === "error" ? storyNotice.text : ""}
+            {storyNotice?.leadId ? (
+              <p>
+                Your material is saved.{" "}
+                <Link
+                  to="/desk/story/$leadId"
+                  params={{ leadId: String(storyNotice.leadId) }}
+                  className="inline-link"
+                >
+                  Open the saved story to choose a model and continue
+                </Link>
+                .
+              </p>
+            ) : null}
             {storyNotice?.kind === "error" &&
             looksLikeProviderAuthFailure(storyNotice.authDetail) ? (
               <ProviderSignInButton detail={storyNotice.authDetail} />
@@ -880,7 +908,7 @@ function DeskHome() {
                 </p>
                 {(published.data ?? []).slice(0, 3).map((p) => (
                   <p key={p.id} className="wire-row">
-                    <Link to="/desk/published" className="hl-link sm">
+                    <Link to="/articles/$slug" params={{ slug: p.slug }} className="hl-link sm">
                       {p.headline}
                     </Link>
                     <span className="meta-inline">

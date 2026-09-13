@@ -116,6 +116,7 @@ const { DeskShell, deskShellClassName } = await import(
       "@/lib/news/desk-copy": deskCopyStub,
       "lucide-react": import.meta.resolve("lucide-react"),
       "@/lib/news/desk": inlineModule("export async function listLeads() { return []; }"),
+      "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },

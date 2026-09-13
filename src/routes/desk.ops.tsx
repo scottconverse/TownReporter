@@ -1172,7 +1172,7 @@ function InviteAnEditor() {
     <section className="mt-16 border-t border-rule pt-8">
       <SecHead
         title="Invite an editor"
-        sub="A one-time link for one email address. It expires in seven days, and the person sets their own password. Editors can do everything but invite others or give up the desk."
+        sub="A one-time link for one email address. It expires in seven days, and the person sets their own password. Editors can report, draft and publish. Ownership, invitations, legal removals and owner-only server settings stay with the owner."
       />
       <p className="mt-2 max-w-2xl text-sm text-muted">
         You will get a link to send yourself. TownReporter does not send email.

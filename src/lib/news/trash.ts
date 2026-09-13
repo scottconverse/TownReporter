@@ -145,6 +145,12 @@ export const restoreTrashItem = createServerFn({ method: "POST" })
         } else if (item.kind === "article") {
           await reinsert(tx, "articles", snap.row);
           for (const c of snap.corrections ?? []) await reinsert(tx, "corrections", c);
+          // Taking an article off the paper returns its lead to drafted.
+          // Restoring the article must restore that relationship as well.
+          if (snap.row.status === "published" && snap.row.lead_id != null) {
+            await tx`update leads set status = 'published'
+              where id = ${Number(snap.row.lead_id)} and newsroom_id = ${owned(context)}`;
+          }
         } else {
           await reinsert(tx, "drafts", snap.row);
           if (snap.extras) await reinsert(tx, "editorial_extras", snap.extras);
