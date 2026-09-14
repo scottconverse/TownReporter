@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Current release: [0.6.47](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.47).** See the [release guide](releases/0.6.47.md) for changes, installation and deployment evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+**Current release: [0.6.48](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.48).** See the [release guide](releases/0.6.48.md) for changes, installation and deployment evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
 **Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
 
@@ -336,7 +336,7 @@ A second box under the story, **Pulled notes**, does not print. **Pull** next to
 
 Draft is allowed to be wrong. Read it against the documents.
 
-### Check a saved draft against its evidence (next development release)
+### Check a saved draft against its evidence
 
 **Check draft against evidence** applies to the exact draft version currently saved for the story. Save any headline, dek, topic or body edits first, then choose the model in the workbench picker and start the check. The control stays unavailable while edits are unsaved, a save is pending or another check is active. The queued job records the model selection and does not restart discovery or initial writing.
 
@@ -345,6 +345,8 @@ Queued, running and failed states remain visible in a full-width progress card t
 Typing while the check or its final reload is running does not silently replace the editor's local text. The checked version is loaded automatically only when the fields still match the snapshot taken at the click. Otherwise the workbench preserves the unsaved buffer and offers an explicit **Reload checked draft** action, which intentionally replaces those local edits.
 
 These controls are included in this release. A saved draft or completed check still needs editorial review.
+
+When the writer omits a usable claim ledger, the final reporting pass may run one citation-only repair against saved public captures. It accepts a source only when an exact clause from the finished draft is paired with an exact passage from that retained capture. If none can be proved, the story remains saved and the job says **Draft saved — review required**. Opened-but-uncited pages are never attached automatically.
 
 Reporter-notebook leftovers (`What is solid`, `Next checks are…`) are stripped from the body so they cannot leak onto the paper. If you need that thinking, put it in notes.
 

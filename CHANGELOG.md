@@ -1,6 +1,15 @@
 # Changelog
 
-Current release: **0.6.47**.
+Current release: **0.6.48**.
+
+## 0.6.48 — 2026-09-14
+
+- Connects the Story workspace's explicit Local model choice to the newsroom's discovered or saved OpenAI-compatible model, so LM Studio can be selected without requiring a duplicate process-level model setting. The evidence check now shows persistent queued/running progress and a saved before-and-after result.
+- Checks names against retained written evidence before the final draft is saved. Exact official-record spelling with compatible role, organization and locality can correct unquoted text; ambiguous, transcript-only, OCR-only or unsupported names remain visibly unresolved.
+- Repairs a missing claims-and-sources ledger only when a bounded model pass can bind an exact draft passage to an exact passage in a saved public capture. Unopened URLs, invented excerpts and unrelated captures are rejected; an incomplete repair preserves the story and marks it for review.
+- Records the writer checkpoint and final checked draft separately. Completed jobs say `Done` only when citation, evidence and name checks are complete; otherwise they say `Draft saved — review required` while keeping the draft editable.
+- Removes short dangling model footnote markers from generated story text without changing Markdown links, bracketed years or numeric ranges.
+- Verified with a real LM Studio `halo-brain-35b` Story run against an official Longmont budget PDF, an independent Sol review, the production build, and the complete safe regression suite: 1,933 tests, 1,888 passed, 45 environment-dependent skips and zero failures.
 
 ## 0.6.47 — 2026-09-13
 
