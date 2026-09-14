@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.45](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.45) — Astra editor desk, document reporting and native Opinion integration.** [Release guide](docs/releases/0.6.45.md) · [Changelog](CHANGELOG.md).
+**Current release: [0.6.46](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.46) — Astra public newspaper, searchable archive and comfortable reading.** [Release guide](docs/releases/0.6.46.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, installation checks and deployment evidence are recorded separately in the [release guide](docs/releases/0.6.45.md).
+Release source, installation checks and deployment evidence are recorded separately in the [release guide](docs/releases/0.6.46.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -50,7 +50,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-Download the Windows installation ZIP from [TownReporter 0.6.45](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.45) or the [latest release](https://github.com/scottconverse/TownReporter/releases/latest). Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
+Download the Windows installation ZIP from [TownReporter 0.6.46](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.46) or the [latest release](https://github.com/scottconverse/TownReporter/releases/latest). Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first editorial workflow within an hour with working internet and an available AI account or endpoint; release evidence records the measured result and its limits. Public hosting is separate from this local installation.
 
@@ -95,9 +95,10 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.46** — Implements the approved public-reader design, full archive search and pagination, browser-local saved stories, dark mode and text sizes, sharing, and a correction email form. See the [reader guide](docs/reader.md).
 - **0.6.45** — Corrects the remaining Claude-only Opinion comment in the downloadable configuration template. Runtime behavior is unchanged from 0.6.44.
 
-- **0.6.44** — Packages the Astra desk, shared large-document and URL intake, private-document evidence checks, supported name corrections, saved Opinion material, Sol default and native voice-file integration for both subscription writers. See [the release guide](docs/releases/0.6.45.md).
+- **0.6.44** — Packages the Astra desk, shared large-document and URL intake, private-document evidence checks, supported name corrections, saved Opinion material, Sol default and native voice-file integration for both subscription writers. See [the release guide](docs/releases/0.6.46.md).
 
 - **0.6.35 beta** — Editor delivery includes the story evidence-check workbench, Stats reports, named custom AI connections, draft recovery and reconciliation, PDF/page-aware evidence, ownership-preserving research and queue improvements, and retained routine-notice editor controls. Published and deployed to Halo at `6f603ec`; the PDF/page-aware OCR and Dark Desk work retain the bounded acceptance limits described below.
 - **0.6.34 beta** — Dark Desk selects relevant captured records across the full inventory before shared selection builds separately bounded inputs for stage-one signal synthesis and the final brief. The release receipt records runtime proof and its limits.

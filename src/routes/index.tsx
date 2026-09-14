@@ -1,244 +1,365 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ArrowRight } from "lucide-react";
-import { PaperShell, TopicChip } from "@/components/paper-chrome";
-import { StoryBody } from "@/components/story-body";
-import { EditionSkeleton, EmptyState, FetchingRule } from "@/components/states";
-import { inkGhost, inkSolid } from "@/components/desk-chrome";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { ArrowRight, FileText, Search } from "lucide-react";
+import { PaperShell, ReaderResources } from "@/components/paper-chrome";
+import { ReaderRow, SaveStory, ReadingButton, useReader } from "@/components/reader-controls";
 import { ViewBeacon } from "@/components/view-beacon";
-import {
-  listPublishedArticles,
-  listPublishedByTopic,
-  searchPublished,
-} from "@/lib/news/public";
+import { readerArticles } from "@/lib/news/reader-public";
+import { readerSearch, readMinutes } from "@/lib/reader";
 import { usePublicSections } from "@/lib/use-sections";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context";
 
-type Search = { topic?: string; q?: string };
-
 export const Route = createFileRoute("/")({
-  validateSearch: (s: Record<string, unknown>): Search => ({
-    topic: typeof s.topic === "string" ? s.topic : undefined,
-    q: typeof s.q === "string" ? s.q : undefined,
-  }),
-  loaderDeps: ({ search }) => ({ topic: search.topic, q: search.q }),
-  loader: ({ deps }) => {
-    if (deps.q) return searchPublished({ data: deps.q });
-    if (deps.topic) return listPublishedByTopic({ data: deps.topic });
-    return listPublishedArticles();
-  },
-  component: Home,
-});
-
-function Home() {
-  const {sections}=usePublicSections();
-  const TOPICS=sections.filter(s=>s.visible).map(s=>s.key);
-  const PAPER = usePaper();
-  const { formatShortDate } = usePaperDateFormatters();
-  const { topic, q } = Route.useSearch();
-  const initial = Route.useLoaderData();
-  const { data, isPending, isFetching, isPlaceholderData, isError, refetch } = useQuery({
-    queryKey: ["paper", topic, q],
-    queryFn: () => {
-      if (q) return searchPublished({ data: q });
-      if (topic) return listPublishedByTopic({ data: topic });
-      return listPublishedArticles();
-    },
-    initialData: initial,
-    placeholderData: keepPreviousData,
-  });
-  const articles = data ?? initial;
-
-  const featured = articles[0];
-  const rest = articles.slice(1);
-  const showSkeleton = isPending && !featured && !isPlaceholderData;
-  const empty = !isPending && !isPlaceholderData && !featured;
-  /*
-    A failed refresh must not leave the paper dimmed forever.
-
-    `dimming` was driven by isFetching alone and the error branch was never
-    consumed, so a rejected query left already-printed stories visually
-    disabled with no explanation and no way back. An audit called it a
-    permanent dead end (UIUX-02). Stale stories are still worth reading; the
-    honest thing is to show them at full strength and say the refresh failed.
-  */
-  const dimming = isFetching && !isError && !showSkeleton;
-
-  let emptyTitle = "The edition is still being set";
-  let emptyBody =
-    "No stories on the paper yet. The editor is working the desk — check back, or read how we report.";
-  if (q) {
-    emptyTitle = `Nothing matched “${q}”`;
-    emptyBody = "Try a different word, or return to the full edition.";
-  } else if (topic) {
-    emptyTitle = `No ${topic} stories yet`;
-    emptyBody =
-      "That beat is quiet in this edition. See everything that has printed, or pick another topic.";
-  }
-
-  return (
+  validateSearch: readerSearch,
+  loaderDeps: ({ search }) => search,
+  loader: ({ deps }) =>
+    readerArticles({
+      data: {
+        q: deps.q,
+        topic: deps.topic,
+        page: deps.page ?? 1,
+        oldest: deps.sort === "oldest",
+        ...(deps.view === "saved" ? { saved: [] } : {}),
+      },
+    }),
+  component: () => (
     <PaperShell>
+      <Home />
+    </PaperShell>
+  ),
+});
+function Home() {
+  const paper = usePaper();
+  const { sections } = usePublicSections();
+  const visible = sections.filter((s) => s.visible);
+  const { formatShortDate, formatDate } = usePaperDateFormatters();
+  const search = Route.useSearch();
+  const initial = Route.useLoaderData();
+  const navigate = useNavigate();
+  const reader = useReader();
+  const [q, setQ] = useState(search.q || "");
+  useEffect(() => setQ(search.q || ""), [search.q]);
+  const listing = Boolean(search.topic || search.q || search.view);
+  const label = sections.find((s) => s.key === search.topic)?.name ?? search.topic;
+  const args = {
+    q: search.q,
+    topic: search.topic,
+    page: search.page ?? 1,
+    oldest: search.sort === "oldest",
+    ...(search.view === "saved" ? { saved: reader.saved } : {}),
+  };
+  const query = useQuery({
+    queryKey: ["reader-archive", args],
+    queryFn: () => readerArticles({ data: args }),
+    initialData: search.view === "saved" ? undefined : initial,
+    enabled: search.view !== "saved" || reader.ready,
+  });
+  const opinion = useQuery({
+    queryKey: ["reader-opinion"],
+    queryFn: () => readerArticles({ data: { topic: "opinion", page: 1, oldest: false } }),
+    enabled: !listing,
+  });
+  const data = query.data ?? initial;
+  const stories = data.stories;
+  const lead = stories[0];
+  const featuredOpinion = opinion.data?.stories[0];
+  const nav = (change: Partial<typeof search>) =>
+    void navigate({ to: "/", search: { ...search, ...change, page: change.page } });
+  return (
+    <>
       <ViewBeacon targets={["site"]} />
-      <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="chip-rail">
-          <Link
-            to="/"
-            className={
-              "pressable inline-flex min-h-11 shrink-0 items-center border px-3 text-[11px] tracking-[0.14em] uppercase transition-[background-color,color,border-color] duration-150 ease-out " +
-              (!topic && !q
-                ? "border-ink bg-ink text-paper"
-                : "border-rule text-ink-2 hover:border-ink hover:text-ink")
-            }
-          >
-            all
-          </Link>
-          {TOPICS.filter((t) => t !== "about").map((t) => (
-            <TopicChip key={t} topic={t} active={topic === t} />
-          ))}
-        </div>
-        {/*
-          The archive search lives in the top bar now, as a magnifying glass.
-
-          It used to sit here permanently, taking a row of the paper's most
-          valuable space to serve the thing readers do least often — and only on
-          this page. As a glass it is one click from every page, and the front
-          page gets the room back for stories.
-        */}
-      </div>
-      {q ? (
-        <p className="enter-fade-fast mb-3 text-sm text-muted">
-          Archive search for “{q}”
-        </p>
-      ) : topic ? (
-        <p className="enter-fade-fast mb-3 text-sm text-muted">
-          Beat: {topic}
-        </p>
-      ) : null}
-      <FetchingRule active={dimming} />
-      {isError ? (
-        <p role="alert" className="mb-6 border border-danger/35 bg-paper-2 px-3 py-2.5 text-sm text-danger">
-          The paper could not refresh. What is below is the last version that
-          loaded.{" "}
-          <button type="button" className="underline" onClick={() => void refetch()}>
+      {query.isError ? (
+        <div className="reader-error" role="alert">
+          The stories could not load.{" "}
+          <button className="btn" type="button" onClick={() => void query.refetch()}>
             Try again
           </button>
-        </p>
-      ) : null}
-
-      {!topic && !q ? (
-        <p className="enter-fade mb-6 max-w-2xl text-ink-2">{PAPER.deck}</p>
-      ) : null}
-
-      {showSkeleton ? (
-        <div className="mt-6">
-          <EditionSkeleton />
         </div>
       ) : null}
-
-      {empty ? (
-        <div className="mt-6">
-          <EmptyState
-            kicker={topic ?? (q ? "Archive" : "The paper")}
-            title={emptyTitle}
-            body={emptyBody}
-            action={
-              <>
-                {(topic || q) && (
-                  <Link to="/" search={{}} className={inkSolid}>
-                    Full edition
-                  </Link>
-                )}
-                <Link to="/how-we-report" className={inkGhost}>
-                  How we report
-                </Link>
-              </>
-            }
+      {listing ? (
+        <div className="listing">
+          <div className="pagehead">
+            <span className="eyebrow">
+              {search.view === "saved"
+                ? "YOUR READING LIST"
+                : search.topic
+                  ? "YOUR COMMUNITY, IN FOCUS"
+                  : "THE ARCHIVE"}
+            </span>
+            <h1>{search.view === "saved" ? "Your saved stories" : label || "Find a story."}</h1>
+            <p>
+              {search.view === "saved"
+                ? "Saved on this browser, no account needed. Only stories still published appear here."
+                : search.topic
+                  ? `Reporting on ${label?.toLowerCase()} in ${paper.city}.`
+                  : "Search by topic, name, place or a detail you remember."}
+            </p>
+          </div>
+          <form
+            className="searchform"
+            onSubmit={(e) => {
+              e.preventDefault();
+              nav({ q: q.trim() || undefined, view: search.view ?? "archive" });
+            }}
           >
-            {q || topic ? (
-              <div className="chip-rail justify-center">
-                {TOPICS.filter((t) => t !== "about" && t !== topic)
-                  .slice(0, 6)
-                  .map((t) => (
-                    <TopicChip key={t} topic={t} />
+            <input
+              className="field"
+              aria-label="Search published stories"
+              type="search"
+              maxLength={80}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search stories, names or places"
+            />
+            <button className="btn primary" type="submit">
+              <Search aria-hidden />
+              Search
+            </button>
+          </form>
+          <div className="filters">
+            <span className="resultcount" role="status">
+              {query.isFetching
+                ? "Loading stories…"
+                : `${data.total} ${data.total === 1 ? "story" : "stories"}`}
+            </span>
+            <div className="filter-controls">
+              <label>
+                Section{" "}
+                <select
+                  aria-label="Section"
+                  value={search.topic ?? ""}
+                  onChange={(e) =>
+                    nav({ topic: e.target.value || undefined, view: search.view ?? "archive" })
+                  }
+                >
+                  <option value="">All sections</option>
+                  {visible.map((s) => (
+                    <option key={s.key} value={s.key}>
+                      {s.name}
+                    </option>
                   ))}
-              </div>
-            ) : null}
-          </EmptyState>
-        </div>
-      ) : null}
-
-      {featured && (
-        <div className={dimming ? "is-fetching" : undefined}>
-          <article className="stagger-in mt-6 border-b border-ink pb-10">
-            <p className="text-[11px] tracking-[0.16em] text-rust uppercase">
-              {sections.find(s=>s.key===featured.topic)?.name??featured.topic} · {formatShortDate(featured.published_at)}
-            </p>
-            <h2 className="mt-2 font-display text-3xl font-semibold leading-tight sm:text-5xl">
-              <Link
-                to="/articles/$slug"
-                params={{ slug: featured.slug }}
-                className="transition-[color] duration-150 ease-out hover:text-rust"
-              >
-                {featured.headline}
-              </Link>
-            </h2>
-            <p className="mt-3 max-w-3xl text-lg italic text-ink-2">
-              {featured.dek}
-            </p>
-            <div className="mt-6 max-w-2xl">
-              <StoryBody
-                body={featured.body.split("\n\n").slice(0, 2).join("\n\n")}
-              />
-              <Link
-                to="/articles/$slug"
-                params={{ slug: featured.slug }}
-                className="group mt-4 inline-flex min-h-11 items-center gap-1 text-sm text-rust transition-[color] duration-150 ease-out hover:text-rust-2"
-              >
-                Continue reading
-                <ArrowRight
-                  className="size-4 transition-transform duration-150 ease-out group-hover:translate-x-1"
-                  strokeWidth={1.75}
-                  aria-hidden
-                />
-              </Link>
+                </select>
+              </label>
+              <label>
+                Sort{" "}
+                <select
+                  aria-label="Sort stories"
+                  value={search.sort ?? "newest"}
+                  onChange={(e) =>
+                    nav({ sort: e.target.value === "oldest" ? "oldest" : undefined })
+                  }
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </label>
             </div>
-          </article>
-
-          {rest.length > 0 && (
-            <div className="stagger-in mt-8 grid gap-8 sm:grid-cols-2">
-              {rest.map((a) => (
-                <article key={a.id} className="border-t border-rule pt-4">
-                  <p className="text-[11px] tracking-[0.16em] text-muted uppercase">
-                    {sections.find(s=>s.key===a.topic)?.name??a.topic} · {formatShortDate(a.published_at)}
-                  </p>
-                  <h3 className="mt-1 font-display text-2xl font-semibold leading-snug">
-                    <Link
-                      to="/articles/$slug"
-                      params={{ slug: a.slug }}
-                      className="transition-[color] duration-150 ease-out hover:text-rust"
-                    >
-                      {a.headline}
-                    </Link>
-                  </h3>
-                  <p className="mt-2 text-ink-2">{a.dek}</p>
-                </article>
-              ))}
+          </div>
+          {stories.map((s) => (
+            <ReaderRow key={s.id} story={s} />
+          ))}
+          {!stories.length && !query.isFetching && !query.isError && (
+            <div className="empty">
+              <h2>
+                {search.view === "saved" && !search.q && !search.topic
+                  ? "Make room for a good read."
+                  : "No stories found."}
+              </h2>
+              <p>
+                {search.view === "saved"
+                  ? "Tap the bookmark beside a story to save it here. Previously saved stories may no longer be published."
+                  : "Try another search or explore a different section."}
+              </p>
+              <Link className="btn" to="/" search={{}}>
+                Front page
+              </Link>{" "}
+              <Link className="btn" to="/" search={{ view: search.view ?? "archive" }}>
+                Clear filters
+              </Link>
             </div>
           )}
+          {data.total > data.pageSize && (
+            <nav className="pagination" aria-label="Archive pages">
+              <button
+                className="btn"
+                disabled={(search.page ?? 1) <= 1 || query.isFetching}
+                onClick={() => nav({ page: (search.page ?? 1) - 1 })}
+              >
+                Previous
+              </button>
+              <span>
+                Page {search.page ?? 1} of {Math.ceil(data.total / data.pageSize)}
+              </span>
+              <button
+                className="btn"
+                disabled={(search.page ?? 1) * data.pageSize >= data.total || query.isFetching}
+                onClick={() => nav({ page: (search.page ?? 1) + 1 })}
+              >
+                Next <ArrowRight aria-hidden />
+              </button>
+            </nav>
+          )}
         </div>
+      ) : (
+        <>
+          <div className="intro">
+            <div>
+              <h1>A clearer view of {paper.city}.</h1>
+              <p>The decisions, the details and what they mean for our community.</p>
+            </div>
+            <span className="date" suppressHydrationWarning>
+              {formatDate(new Date())}
+            </span>
+          </div>
+          {lead ? (
+            <section className="hero" aria-label="Featured story">
+              <article className="lead">
+                <Link to="/" search={{ topic: lead.topic }} className={`tag ${lead.topic}`}>
+                  {sections.find((s) => s.key === lead.topic)?.name ?? lead.topic} · THE LEAD
+                </Link>
+                <Link to="/articles/$slug" params={{ slug: lead.slug }}>
+                  <h2>{lead.headline}</h2>
+                </Link>
+                <p className="dek">{lead.dek}</p>
+                <div className="meta">
+                  <span>{formatShortDate(lead.published_at)}</span>
+                  <span className="dot" />
+                  <span>{readMinutes(lead.body)} min read</span>
+                </div>
+                <div className="leadbottom">
+                  <Link className="btn primary" to="/articles/$slug" params={{ slug: lead.slug }}>
+                    Read the story <ArrowRight aria-hidden />
+                  </Link>
+                  <SaveStory story={lead} />
+                </div>
+              </article>
+              <aside className="record">
+                <div>
+                  <div className="topline">
+                    <FileText aria-hidden /> Around the publication
+                  </div>
+                  <h3>
+                    More of the story.
+                    <br />
+                    More of your community.
+                  </h3>
+                  <ol className="record-list">
+                    {stories.slice(1, 4).map((s, i) => (
+                      <li key={s.id}>
+                        <span className="num">0{i + 1}</span>
+                        <div>
+                          <Link to="/articles/$slug" params={{ slug: s.slug }}>
+                            <strong>{s.headline}</strong>
+                          </Link>
+                          <p>{sections.find((t) => t.key === s.topic)?.name ?? s.topic}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+                <Link className="textlink" to="/" search={{ view: "archive" }}>
+                  Explore the archive <ArrowRight aria-hidden />
+                </Link>
+              </aside>
+            </section>
+          ) : !query.isError ? (
+            <div className="empty">
+              <h2>The edition is still being set.</h2>
+              <p>
+                No published stories yet. Read about the newsroom while the editor prepares the
+                paper.
+              </p>
+              <Link to="/about" className="btn">
+                About this paper
+              </Link>
+            </div>
+          ) : null}
+          <div className="trustbar">
+            <span>
+              <FileText aria-hidden />
+              Reporting you can trace to the record.
+            </span>
+            <span>Corrections in the open.</span>
+            <Link className="textlink" to="/how-we-report">
+              How we report <ArrowRight aria-hidden />
+            </Link>
+          </div>
+          <div className="content-grid">
+            <section>
+              <div className="sectionhead">
+                <h2>The latest</h2>
+                <Link className="textlink" to="/" search={{ view: "archive" }}>
+                  All stories <ArrowRight aria-hidden />
+                </Link>
+              </div>
+              {stories.slice(1, 6).map((s) => (
+                <ReaderRow key={s.id} story={s} />
+              ))}
+              <Link className="btn more" to="/" search={{ view: "archive" }}>
+                Explore the archive <ArrowRight aria-hidden />
+              </Link>
+            </section>
+            <aside>
+              <section className="sidebarcard">
+                <h2>Find your way around.</h2>
+                <p>Start with what matters to you.</p>
+                <div className="topiclist">
+                  {visible.map((s) => (
+                    <Link key={s.key} to="/" search={{ topic: s.key }}>
+                      {s.name}
+                      <span>
+                        <ArrowRight aria-hidden />
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+              <ReaderResources />
+              <section className="sidebarcard">
+                <span className="eyebrow">YOUR READING, YOUR WAY</span>
+                <h2>A little easier on the eyes.</h2>
+                <p>Adjust the type size or switch to a darker page.</p>
+                <ReadingButton label />
+              </section>
+            </aside>
+          </div>
+          {featuredOpinion && (
+            <section className="opinionband">
+              <div className="sectionhead">
+                <h2>Opinion</h2>
+                <Link className="textlink" to="/" search={{ topic: "opinion" }}>
+                  All opinion <ArrowRight aria-hidden />
+                </Link>
+              </div>
+              <article className="opinionfeature">
+                <div className="opinionmark" aria-hidden>
+                  “
+                </div>
+                <div>
+                  <span className="tag opinion">Perspective · Opinion</span>
+                  <Link to="/articles/$slug" params={{ slug: featuredOpinion.slug }}>
+                    <h3>{featuredOpinion.headline}</h3>
+                  </Link>
+                  <p>{featuredOpinion.dek}</p>
+                </div>
+                <Link className="btn" to="/articles/$slug" params={{ slug: featuredOpinion.slug }}>
+                  Read opinion <ArrowRight aria-hidden />
+                </Link>
+              </article>
+            </section>
+          )}
+          <section className="aboutstrip">
+            <div>
+              <h2>Your community. An open record.</h2>
+              <p>Follow the documents, see how we report and hold our work to account.</p>
+            </div>
+            <Link className="btn" to="/about">
+              Meet the publication <ArrowRight aria-hidden />
+            </Link>
+          </section>
+        </>
       )}
-
-      <section className="mt-14 border-t-2 border-ink pt-8">
-        <h2 className="font-display text-2xl font-semibold">The paper is this site</h2>
-        <p className="mt-2 max-w-xl text-ink-2">
-          There is no email list yet. New stories appear on the front page and
-          in the RSS feed when an editor publishes them.
-        </p>
-        <p className="mt-6 text-sm text-muted">
-          {PAPER.name} complements the local paper. The public record is only
-          the beginning.
-        </p>
-      </section>
-    </PaperShell>
+    </>
   );
 }

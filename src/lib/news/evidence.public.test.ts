@@ -42,6 +42,27 @@ async function ensureArticlesSchema() {
 }
 
 describe("public evidence publication", { timeout: 60000 }, () => {
+  it("opens a canonical capture when the published citation retains a trailing slash", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const suffix = `reader-${Date.now()}`;
+    const url = `https://example.org/${suffix}`;
+    const [capture] = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, url, content_hash, title, full_text, fetch_outcome)
+      values ('reader-test', ${url}, ${suffix}, 'Public source', 'The original published source text.', 'fetched') returning id
+    `;
+    await sql`
+      insert into articles (user_id, slug, headline, body, topic, source_urls, status)
+      values ('reader-test', ${suffix}, 'Reader citation', 'Story', 'council', ${JSON.stringify([`${url}/`])}, 'published')
+    `;
+    assert.equal((await loadPublicEvidence(capture!.id))?.extraction_text, 'The original published source text.');
+    assert.equal((await listPublicCaptureHistory(`${url}/`))[0]?.version_id, capture!.id);
+    assert.ok(await comparePublishedEvidence({ url: `${url}/` }));
+    assert.deepEqual(await listPublicCaptureHistory(`${url}?document=private`), []);
+    await sql`update articles set status = 'draft' where slug = ${suffix}`;
+    assert.equal(await loadPublicEvidence(capture!.id), null);
+  });
+
   it("survives draft provenance fields onto a published article and exposes compare", async () => {
     await ensureArticlesSchema();
     const sql = await getSql();

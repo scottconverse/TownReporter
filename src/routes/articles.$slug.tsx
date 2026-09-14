@@ -6,9 +6,17 @@ import { EmptyState, StorySkeleton } from "@/components/states";
 import { inkGhost } from "@/components/desk-chrome";
 import { getPublishedArticle, listPublishedArticles } from "@/lib/news/public";
 import { parseUrlList, siteUrl } from "@/lib/paper";
-import { DEFAULT_PAPER_IDENTITY, usePaperDateFormatters } from "@/lib/paper-context";
+import { DEFAULT_PAPER_IDENTITY, usePaper, usePaperDateFormatters } from "@/lib/paper-context";
 import { usePublicSections } from "@/lib/use-sections";
 import { ProvenanceBlock } from "@/components/provenance";
+import {
+  ReaderRow,
+  SaveStory,
+  ShareStory,
+  ReadingButton,
+  CopyButton,
+} from "@/components/reader-controls";
+import { readMinutes } from "@/lib/reader";
 import { ViewBeacon } from "@/components/view-beacon";
 
 export const Route = createFileRoute("/articles/$slug")({
@@ -96,7 +104,8 @@ export const Route = createFileRoute("/articles/$slug")({
 });
 
 function ArticlePage() {
-  const {sections}=usePublicSections();
+  const paper = usePaper();
+  const { sections } = usePublicSections();
   const { formatDate } = usePaperDateFormatters();
   const { slug } = Route.useParams();
   const loaded = Route.useLoaderData();
@@ -154,60 +163,124 @@ function ArticlePage() {
   return (
     <PaperShell compact>
       <ViewBeacon targets={[`story:${slug}`, "site"]} />
-      <div className="stagger-in">
-        <p className="text-[11px] tracking-[0.16em] text-rust uppercase">
-          {sections.find(s=>s.key===article.topic)?.name??article.topic} · {formatDate(article.published_at)}
-        </p>
-        <h1 className="mt-3 max-w-3xl font-display text-4xl font-semibold leading-tight sm:text-5xl">
-          {article.headline}
-        </h1>
-        <p className="mt-4 max-w-2xl text-xl italic text-ink-2">{article.dek}</p>
+
+      <div className="breadcrumbs">
+        <Link to="/" search={{}}>
+          Front page
+        </Link>
+        <span>/</span>
+        <Link to="/" search={{ topic: article.topic }}>
+          {sections.find((s) => s.key === article.topic)?.name ?? article.topic}
+        </Link>
       </div>
-      <div className="enter-rise mt-8 max-w-2xl">
-        <StoryBody body={article.body} />
-      </div>
-      {article.corrections && article.corrections.length > 0 ? (
-        <section className="mt-10 max-w-2xl border-t border-rule pt-6">
-          <h2 className="font-display text-2xl font-semibold">Corrections</h2>
-          <ul className="mt-4 space-y-4">
-            {article.corrections.map((c, i) => (
-              <li key={i}>
-                <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
-                  {formatDate(c.date)}
-                </p>
-                <p className="mt-1 text-ink-2">{c.body}</p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-      <ProvenanceBlock
-        items={provenance}
-        findings={article.findings}
-        form={article.form}
-      />
-      <p className="mt-8 max-w-2xl text-sm text-muted">
-        Free to reprint in whole or part with credit to TownReporter and a link
-        back. Do not imply endorsement.
-      </p>
-      {more.length > 0 && (
-        <section className="mt-12 border-t-2 border-ink pt-6">
-          <h2 className="font-display text-2xl font-semibold">Also in the paper</h2>
-          <ul className="stagger-in mt-4 space-y-3">
-            {more.map((a) => (
-              <li key={a.id}>
-                <Link
-                  to="/articles/$slug"
-                  params={{ slug: a.slug }}
-                  className="font-display text-xl transition-[color] duration-150 ease-out hover:text-rust"
-                >
-                  {a.headline}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <article>
+        <div className="articlehead">
+          <Link className={`tag ${article.topic}`} to="/" search={{ topic: article.topic }}>
+            {sections.find((s) => s.key === article.topic)?.name ?? article.topic}
+            {article.topic === "opinion" ? " · Perspective" : ""}
+          </Link>
+          <h1>{article.headline}</h1>
+          <p className="dek">{article.dek}</p>
+          <div className="byline">
+            <div className="avatar">
+              <span>TR</span>
+              <div>
+                <strong>
+                  {paper.name}
+                  {article.topic === "opinion" ? " · Opinion" : ""}
+                </strong>
+                <span>
+                  {formatDate(article.published_at)} · {readMinutes(article.body)} min read
+                </span>
+              </div>
+            </div>
+            <div className="readingtools">
+              <SaveStory story={article} label />
+              <ShareStory slug={slug} headline={article.headline} />
+              <ReadingButton label />
+            </div>
+          </div>
+        </div>
+        <div className="articlelayout">
+          <nav className="contents" aria-label="In this article">
+            <strong>In this article</strong>
+            <a href="#story-body">The story</a>
+            {/claims and sources/i.test(article.body) && <a href="#claims">Claims and sources</a>}
+            <a href="#sources">Sources &amp; records</a>
+            <a href="#story-corrections">Corrections</a>
+            <a href="#related">Read next</a>
+          </nav>
+          <div className="articlebody" id="story-body">
+            <StoryBody body={article.body} publicReading />
+            <section className="sources" id="sources">
+              <span className="eyebrow">FOLLOW THE EVIDENCE</span>
+              {provenance.length ? (
+                <ProvenanceBlock
+                  items={provenance}
+                  findings={article.findings}
+                  form={article.form}
+                />
+              ) : (
+                <>
+                  <h2>Sources &amp; public records</h2>
+                  <p>
+                    No separate public source records are attached to this story. See any source
+                    references in the article above.
+                  </p>
+                </>
+              )}
+            </section>
+            <section className="sources" id="story-corrections">
+              <h2>Corrections &amp; accountability</h2>
+              {article.corrections?.length ? (
+                article.corrections.map((c, i) => (
+                  <div className="sourcecard" key={i}>
+                    <strong>{formatDate(c.date)}</strong>
+                    <p>{c.body}</p>
+                  </div>
+                ))
+              ) : (
+                <p>No corrections have been posted for this story.</p>
+              )}
+              <Link className="textlink" to="/corrections" search={{ article: article.headline }}>
+                File a correction →
+              </Link>
+            </section>
+            <section className="sources">
+              <h2>Share the reporting.</h2>
+              <p>
+                Free to reprint with credit to {paper.name} and a link to the original. Reprinting
+                does not imply endorsement.
+              </p>
+              <CopyButton
+                text={() =>
+                  `${article.headline}\nOriginally published by ${paper.name}.\n${new URL("/articles/" + slug, window.location.origin).href}`
+                }
+              >
+                Copy credit &amp; original link
+              </CopyButton>
+            </section>
+          </div>
+          <aside className="articleaside">
+            <span className="tag">OPEN RECORD</span>
+            <p>Good reporting should let you look over its shoulder.</p>
+            <Link className="textlink" to="/how-we-report">
+              How we report →
+            </Link>
+          </aside>
+        </div>
+      </article>
+      <section id="related" className="opinionband">
+        <div className="sectionhead">
+          <h2>Keep reading</h2>
+          <Link className="textlink" to="/" search={{ topic: article.topic }}>
+            More in this section →
+          </Link>
+        </div>
+        {more.map((a) => (
+          <ReaderRow key={a.id} story={a} description={false} />
+        ))}
+      </section>
     </PaperShell>
   );
 }
