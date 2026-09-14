@@ -152,6 +152,32 @@ export function notesHaveAnything(n: ReportingNotes): boolean {
 }
 
 /**
+ * Build the reporting panel's view from the lead memo and the current saved
+ * draft. This mirrors the story workspace's existing fallback behavior.
+ */
+export function mergeDraftEvidenceIntoNotes(
+  notes: ReportingNotes,
+  draft: { found: NoteFound[]; unanswered: string[]; verify: string },
+): ReportingNotes {
+  const merged: ReportingNotes = {
+    ...notes,
+    todo: [...notes.todo],
+    found: [...notes.found],
+    verify: [...notes.verify],
+    opened: [...notes.opened],
+  };
+  if (!notesHaveMemo(merged)) {
+    if (!merged.found.length && draft.found.length) merged.found = draft.found;
+    if (!merged.todo.length && draft.unanswered.length) {
+      merged.todo = draft.unanswered.map((t) => ({ t, done: false, src: "machine" as const }));
+    }
+  }
+  const verification = draft.verify.trim();
+  if (verification && !merged.verify.includes(verification)) merged.verify.push(verification);
+  return merged;
+}
+
+/**
  * What survives a redraft: the reporter's own lines, and any claim-of-absence
  * the gate raised that nobody has confirmed yet. A machine to-do is rebuilt
  * from the new memo; an unchecked gate item is a block on publishing and

@@ -20,7 +20,7 @@ If Opinion fails, use **Restore saved material** on its request to recover the s
 
 ## Review and publish
 
-Use the story workspace's Checks, Sources and Reporting tabs beside the writing surface. Save edits before **Check draft against evidence**. That check uses saved web captures and retained documents. Incomplete checks preserve the existing draft; changes made while checking prevent a stale replacement. Reload a checked version explicitly when offered.
+Use the story workspace's Checks, Sources and Reporting tabs beside the writing surface. Save edits before **Check draft against evidence**. That check uses saved web captures and retained documents. Its progress card names the model and current stage. When it finishes, **Evidence check results** compares the previous and checked versions side by side and keeps every verification finding visible. Keep the checked version or restore the previous version as unsaved text. Incomplete checks preserve the existing draft; changes made while checking prevent a stale replacement.
 
 Names and spellings are checked against opened written evidence. Supported corrections are applied. A name marked **needs review** has not been established by those sources; captions and OCR are not spelling authorities. Changing the text can make previous checks stale.
 

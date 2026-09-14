@@ -73,7 +73,7 @@ type Props =
  */
 function notSetUpHelp(option: ModelChoiceOption): string {
   if (option.value === "local-model") {
-    return "Local model is not set up on this server. See docs/local-models.md.";
+    return "TownReporter cannot reach a local model. Start LM Studio's local server or Ollama, then click Refresh. See docs/local-models.md.";
   }
   return `${option.label} is not set up on this server. See docs/setup.md.`;
 }
@@ -304,10 +304,10 @@ export function ModelPicker(props: Props) {
               >
                 Claude Code installation guide
               </a>
-              . For the local model, start llama.cpp, LM Studio, or any other OpenAI-compatible
-              server on that computer and set <code>LLM_BASE_URL</code> (and, if it wants one,{" "}
-              <code>LLM_MODEL</code> / <code>LLM_API_KEY</code>) in the server&apos;s{" "}
-              <code>.env</code> -- see{" "}
+              . For the local model, start llama.cpp, LM Studio, or Ollama on that computer.
+              TownReporter discovers their default local addresses automatically. Use{" "}
+              <code>LLM_BASE_URL</code>, <code>LLM_MODEL</code> and <code>LLM_API_KEY</code> only
+              for a different address, model or authenticated server -- see{" "}
               <a
                 className="inline-link"
                 href="https://github.com/scottconverse/TownReporter/blob/main/docs/local-models.md"

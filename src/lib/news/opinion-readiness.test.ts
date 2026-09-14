@@ -134,13 +134,14 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
     assert.deepEqual(probed, ["local-model"]);
   });
 
-  it("the real (non-mocked) candidate probe dispatches local-model through ai.ts's generic provider probe, not the Claude Code CLI path", async () => {
+  it("the real candidate probe keeps local-model on the local path when discovery is explicitly disabled", async () => {
     const result = await withEnv(
       {
         LLM_BASE_URL: undefined,
         LLM_API_KEY: undefined,
         LLM_MODEL: undefined,
         OPENAI_API_KEY: undefined,
+        TOWNREPORTER_LOCAL_DISCOVERY: "0",
       },
       () =>
         checkOpinionReadiness("local-model", {
@@ -156,8 +157,8 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
     );
     assert.match(
       result.why,
-      /LLM_BASE_URL/,
-      "the guidance for an unconfigured local-model pick must name the setting that fixes it",
+      /Start LM Studio's local server or Ollama.*click Refresh/,
+      "the guidance for an unavailable local-model pick must explain how to make it reachable",
     );
   });
 });
