@@ -4,6 +4,7 @@ import type { ProvenanceItem } from "./findings.ts";
 
 import { describeTextChanges, type VersionDiff } from "./retrieve.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
+import { canonicalPublicUrl } from "./fetch-outcome.ts";
 
 export type CaptureObservationKind =
   | "captured"
@@ -160,7 +161,15 @@ async function publishedSourceUrls(): Promise<Set<string>> {
 }
 
 function isPublicUrl(url: string, published: Set<string>): boolean {
-  return published.has(url);
+  // Retrieval stores canonical URLs; an article may retain the source's
+  // trailing slash or tracking parameters. Use the same identity as retrieval.
+  try {
+    const canonical = canonicalPublicUrl(url);
+    return [...published].some((source) => {
+      try { return canonicalPublicUrl(source) === canonical; }
+      catch { return false; }
+    });
+  } catch { return false; }
 }
 
 async function blobForVersion(versionId: number | null): Promise<{
@@ -194,6 +203,7 @@ type CaptureRow = {
 
 async function loadCapturesForUrl(url: string): Promise<CaptureRow[]> {
   const sql = await getSql();
+  const canonical = canonicalPublicUrl(url);
   const events = await sql<CaptureRow>`
     select ce.id as capture_event_id, av.id as version_id, ce.observed_at::text as observed_at,
       ce.fetch_outcome, ce.disappearance, coalesce(ce.content_hash, av.content_hash) as content_hash,
@@ -204,7 +214,7 @@ async function loadCapturesForUrl(url: string): Promise<CaptureRow[]> {
       on av.id = ce.version_id
         and av.newsroom_id = ce.newsroom_id
         and av.url = ce.source_url
-    where ce.newsroom_id = ${DEFAULT_NEWSROOM_ID} and ce.source_url = ${url}
+    where ce.newsroom_id = ${DEFAULT_NEWSROOM_ID} and ce.source_url in (${url}, ${canonical})
       and (ce.version_id is null or av.id is not null)
     order by ce.observed_at asc, ce.id asc
     limit 80
@@ -215,7 +225,7 @@ async function loadCapturesForUrl(url: string): Promise<CaptureRow[]> {
       av.fetch_outcome, false as disappearance, av.content_hash as content_hash,
       av.title as title, av.url as url, av.full_text as full_text, av.content_hash as version_hash
     from artifact_versions av
-    where av.newsroom_id = ${DEFAULT_NEWSROOM_ID} and av.url = ${url}
+    where av.newsroom_id = ${DEFAULT_NEWSROOM_ID} and av.url in (${url}, ${canonical})
     order by av.captured_at asc, av.id asc
     limit 40
   `;

@@ -1,6 +1,14 @@
 # Changelog
 
-Current release: **0.6.45**.
+Current release: **0.6.46**.
+
+## 0.6.46 — 2026-09-13
+
+- Implements the approved Astra public-reader design: front page, configured sections, complete paginated archive and search, saved stories, article reading, source records, About, reporting standards and corrections.
+- Adds browser-local bookmarks, three reading sizes, persistent light/dark appearance, story-link and attribution copying, RSS controls and responsive navigation. Existing article addresses, published evidence and editor sign-in remain available.
+- Adds a correction form with story prefill and retained text. TownReporter prepares email to townreporter@gmail.com; readers review and send through their email app. It does not claim server-side delivery.
+- Fixes public evidence links whose published citation retains a trailing slash while retrieval stored a canonical URL. Corrections are scoped to the publication's newsroom.
+- Updates the reader guide and current documentation surfaces. Deployment and verification are recorded separately.
 
 ## 0.6.45 — 2026-09-13
 

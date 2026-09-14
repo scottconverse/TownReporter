@@ -185,7 +185,7 @@ export const listPublicCorrections = createServerFn({ method: "GET" }).handler(
       select c.id, c.body, c.created_at, a.headline, a.slug
       from corrections c
       join articles a on a.id = c.article_id
-      where a.status = 'published'
+      where a.status = 'published' and a.newsroom_id = ${DEFAULT_NEWSROOM_ID}
       order by c.created_at desc
       limit 50
     `;

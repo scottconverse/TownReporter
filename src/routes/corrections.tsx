@@ -1,89 +1,69 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { PaperShell } from "@/components/paper-chrome";
-import { EmptyState, ListSkeleton } from "@/components/states";
-import { inkGhost } from "@/components/desk-chrome";
+import { CorrectionForm } from "@/components/correction-form";
 import { listPublicCorrections } from "@/lib/news/public";
-import { DEFAULT_PAPER_IDENTITY, usePaper, usePaperDateFormatters } from "@/lib/paper-context";
-
+import { DEFAULT_PAPER_IDENTITY, usePaperDateFormatters } from "@/lib/paper-context";
 export const Route = createFileRoute("/corrections")({
-  /*
-    Its own title. Every standing page shared the site's title, so a reader with
-    the paper open in several tabs could not tell them apart, and search results
-    listed them all under one name.
-  */
+  validateSearch: (s: Record<string, unknown>): { article?: string } => ({
+    article: typeof s.article === "string" ? s.article.slice(0, 2000) : undefined,
+  }),
   head: ({ match }) => ({
     meta: [{ title: `Corrections — ${(match.context.paper ?? DEFAULT_PAPER_IDENTITY).name}` }],
   }),
   component: Corrections,
 });
-
 function Corrections() {
-  const { editorEmail: EDITOR_EMAIL } = usePaper();
   const { formatShortDate } = usePaperDateFormatters();
-  const { data: items = [], isPending } = useQuery({
-    queryKey: ["corrections"],
-    queryFn: () => listPublicCorrections(),
-  });
+  const { article } = Route.useSearch();
+  const query = useQuery({ queryKey: ["corrections"], queryFn: () => listPublicCorrections() });
   return (
     <PaperShell compact>
-      <h1 className="enter-fade font-display text-4xl font-semibold">
-        Corrections
-      </h1>
-      <p className="enter-rise mt-4 max-w-2xl text-lg text-ink-2">
-        If we got it wrong, it lives here in the open — not buried in a rewrite
-        nobody sees. Corrections also appear on the story itself.
-        {EDITOR_EMAIL ? (
-          <>
-            {" "}To flag an error, write the editor at{" "}
-            <a className="text-rust underline" href={`mailto:${EDITOR_EMAIL}`}>
-              {EDITOR_EMAIL}
-            </a>
-            .
-          </>
-        ) : null}
-      </p>
-      {isPending ? (
-        <div className="mt-8 max-w-2xl">
-          <ListSkeleton rows={3} />
+      <div className="infopage">
+        <div className="pagehead">
+          <span className="eyebrow">CORRECTIONS</span>
+          <h1>
+            Getting it right includes
+            <br />
+            putting it right.
+          </h1>
+          <p>Changes should be easy to find and easy to understand.</p>
         </div>
-      ) : items.length === 0 ? (
-        <div className="mt-8 max-w-2xl">
-          <EmptyState
-            kicker="The record"
-            title="No corrections posted"
-            body="Nothing to walk back yet. If you spot an error, write the desk — we would rather look careful than look first."
-            action={
-              <Link to="/" className={inkGhost}>
-                Back to the paper
-              </Link>
-            }
-          />
-        </div>
-      ) : (
-        <ul className="stagger-in mt-8 max-w-2xl space-y-6">
-          {items.map((c) => (
-            <li key={c.id} className="border-t border-rule pt-4">
-              <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
-                {formatShortDate(c.created_at)}
-                {c.headline ? ` · ${c.headline}` : ""}
-              </p>
-              <p className="mt-2 text-ink-2">{c.body}</p>
-              {c.slug ? (
-                <p className="mt-2">
-                  <Link
-                    to="/articles/$slug"
-                    params={{ slug: c.slug }}
-                    className="text-sm text-muted hover:text-ink"
-                  >
-                    Read the story
-                  </Link>
-                </p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
+        <p>
+          Corrections appear here and on the affected story, with a date and an explanation of what
+          changed.
+        </p>
+        <CorrectionForm article={article} />
+        <h2>Corrections to published stories</h2>
+        {query.isPending ? (
+          <p role="status">Loading corrections…</p>
+        ) : query.isError ? (
+          <div role="alert" className="reader-error">
+            The correction log could not load.{" "}
+            <button className="btn" onClick={() => void query.refetch()}>
+              Try again
+            </button>
+          </div>
+        ) : !query.data?.length ? (
+          <div className="empty">
+            <h2>No corrections posted.</h2>
+            <p>See an error? Use the form above to write to the editor.</p>
+          </div>
+        ) : (
+          query.data.map((c) => (
+            <section className="sourcecard" key={c.id}>
+              <span className="eyebrow">{formatShortDate(c.created_at)}</span>
+              <h3>{c.headline}</h3>
+              <p>{c.body}</p>
+              {"slug" in c && typeof c.slug === "string" && (
+                <Link className="textlink" to="/articles/$slug" params={{ slug: c.slug }}>
+                  Read the corrected story →
+                </Link>
+              )}
+            </section>
+          ))
+        )}
+      </div>
     </PaperShell>
   );
 }

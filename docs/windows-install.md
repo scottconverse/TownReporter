@@ -10,11 +10,11 @@ Use this path to run a persistent newsroom on your own Windows computer. The sou
 
 The target is to finish installation and a first editorial workflow in under an hour. Download speed, prerequisite installation, provider access and model response time affect that result. See the release's installation evidence for the measured environment and elapsed time; this is not a guarantee for every computer or connection.
 
-Release evidence separates the timed fresh Windows installation and manual publishing check from real-provider testing on the local packaged installation. The fresh CI check disables AI; separate live drafting checks use already available providers and are described in the [release guide](releases/0.6.45.md). Neither measures creating an AI account or completing a real source scan on a fresh machine.
+Release evidence separates the timed fresh Windows installation and manual publishing check from real-provider testing on the local packaged installation. The fresh CI check disables AI; separate live drafting checks use already available providers and are described in the [release guide](releases/0.6.46.md). Neither measures creating an AI account or completing a real source scan on a fresh machine.
 
 ## Download and install
 
-1. Open [TownReporter 0.6.45](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.45) or the [latest release](https://github.com/scottconverse/TownReporter/releases/latest). Download the Windows installation ZIP listed under the chosen release's Assets. Extract the ZIP completely into a folder you intend to keep. Do not run it from inside the ZIP.
+1. Open [TownReporter 0.6.46](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.46) or the [latest release](https://github.com/scottconverse/TownReporter/releases/latest). Download the Windows installation ZIP listed under the chosen release's Assets. Extract the ZIP completely into a folder you intend to keep. Do not run it from inside the ZIP.
 2. Open **Install TownReporter.cmd** in the extracted folder. It downloads pinned Node and PostgreSQL distributions, checks their hashes, installs the application dependencies and Chromium, creates a private database and authentication secret, and builds TownReporter.
 3. Read any prerequisite or port-conflict message. An error stops installation; it does not authorize stopping another program. The installer does not need an existing Node, Git or PostgreSQL installation, and does not replace one.
 4. Wait for the readiness check and open the local address the installer prints. The default is **http://127.0.0.1:4388**.

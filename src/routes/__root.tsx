@@ -7,6 +7,7 @@ import { DEFAULT_PAPER_IDENTITY, PaperProvider, resolvePaperIdentity } from "@/l
 import { getPaperIdentityFn } from "@/lib/news/paper-settings";
 import appCss from "../styles.css?url";
 import deskCss from "../desk-astra.css?url";
+import readerCss from "../reader-astra.css?url";
 import { useState } from "react";
 
 /*
@@ -95,6 +96,7 @@ export const Route = createRootRoute({
       */
         { rel: "stylesheet", href: appCss },
         { rel: "stylesheet", href: deskCss },
+        { rel: "stylesheet", href: readerCss },
         { rel: "manifest", href: "/__grok/manifest.webmanifest" },
         { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
         // Without an explicit icon the browser falls back to /favicon.ico, which
