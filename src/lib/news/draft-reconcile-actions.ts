@@ -40,11 +40,12 @@ function statusInput(raw: unknown): { leadId: number } {
   return { leadId: positiveId(value.leadId, "Lead") };
 }
 
-function resultInput(raw: unknown): { leadId: number; draftId: number } {
+function resultInput(raw: unknown): { leadId: number; draftId: number; originalDraftId: number } {
   const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
     leadId: positiveId(value.leadId, "Lead"),
     draftId: positiveId(value.draftId, "Checked draft"),
+    originalDraftId: positiveId(value.originalDraftId, "Original draft"),
   };
 }
 
@@ -52,6 +53,8 @@ export type CheckedDraftResult = EditableDraftFields & {
   id: number;
   currentDraftId: number;
   updatedAt: string | null;
+  original: EditableDraftFields;
+  integrityNotes: string;
 };
 
 export function assessCheckedDraftResult(input: { resultDraftId: number; currentDraftId: number }) {
@@ -169,14 +172,27 @@ export const getCheckedDraftResultFn = createServerFn({ method: "GET" })
       dek: string;
       body: string;
       topic: string;
+      integrity_notes: string | null;
       updated_at: string | null;
       current_draft_id: number;
+      original_headline: string;
+      original_dek: string;
+      original_body: string;
+      original_topic: string;
     }>`
       select d.id,d.headline,d.dek,d.body,d.topic,d.updated_at,
+        d.integrity_notes,
+        original.headline as original_headline,
+        original.dek as original_dek,
+        original.body as original_body,
+        original.topic as original_topic,
         (select current.id from drafts current
          where current.newsroom_id = d.newsroom_id and current.lead_id = d.lead_id
          order by current.updated_at desc,current.id desc limit 1) as current_draft_id
       from drafts d
+      join drafts original on original.id = ${data.originalDraftId}
+        and original.lead_id = d.lead_id
+        and original.newsroom_id = d.newsroom_id
       where d.id = ${data.draftId}
         and d.lead_id = ${data.leadId}
         and d.newsroom_id = ${context.newsroomId}
@@ -192,6 +208,13 @@ export const getCheckedDraftResultFn = createServerFn({ method: "GET" })
       dek: draft.dek,
       body: draft.body,
       topic: draft.topic,
+      original: {
+        headline: draft.original_headline,
+        dek: draft.original_dek,
+        body: draft.original_body,
+        topic: draft.original_topic,
+      },
+      integrityNotes: draft.integrity_notes ?? "",
     };
   });
 

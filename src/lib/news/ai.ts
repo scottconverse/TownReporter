@@ -88,6 +88,8 @@ export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>
     modelId: string;
     apiKey: string | null;
   }>;
+  /** Test seam for the server-only per-newsroom local-model resolver. */
+  resolveLocal?: (newsroomId?: number) => Promise<LocalModelOverride | null>;
 };
 
 function trimSlash(url: string): string {
@@ -111,14 +113,14 @@ function customGateway(): LlmConfig | null {
 /**
  * The "Local model" entry's own gateway. Unlike `customGateway()` above, this
  * NEVER falls back to `https://api.openai.com/v1` -- an entry named "Local
- * model" that has no LLM_BASE_URL set has no local endpoint to talk to, full
- * stop. Before this, `explicitProvider`'s `local` branch called
+ * model" that has neither a resolved discovery override nor LLM_BASE_URL has
+ * no local endpoint to talk to. Before this, `explicitProvider`'s `local` branch called
  * `customGateway()` directly, so an install with only LLM_API_KEY + LLM_MODEL
  * set (no LLM_BASE_URL) silently sent an editor's "Local model" pick to
  * OpenAI's paid cloud (audit finding "a 'local' pick can hit the real paid
  * OpenAI cloud"). `provider-registry.ts`'s `local-model.enabled()` mirrors
- * this same requirement so the picker never even offers it as ready without
- * an explicit local endpoint.
+ * the same endpoint requirement. Automatic discovery satisfies it by passing
+ * the resolved local server and model into this gateway.
  */
 /**
  * A per-newsroom "Local model" pick, read from provider_settings by the
@@ -251,8 +253,13 @@ function explicitProvider(
     return cli ? { kind: "claude-code", ...cli, model, label: entry.label } : null;
   }
 
-  // Every other entry's off switch governs its only transport, so it decides.
-  if (!entry.enabled()) return null;
+  // A discovered per-newsroom local choice is itself proof of a local endpoint.
+  // The registry's synchronous discovery flag may still be cold in a fresh
+  // request process, so do not discard that resolved choice. The explicit off
+  // switch continues to win.
+  const resolvedLocalIsEnabled =
+    entry.kind === "local" && Boolean(localOverride) && env("TOWNREPORTER_LOCAL") !== "0";
+  if (!entry.enabled() && !resolvedLocalIsEnabled) return null;
 
   if (entry.kind === "codex") return { kind: "codex", model, label: entry.label };
 
@@ -430,7 +437,7 @@ export const AUTOMATIC_LADDER = automaticLadder();
 export async function probeProvider(
   choice?: EffectiveProviderChoice | string,
   newsroomId?: number,
-  adapters?: Pick<GrokChatAdapters, "resolveCustom">,
+  adapters?: Pick<GrokChatAdapters, "resolveCustom" | "resolveLocal">,
 ): Promise<ProviderProbe> {
   if (choice && isCustomModelChoice(choice)) {
     const resolved = await resolveCustomProvider(choice, newsroomId, adapters?.resolveCustom);
@@ -465,7 +472,14 @@ export async function probeProvider(
     }
     return { ok: false, error: `No model in the Automatic ladder is ready. ${failures.join(" ")}` };
   }
-  const provider = resolveProvider(choice);
+  let provider = resolveProvider(choice);
+  if (!provider && choice === "local-model") {
+    let localOverride: LocalModelOverride | null = null;
+    localOverride = adapters?.resolveLocal
+      ? await adapters.resolveLocal(newsroomId)
+      : (await (await import("./provider-settings.ts")).resolveLocalModelChoice(newsroomId)).override;
+    provider = resolveProvider(choice, localOverride);
+  }
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
   if (provider.kind === "codex") {
     const { probeCodex } = await import("./ai-codex.server.ts");

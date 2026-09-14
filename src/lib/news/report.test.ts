@@ -20,6 +20,7 @@ import {
   reportAndDraft,
   resolvePublicFindings,
   stripAiFiller,
+  stripModelCitationMarkers,
   stripReporterNotebook,
   uncreditedOutlets,
   type ProvenanceItem,
@@ -188,6 +189,15 @@ describe("stripAiFiller", () => {
       "This development marks the first time Longmont has split a $2.4 million water contract across two fiscal years.",
     );
     assert.match(out, /\$2\.4 million/);
+  });
+});
+
+describe("stripModelCitationMarkers", () => {
+  it("removes phantom short footnotes while preserving links, years and ranges", () => {
+    assert.equal(
+      stripModelCitationMarkers("The budget rose [1]. Read [1](https://example.test). Years [2025] and [2024-2026]."),
+      "The budget rose. Read [1](https://example.test). Years [2025] and [2024-2026].",
+    );
   });
 });
 

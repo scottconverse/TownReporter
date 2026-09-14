@@ -11,6 +11,7 @@ export type DraftBatchItem = {
   error: string | null;
   draftId: number | null;
   evidenceCheckIncomplete: boolean;
+  reviewRequired: boolean;
   workbenchHref: string;
 };
 export type DraftBatchView = {

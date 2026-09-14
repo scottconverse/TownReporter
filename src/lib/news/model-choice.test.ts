@@ -13,6 +13,7 @@ import {
   storyModelChoice,
   shouldHydrateDarkModel,
 } from "./model-choice.ts";
+import { LOCAL_MODEL_UNCONFIGURED } from "./preflight.ts";
 
 const STORY_VALUES = [
   "auto",
@@ -148,8 +149,10 @@ describe("model choice contract", () => {
       "AI is not available. Set ANTHROPIC_API_KEY, XAI_API_KEY, or LLM_BASE_URL.",
       "local-model",
     );
-    assert.match(guidance, /LLM_BASE_URL/);
-    assert.match(guidance, /LLM_MODEL/);
+    assert.equal(guidance, LOCAL_MODEL_UNCONFIGURED);
+    assert.match(guidance, /Start LM Studio's local server or Ollama/);
+    assert.match(guidance, /click Refresh/);
+    assert.doesNotMatch(guidance, /set LLM_MODEL/);
     assert.doesNotMatch(guidance, /Claude Code/);
   });
 });

@@ -170,12 +170,13 @@ it("actual draft worker uses only the persisted forced transport", async () => {
   );
   assert.equal(persisted.status, "completed");
   assert.equal(persisted.drafts, 1);
-  assert.deepEqual(JSON.parse(persisted.result_json), {
-    requestId: "retained",
-    version: 1,
-    draftId: persisted.draft_id,
-    evidenceCheckIncomplete: true,
-  });
+  const completion = JSON.parse(persisted.result_json);
+  assert.equal(completion.requestId, "retained");
+  assert.equal(completion.version, 2);
+  assert.equal(completion.draftId, persisted.draft_id);
+  assert.equal(completion.finalDraftId, persisted.draft_id);
+  assert.equal(completion.quality.evidenceCheckIncomplete, true);
+  assert.equal(completion.quality.reviewRequired, true);
   const [captureScope] = await sql.query<{ owned: number; default_room: number }>(
     "select count(*) filter (where newsroom_id=$1)::int owned,count(*) filter (where newsroom_id=1)::int default_room from capture_events where source_url=$2",
     [job.newsroom_id, "https://93.184.216.34/scan.pdf"],

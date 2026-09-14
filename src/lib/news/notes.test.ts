@@ -6,6 +6,7 @@ import {
   applyTodoPatch,
   keepHumanTodos,
   machineTodosFrom,
+  mergeDraftEvidenceIntoNotes,
   notesHaveMemo,
   parseNotes,
   toggleTodo,
@@ -14,6 +15,24 @@ import {
 } from "./notes.ts";
 
 describe("reporting notes", () => {
+  it("always includes the checked draft's verification findings when the reporting memo is already filled", () => {
+    const notes = parseNotes(
+      JSON.stringify({
+        news: "Council adopted the ordinance.",
+        verify: ["Confirm the vote count."],
+      }),
+    );
+    const merged = mergeDraftEvidenceIntoNotes(notes, {
+      found: [],
+      unanswered: [],
+      verify: "Brian Bagley spelling confirmed against the signed minutes.",
+    });
+    assert.deepEqual(merged.verify, [
+      "Confirm the vote count.",
+      "Brian Bagley spelling confirmed against the signed minutes.",
+    ]);
+  });
+
   it("keeps human lines through a machine replace", () => {
     const prev = parseNotes(
       JSON.stringify({

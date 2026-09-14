@@ -543,6 +543,47 @@ describe("desk jobs", () => {
       __setJobWorkForTest();
     }
   });
+
+  it("keeps a completed draft terminal while exposing required editorial review", async () => {
+    const sql = await getSql();
+    const newsroomId = 91011;
+    const job = await enqueueJob({
+      userId: "review-terminal",
+      newsroomId,
+      kind: "draft",
+      subjectId: 104,
+      kick: false,
+    });
+    __setJobWorkForTest(async (claimedJob) => {
+      const resultJson = JSON.stringify({
+        version: 2,
+        finalDraftId: 99,
+        draftId: 99,
+        quality: {
+          version: 1,
+          citationStatus: "review-required",
+          evidenceCheckIncomplete: false,
+          nameCheckComplete: true,
+          namesVerified: true,
+          reviewRequired: true,
+          reviewReasons: ["citations-missing"],
+        },
+      });
+      await sql`
+        update desk_jobs set result_json = ${resultJson}, updated_at = now()
+        where id = ${claimedJob.id} and claim_token = ${claimedJob.claim_token}
+      `;
+    });
+    try {
+      assert.equal(await executeJob(job), true);
+      const stored = await latestJob({ newsroomId, kind: "draft", subjectId: 104 });
+      assert.equal(stored?.status, "completed");
+      assert.equal(stored?.stage, "Draft saved — review required");
+      assert.equal(JSON.parse(stored?.result_json ?? "{}").finalDraftId, 99);
+    } finally {
+      __setJobWorkForTest();
+    }
+  });
 });
 
 /**

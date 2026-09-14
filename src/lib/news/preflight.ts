@@ -116,7 +116,7 @@ function providerAuthGuidance(detail: string): string {
  * "Local model" option, so the two surfaces agree.
  */
 export const LOCAL_MODEL_UNCONFIGURED =
-  "Local model is not set up on this server. Set LLM_BASE_URL to your local server (Ollama: http://127.0.0.1:11434/v1) and LLM_MODEL to the model name, then restart the paper. See docs/local-models.md. Nothing was spent.";
+  "TownReporter cannot reach a local model. Start LM Studio's local server or Ollama, then click Refresh under Local model. For a server at a different address, set LLM_BASE_URL. See docs/local-models.md. Nothing was spent.";
 
 /**
  * Classify by the provider's message.

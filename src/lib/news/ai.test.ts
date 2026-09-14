@@ -523,6 +523,29 @@ describe("grokChat", () => {
 });
 
 describe("model-picker provider readiness", () => {
+  it("preflights the discovered newsroom local model without requiring environment variables", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      calls.push(String(input));
+      return new Response(JSON.stringify({ data: [{ id: "halo-brain-35b" }] }), { status: 200 });
+    };
+    try {
+      await withEnvAsync(BARE, async () => {
+        const result = await probeProvider("local-model", 44, {
+          resolveLocal: async () => ({
+            baseUrl: "http://127.0.0.1:1234/v1",
+            id: "halo-brain-35b",
+          }),
+        });
+        assert.deepEqual(result, { ok: true, label: "LLM", choice: "local-model" });
+      });
+      assert.deepEqual(calls, ["http://127.0.0.1:1234/v1/models"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("accepts a saved custom manual model when its endpoint does not implement /models", async () => {
     const originalFetch = globalThis.fetch;
     const calls: { url: string; authorization: string | null }[] = [];

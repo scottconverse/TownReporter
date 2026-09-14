@@ -351,7 +351,7 @@ describe("draft batch transaction and read", () => {
     assert.equal(bound.ok && bound.batch?.items[0]?.draftId, batchDraft.id);
     assert.deepEqual(
       parseDraftBatchCompletion(JSON.stringify({ version: 1, draftId: 12345, evidenceCheckIncomplete: true, untouched: "retained" })),
-      { draftId: 12345, evidenceCheckIncomplete: true },
+      { draftId: 12345, evidenceCheckIncomplete: true, reviewRequired: true },
     );
     const foreign = await readDraftBatchForAuthenticatedEditor(
       { userId: "foreign", newsroomId: newsroomId + 1 },

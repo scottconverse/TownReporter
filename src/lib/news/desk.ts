@@ -75,6 +75,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { effectiveStoryModelChoice, storyModelChoice } from "./model-choice.ts";
 import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
 import { failOverAndRetry, type PerformDraftWorkDeps } from "./desk-model-run.ts";
+import { buildDraftCompletionReceipt } from "./draft-completion.ts";
 export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
 import type { DraftRow, LeadRow, MemoryRow, ScanRow, SourceRow } from "./types";
@@ -951,6 +952,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   if (!lead) throw new Error("Lead not found");
   if (lead.status === "killed") throw new Error("Restore this lead before drafting.");
   let expectedDraft = (await sql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1`)[0] ?? null;
+  let checkpointDraftId: number | null = null;
   const draftStillExpected = (current: DraftRow | null) =>
     current?.id === expectedDraft?.id &&
     String(current?.updated_at ?? "") === String(expectedDraft?.updated_at ?? "") &&
@@ -1031,6 +1033,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         where id=${job.id} and newsroom_id=${job.newsroom_id} and status='running' and claim_token=${job.claim_token??""}
       `;
       expectedDraft=saved;
+      checkpointDraftId=Number(saved.id);
     });
   };
   if (batchSnapshot) {
@@ -1214,14 +1217,20 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     )
     returning id
   `;
-    if (job.draft_batch_id && savedDraft) {
-      const completion = JSON.stringify({
-        version: 1,
-        draftId: Number(savedDraft.id),
+    if (savedDraft) {
+      const completion = JSON.stringify(buildDraftCompletionReceipt({
+        checkpointDraftId,
+        finalDraftId: Number(savedDraft.id),
+        citationStatus: reported.citation_status ?? (
+          reported.source_urls.length || (reported.documentClaims?.length ?? 0) > 0
+            ? "complete"
+            : "review-required"
+        ),
         evidenceCheckIncomplete: notes.includes(
           "Evidence reconciliation not completed within the available edit pass.",
         ),
-      });
+        nameCheck: reported.research_memo.nameCheck,
+      }));
       await sql`
       update desk_jobs
       set result_json = (coalesce(nullif(result_json, ''), '{}')::jsonb || ${completion}::jsonb)::text

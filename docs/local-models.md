@@ -7,6 +7,13 @@ model you like). Start TownReporter. The Writing model picker lists it under
 Also works with no config: LM Studio (start its server) · llama.cpp
 (`llama-server -m <model.gguf>`).
 
+The model shown in the picker is the model TownReporter preflights and calls.
+Automatic discovery supplies both its local address and model name; `LLM_BASE_URL`
+and `LLM_MODEL` are optional overrides. If a server is started after the desk,
+open **Model & research** and click **Refresh**. A reachable model must never be
+shown as loaded while the writing action reports that environment variables are
+missing.
+
 Overrides, only if you need one:
 
 ```

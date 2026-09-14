@@ -10,13 +10,14 @@ let getSql: typeof import("../db.ts").getSql;
 let ensureJobsSchema: typeof import("./jobs.ts").ensureJobsSchema;
 let performDraftWork: typeof import("./desk.ts").performDraftWork;
 let withClaimedLeadDraftCheckpointLock: typeof import("./draft-order.server.ts").withClaimedLeadDraftCheckpointLock;
+let withClaimedLeadDraftLock: typeof import("./draft-order.server.ts").withClaimedLeadDraftLock;
 
 before(async () => {
   vite=await createServer({configFile:false,cacheDir:join(tmpdir(),`townreporter-draft-checkpoint-${process.pid}`),server:{middlewareMode:true,hmr:{port:0}},resolve:{alias:{"@":join(process.cwd(),"src")}}});
   ({getSql}=await vite.ssrLoadModule("/src/lib/db.ts"));
   ({ensureJobsSchema}=await vite.ssrLoadModule("/src/lib/news/jobs.ts"));
   ({performDraftWork}=await vite.ssrLoadModule("/src/lib/news/desk.ts"));
-  ({withClaimedLeadDraftCheckpointLock}=await vite.ssrLoadModule("/src/lib/news/draft-order.server.ts"));
+  ({withClaimedLeadDraftCheckpointLock,withClaimedLeadDraftLock}=await vite.ssrLoadModule("/src/lib/news/draft-order.server.ts"));
 });
 after(async()=>vite?.close());
 
@@ -70,4 +71,18 @@ test("a later writer checkpoint cannot supersede an intervening editor draft",as
   }}),/draft changed/i);
   const rows=await sql.query<{headline:string}>("select headline from drafts where newsroom_id=$1 and lead_id=$2 order by id",[room,lead.id]);
   assert.deepEqual(rows.map(row=>row.headline),["Writer one","Editor saved"]);
+});
+
+test("the atomic final-draft commit exposes a review-required terminal stage",async()=>{
+  await ensureJobsSchema();
+  const sql=await getSql(),room=88403,user="review-stage-editor";
+  await sql.query("insert into newsrooms(id,name) values($1,'Review stage room') on conflict(id) do nothing",[room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')",[user,room]);
+  const [lead]=await sql.query<{id:number}>("insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'Review stage lead','Why','council','new','[]','',1,'{}') returning id",[user,room]);
+  const receipt=JSON.stringify({version:2,finalDraftId:501,draftId:501,quality:{version:1,citationStatus:"repaired",evidenceCheckIncomplete:false,nameCheckComplete:false,namesVerified:false,reviewRequired:true,reviewReasons:["name-check-incomplete"]}});
+  const [jobRow]=await sql.query<{id:number}>("insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token,result_json) values($1,$2,'draft',$3,'local-model','editor','supplied','default','running','Checking names','review-stage-claim',$4) returning id",[user,room,lead.id,receipt]);
+  const job={id:jobRow.id,user_id:user,newsroom_id:room,kind:"draft",subject_id:lead.id,model_choice:"local-model",model_choice_source:"editor",research_scope:"supplied",lane:"default",status:"running",stage:"Checking names",claim_token:"review-stage-claim"} as DeskJob;
+  await withClaimedLeadDraftLock(job,lead.id,async()=>undefined);
+  const [stored]=await sql.query<{status:string;stage:string}>("select status,stage from desk_jobs where id=$1",[job.id]);
+  assert.deepEqual(stored,{status:"completed",stage:"Draft saved — review required"});
 });

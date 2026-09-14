@@ -12,6 +12,8 @@ const base = {
   note: "",
   noteError: false,
   checkedDraftReady: false,
+  onKeepChecked: () => undefined,
+  onRestoreOriginal: () => undefined,
   onStart: () => undefined,
   onReload: () => undefined,
 };
@@ -70,5 +72,58 @@ describe("DraftReconcileControl", () => {
       /Load checked version for review/,
     );
     assert.match(render({ note: "Could not queue.", noteError: true }), /notice-err/);
+  });
+
+  it("shows a persistent, descriptive progress panel while the check is running", () => {
+    const html = render({
+      active: true,
+      modelLabel: "Local model · halo-brain-35b",
+      status: {
+        jobId: 9,
+        draftId: 2,
+        status: "running",
+        stage: "Checking names and spellings",
+        error: null,
+        modelChoice: "local-model",
+        resultDraftId: null,
+        evidenceCheckIncomplete: false,
+      },
+    });
+    assert.match(html, /evidence-check-progress/);
+    assert.match(html, /Checking names and spellings/);
+    assert.match(html, /Local model · halo-brain-35b/);
+    assert.match(html, /You can leave this page/);
+    assert.match(html, /open here for comparison/);
+  });
+
+  it("shows the saved before-and-after result and unresolved checks", () => {
+    const html = render({
+      reviewOpen: true,
+      review: {
+        original: {
+          headline: "Original headline",
+          dek: "Original dek",
+          body: "The unsupported sentence stayed.",
+          topic: "council",
+        },
+        checked: {
+          headline: "Checked headline",
+          dek: "Original dek",
+          body: "The supported sentence stayed.",
+          topic: "council",
+        },
+        integrityNotes: "Confirm the final vote count before publishing.",
+      },
+    });
+    assert.match(html, /Evidence check results/);
+    assert.match(html, /2 changes proposed/);
+    assert.match(html, /Before check/);
+    assert.match(html, /Checked version/);
+    assert.match(html, /Original headline/);
+    assert.match(html, /Checked headline/);
+    assert.match(html, /Verify before print/);
+    assert.match(html, /Confirm the final vote count/);
+    assert.match(html, /Keep checked version/);
+    assert.match(html, /Restore previous version/);
   });
 });

@@ -203,7 +203,8 @@ test("an unavailable provider renders as a disabled option labelled 'not set up'
   const html = renderToStaticMarkup(createElement(ModelPicker, { value: "auto", onChange() {} }));
   assert.match(html, /<option[^>]*value="local-model"[^>]* disabled=""[^>]*>Local model — llama\.cpp, LM Studio, or another OpenAI-compatible server — not set up<\/option>/);
   // Not selected, but the only unavailable option -- still surfaced.
-  assert.match(html, /Local model is not set up on this server\. See docs\/local-models\.md\./);
+  assert.match(html, /TownReporter cannot reach a local model\. Start LM Studio/);
+  assert.match(html, /then click Refresh\. See docs\/local-models\.md\./);
 });
 
 test("selecting the unavailable provider replaces the normal help with the specific one", () => {
@@ -211,7 +212,8 @@ test("selecting the unavailable provider replaces the normal help with the speci
   const html = renderToStaticMarkup(
     createElement(ModelPicker, { value: "local-model", onChange() {} }),
   );
-  assert.match(html, /Local model is not set up on this server\. See docs\/local-models\.md\./);
+  assert.match(html, /TownReporter cannot reach a local model\. Start LM Studio/);
+  assert.match(html, /then click Refresh\. See docs\/local-models\.md\./);
   assert.doesNotMatch(html, /Uses only Local model for this run; no fallback/);
 });
 

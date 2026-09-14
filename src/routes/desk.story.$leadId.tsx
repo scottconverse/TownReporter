@@ -40,6 +40,7 @@ import { useEditorSections } from "@/lib/use-sections";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import {
   applyTodoPatch,
+  mergeDraftEvidenceIntoNotes,
   notesHaveMemo,
   parseNotes,
   uncheckedGateTodos,
@@ -58,9 +59,12 @@ import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review";
-import type { StoryModelChoice } from "@/lib/news/model-choice";
+import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { integrityNoteItems } from "@/lib/news/coerce-draft";
-import { DraftReconcileControl } from "@/components/draft-reconcile-control";
+import {
+  DraftReconcileControl,
+  type EvidenceCheckReview,
+} from "@/components/draft-reconcile-control";
 import {
   assessCheckedDraftResult,
   assessRefreshedCheckedDraft,
@@ -68,8 +72,10 @@ import {
   getCheckedDraftResultFn,
   getDraftReconciliationStatusFn,
   requestDraftReconciliationFn,
+  type CheckedDraftResult,
   type EditableDraftFields,
 } from "@/lib/news/draft-reconcile-actions";
+import { parseDraftCompletionReceipt } from "@/lib/news/draft-completion";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
   component: StoryPage,
@@ -162,6 +168,8 @@ function StoryPage() {
   const [reconcileNoteWarning, setReconcileNoteWarning] = useState(false);
   const [checkedDraftReady, setCheckedDraftReady] = useState(false);
   const [checkedDraftStale, setCheckedDraftStale] = useState(false);
+  const [evidenceReview, setEvidenceReview] = useState<EvidenceCheckReview | null>(null);
+  const [evidenceReviewOpen, setEvidenceReviewOpen] = useState(false);
 
   const waiting = waitingSince !== null;
 
@@ -247,7 +255,10 @@ function StoryPage() {
     priorDraftJobWasOpen.current = false;
     setWaitingSince(null);
     setSlowWait(false);
-    setMsg("");
+    const completion = parseDraftCompletionReceipt(data.job?.result_json);
+    setMsg(completion?.quality.reviewRequired
+      ? "Draft saved. Review the source and name-check warnings before publication."
+      : "Draft saved.");
   }, [awaitingDraftJobAck, data, waitingSince]);
 
   useEffect(() => {
@@ -404,10 +415,23 @@ function StoryPage() {
 
   const applyCheckedDraft = async (
     draftId: number,
+    originalDraftId: number,
     expected?: EditableDraftFields,
     explicit = false,
   ) => {
-    const checked = await getCheckedDraftResultFn({ data: { leadId: id, draftId } });
+    const checked: CheckedDraftResult = await getCheckedDraftResultFn({
+      data: { leadId: id, draftId, originalDraftId },
+    });
+    setEvidenceReview({
+      original: checked.original,
+      checked: {
+        headline: checked.headline,
+        dek: checked.dek,
+        body: stripReporterNotebook(checked.body ?? ""),
+        topic: checked.topic,
+      },
+      integrityNotes: checked.integrityNotes,
+    });
     const assessment = assessCheckedDraftResult({
       resultDraftId: checked.id,
       currentDraftId: checked.currentDraftId,
@@ -501,6 +525,8 @@ function StoryPage() {
       reconcileSnapshot.current = { ...currentDraftFields.current };
       appliedReconcileJob.current = reconcileStatus.data?.jobId ?? null;
       setCheckedDraftReady(false);
+      setEvidenceReview(null);
+      setEvidenceReviewOpen(false);
       setReconcileNote("");
       setReconcileNoteError(false);
       setReconcileNoteWarning(false);
@@ -534,7 +560,6 @@ function StoryPage() {
       return;
     appliedReconcileJob.current = status.jobId;
     const snapshot = reconcileSnapshot.current;
-    if (!snapshot) return;
     if (!status.resultDraftId) {
       setReconcileNote(
         "Evidence check finished without identifying its saved result. Reload the page and review the current draft.",
@@ -542,16 +567,19 @@ function StoryPage() {
       setReconcileNoteError(true);
       return;
     }
-    if (!draftFieldsMatch(snapshot, currentDraftFields.current)) {
-      setCheckedDraftReady(true);
-      setCheckedDraftStale(false);
-      setReconcileNoteWarning(true);
-      setReconcileNote(
-        "Evidence check finished. You typed while it ran, so your unsaved edits were kept.",
-      );
+    if (!snapshot) {
+      void applyCheckedDraft(status.resultDraftId, status.draftId)
+        .then(() => setEvidenceReviewOpen(false))
+        .catch((cause) => {
+          setReconcileNote(
+            cause instanceof Error ? cause.message : "The checked draft could not be loaded.",
+          );
+          setReconcileNoteError(true);
+        });
       return;
     }
-    void applyCheckedDraft(status.resultDraftId, snapshot)
+    setEvidenceReviewOpen(true);
+    void applyCheckedDraft(status.resultDraftId, status.draftId, snapshot)
       .then((loaded) => {
         if (!loaded) return;
         setReconcileNote(
@@ -638,6 +666,13 @@ function StoryPage() {
   // resolveDraftJobState in desk-copy.ts for why this replaced three
   // separately-latched pieces of local state.
   const jobState = resolveDraftJobState(data.job);
+  const draftCompletion = parseDraftCompletionReceipt(data.job?.result_json);
+  const completedDraftNeedsReview = Boolean(
+    data.job?.status === "completed" &&
+    data.draft?.id &&
+    draftCompletion?.finalDraftId === data.draft.id &&
+    draftCompletion.quality.reviewRequired,
+  );
   const sources = parseUrlList(data.lead.source_urls);
   const fromDark =
     Boolean(data.lead.investigation_id) ||
@@ -649,16 +684,11 @@ function StoryPage() {
   const found = findingsFrom(data.draft?.found_note);
   const unanswered = unansweredNotes(data.draft?.unanswered);
   const verify = data.draft?.integrity_notes?.trim() || "";
-  const notes = parseNotes(data.lead.notes_json);
-  if (!notesHaveMemo(notes)) {
-    if (!notes.found.length && found.length) {
-      notes.found = found.map((f) => ({ t: f.text, src: f.url }));
-    }
-    if (!notes.todo.length && unanswered.length) {
-      notes.todo = unanswered.map((t) => ({ t, done: false, src: "machine" as const }));
-    }
-    if (!notes.verify.length && verify) notes.verify = [verify];
-  }
+  const notes = mergeDraftEvidenceIntoNotes(parseNotes(data.lead.notes_json), {
+    found: found.map((f) => ({ t: f.text, src: f.url })),
+    unanswered,
+    verify,
+  });
   const score = data.lead.newsworthiness ?? 0;
   /*
     The "how we report" page promises that leaning on another newsroom's
@@ -721,6 +751,11 @@ function StoryPage() {
             <Link to="/desk">Desk → Your recent drafts</Link>.
           </span>
         </section>
+      ) : null}
+      {completedDraftNeedsReview ? (
+        <Notice kind="err">
+          <strong>Draft saved — review required.</strong> Check the source and name-verification findings before publication.
+        </Notice>
       ) : null}
       <Link to="/desk/queue" className="crumb">
         ← Queue
@@ -791,11 +826,17 @@ function StoryPage() {
               noteWarning={reconcileNoteWarning}
               checkedDraftReady={checkedDraftReady}
               checkedDraftStale={checkedDraftStale}
+              modelLabel={modelChoiceLabel(reconcileStatus.data?.modelChoice ?? modelChoice)}
+              review={evidenceReview}
+              reviewOpen={evidenceReviewOpen}
               onStart={() => reconcile.mutate()}
               onReload={() => {
                 const resultDraftId = reconcileStatus.data?.resultDraftId;
                 if (!resultDraftId) return;
-                void applyCheckedDraft(resultDraftId, undefined, true).catch((cause) => {
+                const originalDraftId = reconcileStatus.data?.draftId;
+                if (!originalDraftId) return;
+                setEvidenceReviewOpen(true);
+                void applyCheckedDraft(resultDraftId, originalDraftId, undefined, true).catch((cause) => {
                   setReconcileNote(
                     cause instanceof Error
                       ? cause.message
@@ -804,6 +845,25 @@ function StoryPage() {
                   setReconcileNoteError(true);
                   setReconcileNoteWarning(false);
                 });
+              }}
+              onKeepChecked={() => {
+                setEvidenceReviewOpen(false);
+                setReconcileNote("The checked version remains the current saved draft.");
+                setReconcileNoteError(false);
+                setReconcileNoteWarning(false);
+              }}
+              onRestoreOriginal={() => {
+                if (!evidenceReview) return;
+                setHeadline(evidenceReview.original.headline);
+                setDek(evidenceReview.original.dek);
+                setBody(stripReporterNotebook(evidenceReview.original.body));
+                setTopic(evidenceReview.original.topic);
+                setEvidenceReviewOpen(false);
+                setReconcileNote(
+                  "Previous version loaded as unsaved text. Click Save edits to make it the current saved draft.",
+                );
+                setReconcileNoteError(false);
+                setReconcileNoteWarning(true);
               }}
             />
             {canPublish ? (
