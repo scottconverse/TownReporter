@@ -1,6 +1,11 @@
 # Changelog
 
-Current release: **0.6.46**.
+Current release: **0.6.47**.
+
+## 0.6.47 — 2026-09-13
+
+- Adds a persistent, labeled Editor’s desk button to the public header. It remains visible beside Explore the publication on phones and opens the existing authenticated desk or sign-in flow.
+- Keeps the footer newsroom links and the desk’s Public news page return path. No editorial data, article addresses or newsroom behavior changed.
 
 ## 0.6.46 — 2026-09-13
 

@@ -105,9 +105,14 @@ export function Masthead() {
                 </Link>
               ))}
           </nav>
-          <Link to="/about" className="textlink">
-            About the newsroom <ArrowRight aria-hidden />
-          </Link>
+          <div className="reader-nav-actions">
+            <Link to="/about" className="textlink about-newsroom">
+              About the newsroom <ArrowRight aria-hidden />
+            </Link>
+            <Link to="/desk" className="btn desk-entry">
+              Editor’s desk <ArrowRight aria-hidden />
+            </Link>
+          </div>
         </div>
       </div>
     </header>

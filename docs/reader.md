@@ -1,6 +1,6 @@
 # Reading TownReporter
 
-For TownReporter 0.6.46. The publication uses its configured name, town and visible sections.
+For TownReporter 0.6.47. The publication uses its configured name, town and visible sections. **Editor’s desk** stays in the public header on desktop and phones; it opens the desk for a signed-in editor and the sign-in flow for everyone else.
 
 The front page leads with the latest published story, more recent coverage, sections, local resources and Opinion. Select the publication name to return here from any reader page. **Editor’s desk** in the footer opens the signed-in desk or its sign-in screen. **Public news page** and the TownReporter logo in the desk return to the newspaper.
 
