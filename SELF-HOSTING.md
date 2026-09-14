@@ -11,7 +11,7 @@ remote development machine as production. The paper is hosted at
 **https://townreporter.org** on the Halo box in Longmont, through a Cloudflare
 Tunnel. “This machine” below refers to Halo.
 
-Production was independently checked on 2026-09-13 at source `c926fc48e8e11ebce437a47bc0fd3c990671ecb8` before packaging 0.6.44. The local and public app answered, the served version matched the build, and published articles were preserved. The [current release record](docs/releases/0.6.45.md) links the release and its dated deployment evidence. A repository version, GitHub tag or release does not establish production version. Earlier machine inventories and receipts below describe their observation dates.
+Production was independently checked on 2026-09-13 at source `c926fc48e8e11ebce437a47bc0fd3c990671ecb8` before packaging 0.6.44. The local and public app answered, the served version matched the build, and published articles were preserved. The [current release record](docs/releases/0.6.46.md) links the release and its dated deployment evidence. A repository version, GitHub tag or release does not establish production version. Earlier machine inventories and receipts below describe their observation dates.
 
 Current development boundaries and queue: [handoff](HANDOFF-NEXT-AGENT.md),
 [TODO](TODO.md). Staging and promotion below require a Halo-local operator.
