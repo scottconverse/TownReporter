@@ -15,26 +15,21 @@ import type {
   DraftBatchView,
 } from "./draft-batch.ts";
 import type { AuthenticatedEditorContext } from "./model-request-commit.server.ts";
+import { parseDraftCompletionReceipt } from "./draft-completion.ts";
 
 export const validateBatchRuntime = validateForcedRuntime;
 
 export function parseDraftBatchCompletion(value: unknown): {
   draftId: number;
   evidenceCheckIncomplete: boolean;
+  reviewRequired: boolean;
 } | null {
-  try {
-    const row = typeof value === "string" ? JSON.parse(value) : value;
-    if (!row || typeof row !== "object" || Array.isArray(row)) return null;
-    const result = row as Record<string, unknown>;
-    if (result.version !== 1 || !Number.isSafeInteger(result.draftId) || Number(result.draftId) <= 0)
-      return null;
-    return {
-      draftId: Number(result.draftId),
-      evidenceCheckIncomplete: result.evidenceCheckIncomplete === true,
-    };
-  } catch {
-    return null;
-  }
+  const receipt = parseDraftCompletionReceipt(value);
+  return receipt ? {
+    draftId: receipt.finalDraftId,
+    evidenceCheckIncomplete: receipt.quality.evidenceCheckIncomplete,
+    reviewRequired: receipt.quality.reviewRequired,
+  } : null;
 }
 
 export async function isCurrentBatchEditor(context: AuthenticatedEditorContext): Promise<boolean> {
@@ -228,6 +223,7 @@ async function batchView(
         error: job.error,
         draftId,
         evidenceCheckIncomplete: draftId != null && completion?.evidenceCheckIncomplete === true,
+        reviewRequired: draftId != null && completion?.reviewRequired === true,
         workbenchHref: "/desk/story/" + job.subject_id,
         };
       }),

@@ -27,7 +27,7 @@ if (probe.ok) {
     await sql.query(`create table drafts(id serial primary key, lead_id integer, newsroom_id integer, headline text, dek text, body text, topic text, source_urls text, updated_at timestamptz default now())`);
     await sql.query(`create table articles(id serial primary key, body text)`);
     await sql.query(`create table newsroom_members(user_id text primary key, newsroom_id integer, role text)`);
-    await sql.query(`create table desk_jobs(id serial primary key, newsroom_id integer, user_id text, status text, stage text, error text, claim_token text, updated_at timestamptz, finished_at timestamptz)`);
+    await sql.query(`create table desk_jobs(id serial primary key, newsroom_id integer, user_id text, status text, stage text, error text, result_json text not null default '{}', claim_token text, updated_at timestamptz, finished_at timestamptz)`);
     await sql.query(`insert into leads values(1,81,'drafted')`);
     await sql.query(`insert into drafts(lead_id,newsroom_id,headline,dek,body,topic,source_urls) values(1,81,'Reviewed','','Reviewed draft','community','[]')`);
     await sql.query(`insert into leads values(2,82,'new')`);

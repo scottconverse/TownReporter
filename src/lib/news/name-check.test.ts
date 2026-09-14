@@ -6,7 +6,7 @@ import { nameCheckText, readNameCheck } from "./name-check.ts";
 const person = { name: "Eugene May", role: "Longmont City Attorney", context: "City Attorney Eugene May spoke." };
 const doc = { url: "https://longmontcolorado.gov/city-attorney/staff/", title: "City Attorney staff", text: "Eugene Mei, City Attorney for Longmont", extras: [], version_id: 42 };
 const candidate = { name: person.name, status: "corrected", spelling: "Eugene Mei", url: doc.url, excerpt: doc.text, authority: "official-directory", samePerson: true, reason: "The written city roster identifies the same Longmont city attorney." };
-test("an invented roster quotation is repaired from an exact saved passage before editor review", async () => {
+test("an invented roster quotation is replaced with an exact saved passage before editor review", async () => {
   const mayor={name:"Brian Bagley",role:"former Mayor of Longmont",context:""};
   const source={...doc,url:"https://longmontcolorado.gov/government/mayors-of-longmont",title:"Mayors of Longmont",text:"Mayors of Longmont\n\nBrian Bagley\n\n2017 - 2021"};
   let calls=0;
@@ -17,17 +17,18 @@ test("an invented roster quotation is repaired from an exact saved passage befor
     if(calls===3) { assert.match(user,/EXACT SAVED PASSAGES/); return {ok:true,text:JSON.stringify({checks:[{...checked,passageId:1}]})}; }
     return {ok:true,text:JSON.stringify({checks:[checked]})};
   }});
-  assert.equal(calls,3); assert.equal(result.check.rows[0].status,"matched");
+  assert.equal(calls,2); assert.equal(result.check.rows[0].status,"matched");
   assert.equal(result.check.rows[0].excerpt,source.text);
   assert.equal(result.check.rows[0].captureId,42);
 });
 test("a correction requires a saved exact written passage and contextual identity", () => {
-  assert.equal(validateNameEvidence(person, candidate, [doc]).status, "corrected");
-  for (const changes of [{excerpt:"Eugene Mei, mayor"}, {url:"https://invented.example/"}, {samePerson:false}, {authority:"none"}, {spelling:"Eugene Meier"}]) assert.equal(validateNameEvidence(person, {...candidate,...changes}, [doc]).status, "unresolved");
-  assert.equal(validateNameEvidence(person, candidate, [{...doc,version_id:null}]).status, "unresolved");
-  assert.equal(validateNameEvidence(person, candidate, [{...doc,extraction_method:"pdf-ocr"}]).status, "unresolved");
+  const officialDomains={city:"Longmont",officialDomains:["longmontcolorado.gov"]};
+  assert.equal(validateNameEvidence(person, candidate, [doc], officialDomains).status, "corrected");
+  for (const changes of [{excerpt:"Eugene Mei, mayor"}, {url:"https://invented.example/"}, {samePerson:false}, {authority:"none"}, {spelling:"Eugene Meier"}]) assert.equal(validateNameEvidence(person, {...candidate,...changes}, [doc], officialDomains).status, "unresolved");
+  assert.equal(validateNameEvidence(person, candidate, [{...doc,version_id:null}], officialDomains).status, "unresolved");
+  assert.equal(validateNameEvidence(person, candidate, [{...doc,extraction_method:"pdf-ocr"}], officialDomains).status, "unresolved");
   const url="https://www.youtube.com/watch?v=abc";
-  assert.equal(validateNameEvidence(person,{...candidate,url},[{...doc,url}]).status,"unresolved");
+  assert.equal(validateNameEvidence(person,{...candidate,url},[{...doc,url}], officialDomains).status,"unresolved");
 });
 test("an authoritative uploaded written record corrects every unquoted draft field with a private locator", async () => {
   const uploaded={evidenceKind:"uploaded-document" as const,documentId:"private-1",filename:"signed-minutes.docx",mime:"application/vnd.openxmlformats-officedocument.wordprocessingml.document",text:"Longmont City Attorney Eugene Mei presented the item."};
@@ -78,6 +79,63 @@ test("timeout or malformed inventory never claims that names were checked", asyn
 });
 test("a source cannot certify a different person with the same name; missing and quoted names stay visible",async()=>{
   const draft={headline:"",dek:"",body:'City Attorney Eugene May spoke. "Eugene May" was the caption.'};
-  let calls=0;const result=await checkStoryNames({draft,city:"Longmont",domains:[],docs:[doc],searchAllowed:false,timeLeft:()=>100000,search:async()=>[],open:async()=>{},chat:async()=>({ok:true,text:JSON.stringify(++calls===1?{complete:true,people:[person]}:{checks:[candidate]})})});
+  let calls=0;const result=await checkStoryNames({draft,city:"Longmont",domains:["longmontcolorado.gov"],docs:[doc],searchAllowed:false,timeLeft:()=>100000,search:async()=>[],open:async()=>{},chat:async()=>({ok:true,text:JSON.stringify(++calls===1?{complete:true,people:[person]}:{checks:[candidate]})})});
   assert.equal(result.check.rows[0].status,"unresolved");assert.match(result.check.rows[0].reason,/quotation/);assert.match(result.draft.body,/City Attorney Eugene Mei/);assert.match(result.draft.body,/"Eugene May"/);
+});
+
+test("an exact Harold-style official record is accepted deterministically even when the model cannot resolve it", async () => {
+  const source={...doc,url:"https://longmontcolorado.gov/uploads/council-agenda.pdf",title:"City Council Agenda",text:"PRESENTED BY: Harold Dominguez, City Manager's Office",version_id:130};
+  let calls=0;
+  const result=await checkStoryNames({
+    draft:{headline:"Harold Dominguez presents the agenda",dek:"",body:"City Manager's Office representative Dominguez presented the item."},
+    city:"Longmont",domains:["longmontcolorado.gov"],docs:[source],searchAllowed:false,timeLeft:()=>100000,search:async()=>[],open:async()=>{},
+    chat:async()=>({ok:true,text:JSON.stringify(++calls===1?{complete:true,people:[{name:"Harold Dominguez",role:"Longmont City Manager's Office",context:"Dominguez presented the item."}]}:{checks:[{name:"Harold Dominguez",status:"unresolved",reason:"The model could not resolve this name."}]})}),
+  });
+  assert.equal(result.check.rows.length,1);
+  assert.equal(result.check.rows[0].status,"matched");
+  assert.equal(result.check.rows[0].spelling,"Harold Dominguez");
+  assert.equal(result.check.rows[0].captureId,130);
+  assert.match(result.check.rows[0].excerpt,/PRESENTED BY: Harold Dominguez, City Manager's Office/);
+});
+
+test("a surname-only inventory entry is merged into its unambiguous full-name entry", async () => {
+  const source={...doc,url:"https://longmontcolorado.gov/uploads/council-agenda.pdf",title:"City Council Agenda",text:"PRESENTED BY: Harold Dominguez, City Manager's Office",version_id:131};
+  let calls=0;
+  const result=await checkStoryNames({
+    draft:{headline:"Harold Dominguez presents the agenda",dek:"",body:"Dominguez presented the item for the City Manager's Office."},
+    city:"Longmont",domains:["longmontcolorado.gov"],docs:[source],searchAllowed:false,timeLeft:()=>100000,search:async()=>[],open:async()=>{},
+    chat:async()=>({ok:true,text:JSON.stringify(++calls===1?{complete:true,people:[
+      {name:"Harold Dominguez",role:"Longmont City Manager's Office",context:"Harold Dominguez presents the agenda."},
+      {name:"Dominguez",role:"City Manager's Office",context:"Dominguez presented the item."},
+    ]}:{checks:[{name:"Harold Dominguez",status:"unresolved",reason:"Model evidence unavailable."}]})}),
+  });
+  assert.deepEqual(result.check.rows.map(row=>row.name),["Harold Dominguez"]);
+  assert.equal(result.check.rows[0].status,"matched");
+  assert.equal(result.check.complete,true);
+});
+
+test("a surname shared by two full names remains unresolved and visible", async () => {
+  const source={...doc,url:"https://longmontcolorado.gov/uploads/council-agenda.pdf",title:"City Council Agenda",text:"PRESENTED BY: Harold Dominguez, City Manager's Office",version_id:132};
+  const people=[
+    {name:"Harold Dominguez",role:"Longmont City Manager's Office",context:"Harold Dominguez presented the item."},
+    {name:"Maria Dominguez",role:"Longmont City Council",context:"Maria Dominguez asked a question."},
+    {name:"Dominguez",role:"Longmont official",context:"Dominguez was mentioned afterward."},
+  ];
+  let calls=0;
+  const result=await checkStoryNames({draft:{headline:"Dominguez officials meet",dek:"",body:"Harold Dominguez presented the item. Maria Dominguez asked a question. Dominguez was mentioned afterward."},city:"Longmont",domains:["longmontcolorado.gov"],docs:[source],searchAllowed:false,timeLeft:()=>100000,search:async()=>[],open:async()=>{},chat:async()=>({ok:true,text:JSON.stringify(++calls===1?{complete:true,people}:{checks:people.map(person=>({name:person.name,status:"matched",spelling:person.name,url:source.url,excerpt:source.text,authority:"official-record",samePerson:true,reason:"The record contains this surname."}))})})});
+  const surname=result.check.rows.find(row=>row.name==="Dominguez");
+  assert.ok(surname);
+  assert.equal(surname.status,"unresolved");
+  assert.match(surname.reason,/ambiguous/i);
+});
+
+test("unexpected resolver failures return a safe diagnostic and invoke the editor hook", async () => {
+  const diagnostics: unknown[]=[];
+  const result=await checkStoryNames({draft:{headline:"Harold Dominguez",dek:"",body:"Harold Dominguez spoke."},city:"Longmont",domains:[],docs:[],searchAllowed:false,timeLeft:()=>100000,search:async()=>[],open:async()=>{},onDiagnostic:async diagnostic=>{diagnostics.push(diagnostic);},chat:async()=>{throw new Error("private document text must not escape");}});
+  assert.equal(result.check.complete,false);
+  assert.match(result.check.note,/diagnostic/i);
+  assert.equal(result.diagnostic?.code,"unexpected-error");
+  assert.equal(diagnostics.length,1);
+  assert.equal((diagnostics[0] as {message:string}).message,"Automatic name verification stopped unexpectedly. Review all listed names before publication.");
+  assert.doesNotMatch(result.check.note,/private document text/);
 });

@@ -12,9 +12,9 @@ output = output.replaceAll('"@/components/states"', JSON.stringify(states)).repl
 const { DraftBatchResult } = await import(`data:text/javascript;base64,${Buffer.from(output).toString("base64")}`);
 
 test("a warned batch result distinguishes the saved draft from the current workbench", () => {
-  const html = renderToStaticMarkup(createElement(DraftBatchResult, { headline: "Council story", item: { leadId: 4, jobId: 9, status: "completed", stage: "Done", error: null, draftId: 27, evidenceCheckIncomplete: true, workbenchHref: "/desk/story/4" } }));
-  assert.match(html, /Batch saved draft #27/);
+  const html = renderToStaticMarkup(createElement(DraftBatchResult, { headline: "Council story", item: { leadId: 4, jobId: 9, status: "completed", stage: "Draft saved — review required", error: null, draftId: 27, evidenceCheckIncomplete: true, reviewRequired: true, workbenchHref: "/desk/story/4" } }));
+  assert.match(html, /Batch saved draft #27.*review required/);
   assert.match(html, /Open current story workbench: Council story/);
-  assert.match(html, /This batch draft(?:'|&#x27;)s evidence check was incomplete/);
+  assert.match(html, /This draft was saved, but one or more source, evidence, or name checks need review before publication/);
   assert.doesNotMatch(html, /Completed|· Done/);
 });

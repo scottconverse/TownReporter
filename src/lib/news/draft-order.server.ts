@@ -44,8 +44,15 @@ async function withClaimedLeadDraftTransaction<T>(
     if (!completeJob) return result;
     const [completed] = await sql<{id:number}>`
       update desk_jobs
-      set status = 'completed', stage = 'Done', error = null,
-          finished_at = now(), updated_at = now()
+      set status = 'completed',
+          stage = case
+            when coalesce((result_json::jsonb -> 'quality' ->> 'reviewRequired')::boolean, false)
+              or coalesce((result_json::jsonb ->> 'evidenceCheckIncomplete')::boolean, false)
+              or result_json::jsonb -> 'quality' ->> 'citationStatus' = 'review-required'
+            then 'Draft saved — review required'
+            else 'Done'
+          end,
+          error = null, finished_at = now(), updated_at = now()
       where id = ${job.id} and newsroom_id = ${job.newsroom_id}
         and status = 'running' and claim_token = ${job.claim_token}
       returning id

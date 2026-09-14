@@ -50,6 +50,7 @@ export type DeskJob = {
   stage: string;
   failover_note: string;
   error: string | null;
+  result_json?: string;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -249,7 +250,7 @@ export async function latestJob(opts: {
   await ensureJobsSchema();
   const sql = await getSql();
   const rows = await sql<DeskJob>`
-    select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error,
+    select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
            created_at, updated_at, started_at, finished_at
     from desk_jobs
     where newsroom_id = ${opts.newsroomId} and kind = ${opts.kind} and subject_id = ${opts.subjectId}
@@ -531,9 +532,22 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
     await runWork({ ...job, claim_token: token });
     // `claim_token` guard: if we were declared stale and someone else took the
     // job, this write must not clobber their result.
+    // Derive the editor-facing terminal stage from the receipt in the same
+    // database write that completes the job. The final draft and receipt are
+    // committed by performDraftWork immediately before this; a separate read
+    // can race connection visibility and briefly turn a review-required draft
+    // into a misleading "Done". The persisted receipt is the authority.
     await sql`
       update desk_jobs
-      set status = ${"completed"}, stage = ${"Done"}, error = null, finished_at = now(), updated_at = now()
+      set status = ${"completed"},
+          stage = case
+            when coalesce((result_json::jsonb -> 'quality' ->> 'reviewRequired')::boolean, false)
+              or coalesce((result_json::jsonb ->> 'evidenceCheckIncomplete')::boolean, false)
+              or result_json::jsonb -> 'quality' ->> 'citationStatus' = 'review-required'
+            then ${"Draft saved — review required"}
+            else ${"Done"}
+          end,
+          error = null, finished_at = now(), updated_at = now()
       where id = ${job.id} and status = ${"running"} and claim_token = ${token}
     `;
   } catch (err) {

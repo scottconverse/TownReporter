@@ -75,6 +75,7 @@ import {
   type CheckedDraftResult,
   type EditableDraftFields,
 } from "@/lib/news/draft-reconcile-actions";
+import { parseDraftCompletionReceipt } from "@/lib/news/draft-completion";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
   component: StoryPage,
@@ -254,7 +255,10 @@ function StoryPage() {
     priorDraftJobWasOpen.current = false;
     setWaitingSince(null);
     setSlowWait(false);
-    setMsg("");
+    const completion = parseDraftCompletionReceipt(data.job?.result_json);
+    setMsg(completion?.quality.reviewRequired
+      ? "Draft saved. Review the source and name-check warnings before publication."
+      : "Draft saved.");
   }, [awaitingDraftJobAck, data, waitingSince]);
 
   useEffect(() => {
@@ -662,6 +666,13 @@ function StoryPage() {
   // resolveDraftJobState in desk-copy.ts for why this replaced three
   // separately-latched pieces of local state.
   const jobState = resolveDraftJobState(data.job);
+  const draftCompletion = parseDraftCompletionReceipt(data.job?.result_json);
+  const completedDraftNeedsReview = Boolean(
+    data.job?.status === "completed" &&
+    data.draft?.id &&
+    draftCompletion?.finalDraftId === data.draft.id &&
+    draftCompletion.quality.reviewRequired,
+  );
   const sources = parseUrlList(data.lead.source_urls);
   const fromDark =
     Boolean(data.lead.investigation_id) ||
@@ -740,6 +751,11 @@ function StoryPage() {
             <Link to="/desk">Desk → Your recent drafts</Link>.
           </span>
         </section>
+      ) : null}
+      {completedDraftNeedsReview ? (
+        <Notice kind="err">
+          <strong>Draft saved — review required.</strong> Check the source and name-verification findings before publication.
+        </Notice>
       ) : null}
       <Link to="/desk/queue" className="crumb">
         ← Queue
