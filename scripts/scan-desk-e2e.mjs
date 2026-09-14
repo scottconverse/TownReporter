@@ -409,14 +409,15 @@ async function draftBatchJourney() {
   await batch.getByRole("link", { name: `Open current story workbench: ${first}`, exact: true }).waitFor();
   await batch.getByRole("link", { name: `Open current story workbench: ${second}`, exact: true }).waitFor();
 
-  // The offline fake returns valid draft JSON. Polling must stop only after
-  // both durable terminal results render, then the queue count must refresh
-  // from New to Drafted instead of retaining stale pre-batch rows.
+  // The offline fake returns valid draft JSON without verified evidence.
+  // Polling must stop only after both durable drafts render with the required
+  // editor-review warning, then the queue count must refresh from New to
+  // Drafted instead of retaining stale pre-batch rows.
   await expect
     .poll(
       async () => {
         const states = await batch.locator("[data-draft-batch-status]").allTextContents();
-        return states.length === 2 && states.every((state) => /^Batch saved draft #\d+$/.test(state.trim()));
+        return states.length === 2 && states.every((state) => /^Batch saved draft #\d+ — review required$/.test(state.trim()));
       },
       { timeout: 45_000 },
     )
@@ -427,7 +428,7 @@ async function draftBatchJourney() {
       { timeout: 10_000 },
     )
     .toBe(1);
-  step("two selected leads use one explicit runtime, complete, and refresh the Drafted queue count");
+  step("two selected leads use one explicit runtime, save with review warnings, and refresh the Drafted queue count");
 }
 
 async function routineNoticePermissionsJourney(context, observePage) {
