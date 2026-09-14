@@ -2,7 +2,7 @@
 
 ## Current release work — 2026-09-13
 
-The current source and operator guide is [0.6.46](docs/releases/0.6.46.md), which supersedes the deployment and feature-status snapshots below. The Astra public reader redesign, complete archive search, saved stories, reading preferences, correction email, and canonical saved-record links are implemented. The Astra desk, shared Opinion/document intake, private-document evidence checks, and native Codex voice-file integration remain available. The [reader guide](docs/reader.md) explains the public controls. Packaging, published-install checks and production deployment are recorded with the release. Original political-editorial refusal and the broader daily newsroom quality target are not claimed solved. Historical staging fixtures and private operator material remain preserved.
+The current source and operator guide is [0.6.47](docs/releases/0.6.47.md), which supersedes the deployment and feature-status snapshots below. The Astra public reader redesign, persistent Editor’s desk header entry, complete archive search, saved stories, reading preferences, correction email, and canonical saved-record links are implemented. The Astra desk, shared Opinion/document intake, private-document evidence checks, and native Codex voice-file integration remain available. The [reader guide](docs/reader.md) explains the public controls. Packaging, published-install checks and production deployment are recorded with the release. Original political-editorial refusal and the broader daily newsroom quality target are not claimed solved. Historical staging fixtures and private operator material remain preserved.
 
 ## Historical work record
 
