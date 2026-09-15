@@ -174,6 +174,22 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
 }
 
 /**
+ * Recreate the choice the editor made for the latest Story run.
+ *
+ * Automatic is resolved to a concrete provider before it is stored on the
+ * job, so reading only `model_choice` makes a reopened Story page pretend the
+ * editor explicitly chose that provider. `model_choice_source` preserves the
+ * distinction. This keeps Redraft on the visible choice that produced the
+ * current draft while still showing Automatic when the ladder made the pick.
+ */
+export function rememberedStoryModelChoice(
+  value: unknown,
+  source: unknown,
+): StoryModelChoice {
+  return source === "auto" ? "auto" : storyModelChoice(value);
+}
+
+/**
  * Rewrites the generic "no model configured at all" message into Opinion's
  * own guidance. `candidate` says WHICH rung was being probed when that
  * happened -- defaulting to "claude-frontier" keeps every existing call site

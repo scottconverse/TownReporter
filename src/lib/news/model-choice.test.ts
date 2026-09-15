@@ -9,6 +9,7 @@ import {
   OPINION_MODEL_CHOICES,
   opinionModelChoice,
   opinionProviderProblem,
+  rememberedStoryModelChoice,
   STORY_MODEL_CHOICES,
   storyModelChoice,
   shouldHydrateDarkModel,
@@ -106,6 +107,12 @@ describe("model choice contract", () => {
     assert.equal(effectiveStoryModelChoice("codex-balanced"), "codex-balanced");
     assert.equal(effectiveStoryModelChoice("not-a-provider"), "auto");
     assert.equal(modelChoiceLabel("configured"), "Configured gateway");
+  });
+
+  it("restores the editor's visible Story choice from the latest job", () => {
+    assert.equal(rememberedStoryModelChoice("claude-frontier", "auto"), "auto");
+    assert.equal(rememberedStoryModelChoice("codex-frontier", "editor"), "codex-frontier");
+    assert.equal(rememberedStoryModelChoice("local-model", "editor"), "local-model");
   });
 
   it("round-trips Opinion choices and defaults missing or invalid input to Sol", () => {

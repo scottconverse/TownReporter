@@ -59,7 +59,11 @@ import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review";
-import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
+import {
+  modelChoiceLabel,
+  rememberedStoryModelChoice,
+  type StoryModelChoice,
+} from "@/lib/news/model-choice";
 import { integrityNoteItems } from "@/lib/news/coerce-draft";
 import {
   DraftReconcileControl,
@@ -130,6 +134,9 @@ function StoryPage() {
   const [scratch, setScratch] = useState("");
   const [researchScope, setResearchScope] = useState<"public" | "supplied">("public");
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
+  const [modelResearchOpen, setModelResearchOpen] = useState(false);
+  const modelResearchPanel = useRef<HTMLElement>(null);
+  const modelChoiceTouched = useRef(false);
   /*
     Publishing is the only irreversible thing on this page, and it was the
     only one that did not ask.
@@ -198,6 +205,18 @@ function StoryPage() {
     !waiting && !msg && data?.job?.status === "failed"
       ? (editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish.")
       : "";
+  const draftProblem = msg || previousJobError;
+
+  useEffect(() => {
+    if (!modelResearchOpen) return;
+    const frame = requestAnimationFrame(() => {
+      modelResearchPanel.current?.scrollIntoView({ block: "nearest" });
+      modelResearchPanel.current
+        ?.querySelector<HTMLSelectElement>("select")
+        ?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [modelResearchOpen]);
 
   useEffect(() => {
     const job = data?.job;
@@ -298,6 +317,13 @@ function StoryPage() {
     const s = parseNotes(data?.lead.notes_json).scratch ?? "";
     if (s) setScratch(s);
   }, [data?.lead.notes_json]);
+
+  useEffect(() => {
+    if (!data?.job || modelChoiceTouched.current) return;
+    setModelChoice(
+      rememberedStoryModelChoice(data.job.model_choice, data.job.model_choice_source),
+    );
+  }, [data?.job]);
 
   useEffect(() => {
     if (!waitingSince) {
@@ -680,6 +706,11 @@ function StoryPage() {
     data.lead.headline.startsWith("[Dark]");
   const locked = data.lead.status === "killed";
   const onPaper = data.lead.status === "published" || Boolean(publishedSlug);
+  const canChooseAnotherModel =
+    !onPaper &&
+    /readiness check|did not answer in time|provider slow|timed?\s*out|choose another model/i.test(
+      draftProblem,
+    );
   const canPublish = Boolean(data.draft) && data.lead.status !== "held" && !locked && !onPaper;
   const found = findingsFrom(data.draft?.found_note);
   const unanswered = unansweredNotes(data.draft?.unanswered);
@@ -770,12 +801,12 @@ function StoryPage() {
       <div className="work-bar astra-story-actions">
         <button
           className="btn"
-          onClick={() => {
-            setInspector("reporting");
-            document.getElementById("story-inspector")?.scrollIntoView({ block: "start" });
-          }}
+          type="button"
+          aria-expanded={modelResearchOpen}
+          aria-controls="story-model-research"
+          onClick={() => setModelResearchOpen((open) => !open)}
         >
-          Model & research
+          Model & research · {modelChoiceLabel(modelChoice)}
         </button>
         <span className="astra-save-state" role="status">
           {onPaper ? "Published story" : hasUnsavedDraftEdits ? "Unsaved changes" : "Saved draft"}
@@ -959,6 +990,44 @@ function StoryPage() {
           </p>
         ) : null}
       </div>
+      {modelResearchOpen && !locked && !onPaper ? (
+        <section
+          className="astra-model-research"
+          id="story-model-research"
+          ref={modelResearchPanel}
+          aria-labelledby="story-model-research-heading"
+        >
+          <div className="astra-model-research-heading">
+            <div>
+              <p className="kick">Redraft settings</p>
+              <h2 id="story-model-research-heading">Choose the model and research scope</h2>
+            </div>
+            <button className="btn" type="button" onClick={() => setModelResearchOpen(false)}>
+              Close
+            </button>
+          </div>
+          <div className="astra-model-research-controls">
+            <ModelPicker
+              value={modelChoice}
+              onChange={(choice) => {
+                modelChoiceTouched.current = true;
+                setModelChoice(choice);
+              }}
+              disabled={waiting || reconcileActive || savePending}
+              compact
+            />
+            <DraftScopePicker
+              value={researchScope}
+              onChange={setResearchScope}
+              disabled={waiting}
+            />
+          </div>
+          <p className="meta">
+            Redraft uses these settings. Your current saved draft stays in place until a new draft
+            finishes successfully.
+          </p>
+        </section>
+      ) : null}
       <div className="story-grid">
         <aside
           className="story-side astra-inspector"
@@ -1082,12 +1151,16 @@ function StoryPage() {
             hidden={inspector !== "reporting"}
           >
             {!locked && !onPaper ? (
-              <ModelPicker
-                value={modelChoice}
-                onChange={setModelChoice}
-                disabled={waiting || reconcileActive || savePending}
-                compact
-              />
+              <div className="astra-current-model">
+                <p className="side-label">Redraft settings</p>
+                <p>
+                  <strong>{modelChoiceLabel(modelChoice)}</strong> ·{" "}
+                  {researchScope === "supplied" ? "Supplied material only" : "Public research"}
+                </p>
+                <button className="btn" type="button" onClick={() => setModelResearchOpen(true)}>
+                  Change model or research
+                </button>
+              </div>
             ) : null}
             <Chip s={data.lead.status} />
             <p className="kick">{fromDark ? "Working notes from Dark Desk" : "The lead"}</p>
@@ -1123,13 +1196,6 @@ function StoryPage() {
                 This trail came from Dark Desk. Draft privately here; printing is a separate click
                 and every claim still needs evidence.
               </p>
-            ) : null}
-            {!locked && !onPaper ? (
-              <DraftScopePicker
-                value={researchScope}
-                onChange={setResearchScope}
-                disabled={waiting}
-              />
             ) : null}
             <ReportingNotesPane
               leadId={id}
@@ -1216,16 +1282,21 @@ function StoryPage() {
             />
           ) : null}
           {publish.isPending ? <Busy label="Sending this to the paper…" /> : null}
-          {(msg || previousJobError) && !onPaper ? (
+          {draftProblem && !onPaper ? (
             <Notice kind={msg === "Saved." ? "ok" : "err"}>
-              {msg || previousJobError}
+              {draftProblem}
               {/*
                 The one error the desk could describe but never act on. A
                 lapsed CLI login used to end at "sign in again", which meant a
                 terminal; this starts the sign-in and hands over to the Server
                 page. It renders only when the error really is that.
               */}
-              <ProviderSignInButton detail={msg || previousJobError} />
+              <ProviderSignInButton detail={draftProblem} />
+              {canChooseAnotherModel ? (
+                <button className="btn" type="button" onClick={() => setModelResearchOpen(true)}>
+                  Choose another model
+                </button>
+              ) : null}
             </Notice>
           ) : null}
 

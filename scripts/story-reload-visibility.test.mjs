@@ -37,12 +37,23 @@ test("Story reload surfaces a durable failed job when no newer click message exi
   */
   assert.match(
     story,
-    /\(msg\s*\|\|\s*previousJobError\)[\s\S]*?<Notice[\s\S]*?>\s*\{msg\s*\|\|\s*previousJobError\}/,
+    /draftProblem\s*&&\s*!onPaper[\s\S]*?<Notice[\s\S]*?>\s*\{draftProblem\}/,
     "the recovered failure must be rendered as an editor-visible notice",
   );
   assert.match(
     story,
-    /<Notice[\s\S]*?\{msg\s*\|\|\s*previousJobError\}[\s\S]{0,600}?<\/Notice>/,
+    /<Notice[\s\S]*?\{draftProblem\}[\s\S]{0,900}?<\/Notice>/,
     "the notice must still close around the recovered failure",
+  );
+});
+
+test("Model and research opens controls beside the toolbar instead of jumping into a scrolled inspector", () => {
+  assert.match(story, /aria-controls="story-model-research"/);
+  assert.match(story, /id="story-model-research"[\s\S]*?<ModelPicker[\s\S]*?<DraftScopePicker/);
+  assert.match(story, /Model & research · \{modelChoiceLabel\(modelChoice\)\}/);
+  assert.match(story, /Choose another model/);
+  assert.doesNotMatch(
+    story,
+    /Model & research[\s\S]{0,500}?document\.getElementById\("story-inspector"\)\?\.scrollIntoView/,
   );
 });

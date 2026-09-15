@@ -1010,6 +1010,48 @@
   flex-basis: 100%;
   margin: 0;
 }
+.desk-ltr.astra .astra-model-research {
+  margin-top: 14px;
+  padding: 22px;
+  border: 1px solid var(--a);
+  border-radius: 12px;
+  background: var(--surface);
+  scroll-margin-top: 92px;
+}
+.desk-ltr.astra .astra-model-research-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+.desk-ltr.astra .astra-model-research-heading h2 {
+  font: 500 calc(22px * var(--ts))/1.25 var(--fd);
+  margin: 3px 0 0;
+}
+.desk-ltr.astra .astra-model-research-controls {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.desk-ltr.astra .astra-model-research .model-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.desk-ltr.astra .astra-model-research select {
+  width: 100%;
+}
+.desk-ltr.astra .astra-current-model {
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-current-model p {
+  margin: 0 0 10px;
+}
 .desk-ltr.astra .evidence-check-progress,
 .desk-ltr.astra .evidence-check-review {
   flex-basis: 100%;
@@ -1332,6 +1374,9 @@
   .desk-ltr.astra .story-grid {
     display: flex;
     flex-direction: column;
+  }
+  .desk-ltr.astra .astra-model-research-controls {
+    grid-template-columns: 1fr;
   }
   .desk-ltr.astra .desk-home > * {
     width: 100%;
