@@ -32,6 +32,15 @@ export type SearchAttempt = {
   relevance?: SearchRelevanceAssessment;
 };
 
+export type SearchProgressEvent = {
+  provider: string;
+  phase: "started" | "finished";
+  state?: SearchState;
+  error?: string;
+};
+
+export type SearchProgress = (event: SearchProgressEvent) => void | Promise<void>;
+
 export function parseDdgHtml(html: string): WebHit[] {
   const hits: WebHit[] = [];
   const seen = new Set<string>();
@@ -197,7 +206,7 @@ export function readMcpSseText(raw: string): string | null {
   return null;
 }
 
-async function searchExa(query: string): Promise<SearchAttempt> {
+async function searchExa(query: string, signal?: AbortSignal): Promise<SearchAttempt> {
   const provider = "exa-mcp";
   try {
     const url = await assertPublicHttpUrl(EXA_MCP_URL);
@@ -215,7 +224,9 @@ async function searchExa(query: string): Promise<SearchAttempt> {
         method: "tools/call",
         params: { name: "web_search_exa", arguments: { query, numResults: 8 } },
       }),
-      signal: AbortSignal.timeout(20_000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(20_000)])
+        : AbortSignal.timeout(20_000),
     } as RequestInit);
     if (!res.ok) {
       return {
@@ -246,10 +257,12 @@ async function searchExa(query: string): Promise<SearchAttempt> {
   }
 }
 
-async function searchHaloGateway(query: string): Promise<SearchAttempt> {
+async function searchHaloGateway(query: string, signal?: AbortSignal): Promise<SearchAttempt> {
   const provider = "halo-gateway";
   try {
+    signal?.throwIfAborted();
     const result = await haloGatewaySearch(query);
+    signal?.throwIfAborted();
     return {
       state: result.hits.length ? "SEARCH_SUCCESS_RESULTS" : "SEARCH_SUCCESS_ZERO_RESULTS",
       hits: result.hits,
@@ -283,11 +296,11 @@ async function searchHaloGateway(query: string): Promise<SearchAttempt> {
   }
 }
 
-async function searchDdg(query: string): Promise<SearchAttempt> {
+async function searchDdg(query: string, signal?: AbortSignal): Promise<SearchAttempt> {
   const url = new URL("https://html.duckduckgo.com/html/");
   url.searchParams.set("q", query);
   try {
-    const res = await fetchPublicHttp(url);
+    const res = await fetchPublicHttp(url, 4, signal);
     const html = await res.text();
     const hits = parseDdgHtml(html);
     const state = classifySearchHtml(res.status, html, hits.length);
@@ -304,11 +317,11 @@ async function searchDdg(query: string): Promise<SearchAttempt> {
   }
 }
 
-async function searchDdgLite(query: string): Promise<SearchAttempt> {
+async function searchDdgLite(query: string, signal?: AbortSignal): Promise<SearchAttempt> {
   const url = new URL("https://lite.duckduckgo.com/lite/");
   url.searchParams.set("q", query);
   try {
-    const res = await fetchPublicHttp(url);
+    const res = await fetchPublicHttp(url, 4, signal);
     const html = await res.text();
     const hits = parseDdgHtml(html);
     const state = classifySearchHtml(res.status, html, hits.length);
@@ -325,14 +338,14 @@ async function searchDdgLite(query: string): Promise<SearchAttempt> {
   }
 }
 
-async function searchWikipedia(query: string): Promise<SearchAttempt> {
+async function searchWikipedia(query: string, signal?: AbortSignal): Promise<SearchAttempt> {
   const url = new URL("https://en.wikipedia.org/w/api.php");
   url.searchParams.set("action", "opensearch");
   url.searchParams.set("search", query);
   url.searchParams.set("limit", "8");
   url.searchParams.set("format", "json");
   try {
-    const res = await fetchPublicHttp(url);
+    const res = await fetchPublicHttp(url, 4, signal);
     if (!res.ok) {
       return {
         state: "SEARCH_FAILED_PROVIDER",
@@ -457,11 +470,11 @@ export function parseBraveHtml(html: string): WebHit[] {
   return hits;
 }
 
-async function searchBing(query: string): Promise<SearchAttempt> {
+async function searchBing(query: string, signal?: AbortSignal): Promise<SearchAttempt> {
   const url = new URL("https://www.bing.com/search");
   url.searchParams.set("q", query);
   try {
-    const res = await fetchPublicHttp(url);
+    const res = await fetchPublicHttp(url, 4, signal);
     const html = await res.text();
     const hits = parseBingHtml(html);
     const state = classifySearchHtml(res.status, html, hits.length);
@@ -478,11 +491,11 @@ async function searchBing(query: string): Promise<SearchAttempt> {
   }
 }
 
-async function searchBrave(query: string): Promise<SearchAttempt> {
+async function searchBrave(query: string, signal?: AbortSignal): Promise<SearchAttempt> {
   const url = new URL("https://search.brave.com/search");
   url.searchParams.set("q", query);
   try {
-    const res = await fetchPublicHttp(url);
+    const res = await fetchPublicHttp(url, 4, signal);
     const html = await res.text();
     const hits = parseBraveHtml(html);
     const state = classifySearchHtml(res.status, html, hits.length);
@@ -500,7 +513,7 @@ async function searchBrave(query: string): Promise<SearchAttempt> {
 }
 
 /** DDG, then an independent index (Bing, Brave), then Wikipedia. A failure or zero is not "nothing exists." */
-type SearchProvider = (query: string) => Promise<SearchAttempt>;
+type SearchProvider = (query: string, signal?: AbortSignal) => Promise<SearchAttempt>;
 
 function normalizedHost(raw: string): string {
   try {
@@ -587,6 +600,8 @@ export async function searchWithFallback(
     searchWikipedia,
   ],
   relevanceOptions?: SearchRelevanceOptions,
+  onProgress?: SearchProgress,
+  signal?: AbortSignal,
 ): Promise<SearchAttempt> {
   const q = query.trim().slice(0, 180);
   if (!q) return { state: "SEARCH_SUCCESS_ZERO_RESULTS", hits: [], provider: "none", lineage: [] };
@@ -602,7 +617,30 @@ export async function searchWithFallback(
   const collectedHits: WebHit[] = [];
   let firstResults: SearchAttempt | undefined;
   for (const fn of providers) {
-    const attempt = await fn(q);
+    signal?.throwIfAborted();
+    const provider =
+      (
+        {
+          searchExa: "Exa",
+          searchDdg: "DuckDuckGo",
+          searchDdgLite: "DuckDuckGo Lite",
+          searchBing: "Bing",
+          searchBrave: "Brave",
+          searchWikipedia: "Wikipedia",
+          searchHaloGateway: "search gateway",
+        } as Record<string, string>
+      )[fn.name] ??
+      fn.name ??
+      "search provider";
+    await onProgress?.({ provider, phase: "started" });
+    const attempt = await fn(q, signal);
+    signal?.throwIfAborted();
+    await onProgress?.({
+      provider: attempt.provider || provider,
+      phase: "finished",
+      state: attempt.state,
+      error: attempt.error,
+    });
     lineage.push(attempt);
     if (attempt.state !== "SEARCH_SUCCESS_RESULTS") continue;
     if (!relevanceOptions) return { ...attempt, lineage };
@@ -676,8 +714,12 @@ export async function searchWithFallback(
   };
 }
 
-export async function webSearch(query: string): Promise<WebHit[]> {
-  const attempt = await searchWithFallback(query);
+export async function webSearch(
+  query: string,
+  onProgress?: SearchProgress,
+  signal?: AbortSignal,
+): Promise<WebHit[]> {
+  const attempt = await searchWithFallback(query, undefined, undefined, onProgress, signal);
   return attempt.hits;
 }
 

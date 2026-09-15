@@ -756,4 +756,33 @@ describe("optional relevance-aware continuation", () => {
     assert.equal(attempt.provider, "first");
     assert.equal(attempt.relevance, undefined);
   });
+
+  it("does not start another provider after the whole-run signal is aborted", async () => {
+    const controller = new AbortController();
+    let secondCalled = false;
+    await assert.rejects(
+      searchWithFallback(
+        "city contract",
+        [
+          async (_query, signal) => {
+            controller.abort("whole-run deadline");
+            assert.equal(signal?.aborted, true);
+            return { state: "SEARCH_TIMEOUT" as const, provider: "first", hits: [] };
+          },
+          async () => {
+            secondCalled = true;
+            return {
+              state: "SEARCH_SUCCESS_ZERO_RESULTS" as const,
+              provider: "second",
+              hits: [],
+            };
+          },
+        ],
+        undefined,
+        undefined,
+        controller.signal,
+      ),
+    );
+    assert.equal(secondCalled, false);
+  });
 });
