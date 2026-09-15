@@ -2455,7 +2455,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     await ensureDarkSchema();
     await assertRate(context.userId, "reddit", owned(context));
-    const { sweepRedditFeeds } = await import("./reddit.server.ts");
+    const { enrichRedditPostsWithLocalRedlib, sweepRedditFeeds } = await import("./reddit.server.ts");
     const {
       subredditNewFeed,
       subredditSearchFeed,
@@ -2475,7 +2475,9 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
     const feeds = [subredditNewFeed(sub), ...groups.map((g) => subredditSearchFeed(sub, g.query))];
     const searched = ["newest", ...groups.map((g) => g.label)];
     const sweep = await sweepRedditFeeds(feeds, feeds.length);
-    const picked = pickCivicPosts(sweep.posts.filter((post) => redditPostIsAutoFileEligible(post)));
+    const enrichment = await enrichRedditPostsWithLocalRedlib(sweep.posts, 3);
+    const posts = enrichment.posts;
+    const picked = pickCivicPosts(posts.filter((post) => redditPostIsAutoFileEligible(post)));
 
     const sql = await getSql();
     let filed = 0;
@@ -2503,7 +2505,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
     await audit(
       context.userId,
       "reddit",
-      `r/${sub} read ${sweep.posts.length} filed ${filed}`,
+      `r/${sub} read ${posts.length} redlib ${enrichment.report.enriched}/${enrichment.report.attempted} filed ${filed}`,
       owned(context),
     );
 
@@ -2511,7 +2513,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
     // to the editor instead of vanishing along with the sweep. Split at the
     // civic threshold: the desk shows what cleared it and, separately, the
     // near misses (3-5) that almost did — the sniffing the owner asked to see.
-    const classified = classifyRedditPosts(sweep.posts, alreadyKnownUrls, filedUrls);
+    const classified = classifyRedditPosts(posts, alreadyKnownUrls, filedUrls);
     const asCard = (p: (typeof classified)[number]) => ({
       title: p.title,
       score: p.score,
@@ -2521,12 +2523,18 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       author: p.author,
       autoFileEligible: p.autoFileEligible,
       state: p.state,
+      sourceAdapter: p.sourceAdapter,
+      redditScore: p.redditScore,
+      upvoteRatio: p.upvoteRatio,
+      reportedCommentCount: p.reportedCommentCount,
+      retrievedCommentCount: p.retrievedCommentCount,
+      coverage: p.coverage,
     });
 
     return {
       ok: true as const,
       subreddit: sub,
-      read: sweep.posts.length,
+      read: posts.length,
       civic: picked.length,
       filed,
       alreadyKnown: alreadyKnownUrls.size,
@@ -2535,6 +2543,7 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       log: sweep.log,
       // Which of the rotating searches ran this check, newest-posts first.
       searched,
+      enrichment: enrichment.report,
       topScores: classified
         .filter((p) => p.score >= 6)
         .slice(0, 12)

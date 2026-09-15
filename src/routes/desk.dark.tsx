@@ -499,6 +499,7 @@ function DarkPage() {
           : `Nothing new in r/${res.subreddit}.`,
       );
       parts.push(`Read ${res.read} posts, ${res.civic} looked civic.`);
+      parts.push(res.enrichment.reason);
       if (res.alreadyKnown) parts.push(`${res.alreadyKnown} already on the desk.`);
       if (res.incomplete && res.reason) parts.push(res.reason);
       // A quiet subreddit is a successful read, not a failure — style it as
@@ -788,8 +789,8 @@ function DarkPage() {
             <div className="reddit-progress">
               <p className="worth-t">Reading {redditLabel}</p>
               <p className="reddit-sub">
-                Four feeds, read 8 seconds apart so Reddit does not block this paper. About a
-                minute.
+                Four feeds, then up to three full-thread reads through Redlib. Every Reddit
+                request stays 8 seconds apart. Usually about a minute.
               </p>
               <div className="busy-rule" aria-hidden />
               <p className="reddit-elapsed" aria-hidden>
@@ -1001,6 +1002,12 @@ function RedditTipRows({
                 {p.title}
               </a>
               <span className="np-meta block">{p.updated ? `Posted ${p.updated.slice(0, 10)}` : "Posted date unknown"}{p.author ? ` · ${p.author}` : ""}{!p.autoFileEligible ? " · older/undated — manual file only" : ""}</span>
+              <span className="np-meta block">
+                {p.sourceAdapter === "redlib-html" ? "Thread page read via Redlib" : "RSS excerpt read"}
+                {p.redditScore !== null && p.redditScore !== undefined ? ` · ${p.redditScore} Reddit points` : ""}
+                {p.reportedCommentCount !== null && p.reportedCommentCount !== undefined ? ` · ${p.reportedCommentCount} comments reported` : ""}
+                {p.coverage === "partial" ? " · some comments were unavailable" : ""}
+              </span>
             </div>
             <span className={"chip st-" + p.state}>{redditPostStateLabel(p.state)}</span>
             {canFile ? (
@@ -1050,6 +1057,9 @@ function RedditResultPanel({
       <p className="worth-t">Reddit read finished</p>
       <p className="reddit-headline">{redditResultHeadline(result)}</p>
       <p className="reddit-sub">Automatic filing uses dated posts from the past 30 days. Older or undated results remain available to file by hand.</p>
+      <p className="reddit-sub">
+        <strong>Full-thread reading:</strong> {result.enrichment.reason}
+      </p>
       {result.searched.length > 0 ? (
         <p className="reddit-searched">Searched: {result.searched.join(" · ")}</p>
       ) : null}

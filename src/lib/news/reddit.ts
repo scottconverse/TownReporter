@@ -23,6 +23,15 @@ export type RedditPost = {
   author: string;
   /** Feed excerpt with markup removed. Reddit truncates these to ~400 chars. */
   excerpt: string;
+  /** Complete original-post text recovered from a validated local Redlib page. */
+  fullText?: string;
+  sourceAdapter?: "reddit-rss" | "redlib-html";
+  redditScore?: number | null;
+  upvoteRatio?: number | null;
+  reportedCommentCount?: number | null;
+  retrievedCommentCount?: number;
+  coverage?: "complete" | "partial" | "unknown";
+  enrichmentWarnings?: string[];
 };
 
 export const REDDIT_AUTO_FILE_DAYS = 30;
@@ -313,8 +322,8 @@ function countMatches(hay: string, patterns: RegExp[]): number {
  * rather than a general one, checked against the original case before the
  * rest of the scorer lowercases everything.
  */
-export function civicScore(post: Pick<RedditPost, "title" | "excerpt">): number {
-  const raw = `${post.title} ${post.excerpt}`;
+export function civicScore(post: Pick<RedditPost, "title" | "excerpt" | "fullText">): number {
+  const raw = `${post.title} ${post.fullText || post.excerpt}`;
   const hay = raw.toLowerCase();
   if (!hay.trim()) return 0;
   const strong = countMatches(hay, STRONG);
@@ -342,6 +351,12 @@ export type ScoredRedditPost = {
   author: string;
   autoFileEligible: boolean;
   state: RedditPostState;
+  sourceAdapter?: "reddit-rss" | "redlib-html";
+  redditScore?: number | null;
+  upvoteRatio?: number | null;
+  reportedCommentCount?: number | null;
+  retrievedCommentCount?: number;
+  coverage?: "complete" | "partial" | "unknown";
 };
 
 /**
@@ -368,7 +383,22 @@ export function classifyRedditPosts(
       const score = civicScore(p);
       const state: RedditPostState =
         score < minScore ? "below-line" : filed.has(p.url) ? "filed" : known.has(p.url) ? "already-known" : "below-line";
-      return { title: p.title, score, url: p.url, excerpt: p.excerpt, updated: p.updated, author: p.author, autoFileEligible: redditPostIsAutoFileEligible(p), state };
+      return {
+        title: p.title,
+        score,
+        url: p.url,
+        excerpt: p.fullText || p.excerpt,
+        updated: p.updated,
+        author: p.author,
+        autoFileEligible: redditPostIsAutoFileEligible(p),
+        state,
+        sourceAdapter: p.sourceAdapter,
+        redditScore: p.redditScore,
+        upvoteRatio: p.upvoteRatio,
+        reportedCommentCount: p.reportedCommentCount,
+        retrievedCommentCount: p.retrievedCommentCount,
+        coverage: p.coverage,
+      };
     })
     .sort((a, b) => b.score - a.score);
 }
@@ -406,7 +436,8 @@ export function redditAnomaly(post: RedditPost, sub: string): RedditAnomaly {
     details: [
       `Posted ${when}${post.author ? ` by ${post.author}` : ""} on r/${sub}.`,
       "UNVERIFIED — a resident's account, not a record. Find the document before writing anything.",
-      post.excerpt ? `They wrote: ${post.excerpt}` : "",
+      post.sourceAdapter === "redlib-html" ? "Full original post read through local Redlib." : "RSS excerpt read.",
+      (post.fullText || post.excerpt) ? `They wrote: ${post.fullText || post.excerpt}` : "",
     ]
       .filter(Boolean)
       .join("\n")

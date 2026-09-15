@@ -2,6 +2,8 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
+The Reddit check discovers posts through Reddit RSS, then asks a validated Redlib to read up to three selected discussions in full. It defaults to the editor's local Redlib at `127.0.0.1:18080`, keeps canonical `reddit.com` permalinks and labels posts as unverified tips. If Redlib is stopped, malformed, rate-limited or unable to reach a thread, the scan keeps the RSS result and tells the editor that only the excerpt was read. Set `REDDIT_REDLIB_BASE_URL=off` to disable the probe, or set another Redlib base address explicitly. TownReporter uses only the configured instance and does not rotate through public instances.
+
 The Dark Desk is the part of TownReporter that goes looking for the things
 nobody has written down yet. It does not publish. It hands the editor
 questions, and the evidence it gathered while asking them.
