@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
 | **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
-| **A model**                 | Story, Scan and Dark Desk offer per-run provider choices, including configured gateways and signed-in Codex/Claude CLIs. Opinion offers Automatic, Claude Opus, Codex Terra, Codex Sol, Local model and saved custom connections.     |
+| **A model**                 | Every writing picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.     |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 
@@ -48,7 +48,7 @@ on an editor's action:
 
 | What               | Triggered by                                      | Where it goes                                                                                                                                                                                                                                                                                    |
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Story, Scan and Dark Desk use their per-run choices. Automatic uses configured `LLM_*` exclusively when present; otherwise it tries Claude Opus, then Codex Terra, before enqueue. Opinion defaults to Codex Sol; Opinion Automatic follows a Claude-then-Sol readiness path; explicit Claude, Codex Terra, Codex Sol, Local model or custom choices stay selected.              |
+| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Each desk uses its per-run choice. Dark Automatic uses configured `LLM_*` when present; otherwise Sonnet with one Terra retry. Story and Opinion retain their documented Automatic ladders. Explicit named or custom choices never switch.              |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
 | **Searches**       | Public-source research, PULL, and Dark Desk hops  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key. Drafting scope **Use only supplied material** skips discovery/search for that draft, but still opens URLs you supply. PULL and Dark Desk remain separate external-research actions. |
 
@@ -281,7 +281,7 @@ multi-agent capabilities remain available. TownReporter launches Codex with
 the signed-in account can reach. The assignment still travels over stdin; Opinion loads the full voice separately through the native instruction-file setting,
 and its task remains the scope of the requested run.
 
-Opinion displays Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
+Opinion displays Automatic, all named Codex and Claude models, Local model,
 plus saved custom connections. Codex Sol is selected by default. Automatic tries Claude Opus, then Codex Sol
 once if Claude is unavailable; explicit choices stay selected. An invalid
 delivery -- a refusal, an assistant note, an incomplete piece --

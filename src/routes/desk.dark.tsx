@@ -21,6 +21,7 @@ import {
   reopenParkedInvestigation,
   scanTipSubreddit,
   getTipSubreddit,
+  type DarkRunRow,
   type InvestigationRow,
 } from "@/lib/news/dark";
 import {
@@ -146,7 +147,7 @@ function DarkPage() {
   }
 
   function beginDigPhase() {
-    setCardPhase("Searching records…");
+    setCardPhase("Queueing investigation…");
   }
 
   function clearPhase() {
@@ -248,6 +249,9 @@ function DarkPage() {
 
   const detailInvestigationId = detail.data?.investigation.id;
   const currentDarkJob = detail.data?.darkJob;
+  const liveJobStage = darkJobActive(currentDarkJob?.status)
+    ? String(currentDarkJob?.stage ?? "").trim()
+    : "";
   useEffect(() => {
     if (openId == null || detailInvestigationId !== openId) return;
     const job = currentDarkJob;
@@ -704,7 +708,7 @@ function DarkPage() {
                 "This research run did not finish."
               : null
           }
-          phase={cardPhase || liveLine}
+          phase={liveJobStage || cardPhase || liveLine}
           notice={noticeAt === "work" ? notice : null}
           noticeOk={noticeOk}
           queuedLead={queued?.invId === openId ? queued.leadId : null}
@@ -921,6 +925,7 @@ function DarkPage() {
                     </p>
                   ) : null}
                   {r.summary ? <p className="side-item">{plainEditorText(r.summary)}</p> : null}
+                  <DarkRunMeter run={r} />
                 </div>
               ))}
             </details>
@@ -1161,6 +1166,50 @@ function WorthCard({
   );
 }
 
+const DARK_STOP_COPY: Record<string, string> = {
+  "elapsed-time-limit": "Stopped at the total time limit",
+  "model-call-limit": "Stopped at the model-call limit",
+  "search-limit": "Stopped at the search limit",
+  "document-read-limit": "Stopped at the document-read limit",
+  "evidence-sufficient": "Stopped because the evidence was sufficient",
+  "diminishing-returns": "Stopped after diminishing returns",
+  "repeated-sources": "Stopped after sources began repeating",
+  "no-materially-new-finding": "Stopped after two rounds without a material new finding",
+  "frontier-exhausted": "Stopped because no useful unresolved lead remained",
+  "hop-limit": "Stopped at the hop limit; unresolved leads remain saved",
+  "synthesis-failed": "Stopped because synthesis failed; completed research remains saved",
+  "provider-failed": "Stopped because the provider failed; completed work remains saved",
+  completed: "Completed within the run limits",
+};
+
+function DarkRunMeter({ run, active = false }: { run: DarkRunRow; active?: boolean }) {
+  const totals = run.usage.totals;
+  const startedAt = Date.parse(run.started_at);
+  const elapsedMs = active && Number.isFinite(startedAt)
+    ? Math.max(totals.elapsedMs, Date.now() - startedAt)
+    : totals.elapsedMs;
+  const tokens = totals.totalTokens == null ? "tokens not reported for every call" : `${totals.totalTokens.toLocaleString()} tokens`;
+  return (
+    <div className="of-stop" role={active ? "status" : undefined} aria-live={active ? "polite" : undefined}>
+      <p>
+        <b>{active ? "Live run:" : "Run usage:"}</b>{" "}
+        {totals.modelCalls} model call{totals.modelCalls === 1 ? "" : "s"} · {totals.searches} search{totals.searches === 1 ? "" : "es"} · {totals.documentReads} document read{totals.documentReads === 1 ? "" : "s"} · {elapsedLabel(Math.ceil(elapsedMs / 1000))} · {tokens}
+      </p>
+      {!active && run.stopReason ? <p className="meta">{DARK_STOP_COPY[run.stopReason] ?? run.stopReason}</p> : null}
+      {run.usage.calls.length ? (
+        <details className="of-trail">
+          <summary>Model calls — {run.usage.calls.length}</summary>
+          {run.usage.calls.map((call, index) => (
+            <p className="side-item" key={`${call.stage}-${index}`}>
+              <b>{call.stage}</b> · {call.provider} · {call.model} · {elapsedLabel(Math.ceil(call.durationMs / 1000))} · {call.result}{call.totalTokens == null ? "" : ` · ${call.totalTokens.toLocaleString()} tokens`}
+            </p>
+          ))}
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 function InvestigationWorkspace({
   openId,
   detail,
@@ -1260,6 +1309,7 @@ function InvestigationWorkspace({
   const entities = detail?.entities ?? [];
   const signals = detail?.signals ?? [];
   const brief = detail?.brief ?? null;
+  const run = detail?.run ?? null;
   /*
     The two stages, said out loud.
 
@@ -1272,8 +1322,8 @@ function InvestigationWorkspace({
   const queueBlocked = signals.length > 0 && verifiedSignals.length === 0 && !sendUnverified;
   const queueBlockedReason =
     signals.length === 1
-      ? "The signal has not met all verification requirements. Review its checks and missing evidence below, or send it unverified as a tip."
-      : `None of the ${signals.length} signals has met all verification requirements. Review their checks and missing evidence below, or send them unverified as tips.`;
+      ? "The signal has not completed the verification protocol. Review its checks and missing evidence below, or send it unverified as a tip."
+      : `None of the ${signals.length} signals has completed the verification protocol. Review their checks and missing evidence below, or send them unverified as tips.`;
   const facts = claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind));
   const questions = openQuestionsFrom(detail);
   // Grade each "On the record" line by whether it ties to a captured
@@ -1400,6 +1450,7 @@ function InvestigationWorkspace({
       {stalled ? <p className="note err">{stalledRunCopy("dark")}</p> : null}
       {darkJobError ? <p className="note err" role="alert">{darkJobError}</p> : null}
       {digging ? <Busy label={phase || "Searching records…"} /> : null}
+      {run ? <DarkRunMeter run={run} active={digging} /> : null}
       {notice && !digging ? <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p> : null}
       {
         /*
@@ -1440,7 +1491,7 @@ function InvestigationWorkspace({
           <b>{sendUnverified ? "Filing as an unverified tip:" : queueBlocked ? "Not ready for the queue:" : "Ready for the queue:"}</b>{" "}
           {queueBlocked
             ? queueBlockedReason
-            : `${verifiedSignals.length} of ${signals.length} signal${signals.length === 1 ? "" : "s"} on this file passed all four gates.`}{" "}
+            : `${verifiedSignals.length} of ${signals.length} signal${signals.length === 1 ? "" : "s"} on this file completed all four gates. That records a completed protocol; read the evidence before treating a claim as verified.`}{" "}
           <label className="tip-toggle">
             <input
               type="checkbox"
@@ -1594,7 +1645,7 @@ function InvestigationWorkspace({
               <SecHead
                 title="Signals"
                 count={signals.length}
-                sub="Stage one asks the question. Stage two runs the adversarial searches and answers the four gates. Only a signal that passed all four is called verified."
+                sub="Stage one asks the question. Stage two runs the adversarial searches and answers the four gates. Completing all four records protocol completion; the editor still verifies the underlying facts."
               />
               {signals.map((s) => (
                 <div key={s.id} className="side-item sig-card">

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   planDarkRoundFailover,
+  runCheckpointedDarkStages,
   runDarkResearchWithRememberedChoice,
   terminalPlannerStartupFailure,
 } from "./dark.ts";
@@ -26,7 +27,7 @@ function job(overrides: Partial<DeskJob> = {}): DeskJob {
     user_id: "u1",
     kind: "dark",
     subject_id: 5,
-    model_choice: "claude-frontier",
+    model_choice: "claude-sonnet",
     model_choice_source: "auto",
     lane: "editorial",
     status: "running",
@@ -59,10 +60,10 @@ describe("planDarkRoundFailover", () => {
     assert.deepEqual(result, {
       next: "codex-balanced",
       label: "Codex Terra",
-      switchedBecause: "Claude Opus sign-in lapsed",
+      switchedBecause: "Claude Sonnet sign-in lapsed",
     });
     assert.deepEqual(modelChoiceCalls, [[99, "codex-balanced"]]);
-    assert.deepEqual(stageMessages, ["Switched to Codex Terra: Claude Opus sign-in lapsed"]);
+    assert.deepEqual(stageMessages, ["Switched to Codex Terra: Claude Sonnet sign-in lapsed"]);
   });
 
   it("fails over on a timeout / zero-output error: picks the next rung and words the switch as 'timed out'", async () => {
@@ -82,10 +83,10 @@ describe("planDarkRoundFailover", () => {
     assert.deepEqual(result, {
       next: "codex-balanced",
       label: "Codex Terra",
-      switchedBecause: "Claude Opus timed out",
+      switchedBecause: "Claude Sonnet timed out",
     });
     assert.deepEqual(modelChoiceCalls, [[99, "codex-balanced"]]);
-    assert.deepEqual(stageMessages, ["Switched to Codex Terra: Claude Opus timed out"]);
+    assert.deepEqual(stageMessages, ["Switched to Codex Terra: Claude Sonnet timed out"]);
   });
 
   it("never fails over an editor's explicit model choice", async () => {
@@ -110,6 +111,18 @@ describe("planDarkRoundFailover", () => {
     assert.equal(probed, false, "an explicit editor choice must never even probe another provider");
     assert.equal(modelChoiceSet, false);
     assert.equal(stageSet, false);
+  });
+
+  it("keeps a configured Automatic gateway exclusive", async () => {
+    let probed = false;
+    const result = await planDarkRoundFailover(job({ model_choice: "configured" }), LIVE_TIMEOUT_NO_OUTPUT, {
+      probe: async () => {
+        probed = true;
+        return { ok: true, label: "Claude Sonnet", choice: "claude-sonnet" };
+      },
+    });
+    assert.equal(result, null);
+    assert.equal(probed, false);
   });
 
   it("returns null when Automatic's next rung is not ready either, without writing anything", async () => {
@@ -143,6 +156,41 @@ describe("planDarkRoundFailover", () => {
 
     assert.equal(result, null);
     assert.equal(probed, false, "a refusal is not a login lapse or a timeout and must not trigger a probe");
+  });
+});
+
+describe("runCheckpointedDarkStages", () => {
+  it("retries only synthesis after Automatic synthesis timeout", async () => {
+    const events: string[] = [];
+    const result = await runCheckpointedDarkStages({
+      initialChoice: "claude-sonnet",
+      research: async (choice) => {
+        events.push(`research:${choice}`);
+        return { hops: 3, plannerStartupFailures: 0, summary: "three completed hops" };
+      },
+      synthesize: async (choice) => {
+        events.push(`synthesis:${choice}`);
+        return choice === "claude-sonnet"
+          ? { stored: 0, summary: "", error: "Claude request timed out" }
+          : { stored: 2, summary: "two signals", error: undefined };
+      },
+      failOver: async (_error, stage) => {
+        events.push(`failover:${stage}`);
+        return { next: "codex-balanced", label: "Codex Terra", switchedBecause: "Claude timed out" };
+      },
+      setStage: async (stage) => {
+        events.push(`stage:${stage}`);
+      },
+    });
+
+    assert.equal(result.choice, "codex-balanced");
+    assert.deepEqual(events, [
+      "research:claude-sonnet",
+      "synthesis:claude-sonnet",
+      "failover:synthesis",
+      "stage:Claude timed out → Codex Terra retrying synthesis",
+      "synthesis:codex-balanced",
+    ]);
   });
 });
 

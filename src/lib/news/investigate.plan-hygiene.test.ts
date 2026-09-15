@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parsePlan } from "./investigate.ts";
+import {
+  boundedFrontierItems,
+  parsePlan,
+  researchStopReason,
+} from "./investigate.ts";
 
 /**
  * Dark Desk F3: a model response containing tool-refusal narration —
@@ -127,5 +131,59 @@ describe("parsePlan on a clean response changes nothing", () => {
     assert.equal(plan.frontier.length, 1);
     assert.equal(plan.anomalies.length, 1);
     assert.equal(plan.dead_ends.length, 1);
+  });
+});
+
+describe("frontier growth controls", () => {
+  it("rejects broken fragments, merges equivalent labels, and keeps only the highest-value cap", () => {
+    const bounded = boundedFrontierItems(
+      [
+        { label: "#", kind: "unknown", why: "fragment", priority: 15 },
+        { label: "https://", kind: "url", why: "broken", priority: 15 },
+        { label: "Acme Holdings, LLC", kind: "company", why: "first", priority: 7, queries: ["Acme filing"] },
+        { label: "acme holdings llc", kind: "company", why: "stronger", priority: 10, queries: ["Acme contract"] },
+        { label: "Water rate study", kind: "document", why: "official record missing", priority: 9 },
+        { label: "Low-value aside", kind: "unknown", why: "weak", priority: 2 },
+      ],
+      2,
+    );
+
+    assert.equal(bounded.length, 2);
+    assert.deepEqual(bounded.map((item) => item.label), ["acme holdings llc", "Water rate study"]);
+    assert.deepEqual(bounded[0]?.queries, ["Acme filing", "Acme contract"]);
+  });
+});
+
+describe("research stop policy", () => {
+  it("stops on sufficient evidence even when low-value frontier remains", () => {
+    assert.equal(
+      researchStopReason({
+        planRequestedStop: true,
+        openFrontier: 4,
+        highValueOpenFrontier: 0,
+        totalReadableSources: 3,
+        totalSupportedClaims: 2,
+        consecutiveNoMaterialHops: 0,
+        consecutiveLowYieldHops: 0,
+        repeatedSourcesThisHop: 0,
+      }),
+      "evidence-sufficient",
+    );
+  });
+
+  it("stops on repeated sources or no materially new finding without waiting for an empty frontier", () => {
+    const base = {
+      planRequestedStop: false,
+      openFrontier: 6,
+      highValueOpenFrontier: 3,
+      totalReadableSources: 1,
+      totalSupportedClaims: 0,
+      consecutiveNoMaterialHops: 0,
+      consecutiveLowYieldHops: 0,
+      repeatedSourcesThisHop: 0,
+    };
+    assert.equal(researchStopReason({ ...base, repeatedSourcesThisHop: 3 }), "repeated-sources");
+    assert.equal(researchStopReason({ ...base, consecutiveNoMaterialHops: 2 }), "no-materially-new-finding");
+    assert.equal(researchStopReason({ ...base, consecutiveLowYieldHops: 3 }), "diminishing-returns");
   });
 });

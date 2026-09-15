@@ -69,7 +69,7 @@ constrain one of them.
 
 ## Stage 2 — the Dark Signal Desk
 
-Before any signal may be shown as verified or sent to the queue as a finding,
+Before any signal may be shown as having completed the verification protocol or sent to the queue as a finding,
 **the application runs the adversarial searches itself** and the model answers
 four gates.
 
@@ -125,7 +125,33 @@ which gate is missing, in words. A one-word shrug counts as unanswered.
 
 The first three answers are checked for minimum length, not independently
 proven true by the code. The editor must read the cited records and challenge
-the reasoning. A “verified” label is a protocol result, not fact-checking.
+the reasoning. The interface therefore says **Protocol complete · four gates**
+rather than claiming that a fact has been verified.
+
+## Models, checkpoints and the whole-run limit
+
+The shared picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus,
+Sonnet and Haiku; Local model; Automatic; and saved custom connections. An
+explicit choice stays on that model. Dark Desk Automatic uses a configured
+gateway when present; otherwise it starts synthesis on Claude Sonnet and can
+retry an unfinished synthesis stage on Codex Terra. It does not choose Opus or
+Astra automatically. Claude planning uses Haiku; Codex Astra and Luna planning
+uses Luna; Codex Sol and Terra planning uses Terra.
+
+A round checkpoints research before synthesis. If synthesis times out, the
+completed searches and document reads stay complete and only synthesis is
+retried. One run meter caps elapsed time, model calls, searches and document
+reads across research, synthesis, signal verification and the editor brief.
+The open file shows the current stage and the live counts. The run record keeps
+each model call's stage, provider, model, duration, result and timeout status;
+provider-reported token counts are stored when available and remain unknown
+when the provider does not report them.
+
+Research may finish with unresolved low-value items. It stops when the evidence
+is sufficient for the bounded question, successive hops add no material
+finding, results repeat the same sources, returns diminish, or a whole-run cap
+is reached. New follow-up items are cleaned, equivalent labels are merged, and
+only the highest-value bounded set remains open.
 
 ## Search minimums
 

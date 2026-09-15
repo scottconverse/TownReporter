@@ -787,8 +787,9 @@
             <h3>Pick the model everywhere</h3>
             <p class="cap" style="margin: 0 0 10px">One registry</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              Story, Scan and Dark Desk now all show the same Writing model picker
-              &mdash; Automatic, Codex Terra, Codex Sol, Claude Opus or Local model &mdash; each
+              Story, Scan, Opinion and Dark Desk show the same Writing model picker:
+              Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku;
+              Local model; and saved custom connections. Each
               one reading from a single provider registry instead of four files that had to
               agree by hand.
             </p>
@@ -1029,6 +1030,12 @@ npm run dev
                 after an eligible failure. Named choices never fall back.
               </p>
               <p>
+                <strong>Bound Dark Desk cost.</strong> Dark Automatic uses a configured gateway when
+                present; otherwise Sonnet writes with one Terra retry. Haiku or Luna handles the
+                mechanical planning. Completed searches and reads are checkpointed before synthesis,
+                and each round has total limits for time, calls, searches and document reads.
+              </p>
+              <p>
                 <b>Set up a writing model</b> opens help under every Queue, workbench and Opinion
                 picker: installation links, sign-in on the server's account, and reload/retry steps.
                 Opinion also explains its required voice file. Nothing installs or signs you in
@@ -1055,7 +1062,7 @@ npm run dev
                 configured provider for Scan and Dark Desk.
               </p>
               <p>
-                Opinion offers Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
+                Opinion offers Automatic, every named Codex and Claude model, and Local model,
                 plus saved custom connections. Codex Sol is the default. Automatic tries Claude Opus, then Codex Sol once
                 if needed; explicit choices stay selected. Both Claude and Codex read the complete editorial voice through native instruction-file options, with research tools available while writing. A refusal, assistant note, implausible
                 headline or incomplete body is marked failed and never becomes a draft.

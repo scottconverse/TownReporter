@@ -231,7 +231,11 @@ describe("the four gates", () => {
     assert.match(stageWords({ stage: "black-desk" }).sentence, /capped at 50%/);
     assert.match(
       stageWords({ stage: "dark-signal-desk", verification_status: "verified" }).chip,
-      /Verified · four gates/,
+      /Protocol complete · four gates/,
+    );
+    assert.match(
+      stageWords({ stage: "dark-signal-desk", verification_status: "verified" }).sentence,
+      /before treating a claim as verified/i,
     );
     const un = stageWords({
       stage: "dark-signal-desk",

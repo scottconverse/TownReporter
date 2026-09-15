@@ -451,7 +451,7 @@ export function verify(input: {
     status: "verified",
     missing: [],
     reason:
-      "Verified. The desk ran the adversarial searches itself and the model answered all four gates.",
+      "Protocol complete. The desk ran the adversarial searches itself and the model answered all four gates. Read the underlying records before treating the claim as verified.",
   };
 }
 
@@ -464,9 +464,9 @@ export function stageWords(row: {
   const missing = String(row.gates_missing ?? "").trim();
   if (row.verification_status === "verified")
     return {
-      chip: "Verified · four gates",
+      chip: "Protocol complete · four gates",
       sentence:
-        "The desk searched for the ordinary explanation, the official record, local press and the opposing account, then the model answered all four gates.",
+        "The desk completed its search-and-review protocol: ordinary explanation, official record, local press, opposing account and four model answers. Read the underlying records before treating a claim as verified.",
     };
   if (row.stage === "dark-signal-desk")
     return {

@@ -10,7 +10,7 @@ import {
   probeProvider,
   type EffectiveProviderChoice,
 } from "./ai.ts";
-import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
+import { DARK_AUTOMATIC_LADDER, effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import { planAutomaticFailover, failoverReasonPhrase } from "./automatic-failover.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
@@ -76,12 +76,33 @@ import {
   setJobStage,
   type DeskJob,
 } from "./jobs.ts";
+import {
+  createDarkRunBudget,
+  type DarkRunBudget,
+  type DarkRunStopReason,
+  type DarkRunUsageSnapshot,
+} from "./dark-run-budget.ts";
 
 const DARK_SYNTHESIS_PACK_CAP = 28_000;
 const DARK_SYNTHESIS_CONTEXT_CAP = 14_000;
 const DARK_ARTIFACT_CAP = 12_000;
 const DARK_ARTIFACT_COUNT = 8;
 const SECTION_BUDGET_MARKER = "\n[section budget reached]";
+
+function darkRunBudget(
+  dials: DarkDials,
+  choice: EffectiveProviderChoice,
+  overrides: ProviderOverrides | null,
+  verificationLimit: number,
+): DarkRunBudget {
+  const hopLimit = budgetFor(dials).hops;
+  return createDarkRunBudget({
+    elapsedMs: providerBudget(choice, overrides).wallMs,
+    modelCalls: hopLimit * 2 + Math.max(0, verificationLimit) + 3,
+    searches: hopLimit * 3 + Math.max(0, verificationLimit) * 4,
+    documentReads: hopLimit * 4,
+  });
+}
 
 type DarkArtifactEvidence = {
   id: number;
@@ -338,7 +359,22 @@ const snapshotDarkSettingsFor = createServerOnlyFn(async (newsroomId: number, ru
  * row, no dark_runs row and no rate spend ever exist, so there is nothing for
  * the queue to mark completed while lying about what happened.
  */
-async function darkPreflightRefusal(choice?: string, newsroomId?: number): Promise<{
+async function probeDarkProvider(choice?: string, newsroomId?: number) {
+  if (choice !== "auto") return probeProvider(choice, newsroomId);
+  const failures: string[] = [];
+  for (const rung of ["configured", ...DARK_AUTOMATIC_LADDER]) {
+    const result = await probeProvider(rung, newsroomId);
+    if (result.ok) return result;
+    failures.push(result.error);
+  }
+  return { ok: false as const, error: `No Dark Desk Automatic provider is ready. ${failures.join(" ")}` };
+}
+
+async function darkPreflightRefusal(
+  choice?: string,
+  newsroomId?: number,
+  probed?: Awaited<ReturnType<typeof probeProvider>>,
+): Promise<{
   ok: false;
   kind: string;
   error: string;
@@ -346,7 +382,7 @@ async function darkPreflightRefusal(choice?: string, newsroomId?: number): Promi
   retryable: boolean;
 } | null> {
   const { scanPreflight } = await import("./preflight.ts");
-  const ready = scanPreflight(await probeProvider(choice, newsroomId), choice);
+  const ready = scanPreflight(probed ?? await probeDarkProvider(choice, newsroomId), choice);
   if (ready.ok) return null;
   return {
     ok: false as const,
@@ -397,7 +433,64 @@ export type DarkRunRow = {
   error: string | null;
   /** Null on every round dug before 0.6.2 gave Dark Desk a picker. */
   model_choice: string | null;
+  investigation_id: number | null;
+  stopReason: string | null;
+  usage: import("./dark-run-budget.ts").DarkRunUsageSnapshot;
 };
+
+type StoredDarkRunRow = Omit<DarkRunRow, "stopReason" | "usage"> & {
+  stop_reason: string | null;
+  usage_totals_json: string | null;
+  usage_ledger_json: string | null;
+};
+
+const EMPTY_DARK_USAGE: DarkRunUsageSnapshot = {
+  totals: {
+    modelCalls: 0,
+    searches: 0,
+    documentReads: 0,
+    elapsedMs: 0,
+    inputTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+  },
+  calls: [],
+};
+
+export function presentDarkRun(row: StoredDarkRunRow): DarkRunRow {
+  let totals = EMPTY_DARK_USAGE.totals;
+  let calls = EMPTY_DARK_USAGE.calls;
+  try {
+    const parsed = JSON.parse(row.usage_totals_json || "{}") as Partial<DarkRunUsageSnapshot["totals"]>;
+    totals = { ...EMPTY_DARK_USAGE.totals, ...parsed };
+  } catch {
+    totals = EMPTY_DARK_USAGE.totals;
+  }
+  try {
+    const parsed = JSON.parse(row.usage_ledger_json || "[]") as unknown;
+    calls = Array.isArray(parsed) ? parsed as DarkRunUsageSnapshot["calls"] : [];
+  } catch {
+    calls = [];
+  }
+  const { stop_reason, usage_totals_json: _totals, usage_ledger_json: _ledger, ...existing } = row;
+  return { ...existing, stopReason: stop_reason, usage: { totals, calls } };
+}
+
+async function persistDarkRunUsage(
+  runId: number,
+  newsroomId: number,
+  usage: DarkRunUsageSnapshot,
+  stopReason?: DarkRunStopReason | null,
+) {
+  const sql = await getSql();
+  await sql`
+    update dark_runs
+    set usage_totals_json = ${JSON.stringify(usage.totals)},
+        usage_ledger_json = ${JSON.stringify(usage.calls)},
+        stop_reason = coalesce(${stopReason ?? null}, stop_reason)
+    where id = ${runId} and newsroom_id = ${newsroomId}
+  `;
+}
 
 export type DarkPromiseRow = {
   id: number;
@@ -593,6 +686,11 @@ export const DARK_SCHEMA_STATEMENTS: readonly string[] = [
   `alter table dark_settings add column if not exists research_preferences text not null default '{}'`,
   `alter table dark_runs add column if not exists research_preferences_json text`,
   `alter table dark_runs add column if not exists verification_counts_json text`,
+  `alter table dark_runs add column if not exists investigation_id integer`,
+  `alter table dark_runs add column if not exists stop_reason text`,
+  `alter table dark_runs add column if not exists usage_totals_json text not null default '{}'`,
+  `alter table dark_runs add column if not exists usage_ledger_json text not null default '[]'`,
+  `create index if not exists dark_runs_investigation_idx on dark_runs (newsroom_id, investigation_id, started_at desc)`,
 ];
 
 export async function ensureDarkSchema() {
@@ -622,13 +720,15 @@ export const listDarkRuns = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await ensureDarkSchema();
     const sql = await getSql();
-    return sql<DarkRunRow>`
-      select id, started_at, finished_at, summary, error, model_choice
+    const rows = await sql<StoredDarkRunRow>`
+      select id, started_at, finished_at, summary, error, model_choice, investigation_id,
+             stop_reason, usage_totals_json, usage_ledger_json
       from dark_runs
       where newsroom_id = ${owned(context)}
       order by started_at desc
       limit 12
     `;
+    return rows.map(presentDarkRun);
   });
 
 export const listDarkPromises = createServerFn({ method: "GET" })
@@ -984,6 +1084,13 @@ export const getInvestigation = createServerFn({ method: "GET" })
     */
     const job = await latestJob({ newsroomId: owned(context), kind: "dark", subjectId: id });
     const stalled = runLooksStalled({ runOpen: inv[0].status === "investigating", job });
+    const runRows = await sql<StoredDarkRunRow>`
+      select id, started_at, finished_at, summary, error, model_choice, investigation_id,
+             stop_reason, usage_totals_json, usage_ledger_json
+      from dark_runs
+      where newsroom_id = ${owned(context)} and investigation_id = ${id}
+      order by started_at desc limit 1
+    `;
 
     /*
       The brief is its own job now (0.6.2), so the page has something to poll
@@ -1002,6 +1109,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
       darkJob: job
         ? { id: job.id, status: job.status, stage: job.stage, error: job.error }
         : null,
+      run: runRows[0] ? presentDarkRun(runRows[0]) : null,
       briefJob: brief_job
         ? { id: brief_job.id, status: brief_job.status, error: brief_job.error }
         : null,
@@ -1230,6 +1338,8 @@ async function synthesizeSignals(
   overrides?: ProviderOverrides | null,
   newsroomId: number = DEFAULT_NEWSROOM_ID,
   preferences?: ResearchSnapshot,
+  runBudget?: DarkRunBudget,
+  onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>,
 ) {
   const sql = await getSql();
   const researchWindow = preferences ? `${describeResearchWindow(preferences)}\n\n` : "";
@@ -1255,15 +1365,49 @@ async function synthesizeSignals(
     the dark desk failed with "Claude Code request timed out" for exactly this.
   */
   const { place } = await readDarkPlace(newsroomId);
-  const ai = await grokChat(darkSystemFor(dials, place), pack, 3200, {
-    timeoutMs: providerBudget(choice, overrides).callMs,
-    choice,
-    newsroomId,
-    localModel: overrides?.["local-model"]?.localModel,
-    // Dark Desk F1: synthesis reads the pack already assembled above and
-    // returns JSON only — it never fetches or searches itself.
-    noTools: true,
+  const call = runBudget?.startModelCall({
+    stage: "synthesis",
+    provider: choice ?? "automatic",
+    model: choice ?? "provider-default",
   });
+  if (runBudget && !call) {
+    return { stored: 0, summary: "", error: `Run stopped: ${runBudget.stopReason ?? "budget-limit"}` };
+  }
+  if (call) await onUsage?.(runBudget!.snapshot());
+  const callMs = providerBudget(choice, overrides).callMs;
+  let ai: Awaited<ReturnType<typeof grokChat>>;
+  try {
+    ai = await grokChat(darkSystemFor(dials, place), pack, 3200, {
+      timeoutMs: Math.max(1, Math.min(callMs, runBudget?.remainingMs() ?? callMs)),
+      choice,
+      newsroomId,
+      localModel: overrides?.["local-model"]?.localModel,
+      // Dark Desk F1: synthesis reads the pack already assembled above and
+      // returns JSON only — it never fetches or searches itself.
+      noTools: true,
+    });
+  } catch (err) {
+    call?.finish({
+      result: "error",
+      timedOut: /timed out|timeout/i.test(asDarkError(err)),
+    });
+    if (call) await onUsage?.(runBudget!.snapshot());
+    throw err;
+  }
+  if (call) {
+    const error = ai && !ai.ok ? ai.error : "";
+    call.finish({
+      result: ai?.ok ? "ok" : (/timed out|timeout/i.test(error) ? "timeout" : "error"),
+      durationMs: ai?.meta?.durationMs,
+      timedOut: ai?.meta?.timedOut ?? (!ai?.ok && /timed out|timeout/i.test(error)),
+      provider: ai?.meta?.provider,
+      model: ai?.meta?.model,
+      inputTokens: ai?.meta?.inputTokens,
+      outputTokens: ai?.meta?.outputTokens,
+      totalTokens: ai?.meta?.totalTokens,
+    });
+    await onUsage?.(runBudget!.snapshot());
+  }
   if (!ai?.ok)
     return {
       stored: 0,
@@ -1401,6 +1545,9 @@ async function runVerificationStage(
   choice?: EffectiveProviderChoice,
   overrides?: ProviderOverrides | null,
   preferences?: ResearchSnapshot,
+  runBudget?: DarkRunBudget,
+  onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>,
+  onStage?: (stage: string) => Promise<unknown>,
 ): Promise<string> {
   try {
     const { place, official, press } = await readDarkPlace(newsroomId);
@@ -1415,6 +1562,9 @@ async function runVerificationStage(
       choice,
       overrides,
       preferences,
+      runBudget,
+      onUsage,
+      onStage,
     });
     return out.summary;
   } catch (err) {
@@ -1463,6 +1613,7 @@ async function executeDarkRun(
     investigationId?: number;
     title?: string;
     choice?: EffectiveProviderChoice;
+    automatic?: boolean;
   },
   newsroomId: number = DEFAULT_NEWSROOM_ID,
 ) {
@@ -1485,6 +1636,7 @@ async function executeDarkRun(
     );
     investigationId = opened.investigationId;
   }
+  await sql`update dark_runs set investigation_id = ${investigationId} where id = ${runId}`;
 
   try {
     const snapshot = await snapshotDarkSettingsFor(newsroomId, runId);
@@ -1495,39 +1647,72 @@ async function executeDarkRun(
     // expects the file they open next to dig that hard too.
     const dials = snapshot.dials;
     const budget = budgetFor(dials);
+    const runBudget = darkRunBudget(dials, choice!, overrides, snapshot.preferences.verificationLimit ?? 6);
+    const saveUsage = (usage: DarkRunUsageSnapshot) =>
+      persistDarkRunUsage(runId, newsroomId, usage, runBudget.stopReason);
+    await saveUsage(runBudget.snapshot());
     // Location scoping and domain tiers come from the paper's own settings,
     // so the loop's searches name this town and the run record can say which
     // tier answered.
     const where = await readDarkPlace(newsroomId).catch(() => null);
-    const loop = await runDarkResearchWithRememberedChoice(investigationId, choice!, {
-      remember: rememberLastModelChoice,
-      run: (on) => researchLoop({
+    let activeChoice = choice!;
+    const research = (on: EffectiveProviderChoice) => {
+      activeChoice = on;
+      return runDarkResearchWithRememberedChoice(investigationId, on, {
+        remember: rememberLastModelChoice,
+        run: (remembered) => researchLoop({
+          userId,
+          investigationId,
+          hops: budget.hops,
+          choice: remembered,
+          providerOverrides: overrides,
+          newsroomId,
+          place: where?.place,
+          officialDomains: where?.official,
+          pressDomains: where?.press,
+          preferences: snapshot.preferences,
+          executionMode: snapshot.preferences.executionMode ?? "batch",
+          actionLimit: snapshot.preferences.actionLimit ?? 6,
+          runBudget,
+          onUsage: saveUsage,
+        }),
+      });
+    };
+    const synthesize = (on: EffectiveProviderChoice) => {
+      activeChoice = on;
+      return synthesizeSignals(
         userId,
+        runId,
         investigationId,
-        hops: budget.hops,
-        choice: on,
-        providerOverrides: overrides,
+        paste,
+        dials,
+        on,
+        overrides,
         newsroomId,
-        place: where?.place,
-        officialDomains: where?.official,
-        pressDomains: where?.press,
-        preferences: snapshot.preferences,
-        executionMode: snapshot.preferences.executionMode ?? "batch",
-        actionLimit: snapshot.preferences.actionLimit ?? 6,
-      }),
+        snapshot.preferences,
+        runBudget,
+        saveUsage,
+      );
+    };
+    const checkpointed = await runCheckpointedDarkStages({
+      initialChoice: activeChoice,
+      research,
+      synthesize,
+      failOver: async (error) => {
+        const plan = await planAutomaticFailover({
+          source: opts.automatic ? "auto" : "editor",
+          current: activeChoice,
+          error,
+          probe: (next) => probeProvider(next, newsroomId),
+          ladder: DARK_AUTOMATIC_LADDER,
+        });
+        if (!plan) return null;
+        const switchedBecause = failoverReasonPhrase(modelChoiceLabel(activeChoice), plan.reason);
+        return { next: plan.next, label: plan.label, switchedBecause };
+      },
     });
-
-    const synth = await synthesizeSignals(
-      userId,
-      runId,
-      investigationId,
-      paste,
-      dials,
-      choice,
-      overrides,
-      newsroomId,
-      snapshot.preferences,
-    );
+    activeChoice = checkpointed.choice;
+    const { loop, synth } = checkpointed;
     /*
       Stage 2. Nothing this round filed may be shown as finalized until the
       Dark Signal Desk has run the adversarial searches and the model has
@@ -1538,11 +1723,15 @@ async function executeDarkRun(
       newsroomId,
       runId,
       investigationId,
-      choice,
+      activeChoice,
       overrides,
       snapshot.preferences,
+      runBudget,
+      saveUsage,
     );
-    await rememberLastModelChoice(investigationId, choice);
+    const stopReason: DarkRunStopReason = runBudget.stopReason ?? loop.stopReason ?? (synth.error ? "synthesis-failed" : loop.paused ? "hop-limit" : "completed");
+    await persistDarkRunUsage(runId, newsroomId, runBudget.snapshot(), stopReason);
+    await rememberLastModelChoice(investigationId, activeChoice);
     const names = (
       await sql<{ name: string }>`
         select e.name from investigation_entities ie
@@ -1571,7 +1760,8 @@ async function executeDarkRun(
 
     await sql`
       update dark_runs
-      set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null}
+      set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null},
+          stop_reason = ${stopReason}
       where id = ${runId}
     `;
     await audit(
@@ -1623,8 +1813,8 @@ export const runDarkDesk = createServerFn({ method: "POST" })
       trusting a string off the wire.
     */
     const asked = storyModelChoice(data.modelChoice);
-    const probe = await probeProvider(asked, owned(context));
-    const refusal = await darkPreflightRefusal(asked, owned(context));
+    const probe = await probeDarkProvider(asked, owned(context));
+    const refusal = await darkPreflightRefusal(asked, owned(context), probe);
     if (refusal) return refusal;
     await ensureDarkSchema();
     await assertRate(context.userId, "dark", owned(context));
@@ -1634,6 +1824,7 @@ export const runDarkDesk = createServerFn({ method: "POST" })
         paste: data.paste,
         investigationId: data.investigationId,
         choice: probe.ok ? probe.choice : asked,
+        automatic: asked === "auto",
       },
       owned(context),
     );
@@ -1710,8 +1901,8 @@ export async function startDarkRound(
     gets pinned on the job -- so a round does not silently change author
     between the press and the queue picking it up.
   */
-  const probe = await probeProvider(asked, owned(context));
-  const refusal = await darkPreflightRefusal(asked, owned(context));
+  const probe = await probeDarkProvider(asked, owned(context));
+  const refusal = await darkPreflightRefusal(asked, owned(context), probe);
   if (refusal) return refusal;
   await ensureDarkSchema();
   const sql = await getSql();
@@ -1814,12 +2005,16 @@ export async function planDarkRoundFailover(
   const probe = deps.probe ?? probeProvider;
   const setModelChoice = deps.setModelChoice ?? setJobModelChoice;
   const setStage = deps.setStage ?? setJobStage;
+  // An operator-configured gateway is an explicit installation policy. Dark
+  // Automatic uses it exclusively, matching the other desk surfaces.
+  if (job.model_choice === "configured") return null;
 
   const plan = await planAutomaticFailover({
     source: job.model_choice_source ?? "editor",
     current: job.model_choice,
     error: failure,
     probe,
+    ladder: DARK_AUTOMATIC_LADDER,
   });
   if (!plan) return null;
 
@@ -1840,6 +2035,44 @@ export async function runDarkResearchWithRememberedChoice<T>(
 ): Promise<T> {
   await deps.remember(investigationId, choice).catch(() => undefined);
   return deps.run(choice);
+}
+
+export async function runCheckpointedDarkStages<
+  TLoop extends { hops: number; plannerStartupFailures: number; summary: string },
+  TSynthesis extends { error?: string },
+>(opts: {
+  initialChoice: EffectiveProviderChoice;
+  research: (choice: EffectiveProviderChoice) => Promise<TLoop>;
+  synthesize: (choice: EffectiveProviderChoice) => Promise<TSynthesis>;
+  failOver: (
+    error: string,
+    stage: "research" | "synthesis",
+  ) => Promise<{ next: EffectiveProviderChoice; label: string; switchedBecause: string } | null>;
+  setStage?: (stage: string) => Promise<unknown>;
+}) {
+  let choice = opts.initialChoice;
+  let switched = false;
+  let loop = await opts.research(choice);
+  if (loop.hops === 0 && loop.plannerStartupFailures > 0) {
+    const next = await opts.failOver(loop.summary, "research");
+    if (next) {
+      switched = true;
+      choice = next.next;
+      await opts.setStage?.(`${next.switchedBecause} → ${next.label} retrying research`);
+      loop = await opts.research(choice);
+    }
+  }
+
+  let synth = await opts.synthesize(choice);
+  if (synth.error && !switched) {
+    const next = await opts.failOver(synth.error, "synthesis");
+    if (next) {
+      choice = next.next;
+      await opts.setStage?.(`${next.switchedBecause} → ${next.label} retrying synthesis`);
+      synth = await opts.synthesize(choice);
+    }
+  }
+  return { choice, loop, synth };
 }
 
 export function terminalPlannerStartupFailure(
@@ -1953,8 +2186,8 @@ export async function performDarkRound(job: DeskJob) {
   let choice = effectiveStoryModelChoice(job.model_choice);
   const overrides = await readProviderOverrides(owned(context)).catch(() => ({}));
   const runRows = await sql<{ id: number }>`
-    insert into dark_runs (user_id, newsroom_id, model_choice)
-    values (${context.userId}, ${owned(context)}, ${choice}) returning id
+    insert into dark_runs (user_id, newsroom_id, model_choice, investigation_id)
+    values (${context.userId}, ${owned(context)}, ${choice}, ${id}) returning id
   `;
   const runId = runRows[0]!.id;
   try {
@@ -1970,9 +2203,13 @@ export async function performDarkRound(job: DeskJob) {
     */
     const dials = snapshot.dials;
     const budget = budgetFor(dials);
+    const runBudget = darkRunBudget(dials, choice, overrides, snapshot.preferences.verificationLimit ?? 6);
+    const saveUsage = (usage: DarkRunUsageSnapshot) =>
+      persistDarkRunUsage(runId, owned(context), usage, runBudget.stopReason);
+    await saveUsage(runBudget.snapshot());
     const where = await readDarkPlace(owned(context)).catch(() => null);
-    const runOnce = async (on: EffectiveProviderChoice) => {
-      const ran = await runDarkResearchWithRememberedChoice(id, on, {
+    const research = async (on: EffectiveProviderChoice) =>
+      runDarkResearchWithRememberedChoice(id, on, {
         remember: rememberLastModelChoice,
         run: (rememberedChoice) => researchLoop({
           userId: context.userId,
@@ -1987,9 +2224,14 @@ export async function performDarkRound(job: DeskJob) {
           preferences: snapshot.preferences,
           executionMode: snapshot.preferences.executionMode ?? "batch",
           actionLimit: snapshot.preferences.actionLimit ?? 6,
+          runBudget,
+          onUsage: saveUsage,
+          onStage: (stage) => setJobStage(job.id, stage),
         }),
       });
-      const signals = await synthesizeSignals(
+    const synthesize = async (on: EffectiveProviderChoice) => {
+      await setJobStage(job.id, `Synthesizing signals with ${modelChoiceLabel(on)}`);
+      return synthesizeSignals(
         context.userId,
         runId,
         id,
@@ -1999,37 +2241,20 @@ export async function performDarkRound(job: DeskJob) {
         overrides,
         owned(context),
         snapshot.preferences,
+        runBudget,
+        saveUsage,
       );
-      return { loop: ran, synth: signals };
     };
 
-    let { loop, synth } = await runOnce(choice);
-
-    /*
-      One-shot Automatic failover, at the ROUND level.
-
-      Story and Scan both do this (see automatic-failover.ts and
-      scan-model-run.ts) and Dark Desk did not, because until 0.6.2 it had no
-      pinned model to fail over FROM. The trigger is deliberately narrow: only
-      a job Automatic chose for, only an error that reads as a lapsed login OR
-      a timeout/no-output, only a rung strictly later in the ladder, and only
-      once. A refusal or an empty-but-not-zero-byte answer is a real result
-      and must not be papered over with a second provider's opinion.
-
-      A hop's own planner failure surfaces in `loop.summary` ("Planner fell
-      back on 1 of 4 hops: ...") rather than as a thrown error, because the
-      loop keeps digging with the keyword heuristic when the model will not
-      answer. That text is checked too, so a round whose every hop was planned
-      by a signed-out provider is not recorded as a successful dig.
-    */
-    const failure = synth.error || (loop.plannerFailures > 0 ? loop.summary : "");
-    if (failure) {
-      const switched = await planDarkRoundFailover(job, failure);
-      if (switched) {
-        choice = switched.next;
-        ({ loop, synth } = await runOnce(choice));
-      }
-    }
+    const checkpointed = await runCheckpointedDarkStages({
+      initialChoice: choice,
+      research,
+      synthesize,
+      failOver: (error) => planDarkRoundFailover(job, error, { setStage: async () => undefined }),
+      setStage: (stage) => setJobStage(job.id, stage),
+    });
+    choice = checkpointed.choice;
+    const { loop, synth } = checkpointed;
     const terminalFailure = terminalPlannerStartupFailure(loop, synth.error);
     if (terminalFailure) throw new Error(terminalFailure);
     // Stage 2, on the "Keep digging" path too.
@@ -2041,6 +2266,9 @@ export async function performDarkRound(job: DeskJob) {
       choice,
       overrides,
       snapshot.preferences,
+      runBudget,
+      saveUsage,
+      (stage) => setJobStage(job.id, stage),
     );
     await rememberLastModelChoice(id, choice);
     const names = (
@@ -2067,18 +2295,6 @@ export async function performDarkRound(job: DeskJob) {
     ]
       .filter(Boolean)
       .join("\n");
-    await sql`
-      update dark_runs
-      set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null},
-          model_choice = ${choice}
-      where id = ${runId} and newsroom_id = ${owned(context)}
-    `;
-    await audit(
-      context.userId,
-      "dark-continue",
-      `run ${runId} inv ${id} hops ${loop.hops} signals ${synth.stored}`,
-      owned(context),
-    );
     /*
       Write the brief while the round is still warm.
 
@@ -2087,11 +2303,42 @@ export async function performDarkRound(job: DeskJob) {
       lists are the real content and a missing summary must never fail a round
       that otherwise dug successfully.
     */
+    let briefError = "";
     try {
-      await buildBrief(context.userId, owned(context), id, choice, overrides);
-    } catch {
+      const briefResult = await buildBrief(
+        context.userId,
+        owned(context),
+        id,
+        choice,
+        overrides,
+        grokChat,
+        {
+          budget: runBudget,
+          onUsage: saveUsage,
+          onStage: (stage) => setJobStage(job.id, stage),
+        },
+      );
+      if (!briefResult.ok) briefError = briefResult.error;
+    } catch (error) {
+      briefError = asDarkError(error);
       /* the file is still readable without it */
     }
+
+    const stopReason = runBudget.stopReason ?? loop.stopReason ?? (synth.error ? "synthesis-failed" : loop.paused ? "hop-limit" : "completed");
+    await persistDarkRunUsage(runId, owned(context), runBudget.snapshot(), stopReason as DarkRunStopReason);
+    const finishedSummary = briefError ? `${header}\nBrief: ${briefError}` : header;
+    await sql`
+      update dark_runs
+      set finished_at = now(), summary = ${finishedSummary.slice(0, 2500)}, error = ${synth.error ?? null},
+          model_choice = ${choice}, stop_reason = ${stopReason}
+      where id = ${runId} and newsroom_id = ${owned(context)}
+    `;
+    await audit(
+      context.userId,
+      "dark-continue",
+      `run ${runId} inv ${id} hops ${loop.hops} signals ${synth.stored}`,
+      owned(context),
+    );
 
     if (synth.error && !loop.paused) await markInvestigationPaused(context.userId, id, synth.error);
   } catch (err) {
@@ -2738,6 +2985,13 @@ export async function buildDarkBriefPromptPack(newsroomId: number, id: number): 
   const anoms = await sql<{ kind: string; summary: string }>`
     select kind, summary from anomalies where investigation_id = ${id} order by id desc limit 20
   `.catch(() => []);
+  const verificationRows = await sql<{ eligible: number; complete: number }>`
+    select count(*)::int as eligible,
+           count(*) filter (where verification_status = 'verified')::int as complete
+    from dark_signals
+    where investigation_id = ${id} and newsroom_id = ${newsroomId}
+  `.catch(() => [{ eligible: 0, complete: 0 }]);
+  const verification = verificationRows[0] ?? { eligible: 0, complete: 0 };
 
   const artifactEvidence = await relevantDarkArtifactEvidence(
     id,
@@ -2751,6 +3005,7 @@ export async function buildDarkBriefPromptPack(newsroomId: number, id: number): 
   );
   return briefPack({
     title: inv[0].title,
+    verification,
     facts: claims
       .filter((c) => /FACT|OBSERVATION/i.test(c.kind))
       .map((c) => ({ body: c.body, evidence: c.evidence ?? "" })),
@@ -2769,23 +3024,75 @@ export async function buildBrief(
   choice?: EffectiveProviderChoice,
   overrides?: ProviderOverrides | null,
   chat: typeof grokChat = grokChat,
+  run?: {
+    budget: DarkRunBudget;
+    onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>;
+    onStage?: (stage: string) => Promise<unknown>;
+  },
 ) {
   const sql = await getSql();
   const pack = await buildDarkBriefPromptPack(newsroomId, id);
   if (!pack) return { ok: false as const, error: "not found" };
+  const verificationRows = await sql<{ eligible: number; complete: number }>`
+    select count(*)::int as eligible,
+           count(*) filter (where verification_status = 'verified')::int as complete
+    from dark_signals
+    where investigation_id = ${id} and newsroom_id = ${newsroomId}
+  `.catch(() => [{ eligible: 0, complete: 0 }]);
+  const verification = verificationRows[0] ?? { eligible: 0, complete: 0 };
+  const evidenceStatus =
+    verification.eligible > 0 && verification.complete === verification.eligible
+      ? "protocol-complete" as const
+      : "unverified" as const;
 
-  const ai = await chat(BRIEF_SYSTEM, pack, 1200, {
-    timeoutMs: providerBudget(choice, overrides).callMs,
-    choice,
-    newsroomId,
-    localModel: overrides?.["local-model"]?.localModel,
-    // Dark Desk F1: the brief reads the file already assembled above and
-    // returns JSON only — it never fetches or searches itself.
-    noTools: true,
+  await run?.onStage?.("Writing editor brief");
+  const modelCall = run?.budget.startModelCall({
+    stage: "writing editor brief",
+    provider: choice ?? "automatic",
+    model: choice ?? "provider-default",
   });
+  if (run?.budget && !modelCall) {
+    await run.onUsage?.(run.budget.snapshot());
+    return { ok: false as const, error: `run stopped: ${run.budget.stopReason ?? "model-call-limit"}` };
+  }
+  if (modelCall) await run?.onUsage?.(run.budget.snapshot());
+  const callMs = providerBudget(choice, overrides).callMs;
+  let ai: Awaited<ReturnType<typeof chat>>;
+  try {
+    ai = await chat(BRIEF_SYSTEM, pack, 1200, {
+      timeoutMs: Math.max(1, Math.min(callMs, run?.budget.remainingMs() ?? callMs)),
+      choice,
+      newsroomId,
+      localModel: overrides?.["local-model"]?.localModel,
+      // Dark Desk F1: the brief reads the file already assembled above and
+      // returns JSON only — it never fetches or searches itself.
+      noTools: true,
+    });
+  } catch (err) {
+    modelCall?.finish({
+      result: "error",
+      timedOut: /timed out|timeout/i.test(asDarkError(err)),
+    });
+    if (modelCall) await run?.onUsage?.(run.budget.snapshot());
+    throw err;
+  }
+  if (modelCall) {
+    const meta = "meta" in ai ? ai.meta : undefined;
+    modelCall.finish({
+      result: ai.ok ? "ok" : (/timed out|timeout/i.test(ai.error) ? "timeout" : "error"),
+      timedOut: meta?.timedOut ?? (!ai.ok && /timed out|timeout/i.test(ai.error)),
+      provider: meta?.provider,
+      model: meta?.model,
+      durationMs: meta?.durationMs,
+      inputTokens: meta?.inputTokens,
+      outputTokens: meta?.outputTokens,
+      totalTokens: meta?.totalTokens,
+    });
+    await run?.onUsage?.(run.budget.snapshot());
+  }
   if (!ai?.ok) return { ok: false as const, error: "error" in ai ? ai.error : "no response" };
 
-  const brief = parseBrief(parseJsonBlock<unknown>(ai.text));
+  const brief = parseBrief(parseJsonBlock<unknown>(ai.text), new Date(), evidenceStatus);
   if (!briefIsUseful(brief)) return { ok: false as const, error: "brief was empty" };
 
   await sql`
@@ -2808,8 +3115,8 @@ export async function startBriefJob(
   modelChoice: string = "auto",
 ) {
   const asked = storyModelChoice(modelChoice);
-  const probe = await probeProvider(asked, owned(context));
-  const refusal = await darkPreflightRefusal(asked, owned(context));
+  const probe = await probeDarkProvider(asked, owned(context));
+  const refusal = await darkPreflightRefusal(asked, owned(context), probe);
   if (refusal) return refusal;
   await ensureDarkSchema();
   const effectiveChoice = probe.ok ? probe.choice : asked;
@@ -2850,6 +3157,7 @@ export async function startBriefJob(
 export async function performBriefWork(job: DeskJob) {
   const newsroomId = job.newsroom_id;
   const overrides = await readProviderOverrides(newsroomId).catch(() => ({}));
+  await setJobStage(job.id, "Writing editor brief");
   const result = await buildBrief(
     job.user_id,
     newsroomId,

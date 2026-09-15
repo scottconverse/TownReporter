@@ -48,6 +48,8 @@ export type AutomaticFailoverInput = {
   error: string;
   /** Injectable so this stays a pure, hermetic function to test. */
   probe: (choice: string) => Promise<ProviderProbe>;
+  /** Optional surface-specific ladder; Story/Scan retain the shared default. */
+  ladder?: readonly string[];
 };
 
 /** Why Automatic is moving on, so the caller can word the switch accurately. */
@@ -102,11 +104,12 @@ export async function planAutomaticFailover(
   if (!isTimeout && !isAuthLapse) return null;
   const reason: AutomaticFailoverReason = isTimeout ? "timeout" : "auth";
 
-  const currentIndex = AUTOMATIC_LADDER.indexOf(input.current as (typeof AUTOMATIC_LADDER)[number]);
+  const ladder = input.ladder ?? AUTOMATIC_LADDER;
+  const currentIndex = ladder.indexOf(input.current);
   if (currentIndex === -1) return null;
 
-  for (let i = currentIndex + 1; i < AUTOMATIC_LADDER.length; i++) {
-    const rung = AUTOMATIC_LADDER[i];
+  for (let i = currentIndex + 1; i < ladder.length; i++) {
+    const rung = ladder[i];
     const probed = await input.probe(rung);
     if (probed.ok) {
       return { next: storyModelChoice(rung), label: probed.label || modelChoiceLabel(rung), reason };

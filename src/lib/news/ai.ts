@@ -1,5 +1,8 @@
-type GrokOk = { ok: true; text: string };
-type GrokErr = { ok: false; error: string };
+import type { ChatResultMetadata } from "./ai-result-metadata.ts";
+
+export type { ChatResultMetadata } from "./ai-result-metadata.ts";
+export type GrokOk = { ok: true; text: string; meta?: ChatResultMetadata };
+export type GrokErr = { ok: false; error: string; meta?: ChatResultMetadata };
 
 import {
   isCustomModelChoice,
@@ -403,6 +406,7 @@ async function probeOpenAi(
 /** Validate a configured Anthropic key without generating or spending a completion. */
 async function probeAnthropic(
   provider: Extract<Provider, { kind: "anthropic" }>,
+  choice: EffectiveProviderChoice,
 ): Promise<ProviderProbe> {
   try {
     const res = await fetch("https://api.anthropic.com/v1/models?limit=1", {
@@ -421,7 +425,7 @@ async function probeAnthropic(
       };
     }
     if (!res.ok) return { ok: false, error: `Claude readiness check failed (${res.status}).` };
-    return { ok: true, label: provider.label, choice: "claude-frontier" };
+    return { ok: true, label: provider.label, choice };
   } catch (err) {
     return { ok: false, error: connectionError(provider.label, err) };
   }
@@ -493,7 +497,7 @@ export async function probeProvider(
       : result;
   }
   if (provider.kind === "anthropic") {
-    return probeAnthropic(provider);
+    return probeAnthropic(provider, storyModelChoice(choice || "claude-frontier"));
   }
   const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
   const result = await probeClaudeCode(provider.label);
@@ -516,6 +520,21 @@ async function anthropicChat(
   maxTokens: number,
   timeoutMs: number,
 ): Promise<GrokOk | GrokErr> {
+  const startedAt = Date.now();
+  const meta = (
+    usage?: { input_tokens?: number; output_tokens?: number },
+    timedOut = false,
+  ): ChatResultMetadata => {
+    const result: ChatResultMetadata = {
+      provider: "anthropic",
+      model: cfg.model,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      timedOut,
+    };
+    if (Number.isFinite(usage?.input_tokens)) result.inputTokens = usage!.input_tokens;
+    if (Number.isFinite(usage?.output_tokens)) result.outputTokens = usage!.output_tokens;
+    return result;
+  };
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({
     apiKey: cfg.apiKey,
@@ -536,7 +555,7 @@ async function anthropicChat(
 
     if (res.stop_reason === "refusal") {
       const why = res.stop_details?.category ?? "unspecified";
-      return { ok: false, error: `${cfg.label} declined this request (${why})` };
+      return { ok: false, error: `${cfg.label} declined this request (${why})`, meta: meta(res.usage) };
     }
     const text = res.content
       .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
@@ -544,25 +563,25 @@ async function anthropicChat(
       .join("")
       .trim();
     if (res.stop_reason === "max_tokens" && !text) {
-      return { ok: false, error: `${cfg.label} hit the token ceiling before answering` };
+      return { ok: false, error: `${cfg.label} hit the token ceiling before answering`, meta: meta(res.usage) };
     }
-    if (!text) return { ok: false, error: "Empty model response" };
-    return { ok: true, text };
+    if (!text) return { ok: false, error: "Empty model response", meta: meta(res.usage) };
+    return { ok: true, text, meta: meta(res.usage) };
   } catch (err) {
     const A = (await import("@anthropic-ai/sdk")).default;
     if (err instanceof A.AuthenticationError) {
-      return { ok: false, error: `${cfg.label} rejected the API key` };
+      return { ok: false, error: `${cfg.label} rejected the API key`, meta: meta() };
     }
     if (err instanceof A.RateLimitError) {
-      return { ok: false, error: `${cfg.label} rate limit — try again shortly` };
+      return { ok: false, error: `${cfg.label} rate limit — try again shortly`, meta: meta() };
     }
     if (err instanceof A.APIConnectionTimeoutError) {
-      return { ok: false, error: `${cfg.label} request timed out` };
+      return { ok: false, error: `${cfg.label} request timed out`, meta: meta(undefined, true) };
     }
     if (err instanceof A.APIError) {
-      return { ok: false, error: `${cfg.label} API error ${err.status ?? ""}`.trim() };
+      return { ok: false, error: `${cfg.label} API error ${err.status ?? ""}`.trim(), meta: meta() };
     }
-    return { ok: false, error: `${cfg.label} request failed` };
+    return { ok: false, error: `${cfg.label} request failed`, meta: meta() };
   }
 }
 
@@ -665,6 +684,28 @@ export async function grokChat(
     headers.Authorization = `Bearer ${llm.apiKey}`;
   }
 
+  const startedAt = Date.now();
+  const openAiMeta = (
+    body?: {
+      model?: string;
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    },
+    timedOut = false,
+  ): ChatResultMetadata => {
+    const result: ChatResultMetadata = {
+      provider: "openai-compatible",
+      model: body?.model?.trim() || model,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      timedOut,
+    };
+    const usage = body?.usage;
+    if (Number.isFinite(usage?.prompt_tokens)) result.inputTokens = usage!.prompt_tokens;
+    if (Number.isFinite(usage?.completion_tokens)) result.outputTokens = usage!.completion_tokens;
+    if (Number.isFinite(usage?.total_tokens)) result.totalTokens = usage!.total_tokens;
+    return result;
+  };
+  const isTimeout = (err: unknown) =>
+    err instanceof Error && (/timeout/i.test(err.name) || /timed?\s*out/i.test(err.message));
   const deadline = Date.now() + timeoutMs;
   const remaining = () => Math.max(1, deadline - Date.now());
   let res: Response;
@@ -676,13 +717,13 @@ export async function grokChat(
       signal: AbortSignal.timeout(remaining()),
     });
   } catch (err) {
-    return { ok: false, error: connectionError(llm.label, err) };
+    return { ok: false, error: connectionError(llm.label, err), meta: openAiMeta(undefined, isTimeout(err)) };
   }
   if (res.status === 429 || res.status >= 500) {
     if (timeoutMs < 30_000) {
-      return { ok: false, error: `${llm.label} API error ${res.status}` };
+      return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
     }
-    if (remaining() <= 1_000) return { ok: false, error: `${llm.label} API error ${res.status}` };
+    if (remaining() <= 1_000) return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
     await new Promise((r) => setTimeout(r, Math.min(800, remaining())));
     try {
       res = await fetch(url, {
@@ -692,21 +733,28 @@ export async function grokChat(
         signal: AbortSignal.timeout(remaining()),
       });
     } catch (err) {
-      return { ok: false, error: connectionError(llm.label, err) };
+      return { ok: false, error: connectionError(llm.label, err), meta: openAiMeta(undefined, isTimeout(err)) };
     }
   }
-  if (!res.ok) return { ok: false, error: `${llm.label} API error ${res.status}` };
-  const body = (await res.json()) as {
+  if (!res.ok) return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
+  let body: {
     error?: { message?: string } | string;
+    model?: string;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
   };
+  try {
+    body = await res.json() as typeof body;
+  } catch {
+    return { ok: false, error: `${llm.label} returned an unreadable response`, meta: openAiMeta() };
+  }
   if (body.error) {
     const detail = typeof body.error === "string" ? body.error : body.error.message;
     // A custom endpoint is outside TownReporter's control. Its error body may
     // reflect an Authorization header or request payload; preserve the useful
     // HTTP failure category without letting that body enter a job error or UI.
-    if (llm.label === "Custom AI") return { ok: false, error: "Custom AI API error" };
-    return { ok: false, error: `${llm.label} API error${detail ? `: ${detail}` : ""}` };
+    if (llm.label === "Custom AI") return { ok: false, error: "Custom AI API error", meta: openAiMeta(body) };
+    return { ok: false, error: `${llm.label} API error${detail ? `: ${detail}` : ""}`, meta: openAiMeta(body) };
   }
   const message = body.choices?.[0]?.message;
   const text = message?.content?.trim() ?? "";
@@ -727,11 +775,12 @@ export async function grokChat(
         ok: false,
         error:
           "The local model spent its whole answer thinking and never wrote the draft. Turn thinking off for it (LLM_REASONING_EFFORT=none) or pick a different local model.",
+        meta: openAiMeta(body),
       };
     }
-    return { ok: false, error: "Empty model response" };
+    return { ok: false, error: "Empty model response", meta: openAiMeta(body) };
   }
-  return { ok: true, text };
+  return { ok: true, text, meta: openAiMeta(body) };
 }
 
 const THINKING_MODEL_RE = /gemma-?4|qwen3(?:\.\d+)?|deepseek-r1|gpt-oss|o[134]-|reasoning|think/i;

@@ -54,6 +54,23 @@ describe("planAutomaticFailover", () => {
     assert.deepEqual(calls, ["codex-balanced"], "must not probe the current rung or any before it");
   });
 
+  it("uses a surface-specific ladder without rerouting the shared Story ladder", async () => {
+    const calls: string[] = [];
+    const plan = await planAutomaticFailover({
+      source: "auto",
+      current: "claude-sonnet",
+      error: LIVE_TIMEOUT_NO_OUTPUT,
+      ladder: ["claude-sonnet", "codex-balanced"],
+      probe: async (choice) => {
+        calls.push(choice);
+        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+      },
+    });
+
+    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
+    assert.deepEqual(calls, ["codex-balanced"]);
+  });
+
   it("never fails over an editor's explicit model choice, even on the same login lapse", async () => {
     const calls: string[] = [];
     const plan = await planAutomaticFailover({

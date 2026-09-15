@@ -154,6 +154,23 @@ describe("resolveAnthropic", () => {
 });
 
 describe("resolveProvider", () => {
+  it("routes each named subscription choice to its own model", async () => {
+    await withEnv({ ANTHROPIC_API_KEY: undefined, TOWNREPORTER_CLAUDE_CODE: undefined, TOWNREPORTER_CODEX: undefined }, () => {
+      for (const [choice, model] of [
+        ["codex-astra", "gpt-6-astra"],
+        ["codex-frontier", "gpt-5.6-sol"],
+        ["codex-balanced", "gpt-5.6-terra"],
+        ["codex-luna", "gpt-5.6-luna"],
+        ["claude-fable", "fable"],
+        ["claude-frontier", "claude-opus-5"],
+        ["claude-sonnet", "sonnet"],
+        ["claude-haiku", "haiku"],
+      ] as const) {
+        const provider = resolveProvider(choice);
+        assert.equal(provider?.model, model, choice);
+      }
+    });
+  });
   it("honours deployment overrides for every picker-backed provider", () => {
     withEnv(
       {
@@ -514,7 +531,12 @@ describe("grokChat", () => {
           }),
         },
       );
-      assert.deepEqual(result, { ok: false, error: "Custom AI API error 400" });
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.equal(result.error, "Custom AI API error 400");
+        assert.equal(result.meta?.provider, "openai-compatible");
+        assert.equal(result.meta?.model, "manual-model");
+      }
       assert.doesNotMatch(JSON.stringify(result), /test-only-key/);
     } finally {
       globalThis.fetch = originalFetch;
@@ -622,6 +644,22 @@ describe("model-picker provider readiness", () => {
     }
   });
 
+  it("keeps the editor's named Claude model after API-key preflight", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: [] }), { status: 200 });
+    try {
+      await withEnvAsync({ ...BARE, ANTHROPIC_API_KEY: "test-key" }, async () => {
+        for (const choice of ["claude-fable", "claude-sonnet", "claude-haiku"] as const) {
+          const result = await probeProvider(choice);
+          assert.equal(result.ok, true);
+          if (result.ok) assert.equal(result.choice, choice);
+        }
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("proves the selected configured gateway model is actually loaded", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
@@ -673,7 +711,11 @@ describe("model-picker provider readiness", () => {
         });
       }
       return new Response(
-        JSON.stringify({ choices: [{ message: { content: "drafted locally" } }] }),
+        JSON.stringify({
+          model: "local-test-model",
+          usage: { prompt_tokens: 41, completion_tokens: 9, total_tokens: 50 },
+          choices: [{ message: { content: "drafted locally" } }],
+        }),
         { status: 200 },
       );
     };
@@ -693,7 +735,14 @@ describe("model-picker provider readiness", () => {
             choice: "local-model",
           });
           assert.equal(draft.ok, true);
-          if (draft.ok) assert.equal(draft.text, "drafted locally");
+          if (draft.ok) {
+            assert.equal(draft.text, "drafted locally");
+            assert.equal(draft.meta?.provider, "openai-compatible");
+            assert.equal(draft.meta?.model, "local-test-model");
+            assert.equal(draft.meta?.inputTokens, 41);
+            assert.equal(draft.meta?.outputTokens, 9);
+            assert.equal(draft.meta?.totalTokens, 50);
+          }
         },
       );
       assert.equal(calls[0]!.url, "http://127.0.0.1:1234/v1/models");

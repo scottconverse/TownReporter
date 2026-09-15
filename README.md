@@ -261,8 +261,8 @@ Code, Codex Terra, or Codex Sol runtime; it never uses Automatic, a gateway,
 or API fallback. It retains each lead's saved research scope, shows each
 lead's durable result and workbench link, and never publishes a story.
 
-Pick Codex Terra, frontier Codex Sol, frontier Claude Opus, or **Local
-model** to force that provider for one run. Explicit choices never fall
+Pick Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or
+**Local model** to force that provider for one run. Explicit choices never fall
 back, at enqueue or mid-run. The endpoint/model compatibility overrides are
 listed in [docs/setup.md](docs/setup.md#per-run-picker).
 
@@ -299,7 +299,8 @@ For **Automatic**, a configured gateway wins; named choices in Story, Scan and D
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
 **Opinion offers the native providers and local model.** The picker offers
-Automatic, Claude Opus, Codex Terra, Codex Sol and Local model, plus saved
+Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus, Sonnet and
+Haiku, and Local model, plus saved
 custom connections. Codex Sol is selected by default. Automatic tries Claude Opus first and moves to Codex Sol
 once if Claude is unavailable; an explicit choice stays selected. The writer
 reads the configured private voice file, and a provider refusal or invalid
@@ -479,3 +480,11 @@ Created by **Scott Converse**. Companion civic tools: [civic-transparency-toolki
 ## Current Opinion document and review workflow
 
 Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.
+
+Dark Desk uses a separate cost-aware Automatic path: a configured gateway wins;
+otherwise Claude Sonnet synthesizes and Codex Terra is the one eligible retry.
+Claude Haiku plans Claude runs and Codex Luna plans Astra/Luna runs. Research is
+checkpointed before synthesis, so a synthesis retry does not repeat completed
+searches or document reads. Each round enforces one wall-time, model-call,
+search, and document-read budget and stores its actual call ledger when the
+provider reports usage.

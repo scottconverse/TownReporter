@@ -161,8 +161,9 @@ Story routing and a separate Opinion frontier path:
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | Scan and Dark Desk | the configured provider (`LLM_*`, Anthropic, Claude Code, or Grok), or an explicit picker choice including Local model            |
 | Story — Automatic  | configured `LLM_*` gateway when present; otherwise first ready Claude Opus → Codex Terra rung                                     |
-| Story — explicit   | Codex Terra, Codex Sol, Claude Opus, or Local model; no fallback (Zen MiMo and Local Qwen were removed 2026-09-02; a generic Local model returned 2026-09-03) |
-| Opinion            | Automatic: Claude Opus → Codex Terra once when needed; explicit Claude Opus, Codex Sol, Codex Sol, Local model or custom choice stays selected |
+| Story — explicit   | Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or Local model; no fallback |
+| Dark — Automatic  | configured gateway when present; otherwise Claude Sonnet → Codex Terra for a synthesis-stage retry only |
+| Opinion            | Automatic retains its Claude Opus → Codex Sol path; any named Codex or Claude model, Local model or custom choice stays selected |
 
 Pointing `LLM_BASE_URL` at LM Studio therefore makes that gateway the configured
 provider for Scan and Dark Desk and the forced provider for **Story Automatic**.
@@ -283,8 +284,8 @@ Two things it deliberately does NOT get for free:
   silent: the planner falls back to keyword matching without a word.
 
 **Opinion offers it too.** Opinion shares the provider registry with the other
-desks: Automatic tries Claude Opus then Codex Terra once, while explicit Claude,
-Codex Terra, Codex Sol, Local model and custom choices stay selected. A provider
+desks: Automatic retains its documented Claude-to-Codex path, while every named
+Codex and Claude model, Local model and custom choice stays selected. A provider
 can still refuse or return an invalid editorial, which leaves the request failed.
 
 **On time budgets.** `KIND_BUDGETS.local` allows ten minutes for one call

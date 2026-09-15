@@ -71,9 +71,14 @@ export type ProviderBudget = {
   `provider-registry.test.ts` fails if these lists and the registry disagree.
 */
 export const PICKER_PROVIDER_IDS = [
-  "codex-balanced",
+  "codex-astra",
   "codex-frontier",
+  "codex-balanced",
+  "codex-luna",
+  "claude-fable",
   "claude-frontier",
+  "claude-sonnet",
+  "claude-haiku",
   "local-model",
 ] as const;
 export const INTERNAL_PROVIDER_IDS = ["configured"] as const;
@@ -118,10 +123,9 @@ export type ProviderEntry = {
    * the configured gateway is handled before the ladder runs at all.
    *
    * This is separate from the array order below because the two orders are
-   * genuinely different: the PICKER reads Codex, Codex, Claude (cheapest
-   * first, the way the menu has always read), while the LADDER tries Claude
-   * before Codex (the operator's own signed-in provider first -- see the
-   * v0.5.7 incident recorded in `probeProvider`).
+   * genuinely different: the picker groups every named Codex model, then every
+   * named Claude model, while the ladder uses the cheaper defaults chosen for
+   * unattended work. The configured gateway is checked before that ladder.
    */
   ladderRank?: number;
 };
@@ -201,6 +205,7 @@ export const PIPELINE_BUDGET: ProviderBudget = {
 export const CLAUDE_PLANNER_MODEL = "claude-haiku-4-5-20251001";
 const CODEX_TERRA_MODEL = "gpt-5.6-terra";
 const CODEX_SOL_MODEL = "gpt-5.6-sol";
+const CODEX_LUNA_MODEL = "gpt-5.6-luna";
 
 const EVERY_SURFACE: Record<ProviderSurface, boolean> = {
   story: true,
@@ -220,6 +225,32 @@ const EVERY_SURFACE: Record<ProviderSurface, boolean> = {
  */
 export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   {
+    id: "codex-astra",
+    label: "Codex Astra",
+    detail: "Most capable",
+    kind: "codex",
+    model: "gpt-6-astra",
+    envOverrides: {},
+    budget: KIND_BUDGETS.codex,
+    plannerModel: CODEX_LUNA_MODEL,
+    enabled: () => notSwitchedOff("TOWNREPORTER_CODEX"),
+    offSwitchEnv: "TOWNREPORTER_CODEX",
+    offeredFor: EVERY_SURFACE,
+  },
+  {
+    id: "codex-luna",
+    label: "Codex Luna",
+    detail: "Fast",
+    kind: "codex",
+    model: CODEX_LUNA_MODEL,
+    envOverrides: {},
+    budget: KIND_BUDGETS.codex,
+    plannerModel: CODEX_LUNA_MODEL,
+    enabled: () => notSwitchedOff("TOWNREPORTER_CODEX"),
+    offSwitchEnv: "TOWNREPORTER_CODEX",
+    offeredFor: EVERY_SURFACE,
+  },
+  {
     id: "codex-balanced",
     label: "Codex Terra",
     detail: "More depth",
@@ -234,6 +265,45 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     // erase an otherwise available native subscription provider.
     offeredFor: EVERY_SURFACE,
     ladderRank: 2,
+  },
+  {
+    id: "claude-fable",
+    label: "Claude Fable",
+    detail: "Fast",
+    kind: "claude-code",
+    model: "fable",
+    envOverrides: {},
+    budget: KIND_BUDGETS["claude-code"],
+    plannerModel: CLAUDE_PLANNER_MODEL,
+    enabled: () => notSwitchedOff("TOWNREPORTER_CLAUDE_CODE"),
+    offSwitchEnv: "TOWNREPORTER_CLAUDE_CODE",
+    offeredFor: EVERY_SURFACE,
+  },
+  {
+    id: "claude-sonnet",
+    label: "Claude Sonnet",
+    detail: "Balanced",
+    kind: "claude-code",
+    model: "sonnet",
+    envOverrides: {},
+    budget: KIND_BUDGETS["claude-code"],
+    plannerModel: CLAUDE_PLANNER_MODEL,
+    enabled: () => notSwitchedOff("TOWNREPORTER_CLAUDE_CODE"),
+    offSwitchEnv: "TOWNREPORTER_CLAUDE_CODE",
+    offeredFor: EVERY_SURFACE,
+  },
+  {
+    id: "claude-haiku",
+    label: "Claude Haiku",
+    detail: "Fastest",
+    kind: "claude-code",
+    model: "haiku",
+    envOverrides: {},
+    budget: KIND_BUDGETS["claude-code"],
+    plannerModel: CLAUDE_PLANNER_MODEL,
+    enabled: () => notSwitchedOff("TOWNREPORTER_CLAUDE_CODE"),
+    offSwitchEnv: "TOWNREPORTER_CLAUDE_CODE",
+    offeredFor: EVERY_SURFACE,
   },
   {
     id: "codex-frontier",
@@ -378,7 +448,11 @@ export function providerEntry(id: string | undefined | null): ProviderEntry | nu
 
 /** Every entry a given picker should offer, registry order, Automatic aside. */
 export function providersFor(surface: ProviderSurface): readonly ProviderEntry[] {
-  return PROVIDER_REGISTRY.filter((entry) => entry.offeredFor[surface]);
+  const pickerOrder = new Map<string, number>(PICKER_PROVIDER_IDS.map((id, index) => [id, index]));
+  return PROVIDER_REGISTRY
+    .filter((entry) => entry.offeredFor[surface])
+    .slice()
+    .sort((a, b) => pickerOrder.get(a.id)! - pickerOrder.get(b.id)!);
 }
 
 /**

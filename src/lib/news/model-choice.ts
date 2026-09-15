@@ -60,6 +60,12 @@ export type EffectiveStoryModelChoice = StoryModelChoice | "configured";
    tries Claude and then Codex Sol; an explicit pick never falls through. */
 export const DEFAULT_OPINION_MODEL = "codex-frontier" as const;
 export const OPINION_AUTOMATIC_LADDER = ["claude-frontier", "codex-frontier"] as const;
+/**
+ * Dark Desk spends most of a round on mechanical planning and evidence
+ * triage. Automatic therefore uses the balanced synthesis models; Opus and
+ * Astra remain explicit choices for an editor who wants them.
+ */
+export const DARK_AUTOMATIC_LADDER = ["claude-sonnet", "codex-balanced"] as const;
 export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = STORY_MODEL_CHOICES.filter(
   (choice) => choice.value === "auto" || providerEntry(choice.value)?.offeredFor.opinion,
 );
@@ -161,8 +167,10 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
   if (scope === "opinion") {
     return `Tries ${ladderSentence(OPINION_AUTOMATIC_LADDER)}. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.`;
   }
-  const noun = scope === "dark" ? "round" : "draft";
-  return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first one's login has lapsed or it does not respond in time, the ${noun} moves to the next.`;
+  if (scope === "dark") {
+    return `Uses your configured gateway when set; otherwise tries ${ladderSentence(DARK_AUTOMATIC_LADDER)}. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.`;
+  }
+  return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first one's login has lapsed or it does not respond in time, the draft moves to the next.`;
 }
 
 /**

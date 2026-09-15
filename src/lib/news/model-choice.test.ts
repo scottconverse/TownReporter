@@ -17,13 +17,35 @@ import { LOCAL_MODEL_UNCONFIGURED } from "./preflight.ts";
 
 const STORY_VALUES = [
   "auto",
-  "codex-balanced",
+  "codex-astra",
   "codex-frontier",
+  "codex-balanced",
+  "codex-luna",
+  "claude-fable",
   "claude-frontier",
+  "claude-sonnet",
+  "claude-haiku",
   "local-model",
 ] as const;
 
 describe("model choice contract", () => {
+  it("offers every named subscription model in the shared Story picker", () => {
+    assert.deepEqual(
+      STORY_MODEL_CHOICES.map((choice) => choice.label),
+      [
+        "Automatic",
+        "Codex Astra",
+        "Codex Sol",
+        "Codex Terra",
+        "Codex Luna",
+        "Claude Fable",
+        "Claude Opus",
+        "Claude Sonnet",
+        "Claude Haiku",
+        "Local model",
+      ],
+    );
+  });
   it("never converts a missing or malformed custom connection into Automatic", () => {
     for (const value of ["custom:", "custom:deleted", "custom:untrusted/input"]) {
       for (const normalize of [storyModelChoice, opinionModelChoice, darkModelChoice]) {
@@ -59,7 +81,7 @@ describe("model choice contract", () => {
   it("offers the signed-in Codex providers on Opinion", () => {
     assert.deepEqual(
       OPINION_MODEL_CHOICES.map((choice) => choice.value),
-      ["auto", "codex-balanced", "codex-frontier", "claude-frontier", "local-model"],
+      STORY_VALUES,
     );
     assert.ok(OPINION_MODEL_CHOICES.every((choice) => STORY_MODEL_CHOICES.includes(choice)));
   });
@@ -111,6 +133,10 @@ describe("model choice contract", () => {
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
       "Tries Claude Opus, then Codex Sol. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.",
+    );
+    assert.equal(
+      modelChoiceHelp("auto", "dark"),
+      "Uses your configured gateway when set; otherwise tries Claude Sonnet, then Codex Terra. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),

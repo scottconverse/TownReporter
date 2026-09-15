@@ -3,8 +3,8 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { spawnPlan } from "./cli-spawn.server.ts";
+import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
 
-type ChatResult = { ok: true; text: string } | { ok: false; error: string };
 
 /** Safe, bounded labels for opt-in native transport diagnostics. */
 export type CodexDiagnosticClass =
@@ -154,8 +154,9 @@ function run(
   input: string,
   timeoutMs: number,
   cwd?: string,
-): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }> {
+): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean; durationMs: number }> {
   return new Promise((resolve) => {
+    const startedAt = Date.now();
     const appData = process.env.APPDATA?.trim();
     const userRoot =
       process.env.USERPROFILE?.trim() || (appData ? path.resolve(appData, "..", "..") : undefined);
@@ -175,12 +176,11 @@ function run(
         ...(cwd ? { cwd } : {}),
       });
     } catch {
-      resolve({ code: null, stdout: "", stderr: "", timedOut: false });
+      resolve({ code: null, stdout: "", stderr: "", timedOut: false, durationMs: Date.now() - startedAt });
       return;
     }
     let stdout = "";
     let stderr = "";
-    const startedAt = Date.now();
     let lastActivityAt = startedAt;
     let settled = false;
     const timerRef: { value?: NodeJS.Timeout } = {};
@@ -200,7 +200,7 @@ function run(
         timedOut,
         classification: classifyCodexDiagnostic(combined, { code, timedOut }),
       });
-      resolve({ code, stdout, stderr, timedOut });
+      resolve({ code, stdout, stderr, timedOut, durationMs: Date.now() - startedAt });
     };
     child.stdout?.on("data", (chunk) => {
       lastActivityAt = Date.now();
@@ -299,8 +299,70 @@ export function buildCodexArgs(input: {
     "--ephemeral",
     "--color",
     "never",
+    "--json",
     "-",
   ];
+}
+
+function reportedCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function itemText(item: unknown): string | undefined {
+  if (!item || typeof item !== "object") return undefined;
+  const record = item as Record<string, unknown>;
+  if (record.type !== "agent_message") return undefined;
+  if (typeof record.text === "string") return record.text.trim() || undefined;
+  if (!Array.isArray(record.content)) return undefined;
+  const text = record.content
+    .map((part) => part && typeof part === "object" ? (part as Record<string, unknown>).text : undefined)
+    .filter((part): part is string => typeof part === "string")
+    .join("")
+    .trim();
+  return text || undefined;
+}
+
+/** Extract Codex `exec --json` JSONL without accepting its event log as copy. */
+export function parseCodexJsonl(stdout: string): {
+  text: string;
+  usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+  model?: string;
+  recognized: boolean;
+} {
+  let text: string | undefined;
+  let usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
+  let model: string | undefined;
+  let recognized = false;
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let event: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(line) as unknown;
+      if (!parsed || typeof parsed !== "object") continue;
+      event = parsed as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const type = event.type;
+    if (type === "item.completed") {
+      recognized = true;
+      text = itemText(event.item) ?? text;
+    }
+    if (type === "turn.completed") {
+      recognized = true;
+      const eventUsage = event.usage;
+      if (eventUsage && typeof eventUsage === "object") {
+        const counters = eventUsage as Record<string, unknown>;
+        usage = {
+          ...(reportedCount(counters.input_tokens) !== undefined ? { inputTokens: reportedCount(counters.input_tokens) } : {}),
+          ...(reportedCount(counters.output_tokens) !== undefined ? { outputTokens: reportedCount(counters.output_tokens) } : {}),
+          ...(reportedCount(counters.total_tokens) !== undefined ? { totalTokens: reportedCount(counters.total_tokens) } : {}),
+        };
+      }
+      if (typeof event.model === "string" && event.model.trim()) model = event.model;
+    }
+  }
+  return { text: text ?? (recognized ? "" : stdout.trim()), usage, model, recognized };
 }
 
 export function buildCodexPrompt(input: {
@@ -348,9 +410,19 @@ export async function codexChat(input: {
     // Codex settings, subscription, tools, or permissions.
     input.systemPromptFile ? tmpdir() : undefined,
   );
-  if (result.timedOut) return { ok: false, error: "Codex request timed out" };
-  const text = result.stdout.trim();
-  if (result.code === 0 && text) return { ok: true, text };
+  const parsed = parseCodexJsonl(result.stdout);
+  const meta: ChatResultMetadata = {
+    provider: "codex",
+    model: parsed.model ?? input.model,
+    durationMs: result.durationMs,
+    timedOut: result.timedOut,
+    ...(parsed.usage?.inputTokens !== undefined ? { inputTokens: parsed.usage.inputTokens } : {}),
+    ...(parsed.usage?.outputTokens !== undefined ? { outputTokens: parsed.usage.outputTokens } : {}),
+    ...(parsed.usage?.totalTokens !== undefined ? { totalTokens: parsed.usage.totalTokens } : {}),
+  };
+  if (result.timedOut) return { ok: false, error: "Codex request timed out", meta };
+  const text = parsed.text;
+  if (result.code === 0 && text) return { ok: true, text, meta };
   const combined = `${result.stdout}\n${result.stderr}`;
-  return { ok: false, error: codexFailureMessage(combined, result) };
+  return { ok: false, error: codexFailureMessage(combined, result), meta };
 }

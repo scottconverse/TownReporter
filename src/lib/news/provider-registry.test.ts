@@ -101,7 +101,17 @@ describe("the provider registry is the one description of a writing model", () =
     // remain failed requests, while editors can select each supported runtime.
     assert.deepEqual(
       providersFor("opinion").map((entry) => entry.id),
-      ["codex-balanced", "codex-frontier", "claude-frontier", "local-model"],
+      [
+        "codex-astra",
+        "codex-frontier",
+        "codex-balanced",
+        "codex-luna",
+        "claude-fable",
+        "claude-frontier",
+        "claude-sonnet",
+        "claude-haiku",
+        "local-model",
+      ],
     );
     // Everything Opinion offers, Story and Dark offer too.
     for (const entry of providersFor("opinion")) {
@@ -197,6 +207,11 @@ describe("the planner substitution rule", () => {
       // Claude plans on Haiku: same searches as Opus, more claims, a quarter
       // of the cost. Both Codex entries plan on Terra.
       assert.match(plannerModelFor("claude-frontier"), /haiku/i);
+      assert.match(plannerModelFor("claude-fable"), /haiku/i);
+      assert.match(plannerModelFor("claude-sonnet"), /haiku/i);
+      assert.match(plannerModelFor("claude-haiku"), /haiku/i);
+      assert.equal(plannerModelFor("codex-astra"), "gpt-5.6-luna");
+      assert.equal(plannerModelFor("codex-luna"), "gpt-5.6-luna");
       assert.equal(plannerModelFor("codex-balanced"), "gpt-5.6-terra");
       assert.equal(plannerModelFor("codex-frontier"), "gpt-5.6-terra");
       /*

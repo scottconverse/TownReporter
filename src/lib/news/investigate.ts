@@ -65,10 +65,13 @@ import {
   strategiesForFrontier,
   strategyKeyForQuery,
 } from "./strategies.ts";
+import type { DarkRunBudget, DarkRunStopReason, DarkRunUsageSnapshot } from "./dark-run-budget.ts";
 
 export const HOPS_PER_RUN = 5;
 export const SEARCHES_PER_HOP = 3;
 export const FETCHES_PER_HOP = 4;
+export const NEW_FRONTIER_PER_HOP = 8;
+export const OPEN_FRONTIER_CAP = 24;
 /** Matches grokPlanner's provider input ceiling; keep important context inside it. */
 export const PLANNER_INPUT_CAP = 24_000;
 const PLANNER_GRAPH_CAP = 16_000;
@@ -130,6 +133,91 @@ export type HopPlan = {
 export type HopPlanClaim = HopPlan["claims"][number];
 export type HopPlanRel = HopPlan["relationships"][number];
 
+const BROKEN_FRONTIER_LABELS = new Set(["n/a", "na", "none", "null", "source", "unknown", "tbd"]);
+
+function validFrontierItem(item: HopPlan["frontier"][number]): boolean {
+  const label = item.label.replace(/\s+/g, " ").trim();
+  if (!label || label.length > 240 || BROKEN_FRONTIER_LABELS.has(label.toLowerCase())) return false;
+  if (!/[\p{L}\p{N}]/u.test(label) || /^[\[{].*[\]}]$/s.test(label)) return false;
+  if (isSelfReferential(`${label} ${item.why}`)) return false;
+  if (item.kind === "url" || /^https?:/i.test(label)) {
+    try {
+      const parsed = new URL(label);
+      if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname.includes(".")) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+function frontierSemanticKey(item: HopPlan["frontier"][number]): string {
+  const label = item.label.trim();
+  if (item.kind === "url" || /^https?:\/\//i.test(label)) return frontierDedupKey("url", label).norm;
+  return label
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/^the\s+/, "")
+    .replace(/\b(?:incorporated|inc|limited|ltd|corporation|corp|company|co|llc|l\.l\.c)\.?$/i, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+/** Sanitize and bound one planner hop before anything reaches frontier_items. */
+export function boundedFrontierItems(items: HopPlan["frontier"], cap: number): HopPlan["frontier"] {
+  const merged = new Map<string, HopPlan["frontier"][number]>();
+  for (const raw of items) {
+    if (!validFrontierItem(raw)) continue;
+    const item = {
+      ...raw,
+      label: raw.label.replace(/\s+/g, " ").trim(),
+      why: raw.why.replace(/\s+/g, " ").trim().slice(0, 800),
+      priority: Math.max(1, Math.min(15, Math.round(raw.priority || 5))),
+      queries: [...new Set((raw.queries ?? []).map((q) => q.replace(/\s+/g, " ").trim()).filter(Boolean))].slice(0, 12),
+    };
+    const key = frontierSemanticKey(item);
+    if (!key) continue;
+    const prior = merged.get(key);
+    if (!prior) {
+      merged.set(key, item);
+      continue;
+    }
+    const strongest = item.priority > prior.priority ? item : prior;
+    merged.set(key, {
+      ...strongest,
+      queries: [...new Set([...(prior.queries ?? []), ...(item.queries ?? [])])].slice(0, 12),
+    });
+  }
+  return [...merged.values()]
+    .sort((a, b) => b.priority - a.priority || a.label.localeCompare(b.label))
+    .slice(0, Math.max(0, Math.floor(cap)));
+}
+
+export function researchStopReason(state: {
+  planRequestedStop: boolean;
+  openFrontier: number;
+  highValueOpenFrontier: number;
+  totalReadableSources: number;
+  totalSupportedClaims: number;
+  consecutiveNoMaterialHops: number;
+  consecutiveLowYieldHops: number;
+  repeatedSourcesThisHop: number;
+}): import("./dark-run-budget.ts").DarkRunStopReason | null {
+  if (
+    state.planRequestedStop &&
+    state.highValueOpenFrontier === 0 &&
+    state.totalReadableSources >= 2 &&
+    state.totalSupportedClaims >= 1
+  ) {
+    return "evidence-sufficient";
+  }
+  if (state.repeatedSourcesThisHop >= 3) return "repeated-sources";
+  if (state.consecutiveNoMaterialHops >= 2) return "no-materially-new-finding";
+  if (state.consecutiveLowYieldHops >= 3) return "diminishing-returns";
+  if (state.planRequestedStop && state.openFrontier === 0) return "frontier-exhausted";
+  return null;
+}
+
 export type SearchFn = (query: string) => Promise<WebHit[]>;
 export type FetchFn = (url: string) => Promise<{
   ok: boolean;
@@ -160,6 +248,7 @@ export type ResearchLoopResult = {
   plannerStartupFailures: number;
   actionDecisions?: number;
   finished?: boolean;
+  stopReason?: DarkRunStopReason | null;
 };
 
 export type ResearchLoopOptions = {
@@ -185,6 +274,11 @@ export type ResearchLoopOptions = {
   actionLimit?: number;
   /** Deterministic test seam; production uses the editor-selected provider. */
   actionChooser?: ResearchActionChooser;
+  /** One whole-run meter shared by research, synthesis, verification, and brief writing. */
+  runBudget?: DarkRunBudget;
+  onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>;
+  /** Existing desk-job stage bridge; failures here must not fail research. */
+  onStage?: (stage: string) => Promise<unknown>;
   /** Internal one-operation adapter marker; callers should not set this. */
   _responsiveOperation?: "search" | "read" | "follow";
 };
@@ -803,6 +897,9 @@ export async function grokPlanner(
   overrides?: ProviderOverrides | null,
   place?: Place,
   newsroomId?: number,
+  runBudget?: DarkRunBudget,
+  stage = "planning",
+  onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>,
 ): Promise<HopPlan> {
   /*
     The provider's own per-call budget, not the 45-second default.
@@ -824,8 +921,17 @@ export async function grokPlanner(
     for this round. A round pinned to Codex would be budgeted and planned as
     if it were Claude. See `plannerModel` for the substitution rule.
   */
+  const call = runBudget?.startModelCall({
+    stage,
+    provider: choice ?? "automatic",
+    model: plannerModel(choice) || choice || "provider-default",
+  });
+  if (runBudget && !call) {
+    return { ...emptyPlan(), planner_error: `Run stopped: ${runBudget.stopReason ?? "budget-limit"}` };
+  }
+  if (call) await onUsage?.(runBudget!.snapshot());
   const ai = await grokChat(darkPlannerFor(place), pack.slice(0, PLANNER_INPUT_CAP), 2200, {
-    timeoutMs: callMs,
+    timeoutMs: Math.max(1, Math.min(callMs, runBudget?.remainingMs() ?? callMs)),
     model: plannerModel(choice),
     choice,
     newsroomId,
@@ -835,6 +941,20 @@ export async function grokPlanner(
     // try and get denied on. See ai-claude-code.server.ts's noTools comment.
     noTools: true,
   });
+  if (call) {
+    const meta = "meta" in ai ? ai.meta : undefined;
+    call.finish({
+      result: ai.ok ? "ok" : (/timed out|timeout/i.test(ai.error) ? "timeout" : "error"),
+      durationMs: meta?.durationMs,
+      timedOut: meta?.timedOut ?? (!ai.ok && /timed out|timeout/i.test(ai.error)),
+      provider: meta?.provider,
+      model: meta?.model,
+      inputTokens: meta?.inputTokens,
+      outputTokens: meta?.outputTokens,
+      totalTokens: meta?.totalTokens,
+    });
+    await onUsage?.(runBudget!.snapshot());
+  }
   if (!ai?.ok) {
     const why = ai && "error" in ai ? ai.error : "no response";
     return { ...heuristicPlan(pack, new Set()), planner_error: why };
@@ -2052,7 +2172,16 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
   const fetchDoc = opts.fetch ?? defaultFetch;
   const planner = opts.planner;
-  const readSelector = opts.readSelector ?? (!planner ? async (pack: string) => grokPlanner(pack, opts.choice, opts.providerOverrides, place, newsroomId) : undefined);
+  const readSelector = opts.readSelector ?? (!planner ? async (pack: string) => grokPlanner(
+    pack,
+    opts.choice,
+    opts.providerOverrides,
+    place,
+    newsroomId,
+    opts.runBudget,
+    "selecting documents",
+    opts.onUsage,
+  ) : undefined);
   const tried = new Set<string>();
   /** Every hop that had to fall back, so the run can say so. */
   const plannerFailures: string[] = [];
@@ -2072,6 +2201,18 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   let hopsDone = 0;
   let lastSummary = "";
   const fetchedThisRun = new Set<string>();
+  const materialFingerprints = new Set<string>();
+  let consecutiveNoMaterialHops = 0;
+  let consecutiveLowYieldHops = 0;
+  let stopReason: DarkRunStopReason | null = null;
+
+  const setStage = async (stage: string) => {
+    try {
+      await opts.onStage?.(stage);
+    } catch {
+      /* progress text is best-effort; durable research remains authoritative */
+    }
+  };
 
   function canon(raw: string) {
     try {
@@ -2106,7 +2247,12 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     });
   }
 
-  for (let hop = 0; hop < hopsBudget; hop++) {
+  hopLoop: for (let hop = 0; hop < hopsBudget; hop++) {
+    if (opts.runBudget?.remainingMs() === 0) {
+      stopReason = opts.runBudget.stopReason ?? "elapsed-time-limit";
+      break;
+    }
+    await setStage(`Researching hop ${hop + 1}/${hopsBudget}`);
     const openFrontier = await sql<{
       id: number;
       label: string;
@@ -2134,7 +2280,16 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     let plan: HopPlan;
     if (planner) plan = await planner(pack);
     else {
-      const grok = await grokPlanner(pack, opts.choice, opts.providerOverrides, place, newsroomId);
+      const grok = await grokPlanner(
+        pack,
+        opts.choice,
+        opts.providerOverrides,
+        place,
+        newsroomId,
+        opts.runBudget,
+        `planning hop ${hop + 1}`,
+        opts.onUsage,
+      );
       const heur = heuristicPlan(graph, tried);
       plan = grok.searches.length || grok.fetch_urls.length ? grok : heur;
       if (grok.planner_error) plan.planner_error = grok.planner_error;
@@ -2142,6 +2297,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       if (!plan.fetch_urls.length && heur.fetch_urls.length) plan.fetch_urls = heur.fetch_urls;
       plan.frontier = [...plan.frontier, ...heur.frontier];
     }
+    plan.frontier = boundedFrontierItems(plan.frontier, NEW_FRONTIER_PER_HOP);
 
     // Say it out loud. A run that dug with the heuristic must not read like a
     // run that dug with the model.
@@ -2260,9 +2416,16 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     let postSearchPlan: HopPlan | null = null;
     let postSearchFailure = "";
 
-    for (const q of queries) {
+    for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
+      const q = queries[queryIndex]!;
+      if (opts.runBudget && !opts.runBudget.consumeSearch()) {
+        stopReason = opts.runBudget.stopReason;
+        break;
+      }
+      await setStage(`Searching ${queryIndex + 1}/${queries.length} on hop ${hop + 1}`);
       tried.add(queryFingerprint(q));
       const attempt = await runSearch(q);
+      if (opts.runBudget) await opts.onUsage?.(opts.runBudget.snapshot());
       const selected = attempt.hits.slice(0, 6).map((h) => h.url);
       selectedThisHop.push(...selected);
       const fp = queryFingerprint(q);
@@ -2405,6 +2568,8 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       }
     }
 
+    if (stopReason) break hopLoop;
+
     if (readSelector && currentSearchHits.size > 0) {
       const hitContext = [...currentSearchHits].slice(0, 6).map((url) => `SEARCH RESULT URL: ${url}`).join("\n");
       try {
@@ -2438,6 +2603,8 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       .map(canon)
       .filter((url, i, arr) => arr.indexOf(url) === i && !fetchedThisRun.has(url)) ?? [];
     const fetchLimit = opts._responsiveOperation ? 1 : FETCHES_PER_HOP;
+    let repeatedSourcesThisHop = 0;
+    let newReadableSourcesThisHop = 0;
     while (fetchedThisHop.length < fetchLimit) {
       const discovery = selectedReads[0] ?? (opts._responsiveOperation !== "search" && !searchSlotUsed
         ? sanitizePublicUrls([...currentSearchHits]).map(canon).find((u) => !fetchedThisRun.has(u))
@@ -2493,6 +2660,12 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       }
       if (isReddit) redditFetchesThisHop += 1;
 
+      if (opts.runBudget && !opts.runBudget.consumeDocumentRead()) {
+        stopReason = opts.runBudget.stopReason;
+        break;
+      }
+      await setStage(`Reading document ${fetchedThisHop.length}/${fetchLimit} on hop ${hop + 1}`);
+
       await persistDiscovery(opts.userId, opts.investigationId, {
         kind: "url",
         label: url,
@@ -2521,6 +2694,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
           `
         )[0];
       const got = asFetched(await fetchDoc(url), url);
+      if (opts.runBudget) await opts.onUsage?.(opts.runBudget.snapshot());
       const hash = got.ok ? await sha256(got.text) : "missing";
       const classified = classifyFetchedPage({
         status: got.status,
@@ -2551,6 +2725,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       });
 
       if (outcome === "unchanged") {
+        repeatedSourcesThisHop += 1;
         await markFrontier(opts.userId, opts.investigationId, url, "resolved", "Unchanged capture");
         continue;
       }
@@ -2626,6 +2801,8 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         await markFrontier(opts.userId, opts.investigationId, url, "deferred", `Fetch ${outcome}`);
         continue;
       }
+
+      newReadableSourcesThisHop += 1;
 
       if (outcome === "changed" && prior?.full_text) {
         const delta = diffExcerpt(prior.full_text, got.text);
@@ -2707,6 +2884,8 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       if (got.title) thisHopEvidenceNames.push(got.title);
     }
 
+    if (stopReason) break hopLoop;
+
     for (const extra of sanitizePublicUrls([...toFetch])) {
       const leftover = canon(extra);
       if (fetchedThisRun.has(leftover)) continue;
@@ -2745,12 +2924,62 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       where id = ${opts.investigationId}
     `;
 
-    const open = await sql<{ c: number }>`
-      select count(*)::int as c from frontier_items
+    await sql`
+      update frontier_items
+      set status = ${"deferred"},
+          closed_reason = ${`Open-frontier cap ${OPEN_FRONTIER_CAP}: lower-value item deferred`}
+      where id in (
+        select id from frontier_items
+        where investigation_id = ${opts.investigationId} and newsroom_id = ${newsroomId}
+          and status in ('open', 'investigating', 'reopened')
+        order by priority desc, id desc
+        offset ${OPEN_FRONTIER_CAP}
+      )
+    `;
+    const open = await sql<{ c: number; high: number }>`
+      select count(*)::int as c,
+             count(*) filter (where priority >= 7)::int as high
+      from frontier_items
       where investigation_id = ${opts.investigationId}
+        and newsroom_id = ${newsroomId}
         and status in ('open', 'investigating', 'reopened')
     `;
-    if (plan.stop && (open[0]?.c ?? 0) === 0) break;
+    const totals = await sql<{ sources: number; claims: number }>`
+      select
+        (select count(distinct url)::int from artifacts
+         where investigation_id = ${opts.investigationId} and newsroom_id = ${newsroomId}
+           and fetch_status = 200 and length(trim(full_text)) >= 40) as sources,
+        (select count(*)::int from claims
+         where investigation_id = ${opts.investigationId} and newsroom_id = ${newsroomId}
+           and coalesce(provenance_status, '') <> 'unresolved') as claims
+    `;
+    const materialValues = [
+      ...plan.entities.map((item) => `entity:${item.name}`),
+      ...plan.relationships.map((item) => `relationship:${item.from}:${item.kind}:${item.to}`),
+      ...plan.claims.map((item) => `claim:${item.text}`),
+      ...plan.anomalies.map((item) => `anomaly:${item.kind}:${item.summary}`),
+      ...plan.dead_ends.map((item) => `dead-end:${item.hypothesis}:${item.reason}`),
+    ].map((value) => value.toLowerCase().replace(/\s+/g, " ").trim());
+    let newFindingsThisHop = 0;
+    for (const value of materialValues) {
+      if (!value || materialFingerprints.has(value)) continue;
+      materialFingerprints.add(value);
+      newFindingsThisHop += 1;
+    }
+    const materialYield = newReadableSourcesThisHop + newFindingsThisHop;
+    consecutiveNoMaterialHops = materialYield === 0 ? consecutiveNoMaterialHops + 1 : 0;
+    consecutiveLowYieldHops = materialYield <= 1 ? consecutiveLowYieldHops + 1 : 0;
+    stopReason = researchStopReason({
+      planRequestedStop: plan.stop,
+      openFrontier: open[0]?.c ?? 0,
+      highValueOpenFrontier: open[0]?.high ?? 0,
+      totalReadableSources: totals[0]?.sources ?? 0,
+      totalSupportedClaims: totals[0]?.claims ?? 0,
+      consecutiveNoMaterialHops,
+      consecutiveLowYieldHops,
+      repeatedSourcesThisHop,
+    });
+    if (stopReason) break;
   }
 
   const open = await sql<{ c: number }>`
@@ -2762,10 +2991,19 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     select count(*)::int as c from artifacts
     where investigation_id = ${opts.investigationId}
   `;
-  const paused = (open[0]?.c ?? 0) > 0;
-  const pauseReason = paused
-    ? `Hop budget ${hopsBudget} reached with ${open[0]!.c} frontier item(s) still open. Budget pauses work; evidence exhaustion would close it.`
-    : "";
+  stopReason ??= opts.runBudget?.stopReason ?? null;
+  const budgetStopped = Boolean(stopReason && [
+    "elapsed-time-limit",
+    "model-call-limit",
+    "search-limit",
+    "document-read-limit",
+  ].includes(stopReason));
+  const paused = budgetStopped || (!stopReason && (open[0]?.c ?? 0) > 0);
+  const pauseReason = budgetStopped
+    ? `Run stopped at the ${stopReason}. Completed work is checkpointed.`
+    : paused
+      ? `Hop budget ${hopsBudget} reached with ${open[0]!.c} frontier item(s) still open. Budget pauses work; evidence exhaustion would close it.`
+      : "";
   await sql`
     update investigations
     set status = ${paused ? "paused" : "open"},
@@ -2794,6 +3032,7 @@ Planner could not start research: ${[...new Set(plannerFailures)].join("; ")}`
     summary: lastSummary + fellBack + (selectorFailures.length ? `\nPost-search read selection fell back to the ordinary queue: ${[...new Set(selectorFailures)].join("; ")}` : ""),
     plannerFailures: plannerFailures.length,
     plannerStartupFailures: plannerStartupFailures.length,
+    stopReason,
   };
 }
 

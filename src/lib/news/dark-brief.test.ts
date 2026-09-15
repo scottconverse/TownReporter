@@ -6,6 +6,8 @@ import {
   briefIsUseful,
   briefPack,
   parseBrief,
+  statusBoundedHeadline,
+  wordBoundedStr,
 } from "./dark-brief.ts";
 
 describe("parseBrief", () => {
@@ -23,12 +25,30 @@ describe("parseBrief", () => {
       why_verdict: "Two independent records line up",
       next: "Pull the SOS filings",
       sections: { record: "a", tested: "b", open: "c", known: "d" },
-    });
+    }, new Date(), "protocol-complete");
     assert.equal(b.verdict, "promising");
     assert.equal(b.strength, 0.4);
     assert.equal(b.connections.length, 1);
     assert.equal(b.sections.open, "c");
     assert.match(b.generated_at, /^\d{4}-/);
+  });
+
+  it("never truncates a headline in the middle of a word", () => {
+    const headline = "A carefully reported municipal question with Supercalifragilisticexpialidocious evidence";
+    const bounded = wordBoundedStr(headline, 58);
+
+    assert.equal(bounded, "A carefully reported municipal question with…");
+    assert.ok(bounded.length <= 58);
+  });
+
+  it("labels incomplete evidence and removes unsupported certainty language", () => {
+    const headline = statusBoundedHeadline(
+      "The documented and confirmed collapse of the city's purchasing controls",
+      "unverified",
+    );
+
+    assert.equal(headline, "Unverified lead: The collapse of the city's purchasing controls");
+    assert.doesNotMatch(headline, /documented|confirmed/i);
   });
 
   it("keeps a complete multi-clause instruction for the record that would settle the file", () => {
@@ -161,6 +181,22 @@ describe("briefPack", () => {
       artifacts: [],
     });
     assert.equal((pack.match(/\(none yet\)/g) ?? []).length, 6);
+  });
+
+  it("puts the externally computed verification status in the model pack", () => {
+    const pack = briefPack({
+      title: "Status file",
+      verification: { eligible: 4, complete: 1 },
+      facts: [],
+      hypotheses: [],
+      questions: [],
+      findings: [],
+      entities: [],
+      artifacts: [],
+    });
+
+    assert.match(pack, /VERIFICATION STATUS: UNVERIFIED/);
+    assert.match(pack, /1 of 4 signals/);
   });
 
   it("keeps a whole selected document at the 10k evidence boundary", () => {

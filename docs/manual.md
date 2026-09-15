@@ -367,8 +367,8 @@ the headline and there is no byline, because an unsigned editorial is the
 paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
 
-Opinion shows Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
-plus saved custom connections. Codex Sol is selected by default. Automatic tries Claude Opus, then Codex Sol
+Opinion shows Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus,
+Sonnet and Haiku, Local model, plus saved custom connections. Codex Sol is selected by default. Automatic tries Claude Opus, then Codex Sol
 once if Claude is unavailable; explicit choices stay selected. Claude Code
 and Codex both read the complete configured voice through their native instruction-file options. The page
 lists every missing voice, installation, or login prerequisite and stays
@@ -564,8 +564,8 @@ the registry is the canonical picker definition; provider adapters still impleme
 | **Opinion (editorials)**              | Default: Codex Sol. Automatic: Claude Opus → Codex Sol once when needed; explicit Claude Opus, Codex Terra, Codex Sol, Local model or custom choice stays selected                                                                                                                        | The selected provider                                                                                           |
 
 **Opinion provider behavior.** An editorial uses the paper's configured voice
-and frontier research. Opinion's picker offers Automatic, Claude Opus, Codex
-Terra, Codex Sol, Local model and custom connections. Automatic tries Claude
+and frontier research. Opinion's picker offers Automatic, all four named Codex
+models, all four named Claude models, Local model and custom connections. Automatic tries Claude
 Opus then Codex Sol once when needed; explicit choices stay selected. (Zen MiMo and the earlier, model-specific
 Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
 brought a generic local pick back.) Claude Code
@@ -606,8 +606,8 @@ failure every time.
 
 Pointing `LLM_BASE_URL` at a local model sends Scan, Dark Desk, and Story
 Automatic to that gateway. An explicit Story choice still forces its named
-provider. Opinion offers Automatic, Claude Opus, Codex Terra, Codex Sol, Local
-model and saved custom connections.
+provider. Every picker offers Codex Astra, Sol, Terra and Luna and Claude Fable,
+Opus, Sonnet and Haiku, plus Local model and saved custom connections.
 What that actually costs in quality was measured on this machine:
 [docs/local-models.md](local-models.md).
 
@@ -752,9 +752,12 @@ instead of filed as findings about the world.
 Planning and synthesis are separate calls and can use different models.
 Measured over five runs each, planning on Haiku produced the same output quality
 as Opus at about a quarter of the cost. On the **Claude Dark Desk path**, Haiku
-plans and the configured Claude model synthesises. Non-Claude providers keep
-their configured model instead of receiving a Claude model name. Opinion is a
-separate path offering Claude Opus or Local model.
+plans and the editor-selected Claude model synthesises. Codex Terra plans Sol
+and Terra runs; Codex Luna plans Astra and Luna runs. Dark Automatic uses a
+configured gateway when present, otherwise Sonnet with a one-time Terra retry.
+Completed research is checkpointed, so a synthesis retry does not rerun searches
+or document reads. The run stops on its total time, call, search, or read limit,
+or when evidence is sufficient or yields are repeating or diminishing.
 
 ## Tests
 

@@ -464,10 +464,12 @@ Keep the file open while its research job is running and Dark Desk refreshes tha
 ### Which model digs
 
 Next to **Keep digging** there is a **Digging model** picker, the same one the
-queue and the workbench have: Automatic, Codex Terra, Codex Sol, Claude Opus,
-or Local model.
-Automatic tries Claude Opus, then Codex Terra, and if the first one’s login has
-lapsed the round moves to the next. A model you name yourself never falls back
+queue and the workbench have: Automatic; Codex Astra, Sol, Terra and Luna;
+Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.
+Dark Desk Automatic uses a configured gateway when present; otherwise it tries
+Claude Sonnet, then Codex Terra. Planning uses Claude Haiku or the cheaper Codex
+planning model. If synthesis times out, only synthesis moves to the next model;
+completed searches and document reads do not run again. A model you name yourself never falls back
 — choosing one model is choosing not to run the others.
 
 The choice is checked before the round starts. If no model is ready, the desk
@@ -478,6 +480,14 @@ started on Codex stays on Codex rather than quietly changing author halfway
 through an investigation. Change it whenever you like; the next round uses the
 new one. **What Dark Desk did** — the round history at the bottom of the page —
 names the model that dug each round.
+
+While a round runs, the open file names the real stage and shows elapsed time,
+model calls, searches and document reads. The saved run keeps those totals and
+the per-call provider, model, duration, result and timeout. Token totals appear
+only when the provider reports them. A whole-run ceiling applies across every
+stage, and the final line says whether the run stopped for sufficient evidence,
+repeated sources, diminishing returns, no material new finding, or a resource
+limit.
 
 This arrived in 0.6.2. Before that, Dark Desk was the one screen with no
 picker: rounds ran on whatever the machine was configured for.
@@ -546,7 +556,7 @@ For a readable capture, choose an active reporting section and **Create unverifi
 
 On Dark Desk, open **How hard to dig → Change**. Choose a lookback of 1–3650 inclusive UTC calendar days (default90; one day means today in UTC) or an inclusive start/end UTC calendar range, then choose 1–24 signals to verify per round (default6). **Save** confirms the stored settings; reload to verify a save whose response failed. A validation error explains the rejected value. A settings-read failure offers **Retry settings** instead of showing invented defaults.
 
-These controls are independent of dig, nerve, map and county. Presets retain your date/count choices. Each new round saves a snapshot before work starts, so a mid-round edit affects later rounds. More attempted signals can cost more model calls and time. The round summary shows verified out of all eligible signals, attempted, unverified (including failures), and deferred. Every attempted signal still faces the four gates. Search dates guide queries and providers; always check dates in the captured evidence.
+These controls are independent of dig, nerve, map and county. Presets retain your date/count choices. Each new round saves a snapshot before work starts, so a mid-round edit affects later rounds. More attempted signals can cost more model calls and time. The round summary shows protocol-complete signals out of all eligible signals, attempted, unverified (including failures), and deferred. Every attempted signal still faces the four gates. Search dates guide queries and providers; always check dates in the captured evidence.
 
 ## Opinion (`/desk/opinion`)
 
