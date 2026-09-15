@@ -52,12 +52,20 @@ describe("prompt non-gating contract", () => {
     assert.match(DARK_SYSTEM, /job is to find leads, follow them, connect people, organizations, money/i);
     assert.match(DARK_SYSTEM, /unnamed actor is a lead, not a dead end/i);
     assert.match(DARK_SYSTEM, /KEEP TWO LIVE EXPLANATIONS/);
-    assert.match(DARK_SYSTEM, /unregistered or opaque fundraising vehicle/i);
+    assert.match(DARK_SYSTEM, /undisclosed or opaque legal or fiscal vehicle/i);
+    assert.match(DARK_SYSTEM, /registration status remains unknown until an authoritative entity search establishes it/i);
     assert.match(DARK_SYSTEM, /new organization still building its paperwork/i);
     assert.match(DARK_PLANNER, /INVESTIGATIVE:/);
     assert.match(DARK_PLANNER, /BENIGN:/);
     assert.match(DARK_PLANNER, /nonprofit, beneficiary, organizer, vendor, sponsor, proceeds/i);
     assert.match(DARK_PLANNER, /empty search or unread record is never enough/i);
+    assert.match(DARK_SYSTEM, /ABSENCE CLAIM DISCIPLINE/);
+    assert.match(DARK_SYSTEM, /Never infer a date or date range the pack does not supply/i);
+    assert.match(DARK_SYSTEM, /If the pack contains no explicit promise, return an empty promises array/i);
+    assert.match(DARK_SYSTEM, /gross receipts, costs, retained fees, net proceeds, cash handling/i);
+    assert.match(DARK_PLANNER, /never become[^\n]+does not exist[^\n]+unregistered[^\n]+unpermitted[^\n]+missing/i);
+    assert.match(DARK_PLANNER, /promises require an explicit sourced commitment/i);
+    assert.match(DARK_PLANNER, /gross-to-net money path/i);
   });
 });
 

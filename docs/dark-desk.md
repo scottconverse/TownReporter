@@ -134,6 +134,13 @@ does not prove the answer true; the editor must read the records and challenge
 the reasoning. The interface therefore says **Protocol complete · four gates**
 rather than claiming that a fact has been verified.
 
+The file also preserves the limits of negative evidence. **Not established in
+this file** or **not found in these searches** never becomes **does not exist**
+unless a complete authoritative inventory supports that claim. It does not
+invent a date window. A promise is recorded only when a named person or
+organization made an explicit, sourced commitment; if there is no such
+commitment, the promises list stays empty.
+
 ## Models, checkpoints and the whole-run limit
 
 The shared picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus,

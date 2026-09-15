@@ -561,6 +561,89 @@ type DarkJson = {
 
 type DarkSignal = NonNullable<DarkJson["signals"]>[number];
 
+type CandidateDarkPromise = NonNullable<DarkJson["promises"]>[number];
+
+function normalizedEvidenceText(value: unknown): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9:/._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Promise rows become standing newsroom leads, so a prompt instruction is not
+ * enough. Require the named actor and returned source locator to exist in the
+ * evidence, plus explicit commitment language near that actor. If this narrow
+ * boundary fails, the surrounding signal stays; only the unsupported promise
+ * row is omitted.
+ */
+export function isGroundedDarkPromise(p: CandidateDarkPromise, evidencePack: string): boolean {
+  const who = normalizedEvidenceText(p.who);
+  const what = normalizedEvidenceText(p.what);
+  const cite = normalizedEvidenceText(p.source_cite);
+  const evidence = normalizedEvidenceText(evidencePack);
+  if (
+    !who ||
+    !what ||
+    cite.length < 8 ||
+    !evidence.includes(who) ||
+    !evidence.includes(what) ||
+    !evidence.includes(cite)
+  ) return false;
+
+  const commitment = /\b(?:will|shall|promis(?:e|es|ed)|commit(?:s|ted)?|pledge(?:s|d)?|agree(?:s|d)?|scheduled to|plans? to|intends? to|by \d{4}-\d{2}-\d{2})\b/i;
+  let from = evidence.indexOf(who);
+  while (from >= 0) {
+    const nearby = evidence.slice(Math.max(0, from - 500), Math.min(evidence.length, from + who.length + 700));
+    if (commitment.test(nearby)) return true;
+    from = evidence.indexOf(who, from + who.length);
+  }
+  return false;
+}
+
+/** The visible window comes from the saved run setting, never model inference. */
+export function groundedDarkWindow(preferences?: ResearchSnapshot): string {
+  return preferences
+    ? `${preferences.startDate} through ${preferences.endDate} (search preference; verify dates in each source)`
+    : "unknown";
+}
+
+/**
+ * A bounded file cannot establish universal nonexistence. Models commonly
+ * shorten "not established in this file" to "no record was found," so narrow
+ * that phrasing again before factual summary/observation text is persisted.
+ * Hypothesis fields remain untouched so the desk can still test a concrete
+ * hidden explanation.
+ */
+export function preserveBoundedAbsenceLanguage(value: unknown, evidencePack: string): string {
+  const text = String(value ?? "");
+  const asObject = (subject: string) => subject.trim().replace(/^(The|A|An)\b/, (article) => article.toLowerCase());
+  const boundedPack = /(?:not established|no [^.\n]{2,180}? (?:was|were) established) in (?:the )?(?:captured|provided|bounded|current|available)?\s*(?:material|file|record|evidence)|absence of (?:those|these|the) records[^.]{0,120}does not prove/i.test(evidencePack);
+  if (!boundedPack) return text;
+
+  const narrowed = text.replace(
+    /\bNo\s+([^.\n]{2,180}?)\s+(?:was|were)\s+found(?:\s+in\s+(?:the\s+)?(?:provided|current|captured|available|bounded)\s+(?:search notes|file|record|material|evidence(?:\s+pack)?))?(?=[.;\n]|$)/gi,
+    (_match, subject: string) => `The bounded evidence pack did not establish ${subject.trim()}`,
+  );
+  return narrowed
+    .replace(
+      /\b([^.\n]{2,180}?)\s+does not exist(?=[.;\n]|$)/gi,
+      (_match, subject: string) => `The bounded evidence pack did not establish the existence of ${asObject(subject)}`,
+    )
+    .replace(
+      /\b([^.\n]{2,180}?)\s+is\s+(unregistered|unpermitted|missing)(?=[.;\n]|$)/gi,
+      (_match, subject: string, state: string) => {
+        const object = state.toLowerCase() === "unregistered"
+          ? "registration for"
+          : state.toLowerCase() === "unpermitted"
+            ? "permits for"
+            : "the presence of";
+        return `The bounded evidence pack did not establish ${object} ${asObject(subject)}`;
+      },
+    );
+}
+
 /**
  * Reject a response only when every substantive field is model-process
  * narration. A real lead must not disappear because one field contains an
@@ -1412,12 +1495,12 @@ async function synthesizeSignals(
     };
 
   const parsed = parseJsonBlock<DarkJson>(ai.text) ?? {};
-  const summary = String(parsed.editor_summary ?? "").slice(0, 2000);
+  const summary = preserveBoundedAbsenceLanguage(parsed.editor_summary, pack).slice(0, 2000);
   const gaps = (parsed.inventory_gaps ?? []).join("; ").slice(0, 800);
   const header = [
     summary,
     gaps ? `Gaps: ${gaps}` : "",
-    parsed.window ? `Window: ${parsed.window}` : "",
+    `Window: ${groundedDarkWindow(preferences)}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1455,7 +1538,7 @@ async function synthesizeSignals(
         ${normalizePosture(sig.posture)},
         ${String(sig.type ?? "").slice(0, 80)},
         ${strength}, ${confidence},
-        ${String(sig.observation ?? "").slice(0, 4000)},
+        ${preserveBoundedAbsenceLanguage(sig.observation, pack).slice(0, 4000)},
         ${String(sig.pattern ?? "").slice(0, 4000)},
         ${String(sig.linkage_map ?? "").slice(0, 4000)},
         ${String(sig.alternatives ?? "").slice(0, 4000)},
@@ -1475,7 +1558,7 @@ async function synthesizeSignals(
   for (const p of parsed.promises ?? []) {
     const who = String(p.who ?? "").trim();
     const what = String(p.what ?? "").trim();
-    if (!who || !what) continue;
+    if (!who || !what || !isGroundedDarkPromise(p, pack)) continue;
     await sql`
       insert into dark_promises (user_id, newsroom_id, who_promised, what, when_due, source_cite, status)
       values (

@@ -337,6 +337,13 @@ grounds for deleting the lead. Lower-priority trails remain visible as deferred
 work and return to the active set on the next **Keep digging** run after the
 current higher-priority set drains.
 
+The desk keeps narrow evidence narrow: **not found in the material opened so
+far** does not become **does not exist**, and it does not invent a date range.
+Its promises list contains only explicit, sourced commitments. For events and
+fundraisers, the follow-up trail can include the legal entity, organizers,
+beneficiaries, gross and net proceeds, retained fees, cash handling, transfer
+evidence, permits, sponsors and relationships among the people involved.
+
 A file that stops mid-trail is normal. It says how many pages it has not opened
 yet and waits for **Keep digging**.
 
