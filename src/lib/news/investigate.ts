@@ -139,7 +139,7 @@ const BROKEN_FRONTIER_LABELS = new Set(["n/a", "na", "none", "null", "source", "
 function validFrontierItem(item: HopPlan["frontier"][number]): boolean {
   const label = item.label.replace(/\s+/g, " ").trim();
   if (!label || label.length > 240 || BROKEN_FRONTIER_LABELS.has(label.toLowerCase())) return false;
-  if (!/[\p{L}\p{N}]/u.test(label) || /^[\[{].*[\]}]$/s.test(label)) return false;
+  if (!/[\p{L}\p{N}]/u.test(label) || /^(?:\{|\[).*(?:\}|\])$/s.test(label)) return false;
   if (isSelfReferential(`${label} ${item.why}`)) return false;
   if (item.kind === "url" || /^https?:/i.test(label)) {
     try {
