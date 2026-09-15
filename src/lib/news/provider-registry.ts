@@ -264,7 +264,9 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     // Earlier refusals remain delivery failures; they were not a reason to
     // erase an otherwise available native subscription provider.
     offeredFor: EVERY_SURFACE,
-    ladderRank: 2,
+    // Automatic starts on the operator's OpenAI subscription. Claude is the
+    // limited fallback on this installation, not the default writer.
+    ladderRank: 1,
   },
   {
     id: "claude-fable",
@@ -291,6 +293,9 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     enabled: () => notSwitchedOff("TOWNREPORTER_CLAUDE_CODE"),
     offSwitchEnv: "TOWNREPORTER_CLAUDE_CODE",
     offeredFor: EVERY_SURFACE,
+    // Keep Claude last and use the balanced tier rather than spending Opus
+    // allowance on ordinary newsroom work.
+    ladderRank: 2,
   },
   {
     id: "claude-haiku",
@@ -350,7 +355,6 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     enabled: () => notSwitchedOff("TOWNREPORTER_CLAUDE_CODE"),
     offSwitchEnv: "TOWNREPORTER_CLAUDE_CODE",
     offeredFor: EVERY_SURFACE,
-    ladderRank: 1,
   },
   {
     id: "local-model",
@@ -396,7 +400,8 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       or not).
     */
     enabled: () =>
-      notSwitchedOff("TOWNREPORTER_LOCAL") && (Boolean(env("LLM_BASE_URL")) || localDiscoveryReachable),
+      notSwitchedOff("TOWNREPORTER_LOCAL") &&
+      (Boolean(env("LLM_BASE_URL")) || localDiscoveryReachable),
     offSwitchEnv: "TOWNREPORTER_LOCAL",
     // "Anywhere an AI acts, the editor can pick the model" -- every surface.
     offeredFor: EVERY_SURFACE,
@@ -449,8 +454,7 @@ export function providerEntry(id: string | undefined | null): ProviderEntry | nu
 /** Every entry a given picker should offer, registry order, Automatic aside. */
 export function providersFor(surface: ProviderSurface): readonly ProviderEntry[] {
   const pickerOrder = new Map<string, number>(PICKER_PROVIDER_IDS.map((id, index) => [id, index]));
-  return PROVIDER_REGISTRY
-    .filter((entry) => entry.offeredFor[surface])
+  return PROVIDER_REGISTRY.filter((entry) => entry.offeredFor[surface])
     .slice()
     .sort((a, b) => pickerOrder.get(a.id)! - pickerOrder.get(b.id)!);
 }

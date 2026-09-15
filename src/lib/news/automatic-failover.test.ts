@@ -24,70 +24,70 @@ const LIVE_401 =
 const LIVE_TIMEOUT_NO_OUTPUT = "Claude Code request timed out after 150s, 0 bytes out";
 
 describe("planAutomaticFailover", () => {
-  it("moves Automatic to Codex Terra when Claude's login lapsed mid-run and Codex is ready", async () => {
+  it("moves Automatic to Claude Sonnet when Codex login lapses mid-run", async () => {
     const calls: string[] = [];
     const plan = await planAutomaticFailover({
       source: "auto",
-      current: "claude-frontier",
-      error: LIVE_401,
+      current: "codex-balanced",
+      error: "Codex authentication has expired or Codex is signed out.",
       probe: async (choice) => {
         calls.push(choice);
-        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+        return { ok: true, label: "Claude Sonnet", choice: "claude-sonnet" };
       },
     });
-    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "auth" });
-    assert.deepEqual(calls, ["codex-balanced"], "must not probe the current rung or any before it");
+    assert.deepEqual(plan, { next: "claude-sonnet", label: "Claude Sonnet", reason: "auth" });
+    assert.deepEqual(calls, ["claude-sonnet"], "must not probe the current rung or any before it");
   });
 
-  it("moves Automatic to Codex Terra when Claude's draft timed out with no output and Codex is ready", async () => {
+  it("moves Automatic to Claude Sonnet when Codex times out with no output", async () => {
     const calls: string[] = [];
     const plan = await planAutomaticFailover({
       source: "auto",
-      current: "claude-frontier",
-      error: LIVE_TIMEOUT_NO_OUTPUT,
+      current: "codex-balanced",
+      error: "Codex request timed out after 150s, 0 bytes out",
       probe: async (choice) => {
         calls.push(choice);
-        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+        return { ok: true, label: "Claude Sonnet", choice: "claude-sonnet" };
       },
     });
-    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
-    assert.deepEqual(calls, ["codex-balanced"], "must not probe the current rung or any before it");
+    assert.deepEqual(plan, { next: "claude-sonnet", label: "Claude Sonnet", reason: "timeout" });
+    assert.deepEqual(calls, ["claude-sonnet"], "must not probe the current rung or any before it");
   });
 
-  it("moves Automatic to Codex Terra when Claude reaches its usage allowance", async () => {
+  it("moves Automatic to Claude Sonnet when Codex reaches its usage allowance", async () => {
     const plan = await planAutomaticFailover({
       source: "auto",
-      current: "claude-frontier",
-      error: "Claude API error 429: usage limit reached; resets 11:30pm (America/Denver).",
-      probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
+      current: "codex-balanced",
+      error: "Codex API error 429: usage limit reached; resets 11:30pm (America/Denver).",
+      probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
     });
-    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "quota" });
+    assert.deepEqual(plan, { next: "claude-sonnet", label: "Claude Sonnet", reason: "quota" });
   });
 
-  it("moves Automatic to Codex Terra when Claude is unavailable", async () => {
+  it("moves Automatic to Claude Sonnet when Codex is unavailable", async () => {
     const plan = await planAutomaticFailover({
       source: "auto",
-      current: "claude-frontier",
-      error: "Claude Code is unreachable on this machine.",
-      probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
+      current: "codex-balanced",
+      error: "Codex is unreachable on this machine.",
+      probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
     });
-    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "unavailable" });
+    assert.deepEqual(plan, { next: "claude-sonnet", label: "Claude Sonnet", reason: "unavailable" });
   });
 
   it("recognizes plain unavailable and HTTP 503 provider failures", async () => {
     for (const error of [
-      "Claude Code is unavailable.",
-      "Claude API error (503): upstream unavailable",
+      "Codex is unavailable.",
+      "Codex API error (503): upstream unavailable",
     ]) {
       const plan = await planAutomaticFailover({
         source: "auto",
-        current: "claude-frontier",
+        current: "codex-balanced",
         error,
-        probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
+        probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
       });
       assert.deepEqual(plan, {
-        next: "codex-balanced",
-        label: "Codex Terra",
+        next: "claude-sonnet",
+        label: "Claude Sonnet",
         reason: "unavailable",
       });
     }
@@ -155,6 +155,7 @@ describe("planAutomaticFailover", () => {
       source: "auto",
       current: "claude-frontier",
       error: "Claude Code readiness check timed out.",
+      ladder: ["claude-frontier", "codex-balanced"],
       probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
     });
     assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
@@ -174,11 +175,11 @@ describe("planAutomaticFailover", () => {
     const calls: string[] = [];
     const plan = await planAutomaticFailover({
       source: "auto",
-      current: "codex-balanced",
+      current: "claude-sonnet",
       error: LIVE_TIMEOUT_NO_OUTPUT,
       probe: async (choice) => {
         calls.push(choice);
-        return { ok: true, label: "Claude Opus", choice: "claude-frontier" };
+        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
       },
     });
     assert.equal(plan, null);
@@ -225,12 +226,12 @@ describe("planAutomaticFailover", () => {
     const calls: string[] = [];
     const plan = await planAutomaticFailover({
       source: "auto",
-      current: "codex-balanced",
+      current: "claude-sonnet",
       error:
         "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.",
       probe: async (choice) => {
         calls.push(choice);
-        return { ok: true, label: "Claude Opus", choice: "claude-frontier" };
+        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
       },
     });
     assert.equal(plan, null);

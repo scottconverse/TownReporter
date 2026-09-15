@@ -57,15 +57,16 @@ export function isCustomModelChoice(value: unknown): value is CustomModelChoice 
 export type EffectiveStoryModelChoice = StoryModelChoice | "configured";
 
 /* Opinion uses the same native subscription providers as Story. Automatic
-   tries Claude and then Codex Sol; an explicit pick never falls through. */
+   starts on Codex Sol and keeps Claude Sonnet as its limited fallback; an
+   explicit pick never falls through. */
 export const DEFAULT_OPINION_MODEL = "codex-frontier" as const;
-export const OPINION_AUTOMATIC_LADDER = ["claude-frontier", "codex-frontier"] as const;
+export const OPINION_AUTOMATIC_LADDER = ["codex-frontier", "claude-sonnet"] as const;
 /**
  * Dark Desk spends most of a round on mechanical planning and evidence
  * triage. Automatic therefore uses the balanced synthesis models; Opus and
  * Astra remain explicit choices for an editor who wants them.
  */
-export const DARK_AUTOMATIC_LADDER = ["claude-sonnet", "codex-balanced"] as const;
+export const DARK_AUTOMATIC_LADDER = ["codex-balanced", "claude-sonnet"] as const;
 export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = STORY_MODEL_CHOICES.filter(
   (choice) => choice.value === "auto" || providerEntry(choice.value)?.offeredFor.opinion,
 );
@@ -130,7 +131,7 @@ export function modelChoiceLabel(value: unknown): string {
 }
 
 /**
- * The Automatic ladder, in words: "Claude Opus, then Codex Terra".
+ * The Automatic ladder, in words: "Codex Terra, then Claude Sonnet".
  *
  * Read from the registry rather than typed out, so a reordered or retired
  * rung cannot leave this sentence describing a ladder that no longer exists

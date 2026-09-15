@@ -134,6 +134,7 @@ export type PerformDraftWorkDeps = {
       timeoutMs: number;
     }) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
     local: typeof import("./ai.ts").grokChat;
+    custom: typeof import("./ai.ts").grokChat;
   };
   batchOcrAdapters?: import("./ocr.ts").OcrAdapters;
 };

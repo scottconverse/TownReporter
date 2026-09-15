@@ -785,10 +785,8 @@ describe("model-picker provider readiness", () => {
     });
   });
 
-  it("Automatic's ladder reaches Claude before Codex", async () => {
-    // Zen and Local Qwen were removed from Automatic 2026-09-02; the ladder is
-    // now exactly ["claude-frontier", "codex-balanced"], Claude first.
-    const originalFetch = globalThis.fetch;
+  it("Automatic falls through to Claude Sonnet when Codex is switched off", async () => {
+        const originalFetch = globalThis.fetch;
     const urls: string[] = [];
     globalThis.fetch = async (input) => {
       urls.push(String(input));
@@ -798,10 +796,10 @@ describe("model-picker provider readiness", () => {
       await withEnvAsync({ ANTHROPIC_API_KEY: "sk-ant-test", TOWNREPORTER_CODEX: "0" }, async () => {
         const result = await probeProvider("auto");
         assert.equal(result.ok, true);
-        if (result.ok) assert.equal(result.choice, "claude-frontier");
+        if (result.ok) assert.equal(result.choice, "claude-sonnet");
       });
-      // Only Claude was probed -- Codex is disabled here, and neither Zen nor
-      // Local Qwen exist as rungs to fall through to.
+      // Codex was skipped by its off switch, so the first network probe is the
+      // lower-cost Claude fallback.
       assert.deepEqual(urls, ["https://api.anthropic.com/v1/models?limit=1"]);
     } finally {
       globalThis.fetch = originalFetch;

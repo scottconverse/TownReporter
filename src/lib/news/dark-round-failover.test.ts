@@ -19,6 +19,9 @@ import type { DeskJob } from "./jobs.ts";
 const LIVE_401 =
   "Claude Code error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
 const LIVE_TIMEOUT_NO_OUTPUT = "Claude Code request timed out after 150s, 0 bytes out";
+const CODEX_AUTH_FAILURE =
+  "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";
+const CODEX_TIMEOUT_NO_OUTPUT = "Codex request timed out after 150s, 0 bytes out";
 
 function job(overrides: Partial<DeskJob> = {}): DeskJob {
   return {
@@ -27,7 +30,7 @@ function job(overrides: Partial<DeskJob> = {}): DeskJob {
     user_id: "u1",
     kind: "dark",
     subject_id: 5,
-    model_choice: "claude-sonnet",
+    model_choice: "codex-balanced",
     model_choice_source: "auto",
     lane: "editorial",
     status: "running",
@@ -47,8 +50,12 @@ describe("planDarkRoundFailover", () => {
     const modelChoiceCalls: [number, string][] = [];
     const stageMessages: string[] = [];
 
-    const result = await planDarkRoundFailover(job(), LIVE_401, {
-      probe: async (choice) => ({ ok: true, label: "Codex Terra", choice: choice as "codex-balanced" }),
+    const result = await planDarkRoundFailover(job(), CODEX_AUTH_FAILURE, {
+      probe: async (choice) => ({
+        ok: true,
+        label: "Claude Sonnet",
+        choice: choice as "claude-sonnet",
+      }),
       setModelChoice: async (id, choice) => {
         modelChoiceCalls.push([id, choice]);
       },
@@ -58,20 +65,24 @@ describe("planDarkRoundFailover", () => {
     });
 
     assert.deepEqual(result, {
-      next: "codex-balanced",
-      label: "Codex Terra",
-      switchedBecause: "Claude Sonnet sign-in lapsed",
+      next: "claude-sonnet",
+      label: "Claude Sonnet",
+      switchedBecause: "Codex Terra sign-in lapsed",
     });
-    assert.deepEqual(modelChoiceCalls, [[99, "codex-balanced"]]);
-    assert.deepEqual(stageMessages, ["Switched to Codex Terra: Claude Sonnet sign-in lapsed"]);
+    assert.deepEqual(modelChoiceCalls, [[99, "claude-sonnet"]]);
+    assert.deepEqual(stageMessages, ["Switched to Claude Sonnet: Codex Terra sign-in lapsed"]);
   });
 
   it("fails over on a timeout / zero-output error: picks the next rung and words the switch as 'timed out'", async () => {
     const modelChoiceCalls: [number, string][] = [];
     const stageMessages: string[] = [];
 
-    const result = await planDarkRoundFailover(job(), LIVE_TIMEOUT_NO_OUTPUT, {
-      probe: async (choice) => ({ ok: true, label: "Codex Terra", choice: choice as "codex-balanced" }),
+    const result = await planDarkRoundFailover(job(), CODEX_TIMEOUT_NO_OUTPUT, {
+      probe: async (choice) => ({
+        ok: true,
+        label: "Claude Sonnet",
+        choice: choice as "claude-sonnet",
+      }),
       setModelChoice: async (id, choice) => {
         modelChoiceCalls.push([id, choice]);
       },
@@ -81,12 +92,12 @@ describe("planDarkRoundFailover", () => {
     });
 
     assert.deepEqual(result, {
-      next: "codex-balanced",
-      label: "Codex Terra",
-      switchedBecause: "Claude Sonnet timed out",
+      next: "claude-sonnet",
+      label: "Claude Sonnet",
+      switchedBecause: "Codex Terra timed out",
     });
-    assert.deepEqual(modelChoiceCalls, [[99, "codex-balanced"]]);
-    assert.deepEqual(stageMessages, ["Switched to Codex Terra: Claude Sonnet timed out"]);
+    assert.deepEqual(modelChoiceCalls, [[99, "claude-sonnet"]]);
+    assert.deepEqual(stageMessages, ["Switched to Claude Sonnet: Codex Terra timed out"]);
   });
 
   it("never fails over an editor's explicit model choice", async () => {
@@ -115,12 +126,16 @@ describe("planDarkRoundFailover", () => {
 
   it("keeps a configured Automatic gateway exclusive", async () => {
     let probed = false;
-    const result = await planDarkRoundFailover(job({ model_choice: "configured" }), LIVE_TIMEOUT_NO_OUTPUT, {
-      probe: async () => {
-        probed = true;
-        return { ok: true, label: "Claude Sonnet", choice: "claude-sonnet" };
+    const result = await planDarkRoundFailover(
+      job({ model_choice: "configured" }),
+      LIVE_TIMEOUT_NO_OUTPUT,
+      {
+        probe: async () => {
+          probed = true;
+          return { ok: true, label: "Claude Sonnet", choice: "claude-sonnet" };
+        },
       },
-    });
+    );
     assert.equal(result, null);
     assert.equal(probed, false);
   });
@@ -155,7 +170,11 @@ describe("planDarkRoundFailover", () => {
     });
 
     assert.equal(result, null);
-    assert.equal(probed, false, "a refusal is not a login lapse or a timeout and must not trigger a probe");
+    assert.equal(
+      probed,
+      false,
+      "a refusal is not a login lapse or a timeout and must not trigger a probe",
+    );
   });
 });
 
@@ -176,7 +195,11 @@ describe("runCheckpointedDarkStages", () => {
       },
       failOver: async (_error, stage) => {
         events.push(`failover:${stage}`);
-        return { next: "codex-balanced", label: "Codex Terra", switchedBecause: "Claude timed out" };
+        return {
+          next: "codex-balanced",
+          label: "Codex Terra",
+          switchedBecause: "Claude timed out",
+        };
       },
       setStage: async (stage) => {
         events.push(`stage:${stage}`);
@@ -198,8 +221,13 @@ describe("runDarkResearchWithRememberedChoice", () => {
   it("persists each primary or failover choice before that research attempt starts", async () => {
     const calls: string[] = [];
     const deps = {
-      remember: async (_id: number, choice: string) => { calls.push(`remember:${choice}`); },
-      run: async (choice: string) => { calls.push(`run:${choice}`); return choice; },
+      remember: async (_id: number, choice: string) => {
+        calls.push(`remember:${choice}`);
+      },
+      run: async (choice: string) => {
+        calls.push(`run:${choice}`);
+        return choice;
+      },
     };
 
     await runDarkResearchWithRememberedChoice(5, "claude-frontier", deps);
@@ -216,8 +244,13 @@ describe("runDarkResearchWithRememberedChoice", () => {
   it("keeps choice persistence best-effort and still starts research when its write fails", async () => {
     let ran = false;
     const result = await runDarkResearchWithRememberedChoice(5, "codex-balanced", {
-      remember: async () => { throw new Error("database write unavailable"); },
-      run: async () => { ran = true; return "finished"; },
+      remember: async () => {
+        throw new Error("database write unavailable");
+      },
+      run: async () => {
+        ran = true;
+        return "finished";
+      },
     });
     assert.equal(ran, true);
     assert.equal(result, "finished");
@@ -227,14 +260,20 @@ describe("runDarkResearchWithRememberedChoice", () => {
 describe("terminalPlannerStartupFailure", () => {
   it("classifies a provider failure before any source action as a failed round", () => {
     assert.equal(
-      terminalPlannerStartupFailure({ hops: 0, plannerStartupFailures: 1 }, "Codex could not complete this draft"),
+      terminalPlannerStartupFailure(
+        { hops: 0, plannerStartupFailures: 1 },
+        "Codex could not complete this draft",
+      ),
       "Codex could not complete this draft",
     );
   });
 
   it("does not misclassify a completed zero-result search as a provider failure", () => {
     assert.equal(
-      terminalPlannerStartupFailure({ hops: 1, plannerStartupFailures: 0 }, "Codex could not complete this draft"),
+      terminalPlannerStartupFailure(
+        { hops: 1, plannerStartupFailures: 0 },
+        "Codex could not complete this draft",
+      ),
       null,
     );
   });

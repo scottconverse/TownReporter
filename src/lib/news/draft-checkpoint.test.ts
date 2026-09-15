@@ -54,7 +54,7 @@ test("persists a writer checkpoint without completing the job when later reporti
   await assert.rejects(withClaimedLeadDraftCheckpointLock(job,lead.id,async()=>assert.fail("withdrawn editor entered checkpoint write")),/permission was withdrawn/i);
 });
 
-test("Automatic resumes supplied-document reading on Codex after Claude quota", async () => {
+test("Automatic resumes supplied-document reading on Claude Sonnet after Codex quota", async () => {
   await ensureJobsSchema();
   const sql = await getSql(), room = 88404, user = "document-failover-editor";
   await sql.query("insert into newsrooms(id,name) values($1,'Document failover room') on conflict(id) do nothing", [room]);
@@ -64,12 +64,12 @@ test("Automatic resumes supplied-document reading on Codex after Claude quota", 
     [user, room],
   );
   const [jobRow] = await sql.query<{ id: number }>(
-    "insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'draft',$3,'claude-frontier','auto','supplied','default','running','Reading documents','document-failover-claim') returning id",
+    "insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'draft',$3,'codex-balanced','auto','supplied','default','running','Reading documents','document-failover-claim') returning id",
     [user, room, lead.id],
   );
   const job = {
     id: jobRow.id, user_id: user, newsroom_id: room, kind: "draft", subject_id: lead.id,
-    model_choice: "claude-frontier", model_choice_source: "auto", research_scope: "supplied",
+    model_choice: "codex-balanced", model_choice_source: "auto", research_scope: "supplied",
     lane: "default", status: "running", stage: "Reading documents", claim_token: "document-failover-claim",
   } as DeskJob;
   const documentChoices: string[] = [];
@@ -78,7 +78,7 @@ test("Automatic resumes supplied-document reading on Codex after Claude quota", 
   await performDraftWork(job, {
     readStoryDocuments: async (_room, _lead, choice) => {
       documentChoices.push(choice);
-      if (choice === "claude-frontier") throw new Error("Claude API error 429: usage limit reached");
+      if (choice === "codex-balanced") throw new Error("Codex API error 429: usage limit reached");
       return "EDITOR-SUPPLIED DOCUMENTS: packet evidence";
     },
     reportAndDraft: async (input) => {
@@ -91,14 +91,14 @@ test("Automatic resumes supplied-document reading on Codex after Claude quota", 
         provenance: [], found_note: "", findings: [], unanswered: [], claims: [], research_memo: {},
       } as ReportedDraftResult;
     },
-    probe: async (choice) => ({ ok: true, label: "Codex Terra", choice: choice as "codex-balanced" }),
+    probe: async (choice) => ({ ok: true, label: "Claude Sonnet", choice: choice as "claude-sonnet" }),
     setJobModelChoice: async (_id, choice) => { job.model_choice = choice; },
     setJobStage: async (_id, stage) => { stages.push(stage); },
     setJobFailoverNote: async () => undefined,
   });
-  assert.deepEqual(documentChoices, ["claude-frontier", "codex-balanced"]);
-  assert.deepEqual(reportChoices, ["codex-balanced"]);
-  assert.ok(stages.includes("Switched to Codex Terra: Claude Opus reached its usage limit"));
+  assert.deepEqual(documentChoices, ["codex-balanced", "claude-sonnet"]);
+  assert.deepEqual(reportChoices, ["claude-sonnet"]);
+  assert.ok(stages.includes("Switched to Claude Sonnet: Codex Terra reached its usage limit"));
 });
 
 test("a later writer checkpoint cannot supersede an intervening editor draft",async()=>{

@@ -172,9 +172,9 @@ One pass: fetch every **accepted** source, then one model read for leads and pro
 - When it files leads, open the queue. When it files nothing, that can be “nothing moved,” not a crash. The page will say which.
 
 Scan has the same **Writing model** picker Story and the queue have, next to
-**Run scan**: Automatic (the default), Codex Terra, Codex Sol, Claude
-Opus, or Local model. Automatic uses the operator's configured gateway when one is set;
-otherwise it tries Claude Opus, then Codex Terra. If the first one's login
+**Run scan**: Automatic (the default), every named Codex and Claude model, or
+Local model. Automatic uses the operator's configured gateway when one is set;
+otherwise it tries Codex Terra, then Claude Sonnet. If the first one's login
 lapses partway through the run, the scan moves to the next rung once, if it
 is ready, reusing the same fetched sources rather than fetching them again.
 A named choice uses only that provider and never falls back. The choice is
@@ -206,8 +206,8 @@ Statuses you will use:
 
 Every active lead has its own compact **Writing model** picker beside **Draft
 with AI** (or **Redraft with AI** after a draft exists). Automatic uses the
-operator's configured gateway when one is set; otherwise it tries Claude
-Opus, then Codex Terra. If the first one's login lapses partway through the
+operator's configured gateway when one is set; otherwise it tries Codex Terra,
+then Claude Sonnet. If the first one's login lapses partway through the
 run, the draft moves to the next rung once, if it is ready, and the row shows
 which provider took over and why. A named choice uses only that provider and
 never falls back, at enqueue or mid-run. The result appears on the same
@@ -218,9 +218,9 @@ list.
 ### Draft selected leads
 
 The **Draft selected leads** bar prepares up to five eligible Queue leads as
-one atomic batch. Tick the leads, then choose exactly one runtime: **Local
-model**, **Claude Code**, **Codex Terra**, or **Codex Sol**. It deliberately
-does not offer Automatic, a gateway, or an API fallback. Each lead keeps its
+one atomic batch. Tick the leads, then choose exactly one named **Codex**,
+**Claude**, **Local model**, or saved **Custom AI** connection (including Gemini). It deliberately does not offer Automatic or
+fallback. Each lead keeps its
 saved research scope. If the selected runtime is unavailable, or one selected
 lead cannot be queued, the batch does not start and the Queue explains why.
 
@@ -316,13 +316,13 @@ During public-source reporting, a captured recurring record such as an agenda, m
 Changing the body of a draft with reporting evidence requires a new evidence review before publishing. Check the sources against the revised story, then choose **I checked: keep this evidence** or **Remove old evidence from public story**. Removal clears the old public source list and reporting metadata, while retaining the original in the private draft archive. It does not remove links you have written into the body. A concurrent edit invalidates an older review; reload and review the current draft.
 
 The picker beside it controls this run. **Automatic** uses a configured
-`LLM_*` gateway exclusively when present; otherwise it tries Claude Opus,
-then Codex Terra, chooses the first ready one before enqueueing, and keeps it
+`LLM_*` gateway exclusively when present; otherwise it tries Codex Terra,
+then Claude Sonnet, chooses the first ready one before enqueueing, and keeps it
 for every reporting and writing pass unless it reaches a usage limit, becomes
 unavailable, loses its login, or times out. Automatic moves the unfinished work
 once to the next ready provider and shows the switch in the workbench. A model
-content refusal stops the run. Choose a named model to force only
-Codex Terra, frontier Codex Sol, frontier Claude Opus, or Local model.
+content refusal stops the run. Choose a named model to force Codex Astra, Sol,
+Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or Local model.
 Explicit choices never fall back. Redraft has the same picker.
 
 Choose **Local model**, then the individual model found on LM Studio, Ollama or llama.cpp. A configured `LLM_BASE_URL` is also supported. Availability means the server can be reached, not that every model can finish your task. See [local-models.md](local-models.md).
@@ -470,7 +470,7 @@ Next to **Keep digging** there is a **Digging model** picker, the same one the
 queue and the workbench have: Automatic; Codex Astra, Sol, Terra and Luna;
 Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.
 Dark Desk Automatic uses a configured gateway when present; otherwise it tries
-Claude Sonnet, then Codex Terra. Planning uses Claude Haiku or the cheaper Codex
+Codex Terra, then Claude Sonnet. Planning uses Claude Haiku or the cheaper Codex
 planning model. If synthesis times out, only synthesis moves to the next model;
 completed searches and document reads do not run again. A model you name yourself never falls back
 — choosing one model is choosing not to run the others.
@@ -569,9 +569,9 @@ Where the paper says what it thinks.
 
 Use **Add documents** or drop files into **Start with your documents**, paste source text, or supply URLs. Keep the writing instruction separate from the evidence. Then press **Write an editorial**. See the [current desk guide](editor-desk.md) for limits, progress, recovery and where the finished draft appears.
 
-Choose **Automatic**, **Claude Opus**, **Codex Terra**, **Codex Sol** or
-**Local model**; saved custom connections are offered too. Codex Sol is selected by default. Automatic tries
-Claude Opus, then Codex Sol once if Claude is unavailable. An explicit choice
+Choose **Automatic**, any named Codex or Claude model, or **Local model**;
+saved custom connections are offered too. Codex Sol is selected by default. Automatic tries
+Codex Sol, then Claude Sonnet once if Codex is unavailable. An explicit choice
 stays selected. Claude and Codex both read the complete configured voice through their native instruction-file options.
 Readiness lists every missing prerequisite — voice file, installation, or
 login — before the button is enabled, and the server checks again when you
@@ -599,7 +599,7 @@ The desk checks that the delivery is actually an editorial before it files
 anything. A provider refusal, limitation note, neutral-summary substitute,
 implausible headline, or incomplete body makes the row **Failed** and creates no
 draft. There is then no Read, Edit, or Publish action to mistake for success.
-Automatic can move from Claude Opus to Codex Sol once; a named choice stays
+Automatic can move from Codex Sol to Claude Sonnet once; a named choice stays
 with that provider. A
 finished row names the provider that actually delivered the piece.
 
@@ -946,4 +946,4 @@ In the story workspace, use **Check draft against evidence**. The check reads th
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.

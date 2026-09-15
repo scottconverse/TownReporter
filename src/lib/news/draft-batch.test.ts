@@ -4,6 +4,7 @@ import { getSql } from "../db.ts";
 import { ensureJobsSchema } from "./jobs.ts";
 import { ensureNewsroomSchema } from "./membership.ts";
 import { cleanDraftBatchInput } from "./draft-batch.ts";
+import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
 import {
   commitDraftBatchForAuthenticatedEditor,
   ensureDraftBatchSchema,
@@ -84,6 +85,21 @@ describe("draft batch validation", () => {
       assert.equal(cleanDraftBatchInput(value).ok, false);
     });
   }
+
+  it("accepts every named Codex, Claude and Local model as the one batch runtime", () => {
+    for (const runtime of PICKER_PROVIDER_IDS) {
+      const result = cleanDraftBatchInput({ items: [{ leadId: 1 }], runtime });
+      assert.equal(result.ok, true, runtime);
+      if (result.ok) assert.equal(result.runtime, runtime);
+    }
+  });
+
+  it("accepts one saved Custom AI connection as the batch runtime", () => {
+    const runtime = "custom:11111111-1111-4111-8111-111111111111";
+    const result = cleanDraftBatchInput({ items: [{ leadId: 1 }], runtime });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.runtime, runtime);
+  });
 });
 
 describe("draft batch transaction and read", () => {

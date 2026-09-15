@@ -10,7 +10,7 @@ You can attach up to 20 files, each up to 100 MB. Supported intake includes Mark
 
 URL intake supports web pages, PDFs and YouTube transcripts where available. A URL does not guarantee that the host will supply its contents or captions. An inaccessible or unsupported source must be replaced with an accessible source or uploaded document.
 
-Choose the writing model and research scope, then start writing. Opinion defaults to Codex Sol. Automatic tries Claude Opus, then Sol if needed; named choices stay selected. Local model and saved API connections follow their configured capabilities. Subscription writers receive the full configured voice and retain their research tools.
+Choose the writing model and research scope, then start writing. Opinion defaults to Codex Sol. Automatic tries Codex Sol, then Claude Sonnet if needed; named choices stay selected. Local model and saved API connections follow their configured capabilities. Subscription writers receive the full configured voice and retain their research tools.
 
 ## Find the result
 

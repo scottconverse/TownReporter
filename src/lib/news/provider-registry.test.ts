@@ -128,12 +128,10 @@ describe("the provider registry is the one description of a writing model", () =
 });
 
 describe("the Automatic ladder is derived, not typed out", () => {
-  it("orders the ladder by ladderRank, which is not the picker's order", () => {
+  it("orders Automatic with Codex first and the cheaper Claude Sonnet fallback last", () => {
     const ladder = automaticLadder();
-    assert.deepEqual(ladder, ["claude-frontier", "codex-balanced"]);
-    // The picker reads Codex, Codex, Claude; the ladder tries Claude first.
-    // Two different orders on purpose -- see ProviderEntry.ladderRank.
-    assert.notDeepEqual(
+    assert.deepEqual(ladder, ["codex-balanced", "claude-sonnet"]);
+    assert.deepEqual(
       ladder,
       providersFor("story")
         .map((entry) => entry.id)
@@ -153,10 +151,10 @@ describe("the Automatic ladder is derived, not typed out", () => {
 
   it("drops a rung the machine has switched off, without changing the static ladder", () => {
     withEnv({ TOWNREPORTER_CODEX: "0" }, () => {
-      assert.deepEqual(enabledAutomaticLadder(), ["claude-frontier"]);
+      assert.deepEqual(enabledAutomaticLadder(), ["claude-sonnet"]);
       // The static list is unchanged: it is read at module load by ai.ts, and
       // the probe loop already copes with a rung that turns out to be gone.
-      assert.deepEqual(automaticLadder(), ["claude-frontier", "codex-balanced"]);
+      assert.deepEqual(automaticLadder(), ["codex-balanced", "claude-sonnet"]);
     });
     withEnv({ TOWNREPORTER_CLAUDE_CODE: "0", TOWNREPORTER_CODEX: "0" }, () => {
       assert.deepEqual(enabledAutomaticLadder(), []);
@@ -187,7 +185,10 @@ describe("environment overrides are config, not code", () => {
     withEnv({ TOWNREPORTER_CODEX: "0" }, () => {
       assert.equal(providerEnabled("codex-balanced"), false);
       // The paper cannot turn on what the machine does not have.
-      assert.equal(providerEnabled("codex-balanced", { "codex-balanced": { enabled: true } }), false);
+      assert.equal(
+        providerEnabled("codex-balanced", { "codex-balanced": { enabled: true } }),
+        false,
+      );
     });
     withEnv({}, () => {
       assert.equal(providerEnabled("codex-balanced"), true);
@@ -390,9 +391,8 @@ describe("the local model is a named pick, everywhere an AI acts", () => {
     probes flip this flag, and `local-model.enabled()` OR's it in.
   */
   it("becomes enabled from discovery alone, with no LLM_BASE_URL set", async () => {
-    const { setLocalDiscoveryReachable, resetLocalDiscoveryReachableForTests } = await import(
-      "./provider-registry.ts"
-    );
+    const { setLocalDiscoveryReachable, resetLocalDiscoveryReachableForTests } =
+      await import("./provider-registry.ts");
     try {
       withEnv({}, () => assert.equal(providerEnabled("local-model"), false));
       setLocalDiscoveryReachable(true);

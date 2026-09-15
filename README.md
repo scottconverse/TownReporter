@@ -249,7 +249,7 @@ Every active Queue row has its own **Writing model** picker beside **Draft with
 AI**; the story workbench has the same control beside Draft or Redraft. The
 default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
 pair names a gateway, Automatic uses that gateway and no other provider.
-Otherwise it tries Claude Opus, then Codex Terra, chooses the first ready
+Otherwise it tries Codex Terra, then Claude Sonnet, chooses the first ready
 provider before enqueueing, and stores that effective choice on the job. Every
 reporting and writing pass in that run uses the same provider, unless it reaches
 a usage limit, becomes unavailable, loses its login, or times out mid-run.
@@ -258,9 +258,8 @@ ready. Uploaded documents remain saved and are reread by the provider that
 takes over. A content refusal stops the run.
 
 The Queue also offers **Draft selected** for one editor-chosen batch of up to
-five eligible leads. That batch requires one explicit Local model, Claude
-Code, Codex Terra, or Codex Sol runtime; it never uses Automatic, a gateway,
-or API fallback. It retains each lead's saved research scope, shows each
+five eligible leads. That batch requires one explicit named Codex, Claude, Local model, or saved
+Custom AI connection (including a configured Gemini endpoint); it never uses Automatic or fallback. It retains each lead's saved research scope, shows each
 lead's durable result and workbench link, and never publishes a story.
 
 Pick Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or
@@ -303,8 +302,8 @@ The CLI is slower than an API — it reloads a fixed preamble per call, so a dra
 **Opinion offers the native providers and local model.** The picker offers
 Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus, Sonnet and
 Haiku, and Local model, plus saved
-custom connections. Codex Sol is selected by default. Automatic tries Claude Opus first and moves to Codex Sol
-once if Claude is unavailable; an explicit choice stays selected. The writer
+custom connections. Codex Sol is selected by default. Automatic tries Codex Sol first and moves to Claude Sonnet
+once if Codex is unavailable; an explicit choice stays selected. The writer
 reads the configured private voice file, and a provider refusal or invalid
 delivery leaves the request failed without a draft.
 
@@ -481,10 +480,10 @@ Created by **Scott Converse**. Companion civic tools: [civic-transparency-toolki
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.
 
 Dark Desk uses a separate cost-aware Automatic path: a configured gateway wins;
-otherwise Claude Sonnet synthesizes and Codex Terra is the one eligible retry.
+otherwise Codex Terra synthesizes and Claude Sonnet is the one eligible retry.
 Claude Haiku plans Claude runs and Codex Luna plans Astra/Luna runs. Research is
 checkpointed before synthesis, so a synthesis retry does not repeat completed
 searches or document reads. Each round enforces one wall-time, model-call,
