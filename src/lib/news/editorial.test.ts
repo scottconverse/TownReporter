@@ -449,15 +449,8 @@ function customRuntime(events: string[], reply: EditorialChatResult) {
   return runtime;
 }
 
-/*
-  Opinion is Claude-only. Codex sat on this picker for one release candidate
-  and its model refused the job every time it was asked for an editorial that
-  takes a position -- the provider's policy, not a bug. These tests pin the
-  shape that replaced it: one provider, one pair, and refusals still never
-  become a headline.
-*/
-describe("Opinion runs one Claude pair", () => {
-  it("Automatic runs locate -> Claude pair -> file, and nothing else", async () => {
+describe("Opinion routes the exact selected cloud model", () => {
+  it("Automatic runs Codex Sol first and files without spending Claude", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     const result = await orchestrateEditorial(
@@ -466,8 +459,8 @@ describe("Opinion runs one Claude pair", () => {
     );
     assert.equal(result.ok, true);
     if (!result.ok) assert.fail(result.error);
-    assert.equal(result.modelChoice, "claude-frontier");
-    assert.deepEqual(events, ["voice:locate", "claude", "file"]);
+    assert.equal(result.modelChoice, "codex-frontier");
+    assert.deepEqual(events, ["voice:locate", "codex", "file"]);
   });
 
   it("an explicit Claude choice does the same", async () => {
@@ -493,6 +486,51 @@ describe("Opinion runs one Claude pair", () => {
     assert.equal(result.modelChoice, "codex-frontier");
     assert.deepEqual(events, ["voice:locate", "codex", "file"]);
   });
+
+  for (const choice of ["codex-astra", "codex-frontier", "codex-balanced", "codex-luna"] as const) {
+    it(`sends the exact ${choice} choice to the Codex pair`, async () => {
+      const orchestrateEditorial = await loadEditorialOrchestrator();
+      const events: string[] = [];
+      const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+      runtime.runCodexPair = async ({ input }) => {
+        assert.equal(input.modelChoice, choice);
+        events.push("codex");
+        return { ok: true, text: DELIVERED };
+      };
+      const result = await orchestrateEditorial(
+        { ...ORCHESTRATION_INPUT, modelChoice: choice },
+        runtime,
+      );
+      assert.equal(result.ok, true, result.ok ? "" : result.error);
+      if (result.ok) assert.equal(result.modelChoice, choice);
+      assert.deepEqual(events, ["voice:locate", "codex", "file"]);
+    });
+  }
+
+  for (const choice of [
+    "claude-fable",
+    "claude-frontier",
+    "claude-sonnet",
+    "claude-haiku",
+  ] as const) {
+    it(`sends the exact ${choice} choice to the Claude pair`, async () => {
+      const orchestrateEditorial = await loadEditorialOrchestrator();
+      const events: string[] = [];
+      const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+      runtime.runClaudePair = async ({ input }) => {
+        assert.equal(input.modelChoice, choice);
+        events.push("claude");
+        return { ok: true, text: DELIVERED };
+      };
+      const result = await orchestrateEditorial(
+        { ...ORCHESTRATION_INPUT, modelChoice: choice },
+        runtime,
+      );
+      assert.equal(result.ok, true, result.ok ? "" : result.error);
+      if (result.ok) assert.equal(result.modelChoice, choice);
+      assert.deepEqual(events, ["voice:locate", "claude", "file"]);
+    });
+  }
 
   it("does not file when the voice file is missing", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
@@ -551,27 +589,38 @@ describe("Opinion runs one Claude pair", () => {
     assert.equal(events.includes("file"), true);
   });
 
-  it("Automatic falls back to Codex after a Claude quota failure", async () => {
+  it("Automatic falls back to Claude Sonnet after a Codex quota failure", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
-    const runtime = claudeRuntime(events, { ok: false, error: "429 Claude session limit" });
-    runtime.runCodexPair = async ({ input }) => { assert.equal(input.modelChoice, "codex-frontier"); events.push("codex"); return { ok: true, text: DELIVERED }; };
+    const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+    runtime.runCodexPair = async ({ input }) => {
+      assert.equal(input.modelChoice, "codex-frontier");
+      events.push("codex");
+      return { ok: false, error: "429 Codex session limit" };
+    };
+    runtime.runClaudePair = async ({ input }) => {
+      assert.equal(input.modelChoice, "claude-sonnet");
+      events.push("claude");
+      return { ok: true, text: DELIVERED };
+    };
     const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
     assert.equal(result.ok, true, result.ok ? "" : result.error);
-    if (result.ok) assert.equal(result.modelChoice, "codex-frontier");
-    assert.deepEqual(events, ["voice:locate", "claude", "codex", "file"]);
+    if (result.ok) assert.equal(result.modelChoice, "claude-sonnet");
+    assert.deepEqual(events, ["voice:locate", "codex", "claude", "file"]);
   });
 
   it("Automatic does not use another provider to bypass a refusal", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
-    const result = await orchestrateEditorial(
-      ORCHESTRATION_INPUT,
-      claudeRuntime(events, { ok: true, text: "EDITORIAL_REFUSAL: This requested political advocacy is not supported." }),
-    );
+    const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+    runtime.runCodexPair = async () => {
+      events.push("codex");
+      return { ok: false, error: "Codex declined this request: I cannot write this editorial." };
+    };
+    const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
     assert.equal(result.ok, false);
-    assert.deepEqual(events, ["voice:locate", "claude"]);
-    if (!result.ok) assert.match(result.error, /political advocacy/i);
+    assert.deepEqual(events, ["voice:locate", "codex"]);
+    if (!result.ok) assert.match(result.error, /declined this request/i);
   });
 });
 

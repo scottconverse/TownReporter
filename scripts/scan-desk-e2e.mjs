@@ -175,9 +175,21 @@ async function dailySettingsJourney(context, observePage) {
   const enabled = panel.getByRole("checkbox", { name: /Run once each day/ });
   if (await enabled.isChecked()) throw new Error("daily scan must start disabled");
   await panel.getByText("Timezone: America/Denver").waitFor();
-  const runtime = panel.getByLabel("Runtime");
-  const labels = await runtime.locator("option").allTextContents();
-  const expected = ["Local model", "Claude Code subscription", "Codex Terra subscription", "Codex Sol subscription"];
+  const runtime = panel.getByLabel("Writing model");
+  const labels = (await runtime.locator("option").allTextContents()).map((label) =>
+    label.split("—")[0].trim(),
+  );
+  const expected = [
+    "Codex Astra",
+    "Codex Sol",
+    "Codex Terra",
+    "Codex Luna",
+    "Claude Fable",
+    "Claude Opus",
+    "Claude Sonnet",
+    "Claude Haiku",
+    "Local model",
+  ];
   if (JSON.stringify(labels) !== JSON.stringify(expected)) {
     throw new Error(`daily runtime labels differ: ${JSON.stringify(labels)}`);
   }
@@ -228,14 +240,15 @@ async function dailySettingsJourney(context, observePage) {
 
   const future = futureDenverTime();
   await time.fill(future);
-  await runtime.selectOption("claude-cli");
+  const freshRuntime = freshPanel.getByLabel("Writing model");
+  await freshRuntime.selectOption("claude-haiku");
   await freshPanel.getByRole("button", { name: "Save daily scan" }).click();
   await freshPanel.getByText("Daily scan settings saved.").waitFor();
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Daily scan", exact: true }).click();
   const persistedPanel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
   if ((await persistedPanel.getByLabel("Local time").inputValue()) !== future) throw new Error("saved local time did not persist");
-  if ((await persistedPanel.getByLabel("Runtime").inputValue()) !== "claude-cli") throw new Error("saved runtime did not persist");
+  if ((await persistedPanel.getByLabel("Writing model").inputValue()) !== "claude-haiku") throw new Error("saved runtime did not persist");
   if (!(await persistedPanel.getByRole("checkbox", { name: /Daily settings source/ }).isChecked())) throw new Error("saved source selection did not persist");
   step("disabled future schedule saves and survives a real reload");
 
@@ -306,7 +319,7 @@ async function fileQueueLead(headline, why) {
 
 async function persistSuppliedScope(headline, why) {
   await fileQueueLead(headline, why);
-  await page.getByRole("tab", { name: "Reporting", exact: true }).click();
+  await page.getByRole("button", { name: /^Model & research · / }).click();
 
   // Draft performs the real saveReportingNotes call first. Hold only its
   // second, model-bearing draftLead request and abort it: the stored scope is
@@ -395,17 +408,29 @@ async function draftBatchJourney() {
   }
   await batch.getByText("2 of 5 selected").waitFor();
 
-  const runtime = batch.getByLabel("Batch runtime");
-  const labels = await runtime.locator("option").allTextContents();
-  const expected = ["Local model", "Claude Code", "Codex Terra", "Codex Sol"];
+  const runtime = batch.getByLabel("Writing model");
+  const labels = (await runtime.locator("option").allInnerTexts()).map((line) =>
+    line.split("—")[0].trim(),
+  );
+  const expected = [
+    "Codex Astra",
+    "Codex Sol",
+    "Codex Terra",
+    "Codex Luna",
+    "Claude Fable",
+    "Claude Opus",
+    "Claude Sonnet",
+    "Claude Haiku",
+    "Local model",
+  ];
   if (JSON.stringify(labels) !== JSON.stringify(expected)) {
-    throw new Error(`batch runtime labels differ: ${JSON.stringify(labels)}`);
+    throw new Error(`batch writing-model labels differ: ${JSON.stringify(labels)}`);
   }
-  await runtime.selectOption("claude-cli");
+  await runtime.selectOption("claude-sonnet");
   await batch.getByRole("button", { name: "Draft selected" }).click();
-  await batch.getByText("Draft batch started with Claude Code.").waitFor();
+  await batch.getByText("Draft batch started with Claude Sonnet.").waitFor();
   await page.reload({ waitUntil: "domcontentloaded" });
-  await batch.getByText(/Batch #\d+ · Claude Code/).waitFor();
+  await batch.getByText(/Batch #\d+ · Claude Sonnet/).waitFor();
   await batch.getByRole("link", { name: `Open current story workbench: ${first}`, exact: true }).waitFor();
   await batch.getByRole("link", { name: `Open current story workbench: ${second}`, exact: true }).waitFor();
 
@@ -428,7 +453,7 @@ async function draftBatchJourney() {
       { timeout: 10_000 },
     )
     .toBe(1);
-  step("two selected leads use one explicit runtime, save with review warnings, and refresh the Drafted queue count");
+  step("the expanded Batch picker sends two selected leads to exact Claude Sonnet, saves review warnings, and refreshes the Drafted queue count");
 }
 
 async function routineNoticePermissionsJourney(context, observePage) {

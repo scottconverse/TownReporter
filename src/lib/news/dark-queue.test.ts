@@ -161,7 +161,7 @@ it(
       evidence: string;
     }>`select why, evidence from leads where id = ${result.leadId}`;
     for (const text of [rows[0]!.why, rows[0]!.evidence]) {
-      assert.match(text, /Sent unverified/);
+      assert.match(text, /lead handoff, not publication/i);
       assert.match(text, /Emergency exemption 0/);
       assert.match(text, /Missing signed procurement file 0/);
       assert.match(text, /A signed exception disproves/);

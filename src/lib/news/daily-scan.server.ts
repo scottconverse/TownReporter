@@ -1,7 +1,7 @@
 import { createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { kickJobs, type DeskJob } from "./jobs.ts";
-import type { DailyScanRuntime } from "./daily-scan.ts";
+import { dailyScanRuntime, type DailyScanRuntime, type StoredDailyScanRuntime } from "./daily-scan.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import {
   runForcedChat,
@@ -73,7 +73,10 @@ export async function tickDailyScans(
     if (!authorized) continue;
     let model: any;
     try {
-      model = await (deps.runtimeSnapshot ?? validateDailyRuntime)(p.newsroom_id, p.runtime);
+      model = await (deps.runtimeSnapshot ?? validateDailyRuntime)(
+        p.newsroom_id,
+        dailyScanRuntime(p.runtime as StoredDailyScanRuntime),
+      );
     } catch (e) {
       await sql.query(
         "update daily_scan_policies set paused=true,pause_reason=$2,revision=revision+1,updated_at=now() where newsroom_id=$1 and revision=$3",

@@ -4,6 +4,7 @@ import { getSql } from "../db.ts";
 import { ensureJobsSchema } from "./jobs.ts";
 import { ensureNewsroomSchema } from "./membership.ts";
 import { cleanDraftBatchInput } from "./draft-batch.ts";
+import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
 import {
   commitDraftBatchForAuthenticatedEditor,
   ensureDraftBatchSchema,
@@ -14,8 +15,8 @@ import {
 const newsroomId = 99101;
 const context = { userId: "batch-editor", newsroomId };
 const runtimeSnapshot = {
-  runtime: "claude-cli" as const,
-  modelChoice: "claude-frontier",
+  runtime: "claude-sonnet" as const,
+  modelChoice: "claude-sonnet",
   model: "selected-claude",
   transport: "claude-code" as const,
 };
@@ -84,6 +85,21 @@ describe("draft batch validation", () => {
       assert.equal(cleanDraftBatchInput(value).ok, false);
     });
   }
+
+  it("accepts every named Codex, Claude and Local model as the one batch runtime", () => {
+    for (const runtime of PICKER_PROVIDER_IDS) {
+      const result = cleanDraftBatchInput({ items: [{ leadId: 1 }], runtime });
+      assert.equal(result.ok, true, runtime);
+      if (result.ok) assert.equal(result.runtime, runtime);
+    }
+  });
+
+  it("accepts one saved Custom AI connection as the batch runtime", () => {
+    const runtime = "custom:11111111-1111-4111-8111-111111111111";
+    const result = cleanDraftBatchInput({ items: [{ leadId: 1 }], runtime });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.runtime, runtime);
+  });
 });
 
 describe("draft batch transaction and read", () => {
@@ -207,7 +223,7 @@ describe("draft batch transaction and read", () => {
     assert.equal(attempts, 0);
   });
 
-  it("refuses a later stored supplied scope for Codex before inserting anything", async () => {
+  it("accepts a later stored supplied scope for Codex", async () => {
     const first = await addLead("new", "public");
     const second = await addLead("new", "supplied");
     const result = await commitDraftBatchForAuthenticatedEditor(
@@ -223,30 +239,26 @@ describe("draft batch transaction and read", () => {
       },
       { accountRate: false, kick: false },
     );
-    assert.equal(result.ok, false);
-    if (!result.ok) {
-      assert.equal(result.code, "ineligible");
-      assert.equal(result.leadId, second);
-    }
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
     const sql = await getSql();
     assert.equal(
       Number(
-        (await sql.query<{ count: number }>("select count(*)::int count from draft_batches"))[0]
-          .count,
+        (await sql.query<{ count: number }>(
+          "select count(*)::int count from draft_batches where newsroom_id=$1",
+          [newsroomId],
+        ))[0].count,
       ),
-      0,
+      1,
     );
-    assert.equal(
-      Number(
-        (
-          await sql.query<{ count: number }>(
-            "select count(*)::int count from desk_jobs where newsroom_id=$1",
-            [newsroomId],
-          )
-        )[0].count,
-      ),
-      0,
+    const jobs = await sql.query<{ subject_id: number; research_scope: string }>(
+      "select subject_id,research_scope from desk_jobs where newsroom_id=$1 order by subject_id",
+      [newsroomId],
     );
+    assert.deepEqual(jobs, [
+      { subject_id: first, research_scope: "public" },
+      { subject_id: second, research_scope: "supplied" },
+    ]);
   });
 
   it("an open job on a later lead rolls back the whole selection", async () => {

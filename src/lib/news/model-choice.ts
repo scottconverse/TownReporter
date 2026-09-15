@@ -57,9 +57,16 @@ export function isCustomModelChoice(value: unknown): value is CustomModelChoice 
 export type EffectiveStoryModelChoice = StoryModelChoice | "configured";
 
 /* Opinion uses the same native subscription providers as Story. Automatic
-   tries Claude and then Codex Sol; an explicit pick never falls through. */
+   starts on Codex Sol and keeps Claude Sonnet as its limited fallback; an
+   explicit pick never falls through. */
 export const DEFAULT_OPINION_MODEL = "codex-frontier" as const;
-export const OPINION_AUTOMATIC_LADDER = ["claude-frontier", "codex-frontier"] as const;
+export const OPINION_AUTOMATIC_LADDER = ["codex-frontier", "claude-sonnet"] as const;
+/**
+ * Dark Desk spends most of a round on mechanical planning and evidence
+ * triage. Automatic therefore uses the balanced synthesis models; Opus and
+ * Astra remain explicit choices for an editor who wants them.
+ */
+export const DARK_AUTOMATIC_LADDER = ["codex-balanced", "claude-sonnet"] as const;
 export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = STORY_MODEL_CHOICES.filter(
   (choice) => choice.value === "auto" || providerEntry(choice.value)?.offeredFor.opinion,
 );
@@ -110,8 +117,10 @@ export function shouldHydrateDarkModel(
   lastModelChoice: unknown,
   status: unknown,
 ): boolean {
-  return selectedInvestigationId === detailInvestigationId &&
-    (lastModelChoice != null || status !== "investigating");
+  return (
+    selectedInvestigationId === detailInvestigationId &&
+    (lastModelChoice != null || status !== "investigating")
+  );
 }
 
 export function modelChoiceLabel(value: unknown): string {
@@ -122,7 +131,7 @@ export function modelChoiceLabel(value: unknown): string {
 }
 
 /**
- * The Automatic ladder, in words: "Claude Opus, then Codex Terra".
+ * The Automatic ladder, in words: "Codex Terra, then Claude Sonnet".
  *
  * Read from the registry rather than typed out, so a reordered or retired
  * rung cannot leave this sentence describing a ladder that no longer exists
@@ -144,7 +153,8 @@ function ladderSentence(ladder: readonly string[] = automaticLadder()): string {
  * cannot leave the help text describing a ladder that no longer exists.
  */
 export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"): string {
-  if (isCustomModelChoice(value)) return "Uses only the selected custom API connection for this run; no fallback. Your provider's usage charges may apply.";
+  if (isCustomModelChoice(value))
+    return "Uses only the selected custom API connection for this run; no fallback. Your provider's usage charges may apply.";
   const options =
     scope === "opinion"
       ? OPINION_MODEL_CHOICES
@@ -161,15 +171,30 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
   if (scope === "opinion") {
     return `Tries ${ladderSentence(OPINION_AUTOMATIC_LADDER)}. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.`;
   }
-  const noun = scope === "dark" ? "round" : "draft";
-  return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first one's login has lapsed or it does not respond in time, the ${noun} moves to the next.`;
+  if (scope === "dark") {
+    return `Uses your configured gateway when set; otherwise tries ${ladderSentence(DARK_AUTOMATIC_LADDER)}. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.`;
+  }
+  return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the draft moves to the next. A content refusal stops the run, and an explicit pick never falls back.`;
+}
+
+/**
+ * Recreate the choice the editor made for the latest Story run.
+ *
+ * Automatic is resolved to a concrete provider before it is stored on the
+ * job, so reading only `model_choice` makes a reopened Story page pretend the
+ * editor explicitly chose that provider. `model_choice_source` preserves the
+ * distinction. This keeps Redraft on the visible choice that produced the
+ * current draft while still showing Automatic when the ladder made the pick.
+ */
+export function rememberedStoryModelChoice(value: unknown, source: unknown): StoryModelChoice {
+  return source === "auto" ? "auto" : storyModelChoice(value);
 }
 
 /**
  * Rewrites the generic "no model configured at all" message into Opinion's
  * own guidance. `candidate` says WHICH rung was being probed when that
- * happened -- defaulting to "claude-frontier" keeps every existing call site
- * (and Automatic, which is still Claude-only) unchanged.
+ * happened -- defaulting to "claude-frontier" keeps existing call sites that
+ * omit the candidate compatible.
  *
  * Before `candidate` existed, this rewrote to "Open Claude Code ... and sign
  * in" unconditionally, so a "local-model" pick with no LLM_BASE_URL set at

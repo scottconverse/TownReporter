@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   cleanDailyScanPolicyInput,
+  dailyScanRuntime,
   nextDailyOccurrence,
   nextEligibleDailyOccurrence,
   persistDailyScanPolicy,
@@ -78,10 +79,26 @@ describe("scheduled scan trust boundaries", () => {
 });
 
 describe("daily scan request validation", () => {
+  it("migrates legacy runtime names without silently choosing Opus", () => {
+    assert.equal(dailyScanRuntime("claude-cli"), "claude-sonnet");
+    assert.equal(dailyScanRuntime("codex-terra"), "codex-balanced");
+    assert.equal(dailyScanRuntime("codex-sol"), "codex-frontier");
+    assert.equal(dailyScanRuntime("local"), "local-model");
+    assert.equal(dailyScanRuntime("claude-frontier"), "claude-frontier");
+    assert.equal(dailyScanRuntime("custom:gemini"), "custom:gemini");
+  });
   for (const raw of [
     null,
     {},
     { enabled: "true" },
+    {
+      enabled: false,
+      localTime: "06:00",
+      runtime: "unknown-provider",
+      sourceCap: 12,
+      selectedSourceIds: [],
+      expectedRevision: 0,
+    },
     {
       enabled: "false",
       localTime: "06:00",
@@ -123,7 +140,7 @@ describe("daily scan policy compare-and-swap", () => {
     const input = {
       enabled: false,
       localTime: "06:00",
-      runtime: "local" as const,
+      runtime: "local-model" as const,
       sourceCap: 12,
       selectedSourceIds: [7],
       expectedRevision: 0,

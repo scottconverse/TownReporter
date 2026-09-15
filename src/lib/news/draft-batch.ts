@@ -1,7 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
 import { deskMiddleware } from "./desk-auth.ts";
+import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
+import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
 
-export type DraftBatchRuntime = "local" | "claude-cli" | "codex-terra" | "codex-sol";
+export type DraftBatchRuntime = Exclude<StoryModelChoice, "auto">;
+export type DraftBatchStoredRuntime =
+  | DraftBatchRuntime
+  | "local"
+  | "claude-cli"
+  | "codex-terra"
+  | "codex-sol";
 export type DraftBatchStartItem = { leadId: number; researchScope?: "public" | "supplied" };
 export type DraftBatchItem = {
   leadId: number;
@@ -17,7 +25,7 @@ export type DraftBatchItem = {
 export type DraftBatchView = {
   id: number;
   createdAt: string;
-  runtime: { runtime: DraftBatchRuntime; label: string };
+  runtime: { runtime: DraftBatchStoredRuntime; label: string };
   items: DraftBatchItem[];
 };
 export type DraftBatchFailure = {
@@ -35,7 +43,7 @@ export type DraftBatchFailure = {
 };
 export type DraftBatchResult = { ok: true; batch: DraftBatchView } | DraftBatchFailure;
 
-const runtimes = new Set<DraftBatchRuntime>(["local", "claude-cli", "codex-terra", "codex-sol"]);
+const runtimes = new Set<string>(PICKER_PROVIDER_IDS);
 
 export function cleanDraftBatchInput(
   value: unknown,
@@ -44,11 +52,14 @@ export function cleanDraftBatchInput(
     return { ok: false, code: "invalid-input", error: "Choose between one and five leads." };
   }
   const row = value as Record<string, unknown>;
-  if (!runtimes.has(row.runtime as DraftBatchRuntime)) {
+  if (
+    typeof row.runtime !== "string" ||
+    (!runtimes.has(row.runtime) && !isCustomModelChoice(row.runtime))
+  ) {
     return {
       ok: false,
       code: "invalid-input",
-      error: "Choose Local model, Claude Code, Codex Terra, or Codex Sol.",
+      error: "Choose one named Codex, Claude, Local, or saved Custom AI model for this batch.",
     };
   }
   if (!Array.isArray(row.items) || row.items.length < 1 || row.items.length > 5) {

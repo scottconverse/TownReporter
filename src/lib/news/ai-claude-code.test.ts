@@ -34,6 +34,54 @@ describe("parseCliEnvelope", () => {
     assert.deepEqual(parseCliEnvelope(raw), { ok: true, text: '{"headline":"Hi"}' });
   });
 
+  it("carries only the CLI-reported usage counters and result facts into metadata", () => {
+    const out = parseCliEnvelope(
+      JSON.stringify({
+        is_error: false,
+        result: "PONG",
+        duration_ms: 427,
+        modelUsage: { "claude-sonnet-4-5-20250929": { input_tokens: 10 } },
+        usage: {
+          input_tokens: 120,
+          cache_creation_input_tokens: 55,
+          cache_read_input_tokens: 1_900,
+          output_tokens: 48,
+        },
+      }),
+      { provider: "claude-code", model: "requested-model", durationMs: 999, timedOut: false },
+    );
+    assert.deepEqual(out, {
+      ok: true,
+      text: "PONG",
+      meta: {
+        provider: "claude-code",
+        model: "claude-sonnet-4-5-20250929",
+        durationMs: 427,
+        timedOut: false,
+        inputTokens: 120,
+        outputTokens: 48,
+      },
+    });
+  });
+
+  it("retains metadata on an error envelope without inventing a total", () => {
+    const out = parseCliEnvelope(
+      JSON.stringify({ is_error: true, result: "rate limited", usage: { input_tokens: 12 } }),
+      { provider: "claude-code", model: "claude-test", durationMs: 99, timedOut: false },
+    );
+    assert.equal(out.ok, false);
+    if (!out.ok) {
+      assert.deepEqual(out.meta, {
+        provider: "claude-code",
+        model: "claude-test",
+        durationMs: 99,
+        timedOut: false,
+        inputTokens: 12,
+      });
+      assert.equal(out.meta?.totalTokens, undefined);
+    }
+  });
+
   it("trims surrounding whitespace", () => {
     const raw = `\n  ${JSON.stringify({ is_error: false, result: "  PONG  " })}  \n`;
     assert.deepEqual(parseCliEnvelope(raw), { ok: true, text: "PONG" });

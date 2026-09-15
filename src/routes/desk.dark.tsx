@@ -21,6 +21,7 @@ import {
   reopenParkedInvestigation,
   scanTipSubreddit,
   getTipSubreddit,
+  type DarkRunRow,
   type InvestigationRow,
 } from "@/lib/news/dark";
 import {
@@ -146,7 +147,7 @@ function DarkPage() {
   }
 
   function beginDigPhase() {
-    setCardPhase("Searching records…");
+    setCardPhase("Queueing investigation…");
   }
 
   function clearPhase() {
@@ -248,6 +249,9 @@ function DarkPage() {
 
   const detailInvestigationId = detail.data?.investigation.id;
   const currentDarkJob = detail.data?.darkJob;
+  const liveJobStage = darkJobActive(currentDarkJob?.status)
+    ? String(currentDarkJob?.stage ?? "").trim()
+    : "";
   useEffect(() => {
     if (openId == null || detailInvestigationId !== openId) return;
     const job = currentDarkJob;
@@ -389,18 +393,8 @@ function DarkPage() {
     },
   });
 
-  /*
-    "Send unverified, as a tip."
-
-    The four gates decide whether a signal may be called verified; they do not
-    decide what the editor is allowed to do. An editor who wants a speculative
-    file on the queue anyway can say so, and the lead then carries the words
-    "sent unverified" in its own notes rather than pretending.
-  */
-  const [sendUnverified, setSendUnverified] = useState(false);
-
   const toQueue = useMutation({
-    mutationFn: (id: number) => queueInvestigation({ data: { id, asTip: sendUnverified } }),
+    mutationFn: (id: number) => queueInvestigation({ data: { id } }),
     onMutate: (id) => {
       // Clear any stale error/confirmation from a previous attempt on this
       // file so a retry does not show two contradictory banners at once.
@@ -499,6 +493,7 @@ function DarkPage() {
           : `Nothing new in r/${res.subreddit}.`,
       );
       parts.push(`Read ${res.read} posts, ${res.civic} looked civic.`);
+      parts.push(res.enrichment.reason);
       if (res.alreadyKnown) parts.push(`${res.alreadyKnown} already on the desk.`);
       if (res.incomplete && res.reason) parts.push(res.reason);
       // A quiet subreddit is a successful read, not a failure — style it as
@@ -703,15 +698,13 @@ function DarkPage() {
                 "This research run did not finish."
               : null
           }
-          phase={cardPhase || liveLine}
+          phase={liveJobStage || cardPhase || liveLine}
           notice={noticeAt === "work" ? notice : null}
           noticeOk={noticeOk}
           queuedLead={queued?.invId === openId ? queued.leadId : null}
           queuedAlready={queued?.invId === openId ? queued.alreadyQueued : false}
           queuePending={toQueue.isPending}
           queueError={queueError?.invId === openId ? queueError.message : null}
-          sendUnverified={sendUnverified}
-          onSendUnverified={setSendUnverified}
           followPending={followLead.isPending}
           parkPending={park.isPending}
           onKeepDigging={() => {
@@ -788,8 +781,8 @@ function DarkPage() {
             <div className="reddit-progress">
               <p className="worth-t">Reading {redditLabel}</p>
               <p className="reddit-sub">
-                Four feeds, read 8 seconds apart so Reddit does not block this paper. About a
-                minute.
+                Four feeds, then up to three full-thread reads through Redlib. Every Reddit
+                request stays 8 seconds apart. Usually about a minute.
               </p>
               <div className="busy-rule" aria-hidden />
               <p className="reddit-elapsed" aria-hidden>
@@ -920,6 +913,7 @@ function DarkPage() {
                     </p>
                   ) : null}
                   {r.summary ? <p className="side-item">{plainEditorText(r.summary)}</p> : null}
+                  <DarkRunMeter run={r} />
                 </div>
               ))}
             </details>
@@ -1001,6 +995,12 @@ function RedditTipRows({
                 {p.title}
               </a>
               <span className="np-meta block">{p.updated ? `Posted ${p.updated.slice(0, 10)}` : "Posted date unknown"}{p.author ? ` · ${p.author}` : ""}{!p.autoFileEligible ? " · older/undated — manual file only" : ""}</span>
+              <span className="np-meta block">
+                {p.sourceAdapter === "redlib-html" ? "Thread page read via Redlib" : "RSS excerpt read"}
+                {p.redditScore !== null && p.redditScore !== undefined ? ` · ${p.redditScore} Reddit points` : ""}
+                {p.reportedCommentCount !== null && p.reportedCommentCount !== undefined ? ` · ${p.reportedCommentCount} comments reported` : ""}
+                {p.coverage === "partial" ? " · some comments were unavailable" : ""}
+              </span>
             </div>
             <span className={"chip st-" + p.state}>{redditPostStateLabel(p.state)}</span>
             {canFile ? (
@@ -1050,6 +1050,9 @@ function RedditResultPanel({
       <p className="worth-t">Reddit read finished</p>
       <p className="reddit-headline">{redditResultHeadline(result)}</p>
       <p className="reddit-sub">Automatic filing uses dated posts from the past 30 days. Older or undated results remain available to file by hand.</p>
+      <p className="reddit-sub">
+        <strong>Full-thread reading:</strong> {result.enrichment.reason}
+      </p>
       {result.searched.length > 0 ? (
         <p className="reddit-searched">Searched: {result.searched.join(" · ")}</p>
       ) : null}
@@ -1151,6 +1154,50 @@ function WorthCard({
   );
 }
 
+const DARK_STOP_COPY: Record<string, string> = {
+  "elapsed-time-limit": "Stopped at the total time limit",
+  "model-call-limit": "Stopped at the model-call limit",
+  "search-limit": "Stopped at the search limit",
+  "document-read-limit": "Stopped at the document-read limit",
+  "evidence-sufficient": "This run paused after the planner judged the current evidence sufficient; unresolved trails remain saved",
+  "diminishing-returns": "This run paused after diminishing returns; it did not reject the remaining leads",
+  "repeated-sources": "This run paused after sources began repeating; it did not resolve the hypothesis",
+  "no-materially-new-finding": "This run paused after two rounds without a material new finding; unresolved trails remain saved",
+  "frontier-exhausted": "This run ended because no productive unresolved lead remained in the active frontier",
+  "hop-limit": "Stopped at the hop limit; unresolved leads remain saved",
+  "synthesis-failed": "Stopped because synthesis failed; completed research remains saved",
+  "provider-failed": "Stopped because the provider failed; completed work remains saved",
+  completed: "Completed within the run limits",
+};
+
+function DarkRunMeter({ run, active = false }: { run: DarkRunRow; active?: boolean }) {
+  const totals = run.usage.totals;
+  const startedAt = Date.parse(run.started_at);
+  const elapsedMs = active && Number.isFinite(startedAt)
+    ? Math.max(totals.elapsedMs, Date.now() - startedAt)
+    : totals.elapsedMs;
+  const tokens = totals.totalTokens == null ? "tokens not reported for every call" : `${totals.totalTokens.toLocaleString()} tokens`;
+  return (
+    <div className="of-stop" role={active ? "status" : undefined} aria-live={active ? "polite" : undefined}>
+      <p>
+        <b>{active ? "Live run:" : "Run usage:"}</b>{" "}
+        {totals.modelCalls} model call{totals.modelCalls === 1 ? "" : "s"} · {totals.searches} search{totals.searches === 1 ? "" : "es"} · {totals.documentReads} document read{totals.documentReads === 1 ? "" : "s"} · {elapsedLabel(Math.ceil(elapsedMs / 1000))} · {tokens}
+      </p>
+      {!active && run.stopReason ? <p className="meta">{DARK_STOP_COPY[run.stopReason] ?? run.stopReason}</p> : null}
+      {run.usage.calls.length ? (
+        <details className="of-trail">
+          <summary>Model calls — {run.usage.calls.length}</summary>
+          {run.usage.calls.map((call, index) => (
+            <p className="side-item" key={`${call.stage}-${index}`}>
+              <b>{call.stage}</b> · {call.provider} · {call.model} · {elapsedLabel(Math.ceil(call.durationMs / 1000))} · {call.result}{call.totalTokens == null ? "" : ` · ${call.totalTokens.toLocaleString()} tokens`}
+            </p>
+          ))}
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 function InvestigationWorkspace({
   openId,
   detail,
@@ -1166,8 +1213,6 @@ function InvestigationWorkspace({
   queuedAlready,
   queuePending,
   queueError,
-  sendUnverified,
-  onSendUnverified,
   followPending,
   parkPending,
   onKeepDigging,
@@ -1194,8 +1239,6 @@ function InvestigationWorkspace({
   queuedAlready: boolean;
   queuePending: boolean;
   queueError: string | null;
-  sendUnverified: boolean;
-  onSendUnverified: (v: boolean) => void;
   followPending: boolean;
   parkPending: boolean;
   onKeepDigging: () => void;
@@ -1250,20 +1293,8 @@ function InvestigationWorkspace({
   const entities = detail?.entities ?? [];
   const signals = detail?.signals ?? [];
   const brief = detail?.brief ?? null;
-  /*
-    The two stages, said out loud.
-
-    A signal may remain unverified after checks ran but found insufficient
-    evidence. State the missing qualification, not an invented lack of effort.
-    Ticking "send unverified, as a tip" un-blocks it — the gate
-    decides what may be CALLED verified, never what the editor may do.
-  */
+  const run = detail?.run ?? null;
   const verifiedSignals = signals.filter((s) => s.verification_status === "verified");
-  const queueBlocked = signals.length > 0 && verifiedSignals.length === 0 && !sendUnverified;
-  const queueBlockedReason =
-    signals.length === 1
-      ? "The signal has not met all verification requirements. Review its checks and missing evidence below, or send it unverified as a tip."
-      : `None of the ${signals.length} signals has met all verification requirements. Review their checks and missing evidence below, or send them unverified as tips.`;
   const facts = claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind));
   const questions = openQuestionsFrom(detail);
   // Grade each "On the record" line by whether it ties to a captured
@@ -1298,7 +1329,11 @@ function InvestigationWorkspace({
       .filter((f) => f.text),
   ];
   const tests = hyps.map((h) => plainEditorText(h.body)).filter(Boolean);
-  const next = frontier.filter((f) => ["open", "investigating", "reopened"].includes(f.status));
+  // Deferred means "saved for a later run," not rejected. Keep those leads
+  // visible so a frontier cap never looks like the desk threw them away.
+  const next = frontier.filter((f) =>
+    ["open", "investigating", "reopened", "deferred"].includes(f.status),
+  );
   // The raw row list can hold the same lead under several labels; dedupe by
   // its displayed text so the pile shows what's actually left to open, not
   // duplicate rows counted as separate work (Dark Desk F6).
@@ -1314,7 +1349,7 @@ function InvestigationWorkspace({
     return out;
   })();
   const leftover = nextDeduped.length;
-  const totalOpen = Number(inv?.still_open ?? leftover);
+  const totalOpen = Math.max(Number(inv?.still_open ?? 0), leftover);
   const pauseText = editorPauseReason(inv?.pause_reason, captureStats);
   const parentTitle = inv?.title || `File ${openId}`;
   const started = startedLine(parentTitle, pasteArt?.excerpt ?? "", inv?.summary ?? "");
@@ -1330,7 +1365,7 @@ function InvestigationWorkspace({
   const statusLine = [
     statusBit,
     readableLabel,
-    totalOpen > 0 ? `${totalOpen} open follow-up entries` : null,
+    totalOpen > 0 ? `${totalOpen} unresolved follow-up entries` : null,
     investigationRoundLabel(round, budget),
     inv?.updated_at ? `last touched ${formatShortDate(inv.updated_at)}` : null,
   ]
@@ -1373,7 +1408,7 @@ function InvestigationWorkspace({
           ) : (
             <InkButton
               tone="ghost"
-              disabled={keepDisabled || queuePending || queueBlocked}
+              disabled={keepDisabled || queuePending}
               onClick={onQueue}
             >
               {queuePending ? "Sending…" : "Send to the queue"}
@@ -1390,6 +1425,7 @@ function InvestigationWorkspace({
       {stalled ? <p className="note err">{stalledRunCopy("dark")}</p> : null}
       {darkJobError ? <p className="note err" role="alert">{darkJobError}</p> : null}
       {digging ? <Busy label={phase || "Searching records…"} /> : null}
+      {run ? <DarkRunMeter run={run} active={digging} /> : null}
       {notice && !digging ? <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p> : null}
       {
         /*
@@ -1427,18 +1463,8 @@ function InvestigationWorkspace({
       }
       {signals.length > 0 && queuedLead == null ? (
         <p className="of-stop" role="status">
-          <b>{sendUnverified ? "Filing as an unverified tip:" : queueBlocked ? "Not ready for the queue:" : "Ready for the queue:"}</b>{" "}
-          {queueBlocked
-            ? queueBlockedReason
-            : `${verifiedSignals.length} of ${signals.length} signal${signals.length === 1 ? "" : "s"} on this file passed all four gates.`}{" "}
-          <label className="tip-toggle">
-            <input
-              type="checkbox"
-              checked={sendUnverified}
-              onChange={(e) => onSendUnverified(e.currentTarget.checked)}
-            />{" "}
-            Send unverified, as a tip
-          </label>
+          <b>Lead status:</b>{" "}
+          {`${verifiedSignals.length} of ${signals.length} signal${signals.length === 1 ? "" : "s"} completed the research protocol. Incomplete checks remain visible in the file and travel with the lead; they do not block sending it to the working queue.`}
         </p>
       ) : null}
       {pending ? <p className="meta">Getting this ready…</p> : null}
@@ -1476,14 +1502,17 @@ function InvestigationWorkspace({
           {nextDeduped.length > 0 ? (
             <>
               <SecHead
-                title="Still unopened"
+                title="Still to pursue"
                 count={nextDeduped.length}
-                sub="Items shown from the open follow-up list. Displayed duplicates are folded in."
+                sub="Open and deferred trails stay visible here. Displayed duplicates are folded in."
               />
               <div className="of-frontier">
                 {nextDeduped.slice(0, frN).map((f) => (
                   <div key={f.id} className="fr-item">
                     <p className="fr-label">{humanFrontierLabel(f.label)}</p>
+                    {f.status === "deferred" ? (
+                      <p className="meta">Saved for a later run; this lead was not rejected.</p>
+                    ) : null}
                     {f.why ? <p className="fr-why">{plainEditorText(f.why)}</p> : null}
                     <InkButton
                       tone="quiet"
@@ -1584,7 +1613,7 @@ function InvestigationWorkspace({
               <SecHead
                 title="Signals"
                 count={signals.length}
-                sub="Stage one asks the question. Stage two runs the adversarial searches and answers the four gates. Only a signal that passed all four is called verified."
+                sub="Stage one asks the question. Stage two runs the adversarial searches and answers the four gates. Completing all four records protocol completion; the editor still verifies the underlying facts."
               />
               {signals.map((s) => (
                 <div key={s.id} className="side-item sig-card">

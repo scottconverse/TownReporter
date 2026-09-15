@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.48](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.48) — reliable local-model drafting with reviewable evidence, citations and name checks.** [Release guide](docs/releases/0.6.48.md) · [Changelog](CHANGELOG.md).
+**Current release: [0.6.49](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.49) — bounded Dark Desk investigations, durable reporting pulls and automatic Story recovery.** [Release guide](docs/releases/0.6.49.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, installation checks and deployment evidence are recorded separately in the [release guide](docs/releases/0.6.48.md).
+Release source, installation checks and deployment evidence are recorded separately in the [release guide](docs/releases/0.6.49.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -50,7 +50,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-Download the Windows installation ZIP from [TownReporter 0.6.48](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.48) or the [latest release](https://github.com/scottconverse/TownReporter/releases/latest). Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
+Download the Windows installation ZIP from [TownReporter 0.6.49](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.49) or the [latest release](https://github.com/scottconverse/TownReporter/releases/latest). Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first editorial workflow within an hour with working internet and an available AI account or endpoint; release evidence records the measured result and its limits. Public hosting is separate from this local installation.
 
@@ -95,12 +95,13 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.49** — Restores Dark Desk lead development, adds bounded run controls and visible usage, makes reporting Pull durable and resumable, keeps Story model controls reachable, and lets Automatic recover uploaded-document work when a provider reaches its limit or becomes unavailable.
 - **0.6.48** — Connects discovered local models to Story drafting, makes evidence-check progress and results visible, verifies names from retained written records, selectively repairs missing citations, and distinguishes the writer checkpoint from the final checked draft.
 - **0.6.47** — Keeps a labeled Editor’s desk button in the public header on desktop and phones.
 - **0.6.46** — Implements the approved public-reader design, full archive search and pagination, browser-local saved stories, dark mode and text sizes, sharing, and a correction email form. See the [reader guide](docs/reader.md).
 - **0.6.45** — Corrects the remaining Claude-only Opinion comment in the downloadable configuration template. Runtime behavior is unchanged from 0.6.44.
 
-- **0.6.44** — Packages the Astra desk, shared large-document and URL intake, private-document evidence checks, supported name corrections, saved Opinion material, Sol default and native voice-file integration for both subscription writers. See [the current release guide](docs/releases/0.6.48.md).
+- **0.6.44** — Packages the Astra desk, shared large-document and URL intake, private-document evidence checks, supported name corrections, saved Opinion material, Sol default and native voice-file integration for both subscription writers. See [the current release guide](docs/releases/0.6.49.md).
 
 - **0.6.35 beta** — Editor delivery includes the story evidence-check workbench, Stats reports, named custom AI connections, draft recovery and reconciliation, PDF/page-aware evidence, ownership-preserving research and queue improvements, and retained routine-notice editor controls. Published and deployed to Halo at `6f603ec`; the PDF/page-aware OCR and Dark Desk work retain the bounded acceptance limits described below.
 - **0.6.34 beta** — Dark Desk selects relevant captured records across the full inventory before shared selection builds separately bounded inputs for stage-one signal synthesis and the final brief. The release receipt records runtime proof and its limits.
@@ -171,7 +172,7 @@ Current development status and remaining features: [TODO.md](TODO.md). Remote ta
 - **Dark Desk has two dials.** _Dig_ — how far it chases. _Nerve_ — how speculative it may be. The panel says in plain words what the current setting will do.
 - **Dark Desk's planner had never run.** Its budget was 45 seconds against a call that needs 150, and every failure fell back to keyword matching in silence. The database held zero entities, claims or hypotheses.
 - **Confidence is capped by the label in code**, not requested in a prompt, and a FACT with no citation is downgraded.
-- **Reddit is a tip line** — one unambiguous accepted subreddit source enables the paced check. Posts are filed as unverified tips, never as reporting; a new town does not silently inherit r/longmont.
+- **Reddit is a tip line** — one unambiguous accepted subreddit source enables the paced check. RSS discovers candidates; an optional local Redlib reads selected original posts in full and reports its coverage, while RSS remains the fallback. Posts are filed as unverified tips, never as reporting; a new town does not silently inherit r/longmont.
 - **Search works.** Exa runs first, and a PULL no longer answers a Longmont question with three California school-district PDFs.
 - **Nothing scrolls sideways.** The navigation rails wrap.
 
@@ -249,20 +250,28 @@ Every active Queue row has its own **Writing model** picker beside **Draft with
 AI**; the story workbench has the same control beside Draft or Redraft. The
 default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
 pair names a gateway, Automatic uses that gateway and no other provider.
-Otherwise it tries Claude Opus, then Codex Terra, chooses the first ready
+Otherwise it tries Codex Terra, then Claude Sonnet, chooses the first ready
 provider before enqueueing, and stores that effective choice on the job. Every
-reporting and writing pass in that run uses the same provider, unless that
-provider's login lapses mid-run -- Automatic then moves to the next ladder
-rung once, if it is ready.
+reporting and writing pass in that run uses the same provider, unless it reaches
+a usage limit, becomes unavailable, loses its login, or times out mid-run.
+Automatic then moves the unfinished work to the next ladder rung once, if it is
+ready. Uploaded documents remain saved and are reread by the provider that
+takes over. A content refusal stops the run.
 
 The Queue also offers **Draft selected** for one editor-chosen batch of up to
-five eligible leads. That batch requires one explicit Local model, Claude
-Code, Codex Terra, or Codex Sol runtime; it never uses Automatic, a gateway,
-or API fallback. It retains each lead's saved research scope, shows each
-lead's durable result and workbench link, and never publishes a story.
+five eligible leads. That batch requires one explicit named Codex, Claude,
+Local model, or saved Custom AI connection, including a configured Gemini
+endpoint. It never uses Automatic or fallback. It retains each lead's saved
+research scope, shows each lead's durable result and workbench link, and never
+publishes a story.
 
-Pick Codex Terra, frontier Codex Sol, frontier Claude Opus, or **Local
-model** to force that provider for one run. Explicit choices never fall
+Daily Scan uses the same explicit choices, including saved Custom AI
+connections. It stores the selected model with the schedule and never falls
+back to a different provider. When a selected workflow reads a scanned PDF or
+image, OCR stays on that workflow's selected model.
+
+Pick Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or
+**Local model** to force that provider for one run. Explicit choices never fall
 back, at enqueue or mid-run. The endpoint/model compatibility overrides are
 listed in [docs/setup.md](docs/setup.md#per-run-picker).
 
@@ -299,9 +308,10 @@ For **Automatic**, a configured gateway wins; named choices in Story, Scan and D
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
 **Opinion offers the native providers and local model.** The picker offers
-Automatic, Claude Opus, Codex Terra, Codex Sol and Local model, plus saved
-custom connections. Codex Sol is selected by default. Automatic tries Claude Opus first and moves to Codex Sol
-once if Claude is unavailable; an explicit choice stays selected. The writer
+Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus, Sonnet and
+Haiku, Local model, and saved custom connections. Codex Sol is selected by
+default. Automatic tries Codex Sol first and moves to Claude Sonnet once if
+Codex is unavailable; an explicit choice stays selected. The writer
 reads the configured private voice file, and a provider refusal or invalid
 delivery leaves the request failed without a draft.
 
@@ -478,4 +488,12 @@ Created by **Scott Converse**. Companion civic tools: [civic-transparency-toolki
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.
+
+Dark Desk uses a separate cost-aware Automatic path: a configured gateway wins;
+otherwise Codex Terra synthesizes and Claude Sonnet is the one eligible retry.
+Claude Haiku plans Claude runs and Codex Luna plans Astra/Luna runs. Research is
+checkpointed before synthesis, so a synthesis retry does not repeat completed
+searches or document reads. Each round enforces one wall-time, model-call,
+search, and document-read budget and stores its actual call ledger when the
+provider reports usage.

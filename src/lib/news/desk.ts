@@ -31,25 +31,14 @@ import {
   mayInheritLeadSources,
 } from "./draft-evidence.ts";
 import { webSearch } from "./search-web";
-import { dropListingUrls, namedSubjects, preferPrimaryUrls } from "./extract";
-import {
-  docCandidateHosts,
-  docIndexPages,
-  isOnSubject,
-  pullQueries,
-  siteOwnDocLinks,
-} from "./pull-plan";
+import { namedSubjects } from "./extract";
 import { absenceClaims } from "./absence-gate";
 import {
   applyTodoPatch,
-  appendScratch,
-  formatPullDump,
-  selectExcerpt,
   keepHumanTodos,
   machineTodosFrom,
   packNotes,
   parseNotes,
-  toggleTodo,
   uncheckedGateTodos,
   type NoteTodo,
 } from "./notes";
@@ -63,6 +52,8 @@ import {
 import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
 import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
 import {
+  enqueueJob,
+  findOpenJob,
   kickJobs,
   latestJob,
   runLooksStalled,
@@ -71,10 +62,15 @@ import {
   setJobStage,
   type DeskJob,
 } from "./jobs";
+import { newPullReceipt, parsePullReceipt, type PullRunView } from "./pull.server.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { effectiveStoryModelChoice, storyModelChoice } from "./model-choice.ts";
 import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
-import { failOverAndRetry, type PerformDraftWorkDeps } from "./desk-model-run.ts";
+import {
+  failOverAndRetry,
+  failOverOperationAndRetry,
+  type PerformDraftWorkDeps,
+} from "./desk-model-run.ts";
 import { buildDraftCompletionReceipt } from "./draft-completion.ts";
 export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
@@ -203,7 +199,13 @@ export const listLeads = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
     const sql = await getSql();
-    return sql<LeadRow & { article_slug: string | null; investigation_id: number | null; story_headline: string | null }>`
+    return sql<
+      LeadRow & {
+        article_slug: string | null;
+        investigation_id: number | null;
+        story_headline: string | null;
+      }
+    >`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.status, l.source_urls, l.evidence,
              l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
              coalesce(a.headline, (select nullif(d.headline, '') from drafts d
@@ -582,7 +584,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       "This section no longer has accepted assigned sources. Review Paper setup and start a new scan.",
     );
 
-  const fetched: { title: string; url: string; text: string; extras: { url: string; text: string }[]; changed: boolean }[] = [];
+  const fetched: {
+    title: string;
+    url: string;
+    text: string;
+    extras: { url: string; text: string }[];
+    changed: boolean;
+  }[] = [];
   const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
   const pendingSourceTouches: { id: number; error: string | null }[] = [];
   const pendingDisappeared: { title: string; url: string; error: string }[] = [];
@@ -683,7 +691,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       select id, entity, last_angle, updated_at from beat_memory
       where newsroom_id = ${owned(context)} order by updated_at desc limit 24
     `;
-  const published = await sql<{ headline: string; dek: string | null; source_urls: string; published_at: string | null }>`
+  const published = await sql<{
+    headline: string;
+    dek: string | null;
+    source_urls: string;
+    published_at: string | null;
+  }>`
     select headline, dek, source_urls, published_at::text as published_at
        from articles
       where newsroom_id = ${owned(context)} and status = 'published'
@@ -694,16 +707,31 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     let sourceUrls: string[] = [];
     try {
       const parsed = JSON.parse(row.source_urls || "[]");
-      if (Array.isArray(parsed)) sourceUrls = parsed.map(String).filter((url) => /^https?:\/\//i.test(url)).slice(0, 4);
-    } catch { /* malformed legacy source metadata is not scan context */ }
-    return { headline: row.headline, dek: row.dek ?? "", source_urls: sourceUrls, published_at: row.published_at ?? "" };
+      if (Array.isArray(parsed))
+        sourceUrls = parsed
+          .map(String)
+          .filter((url) => /^https?:\/\//i.test(url))
+          .slice(0, 4);
+    } catch {
+      /* malformed legacy source metadata is not scan context */
+    }
+    return {
+      headline: row.headline,
+      dek: row.dek ?? "",
+      source_urls: sourceUrls,
+      published_at: row.published_at ?? "",
+    };
   });
 
   const ranked = [...fetched].sort((a, b) => Number(b.changed) - Number(a.changed));
   const PAYLOAD_BUDGET = 48000;
   let payload = "";
   for (const f of ranked) {
-    const excerpt = scanSourceExcerpt(f.text, f.extras, expandForScope || reread || f.changed ? 2800 : 800);
+    const excerpt = scanSourceExcerpt(
+      f.text,
+      f.extras,
+      expandForScope || reread || f.changed ? 2800 : 800,
+    );
     const changedLine = expandForScope
       ? f.changed
         ? "yes; expanded excerpt for this scan scope"
@@ -928,7 +956,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   job: DeskJob,
   deps: PerformDraftWorkDeps = {},
 ) {
-  const { withClaimedLeadDraftLock, withClaimedLeadDraftCheckpointLock } = await import("./draft-order.server.ts");
+  const { withClaimedLeadDraftLock, withClaimedLeadDraftCheckpointLock } =
+    await import("./draft-order.server.ts");
   const runReport = deps.reportAndDraft ?? reportAndDraft;
   const probe = deps.probe ?? probeProvider;
   const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
@@ -951,12 +980,17 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const lead = leads[0];
   if (!lead) throw new Error("Lead not found");
   if (lead.status === "killed") throw new Error("Restore this lead before drafting.");
-  let expectedDraft = (await sql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1`)[0] ?? null;
+  let expectedDraft =
+    (
+      await sql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1`
+    )[0] ?? null;
   let checkpointDraftId: number | null = null;
   const draftStillExpected = (current: DraftRow | null) =>
     current?.id === expectedDraft?.id &&
     String(current?.updated_at ?? "") === String(expectedDraft?.updated_at ?? "") &&
-    (!current || !expectedDraft || evidenceReviewToken(current) === evidenceReviewToken(expectedDraft));
+    (!current ||
+      !expectedDraft ||
+      evidenceReviewToken(current) === evidenceReviewToken(expectedDraft));
   await ensureDraftMemoColumn();
 
   let urls: string[] = [];
@@ -975,19 +1009,63 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const researchScope = job.research_scope ?? prevNotes.researchScope ?? "public";
   const sourceInput = draftSourceInputs(urls, prevNotes, researchScope);
   const { retainedWatchSources } = await import("./retained-watch-source.server.ts");
-  const {readStoryDocuments}=await import("./story-documents.server.ts");
-  const documentReadingEvidence=await readStoryDocuments(owned(context),leadId,job.model_choice as import("./ai.ts").EffectiveProviderChoice,prevNotes.editorialAssignment?.text || lead.headline, message=>setStage(job.id,message), prevNotes.suppliedUrls ?? [], context.userId, researchScope === "supplied");
-  const retainedNameDocuments = await sql<{id:string;filename:string;mime:string;full_text:string;source_url:string|null}>`
+  const storyDocumentReader =
+    deps.readStoryDocuments ?? (await import("./story-documents.server.ts")).readStoryDocuments;
+  const documentAssignment = prevNotes.editorialAssignment?.text || lead.headline;
+  const readDocuments = (choice: string) =>
+    storyDocumentReader(
+      owned(context),
+      leadId,
+      choice as import("./ai.ts").EffectiveProviderChoice,
+      documentAssignment,
+      (message) => setStage(job.id, message),
+      prevNotes.suppliedUrls ?? [],
+      context.userId,
+      researchScope === "supplied",
+    );
+  const initialDocumentChoice = effectiveStoryModelChoice(job.model_choice);
+  let documentReadingEvidence: string;
+  try {
+    documentReadingEvidence = await readDocuments(initialDocumentChoice);
+  } catch (documentError) {
+    const detail = documentError instanceof Error ? documentError.message : String(documentError);
+    const recovery = await failOverOperationAndRetry({
+      job,
+      error: detail,
+      operation: readDocuments,
+      probe,
+      setModelChoice,
+      setStage,
+      setFailoverNote,
+    });
+    if (!recovery.ok) throw new Error(recovery.error);
+    job.model_choice = recovery.choice;
+    documentReadingEvidence = recovery.value;
+  }
+  const retainedNameDocuments = await sql<{
+    id: string;
+    filename: string;
+    mime: string;
+    full_text: string;
+    source_url: string | null;
+  }>`
     select id,filename,mime,full_text,source_url from story_documents
     where newsroom_id=${owned(context)} and lead_id=${leadId} and status='read'
       and full_text is not null and mime <> 'application/x-townreporter-source-links'
     order by created_at,id`;
   const documentEvidence = retainedNameDocuments.length
-    ? `PRIVATE DOCUMENT IDENTITIES (internal evidence labels only; never print IDs in the story):\n${retainedNameDocuments.map(doc=>`DOCUMENT ID ${doc.id} | FILENAME ${doc.filename}`).join("\n")}\n\n${documentReadingEvidence}`
+    ? `PRIVATE DOCUMENT IDENTITIES (internal evidence labels only; never print IDs in the story):\n${retainedNameDocuments.map((doc) => `DOCUMENT ID ${doc.id} | FILENAME ${doc.filename}`).join("\n")}\n\n${documentReadingEvidence}`
     : documentReadingEvidence;
   const draftInput = {
     documentEvidence,
-    documentNameEvidence: retainedNameDocuments.map(doc => ({evidenceKind:"uploaded-document" as const,documentId:doc.id,filename:doc.filename,mime:doc.mime,text:doc.full_text,sourceUrl:doc.source_url})),
+    documentNameEvidence: retainedNameDocuments.map((doc) => ({
+      evidenceKind: "uploaded-document" as const,
+      documentId: doc.id,
+      filename: doc.filename,
+      mime: doc.mime,
+      text: doc.full_text,
+      sourceUrl: doc.source_url,
+    })),
     userId: context.userId,
     newsroomId: context.newsroomId,
     lead,
@@ -1010,30 +1088,43 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const reportDeps: Parameters<typeof reportAndDraft>[1] = {
     onStage: (stage) => setStage(job.id, stage),
   };
-  reportDeps.onWriterDraft = async checkpoint => {
-    const checkpointNote = "Evidence reconciliation not completed within the available edit pass. Draft retained; verify its claims and citations before publication.";
-    const integrityNotes = [...new Set([checkpoint.integrity_notes,checkpointNote].map(value=>String(value??"").trim()).filter(Boolean))].join("\n");
-    const provenance = checkpoint.captures.map(capture => ({
+  reportDeps.onWriterDraft = async (checkpoint) => {
+    const checkpointNote =
+      "Evidence reconciliation not completed within the available edit pass. Draft retained; verify its claims and citations before publication.";
+    const integrityNotes = [
+      ...new Set(
+        [checkpoint.integrity_notes, checkpointNote]
+          .map((value) => String(value ?? "").trim())
+          .filter(Boolean),
+      ),
+    ].join("\n");
+    const provenance = checkpoint.captures.map((capture) => ({
       url: capture.url,
       title: capture.title,
       version_id: capture.version_id,
       capture_event_id: capture.capture_event_id,
       role: "followed",
     }));
-    await withClaimedLeadDraftCheckpointLock(job,leadId,async transactionSql => {
-      const current = (await transactionSql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1 for update`)[0] ?? null;
-      if (!draftStillExpected(current)) throw new Error("The draft changed while the writer was working. The editor's newer draft was preserved.");
+    await withClaimedLeadDraftCheckpointLock(job, leadId, async (transactionSql) => {
+      const current =
+        (
+          await transactionSql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1 for update`
+        )[0] ?? null;
+      if (!draftStillExpected(current))
+        throw new Error(
+          "The draft changed while the writer was working. The editor's newer draft was preserved.",
+        );
       const [saved] = await transactionSql<DraftRow>`
         insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json)
-        values(${context.userId},${owned(context)},${leadId},${checkpoint.headline},${checkpoint.dek},${checkpoint.body},${lead.topic},${JSON.stringify(checkpoint.source_urls)},${integrityNotes},${JSON.stringify(provenance)},${String(checkpoint.form??"")},${JSON.stringify(checkpoint.found??null)},${JSON.stringify(Array.isArray(checkpoint.unanswered)?checkpoint.unanswered:[])},${JSON.stringify({citationPolicy:"explicit",researchScope:draftInput.researchScope,reportedClaims:{version:1,rows:Array.isArray(checkpoint.claims)?checkpoint.claims:[]},writerCheckpoint:{version:1,jobId:job.id,evidenceCheckIncomplete:true}})})
+        values(${context.userId},${owned(context)},${leadId},${checkpoint.headline},${checkpoint.dek},${checkpoint.body},${lead.topic},${JSON.stringify(checkpoint.source_urls)},${integrityNotes},${JSON.stringify(provenance)},${String(checkpoint.form ?? "")},${JSON.stringify(checkpoint.found ?? null)},${JSON.stringify(Array.isArray(checkpoint.unanswered) ? checkpoint.unanswered : [])},${JSON.stringify({ citationPolicy: "explicit", researchScope: draftInput.researchScope, reportedClaims: { version: 1, rows: Array.isArray(checkpoint.claims) ? checkpoint.claims : [] }, writerCheckpoint: { version: 1, jobId: job.id, evidenceCheckIncomplete: true } })})
         returning *
       `;
       await transactionSql`
-        update desk_jobs set result_json=(coalesce(nullif(result_json,''),'{}')::jsonb || ${JSON.stringify({checkpointDraftId:Number(saved.id)})}::jsonb)::text,updated_at=now()
-        where id=${job.id} and newsroom_id=${job.newsroom_id} and status='running' and claim_token=${job.claim_token??""}
+        update desk_jobs set result_json=(coalesce(nullif(result_json,''),'{}')::jsonb || ${JSON.stringify({ checkpointDraftId: Number(saved.id) })}::jsonb)::text,updated_at=now()
+        where id=${job.id} and newsroom_id=${job.newsroom_id} and status='running' and claim_token=${job.claim_token ?? ""}
       `;
-      expectedDraft=saved;
-      checkpointDraftId=Number(saved.id);
+      expectedDraft = saved;
+      checkpointDraftId = Number(saved.id);
     });
   };
   if (batchSnapshot) {
@@ -1044,6 +1135,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         claude: async (input) => (await import("./ai-claude-code.server.ts")).claudeCodeChat(input),
         codex: async (input) => (await import("./ai-codex.server.ts")).codexChat(input),
         local: grokChat,
+        custom: grokChat,
       } satisfies NonNullable<PerformDraftWorkDeps["batchChatAdapters"]>);
     reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
       const current = await batchGuard();
@@ -1102,13 +1194,12 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         return { version_id: rec.versionId, capture_event_id: rec.captureEventId };
       });
   }
-  const runReportWithCheckpoint = (input: Parameters<typeof reportAndDraft>[0]) => runReport(input,reportDeps);
-  let reported = await runReportWithCheckpoint(
-    {
-      ...draftInput,
-      modelChoice: effectiveStoryModelChoice(job.model_choice),
-    },
-  );
+  const runReportWithCheckpoint = (input: Parameters<typeof reportAndDraft>[0]) =>
+    runReport(input, reportDeps);
+  let reported = await runReportWithCheckpoint({
+    ...draftInput,
+    modelChoice: effectiveStoryModelChoice(job.model_choice),
+  });
   if ("error" in reported && !batchSnapshot) {
     reported = await failOverAndRetry({
       job,
@@ -1135,7 +1226,11 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     citationPolicy: "explicit",
     researchScope: draftInput.researchScope,
     reportedClaims: { version: 1, rows: reported.claims },
-    reportedDocumentClaims: { version: 1, checkedText: [reported.headline,reported.dek,reported.body].join("\n\n"), rows: reported.documentClaims ?? [] },
+    reportedDocumentClaims: {
+      version: 1,
+      checkedText: [reported.headline, reported.dek, reported.body].join("\n\n"),
+      rows: reported.documentClaims ?? [],
+    },
   });
   const yours = keepHumanTodos(prevNotes);
   /*
@@ -1202,8 +1297,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const notesJson = packNotes(nextNotes);
 
   await withClaimedLeadDraftLock(job, leadId, async (sql) => {
-    const current=(await sql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1 for update`)[0]??null;
-    if (!draftStillExpected(current)) throw new Error("The draft changed while reporting was finishing. The editor's newer draft was preserved.");
+    const current =
+      (
+        await sql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1 for update`
+      )[0] ?? null;
+    if (!draftStillExpected(current))
+      throw new Error(
+        "The draft changed while reporting was finishing. The editor's newer draft was preserved.",
+      );
     const [savedDraft] = await sql<{ id: number }>`
     insert into drafts (
       user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
@@ -1218,19 +1319,21 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     returning id
   `;
     if (savedDraft) {
-      const completion = JSON.stringify(buildDraftCompletionReceipt({
-        checkpointDraftId,
-        finalDraftId: Number(savedDraft.id),
-        citationStatus: reported.citation_status ?? (
-          reported.source_urls.length || (reported.documentClaims?.length ?? 0) > 0
-            ? "complete"
-            : "review-required"
-        ),
-        evidenceCheckIncomplete: notes.includes(
-          "Evidence reconciliation not completed within the available edit pass.",
-        ),
-        nameCheck: reported.research_memo.nameCheck,
-      }));
+      const completion = JSON.stringify(
+        buildDraftCompletionReceipt({
+          checkpointDraftId,
+          finalDraftId: Number(savedDraft.id),
+          citationStatus:
+            reported.citation_status ??
+            (reported.source_urls.length || (reported.documentClaims?.length ?? 0) > 0
+              ? "complete"
+              : "review-required"),
+          evidenceCheckIncomplete: notes.includes(
+            "Evidence reconciliation not completed within the available edit pass.",
+          ),
+          nameCheck: reported.research_memo.nameCheck,
+        }),
+      );
       await sql`
       update desk_jobs
       set result_json = (coalesce(nullif(result_json, ''), '{}')::jsonb || ${completion}::jsonb)::text
@@ -1285,7 +1388,14 @@ export const listRecentStoryWork = createServerFn({ method: "GET" })
     const { ensureJobsSchema } = await import("./jobs.ts");
     await ensureJobsSchema();
     const sql = await getSql();
-    return sql<{ id: number; lead_id: number; headline: string; status: string; stage: string; updated_at: string }>`
+    return sql<{
+      id: number;
+      lead_id: number;
+      headline: string;
+      status: string;
+      stage: string;
+      updated_at: string;
+    }>`
       select * from (
         select distinct on (j.subject_id) j.id, j.subject_id as lead_id, coalesce((select nullif(d.headline, '') from drafts d where d.lead_id=l.id and d.newsroom_id=l.newsroom_id order by d.updated_at desc,d.id desc limit 1), l.headline) as headline, j.status, j.stage, j.updated_at
         from desk_jobs j join leads l on l.id=j.subject_id and l.newsroom_id=j.newsroom_id
@@ -1331,30 +1441,38 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
     }) => input,
   )
   .handler(async ({ context, data }) => {
-    const sql = await getSql();
     await ensureDraftMemoColumn();
-    const rows = await sql<{ notes_json: string | null }>`
-      select notes_json from leads where id = ${data.leadId} and newsroom_id = ${owned(context)} limit 1
-    `;
-    if (!rows[0]) return { ok: false as const, error: "Lead not found" };
-    const notes = applyTodoPatch(parseNotes(rows[0].notes_json), {
-      todos: data.todos,
-      toggle: data.toggle,
-      add: data.add,
-      scratch: data.scratch,
+    return withTransaction(async (sql) => {
+      /*
+        Pull writes excerpts in the background. Lock the same lead row before
+        applying an editor note change so neither full notes_json update can
+        erase the other after reading an older copy.
+      */
+      const rows = await sql<{ notes_json: string | null }>`
+        select notes_json from leads
+        where id = ${data.leadId} and newsroom_id = ${owned(context)}
+        for update
+      `;
+      if (!rows[0]) return { ok: false as const, error: "Lead not found" };
+      const notes = applyTodoPatch(parseNotes(rows[0].notes_json), {
+        todos: data.todos,
+        toggle: data.toggle,
+        add: data.add,
+        scratch: data.scratch,
+      });
+      if (data.researchScope === "supplied" || data.researchScope === "public")
+        notes.researchScope = data.researchScope;
+      if (typeof data.scratch === "string")
+        notes.suppliedUrls = sanitizePublicUrls([
+          ...(notes.suppliedUrls ?? []),
+          ...suppliedUrlsFromText(data.scratch),
+        ]).slice(0, 8);
+      const json = packNotes(notes);
+      await sql`
+        update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
+      `;
+      return { ok: true as const, notes };
     });
-    if (data.researchScope === "supplied" || data.researchScope === "public")
-      notes.researchScope = data.researchScope;
-    if (typeof data.scratch === "string")
-      notes.suppliedUrls = sanitizePublicUrls([
-        ...(notes.suppliedUrls ?? []),
-        ...suppliedUrlsFromText(data.scratch),
-      ]).slice(0, 8);
-    const json = packNotes(notes);
-    await sql`
-      update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
-    `;
-    return { ok: true as const, notes };
   });
 
 export const pullTodo = createServerFn({ method: "POST" })
@@ -1362,172 +1480,187 @@ export const pullTodo = createServerFn({ method: "POST" })
   .validator((input: { leadId: number; query: string; index?: number }) => input)
   .handler(async ({ context, data }) => {
     try {
-      await assertRate(context.userId, "pull");
+      await assertRate(context.userId, "pull", owned(context));
       await ensureDraftMemoColumn();
-      const paperConfig = await getPaperConfig(owned(context));
       const sql = await getSql();
-      const rows = await sql<{ notes_json: string | null; headline: string; source_urls: string }>`
-        select notes_json, headline, source_urls from leads
+      const rows = await sql<{ id: number }>`
+        select id from leads
         where id = ${data.leadId} and newsroom_id = ${owned(context)} limit 1
       `;
       if (!rows[0]) return { ok: false as const, error: "Lead not found" };
       const query = data.query.trim().slice(0, 240);
       if (query.length < 4)
         return { ok: false as const, error: "That line is too thin to search." };
-      /*
-        Subjects come from the whole memo, not the headline alone. A headline
-        written for readers — "Longmont is inside the rail district that just
-        sent a sales tax to the ballot" — names no proper noun at all, so the
-        only anchor left was the city, and the pull came back with the city's
-        own unrelated resolutions. The memo names the body: Front Range
-        Passenger Rail District.
-      */
-      const memo = parseNotes(rows[0].notes_json);
-      const subjects = namedSubjects(
-        [rows[0].headline, memo.news, memo.angle, memo.why, query].filter(Boolean).join("\n"),
-      );
-
-      // One line, several short anchored searches — not one 240-character
-      // run-on that matches only its own generic nouns.
-      const queries = pullQueries(query, subjects, paperConfig.city);
-      const hits: { title: string; url: string; snippet?: string }[] = [];
-      for (const q of queries) {
-        try {
-          hits.push(...(await webSearch(q)));
-        } catch {
-          /* one dead query must not sink the pull */
-        }
+      const open = await findOpenJob({
+        newsroomId: owned(context),
+        kind: "pull",
+        subjectId: data.leadId,
+      });
+      if (open) {
+        return {
+          ok: false as const,
+          error:
+            "This story already has a Pull running. Its live progress is shown beside the reporting line.",
+        };
       }
-
-      /*
-        The lead's URLs still carry the watch-list pages the scan spotted it
-        through. Left in, they made the paper's own homepage the top-ranked
-        place to go looking for a rail district's board packet.
-      */
-      const watchedForPull = await sql<{ url: string }>`
-        select url from sources where newsroom_id = ${owned(context)}
+      const receipt = newPullReceipt({ leadId: data.leadId, todoIndex: data.index, query });
+      const job = await enqueueJob({
+        userId: context.userId,
+        newsroomId: owned(context),
+        kind: "pull",
+        subjectId: data.leadId,
+        resultJson: JSON.stringify(receipt),
+      });
+      const accepted = await sql<{ result_json: string }>`
+        select result_json from desk_jobs where id = ${job.id} limit 1
       `;
-      /*
-        The draft's source list first: it is what the reporting pass actually
-        cited, so it names the issuing body. The lead's own list is the scan's
-        view and is mostly the watch-list page the lead was spotted on.
-      */
-      const draftSrc = await sql<{ source_urls: string }>`
-        select source_urls from drafts
-        where lead_id = ${data.leadId} and user_id = ${context.userId}
-        order by updated_at desc limit 1
-      `;
-      const storyUrls: string[] = [];
-      for (const raw of [draftSrc[0]?.source_urls, rows[0].source_urls]) {
-        if (!raw) continue;
-        try {
-          storyUrls.push(
-            ...dropListingUrls(
-              sanitizePublicUrls(JSON.parse(raw)),
-              watchedForPull.map((w) => w.url),
-              true,
-            ),
-          );
-        } catch {
-          /* a lead with unparseable URLs contributes none */
-        }
+      const acceptedReceipt = parsePullReceipt(accepted[0]?.result_json);
+      if (!acceptedReceipt || acceptedReceipt.attemptId !== receipt.attemptId) {
+        return {
+          ok: false as const,
+          error:
+            "Another reporting-line Pull won the start race. Its live progress is shown beside that line.",
+        };
       }
-
-      /*
-        Board packets, agendas and adopted resolutions are usually absent from
-        every search index — they hang off the issuing body's own meetings page.
-        So read that page and take the document links from it.
-      */
-      const indexed: string[] = [];
-      const hosts = docCandidateHosts(
-        hits.map((h) => h.url),
-        storyUrls,
-      );
-      for (const page of docIndexPages(hosts)) {
-        try {
-          // `extras` is exactly this: the document and article links the
-          // ingester already found on the page it fetched.
-          const got = await ingestDocument(page);
-          indexed.push(...siteOwnDocLinks(got.extras, page));
-        } catch {
-          /* a body without that page is the normal case */
-        }
-        if (indexed.length >= 12) break;
-      }
-
-      const ranked = preferPrimaryUrls(
-        [...new Set([...indexed, ...hits.map((h) => h.url)])],
-        subjects,
-      ).slice(0, 8);
-      const docs: { title: string; url: string; excerpt: string }[] = [];
-      let offSubject = 0;
-      for (const url of ranked) {
-        if (docs.length >= 4) break;
-        try {
-          const got = await ingestDocument(url);
-          if (!got.text || got.text.trim().length < 40) continue;
-          /*
-            A document that names neither the city, the state, nor any subject
-            of the story is not the record. Three California parcel-tax PDFs
-            were written into a Longmont rail story's notes before this gate
-            existed, and nothing downstream could tell they did not belong.
-          */
-          if (!isOnSubject(got.text, subjects, paperConfig.city, paperConfig.state)) {
-            offSubject += 1;
-            continue;
-          }
-          docs.push({
-            title: (got.title || url).slice(0, 160),
-            url,
-            // The best-matching passage, paragraph breaks intact -- not the first
-            // 1,600 flattened characters of navigation (see selectExcerpt).
-            excerpt: selectExcerpt(got.text, query),
-          });
-        } catch {
-          /* skip a dead URL */
-        }
-      }
-
-      const dump = formatPullDump(query, docs);
-      let notes = memo;
-      notes = appendScratch(notes, dump);
-      /*
-        Only a pull that actually returned a document strikes the line.
-
-        It used to strike unconditionally, so a line the desk searched and
-        failed on looked exactly like a line it had answered -- the same
-        confusion between "nothing is there" and "we did not find it" that put
-        a false claim of absence in a story on 2026-09-05.
-      */
-      if (typeof data.index === "number" && notes.todo[data.index]) {
-        if (docs.length && !notes.todo[data.index].done) {
-          notes = toggleTodo(notes, data.index);
-        } else if (!docs.length) {
-          notes = {
-            ...notes,
-            todo: notes.todo.map((row, i) =>
-              i === data.index ? { ...row, done: false, q: "pull found nothing" } : row,
-            ),
-          };
-        }
-      }
-      /*
-        Newest first. The cap used to drop from the end, so once a lead had
-        collected 16 pages every later pull added nothing and said so nowhere.
-      */
-      const opened = [...docs.map((d) => ({ url: d.url, title: d.title })), ...notes.opened]
-        .filter((o, i, arr) => arr.findIndex((x) => x.url === o.url) === i)
-        .slice(0, 24);
-      notes = { ...notes, opened };
-      const json = packNotes(notes);
-      await sql`
-        update leads set notes_json = ${json} where id = ${data.leadId} and newsroom_id = ${owned(context)}
-      `;
-      await audit(context.userId, "pull", query.slice(0, 200), owned(context));
-      return { ok: true as const, notes, dump, found: docs.length, offSubject };
+      return { ok: true as const, jobId: job.id };
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Pull failed";
       return { ok: false as const, error: raw };
+    }
+  });
+
+export const listPullJobs = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: { leadId: number }) => input)
+  .handler(async ({ context, data }): Promise<PullRunView[]> => {
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number;
+      subject_id: number;
+      status: "queued" | "running" | "completed" | "failed";
+      stage: string;
+      result_json: string;
+      started_at: string | null;
+      updated_at: string;
+      finished_at: string | null;
+    }>`
+      select id, subject_id, status, stage, result_json, started_at, updated_at, finished_at
+      from desk_jobs
+      where newsroom_id = ${owned(context)} and kind = 'pull' and subject_id = ${data.leadId}
+      order by id desc limit 24
+    `;
+    return rows.flatMap((job) => {
+      const receipt = parsePullReceipt(job.result_json);
+      if (!receipt) return [];
+      const status =
+        job.status === "failed"
+          ? "failed"
+          : job.status === "running" && receipt.status === "queued"
+            ? "running"
+            : receipt.status;
+      return [
+        {
+          jobId: job.id,
+          leadId: receipt.leadId,
+          todoIndex: receipt.todoIndex,
+          query: receipt.query,
+          jobStatus: job.status,
+          status,
+          stage:
+            job.status === "queued" || job.status === "running"
+              ? job.stage || receipt.stage
+              : receipt.stage,
+          stopRequested: receipt.stopRequested,
+          counters: receipt.counters,
+          errors: receipt.errors,
+          startedAt: receipt.startedAt ?? job.started_at,
+          updatedAt: receipt.updatedAt || job.updated_at,
+          finishedAt: receipt.finishedAt ?? job.finished_at,
+        },
+      ];
+    });
+  });
+
+export const stopPullJob = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { jobId: number }) => input)
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const changed = await sql<{ id: number }>`
+      update desk_jobs
+      set result_json = jsonb_set(result_json::jsonb, '{stopRequested}', 'true'::jsonb)::text,
+          stage = 'Stopping after the current request…', updated_at = now()
+      where id = ${data.jobId} and newsroom_id = ${owned(context)}
+        and kind = 'pull' and status in ('queued', 'running')
+      returning id
+    `;
+    return changed[0]
+      ? { ok: true as const }
+      : { ok: false as const, error: "That Pull is no longer running." };
+  });
+
+export const continuePullJob = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { jobId: number }) => input)
+  .handler(async ({ context, data }) => {
+    try {
+      await assertRate(context.userId, "pull", owned(context));
+      const sql = await getSql();
+      const rows = await sql<{
+        subject_id: number;
+        status: string;
+        result_json: string;
+      }>`
+        select subject_id, status, result_json from desk_jobs
+        where id = ${data.jobId} and newsroom_id = ${owned(context)}
+          and kind = 'pull' limit 1
+      `;
+      const prior = rows[0];
+      const receipt = parsePullReceipt(prior?.result_json);
+      if (!prior || !receipt) return { ok: false as const, error: "Saved Pull not found." };
+      if (prior.status === "queued" || prior.status === "running") {
+        return { ok: false as const, error: "That Pull is still running." };
+      }
+      const open = await findOpenJob({
+        newsroomId: owned(context),
+        kind: "pull",
+        subjectId: prior.subject_id,
+      });
+      if (open) return { ok: false as const, error: "This story already has a Pull running." };
+      const resumed: typeof receipt = {
+        ...receipt,
+        attemptId: crypto.randomUUID(),
+        status: "queued",
+        stage: "Queued to continue",
+        stopRequested: false,
+        startedAt: null,
+        updatedAt: new Date().toISOString(),
+        finishedAt: null,
+      };
+      const job = await enqueueJob({
+        userId: context.userId,
+        newsroomId: owned(context),
+        kind: "pull",
+        subjectId: prior.subject_id,
+        resultJson: JSON.stringify(resumed),
+      });
+      const accepted = await sql<{ result_json: string }>`
+        select result_json from desk_jobs where id = ${job.id} limit 1
+      `;
+      const acceptedReceipt = parsePullReceipt(accepted[0]?.result_json);
+      if (!acceptedReceipt || acceptedReceipt.attemptId !== resumed.attemptId) {
+        return {
+          ok: false as const,
+          error:
+            "Another reporting-line Pull won the continue race. Its live progress is shown beside that line.",
+        };
+      }
+      return { ok: true as const, jobId: job.id };
+    } catch (err) {
+      return {
+        ok: false as const,
+        error: err instanceof Error ? err.message : "Could not continue Pull.",
+      };
     }
   });
 

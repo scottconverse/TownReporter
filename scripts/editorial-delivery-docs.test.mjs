@@ -9,8 +9,8 @@ const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 
 test("current operator docs describe Opinion validation and provider routing", () => {
   /*
-    Opinion uses the shared provider registry. Automatic starts with Claude
-    and can fall back to Codex Sol once; explicit choices remain selected.
+    Opinion uses the shared provider registry. Automatic starts with Codex Sol
+    and can fall back to Claude Sonnet once; explicit choices remain selected.
   */
   for (const rel of [
     "README.md",
@@ -25,7 +25,7 @@ test("current operator docs describe Opinion validation and provider routing", (
     assert.match(text, /(?:no\s+draft|never\s+becomes\s+a\s+draft|before\s+draft storage)/i, rel);
     assert.match(text, /Codex\s+(?:Terra|Sol)/i, rel);
     assert.match(text, /Local model/i, rel);
-    assert.match(text, /Automatic[\s\S]{0,200}Claude Opus/i, rel);
+    assert.match(text, /Automatic[\s\S]{0,200}Codex Sol[\s\S]{0,200}Claude Sonnet/i, rel);
     assert.doesNotMatch(
       text,
       /Codex\s+is\s+not\s+offered\s+(?:for|here)/i,

@@ -15,7 +15,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
  * provider took. It is a job now, on the default lane, for the same reasons
  * drafting is.
  */
-export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice" | "artifact-ocr";
+export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice" | "artifact-ocr" | "pull";
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
 /**
@@ -221,6 +221,9 @@ async function realWork(job: DeskJob): Promise<void> {
   } else if (job.kind === "artifact-ocr") {
     const { performArtifactOcrWork } = await import("./dark.ts");
     await performArtifactOcrWork(job);
+  } else if (job.kind === "pull") {
+    const { performPullWork } = await import("./pull.server.ts");
+    await performPullWork(job);
   }
 }
 

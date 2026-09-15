@@ -11,7 +11,7 @@ import {
 
 const claude = {
   runtime: "claude-cli",
-  modelChoice: "claude-frontier",
+  modelChoice: "claude-sonnet",
   transport: "claude-code",
   model: "selected-claude",
 } as const satisfies ForcedRuntimeSnapshot;
@@ -22,7 +22,7 @@ describe("forced runtime snapshots", () => {
   });
 
   for (const malformed of [
-    { runtime: "claude-cli", modelChoice: "claude-frontier", transport: "claude-code" },
+    { runtime: "claude-cli", modelChoice: "claude-sonnet", transport: "claude-code" },
     { runtime: "local", modelChoice: "local-model", transport: "local" },
     { ...claude, transport: "codex" },
   ]) {
@@ -74,6 +74,42 @@ describe("forced runtime snapshots", () => {
     assert.equal((received as { noTools?: boolean }).noTools, true);
   });
 
+  for (const [modelChoice, transport, model] of [
+    ["codex-astra", "codex", "gpt-6-astra"],
+    ["codex-frontier", "codex", "gpt-5.6-sol"],
+    ["codex-balanced", "codex", "gpt-5.6-terra"],
+    ["codex-luna", "codex", "gpt-5.6-luna"],
+    ["claude-fable", "claude-code", "fable"],
+    ["claude-frontier", "claude-code", "claude-opus-5"],
+    ["claude-sonnet", "claude-code", "sonnet"],
+    ["claude-haiku", "claude-code", "haiku"],
+  ] as const) {
+    it(`keeps ${modelChoice} pinned to its exact model and transport`, async () => {
+      const snapshot = {
+        runtime: modelChoice,
+        modelChoice,
+        transport,
+        model,
+      } as const satisfies ForcedRuntimeSnapshot;
+      assert.deepEqual(parseForcedRuntimeSnapshot(snapshot), snapshot);
+      const calls: Array<{ transport: string; model: string }> = [];
+      await runForcedChat(snapshot, "system", "user", 100, undefined, {
+        claude: async (input) => {
+          calls.push({ transport: "claude-code", model: input.model });
+          return { ok: true };
+        },
+        codex: async (input) => {
+          calls.push({ transport: "codex", model: input.model });
+          return { ok: true };
+        },
+        local: async () => {
+          throw new Error("named cloud models must not use Local model");
+        },
+      });
+      assert.deepEqual(calls, [{ transport, model }]);
+    });
+  }
+
   it("uses forced Claude Code OCR when a metered Anthropic key is present", async () => {
     const previous = process.env.ANTHROPIC_API_KEY;
     process.env.ANTHROPIC_API_KEY = "must-not-be-used";
@@ -98,5 +134,42 @@ describe("forced runtime snapshots", () => {
       if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = previous;
     }
+  });
+
+  it("keeps saved Custom AI credentials out of the batch snapshot and resolves them at call time", async () => {
+    const snapshot = {
+      runtime: "custom:11111111-1111-4111-8111-111111111111",
+      modelChoice: "custom:11111111-1111-4111-8111-111111111111",
+      transport: "custom",
+      model: "gemini-2.5-flash",
+      newsroomId: 42,
+      label: "Gemini",
+    } as const satisfies ForcedRuntimeSnapshot;
+    assert.deepEqual(parseForcedRuntimeSnapshot(snapshot), snapshot);
+    assert.doesNotMatch(JSON.stringify(snapshot), /api.?key|secret|base.?url/i);
+    let received: unknown;
+    const result = await runForcedChat(snapshot, "system", "user", 100, undefined, {
+      claude: async () => { throw new Error("wrong transport"); },
+      codex: async () => { throw new Error("wrong transport"); },
+      local: async () => { throw new Error("wrong transport"); },
+      custom: async (_system, _user, _maxTokens, options) => {
+        received = options;
+        return { ok: true as const, text: "done" };
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(received, {
+      choice: snapshot.modelChoice,
+      newsroomId: 42,
+      model: "gemini-2.5-flash",
+    });
+    assert.deepEqual(forcedOcrOptions(snapshot), {
+      provider: snapshot.modelChoice,
+      newsroomId: "42",
+      localModel: undefined,
+      forcedPlan: undefined,
+      beforeModelCall: undefined,
+      adapters: undefined,
+    });
   });
 });

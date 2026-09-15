@@ -1,6 +1,21 @@
 # Changelog
 
-Current release: **0.6.48**.
+Current release: **0.6.49**.
+
+## Unreleased
+
+## 0.6.49 — 2026-09-15
+
+- Restores Dark Desk as a lead-development system: it follows unnamed actors, beneficiaries, organizations, money and missing records; keeps investigative and benign explanations live together; preserves thin and deferred trails; and prevents low-yield stop rules from closing high-value open work.
+- Adds selectable Dark Desk provider/model controls, bounded model/search/document/time budgets, live usage and stage reporting, checkpointed synthesis recovery, controlled frontier growth and evidence-based stopping.
+- Adds local Redlib enrichment to Dark Desk Reddit checks while keeping the RSS path available.
+- Makes each reporting-item Pull a durable background job with saved partial documents, live stages and counters, a whole-run deadline, Stop and Continue controls, and recovery after reload. Pull remains mechanical and uses no writing-model tokens.
+- Keeps Story model controls reachable during editing and redrafting and shows the durable provider switch while work continues.
+- Changes unattended cloud routing to use Codex first and Claude Sonnet only as the final fallback: Story, Scan and Dark Desk use Terra then Sonnet; Opinion uses Sol then Sonnet. Opus is available only when an editor selects it.
+- Makes Codex Astra, Sol, Terra and Luna and Claude Fable, Opus, Sonnet and Haiku exact per-run choices. Explicit picks do not fall back, and content refusals remain terminal.
+- Extends Automatic recovery to quota, unavailable, authentication, timeout and network failures. Uploaded documents remain saved and are reread by the provider that takes over.
+- Expands batch drafting and Daily Scan to all eight named cloud models, discovered Local models and encrypted Custom AI connections such as Gemini. Each run pins one explicit runtime and never falls back; a batch never publishes.
+- Keeps document and image OCR on the model selected for the Story, Dark Desk, scheduled Scan or batch run, including saved Custom AI/Gemini connections.
 
 ## 0.6.48 — 2026-09-14
 

@@ -145,6 +145,11 @@ export type OcrOptions = {
     | { kind: "claude-code" | "codex"; model: string }
     | { kind: "local"; baseUrl: string; model: string };
   beforeModelCall?: () => Promise<void>;
+  /** Test-only seam for proving newsroom-scoped custom OCR resolution. */
+  resolveCustom?: (
+    newsroomId: number,
+    id: string,
+  ) => Promise<{ baseUrl: string; apiKey: string | null; modelId: string }>;
   /**
    * Test-only per-transport override (mirrors ai.ts's `GrokChatAdapters`),
    * keyed by the transport kind ("anthropic" | "codex" | "claude-code" |
@@ -571,11 +576,16 @@ function clean(doc: IngestDocument): IngestDocument {
 export async function ingestDocument(
   raw: string,
   ocrOptions?: IngestOptions,
+  signal?: AbortSignal,
 ): Promise<IngestDocument> {
-  return clean(await ingestDocumentRaw(raw, ocrOptions));
+  return clean(await ingestDocumentRaw(raw, ocrOptions, signal));
 }
 
-async function ingestDocumentRaw(raw: string, ocrOptions?: IngestOptions): Promise<IngestDocument> {
+async function ingestDocumentRaw(
+  raw: string,
+  ocrOptions?: IngestOptions,
+  signal?: AbortSignal,
+): Promise<IngestDocument> {
   let responseChain: string[] = [];
   const empty = (over: Partial<IngestDocument>): IngestDocument => ({
     ok: false,
@@ -594,8 +604,10 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: IngestOptions): Promi
     ...over,
   });
   try {
+    signal?.throwIfAborted();
     const url = await assertPublicHttpUrl(raw);
     const yt = await ingestYoutubeIfNeeded(url);
+    signal?.throwIfAborted();
     if (yt) {
       return empty({
         ok: yt.text.length >= 40,
@@ -610,6 +622,7 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: IngestOptions): Promi
       });
     }
     const pg = await ingestPrimeGov(url);
+    signal?.throwIfAborted();
     if (pg) {
       return empty({
         ok: pg.text.length >= 40,
@@ -624,6 +637,7 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: IngestOptions): Promi
       });
     }
     const reddit = await ingestRedditIfNeeded(url);
+    signal?.throwIfAborted();
     if (reddit) {
       const outcome: FetchOutcome = reddit.ok
         ? "fetched"
@@ -642,7 +656,7 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: IngestOptions): Promi
         extras: [],
       });
     }
-    const tracked = await fetchPublicHttpTracked(url);
+    const tracked = await fetchPublicHttpTracked(url, 4, signal);
     responseChain = tracked.chain;
     const res = tracked.response;
     const status = res.status;
@@ -785,8 +799,10 @@ async function ingestDocumentRaw(raw: string, ocrOptions?: IngestOptions): Promi
     // Rendering them starts an unnecessary browser and can replace the raw
     // document with an unrelated portal page.
     const mediaType = ctype.split(";", 1)[0]?.trim();
-    const structuredText = mediaType === "text/plain" ||
-      mediaType === "application/json" || mediaType?.endsWith("+json");
+    const structuredText =
+      mediaType === "text/plain" ||
+      mediaType === "application/json" ||
+      mediaType?.endsWith("+json");
     if (
       !structuredText &&
       !rawHtmlAccepted &&
@@ -922,5 +938,10 @@ export async function ingestUrl(raw: string): Promise<IngestResult> {
       /* skip */
     }
   }
-  return { text, titleHint: extracted.title || titleHint, extras, notices: extractSiteNotices(body) };
+  return {
+    text,
+    titleHint: extracted.title || titleHint,
+    extras,
+    notices: extractSiteNotices(body),
+  };
 }

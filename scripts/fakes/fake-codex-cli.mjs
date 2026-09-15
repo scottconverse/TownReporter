@@ -9,6 +9,8 @@
  *   FAKE_CODEX_SIGNED_IN   "1" for signed in
  *   FAKE_CODEX_STATE_FILE  a file whose presence means "signed in"
  *   FAKE_CODEX_MODE        exit-ok | exit-fail | hang   (default exit-ok)
+ *   FAKE_CODEX_FAIL_PROMPTS "1" returns an authentication failure for every exec call
+ *   FAKE_CODEX_QUOTA_PROMPTS "1" returns a usage-limit failure for every exec call
  *
  * A third command, `exec`, matches what src/lib/news/ai-codex.server.ts's
  * `buildCodexArgs` actually spawns for a draft call: `exec --model <m>
@@ -83,10 +85,22 @@ if (argv[0] === "login" && argv.includes("--device-auth")) {
   // The whole prompt (SYSTEM INSTRUCTIONS + USER REQUEST, see
   // buildCodexPrompt) arrives on stdin, exactly like the real CLI reads it.
   const prompt = await readStdin();
+  if (process.env.FAKE_CODEX_FAIL_PROMPTS === "1") {
+    process.stderr.write(
+      "Codex error (401): Failed to authenticate. OAuth access token has expired. Re-authenticate to continue.\n",
+    );
+    process.exit(1);
+  }
+  if (process.env.FAKE_CODEX_QUOTA_PROMPTS === "1") {
+    process.stderr.write("Codex usage limit reached. It resets 7pm (America/Denver).\n");
+    process.exit(1);
+  }
+  const documentMarker = prompt.match(/AUTOMATIC_DOCUMENT_MARKER_[A-Z0-9_]+/)?.[0] ?? "";
   // report.ts's research-pass user message opens with "Lead: "; the write
   // pass's opens with "NEWS ANGLE: ". Anything else (the occasional edit
   // pass, which sends "Draft JSON to edit:") gets the write shape below,
   // since it is the superset a JSON-object-shaped answer parses out of.
+  const isDocumentRead = /UNTRUSTED SOURCE TEXT:/.test(prompt);
   const isResearchPass = /\bLead:\s/.test(prompt) && !/NEWS ANGLE:/.test(prompt);
   /*
     A browser walk has to be able to SEE the transient "Switched to Codex
@@ -97,7 +111,11 @@ if (argv[0] === "login" && argv.includes("--device-auth")) {
   */
   const delay = Number(process.env.FAKE_CODEX_DELAY_MS || 0);
   if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
-  if (isResearchPass) {
+  if (isDocumentRead) {
+    process.stdout.write(
+      `The uploaded document says ${documentMarker || "the council packet contains the filed evidence"}.\n`,
+    );
+  } else if (isResearchPass) {
     process.stdout.write(
       JSON.stringify({
         news: "The council approved the item on a fake-CLI test drive.",
@@ -118,8 +136,8 @@ if (argv[0] === "login" && argv.includes("--device-auth")) {
         body:
           "The newsroom's Automatic writing model started this draft on Claude Opus. Its " +
           "login had lapsed, so the desk moved to the next rung of the ladder on its own.\n\n" +
-          "Codex Terra finished the draft from there. Nothing about the failure reached the " +
-          "editor as a dead end: the desk explained what happened and kept working.",
+          "Codex Terra finished the draft from the retained uploaded document. The evidence marker is " +
+          `${documentMarker || "missing"}. The desk explained the provider switch and kept working.`,
         topic: "council",
         source_urls: [],
         integrity_notes: "",

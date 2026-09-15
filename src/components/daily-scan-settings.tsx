@@ -13,13 +13,7 @@ import {
   type DailyScanPolicy,
   type DailyScanRuntime,
 } from "@/lib/news/daily-scan";
-
-const RUNTIME_OPTIONS: ReadonlyArray<{ value: DailyScanRuntime; label: string }> = [
-  { value: "local", label: "Local model" },
-  { value: "claude-cli", label: "Claude Code subscription" },
-  { value: "codex-terra", label: "Codex Terra subscription" },
-  { value: "codex-sol", label: "Codex Sol subscription" },
-];
+import { ModelPicker } from "@/components/model-picker";
 
 type Draft = Pick<
   DailyScanPolicy,
@@ -284,8 +278,8 @@ export function DailyScanSettings() {
         sub="A scheduled reporter pass for leads only. It does not draft or publish anything."
       />
       <p id="daily-scan-heading" className="mt-3 max-w-2xl text-sm text-muted">
-        This machine uses its local model or an existing Claude Code or Codex subscription. It does
-        not fall back to paid APIs.
+        Choose one exact model for every scheduled run. Saved Custom AI connections, including
+        OpenAI-compatible Gemini endpoints, resolve their encrypted credential only when the run starts.
       </p>
       <div className="mt-5 max-w-2xl space-y-4">
         <label className="flex items-start gap-3 border border-rule p-4">
@@ -311,21 +305,15 @@ export function DailyScanSettings() {
               onChange={(event) => changeDraft({ ...draft, localTime: event.target.value })}
             />
           </Field>
-          <Field label="Runtime" hint="Only the selected runtime is used.">
-            <select
-              className={`${inputClass} mt-1 w-full`}
-              value={draft.runtime}
-              onChange={(event) =>
-                changeDraft({ ...draft, runtime: event.target.value as DailyScanRuntime })
-              }
-            >
-              {RUNTIME_OPTIONS.map((runtime) => (
-                <option key={runtime.value} value={runtime.value}>
-                  {runtime.label}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <ModelPicker
+            scope="story"
+            value={draft.runtime}
+            onChange={(runtime) => {
+              if (runtime !== "auto") changeDraft({ ...draft, runtime: runtime as DailyScanRuntime });
+            }}
+            excludeAutomatic
+            compact
+          />
         </div>
         <Field
           label="Daily source limit"

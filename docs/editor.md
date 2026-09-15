@@ -1,8 +1,8 @@
 # TownReporter — editor’s manual
 
-Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
+Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name. Reddit RSS finds candidates; when a local Redlib is running, the strongest candidates are read in full. The result panel says whether each card contains a full post or only an RSS excerpt. A Redlib failure never discards the RSS results.
 
-**Current release: [0.6.48](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.48).** See the [release guide](releases/0.6.48.md) for changes, installation and deployment evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+**Current release: [0.6.49](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.49).** See the [release guide](releases/0.6.49.md) for changes, installation and deployment evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
 **Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
 
@@ -172,9 +172,9 @@ One pass: fetch every **accepted** source, then one model read for leads and pro
 - When it files leads, open the queue. When it files nothing, that can be “nothing moved,” not a crash. The page will say which.
 
 Scan has the same **Writing model** picker Story and the queue have, next to
-**Run scan**: Automatic (the default), Codex Terra, Codex Sol, Claude
-Opus, or Local model. Automatic uses the operator's configured gateway when one is set;
-otherwise it tries Claude Opus, then Codex Terra. If the first one's login
+**Run scan**: Automatic (the default), every named Codex and Claude model, or
+Local model. Automatic uses the operator's configured gateway when one is set;
+otherwise it tries Codex Terra, then Claude Sonnet. If the first one's login
 lapses partway through the run, the scan moves to the next rung once, if it
 is ready, reusing the same fetched sources rather than fetching them again.
 A named choice uses only that provider and never falls back. The choice is
@@ -206,8 +206,8 @@ Statuses you will use:
 
 Every active lead has its own compact **Writing model** picker beside **Draft
 with AI** (or **Redraft with AI** after a draft exists). Automatic uses the
-operator's configured gateway when one is set; otherwise it tries Claude
-Opus, then Codex Terra. If the first one's login lapses partway through the
+operator's configured gateway when one is set; otherwise it tries Codex Terra,
+then Claude Sonnet. If the first one's login lapses partway through the
 run, the draft moves to the next rung once, if it is ready, and the row shows
 which provider took over and why. A named choice uses only that provider and
 never falls back, at enqueue or mid-run. The result appears on the same
@@ -218,11 +218,16 @@ list.
 ### Draft selected leads
 
 The **Draft selected leads** bar prepares up to five eligible Queue leads as
-one atomic batch. Tick the leads, then choose exactly one runtime: **Local
-model**, **Claude Code**, **Codex Terra**, or **Codex Sol**. It deliberately
-does not offer Automatic, a gateway, or an API fallback. Each lead keeps its
+one atomic batch. Tick the leads, then choose exactly one named **Codex**,
+**Claude**, **Local model**, or saved **Custom AI** connection, including
+Gemini. It deliberately does not offer Automatic or fallback. Each lead keeps its
 saved research scope. If the selected runtime is unavailable, or one selected
 lead cannot be queued, the batch does not start and the Queue explains why.
+
+Daily Scan uses the same exact named model choices and saved Custom AI
+connections. It does not offer Automatic or fallback. Document and image OCR
+performed for a Story, Dark Desk run, scheduled Scan or batch remains pinned
+to that run's selected model.
 
 The bar also offers an optional **Suggested focus** size of three to five
 leads. Suggestions balance existing lead scores and sections. Review the
@@ -309,17 +314,20 @@ The lead and the notes are on the left and never print. The draft is on the righ
 
 Before **Draft with AI**, choose **Drafting scope**. **Research public sources** follows supplied links and searches for relevant public evidence. **Use only supplied material** reads your text and opens only URLs you supply; it does not discover sources or run external searches. Use this control to limit research, rather than writing “do not search” inside pasted material. The choice is saved with the queued job, including retries.
 
-Supplied-only drafting supports Claude and local/API models. Codex is refused for this scope because its native tools do not provide that restriction; choose a supported model. The draft fills the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
+Supplied-only drafting supports every Story model, including Codex. It does not run discovery or external searches. Uploaded originals remain saved; if Automatic changes providers after an eligible technical failure, the provider that takes over rereads the retained material. The draft fills the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
 
 During public-source reporting, a captured recurring record such as an agenda, meeting page, report, packet or RFP can start an automatic background watch for later changes or disappearance. The watch does not draft or publish. This automatic behavior is separate from the editor-created watches under **Dark Desk → Watch a page / view watches**; that manual-watch panel does not currently provide management controls for automatic watches.
 
 Changing the body of a draft with reporting evidence requires a new evidence review before publishing. Check the sources against the revised story, then choose **I checked: keep this evidence** or **Remove old evidence from public story**. Removal clears the old public source list and reporting metadata, while retaining the original in the private draft archive. It does not remove links you have written into the body. A concurrent edit invalidates an older review; reload and review the current draft.
 
 The picker beside it controls this run. **Automatic** uses a configured
-`LLM_*` gateway exclusively when present; otherwise it tries Claude Opus,
-then Codex Terra, chooses the first ready one before enqueueing, and keeps it
-for every reporting and writing pass. Choose a named model to force only
-Codex Terra, frontier Codex Sol, frontier Claude Opus, or Local model.
+`LLM_*` gateway exclusively when present; otherwise it tries Codex Terra,
+then Claude Sonnet, chooses the first ready one before enqueueing, and keeps it
+for every reporting and writing pass unless it reaches a usage limit, becomes
+unavailable, loses its login, or times out. Automatic moves the unfinished work
+once to the next ready provider and shows the switch in the workbench. A model
+content refusal stops the run. Choose a named model to force Codex Astra, Sol,
+Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or Local model.
 Explicit choices never fall back. Redraft has the same picker.
 
 Choose **Local model**, then the individual model found on LM Studio, Ollama or llama.cpp. A configured `LLM_BASE_URL` is also supported. Availability means the server can be reached, not that every model can finish your task. See [local-models.md](local-models.md).
@@ -464,10 +472,12 @@ Keep the file open while its research job is running and Dark Desk refreshes tha
 ### Which model digs
 
 Next to **Keep digging** there is a **Digging model** picker, the same one the
-queue and the workbench have: Automatic, Codex Terra, Codex Sol, Claude Opus,
-or Local model.
-Automatic tries Claude Opus, then Codex Terra, and if the first one’s login has
-lapsed the round moves to the next. A model you name yourself never falls back
+queue and the workbench have: Automatic; Codex Astra, Sol, Terra and Luna;
+Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.
+Dark Desk Automatic uses a configured gateway when present; otherwise it tries
+Codex Terra, then Claude Sonnet. Planning uses Claude Haiku or the cheaper Codex
+planning model. If synthesis times out, only synthesis moves to the next model;
+completed searches and document reads do not run again. A model you name yourself never falls back
 — choosing one model is choosing not to run the others.
 
 The choice is checked before the round starts. If no model is ready, the desk
@@ -478,6 +488,14 @@ started on Codex stays on Codex rather than quietly changing author halfway
 through an investigation. Change it whenever you like; the next round uses the
 new one. **What Dark Desk did** — the round history at the bottom of the page —
 names the model that dug each round.
+
+While a round runs, the open file names the real stage and shows elapsed time,
+model calls, searches and document reads. The saved run keeps those totals and
+the per-call provider, model, duration, result and timeout. Token totals appear
+only when the provider reports them. A whole-run ceiling applies across every
+stage, and the final line says whether the run stopped for sufficient evidence,
+repeated sources, diminishing returns, no material new finding, or a resource
+limit.
 
 This arrived in 0.6.2. Before that, Dark Desk was the one screen with no
 picker: rounds ran on whatever the machine was configured for.
@@ -542,11 +560,11 @@ Daily checks require the existing local scheduler. **Check now** uses the same g
 
 For a readable capture, choose an active reporting section and **Create unverified lead**, or choose a file and **Attach captured record**. Feedback links to the lead or investigation; the capture's history keeps that outcome after a refresh. **Dismiss change** retains the capture. A removed handoff target is reported as removed instead of being silently recreated. No check automatically creates a lead, drafts or publishes. **Pause**, **Resume** and **Stop watching** retain history; paused and stopped watches do not run checks. An interrupted check can be retried after its 30-minute lease expires. These investigative watches are separate from accepting an ordinary source for story scanning.
 
-### Choose an investigative search window and verification limit
+### Choose an investigative search window and adversarial-review limit
 
-On Dark Desk, open **How hard to dig → Change**. Choose a lookback of 1–3650 inclusive UTC calendar days (default90; one day means today in UTC) or an inclusive start/end UTC calendar range, then choose 1–24 signals to verify per round (default6). **Save** confirms the stored settings; reload to verify a save whose response failed. A validation error explains the rejected value. A settings-read failure offers **Retry settings** instead of showing invented defaults.
+On Dark Desk, open **How hard to dig → Change**. Choose a lookback of 1–3650 inclusive UTC calendar days (default90; one day means today in UTC) or an inclusive start/end UTC calendar range, then choose 1–24 signals for adversarial review per round (default6). **Save** confirms the stored settings; reload to verify a save whose response failed. A validation error explains the rejected value. A settings-read failure offers **Retry settings** instead of showing invented defaults.
 
-These controls are independent of dig, nerve, map and county. Presets retain your date/count choices. Each new round saves a snapshot before work starts, so a mid-round edit affects later rounds. More attempted signals can cost more model calls and time. The round summary shows verified out of all eligible signals, attempted, unverified (including failures), and deferred. Every attempted signal still faces the four gates. Search dates guide queries and providers; always check dates in the captured evidence.
+These controls are independent of dig, nerve, map and county. Presets retain your date/count choices. Each new round saves a snapshot before work starts, so a mid-round edit affects later rounds. More attempted signals can cost more model calls and time. The round summary shows protocol-complete signals out of all eligible signals, attempted, protocol-incomplete (including failures), and saved for later review. The questions describe research completeness and never block editor handoff. Search dates guide queries and providers; always check dates in the captured evidence.
 
 ## Opinion (`/desk/opinion`)
 
@@ -556,9 +574,9 @@ Where the paper says what it thinks.
 
 Use **Add documents** or drop files into **Start with your documents**, paste source text, or supply URLs. Keep the writing instruction separate from the evidence. Then press **Write an editorial**. See the [current desk guide](editor-desk.md) for limits, progress, recovery and where the finished draft appears.
 
-Choose **Automatic**, **Claude Opus**, **Codex Terra**, **Codex Sol** or
-**Local model**; saved custom connections are offered too. Codex Sol is selected by default. Automatic tries
-Claude Opus, then Codex Sol once if Claude is unavailable. An explicit choice
+Choose **Automatic**, any named Codex or Claude model, or **Local model**;
+saved custom connections are offered too. Codex Sol is selected by default. Automatic tries
+Codex Sol, then Claude Sonnet once if Codex is unavailable. An explicit choice
 stays selected. Claude and Codex both read the complete configured voice through their native instruction-file options.
 Readiness lists every missing prerequisite — voice file, installation, or
 login — before the button is enabled, and the server checks again when you
@@ -586,7 +604,7 @@ The desk checks that the delivery is actually an editorial before it files
 anything. A provider refusal, limitation note, neutral-summary substitute,
 implausible headline, or incomplete body makes the row **Failed** and creates no
 draft. There is then no Read, Edit, or Publish action to mistake for success.
-Automatic can move from Claude Opus to Codex Sol once; a named choice stays
+Automatic can move from Codex Sol to Claude Sonnet once; a named choice stays
 with that provider. A
 finished row names the provider that actually delivered the piece.
 
@@ -654,10 +672,12 @@ Every available maintenance action explains its effect before you run it.
 The daily scan controls on Server are available to the owner.
 They start disabled. The owner chooses a local time in the paper's configured
 timezone, selects as many as 12 accepted sources from any reporting beat, and
-chooses one explicit runtime: the already selected local model, Claude Code
-subscription CLI, Codex Terra subscription CLI or Codex Sol subscription CLI.
-The scheduled run does not use a metered API key, a configured gateway or a
-different provider as fallback. It reads bounded excerpts from the selected
+chooses one explicit model: Codex Astra, Sol, Terra, or Luna; Claude Fable,
+Opus, Sonnet, or Haiku; the already selected local model; or a saved Custom AI
+connection such as an OpenAI-compatible Gemini endpoint. A legacy saved
+"Claude Code subscription" setting opens as Claude Sonnet. The scheduled run
+does not switch providers. Custom credentials stay encrypted in newsroom
+settings and are resolved only when the run starts. It reads bounded excerpts from the selected
 sources; it does not claim full-site coverage.
 
 At most one reservation is kept for each local calendar day, and only one
@@ -933,4 +953,4 @@ In the story workspace, use **Check draft against evidence**. The check reads th
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.

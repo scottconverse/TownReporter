@@ -25,14 +25,18 @@ import {
   dropFollowUp,
   draftLead,
   getLead,
+  listPullJobs,
   listFollowUps,
   nudgeFollowUp,
   publishLead,
   pullTodo,
+  continuePullJob,
   recordFollowUpReply,
   saveDraft,
   saveReportingNotes,
+  stopPullJob,
 } from "@/lib/news/desk";
+import type { PullRunView } from "@/lib/news/pull.server";
 import { FollowUpItem } from "@/components/follow-up-item";
 import { uncreditedOutlets } from "@/lib/news/report";
 import { parseUrlList } from "@/lib/paper";
@@ -59,7 +63,11 @@ import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review";
-import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
+import {
+  modelChoiceLabel,
+  rememberedStoryModelChoice,
+  type StoryModelChoice,
+} from "@/lib/news/model-choice";
 import { integrityNoteItems } from "@/lib/news/coerce-draft";
 import {
   DraftReconcileControl,
@@ -130,6 +138,9 @@ function StoryPage() {
   const [scratch, setScratch] = useState("");
   const [researchScope, setResearchScope] = useState<"public" | "supplied">("public");
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
+  const [modelResearchOpen, setModelResearchOpen] = useState(false);
+  const modelResearchPanel = useRef<HTMLElement>(null);
+  const modelChoiceTouched = useRef(false);
   /*
     Publishing is the only irreversible thing on this page, and it was the
     only one that did not ask.
@@ -198,6 +209,18 @@ function StoryPage() {
     !waiting && !msg && data?.job?.status === "failed"
       ? (editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish.")
       : "";
+  const draftProblem = msg || previousJobError;
+
+  useEffect(() => {
+    if (!modelResearchOpen) return;
+    const frame = requestAnimationFrame(() => {
+      modelResearchPanel.current?.scrollIntoView({ block: "nearest" });
+      modelResearchPanel.current
+        ?.querySelector<HTMLSelectElement>("select")
+        ?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [modelResearchOpen]);
 
   useEffect(() => {
     const job = data?.job;
@@ -298,6 +321,13 @@ function StoryPage() {
     const s = parseNotes(data?.lead.notes_json).scratch ?? "";
     if (s) setScratch(s);
   }, [data?.lead.notes_json]);
+
+  useEffect(() => {
+    if (!data?.job || modelChoiceTouched.current) return;
+    setModelChoice(
+      rememberedStoryModelChoice(data.job.model_choice, data.job.model_choice_source),
+    );
+  }, [data?.job]);
 
   useEffect(() => {
     if (!waitingSince) {
@@ -680,6 +710,11 @@ function StoryPage() {
     data.lead.headline.startsWith("[Dark]");
   const locked = data.lead.status === "killed";
   const onPaper = data.lead.status === "published" || Boolean(publishedSlug);
+  const canChooseAnotherModel =
+    !onPaper &&
+    /readiness check|did not answer in time|provider slow|timed?\s*out|choose another model/i.test(
+      draftProblem,
+    );
   const canPublish = Boolean(data.draft) && data.lead.status !== "held" && !locked && !onPaper;
   const found = findingsFrom(data.draft?.found_note);
   const unanswered = unansweredNotes(data.draft?.unanswered);
@@ -746,6 +781,11 @@ function StoryPage() {
             {data.job.status === "queued" ? "Your story is queued" : "Your story is being written"}
           </strong>
           <p>{data.job.stage || "Preparing your sources…"}</p>
+          {data.job.failover_note ? (
+            <p className="story-model-switch-note">
+              <strong>Model switch:</strong> {data.job.failover_note}
+            </p>
+          ) : null}
           <span>
             Your submission is saved. The draft will appear here automatically. You can return from{" "}
             <Link to="/desk">Desk → Your recent drafts</Link>.
@@ -770,12 +810,12 @@ function StoryPage() {
       <div className="work-bar astra-story-actions">
         <button
           className="btn"
-          onClick={() => {
-            setInspector("reporting");
-            document.getElementById("story-inspector")?.scrollIntoView({ block: "start" });
-          }}
+          type="button"
+          aria-expanded={modelResearchOpen}
+          aria-controls="story-model-research"
+          onClick={() => setModelResearchOpen((open) => !open)}
         >
-          Model & research
+          Model & research · {modelChoiceLabel(modelChoice)}
         </button>
         <span className="astra-save-state" role="status">
           {onPaper ? "Published story" : hasUnsavedDraftEdits ? "Unsaved changes" : "Saved draft"}
@@ -800,7 +840,9 @@ function StoryPage() {
               {jobState === "recovering"
                 ? "Recovering…"
                 : waiting
-                  ? "Drafting…"
+                  ? data.job?.failover_note
+                    ? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
+                    : "Drafting…"
                   : data.draft?.body
                     ? "Redraft"
                     : "Draft with AI"}
@@ -959,6 +1001,44 @@ function StoryPage() {
           </p>
         ) : null}
       </div>
+      {modelResearchOpen && !locked && !onPaper ? (
+        <section
+          className="astra-model-research"
+          id="story-model-research"
+          ref={modelResearchPanel}
+          aria-labelledby="story-model-research-heading"
+        >
+          <div className="astra-model-research-heading">
+            <div>
+              <p className="kick">Redraft settings</p>
+              <h2 id="story-model-research-heading">Choose the model and research scope</h2>
+            </div>
+            <button className="btn" type="button" onClick={() => setModelResearchOpen(false)}>
+              Close
+            </button>
+          </div>
+          <div className="astra-model-research-controls">
+            <ModelPicker
+              value={modelChoice}
+              onChange={(choice) => {
+                modelChoiceTouched.current = true;
+                setModelChoice(choice);
+              }}
+              disabled={waiting || reconcileActive || savePending}
+              compact
+            />
+            <DraftScopePicker
+              value={researchScope}
+              onChange={setResearchScope}
+              disabled={waiting}
+            />
+          </div>
+          <p className="meta">
+            Redraft uses these settings. Your current saved draft stays in place until a new draft
+            finishes successfully.
+          </p>
+        </section>
+      ) : null}
       <div className="story-grid">
         <aside
           className="story-side astra-inspector"
@@ -1082,12 +1162,16 @@ function StoryPage() {
             hidden={inspector !== "reporting"}
           >
             {!locked && !onPaper ? (
-              <ModelPicker
-                value={modelChoice}
-                onChange={setModelChoice}
-                disabled={waiting || reconcileActive || savePending}
-                compact
-              />
+              <div className="astra-current-model">
+                <p className="side-label">Redraft settings</p>
+                <p>
+                  <strong>{modelChoiceLabel(modelChoice)}</strong> ·{" "}
+                  {researchScope === "supplied" ? "Supplied material only" : "Public research"}
+                </p>
+                <button className="btn" type="button" onClick={() => setModelResearchOpen(true)}>
+                  Change model or research
+                </button>
+              </div>
             ) : null}
             <Chip s={data.lead.status} />
             <p className="kick">{fromDark ? "Working notes from Dark Desk" : "The lead"}</p>
@@ -1123,13 +1207,6 @@ function StoryPage() {
                 This trail came from Dark Desk. Draft privately here; printing is a separate click
                 and every claim still needs evidence.
               </p>
-            ) : null}
-            {!locked && !onPaper ? (
-              <DraftScopePicker
-                value={researchScope}
-                onChange={setResearchScope}
-                disabled={waiting}
-              />
             ) : null}
             <ReportingNotesPane
               leadId={id}
@@ -1216,16 +1293,21 @@ function StoryPage() {
             />
           ) : null}
           {publish.isPending ? <Busy label="Sending this to the paper…" /> : null}
-          {(msg || previousJobError) && !onPaper ? (
+          {draftProblem && !onPaper ? (
             <Notice kind={msg === "Saved." ? "ok" : "err"}>
-              {msg || previousJobError}
+              {draftProblem}
               {/*
                 The one error the desk could describe but never act on. A
                 lapsed CLI login used to end at "sign in again", which meant a
                 terminal; this starts the sign-in and hands over to the Server
                 page. It renders only when the error really is that.
               */}
-              <ProviderSignInButton detail={msg || previousJobError} />
+              <ProviderSignInButton detail={draftProblem} />
+              {canChooseAnotherModel ? (
+                <button className="btn" type="button" onClick={() => setModelResearchOpen(true)}>
+                  Choose another model
+                </button>
+              ) : null}
             </Notice>
           ) : null}
 
@@ -1412,11 +1494,35 @@ function ReportingNotesPane({
 }) {
   const qc = useQueryClient();
   const [line, setLine] = useState("");
-  const [pulling, setPulling] = useState<number | null>(null);
+  const [startingPullIndex, setStartingPullIndex] = useState<number | null>(null);
   const [pullMsg, setPullMsg] = useState("");
   const small = usePhoneNotes();
-  const filled = notesHaveMemo(notes);
+  const filled =
+    notesHaveMemo(notes) ||
+    notes.opened.length > 0 ||
+    notes.found.length > 0 ||
+    notes.verify.length > 0;
   const verifyItems = notes.verify.flatMap(integrityNoteItems);
+  const pullRuns = useQuery({
+    queryKey: ["pull-jobs", leadId],
+    queryFn: () => listPullJobs({ data: { leadId } }),
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some(
+        (run) => run.jobStatus === "queued" || run.jobStatus === "running",
+      )
+        ? 1_000
+        : false,
+  });
+  const terminalPulls = (pullRuns.data ?? [])
+    .filter((run) => run.jobStatus === "completed" || run.jobStatus === "failed")
+    .map((run) => `${run.jobId}:${run.updatedAt}`)
+    .join("|");
+  const lastTerminalPulls = useRef("");
+  useEffect(() => {
+    if (!terminalPulls || terminalPulls === lastTerminalPulls.current) return;
+    lastTerminalPulls.current = terminalPulls;
+    void qc.invalidateQueries({ queryKey: ["lead", leadId] });
+  }, [leadId, qc, terminalPulls]);
 
   /*
     "People who still need to respond" (Direction A stage 1, the Follow-ups
@@ -1482,11 +1588,11 @@ function ReportingNotesPane({
     mutationFn: (input: { index: number; query: string }) =>
       pullTodo({ data: { leadId, query: input.query, index: input.index } }),
     onMutate: (input) => {
-      setPulling(input.index);
+      setStartingPullIndex(input.index);
       setPullMsg("");
     },
     onSuccess: (res) => {
-      setPulling(null);
+      setStartingPullIndex(null);
       if (!answered(res)) {
         setPullMsg(NO_ANSWER);
         return;
@@ -1495,23 +1601,29 @@ function ReportingNotesPane({
         setPullMsg(res.error);
         return;
       }
-      // Say when pages were found and rejected. "Nothing found" and "found
-      // four documents, none of them about this story" are different answers,
-      // and the second one means the line needs rewording, not retrying.
-      const off = res.offSubject
-        ? ` Skipped ${res.offSubject} page${res.offSubject === 1 ? "" : "s"} that named neither the city nor the subject.`
-        : "";
-      setPullMsg(
-        res.found
-          ? `Dropped ${res.found} page${res.found === 1 ? "" : "s"} under the story.${off}`
-          : `Nothing public found for that line.${off}`,
-      );
-      void qc.invalidateQueries({ queryKey: ["lead", leadId] });
+      setPullMsg("Pull started. Its live progress is shown under the reporting line.");
+      void qc.invalidateQueries({ queryKey: ["pull-jobs", leadId] });
     },
     onError: (err) => {
-      setPulling(null);
+      setStartingPullIndex(null);
       setPullMsg(err instanceof Error ? err.message : "Pull failed.");
     },
+  });
+  const stopPull = useMutation({
+    mutationFn: (jobId: number) => stopPullJob({ data: { jobId } }),
+    onSuccess: (res) => {
+      if (!res.ok) setPullMsg(res.error);
+      void qc.invalidateQueries({ queryKey: ["pull-jobs", leadId] });
+    },
+    onError: (err) => setPullMsg(err instanceof Error ? err.message : "Could not stop Pull."),
+  });
+  const continuePull = useMutation({
+    mutationFn: (jobId: number) => continuePullJob({ data: { jobId } }),
+    onSuccess: (res) => {
+      setPullMsg(res.ok ? "Pull continued from its saved checkpoint." : res.error);
+      void qc.invalidateQueries({ queryKey: ["pull-jobs", leadId] });
+    },
+    onError: (err) => setPullMsg(err instanceof Error ? err.message : "Could not continue Pull."),
   });
 
   /*
@@ -1575,18 +1687,31 @@ function ReportingNotesPane({
     notes.todo.filter((t) => t.src !== "gate").length ? (
       <div className="note-sec">
         <p className="side-label">Still to pull</p>
-        {notes.todo.map((t, i) =>
-          t.src === "gate" ? null : (
+        {notes.todo.map((t, i) => {
+          if (t.src === "gate") return null;
+          const candidates = pullRuns.data ?? [];
+          const queryIsUnique = notes.todo.filter((row) => row.t === t.t).length === 1;
+          const run =
+            candidates.find((candidate) => candidate.todoIndex === i && candidate.query === t.t) ??
+            (queryIsUnique
+              ? candidates.find((candidate) => candidate.query === t.t)
+              : candidates.find(
+                  (candidate) => candidate.todoIndex == null && candidate.query === t.t,
+                ));
+          return (
             <TodoRow
               key={`${prefix}-${t.src}-${t.t}-${i}`}
               item={t}
               disabled={locked}
-              pulling={pulling === i}
+              run={run}
+              starting={startingPullIndex === i}
               onToggle={() => save.mutate({ toggle: i, todos: notes.todo })}
               onPull={() => pull.mutate({ index: i, query: t.t })}
+              onStop={() => run && stopPull.mutate(run.jobId)}
+              onContinue={() => run && continuePull.mutate(run.jobId)}
             />
-          ),
-        )}
+          );
+        })}
         <p className="note-hint">
           Pull searches that line and drops the excerpt in the box under the story. The checkbox
           just strikes it.
@@ -1803,8 +1928,13 @@ function ReportingNotesPane({
   );
 
   if (small) {
+    const activePull =
+      startingPullIndex != null ||
+      (pullRuns.data ?? []).some(
+        (run) => run.jobStatus === "queued" || run.jobStatus === "running",
+      );
     return (
-      <details className="notes-disc">
+      <details className="notes-disc" open={activePull || undefined}>
         <summary>
           Reporting notes <span className="chip dnp">does not print</span>
         </summary>
@@ -1818,35 +1948,119 @@ function ReportingNotesPane({
 function TodoRow({
   item,
   disabled,
-  pulling,
+  run,
+  starting,
   onToggle,
   onPull,
+  onStop,
+  onContinue,
 }: {
   item: ReportingNotes["todo"][number];
   disabled: boolean;
-  pulling: boolean;
+  run?: PullRunView;
+  starting: boolean;
   onToggle: () => void;
   onPull: () => void;
+  onStop: () => void;
+  onContinue: () => void;
 }) {
+  const active = starting || run?.jobStatus === "queued" || run?.jobStatus === "running";
   return (
-    <div className={"todo-row" + (item.done ? " done" : "")}>
-      <button
-        type="button"
-        className={"todo" + (item.done ? " done" : "")}
-        title={item.done ? "Struck — click to restore" : "Click to mark this pulled"}
-        aria-pressed={item.done}
-        disabled={disabled}
-        onClick={onToggle}
-      >
-        <span className="todo-box" />
-        <span className="todo-t">{item.t}</span>
-        {item.src === "you" ? <span className="todo-src">yours</span> : null}
-      </button>
-      {!disabled && !item.done ? (
-        <button type="button" className="todo-pull" disabled={pulling} onClick={onPull}>
-          {pulling ? "Pulling…" : "Pull"}
+    <div className="todo-pull-group">
+      <div className={"todo-row" + (item.done ? " done" : "")}>
+        <button
+          type="button"
+          className={"todo" + (item.done ? " done" : "")}
+          title={item.done ? "Struck — click to restore" : "Click to mark this pulled"}
+          aria-pressed={item.done}
+          disabled={disabled}
+          onClick={onToggle}
+        >
+          <span className="todo-box" />
+          <span className="todo-t">{item.t}</span>
+          {item.src === "you" ? <span className="todo-src">yours</span> : null}
         </button>
+        {!disabled && !item.done ? (
+          <button type="button" className="todo-pull" disabled={active} onClick={onPull}>
+            {active ? "Pulling…" : "Pull"}
+          </button>
+        ) : null}
+      </div>
+      {run ? (
+        <PullProgress run={run} onStop={onStop} onContinue={onContinue} disabled={disabled} />
+      ) : starting ? (
+        <div className="pull-progress active">
+          <div className="pull-progress-head">
+            <strong>Starting Pull…</strong>
+            <span>0s</span>
+          </div>
+          <p>Mechanical web search and document extraction — no AI model is being used.</p>
+          <p className="pull-counts" aria-live="polite">Creating the saved background job…</p>
+        </div>
       ) : null}
+    </div>
+  );
+}
+
+function PullProgress({
+  run,
+  onStop,
+  onContinue,
+  disabled,
+}: {
+  run: PullRunView;
+  onStop: () => void;
+  onContinue: () => void;
+  disabled: boolean;
+}) {
+  const active = run.jobStatus === "queued" || run.jobStatus === "running";
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+  const start = run.startedAt ? Date.parse(run.startedAt) : Date.parse(run.updatedAt);
+  const end = active ? now : run.finishedAt ? Date.parse(run.finishedAt) : Date.parse(run.updatedAt);
+  const elapsed = Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, Math.round((end - start) / 1000)) : 0;
+  const canContinue =
+    !active && (run.status === "stopped" || run.status === "deadline" || run.status === "failed");
+  return (
+    <div className={`pull-progress ${active ? "active" : "finished"}`}>
+      <div className="pull-progress-head">
+        <strong aria-live="polite">{run.stage}</strong>
+        <span>{elapsed}s</span>
+      </div>
+      <p>Mechanical web search and document extraction — no AI model is being used.</p>
+      <p className="pull-counts" aria-live="polite">
+        {run.counters.searchesAttempted} searches · {run.counters.providersAttempted} providers ·{" "}
+        {run.counters.indexPagesChecked} index pages · {run.counters.documentsOpened} documents opened ·{" "}
+        {run.counters.documentsSaved} saved
+      </p>
+      <div className="pull-progress-actions">
+        {active ? (
+          <button type="button" className="text-action" disabled={disabled || run.stopRequested} onClick={onStop}>
+            {run.stopRequested ? "Stopping…" : "Stop"}
+          </button>
+        ) : null}
+        {canContinue ? (
+          <button type="button" className="text-action" disabled={disabled} onClick={onContinue}>
+            Continue pull
+          </button>
+        ) : null}
+        {run.errors.length ? (
+          <details>
+            <summary>
+              {run.errors.length} provider or page failure{run.errors.length === 1 ? "" : "s"}
+            </summary>
+            <ul>
+              {run.errors.map((error, index) => (
+                <li key={`${run.jobId}-pull-error-${index}`}>{error}</li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+      </div>
     </div>
   );
 }

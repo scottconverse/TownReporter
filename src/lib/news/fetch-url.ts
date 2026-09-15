@@ -150,6 +150,7 @@ export async function resolveFetch(): Promise<FetchLike> {
 export async function fetchPublicHttpOnce(
   url: URL,
   schedule: (send: () => Promise<Response>) => Promise<Response> = (send) => send(),
+  signal?: AbortSignal,
 ): Promise<Response> {
   await assertPublicHttpUrl(url.toString());
   const doFetch = await resolveFetch();
@@ -162,15 +163,22 @@ export async function fetchPublicHttpOnce(
         Accept:
           "text/html,application/xhtml+xml,application/xml,text/plain,application/pdf;q=0.8,*/*;q=0.1",
       },
-      signal: AbortSignal.timeout(10000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
+        : AbortSignal.timeout(10000),
     }),
   );
 }
 
-export async function fetchPublicHttpTracked(url: URL, hops = 4): Promise<TrackedFetch> {
+export async function fetchPublicHttpTracked(
+  url: URL,
+  hops = 4,
+  signal?: AbortSignal,
+): Promise<TrackedFetch> {
   const chain: string[] = [url.toString()];
   async function go(u: URL, left: number): Promise<Response> {
-    const res = await fetchPublicHttpOnce(u);
+    signal?.throwIfAborted();
+    const res = await fetchPublicHttpOnce(u, undefined, signal);
     if ([301, 302, 303, 307, 308].includes(res.status)) {
       if (left <= 0) throw new Error("Too many redirects");
       const loc = res.headers.get("location");
@@ -190,8 +198,8 @@ export async function fetchPublicHttpTracked(url: URL, hops = 4): Promise<Tracke
   }
 }
 
-export async function fetchPublicHttp(url: URL, hops = 4): Promise<Response> {
-  const tracked = await fetchPublicHttpTracked(url, hops);
+export async function fetchPublicHttp(url: URL, hops = 4, signal?: AbortSignal): Promise<Response> {
+  const tracked = await fetchPublicHttpTracked(url, hops, signal);
   return tracked.response;
 }
 

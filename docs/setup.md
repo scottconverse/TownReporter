@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.48](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.48).** See the [release guide](releases/0.6.48.md) for changes, installation and deployment evidence. Editors should start at [the editor guide](editor.md).
+**Current release: [0.6.49](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.49).** See the [release guide](releases/0.6.49.md) for changes, installation and deployment evidence. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 
@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
 | **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
-| **A model**                 | Story, Scan and Dark Desk offer per-run provider choices, including configured gateways and signed-in Codex/Claude CLIs. Opinion offers Automatic, Claude Opus, Codex Terra, Codex Sol, Local model and saved custom connections.     |
+| **A model**                 | Every writing picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.     |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 
@@ -48,7 +48,7 @@ on an editor's action:
 
 | What               | Triggered by                                      | Where it goes                                                                                                                                                                                                                                                                                    |
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Story, Scan and Dark Desk use their per-run choices. Automatic uses configured `LLM_*` exclusively when present; otherwise it tries Claude Opus, then Codex Terra, before enqueue. Opinion defaults to Codex Sol; Opinion Automatic follows a Claude-then-Sol readiness path; explicit Claude, Codex Terra, Codex Sol, Local model or custom choices stay selected.              |
+| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Each desk uses its per-run choice. Dark Automatic uses configured `LLM_*` when present; otherwise Terra with one Sonnet retry. Story and Opinion retain their documented Automatic ladders. Explicit named or custom choices never switch.              |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
 | **Searches**       | Public-source research, PULL, and Dark Desk hops  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key. Drafting scope **Use only supplied material** skips discovery/search for that draft, but still opens URLs you supply. PULL and Dark Desk remain separate external-research actions. |
 
@@ -239,12 +239,14 @@ sign in for you.
 
 Every active Queue row and the story workbench default to **Automatic**. A
 configured `LLM_*` gateway is forced for Automatic. Without one, TownReporter
-tries Claude Opus, then Codex Terra, and stores the first ready provider on
+tries Codex Terra, then Claude Sonnet, and stores the first ready provider on
 the job before it is enqueued. Every pass in that Story run uses the same
-effective provider, unless that provider's login lapses mid-run -- Automatic
-then moves to the next ladder rung once, if it is ready. A named choice
-forces only that provider; explicit choices never fall back, at enqueue or
-mid-run.
+effective provider unless it reaches a usage limit, becomes unavailable,
+loses its login, or times out mid-run. Automatic then moves the unfinished
+work to the next ladder rung once, if it is ready. Uploaded documents remain
+saved and are reread by the provider that takes over. A content refusal stops
+the run. A named choice forces only that provider; explicit choices never fall
+back, at enqueue or mid-run.
 
 Zen MiMo and Local Qwen were removed from the picker (2026-09-02). 0.6.10
 brought a local model back as a named pick, "Local model": generic this
@@ -254,11 +256,10 @@ configured, TownReporter also discovers Ollama, LM Studio, or llama.cpp
 running on their default ports. See
 [local-models.md](local-models.md) for the one-command way to get started.
 
-| Choice      | Default identity | Prerequisite / boundary                                                                        |
-| ----------- | ----------------- | ------------------------------------------------------------------------------------------------ |
-| Codex Terra | `gpt-5.6-terra`   | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token.   |
-| Codex Sol   | `gpt-5.6-sol`     | Same Codex login; frontier Story override.                                                       |
-| Claude Opus | `claude-opus-5`   | Signed-in Claude Code, or `ANTHROPIC_API_KEY`.                                                   |
+| Choice | Default identity | Prerequisite / boundary |
+| ------ | ---------------- | ----------------------- |
+| Codex Astra / Sol / Terra / Luna | `gpt-6-astra` / `gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` | Install/open Codex and sign in. TownReporter reuses its OAuth state; it never reads the token. |
+| Claude Fable / Opus / Sonnet / Haiku | Claude CLI aliases `fable` / `claude-opus-5` / `sonnet` / `haiku` | Signed-in Claude Code, or `ANTHROPIC_API_KEY`. |
 | Local model | whatever `LLM_MODEL` names | Discovered LM Studio/Ollama/llama.cpp model, or `LLM_BASE_URL` set (plus `LLM_MODEL`, and `LLM_API_KEY` if the server wants one). `TOWNREPORTER_LOCAL=0` takes it out of the pickers. |
 
 Compatibility overrides:
@@ -281,9 +282,9 @@ multi-agent capabilities remain available. TownReporter launches Codex with
 the signed-in account can reach. The assignment still travels over stdin; Opinion loads the full voice separately through the native instruction-file setting,
 and its task remains the scope of the requested run.
 
-Opinion displays Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
-plus saved custom connections. Codex Sol is selected by default. Automatic tries Claude Opus, then Codex Sol
-once if Claude is unavailable; explicit choices stay selected. An invalid
+Opinion displays Automatic, all named Codex and Claude models, Local model,
+plus saved custom connections. Codex Sol is selected by default. Automatic tries Codex Sol, then Claude Sonnet
+once if Codex is unavailable; explicit choices stay selected. An invalid
 delivery -- a refusal, an assistant note, an incomplete piece --
 creates no draft. The completed request and job store the provider that
 finished.
@@ -345,9 +346,9 @@ Rules the app enforces, not conventions:
 Without the variable, the Opinion desk says so and spends nothing. Everything
 else on the desk works.
 
-`TOWNREPORTER_EDITORIAL_MODEL` overrides the **Claude Opinion writing model**.
-It defaults to Opus deliberately: it is the only call in the newsroom where
-the writing _is_ the product. It does not change Story choices or Codex models.
+The Opinion picker controls the writing model exactly. Named Claude choices use
+Fable, Opus, Sonnet, or Haiku as labelled; named Codex choices use Astra, Sol,
+Terra, or Luna as labelled.
 
 Note the length, and the cost. A piece takes ten to forty minutes, because the
 voice researches before it writes. Three measured runs:
@@ -360,7 +361,7 @@ voice researches before it writes. Three measured runs:
 
 `EDITORIAL_TIMEOUT_MS` sets a ceiling **per research or writing pass**, not per
 editorial, and defaults to 45 minutes. A complete provider pair can therefore
-take about 90 minutes plus orchestration overhead. Automatic can try the Codex Sol pair after Claude fails, increasing the total duration; it does not fall back to Local model. Explicit Local
+take about 90 minutes plus orchestration overhead. Automatic can try the Claude Sonnet pair after Codex fails, increasing the total duration; it does not fall back to Local model. Explicit Local
 model makes one writing call from supplied material, with no separate research
 pass. The
 historical timings above are not a current maximum. The desk enqueues a job and
@@ -519,9 +520,9 @@ Two things stop working there, both by design:
 
 Also note there is normally no Codex or Claude Code CLI on a serverless host —
 set `ANTHROPIC_API_KEY` or the `LLM_*` trio for Scan, Dark Desk, and Story
-instead. Opinion Automatic requires a signed-in Claude Code CLI or a ready
-Codex Sol fallback and the configured voice file. Explicit Claude, Codex
-Terra, Codex Sol, Local model or custom choices stay selected. Explicit Local
+instead. Opinion Automatic requires a ready Codex Sol or signed-in Claude
+Sonnet fallback and the configured voice file. Every explicit named Claude or
+Codex model, Local model, or custom choice stays selected. Explicit Local
 model has no separate research pass. These provider options do not remove
 serverless job-lifetime limits.
 
@@ -630,4 +631,4 @@ TownReporter/
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.

@@ -297,7 +297,7 @@ export async function deleteCustomAiConnection(userId: string, id: string) {
 export async function resolveCustomAiChoice(
   newsroomId: number,
   id: string,
-): Promise<{ baseUrl: string; modelId: string; apiKey: string | null }> {
+): Promise<{ baseUrl: string; modelId: string; apiKey: string | null; name?: string }> {
   await ensureSchema();
   const sql = await getSql();
   const row = (
@@ -311,6 +311,7 @@ export async function resolveCustomAiChoice(
       "The selected custom AI connection is disabled, deleted, or has no model. Choose another model; TownReporter will not fall back automatically.",
     );
   return {
+    name: row.name,
     baseUrl: row.base_url,
     modelId: row.model_id,
     apiKey: decryptApiKey(row.encrypted_api_key),

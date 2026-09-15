@@ -13,19 +13,97 @@
  */
 import type { reportAndDraft } from "./report.ts";
 import type { probeProvider } from "./ai.ts";
-import { AUTOMATIC_LADDER } from "./ai.ts";
 import type { DeskJob, setJobModelChoice, setJobStage, setJobFailoverNote } from "./jobs.ts";
 import { modelChoiceLabel } from "./model-choice.ts";
 import {
   planAutomaticFailover,
-  looksLikeTimeoutOrNoOutput,
+  automaticFailoverReason,
+  looksLikeProviderQuota,
   failoverReasonPhrase,
   failoverNoteSentence,
 } from "./automatic-failover.ts";
-import { looksLikeProviderAuthFailure } from "./preflight.ts";
 
 export type ReportedDraftResult = Awaited<ReturnType<typeof reportAndDraft>>;
 export type DraftInput = Omit<Parameters<typeof reportAndDraft>[0], "modelChoice">;
+
+/** Keep terminal provider-limit errors in the Story vocabulary. The shared
+ * desk renderer also serves Opinion, whose quota copy must not be shown for a
+ * Story job. Deliberately avoid the renderer's quota trigger words here while
+ * preserving the reset detail when the provider supplied one. */
+export function storyProviderFailure(error: string): string {
+  if (!looksLikeProviderQuota(error) || automaticFailoverReason(error) !== "quota") return error;
+  const reset = error
+    .match(/resets?\s+(?:at\s+)?([^.,;]+(?:\s+[AP]M\s+[A-Z]{2,5})?)/i)?.[1]
+    ?.trim();
+  // Preserve the useful Automatic probe result while omitting the original
+  // quota tokens that the shared Opinion renderer uses as its trigger.
+  const automaticDetail = error.match(/Automatic (?:tried|retry)[\s\S]*$/i)?.[0]?.trim();
+  const detail = automaticDetail ? ` ${automaticDetail}` : "";
+  return reset
+    ? `Story drafting is paused because the selected writing provider reached its allowance. It resets ${reset}.${detail} Your saved material was preserved; retry after that time.`
+    : `Story drafting is paused because the selected writing provider reached its allowance.${detail} Your saved material was preserved; retry Story after the provider is available.`;
+}
+
+/** Run one non-draft stage (for example uploaded-document interpretation) on
+ * the same Automatic failover seam as the final writer. Document reading is
+ * intentionally before reportAndDraft, so wrapping only the writer leaves a
+ * quota or unavailable provider error with no opportunity to move to Codex.
+ * The callback receives one later rung and is never called more than once. */
+export async function failOverOperationAndRetry<T>(opts: {
+  job: DeskJob;
+  error: string;
+  operation: (choice: string) => Promise<T>;
+  probe: typeof probeProvider;
+  setModelChoice: typeof setJobModelChoice;
+  setStage: typeof setJobStage;
+  setFailoverNote: typeof setJobFailoverNote;
+}): Promise<{ ok: true; value: T; choice: string } | { ok: false; error: string }> {
+  const rejectedRungs: Array<{ choice: string; error: string }> = [];
+  const plan = await planAutomaticFailover({
+    source: opts.job.model_choice_source ?? "editor",
+    current: opts.job.model_choice,
+    error: opts.error,
+    probe: async (choice) => {
+      const result = await opts.probe(choice);
+      if (!result.ok) rejectedRungs.push({ choice, error: result.error });
+      return result;
+    },
+  });
+  if (!plan) {
+    const source = opts.job.model_choice_source ?? "editor";
+    const rejectedRung = rejectedRungs.at(-1);
+    if (source === "auto" && rejectedRung && automaticFailoverReason(opts.error)) {
+      const label = modelChoiceLabel(rejectedRung.choice);
+      return {
+        ok: false,
+        error: storyProviderFailure(
+          `${opts.error} Automatic tried ${label} next, but it was not ready: ${rejectedRung.error}`,
+        ),
+      };
+    }
+    return { ok: false, error: storyProviderFailure(opts.error) };
+  }
+
+  const previousLabel = modelChoiceLabel(opts.job.model_choice);
+  await opts.setModelChoice(opts.job.id, plan.next);
+  await opts.setStage(
+    opts.job.id,
+    `Switched to ${plan.label}: ${failoverReasonPhrase(previousLabel, plan.reason)}`,
+  );
+  await opts.setFailoverNote(
+    opts.job.id,
+    failoverNoteSentence(plan.label, previousLabel, plan.reason),
+  );
+  try {
+    return { ok: true, value: await opts.operation(plan.next), choice: plan.next };
+  } catch (retryError) {
+    const detail = retryError instanceof Error ? retryError.message : String(retryError);
+    return {
+      ok: false,
+      error: storyProviderFailure(`Automatic retry on ${plan.label} failed: ${detail}`),
+    };
+  }
+}
 
 /** Injectable seam so a job with a real Claude/Codex 401 mid-run, and the
  * failover it triggers, can be tested without a real provider. Defaults to
@@ -33,6 +111,10 @@ export type DraftInput = Omit<Parameters<typeof reportAndDraft>[0], "modelChoice
  * `ReportDeps`. */
 export type PerformDraftWorkDeps = {
   reportAndDraft?: typeof reportAndDraft;
+  /** Test seam for the pre-writer uploaded-document stage. Production uses
+   * readStoryDocuments; the seam keeps its provider failure at the same
+   * Automatic failover boundary without requiring a live provider in tests. */
+  readStoryDocuments?: typeof import("./story-documents.server.ts").readStoryDocuments;
   probe?: typeof probeProvider;
   setJobModelChoice?: typeof setJobModelChoice;
   setJobStage?: typeof setJobStage;
@@ -52,14 +134,16 @@ export type PerformDraftWorkDeps = {
       timeoutMs: number;
     }) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
     local: typeof import("./ai.ts").grokChat;
+    custom: typeof import("./ai.ts").grokChat;
   };
   batchOcrAdapters?: import("./ocr.ts").OcrAdapters;
 };
 
 /**
  * The first attempt failed. If the job was on Automatic and the failure
- * reads as "the login is gone" or "it timed out / sent nothing back" (not a
- * refusal or an unknown error), try exactly one later rung of the ladder
+ * reads as "the login is gone", "it timed out / sent nothing back", "its
+ * allowance is exhausted", or "it is unavailable" (not a refusal or an
+ * unknown error), try exactly one later rung of the ladder
  * and, if it is ready, run the draft again on it -- once. Anything else,
  * including a second failure on the new rung, is returned/thrown as-is by
  * the caller.
@@ -74,14 +158,19 @@ export async function failOverAndRetry(opts: {
   setStage: typeof setJobStage;
   setFailoverNote: typeof setJobFailoverNote;
 }): Promise<ReportedDraftResult> {
-  const { job, error, draftInput, runReport, probe, setModelChoice, setStage, setFailoverNote } = opts;
-  if (draftInput.researchScope === "supplied") return { error: `${error} Supplied-material drafting does not switch to providers with external tools. Choose Claude or a local/API model and retry.` };
+  const { job, error, draftInput, runReport, probe, setModelChoice, setStage, setFailoverNote } =
+    opts;
   const source = job.model_choice_source ?? "editor";
+  const rejectedRungs: Array<{ choice: string; error: string }> = [];
   const plan = await planAutomaticFailover({
     source,
     current: job.model_choice,
     error,
-    probe: (choice) => probe(choice),
+    probe: async (choice) => {
+      const result = await probe(choice);
+      if (!result.ok) rejectedRungs.push({ choice, error: result.error });
+      return result;
+    },
   });
   if (!plan) {
     // Explain WHY Automatic did not move on, when it looked close: still on
@@ -89,22 +178,16 @@ export async function failOverAndRetry(opts: {
     // rung existed -- it just was not ready either. The original wording
     // from the first failure survives so the desk's own classifier
     // (scanPreflight) still reads it the same way it always did.
-    const ladderIndex = AUTOMATIC_LADDER.indexOf(
-      job.model_choice as (typeof AUTOMATIC_LADDER)[number],
-    );
-    const hasLaterRung = ladderIndex !== -1 && ladderIndex < AUTOMATIC_LADDER.length - 1;
-    const wouldHaveTried =
-      source === "auto" &&
-      hasLaterRung &&
-      (looksLikeTimeoutOrNoOutput(error) || looksLikeProviderAuthFailure(error));
-    if (wouldHaveTried) {
-      const nextRung = AUTOMATIC_LADDER[ladderIndex + 1]!;
-      const nextProbe = await probe(nextRung);
-      const label = modelChoiceLabel(nextRung);
-      const why = nextProbe.ok ? "" : nextProbe.error;
-      return { error: `${error} Automatic tried ${label} next, but it was not ready: ${why}` };
+    const rejectedRung = rejectedRungs.at(-1);
+    if (source === "auto" && rejectedRung && automaticFailoverReason(error)) {
+      const label = modelChoiceLabel(rejectedRung.choice);
+      return {
+        error: storyProviderFailure(
+          `${error} Automatic tried ${label} next, but it was not ready: ${rejectedRung.error}`,
+        ),
+      };
     }
-    return { error };
+    return { error: storyProviderFailure(error) };
   }
 
   const previousLabel = modelChoiceLabel(job.model_choice);
@@ -115,5 +198,6 @@ export async function failOverAndRetry(opts: {
   // "Done" once the job finishes, so without this the editor could see the
   // switch reason mid-run but never again once the draft landed.
   await setFailoverNote(job.id, failoverNoteSentence(plan.label, previousLabel, plan.reason));
-  return runReport({ ...draftInput, modelChoice: plan.next });
+  const retried = await runReport({ ...draftInput, modelChoice: plan.next });
+  return "error" in retried ? { error: storyProviderFailure(retried.error) } : retried;
 }

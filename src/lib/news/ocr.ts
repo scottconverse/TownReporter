@@ -25,6 +25,7 @@
 */
 import type { OcrImpl, OcrOptions, PdfPage } from "./ingest.ts";
 import { isSelfReferential } from "./claim-hygiene.ts";
+import { isCustomModelChoice } from "./model-choice.ts";
 import { providerEntry, providerModel, type ProviderKind } from "./provider-registry.ts";
 
 const JPEG_SOI = [0xff, 0xd8, 0xff];
@@ -149,12 +150,17 @@ type Plan =
   | { kind: "anthropic"; apiKey: string; model: string }
   | { kind: "codex"; model: string }
   | { kind: "claude-code"; model: string }
+  | { kind: "openai"; baseUrl: string; apiKey: string; model: string }
   | { kind: "local"; baseUrl: string; apiKey: string; model: string };
 
 type PlanFailure = { needsOcr: true; reason: string };
 
 /** One vision transcription call. Overridable per-transport for hermetic tests. */
-export type OcrPageTranscriber = (image: PageImage, timeoutMs: number) => Promise<string>;
+export type OcrPageTranscriber = (
+  image: PageImage,
+  timeoutMs: number,
+  selected?: { transport: ProviderKind; model: string },
+) => Promise<string>;
 export type OcrAdapters = Partial<Record<ProviderKind, OcrPageTranscriber>>;
 
 async function resolveVisionLocal(
@@ -217,6 +223,36 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
     const local = await resolveVisionLocal(opts.localModel);
     if (local) return local;
     return { needsOcr: true, reason: NO_VISION_AVAILABLE };
+  }
+
+  if (isCustomModelChoice(provider)) {
+    const newsroomId = Number(opts.newsroomId);
+    if (!Number.isSafeInteger(newsroomId) || newsroomId <= 0) {
+      return {
+        needsOcr: true,
+        reason: "The selected custom AI connection cannot read this scan without its newsroom.",
+      };
+    }
+    try {
+      const resolve =
+        opts.resolveCustom ??
+        (await import("./custom-ai-connections.server.ts")).resolveCustomAiChoice;
+      const connection = await resolve(newsroomId, provider.slice("custom:".length));
+      return {
+        kind: "openai",
+        baseUrl: connection.baseUrl,
+        apiKey: connection.apiKey || "not-needed",
+        model: connection.modelId,
+      };
+    } catch (error) {
+      return {
+        needsOcr: true,
+        reason:
+          error instanceof Error
+            ? error.message
+            : "The selected custom AI connection is unavailable for OCR.",
+      };
+    }
   }
 
   const entry = providerEntry(provider);
@@ -346,7 +382,7 @@ async function claudeCodeTranscribePage(
   });
 }
 
-async function localTranscribePage(
+async function openAiCompatibleTranscribePage(
   image: PageImage,
   baseUrl: string,
   apiKey: string,
@@ -375,7 +411,7 @@ async function localTranscribePage(
     }),
     signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!res.ok) throw new Error(`local vision model API error ${res.status}`);
+  if (!res.ok) throw new Error(`vision model API error ${res.status}`);
   const body = (await res.json()) as {
     choices?: { message?: { content?: string } }[];
   };
@@ -389,12 +425,18 @@ async function transcribePage(
   adapters?: OcrAdapters,
 ): Promise<string> {
   const adapter = adapters?.[plan.kind];
-  if (adapter) return adapter(image, timeoutMs);
+  if (adapter) return adapter(image, timeoutMs, { transport: plan.kind, model: plan.model });
   if (plan.kind === "anthropic")
     return anthropicTranscribePage(image, plan.apiKey, plan.model, timeoutMs);
   if (plan.kind === "codex") return codexTranscribePage(image, plan.model, timeoutMs);
   if (plan.kind === "claude-code") return claudeCodeTranscribePage(image, plan.model, timeoutMs);
-  return localTranscribePage(image, plan.baseUrl, plan.apiKey, plan.model, timeoutMs);
+  return openAiCompatibleTranscribePage(
+    image,
+    plan.baseUrl,
+    plan.apiKey,
+    plan.model,
+    timeoutMs,
+  );
 }
 
 /**

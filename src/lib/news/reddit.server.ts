@@ -1,7 +1,15 @@
 import { performance } from "node:perf_hooks";
 import { fetchPublicHttpOnce } from "./fetch-url.ts";
 import { htmlToPlainText } from "./html-text.ts";
-import { isRedditUrl, isRedditThreadUrl, parseRedditFeed, threadFeed, type RedditPost } from "./reddit.ts";
+import {
+  civicScore,
+  isRedditUrl,
+  isRedditThreadUrl,
+  parseRedditFeed,
+  threadFeed,
+  type RedditPost,
+} from "./reddit.ts";
+import { canonicalRedditThreadUrl, parseRedlibThreadHtml } from "./redlib.ts";
 
 /**
  * Fetching Reddit at a pace that keeps working.
@@ -113,6 +121,220 @@ export type RedditSweep = {
   incomplete: boolean;
   reason?: string;
 };
+
+export type RedditEnrichmentReport = {
+  adapter: "redlib" | "rss-only";
+  attempted: number;
+  enriched: number;
+  coverage: "complete" | "partial" | "unavailable";
+  reason: string;
+  version: string | null;
+  instance: string | null;
+};
+
+const DEFAULT_LOCAL_REDLIB = "http://127.0.0.1:18080";
+
+/**
+ * Default to the editor's local Redlib. An explicit operator setting may name
+ * another Redlib; the application does not substitute or rotate instances.
+ */
+export function redlibBaseUrl(raw = process.env.REDDIT_REDLIB_BASE_URL): URL | null {
+  const value = raw?.trim();
+  if (value && ["off", "false", "0"].includes(value.toLowerCase())) return null;
+  const url = new URL(value || DEFAULT_LOCAL_REDLIB);
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error("Redlib URL must use HTTP or HTTPS");
+  if (url.username || url.password) throw new Error("Redlib URL cannot contain credentials");
+  if (url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("Redlib URL must be a base address with no path, query or fragment");
+  }
+  return url;
+}
+
+type RedlibFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
+type RedlibEnrichmentOptions = {
+  baseUrl?: string | null;
+  fetcher?: RedlibFetch;
+  /** Tests can skip the global eight-second Reddit queue. Production never does. */
+  paced?: boolean;
+  timeoutMs?: number;
+};
+
+function localFetch(
+  fetcher: RedlibFetch,
+  url: URL,
+  accept: string,
+  timeoutMs: number,
+): Promise<Response> {
+  return fetcher(url, {
+    method: "GET",
+    redirect: "manual",
+    headers: { Accept: accept, "User-Agent": "TownReporter/0.6 (+Redlib reader)" },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
+function redlibFailure(status: number): string {
+  if (status === 429) return "Redlib was rate-limited by Reddit; the RSS results were kept.";
+  if (status === 401 || status === 403) return "Redlib could not reach this discussion; the RSS results were kept.";
+  if (status === 404) return "A selected Reddit discussion was unavailable; its RSS result was kept.";
+  if (status >= 500) return "Redlib reported an upstream failure; the RSS results were kept.";
+  return `Redlib returned HTTP ${status}; the RSS results were kept.`;
+}
+
+function redlibTransportFailure(error: unknown, stage: "info" | "thread"): string {
+  const message = error instanceof Error ? error.message : "";
+  if (message.startsWith("Redlib ")) return message;
+  if (message.startsWith("parse_failure:")) {
+    return "Redlib returned a page TownReporter could not validate; the RSS result was kept.";
+  }
+  return stage === "info"
+    ? "Redlib did not answer; RSS excerpts were used."
+    : "Redlib could not read a selected discussion; its RSS result was kept.";
+}
+
+/**
+ * Enrich the strongest RSS candidates with complete thread pages from a
+ * validated Redlib. Each failure preserves the original RSS record.
+ */
+export async function enrichRedditPostsWithLocalRedlib(
+  posts: RedditPost[],
+  maxThreads = 3,
+  options: RedlibEnrichmentOptions = {},
+): Promise<{ posts: RedditPost[]; report: RedditEnrichmentReport }> {
+  let base: URL | null;
+  try {
+    base = options.baseUrl === null
+      ? null
+      : redlibBaseUrl(options.baseUrl === undefined ? process.env.REDDIT_REDLIB_BASE_URL : options.baseUrl);
+  } catch (error) {
+    return {
+      posts,
+      report: {
+        adapter: "rss-only",
+        attempted: 0,
+        enriched: 0,
+        coverage: "unavailable",
+        reason: error instanceof Error ? error.message : "Redlib is misconfigured.",
+        version: null,
+        instance: null,
+      },
+    };
+  }
+  if (!base) {
+    return {
+      posts,
+      report: {
+        adapter: "rss-only",
+        attempted: 0,
+        enriched: 0,
+        coverage: "unavailable",
+        reason: "Redlib is turned off; RSS excerpts were used.",
+        version: null,
+        instance: null,
+      },
+    };
+  }
+
+  const fetcher = options.fetcher ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 8_000;
+  let version: string | null = null;
+  try {
+    const infoUrl = new URL("/info.json", base);
+    const infoResponse = await localFetch(fetcher, infoUrl, "application/json", Math.min(timeoutMs, 2_000));
+    if (!infoResponse.ok || !infoResponse.headers.get("content-type")?.toLowerCase().includes("json")) {
+      throw new Error(redlibFailure(infoResponse.status));
+    }
+    const info = await infoResponse.json() as { git_commit?: unknown; crate_version?: unknown };
+    version = typeof info.git_commit === "string"
+      ? info.git_commit.slice(0, 12)
+      : typeof info.crate_version === "string" ? info.crate_version : null;
+    if (!version) throw new Error("Redlib did not identify its version.");
+  } catch (error) {
+    return {
+      posts,
+      report: {
+        adapter: "rss-only",
+        attempted: 0,
+        enriched: 0,
+        coverage: "unavailable",
+        reason: redlibTransportFailure(error, "info"),
+        version: null,
+        instance: base.origin,
+      },
+    };
+  }
+
+  const candidates = posts
+    .filter((post) => canonicalRedditThreadUrl(post.url) !== null)
+    .map((post) => ({ post, score: civicScore(post) }))
+    .sort((a, b) => b.score - a.score || Date.parse(b.post.updated || "0") - Date.parse(a.post.updated || "0"))
+    .slice(0, Math.max(0, maxThreads))
+    .map(({ post }) => post);
+  const replacements = new Map<string, RedditPost>();
+  let attempted = 0;
+  let enriched = 0;
+  let partialThreads = 0;
+  let lastFailure = "";
+
+  for (const post of candidates) {
+    const canonicalUrl = canonicalRedditThreadUrl(post.url);
+    if (!canonicalUrl) continue;
+    attempted += 1;
+    const path = new URL(canonicalUrl).pathname;
+    const url = new URL(`${path}?sort=confidence`, base);
+    try {
+      const send = () => localFetch(fetcher, url, "text/html", timeoutMs);
+      const response = options.paced === false ? await send() : await scheduleRedditRequest(send);
+      if (!response.ok) {
+        lastFailure = redlibFailure(response.status);
+        if (response.status === 429) break;
+        continue;
+      }
+      if (!response.headers.get("content-type")?.toLowerCase().includes("text/html")) {
+        lastFailure = "Redlib returned an unexpected document type; the RSS result was kept.";
+        continue;
+      }
+      const thread = parseRedlibThreadHtml(await response.text(), canonicalUrl);
+      replacements.set(post.url, {
+        ...post,
+        title: thread.title || post.title,
+        author: thread.author || post.author,
+        fullText: thread.bodyText || undefined,
+        sourceAdapter: "redlib-html",
+        redditScore: thread.score,
+        upvoteRatio: thread.upvoteRatio,
+        reportedCommentCount: thread.reportedCommentCount,
+        retrievedCommentCount: thread.retrievedCommentCount,
+        coverage: thread.coverage,
+        enrichmentWarnings: thread.warnings,
+      });
+      enriched += 1;
+      if (thread.coverage !== "complete") partialThreads += 1;
+    } catch (error) {
+      lastFailure = redlibTransportFailure(error, "thread");
+    }
+  }
+
+  const output = posts.map((post) => replacements.get(post.url) ?? { ...post, sourceAdapter: post.sourceAdapter ?? "reddit-rss" as const });
+  const complete = attempted > 0 && enriched === attempted && partialThreads === 0;
+  return {
+    posts: output,
+    report: {
+      adapter: enriched > 0 ? "redlib" : "rss-only",
+      attempted,
+      enriched,
+      coverage: complete ? "complete" : enriched > 0 ? "partial" : "unavailable",
+      reason: complete
+        ? `Redlib read ${enriched} selected discussion${enriched === 1 ? "" : "s"} in full.`
+        : enriched === attempted && partialThreads > 0
+          ? `Redlib read ${enriched} selected discussion${enriched === 1 ? "" : "s"}; Reddit omitted some comments.`
+          : lastFailure || (attempted === 0 ? "No Reddit discussion permalinks were available to enrich." : "RSS excerpts were kept."),
+      version,
+      instance: base.origin,
+    },
+  };
+}
 
 /**
  * Fetch a list of feeds in order, pacing between them.

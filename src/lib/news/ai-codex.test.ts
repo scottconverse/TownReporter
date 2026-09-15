@@ -10,6 +10,7 @@ import {
   classifyCodexDiagnostic,
   codexFailureMessage,
   codexChat,
+  parseCodexJsonl,
   probeCodex,
   runCodexProcessForTest,
 } from "./ai-codex.server.ts";
@@ -27,6 +28,7 @@ const EXPECTED_NATIVE_ARGS = [
   "--ephemeral",
   "--color",
   "never",
+  "--json",
   "-",
 ] as const;
 
@@ -55,6 +57,63 @@ function nodeImport(source: string): string {
 }
 
 describe("Codex native drafting launch", { concurrency: false }, () => {
+  it("extracts the final JSONL agent message and exact reported usage", () => {
+    const parsed = parseCodexJsonl([
+      JSON.stringify({ type: "thread.started", thread_id: "t_123" }),
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "first answer" } }),
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "final answer" } }),
+      JSON.stringify({
+        type: "turn.completed",
+        model: "gpt-5.6-terra",
+        usage: { input_tokens: 321, cached_input_tokens: 300, output_tokens: 45 },
+      }),
+    ].join("\n"));
+    assert.deepEqual(parsed, {
+      text: "final answer",
+      model: "gpt-5.6-terra",
+      recognized: true,
+      usage: { inputTokens: 321, outputTokens: 45 },
+    });
+  });
+
+  it("keeps the existing plain stdout fallback only when no JSONL events are present", () => {
+    const draft = '{"headline":"fixture"}';
+    assert.deepEqual(parseCodexJsonl(draft), {
+      text: draft,
+      recognized: false,
+      usage: undefined,
+      model: undefined,
+    });
+  });
+
+  it("returns JSONL result metadata from a completed Codex call without calculating a total", async () => {
+    const jsonl = [
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "reported answer" } }),
+      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 210, output_tokens: 33 } }),
+    ].join("\n") + "\n";
+    const dir = await mkdtemp(path.join(tmpdir(), "codex-jsonl-test-"));
+    const fakePath = path.join(dir, "jsonl-cli.mjs");
+    await writeFile(fakePath, `process.stdout.write(${JSON.stringify(jsonl)});`);
+    try {
+      const result = await withEnv(
+        { CODEX_CLI_PATH: fakePath },
+        () => codexChat({ system: "System", user: "User", model: "gpt-5.6-terra", timeoutMs: 1_000 }),
+      );
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      assert.equal(result.text, "reported answer");
+      assert.equal(result.meta?.provider, "codex");
+      assert.equal(result.meta?.model, "gpt-5.6-terra");
+      assert.equal(result.meta?.timedOut, false);
+      assert.equal(result.meta?.inputTokens, 210);
+      assert.equal(result.meta?.outputTokens, 33);
+      assert.equal(result.meta?.totalTokens, undefined);
+      assert.ok((result.meta?.durationMs ?? -1) >= 0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("classifies native outcomes without retaining worker text", () => {
     assert.equal(
       classifyCodexDiagnostic("failed to initialize in-process app-server client: Access is denied", {

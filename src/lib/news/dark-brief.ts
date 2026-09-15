@@ -14,10 +14,13 @@
  */
 
 export type BriefVerdict = "promising" | "thin" | "dead" | "unknown";
+export type BriefEvidenceStatus = "protocol-complete" | "unverified";
 
 export type InvestigationBrief = {
   /** One line. What this file is actually about, in the editor's language. */
   headline: string;
+  /** Whether every signal supplied to this brief completed the software protocol. */
+  evidence_status: BriefEvidenceStatus;
   /** Three or four sentences. The state of play. */
   tldr: string;
   /** Is it worth an hour, and why. */
@@ -70,6 +73,45 @@ export const VERDICT_COPY: Record<BriefVerdict, string> = {
 
 const str = (v: unknown, max: number) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 
+/** Bound display copy at a word boundary so a headline never ends mid-word. */
+export function wordBoundedStr(v: unknown, max: number): string {
+  const value = String(v ?? "").replace(/\s+/g, " ").trim();
+  if (value.length <= max) return value;
+  if (max < 2) return "";
+  const room = max - 1;
+  const candidate = value.slice(0, room).trimEnd();
+  const lastSpace = candidate.lastIndexOf(" ");
+  const whole = lastSpace > 0 ? candidate.slice(0, lastSpace) : "";
+  return `${whole.trimEnd()}…`;
+}
+
+/**
+ * A read-me-first headline is not allowed to turn an incomplete protocol into
+ * a finding. The model receives the same rule, and this parser is the backstop
+ * for old or non-compliant output.
+ */
+export function statusBoundedHeadline(
+  value: unknown,
+  status: BriefEvidenceStatus,
+  max = 180,
+): string {
+  let headline = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (status === "unverified") {
+    if (!headline) return "";
+    headline = headline
+      .replace(/^unverified (?:lead|question)\s*:\s*/i, "")
+      .replace(
+        /\b(?:documented|verified|confirmed|proven|established|conclusive|definitive)(?:\s+(?:and|or)\s+(?:documented|verified|confirmed|proven|established|conclusive|definitive))*\b/gi,
+        "",
+      )
+      .replace(/\s+([,.;:!?])/g, "$1")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    headline = `Unverified lead: ${headline}`;
+  }
+  return wordBoundedStr(headline, max);
+}
+
 const visiblyBoundedStr = (v: unknown, max: number) => {
   const value = String(v ?? "").replace(/\s+/g, " ").trim();
   if (value.length <= max) return value;
@@ -92,11 +134,18 @@ const list = (v: unknown, max: number, each: number, preserveTail = false) =>
  * the page is worse than no summary panel, and this runs above four sections
  * an editor still needs to read.
  */
-export function parseBrief(raw: unknown, now = new Date()): InvestigationBrief {
+export function parseBrief(
+  raw: unknown,
+  now = new Date(),
+  suppliedStatus?: BriefEvidenceStatus,
+): InvestigationBrief {
   const o = (raw ?? {}) as Record<string, unknown>;
   const s = (o.sections ?? {}) as Record<string, unknown>;
+  const evidenceStatus: BriefEvidenceStatus =
+    suppliedStatus ?? (o.evidence_status === "protocol-complete" ? "protocol-complete" : "unverified");
   return {
-    headline: str(o.headline, 180),
+    headline: statusBoundedHeadline(o.headline, evidenceStatus, 180),
+    evidence_status: evidenceStatus,
     tldr: str(o.tldr, 900),
     verdict: asVerdict(o.verdict),
     why_verdict: str(o.why_verdict, 400),
@@ -163,6 +212,8 @@ Your job, in order:
 
 7. One line above each of the four sections, saying what is in it.
 
+HEADLINE STATUS: Read VERIFICATION STATUS in the supplied file. If it says UNVERIFIED, the headline must begin "Unverified lead:" and must not use documented, verified, confirmed, proven, established, conclusive or definitive. A completed software protocol still does not prove misconduct or replace reading the underlying records. Never end a headline in the middle of a word.
+
 DO NOT:
 - Repeat the lists back. A summary as long as what it summarises has failed.
 - Upgrade the file's own labels. A HYPOTHESIS stays a hypothesis; an ALLEGATION stays an allegation.
@@ -199,6 +250,7 @@ Return ONLY JSON:
  */
 export function briefPack(input: {
   title: string;
+  verification?: { eligible: number; complete: number };
   facts: { body: string; evidence?: string }[];
   hypotheses: string[];
   questions: string[];
@@ -227,6 +279,11 @@ export function briefPack(input: {
   const evidence = evidenceEntries.join("\n\n") || "(none yet)";
   const sections = [
     `INVESTIGATION: ${clip(input.title, 600)}`,
+    `VERIFICATION STATUS: ${
+      input.verification && input.verification.eligible > 0 && input.verification.complete === input.verification.eligible
+        ? `PROTOCOL COMPLETE for ${input.verification.complete} of ${input.verification.eligible} signals. This is protocol completion, not factual proof.`
+        : `UNVERIFIED. ${input.verification?.complete ?? 0} of ${input.verification?.eligible ?? 0} signals completed the software protocol.`
+    }`,
     `DOCUMENTS READ:\n${evidence}`,
     `WHAT WE KNOW (facts and observations):\n${cap(input.facts.map((f) => `- ${clip(f.body, 600)}${f.evidence ? ` [${f.evidence.slice(0, 160)}]` : ""}`), 30).join("\n") || "(none yet)"}`,
     `BEING TESTED (hypotheses):\n${cap(input.hypotheses.map((h) => `- ${clip(h, 600)}`), 20).join("\n") || "(none yet)"}`,

@@ -42,6 +42,7 @@ type Props =
       onChange: (value: StoryModelChoice) => void;
       disabled?: boolean;
       compact?: boolean;
+      excludeAutomatic?: boolean;
     }
   | {
       scope: "opinion";
@@ -49,6 +50,7 @@ type Props =
       onChange: (value: OpinionModelChoice) => void;
       disabled?: boolean;
       compact?: boolean;
+      excludeAutomatic?: boolean;
     }
   | {
       /**
@@ -62,6 +64,7 @@ type Props =
       onChange: (value: DarkModelChoice) => void;
       disabled?: boolean;
       compact?: boolean;
+      excludeAutomatic?: boolean;
     };
 
 /**
@@ -191,7 +194,10 @@ export function ModelPicker(props: Props) {
     label: connection.name,
     detail: connection.modelId ?? "Choose a model in Server settings",
   }));
-  const options = [...builtInOptions, ...customOptions];
+  const options = [
+    ...builtInOptions.filter((option) => !props.excludeAutomatic || option.value !== "auto"),
+    ...customOptions,
+  ];
   if (isCustomModelChoice(props.value) && !options.some((option) => option.value === props.value)) {
     options.push({ value: props.value, label: "Custom API connection", detail: connections.isPending ? "Loading…" : "Unavailable — choose another model" });
   }

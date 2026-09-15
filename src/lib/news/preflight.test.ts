@@ -125,6 +125,10 @@ describe("scan preflight", () => {
     if (p.ok) return;
     assert.equal(p.kind, "timeout");
     assert.equal(p.retryable, true, "a timeout is the only kind a retry can fix");
+    assert.match(p.guidance, /No model job was started/i);
+    assert.match(p.guidance, /nothing was spent/i);
+    assert.match(p.guidance, /saved work is unchanged/i);
+    assert.match(p.guidance, /Choose another model/i);
   });
 
   /**

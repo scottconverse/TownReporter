@@ -9,7 +9,6 @@ import {
   meaningfulDeadEndMatch,
   persistDiscovery,
   researchLoop,
-  resurfaceDeadEnds,
   type HopPlan,
 } from "./investigate.ts";
 
@@ -114,7 +113,7 @@ describe("persistDiscovery dedup (Dark Desk F4)", () => {
 });
 
 describe("dead_ends confirmation cap + settled state (Dark Desk F4)", () => {
-  it("stops resurfacing a dead end once it crosses the confirmation cap", async () => {
+  it("does not settle a trail from repeated model assertions without strategy exhaustion", async () => {
     const user = `deadend-cap-${Date.now()}`;
     const { sql, id } = await bootInv(user, "Zombie dead end");
 
@@ -144,19 +143,18 @@ describe("dead_ends confirmation cap + settled state (Dark Desk F4)", () => {
       rows[0]!.confirmation_count >= DEAD_END_CONFIRMATION_CAP,
       `expected confirmation_count >= cap, got ${rows[0]!.confirmation_count}`,
     );
-    assert.equal(rows[0]!.settled, true);
+    assert.equal(rows[0]!.settled, false);
 
-    // Settled dead ends are excluded from matchDeadEnds, so evidence naming
-    // it again must not resurface it.
+    // Repetition is bookkeeping, not proof. The candidate remains matchable
+    // and its frontier row remains open until the strategy tracker exhausts it.
     const hits = await matchDeadEnds(user, ["aliens"]);
-    assert.equal(
-      hits.find((h) => h.id === rows[0]!.id),
-      undefined,
-      "a settled dead end must not match",
-    );
-
-    const revived = await resurfaceDeadEnds(user, id, ["aliens"]);
-    assert.equal(revived, 0, "a settled dead end must not resurface");
+    assert.ok(hits.find((h) => h.id === rows[0]!.id));
+    const frontier = await sql<{ status: string }>`
+      select status from frontier_items
+      where investigation_id = ${id} and lower(label) = ${"it was aliens"}
+    `;
+    assert.ok(frontier.length > 0);
+    assert.ok(frontier.every((row) => row.status !== "dead-end"));
   });
 });
 
