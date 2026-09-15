@@ -531,8 +531,8 @@ export function editorDraftError(raw: string | null | undefined): string | null 
   const reset = t.match(/resets?\s+(?:at\s+)?([^.,;]+(?:\s+[AP]M\s+[A-Z]{2,5})?)/i)?.[1]?.trim();
   if (/429|usage limit|session limit|quota/i.test(t)) {
     return reset
-      ? `The writing model's usage limit was reached. It resets ${reset}. Your saved material can be restored from the failed Opinion request and retried after then.`
-      : "The writing model's usage limit was reached. Your saved material can be restored from the failed Opinion request and retried after the limit resets.";
+      ? `The writing model's usage limit was reached. It resets ${reset}. Your saved material is still here. Choose another model or retry after that time.`
+      : "The writing model's usage limit was reached. Your saved material is still here. Choose another model or retry after the limit resets.";
   }
   // Login first: a 401 also contains "API Error" and "Claude Code", and the
   // generic branch below would turn it into "click again".

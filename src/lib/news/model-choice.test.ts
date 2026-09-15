@@ -56,13 +56,21 @@ describe("model choice contract", () => {
   });
   it("preserves an explicit saved API connection in every workflow without changing built-in choices", () => {
     const choice = "custom:2ff67746-9c53-465d-9d63-fb96a7ec1175";
-    for (const normalize of [storyModelChoice, opinionModelChoice, darkModelChoice, effectiveStoryModelChoice]) {
+    for (const normalize of [
+      storyModelChoice,
+      opinionModelChoice,
+      darkModelChoice,
+      effectiveStoryModelChoice,
+    ]) {
       assert.equal(normalize(choice), choice);
     }
     assert.match(modelChoiceLabel(choice), /custom api/i);
     assert.match(modelChoiceHelp(choice), /no fallback/i);
     assert.doesNotMatch(modelChoiceHelp(choice), /tries Claude/);
-    assert.deepEqual(STORY_MODEL_CHOICES.map((option) => option.value), STORY_VALUES);
+    assert.deepEqual(
+      STORY_MODEL_CHOICES.map((option) => option.value),
+      STORY_VALUES,
+    );
   });
   it("ignores stale Dark Desk detail, then hydrates when the selected file's detail arrives", () => {
     assert.equal(shouldHydrateDarkModel(8, 7, "codex-balanced", "briefed"), false);
@@ -116,7 +124,13 @@ describe("model choice contract", () => {
   });
 
   it("round-trips Opinion choices and defaults missing or invalid input to Sol", () => {
-    for (const value of ["auto", "claude-frontier", "codex-balanced", "codex-frontier", "local-model"] as const) {
+    for (const value of [
+      "auto",
+      "claude-frontier",
+      "codex-balanced",
+      "codex-frontier",
+      "local-model",
+    ] as const) {
       assert.equal(opinionModelChoice(value), value);
     }
     for (const invalid of ["local", "zen", "codex", undefined, null, {}]) {
@@ -135,7 +149,7 @@ describe("model choice contract", () => {
   it("explains each automatic order and makes explicit choices no-fallback", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries Claude Opus, then Codex Terra. If the first one's login has lapsed or it does not respond in time, the draft moves to the next.",
+      "Uses your configured gateway when set; otherwise tries Claude Opus, then Codex Terra. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the draft moves to the next. A content refusal stops the run, and an explicit pick never falls back.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
@@ -206,7 +220,12 @@ describe("localModelOptionLabel", () => {
   });
 
   it("never claims vision for a plain chat model", () => {
-    const label = localModelOptionLabel({ id: "gemma4:12b", loaded: true, thinking: true, vision: false });
+    const label = localModelOptionLabel({
+      id: "gemma4:12b",
+      loaded: true,
+      thinking: true,
+      vision: false,
+    });
     assert.doesNotMatch(label, /vision/);
     assert.equal(label, "gemma4:12b · loaded · thinking off");
   });

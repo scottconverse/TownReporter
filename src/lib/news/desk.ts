@@ -66,7 +66,11 @@ import { newPullReceipt, parsePullReceipt, type PullRunView } from "./pull.serve
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { effectiveStoryModelChoice, storyModelChoice } from "./model-choice.ts";
 import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
-import { failOverAndRetry, type PerformDraftWorkDeps } from "./desk-model-run.ts";
+import {
+  failOverAndRetry,
+  failOverOperationAndRetry,
+  type PerformDraftWorkDeps,
+} from "./desk-model-run.ts";
 import { buildDraftCompletionReceipt } from "./draft-completion.ts";
 export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
@@ -1005,17 +1009,39 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const researchScope = job.research_scope ?? prevNotes.researchScope ?? "public";
   const sourceInput = draftSourceInputs(urls, prevNotes, researchScope);
   const { retainedWatchSources } = await import("./retained-watch-source.server.ts");
-  const { readStoryDocuments } = await import("./story-documents.server.ts");
-  const documentReadingEvidence = await readStoryDocuments(
-    owned(context),
-    leadId,
-    job.model_choice as import("./ai.ts").EffectiveProviderChoice,
-    prevNotes.editorialAssignment?.text || lead.headline,
-    (message) => setStage(job.id, message),
-    prevNotes.suppliedUrls ?? [],
-    context.userId,
-    researchScope === "supplied",
-  );
+  const storyDocumentReader =
+    deps.readStoryDocuments ?? (await import("./story-documents.server.ts")).readStoryDocuments;
+  const documentAssignment = prevNotes.editorialAssignment?.text || lead.headline;
+  const readDocuments = (choice: string) =>
+    storyDocumentReader(
+      owned(context),
+      leadId,
+      choice as import("./ai.ts").EffectiveProviderChoice,
+      documentAssignment,
+      (message) => setStage(job.id, message),
+      prevNotes.suppliedUrls ?? [],
+      context.userId,
+      researchScope === "supplied",
+    );
+  const initialDocumentChoice = effectiveStoryModelChoice(job.model_choice);
+  let documentReadingEvidence: string;
+  try {
+    documentReadingEvidence = await readDocuments(initialDocumentChoice);
+  } catch (documentError) {
+    const detail = documentError instanceof Error ? documentError.message : String(documentError);
+    const recovery = await failOverOperationAndRetry({
+      job,
+      error: detail,
+      operation: readDocuments,
+      probe,
+      setModelChoice,
+      setStage,
+      setFailoverNote,
+    });
+    if (!recovery.ok) throw new Error(recovery.error);
+    job.model_choice = recovery.choice;
+    documentReadingEvidence = recovery.value;
+  }
   const retainedNameDocuments = await sql<{
     id: string;
     filename: string;

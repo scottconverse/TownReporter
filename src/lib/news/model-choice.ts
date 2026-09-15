@@ -116,8 +116,10 @@ export function shouldHydrateDarkModel(
   lastModelChoice: unknown,
   status: unknown,
 ): boolean {
-  return selectedInvestigationId === detailInvestigationId &&
-    (lastModelChoice != null || status !== "investigating");
+  return (
+    selectedInvestigationId === detailInvestigationId &&
+    (lastModelChoice != null || status !== "investigating")
+  );
 }
 
 export function modelChoiceLabel(value: unknown): string {
@@ -150,7 +152,8 @@ function ladderSentence(ladder: readonly string[] = automaticLadder()): string {
  * cannot leave the help text describing a ladder that no longer exists.
  */
 export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"): string {
-  if (isCustomModelChoice(value)) return "Uses only the selected custom API connection for this run; no fallback. Your provider's usage charges may apply.";
+  if (isCustomModelChoice(value))
+    return "Uses only the selected custom API connection for this run; no fallback. Your provider's usage charges may apply.";
   const options =
     scope === "opinion"
       ? OPINION_MODEL_CHOICES
@@ -170,7 +173,7 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
   if (scope === "dark") {
     return `Uses your configured gateway when set; otherwise tries ${ladderSentence(DARK_AUTOMATIC_LADDER)}. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.`;
   }
-  return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first one's login has lapsed or it does not respond in time, the draft moves to the next.`;
+  return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the draft moves to the next. A content refusal stops the run, and an explicit pick never falls back.`;
 }
 
 /**
@@ -182,18 +185,15 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
  * distinction. This keeps Redraft on the visible choice that produced the
  * current draft while still showing Automatic when the ladder made the pick.
  */
-export function rememberedStoryModelChoice(
-  value: unknown,
-  source: unknown,
-): StoryModelChoice {
+export function rememberedStoryModelChoice(value: unknown, source: unknown): StoryModelChoice {
   return source === "auto" ? "auto" : storyModelChoice(value);
 }
 
 /**
  * Rewrites the generic "no model configured at all" message into Opinion's
  * own guidance. `candidate` says WHICH rung was being probed when that
- * happened -- defaulting to "claude-frontier" keeps every existing call site
- * (and Automatic, which is still Claude-only) unchanged.
+ * happened -- defaulting to "claude-frontier" keeps existing call sites that
+ * omit the candidate compatible.
  *
  * Before `candidate` existed, this rewrote to "Open Claude Code ... and sign
  * in" unconditionally, so a "local-model" pick with no LLM_BASE_URL set at

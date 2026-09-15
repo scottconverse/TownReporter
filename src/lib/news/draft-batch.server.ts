@@ -127,17 +127,6 @@ async function inspectSelection(
       };
     }
     const scope = item.researchScope ?? parseNotes(lead.notes_json).researchScope ?? "public";
-    if (
-      scope === "supplied" &&
-      (runtimeSnapshot.runtime === "codex-terra" || runtimeSnapshot.runtime === "codex-sol")
-    ) {
-      return {
-        ok: false,
-        code: "ineligible",
-        error: "Use only supplied material requires Claude Code or a local model.",
-        leadId: item.leadId,
-      };
-    }
     items.push({ leadId: item.leadId, researchScope: scope });
   }
   const [open] = await sql.query<{ id: number; subject_id: number }>(

@@ -309,7 +309,7 @@ The lead and the notes are on the left and never print. The draft is on the righ
 
 Before **Draft with AI**, choose **Drafting scope**. **Research public sources** follows supplied links and searches for relevant public evidence. **Use only supplied material** reads your text and opens only URLs you supply; it does not discover sources or run external searches. Use this control to limit research, rather than writing “do not search” inside pasted material. The choice is saved with the queued job, including retries.
 
-Supplied-only drafting supports Claude and local/API models. Codex is refused for this scope because its native tools do not provide that restriction; choose a supported model. The draft fills the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
+Supplied-only drafting supports every Story model, including Codex. It does not run discovery or external searches. Uploaded originals remain saved; if Automatic changes providers after an eligible technical failure, the provider that takes over rereads the retained material. The draft fills the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
 
 During public-source reporting, a captured recurring record such as an agenda, meeting page, report, packet or RFP can start an automatic background watch for later changes or disappearance. The watch does not draft or publish. This automatic behavior is separate from the editor-created watches under **Dark Desk → Watch a page / view watches**; that manual-watch panel does not currently provide management controls for automatic watches.
 
@@ -318,7 +318,10 @@ Changing the body of a draft with reporting evidence requires a new evidence rev
 The picker beside it controls this run. **Automatic** uses a configured
 `LLM_*` gateway exclusively when present; otherwise it tries Claude Opus,
 then Codex Terra, chooses the first ready one before enqueueing, and keeps it
-for every reporting and writing pass. Choose a named model to force only
+for every reporting and writing pass unless it reaches a usage limit, becomes
+unavailable, loses its login, or times out. Automatic moves the unfinished work
+once to the next ready provider and shows the switch in the workbench. A model
+content refusal stops the run. Choose a named model to force only
 Codex Terra, frontier Codex Sol, frontier Claude Opus, or Local model.
 Explicit choices never fall back. Redraft has the same picker.
 

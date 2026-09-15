@@ -54,6 +54,45 @@ describe("planAutomaticFailover", () => {
     assert.deepEqual(calls, ["codex-balanced"], "must not probe the current rung or any before it");
   });
 
+  it("moves Automatic to Codex Terra when Claude reaches its usage allowance", async () => {
+    const plan = await planAutomaticFailover({
+      source: "auto",
+      current: "claude-frontier",
+      error: "Claude API error 429: usage limit reached; resets 11:30pm (America/Denver).",
+      probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
+    });
+    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "quota" });
+  });
+
+  it("moves Automatic to Codex Terra when Claude is unavailable", async () => {
+    const plan = await planAutomaticFailover({
+      source: "auto",
+      current: "claude-frontier",
+      error: "Claude Code is unreachable on this machine.",
+      probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
+    });
+    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "unavailable" });
+  });
+
+  it("recognizes plain unavailable and HTTP 503 provider failures", async () => {
+    for (const error of [
+      "Claude Code is unavailable.",
+      "Claude API error (503): upstream unavailable",
+    ]) {
+      const plan = await planAutomaticFailover({
+        source: "auto",
+        current: "claude-frontier",
+        error,
+        probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
+      });
+      assert.deepEqual(plan, {
+        next: "codex-balanced",
+        label: "Codex Terra",
+        reason: "unavailable",
+      });
+    }
+  });
+
   it("uses a surface-specific ladder without rerouting the shared Story ladder", async () => {
     const calls: string[] = [];
     const plan = await planAutomaticFailover({
@@ -156,6 +195,22 @@ describe("planAutomaticFailover", () => {
     assert.equal(plan, null);
   });
 
+  it("keeps a content refusal terminal even when its explanation mentions quota", async () => {
+    let probes = 0;
+    const plan = await planAutomaticFailover({
+      source: "auto",
+      current: "claude-frontier",
+      error:
+        "The selected model declined to produce the requested editorial: I cannot write this. A quota reset will not change that.",
+      probe: async () => {
+        probes += 1;
+        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+      },
+    });
+    assert.equal(plan, null);
+    assert.equal(probes, 0);
+  });
+
   it("never fails over on an empty model response", async () => {
     const plan = await planAutomaticFailover({
       source: "auto",
@@ -171,7 +226,8 @@ describe("planAutomaticFailover", () => {
     const plan = await planAutomaticFailover({
       source: "auto",
       current: "codex-balanced",
-      error: "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.",
+      error:
+        "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.",
       probe: async (choice) => {
         calls.push(choice);
         return { ok: true, label: "Claude Opus", choice: "claude-frontier" };

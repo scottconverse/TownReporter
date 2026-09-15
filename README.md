@@ -251,9 +251,11 @@ default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
 pair names a gateway, Automatic uses that gateway and no other provider.
 Otherwise it tries Claude Opus, then Codex Terra, chooses the first ready
 provider before enqueueing, and stores that effective choice on the job. Every
-reporting and writing pass in that run uses the same provider, unless that
-provider's login lapses mid-run -- Automatic then moves to the next ladder
-rung once, if it is ready.
+reporting and writing pass in that run uses the same provider, unless it reaches
+a usage limit, becomes unavailable, loses its login, or times out mid-run.
+Automatic then moves the unfinished work to the next ladder rung once, if it is
+ready. Uploaded documents remain saved and are reread by the provider that
+takes over. A content refusal stops the run.
 
 The Queue also offers **Draft selected** for one editor-chosen batch of up to
 five eligible leads. That batch requires one explicit Local model, Claude

@@ -781,6 +781,11 @@ function StoryPage() {
             {data.job.status === "queued" ? "Your story is queued" : "Your story is being written"}
           </strong>
           <p>{data.job.stage || "Preparing your sources…"}</p>
+          {data.job.failover_note ? (
+            <p className="story-model-switch-note">
+              <strong>Model switch:</strong> {data.job.failover_note}
+            </p>
+          ) : null}
           <span>
             Your submission is saved. The draft will appear here automatically. You can return from{" "}
             <Link to="/desk">Desk → Your recent drafts</Link>.
@@ -835,7 +840,9 @@ function StoryPage() {
               {jobState === "recovering"
                 ? "Recovering…"
                 : waiting
-                  ? "Drafting…"
+                  ? data.job?.failover_note
+                    ? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
+                    : "Drafting…"
                   : data.draft?.body
                     ? "Redraft"
                     : "Draft with AI"}

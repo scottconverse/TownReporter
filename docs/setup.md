@@ -241,10 +241,12 @@ Every active Queue row and the story workbench default to **Automatic**. A
 configured `LLM_*` gateway is forced for Automatic. Without one, TownReporter
 tries Claude Opus, then Codex Terra, and stores the first ready provider on
 the job before it is enqueued. Every pass in that Story run uses the same
-effective provider, unless that provider's login lapses mid-run -- Automatic
-then moves to the next ladder rung once, if it is ready. A named choice
-forces only that provider; explicit choices never fall back, at enqueue or
-mid-run.
+effective provider unless it reaches a usage limit, becomes unavailable,
+loses its login, or times out mid-run. Automatic then moves the unfinished
+work to the next ladder rung once, if it is ready. Uploaded documents remain
+saved and are reread by the provider that takes over. A content refusal stops
+the run. A named choice forces only that provider; explicit choices never fall
+back, at enqueue or mid-run.
 
 Zen MiMo and Local Qwen were removed from the picker (2026-09-02). 0.6.10
 brought a local model back as a named pick, "Local model": generic this

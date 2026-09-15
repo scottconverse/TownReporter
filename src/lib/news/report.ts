@@ -1,4 +1,4 @@
-import { grokChat, parseJsonBlock, providerBudget, resolveProvider, type ProviderProbe } from "./ai.ts";
+import { grokChat, parseJsonBlock, providerBudget, type ProviderProbe } from "./ai.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import {
@@ -1308,9 +1308,6 @@ export async function reportAndDraft(
     effectiveModelChoice = ready.choice;
   }
   const suppliedOnly = opts.researchScope === "supplied";
-  if (suppliedOnly && resolveProvider(effectiveModelChoice)?.kind === "codex") {
-    return { error: "Supplied material requires Claude or a local/API model with tools disabled. Choose one of those models, or choose Research public sources." };
-  }
   const limits = providerBudget(effectiveModelChoice, opts.providerOverrides);
   const budget = deps.budgetMs ?? limits.wallMs;
   const reserve = deps.budgetMs ? DRAFT_WRITE_RESERVE_MS : limits.reserveMs;

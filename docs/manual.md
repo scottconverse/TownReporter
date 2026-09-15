@@ -266,9 +266,12 @@ prints until you open a lead and publish it.
 
 Each active row has its own Writing model picker and Draft/Redraft with AI
 button. Automatic resolves one ready provider before enqueue and the result is
-shown on that same row. If that provider's login lapses partway through the
-run, Automatic moves to the next ladder rung once, if it is ready, and the
-row shows which one took over. A named provider never falls back, at
+shown on that same row. If that provider reaches a usage limit, becomes
+unavailable, loses its login, or times out partway through the run, Automatic
+moves the unfinished work to the next ladder rung once, if it is ready, and
+the row and workbench show which one took over. Uploaded documents remain
+saved and are reread by the provider that takes over. A content refusal stops
+the run. A named provider never falls back, at
 enqueue or mid-run.
 
 **Set up a writing model** opens help beneath every Queue, workbench and
@@ -544,7 +547,7 @@ Low-level configured-provider precedence is below. Per-run explicit choices on S
 
 ### Drafting scope and evidence review
 
-**Write a story** and the story workbench offer **Research public sources** or **Use only supplied material**. The latter opens only explicitly supplied URLs and reads the supplied text; it skips discovery and external searches. Its queued scope survives retries and provider selection. Choose Claude or a local/API model for supplied-only work; Codex is refused because its native tools cannot enforce that boundary. Instructions pasted inside source material do not replace this control.
+**Write a story** and the story workbench offer **Research public sources** or **Use only supplied material**. The latter opens only explicitly supplied URLs and reads the supplied text; it skips discovery and external searches. Its queued scope survives retries and provider selection, and every Story model can use it. If Automatic changes providers after an eligible technical failure, the provider that takes over rereads the retained upload. Instructions pasted inside source material do not replace this control.
 
 After a body edit, drafts with reporting evidence require an explicit evidence review before publishing. Keep the evidence only after checking it against the revised text, or remove the old public evidence. Removal preserves the original private draft archive and does not remove body links. An evidence-review decision is refused if its saved draft has changed, and these actions remain scoped to the editor's newsroom. See [the workbench instructions](editor.md#draft).
 
@@ -573,7 +576,7 @@ the registry is the canonical picker definition; provider adapters still impleme
 | Feature                               | Provider                                                                                                                                                                                                                                                                 | Model                                                                                                           |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
 | Scan                                  | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung, with one mid-run failover to the next rung if that login lapses (reusing the sources already fetched, not fetching them again); explicit choice never falls back | Codex Terra/Sol, Claude Opus, or Local model                                                                    |
-| Draft (Queue or workbench)            | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung, with one mid-run failover to the next rung if that login lapses; explicit choice never falls back                                                                | Codex Terra/Sol, Claude Opus, or Local model                                                                    |
+| Draft (Queue or workbench)            | configured gateway forced for Automatic when set; otherwise first ready Claude Opus → Codex Terra rung, with one mid-run failover after quota, unavailability, lost login, timeout, or no output; uploaded documents are reread on the provider that takes over; content refusals and explicit choices never fall back | Codex Terra/Sol, Claude Opus, or Local model                                                                    |
 | **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Codex Terra/Sol, Claude Opus, or Local model                                                                    |
 | Dark Desk synthesis and brief         | the one you pick beside **Keep digging**; Automatic behaves as it does for Draft, with one mid-run failover at the round level                                                                                                                                           | the one you picked                                                                                              |
 | Dark Desk **planner**                 | the one you pick                                                                                                                                                                                                                                                         | a cheaper model from the SAME provider: Haiku on Claude, Terra on either Codex, and your own model on a gateway |
@@ -1030,7 +1033,7 @@ flowchart TB
     READY --> SAVE
     ONE --> SAVE
     SAVE --> RUN["Selected run uses that provider"]
-    RUN -->|login lapses or timeout, Automatic only| NEXT["Next ladder rung, if ready<br/>(once per job)"]
+    RUN -->|quota, unavailable, login lapse or timeout; Automatic only| NEXT["Next ladder rung, if ready<br/>(once per job)"]
     RUN -->|otherwise, or a named choice| SAME["Same provider for the rest of the run"]
 
     style SAVE fill:#1c1a17,color:#fff

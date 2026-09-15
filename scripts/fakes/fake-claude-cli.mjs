@@ -31,6 +31,10 @@
  *                           what a lapsed login mid-draft actually looks
  *                           like, and it is what src/lib/news/automatic-failover.ts
  *                           exists to catch.
+ *   FAKE_CLAUDE_QUOTA_PROMPTS
+ *                           "1" to keep auth ready but return the same 429
+ *                           usage-limit shape the live subscription CLI emits
+ *                           when its allowance is exhausted.
  *   FAKE_CLAUDE_VALID_DRAFT "1" to return a small valid draft JSON for every
  *                           chat call. This is for an offline browser fixture
  *                           only; it never invokes a provider.
@@ -127,7 +131,9 @@ if (argv[0] === "auth" && argv[1] === "login") {
     flag = "--allowed-tools";
     value = argv[allowedIdx + 1] ?? "";
   }
-  process.stdout.write(JSON.stringify({ is_error: false, result: JSON.stringify({ flag, value }) }) + "\n");
+  process.stdout.write(
+    JSON.stringify({ is_error: false, result: JSON.stringify({ flag, value }) }) + "\n",
+  );
   process.exit(0);
 } else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_ECHO_READ_CALL === "1") {
   /*
@@ -143,6 +149,15 @@ if (argv[0] === "auth" && argv[1] === "login") {
   for await (const chunk of process.stdin) stdin += chunk;
   process.stdout.write(
     JSON.stringify({ is_error: false, result: JSON.stringify({ tools, stdin }) }) + "\n",
+  );
+  process.exit(0);
+} else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_QUOTA_PROMPTS === "1") {
+  process.stdout.write(
+    JSON.stringify({
+      is_error: true,
+      api_error_status: 429,
+      result: "Usage limit reached. It resets 7pm (America/Denver).",
+    }) + "\n",
   );
   process.exit(0);
 } else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_FAIL_PROMPTS === "1") {

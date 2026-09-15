@@ -54,6 +54,53 @@ test("persists a writer checkpoint without completing the job when later reporti
   await assert.rejects(withClaimedLeadDraftCheckpointLock(job,lead.id,async()=>assert.fail("withdrawn editor entered checkpoint write")),/permission was withdrawn/i);
 });
 
+test("Automatic resumes supplied-document reading on Codex after Claude quota", async () => {
+  await ensureJobsSchema();
+  const sql = await getSql(), room = 88404, user = "document-failover-editor";
+  await sql.query("insert into newsrooms(id,name) values($1,'Document failover room') on conflict(id) do nothing", [room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')", [user, room]);
+  const [lead] = await sql.query<{ id: number }>(
+    "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'Packet lead','Uploaded packet','council','new','[]','',1,'{}') returning id",
+    [user, room],
+  );
+  const [jobRow] = await sql.query<{ id: number }>(
+    "insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'draft',$3,'claude-frontier','auto','supplied','default','running','Reading documents','document-failover-claim') returning id",
+    [user, room, lead.id],
+  );
+  const job = {
+    id: jobRow.id, user_id: user, newsroom_id: room, kind: "draft", subject_id: lead.id,
+    model_choice: "claude-frontier", model_choice_source: "auto", research_scope: "supplied",
+    lane: "default", status: "running", stage: "Reading documents", claim_token: "document-failover-claim",
+  } as DeskJob;
+  const documentChoices: string[] = [];
+  const reportChoices: string[] = [];
+  const stages: string[] = [];
+  await performDraftWork(job, {
+    readStoryDocuments: async (_room, _lead, choice) => {
+      documentChoices.push(choice);
+      if (choice === "claude-frontier") throw new Error("Claude API error 429: usage limit reached");
+      return "EDITOR-SUPPLIED DOCUMENTS: packet evidence";
+    },
+    reportAndDraft: async (input) => {
+      reportChoices.push(input.modelChoice);
+      assert.equal(input.researchScope, "supplied");
+      assert.match(input.documentEvidence ?? "", /packet evidence/);
+      return {
+        headline: "Packet lead", dek: "", body: "The packet contains a documented council decision.",
+        topic: "council", source_urls: [], integrity_notes: "", memory_entities: [], form: "news",
+        provenance: [], found_note: "", findings: [], unanswered: [], claims: [], research_memo: {},
+      } as ReportedDraftResult;
+    },
+    probe: async (choice) => ({ ok: true, label: "Codex Terra", choice: choice as "codex-balanced" }),
+    setJobModelChoice: async (_id, choice) => { job.model_choice = choice; },
+    setJobStage: async (_id, stage) => { stages.push(stage); },
+    setJobFailoverNote: async () => undefined,
+  });
+  assert.deepEqual(documentChoices, ["claude-frontier", "codex-balanced"]);
+  assert.deepEqual(reportChoices, ["codex-balanced"]);
+  assert.ok(stages.includes("Switched to Codex Terra: Claude Opus reached its usage limit"));
+});
+
 test("a later writer checkpoint cannot supersede an intervening editor draft",async()=>{
   await ensureJobsSchema();
   const sql=await getSql(),room=88402,user="checkpoint-race-editor";
