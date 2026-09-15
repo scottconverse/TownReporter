@@ -522,7 +522,6 @@ export type InvestigationRow = {
 };
 
 const HANDOFFS = new Set([
-  "DISCARD",
   "HOLD FOR PATTERN",
   "MONITOR",
   "FOR VERIFICATION",
@@ -563,14 +562,13 @@ type DarkJson = {
 type DarkSignal = NonNullable<DarkJson["signals"]>[number];
 
 /**
- * Dark Desk F3: the same tool-refusal/sandbox-escape narration filtered out
- * of claims/frontier/anomalies/dead_ends (investigate.ts's `parsePlan`) can
- * land here too — this is the dig's OTHER JSON-returning call. Checked
- * across every free-text field a refusal could hide in, not just
- * `observation`. Exported for tests only.
+ * Reject a response only when every substantive field is model-process
+ * narration. A real lead must not disappear because one field contains an
+ * awkward progress note; its other observations, connections and follow-ups
+ * remain useful to the editor. Exported for tests only.
  */
 export function isPoisonedSignal(sig: DarkSignal): boolean {
-  const text = [
+  const fields = [
     sig.name,
     sig.observation,
     sig.pattern,
@@ -579,10 +577,8 @@ export function isPoisonedSignal(sig: DarkSignal): boolean {
     sig.counter_narrative,
     sig.what_would_kill,
     sig.pathway,
-  ]
-    .map((v) => String(v ?? ""))
-    .join(" ");
-  return isSelfReferential(text);
+  ].map((v) => String(v ?? "").trim()).filter(Boolean);
+  return fields.length > 0 && fields.every((value) => isSelfReferential(value));
 }
 
 // The inline DDL this desk owns directly (dark_* tables + the brief/settings
@@ -760,7 +756,7 @@ export const listInvestigations = createServerFn({ method: "GET" })
         coalesce((
           select count(*)::int from frontier_items f
           where f.investigation_id = i.id
-            and f.status in ('open', 'investigating', 'reopened')
+            and f.status in ('open', 'investigating', 'reopened', 'deferred')
         ), 0) as still_open
       from investigations i
       where i.newsroom_id = ${owned(context)}
@@ -865,7 +861,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
                select count(*)::int from frontier_items f
                where f.investigation_id = i.id
                  and f.newsroom_id = ${owned(context)}
-                 and f.status in ('open', 'investigating', 'reopened')
+                 and f.status in ('open', 'investigating', 'reopened', 'deferred')
              ), 0) as still_open
       from investigations i
       where i.id = ${id} and i.newsroom_id = ${owned(context)} limit 1
@@ -1241,7 +1237,7 @@ export async function buildDarkSynthesisPack(
   `;
   const frontier = await sql<{ label: string; kind: string; why: string }>`
     select label, kind, why from frontier_items
-    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} and status in ('open', 'investigating', 'reopened')
+    where newsroom_id = ${newsroomId} and investigation_id = ${investigationId} and status in ('open', 'investigating', 'reopened', 'deferred')
     order by priority desc limit 16
   `;
   const rels = await sql<{ from_name: string; to_name: string; kind: string }>`
@@ -1444,6 +1440,10 @@ async function synthesizeSignals(
     */
     const confidence = capSpeculativeConfidence(sig.confidence);
     let handoff = String(sig.handoff ?? "HOLD FOR PATTERN").toUpperCase();
+    // Historical prompts allowed DISCARD. Preserve the signal instead: a thin
+    // or incomplete lead belongs in the pattern file where later evidence can
+    // reopen it.
+    if (handoff === "DISCARD") handoff = "HOLD FOR PATTERN";
     if (!HANDOFFS.has(handoff)) handoff = "HOLD FOR PATTERN";
     await sql`
       insert into dark_signals (
@@ -2356,20 +2356,9 @@ export async function performDarkRound(job: DeskJob) {
 /**
  * Send ONE signal to the working queue as a story lead.
  *
- * Two gates stand in front of this, both from the operator's originals, and
- * both answerable in words on screen:
- *
- * 1. The four adversarial gates. "A signal moves from open collection to
- *    closed escalation ONLY after all 4 gates of the Adversarial
- *    Verification Protocol are completed with documented results."
- *    An editor may still push an unverified signal through — deliberately,
- *    with `asTip` — and the lead then says so in its own notes.
- * 2. The newsworthiness gate. A no to all three questions (does anyone's
- *    life change, is it new, is there a record) keeps it in the file as a
- *    watch item rather than a lead.
- *
- * Plain function so both gates can be proved without deskMiddleware, the same
- * pattern `queueInvestigationFor` already uses in this file.
+ * Protocol and triage state travel with the lead, but neither can block the
+ * editor's handoff. The Dark Desk develops leads; sending one to the working
+ * queue is not publication and does not claim the theory is true.
  */
 export async function sendDarkSignalToQueueFor(
   userId: string,
@@ -2394,13 +2383,6 @@ export async function sendDarkSignalToQueueFor(
 
   const verified = sig.verification_status === "verified";
   const words = stageWords(sig);
-  if (!verified && !opts.asTip) {
-    return {
-      ok: false as const,
-      blocked: "unverified" as const,
-      error: `${words.sentence} Tick "send unverified, as a tip" if you want it on the queue anyway.`,
-    };
-  }
 
   let news: ReturnType<typeof readNewsworthiness> = null;
   try {
@@ -2408,14 +2390,6 @@ export async function sendDarkSignalToQueueFor(
   } catch {
     news = null;
   }
-  if (verified && !opts.asTip && sig.newsworthiness_decision === "watch") {
-    return {
-      ok: false as const,
-      blocked: "watch" as const,
-      error: `Kept in the file as a watch item, not a lead. ${newsworthinessWords(news)} Nobody's life changes, it is not new, and there is no record to point at — send it as a tip if you disagree.`,
-    };
-  }
-
   const arts = sig.investigation_id
     ? await sql<{ url: string }>`
         select url from artifacts
@@ -2432,8 +2406,8 @@ export async function sendDarkSignalToQueueFor(
     `DARK DESK investigation notes. Claim kinds in the evidence. Publication is a separate human action.`,
     `Posture: ${sig.posture}. Type: ${sig.signal_type}. Strength ${sig.strength} / confidence ${sig.confidence}.`,
     `Stage: ${words.chip}. ${words.sentence}`,
-    `Newsworthiness gate: ${newsworthinessWords(news)}`,
-    verified ? "" : "Sent unverified, at the editor's direction. Treat it as a tip, not a finding.",
+    `Editor triage: ${newsworthinessWords(news)}`,
+    verified ? "" : "Research protocol incomplete. This is an editor lead, not a factual finding.",
     `Opposing account: ${(sig.counter_narrative || "Not established.").slice(0, 800)}`,
     `Missing context: ${(sig.gate_missing_context || "Not assessed.").slice(0, 800)}`,
     sig.observation,
@@ -2476,7 +2450,8 @@ export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
   );
 
 /**
- * Create-or-find the story lead for an investigation.
+ * Create-or-find the story lead for an investigation. Research completeness
+ * is preserved in the notes and never blocks this editor-controlled handoff.
  *
  * Pulled out of the `createServerFn` handler so a test can prove the three
  * outcomes the Dark Desk "Send to the queue" button now distinguishes on
@@ -2498,17 +2473,6 @@ export async function queueInvestigationFor(
     from investigations where id = ${id} and newsroom_id = ${newsroomId} limit 1
   `;
   if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
-  /*
-    The verification gate, at the file level.
-
-    A file that has filed signals may not become a story lead while every one
-    of those signals is still speculative -- that is the escalation boundary
-    the original draws ("A signal moves from open collection to closed
-    escalation ONLY after all 4 gates ... are completed with documented
-    results"). A file with NO signals is untouched by this: there is nothing
-    to verify, so there is nothing to gate, and the editor's own reading of
-    the captured records is the lead.
-  */
   const gate = await sql<{ total: number; verified: number }>`
     select count(*)::int as total,
            count(*) filter (where verification_status = 'verified')::int as verified
@@ -2522,16 +2486,6 @@ export async function queueInvestigationFor(
     };
   const total = Number(gate[0]?.total ?? 0);
   const verifiedCount = Number(gate[0]?.verified ?? 0);
-  if (total > 0 && verifiedCount === 0 && !opts.asTip) {
-    return {
-      ok: false as const,
-      blocked: "unverified" as const,
-      error:
-        total === 1
-          ? 'The one signal on this file has not passed the four gates yet — the desk has not shown that it tried to disprove it. Tick "send unverified, as a tip" to put it on the queue anyway.'
-          : `None of the ${total} signals on this file have passed the four gates yet — the desk has not shown that it tried to disprove them. Tick "send unverified, as a tip" to put the file on the queue anyway.`,
-    };
-  }
   const already = await sql<{ id: number }>`
     select id from leads
     where investigation_id = ${id} and newsroom_id = ${newsroomId}
@@ -2576,7 +2530,7 @@ export async function queueInvestigationFor(
   const frontier = await sql<{ next_steps: string }>`
     select next_steps from frontier_items
     where investigation_id = ${id} and newsroom_id = ${newsroomId}
-      and status in ('open', 'reopened') and trim(next_steps) <> ''
+      and status in ('open', 'reopened', 'deferred') and trim(next_steps) <> ''
     order by priority desc, id asc limit 3
   `;
   const nextSteps = [briefNext, ...frontier.map((item) => item.next_steps)]
@@ -2584,9 +2538,7 @@ export async function queueInvestigationFor(
     .map((step) => shorten(step, 300));
   const handoff = [
     "DARK DESK notes. Publication is a separate human action.",
-    opts.asTip
-      ? "Sent unverified, at the editor's direction. Treat it as a tip, not a finding."
-      : `${verifiedCount} of ${total} filed signals passed verification; other signals remain unverified.`,
+    `${verifiedCount} of ${total} filed signals completed the research protocol; other signals remain unverified. This is a lead handoff, not publication.`,
     nextSteps.length
       ? `Next steps (not established facts): ${shorten([...new Set(nextSteps)].join("\n"), 600)}\nOpen investigation for all follow-ups.`
       : "",
@@ -2662,7 +2614,7 @@ export const reopenParkedInvestigation = createServerFn({ method: "POST" })
     const leftover = await sql<{ c: number }>`
       select count(*)::int as c from frontier_items
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
-        and status in ('open', 'investigating', 'reopened')
+        and status in ('open', 'investigating', 'reopened', 'deferred')
     `;
     const still = Number(leftover[0]?.c ?? 0);
     await sql`
@@ -2974,7 +2926,7 @@ export async function buildDarkBriefPromptPack(newsroomId: number, id: number): 
   `.catch(() => []);
   const front = await sql<{ label: string; why: string }>`
     select label, why from frontier_items where investigation_id = ${id}
-      and status in ('open', 'reopened')
+      and status in ('open', 'reopened', 'deferred')
     order by priority desc, id desc limit 25
   `.catch(() => []);
   const ents = await sql<{ name: string; kind: string }>`

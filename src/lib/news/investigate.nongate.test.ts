@@ -47,6 +47,18 @@ describe("prompt non-gating contract", () => {
     assert.match(DARK_PLANNER, /"stop": true only when the remaining frontier is empty/i);
     assert.match(DARK_PLANNER, /possible-same \/ unresolved/i);
   });
+
+  it("develops paired theories and follows unnamed money and organizations", () => {
+    assert.match(DARK_SYSTEM, /job is to find leads, follow them, connect people, organizations, money/i);
+    assert.match(DARK_SYSTEM, /unnamed actor is a lead, not a dead end/i);
+    assert.match(DARK_SYSTEM, /KEEP TWO LIVE EXPLANATIONS/);
+    assert.match(DARK_SYSTEM, /unregistered or opaque fundraising vehicle/i);
+    assert.match(DARK_SYSTEM, /new organization still building its paperwork/i);
+    assert.match(DARK_PLANNER, /INVESTIGATIVE:/);
+    assert.match(DARK_PLANNER, /BENIGN:/);
+    assert.match(DARK_PLANNER, /nonprofit, beneficiary, organizer, vendor, sponsor, proceeds/i);
+    assert.match(DARK_PLANNER, /empty search or unread record is never enough/i);
+  });
 });
 
 describe("investigative freedom", { timeout: 120000 }, () => {

@@ -742,7 +742,7 @@ describe("scanned PDF OCR", { timeout: 120000 }, () => {
 });
 
 describe("dead-end resurfacing", { timeout: 120000 }, () => {
-  it("reopens a parked company when a later capture names it", async () => {
+  it("keeps a company active when a later capture follows an unconfirmed dead-end suggestion", async () => {
     const user = `forensic-dead-${Date.now()}`;
     const { sql, id } = await bootInv(user, "Dead then live");
     await seedInvestigation(user, id, "Staff report awards work to Acme Holdings LLC.", []);
@@ -789,9 +789,8 @@ describe("dead-end resurfacing", { timeout: 120000 }, () => {
       limit 1
     `;
     assert.ok(item[0], "Acme Holdings LLC must remain on the frontier");
-    assert.equal(item[0]!.status, "reopened");
-    assert.match(item[0]!.closed_reason ?? "", /revived|reopened from|materially new evidence/i);
-    assert.equal(item[0]!.prior_status, "dead-end");
+    assert.equal(item[0]!.status, "investigating");
+    assert.notEqual(item[0]!.status, "dead-end");
   });
 });
 

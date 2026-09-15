@@ -89,8 +89,8 @@ export type DarkStance = {
   rumorSeeds: boolean;
   /** May it write a provisional narrative, or only questions? */
   provisionalNarrative: boolean;
-  /** What happens to a thin item: dropped, or held for a pattern. */
-  thinHandoff: "DISCARD" | "HOLD FOR PATTERN";
+  /** Thin items stay visible for comparison with later evidence. */
+  thinHandoff: "HOLD FOR PATTERN";
   /** Named for the editor, and printed on every card the run produces. */
   label: string;
 };
@@ -132,7 +132,7 @@ export function stanceFor(dials: DarkDials): DarkStance {
     singleSourceOpensFile: n >= 3,
     rumorSeeds: n >= 2,
     provisionalNarrative: n >= 4,
-    thinHandoff: n >= 2 ? "HOLD FOR PATTERN" : "DISCARD",
+    thinHandoff: "HOLD FOR PATTERN",
     label:
       n <= 2 ? "Documented only" : n <= 4 ? "Careful" : n <= 7 ? "Standard" : n <= 9 ? "Black Desk" : "Black Sky",
   };

@@ -19,13 +19,13 @@ conclusion or the current production deployment. See [the takeover handoff](../H
 This desk is a restoration, not an invention. Its doctrine is the owner's own
 earlier work, carried over more or less line by line:
 
-- **civic-newsroom** — `prompts/03-black-desk.md` (the speculative radar) and
-  `prompts/04-dark-signal-desk.md` (the mandatory verification protocol). The
+- **CivicNewspaper** — `src-tauri/prompts/audit/03-black-desk.md` (the speculative radar) and
+  `src-tauri/prompts/audit/04-dark-signal-desk.md` (the adversarial completeness protocol). The
   two stages, the confidence cap, the three postures and the four gates are all
   from these two files.
-- **civic-scanner** — the Claude Code skill (v2.1). The source tiers, the
-  search minimums, the location scoping and the newsworthiness gate come from
-  here.
+- **civic-scanner** — the Claude Code skill (v2.1), consulted for source and
+  location-search techniques. Those techniques are implementation aids, not
+  editorial gates and not a substitute for the owner's Dark Desk prompts.
 - **civic-transparency-toolkit** — the real-world source list this kind of
   searching is aimed at.
 - **CivicNewspaper** — the Tauri app whose Rust pipeline established the rule
@@ -41,6 +41,13 @@ originals. This document describes what it does now.
 
 Speculative by design. Fail-open. It exists to validate noise, not to confirm
 facts, because suppressing anecdotes kills investigations before they begin.
+
+Its product is a developed lead: the people, organizations, money, records,
+missing names and connections worth following. Each material anomaly keeps two
+live, falsifiable explanations: the investigative theory about what may be
+happening underneath, and the strongest ordinary or benign explanation. The
+desk searches for evidence that supports and contradicts both. It does not pick
+a winner just because one search was empty.
 
 - **Every signal is capped at 0.5 confidence.** Not as a request in the
   prompt — in code (`capSpeculativeConfidence`, `src/lib/news/dark-gates.ts`).
@@ -69,11 +76,12 @@ constrain one of them.
 
 ## Stage 2 — the Dark Signal Desk
 
-Before any signal may be shown as having completed the verification protocol or sent to the queue as a finding,
-**the application runs the adversarial searches itself** and the model answers
-four gates.
+For the strongest new signals, **the application runs adversarial searches
+itself** and the model answers four review questions. This adds a visible
+research-completeness record. It does not decide whether the lead may exist,
+continue, or move to the working queue.
 
-Stage 2 defaults to the **six strongest new signals per round**; the editor can choose 1–24 in **How hard to dig → Change**. The round summary uses every eligible signal as its denominator, separately showing attempted, verified, unverified (including failures) and deferred by the cap. Deferred signals remain speculative. The separate newsworthiness decision determines whether a verified signal is eligible as a finding; publication still requires a human.
+Stage 2 defaults to the **six strongest new signals per round**; the editor can choose 1–24 in **How hard to dig → Change**. The round summary uses every eligible signal as its denominator, separately showing attempted, protocol-complete, protocol-incomplete (including failures) and saved for later review. Signals not reviewed in this round remain visible and speculative. The separate triage answers help rank work; the editor controls lead handoff and publication remains a separate human action.
 
 ### The searches the app runs
 
@@ -92,9 +100,10 @@ answered, the URL and the outcome — including the ones that came back with
 nothing. The open file shows this as "Searches this round", so the editor can
 see the sniffing rather than be told it happened.
 
-In 0.6.24, a failed or blocked search cannot satisfy verification. A successful
-search returning zero results stays in the record, but does not count as a
-returned source tier: the three-tier requirement needs actual returned results.
+Failed, blocked and timed-out searches do not count as completed attempts. A
+successful search returning zero results does count as trying its intended
+source category, and its empty result stays in the record. Requiring a hit in
+every category would turn "look there" into "find something there."
 The verification model receives bounded result titles and snippets plus signal
 context, not fetched full document text. The editor still needs to open and
 read the originals. If the search trail or signal result cannot be saved, the
@@ -115,16 +124,13 @@ list: those are different checks.
 3. **What context is missing** (`missing_context`) — what a reader would need
    that this signal does not have.
 4. **The self-referential check** (`self_referential`) — is this about AI,
-   journalism, information integrity, media, or this tool? If yes it is
-   **never** finalized. These topics create blind spots, and this is the gate
-   that catches the desk narrating its own sandbox at the editor (the 0.6.14
-   regression).
+   journalism, information integrity, media, or this tool? A yes adds explicit
+   editor scrutiny. It does not hide or veto a legitimate lead. Operational
+   model narration is filtered separately when output is parsed.
 
-A signal with **any** gate unanswered stays **unverified**, and the desk says
-which gate is missing, in words. A one-word shrug counts as unanswered.
-
-The first three answers are checked for minimum length, not independently
-proven true by the code. The editor must read the cited records and challenge
+A signal with **any blank answer** stays **protocol-incomplete**, and the desk
+says which answer is missing. There is no invented character minimum. The code
+does not prove the answer true; the editor must read the records and challenge
 the reasoning. The interface therefore says **Protocol complete · four gates**
 rather than claiming that a fact has been verified.
 
@@ -147,11 +153,16 @@ each model call's stage, provider, model, duration, result and timeout status;
 provider-reported token counts are stored when available and remain unknown
 when the provider does not report them.
 
-Research may finish with unresolved low-value items. It stops when the evidence
-is sufficient for the bounded question, successive hops add no material
-finding, results repeat the same sources, returns diminish, or a whole-run cap
-is reached. New follow-up items are cleaned, equivalent labels are merged, and
-only the highest-value bounded set remains open.
+Research can pause with unresolved items, but a low-yield or repeated-source
+stop does not override a high-value open trail. New follow-up items are cleaned,
+equivalent labels are merged, and only a bounded high-value working set stays
+active at once. Lower-priority items are saved as deferred work, shown to the
+editor, and resumed at the start of the next **Keep digging** run after the
+active set drains. An empty search or unread record cannot by itself close a
+trail. Repeated model assertions that
+a hypothesis is a dead end are not evidence exhaustion; the path closes only
+after its tracked search strategies are exhausted, and later evidence can
+reopen it.
 
 ## Search minimums
 
@@ -168,16 +179,16 @@ where the planner falls short:
 - **A 90-day search preference by default.** The editor can choose 1–3650 UTC calendar days of lookback, including the current UTC date, or an inclusive calendar range. The lookback changes at UTC midnight; the paper's display timezone does not change that boundary. The same resolved date hints reach discovery and adversarial queries and their model packs. A provider may ignore date operators; returned records still need their dates checked.
 - The tier that answered is recorded on every search.
 
-## The newsworthiness gate
+## Editor triage
 
-Before a signal becomes a story lead, three questions:
+Three questions help the editor rank a signal:
 
 - Does anyone's life change?
 - Is it new?
 - Is there a record anyone could check?
 
-**No to all three keeps it in the file as a watch item, not a lead.** The
-answers are stored on the lead's notes when it does advance.
+**No to all three suggests a watch item.** It does not block a lead handoff.
+The answers are stored in the lead notes so the working desk can see the state.
 
 ## What the gates never do
 
@@ -188,11 +199,10 @@ research lead. Unknown, weak, contradictory and unverified states are recorded
 accurately and the investigation continues. Frontier items stay open. Files
 stay open. Signals are never deleted for failing a gate.
 
-What the gates decide is narrower and specific: what may be **called
-verified**, and what may go to the working queue **as a finding**. An editor
-who wants a speculative signal on the queue anyway can tick **"send
-unverified, as a tip"** — and the lead then carries the words "sent
-unverified" in its own notes rather than pretending otherwise.
+The four answers describe research completeness; they do not arbitrate truth or
+control the queue. The editor may hand off any signal or whole file. Its notes
+carry the protocol status, opposing account, missing context and next steps so
+the working desk cannot mistake a hypothesis for a factual finding.
 
 ## Watching a specific page
 
@@ -206,9 +216,9 @@ When a site redirects only to add or remove a trailing slash on the same address
 
 | Piece | File |
 | --- | --- |
-| The doctrine: cap, postures, tiers, gates, newsworthiness | `src/lib/news/dark-gates.ts` |
+| The doctrine: cap, postures and adversarial review | `src/lib/news/dark-gates.ts` |
 | Stage 2, the adversarial searches and the gate answers | `src/lib/news/dark-verify.ts` |
-| Stage 1 synthesis, the run loop, the queue gates | `src/lib/news/dark.ts` |
+| Stage 1 synthesis, the run loop, editor-controlled handoff | `src/lib/news/dark.ts` |
 | The prompts | `src/lib/news/dark-prompt.ts` |
 | The dig loop, search minimums, tier recording | `src/lib/news/investigate.ts` |
 | The screen | `src/routes/desk.dark.tsx` |
@@ -250,14 +260,14 @@ For each run, fill this record:
 | Searches | Every query and kind, intended tier versus returned tier, provider, outcome, exact returned URLs; distinguish failed search from successful zero results |
 | Reading | Captured documents with dates and source links, unread/blocked records, OCR method and partial-read status |
 | Gates | Each stored answer, missing reasons, contrary evidence, ordinary explanation and independence assessment |
-| Newsworthiness | Life changes / new / checkable record, with rationale; watch is a valid outcome |
-| Handoff | What reached the queue and a lead link; finding versus explicitly unverified tip; uncertainty retained |
+| Editor triage | Life changes / new / checkable record, with rationale; watch is a valid suggestion |
+| Handoff | What reached the queue and a lead link; protocol status and uncertainty retained |
 | Editor experience | Pending/success/error feedback, readable result destination, what required manual work |
 | Verdict | Pass / defect / inconclusive with supporting record; what remains unknown and the next reporting action |
 
 Pass requires honest states, traceable evidence and preserved uncertainty,
 not a minimum number of findings. A failed search shown as successful, an
-unsupported verified conclusion, an unlabelled speculative queue handoff, a
+unsupported factual conclusion, an unlabelled speculative queue handoff, a
 cross-newsroom record or unread OCR called complete is a defect. Provider
 unavailability may make reporting inconclusive while still proving correct
 failure handling. Aggregate the five records, list defects separately from

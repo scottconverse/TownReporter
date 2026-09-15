@@ -2,8 +2,9 @@
  * Stage 2 — the Dark Signal Desk.
  *
  * The Black Desk (stage 1, `synthesizeSignals` in dark.ts) files speculative
- * signals capped at 0.5. Nothing it filed may be shown as finalized, sent to
- * the queue, or treated as a finding until this runs.
+ * signals capped at 0.5. This stage records adversarial searches and review
+ * questions for the editor. It does not decide whether a lead may remain open
+ * or move to the working queue.
  *
  * The original is blunt about why this exists: "Without adversarial checking,
  * AI systems will naturally analyze contested situations from whatever
@@ -42,7 +43,7 @@ import {
   type Place,
 } from "./dark-gates.ts";
 
-/** Signals verified per round. A round that files thirty does not pay for thirty model calls. */
+/** Signals reviewed per round. A round that files thirty does not pay for thirty model calls. */
 export const VERIFY_PER_ROUND = 6;
 
 export type VerifySearchFn = (query: string) => Promise<WebHit[] | SearchAttempt>;
@@ -138,7 +139,7 @@ export async function verifyRunSignals(opts: {
 
   signalLoop: for (let signalIndex = 0; signalIndex < selected.length; signalIndex++) {
     const sig = selected[signalIndex]!;
-    await opts.onStage?.(`Verifying signal ${signalIndex + 1} of ${selected.length}`);
+    await opts.onStage?.(`Testing explanations for signal ${signalIndex + 1} of ${selected.length}`);
     const plan = adversarialQueries(sig, opts.place, official).map((q) => ({
       ...q,
       query: queryWithResearchWindow(q.query, opts.preferences),
@@ -228,7 +229,7 @@ export async function verifyRunSignals(opts: {
       `SIGNAL: ${sig.name}`,
       `OBSERVATION: ${sig.observation.slice(0, 1000)}`,
       `PATTERN: ${sig.pattern.slice(0, 1000)}`,
-      `BORING EXPLANATION AS FILED: ${sig.alternatives.slice(0, 1000) || "(none written — say so)"}`,
+      `BENIGN EXPLANATION AS FILED: ${sig.alternatives.slice(0, 1000) || "(none written — say so)"}`,
       `WHAT WOULD KILL IT: ${String(sig.what_would_kill ?? "").slice(0, 1000)}`,
       `PLACE: ${opts.place.city}${opts.place.county ? `, ${opts.place.county} County` : ""}, ${opts.place.state}`,
       "",
@@ -357,8 +358,8 @@ export async function verifyRunSignals(opts: {
     .catch(() => false);
 
   const summary = rows.length
-    ? `Verification: ${verified} of ${rows.length} eligible signal(s) verified. Attempted ${selected.length} through the four gates with ${allSearches.length} adversarial searches; ${unverified} left unverified (${failed} encountered failures). ${deferred} deferred by the ${limit}-signal round limit.`
-    : "Verification: no new signals to check this round.";
+    ? `Adversarial review: ${verified} of ${rows.length} eligible signal(s) completed the four-question protocol. Attempted ${selected.length} with ${allSearches.length} searches; ${unverified} remain protocol-incomplete (${failed} encountered failures). ${deferred} saved for a later review round.`
+    : "Adversarial review: no new signals to check this round.";
 
   return {
     checked: selected.length,
@@ -371,7 +372,7 @@ export async function verifyRunSignals(opts: {
     summary:
       summary +
       (unsaved
-        ? ` ${unsaved} verification result(s) could not be saved; retry verification.`
+        ? ` ${unsaved} review result(s) could not be saved; retry the review.`
         : "") +
       (!runSaved ? " The round search summary could not be saved." : ""),
   };

@@ -393,18 +393,8 @@ function DarkPage() {
     },
   });
 
-  /*
-    "Send unverified, as a tip."
-
-    The four gates decide whether a signal may be called verified; they do not
-    decide what the editor is allowed to do. An editor who wants a speculative
-    file on the queue anyway can say so, and the lead then carries the words
-    "sent unverified" in its own notes rather than pretending.
-  */
-  const [sendUnverified, setSendUnverified] = useState(false);
-
   const toQueue = useMutation({
-    mutationFn: (id: number) => queueInvestigation({ data: { id, asTip: sendUnverified } }),
+    mutationFn: (id: number) => queueInvestigation({ data: { id } }),
     onMutate: (id) => {
       // Clear any stale error/confirmation from a previous attempt on this
       // file so a retry does not show two contradictory banners at once.
@@ -715,8 +705,6 @@ function DarkPage() {
           queuedAlready={queued?.invId === openId ? queued.alreadyQueued : false}
           queuePending={toQueue.isPending}
           queueError={queueError?.invId === openId ? queueError.message : null}
-          sendUnverified={sendUnverified}
-          onSendUnverified={setSendUnverified}
           followPending={followLead.isPending}
           parkPending={park.isPending}
           onKeepDigging={() => {
@@ -1171,11 +1159,11 @@ const DARK_STOP_COPY: Record<string, string> = {
   "model-call-limit": "Stopped at the model-call limit",
   "search-limit": "Stopped at the search limit",
   "document-read-limit": "Stopped at the document-read limit",
-  "evidence-sufficient": "Stopped because the evidence was sufficient",
-  "diminishing-returns": "Stopped after diminishing returns",
-  "repeated-sources": "Stopped after sources began repeating",
-  "no-materially-new-finding": "Stopped after two rounds without a material new finding",
-  "frontier-exhausted": "Stopped because no useful unresolved lead remained",
+  "evidence-sufficient": "This run paused after the planner judged the current evidence sufficient; unresolved trails remain saved",
+  "diminishing-returns": "This run paused after diminishing returns; it did not reject the remaining leads",
+  "repeated-sources": "This run paused after sources began repeating; it did not resolve the hypothesis",
+  "no-materially-new-finding": "This run paused after two rounds without a material new finding; unresolved trails remain saved",
+  "frontier-exhausted": "This run ended because no productive unresolved lead remained in the active frontier",
   "hop-limit": "Stopped at the hop limit; unresolved leads remain saved",
   "synthesis-failed": "Stopped because synthesis failed; completed research remains saved",
   "provider-failed": "Stopped because the provider failed; completed work remains saved",
@@ -1225,8 +1213,6 @@ function InvestigationWorkspace({
   queuedAlready,
   queuePending,
   queueError,
-  sendUnverified,
-  onSendUnverified,
   followPending,
   parkPending,
   onKeepDigging,
@@ -1253,8 +1239,6 @@ function InvestigationWorkspace({
   queuedAlready: boolean;
   queuePending: boolean;
   queueError: string | null;
-  sendUnverified: boolean;
-  onSendUnverified: (v: boolean) => void;
   followPending: boolean;
   parkPending: boolean;
   onKeepDigging: () => void;
@@ -1310,20 +1294,7 @@ function InvestigationWorkspace({
   const signals = detail?.signals ?? [];
   const brief = detail?.brief ?? null;
   const run = detail?.run ?? null;
-  /*
-    The two stages, said out loud.
-
-    A signal may remain unverified after checks ran but found insufficient
-    evidence. State the missing qualification, not an invented lack of effort.
-    Ticking "send unverified, as a tip" un-blocks it — the gate
-    decides what may be CALLED verified, never what the editor may do.
-  */
   const verifiedSignals = signals.filter((s) => s.verification_status === "verified");
-  const queueBlocked = signals.length > 0 && verifiedSignals.length === 0 && !sendUnverified;
-  const queueBlockedReason =
-    signals.length === 1
-      ? "The signal has not completed the verification protocol. Review its checks and missing evidence below, or send it unverified as a tip."
-      : `None of the ${signals.length} signals has completed the verification protocol. Review their checks and missing evidence below, or send them unverified as tips.`;
   const facts = claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind));
   const questions = openQuestionsFrom(detail);
   // Grade each "On the record" line by whether it ties to a captured
@@ -1358,7 +1329,11 @@ function InvestigationWorkspace({
       .filter((f) => f.text),
   ];
   const tests = hyps.map((h) => plainEditorText(h.body)).filter(Boolean);
-  const next = frontier.filter((f) => ["open", "investigating", "reopened"].includes(f.status));
+  // Deferred means "saved for a later run," not rejected. Keep those leads
+  // visible so a frontier cap never looks like the desk threw them away.
+  const next = frontier.filter((f) =>
+    ["open", "investigating", "reopened", "deferred"].includes(f.status),
+  );
   // The raw row list can hold the same lead under several labels; dedupe by
   // its displayed text so the pile shows what's actually left to open, not
   // duplicate rows counted as separate work (Dark Desk F6).
@@ -1374,7 +1349,7 @@ function InvestigationWorkspace({
     return out;
   })();
   const leftover = nextDeduped.length;
-  const totalOpen = Number(inv?.still_open ?? leftover);
+  const totalOpen = Math.max(Number(inv?.still_open ?? 0), leftover);
   const pauseText = editorPauseReason(inv?.pause_reason, captureStats);
   const parentTitle = inv?.title || `File ${openId}`;
   const started = startedLine(parentTitle, pasteArt?.excerpt ?? "", inv?.summary ?? "");
@@ -1390,7 +1365,7 @@ function InvestigationWorkspace({
   const statusLine = [
     statusBit,
     readableLabel,
-    totalOpen > 0 ? `${totalOpen} open follow-up entries` : null,
+    totalOpen > 0 ? `${totalOpen} unresolved follow-up entries` : null,
     investigationRoundLabel(round, budget),
     inv?.updated_at ? `last touched ${formatShortDate(inv.updated_at)}` : null,
   ]
@@ -1433,7 +1408,7 @@ function InvestigationWorkspace({
           ) : (
             <InkButton
               tone="ghost"
-              disabled={keepDisabled || queuePending || queueBlocked}
+              disabled={keepDisabled || queuePending}
               onClick={onQueue}
             >
               {queuePending ? "Sending…" : "Send to the queue"}
@@ -1488,18 +1463,8 @@ function InvestigationWorkspace({
       }
       {signals.length > 0 && queuedLead == null ? (
         <p className="of-stop" role="status">
-          <b>{sendUnverified ? "Filing as an unverified tip:" : queueBlocked ? "Not ready for the queue:" : "Ready for the queue:"}</b>{" "}
-          {queueBlocked
-            ? queueBlockedReason
-            : `${verifiedSignals.length} of ${signals.length} signal${signals.length === 1 ? "" : "s"} on this file completed all four gates. That records a completed protocol; read the evidence before treating a claim as verified.`}{" "}
-          <label className="tip-toggle">
-            <input
-              type="checkbox"
-              checked={sendUnverified}
-              onChange={(e) => onSendUnverified(e.currentTarget.checked)}
-            />{" "}
-            Send unverified, as a tip
-          </label>
+          <b>Lead status:</b>{" "}
+          {`${verifiedSignals.length} of ${signals.length} signal${signals.length === 1 ? "" : "s"} completed the research protocol. Incomplete checks remain visible in the file and travel with the lead; they do not block sending it to the working queue.`}
         </p>
       ) : null}
       {pending ? <p className="meta">Getting this ready…</p> : null}
@@ -1537,14 +1502,17 @@ function InvestigationWorkspace({
           {nextDeduped.length > 0 ? (
             <>
               <SecHead
-                title="Still unopened"
+                title="Still to pursue"
                 count={nextDeduped.length}
-                sub="Items shown from the open follow-up list. Displayed duplicates are folded in."
+                sub="Open and deferred trails stay visible here. Displayed duplicates are folded in."
               />
               <div className="of-frontier">
                 {nextDeduped.slice(0, frN).map((f) => (
                   <div key={f.id} className="fr-item">
                     <p className="fr-label">{humanFrontierLabel(f.label)}</p>
+                    {f.status === "deferred" ? (
+                      <p className="meta">Saved for a later run; this lead was not rejected.</p>
+                    ) : null}
                     {f.why ? <p className="fr-why">{plainEditorText(f.why)}</p> : null}
                     <InkButton
                       tone="quiet"

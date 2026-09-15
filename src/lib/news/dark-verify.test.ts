@@ -239,12 +239,7 @@ describe("Dark Signal Desk — stage 2", { timeout: 60000 }, () => {
     assert.match(row.gates_missing ?? "", /independent|context/);
   });
 
-  /*
-    The 0.6.14 regression, end to end: a signal built out of the desk
-    narrating its own sandbox must never reach "verified", however
-    cooperative the model is about the gates.
-  */
-  it("never finalizes a self-referential signal", async () => {
+  it("records self-reference as extra scrutiny without vetoing a completed review", async () => {
     const user = `verify-self-${Date.now()}`;
     const seeded = await seedSignal(user, {
       name: "WebFetch was refused by the sandbox policy",
@@ -259,7 +254,7 @@ describe("Dark Signal Desk — stage 2", { timeout: 60000 }, () => {
       deps: { search: fakeSearch().fn, model: async () => FULL_ANSWER },
     });
     const row = await readSignal(seeded.signalId);
-    assert.equal(row.verification_status, "unverified");
+    assert.equal(row.verification_status, "verified");
   });
 
   /*
@@ -312,29 +307,23 @@ describe("Dark Signal Desk — stage 2", { timeout: 60000 }, () => {
   });
 });
 
-describe("the queue gate", { timeout: 60000 }, () => {
-  it("refuses an unverified signal, in words, and takes it as a tip when the editor says so", async () => {
+describe("editor-controlled queue handoff", { timeout: 60000 }, () => {
+  it("hands off an unverified signal without hiding its research status", async () => {
     await ensureLeadsTable();
     const user = `queue-gate-${Date.now()}`;
     const seeded = await seedSignal(user);
 
-    const refused = await sendDarkSignalToQueueFor(user, DEFAULT_NEWSROOM_ID, seeded.signalId);
-    assert.equal(refused.ok, false);
-    assert.equal(refused.ok === false ? refused.blocked : null, "unverified");
-    assert.match(refused.ok === false ? refused.error : "", /send unverified, as a tip/i);
-
-    const asTip = await sendDarkSignalToQueueFor(user, DEFAULT_NEWSROOM_ID, seeded.signalId, {
-      asTip: true,
-    });
+    const asTip = await sendDarkSignalToQueueFor(user, DEFAULT_NEWSROOM_ID, seeded.signalId);
     assert.equal(asTip.ok, true);
     const sql = await getSql();
     const lead = await sql<{ why: string }>`
       select why from leads where id = ${asTip.ok ? asTip.leadId : 0}
     `;
-    assert.match(lead[0]!.why, /Sent unverified/);
+    assert.match(lead[0]!.why, /Research protocol incomplete/);
+    assert.match(lead[0]!.why, /editor lead, not a factual finding/i);
   });
 
-  it("keeps a no / no / no signal in the file as a watch item rather than a lead", async () => {
+  it("uses a no / no / no result for triage without blocking the editor", async () => {
     await ensureLeadsTable();
     const user = `queue-watch-${Date.now()}`;
     const seeded = await seedSignal(user, { name: "Annual meeting schedule posted" });
@@ -351,23 +340,15 @@ describe("the queue gate", { timeout: 60000 }, () => {
     assert.equal(row.newsworthiness_decision, "watch");
 
     const res = await sendDarkSignalToQueueFor(user, DEFAULT_NEWSROOM_ID, seeded.signalId);
-    assert.equal(res.ok, false);
-    assert.equal(res.ok === false ? res.blocked : null, "watch");
-    assert.match(res.ok === false ? res.error : "", /watch item/i);
+    assert.equal(res.ok, true);
   });
 
-  it("blocks the whole file while every signal on it is speculative, and never blocks a file with none", async () => {
+  it("hands off a speculative file and a file with no signals", async () => {
     await ensureLeadsTable();
     const user = `queue-file-${Date.now()}`;
     const seeded = await seedSignal(user);
-    const blocked = await queueInvestigationFor(user, DEFAULT_NEWSROOM_ID, seeded.investigationId);
-    assert.equal(blocked.ok, false);
-    assert.match("error" in blocked ? blocked.error : "", /four gates/);
-
-    const tipped = await queueInvestigationFor(user, DEFAULT_NEWSROOM_ID, seeded.investigationId, {
-      asTip: true,
-    });
-    assert.equal(tipped.ok, true);
+    const handedOff = await queueInvestigationFor(user, DEFAULT_NEWSROOM_ID, seeded.investigationId);
+    assert.equal(handedOff.ok, true);
 
     // A file with no signals at all is untouched by the gate: there is
     // nothing to verify, so there is nothing to hold back.
@@ -383,7 +364,7 @@ describe("the queue gate", { timeout: 60000 }, () => {
 });
 
 describe("verification evidence integrity", { timeout: 60000 }, () => {
-  for (const mode of ["failed", "empty", "blocked"] as const) {
+  for (const mode of ["failed", "blocked"] as const) {
     it(`does not verify an always-positive model after ${mode} searches`, async () => {
       const seeded = await seedSignal(`integrity-${mode}`);
       const out = await verifyRunSignals({
@@ -413,6 +394,22 @@ describe("verification evidence integrity", { timeout: 60000 }, () => {
       }
     });
   }
+  it("records a completed zero-result search as an attempted category", async () => {
+    const seeded = await seedSignal("integrity-empty");
+    const out = await verifyRunSignals({
+      userId: "integrity-empty",
+      newsroomId: 1,
+      runId: seeded.runId,
+      investigationId: seeded.investigationId,
+      place: PLACE,
+      deps: {
+        search: async () => [],
+        model: async () => FULL_ANSWER,
+      },
+    });
+    assert.equal(out.verified, 1);
+    assert.equal((await readSignal(seeded.signalId)).verification_status, "verified");
+  });
   it("gives the gate model actual bounded search evidence", async () => {
     const seeded = await seedSignal("integrity-evidence");
     let pack = "";
@@ -488,17 +485,16 @@ it(
     assert.match(row.why, /Nobody has asked the housing division/);
   },
 );
-it("labels a whole investigation sent as a tip unverified", { timeout: 60000 }, async () => {
+it("labels a whole investigation handoff as incomplete research", { timeout: 60000 }, async () => {
   await ensureLeadsTable();
   const seeded = await seedSignal("integrity-filetip");
-  const out = await queueInvestigationFor("integrity-filetip", 1, seeded.investigationId, {
-    asTip: true,
-  });
+  const out = await queueInvestigationFor("integrity-filetip", 1, seeded.investigationId);
   assert.equal(out.ok, true);
   if (!out.ok) return;
   const sql = await getSql();
   const row = (await sql<{ why: string }>`select why from leads where id=${out.leadId}`)[0]!;
-  assert.match(row.why, /Sent unverified/);
+  assert.match(row.why, /0 of 1 filed signals completed the research protocol/);
+  assert.match(row.why, /lead handoff, not publication/i);
 });
 
 it(

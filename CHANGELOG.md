@@ -2,6 +2,10 @@
 
 Current release: **0.6.48**.
 
+## Unreleased
+
+- Restores Dark Desk as a lead-development system: it follows unnamed actors, beneficiaries, organizations, money and missing records; keeps concrete investigative and benign explanations live together; preserves thin and deferred trails; and prevents low-yield stop rules from closing high-value open work. Adversarial searches and four review questions remain visible research metadata. Successful zero-result searches count as completed attempts, while invented character-count, self-reference and all-no triage vetoes no longer block an editor from handing a lead to the queue.
+
 ## 0.6.48 — 2026-09-14
 
 - Connects the Story workspace's explicit Local model choice to the newsroom's discovered or saved OpenAI-compatible model, so LM Studio can be selected without requiring a duplicate process-level model setting. The evidence check now shows persistent queued/running progress and a saved before-and-after result.

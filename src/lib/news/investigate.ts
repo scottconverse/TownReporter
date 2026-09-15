@@ -211,9 +211,14 @@ export function researchStopReason(state: {
   ) {
     return "evidence-sufficient";
   }
-  if (state.repeatedSourcesThisHop >= 3) return "repeated-sources";
-  if (state.consecutiveNoMaterialHops >= 2) return "no-materially-new-finding";
-  if (state.consecutiveLowYieldHops >= 3) return "diminishing-returns";
+  // Low yield pauses a run only after its high-value leads are worked. It
+  // must never masquerade as evidence that an unresolved theory is dead.
+  if (state.highValueOpenFrontier === 0 && state.repeatedSourcesThisHop >= 3)
+    return "repeated-sources";
+  if (state.highValueOpenFrontier === 0 && state.consecutiveNoMaterialHops >= 2)
+    return "no-materially-new-finding";
+  if (state.highValueOpenFrontier === 0 && state.consecutiveLowYieldHops >= 3)
+    return "diminishing-returns";
   if (state.planRequestedStop && state.openFrontier === 0) return "frontier-exhausted";
   return null;
 }
@@ -2247,24 +2252,51 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     });
   }
 
+  type ActiveFrontierRow = {
+    id: number;
+    label: string;
+    kind: string;
+    next_steps: string;
+    strategies_tried: string | null;
+  };
+  const readActiveFrontier = () => sql<ActiveFrontierRow>`
+    select id, label, kind, next_steps, strategies_tried from frontier_items
+    where investigation_id = ${opts.investigationId}
+      and newsroom_id = ${newsroomId}
+      and status in ('open', 'investigating', 'reopened')
+    order by priority desc, id asc limit 16
+  `;
+  const activeAtRunStart = await readActiveFrontier();
+  if (!activeAtRunStart.length) {
+    // Start a later Keep digging run from the strongest saved deferred work.
+    // Do this once per run: items deferred during this run stay parked until
+    // the next explicit continuation, so they cannot defeat the working-set
+    // cap by cycling back in on the next hop.
+    await sql`
+      update frontier_items
+      set status = ${"reopened"},
+          prior_status = ${"deferred"},
+          reopened_at = now(),
+          reopened_from = ${"New run resumed saved deferred trail"},
+          closed_reason = ${"Resumed at the start of a later research run"}
+      where id in (
+        select id from frontier_items
+        where investigation_id = ${opts.investigationId}
+          and newsroom_id = ${newsroomId}
+          and status = 'deferred'
+        order by priority desc, id asc
+        limit 16
+      )
+    `;
+  }
+
   hopLoop: for (let hop = 0; hop < hopsBudget; hop++) {
     if (opts.runBudget?.remainingMs() === 0) {
       stopReason = opts.runBudget.stopReason ?? "elapsed-time-limit";
       break;
     }
     await setStage(`Researching hop ${hop + 1}/${hopsBudget}`);
-    const openFrontier = await sql<{
-      id: number;
-      label: string;
-      kind: string;
-      next_steps: string;
-      strategies_tried: string | null;
-    }>`
-      select id, label, kind, next_steps, strategies_tried from frontier_items
-      where investigation_id = ${opts.investigationId}
-        and status in ('open', 'investigating', 'reopened')
-      order by priority desc limit 16
-    `;
+    const openFrontier = await readActiveFrontier();
     const terms = openFrontier.map((f) => f.label);
     const graph = await retrievePack(opts.userId, opts.investigationId, terms);
     const preferenceContext = opts.preferences ? describeResearchWindow(opts.preferences).slice(0, 2_000) : "";
@@ -2985,7 +3017,8 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   const open = await sql<{ c: number }>`
     select count(*)::int as c from frontier_items
     where investigation_id = ${opts.investigationId}
-      and status in ('open', 'investigating', 'reopened')
+      and newsroom_id = ${newsroomId}
+      and status in ('open', 'investigating', 'reopened', 'deferred')
   `;
   const artsN = await sql<{ c: number }>`
     select count(*)::int as c from artifacts
@@ -2998,11 +3031,17 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     "search-limit",
     "document-read-limit",
   ].includes(stopReason));
-  const paused = budgetStopped || (!stopReason && (open[0]?.c ?? 0) > 0);
+  const remainingOpen = open[0]?.c ?? 0;
+  // Any unfinished trail is a paused file, regardless of why this particular
+  // run stopped. The prior expression marked a diminishing-return stop as
+  // open/completed even while unresolved leads remained.
+  const paused = budgetStopped || remainingOpen > 0;
   const pauseReason = budgetStopped
     ? `Run stopped at the ${stopReason}. Completed work is checkpointed.`
+    : stopReason && remainingOpen > 0
+      ? `This run paused at ${stopReason}; ${remainingOpen} unresolved lead(s) remain saved and can be pursued.`
     : paused
-      ? `Hop budget ${hopsBudget} reached with ${open[0]!.c} frontier item(s) still open. Budget pauses work; evidence exhaustion would close it.`
+      ? `Hop budget ${hopsBudget} reached with ${remainingOpen} frontier item(s) still open. Budget pauses work; evidence exhaustion would close it.`
       : "";
   await sql`
     update investigations
@@ -3262,7 +3301,7 @@ async function responsiveCounts(investigationId: number): Promise<{ artifacts: n
   const sql = await getSql();
   const [artifacts, frontier] = await Promise.all([
     sql<{ c: number }>`select count(*)::int as c from artifacts where investigation_id = ${investigationId}`,
-    sql<{ c: number }>`select count(*)::int as c from frontier_items where investigation_id = ${investigationId} and status in ('open', 'investigating', 'reopened')`,
+    sql<{ c: number }>`select count(*)::int as c from frontier_items where investigation_id = ${investigationId} and status in ('open', 'investigating', 'reopened', 'deferred')`,
   ]);
   return { artifacts: artifacts[0]?.c ?? 0, frontier: frontier[0]?.c ?? 0 };
 }
@@ -3689,15 +3728,17 @@ async function persistPlan(
       Dark Desk F4: the model re-asserting the same dead end every hop used
       to insert a fresh row every time (18x on one live hypothesis). Upsert
       keyed on (investigation_id, dedup_key) instead, incrementing
-      confirmation_count; once it crosses DEAD_END_CONFIRMATION_CAP the row
-      is settled and matchDeadEnds stops resurfacing it (see below). Same
+      confirmation_count. Repetition alone does not settle it; closure also
+      requires the deterministic strategy tracker to be exhausted. Same
       best-effort try/catch convention as persistDiscovery's frontier_items
       upsert just above: a database whose unique index creation was skipped
       (pre-existing duplicates) falls back to the old insert-every-time
       behavior rather than failing the hop.
     */
+    let confirmation = 1;
+    let settled = false;
     try {
-      await sql`
+      const confirmed = await sql<{ confirmation_count: number; settled: boolean }>`
         insert into dead_ends (user_id, newsroom_id, investigation_id, hypothesis, dismissed_because, entities, confirmation_count, settled, dedup_key)
         values (${userId}, ${newsroomId}, ${investigationId}, ${hypothesisVal}, ${reasonVal}, ${blob}, 1, false, ${dedupKey})
         on conflict (investigation_id, dedup_key) do update
@@ -3705,17 +3746,54 @@ async function persistPlan(
             dismissed_because = excluded.dismissed_because,
             entities = excluded.entities,
             settled = (dead_ends.confirmation_count + 1 >= ${DEAD_END_CONFIRMATION_CAP})
+        returning confirmation_count, settled
       `;
+      confirmation = Number(confirmed[0]?.confirmation_count ?? 1);
+      settled = confirmed[0]?.settled === true;
     } catch {
-      await sql`
+      const inserted = await sql<{ confirmation_count: number; settled: boolean }>`
         insert into dead_ends (user_id, newsroom_id, investigation_id, hypothesis, dismissed_because, entities, dedup_key)
         values (${userId}, ${newsroomId}, ${investigationId}, ${hypothesisVal}, ${reasonVal}, ${blob}, ${dedupKey})
+        returning confirmation_count, settled
+      `;
+      confirmation = Number(inserted[0]?.confirmation_count ?? 1);
+      settled = inserted[0]?.settled === true;
+    }
+    const { norm: deadEndNorm } = frontierDedupKey("hypothesis", d.hypothesis);
+    const trail = await sql<{ status: string }>`
+      select status from frontier_items
+      where investigation_id = ${investigationId}
+        and newsroom_id = ${newsroomId}
+        and label_norm = ${deadEndNorm}
+      limit 1
+    `;
+    // Repetition from a model is not evidence exhaustion. The path closes only
+    // after the deterministic strategy tracker has actually exhausted it.
+    const mayClose = settled && trail[0]?.status === "exhausted";
+    if (settled && !mayClose) {
+      settled = false;
+      await sql`
+        update dead_ends set settled = false
+        where investigation_id = ${investigationId} and dedup_key = ${dedupKey}
       `;
     }
-    await markFrontier(userId, investigationId, d.hypothesis, "dead-end", d.reason);
+    if (mayClose) {
+      await markFrontier(userId, investigationId, d.hypothesis, "dead-end", d.reason);
+    } else {
+      await persistDiscovery(userId, investigationId, {
+        kind: "hypothesis",
+        label: d.hypothesis,
+        why: `Possible dead end reported ${confirmation} of ${DEAD_END_CONFIRMATION_CAP} times. Keep testing before closing it: ${d.reason}`,
+        evidence: d.reason,
+        priority: 8,
+      });
+    }
     await sql`
       update hypotheses
-      set status = 'dead-end', transition_note = ${d.reason.slice(0, 800)}
+      set status = ${mayClose ? "dead-end" : "open"},
+          transition_note = ${mayClose
+            ? d.reason.slice(0, 800)
+            : `Possible dead end ${confirmation}/${DEAD_END_CONFIRMATION_CAP}; retained for further testing. ${d.reason}`.slice(0, 800)}
       where investigation_id = ${investigationId}
         and body = ${d.hypothesis.slice(0, 2000)}
     `;
@@ -3724,10 +3802,10 @@ async function persistPlan(
 
 /**
  * Dark Desk F4: how many times the model may re-assert the same dead end
- * before it's treated as settled and stops resurfacing. Live data showed one
- * hypothesis inserted 18x and 42 "revived" rows pinned above real leads — 3
- * confirmations is enough to be sure it is genuinely a repeat, not enough to
- * still be crowding the pile by the time it settles.
+ * before it can be treated as settled, and then only when its tracked search
+ * strategies are exhausted. Live data showed one hypothesis inserted 18x and
+ * 42 "revived" rows pinned above real leads. Repetition is deduplicated here;
+ * it is not treated as evidence.
  */
 export const DEAD_END_CONFIRMATION_CAP = 3;
 

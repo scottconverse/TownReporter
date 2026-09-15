@@ -171,11 +171,27 @@ describe("research stop policy", () => {
     );
   });
 
-  it("stops on repeated sources or no materially new finding without waiting for an empty frontier", () => {
+  it("does not stop for low yield while high-value leads remain", () => {
     const base = {
       planRequestedStop: false,
       openFrontier: 6,
       highValueOpenFrontier: 3,
+      totalReadableSources: 1,
+      totalSupportedClaims: 0,
+      consecutiveNoMaterialHops: 0,
+      consecutiveLowYieldHops: 0,
+      repeatedSourcesThisHop: 0,
+    };
+    assert.equal(researchStopReason({ ...base, repeatedSourcesThisHop: 3 }), null);
+    assert.equal(researchStopReason({ ...base, consecutiveNoMaterialHops: 2 }), null);
+    assert.equal(researchStopReason({ ...base, consecutiveLowYieldHops: 3 }), null);
+  });
+
+  it("pauses for repeated sources or low yield after high-value leads are worked", () => {
+    const base = {
+      planRequestedStop: false,
+      openFrontier: 6,
+      highValueOpenFrontier: 0,
       totalReadableSources: 1,
       totalSupportedClaims: 0,
       consecutiveNoMaterialHops: 0,

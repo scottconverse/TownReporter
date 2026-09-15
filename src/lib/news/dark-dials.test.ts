@@ -88,7 +88,7 @@ describe("stanceFor", () => {
   });
 
   it("holds thin items rather than dropping them almost everywhere", () => {
-    assert.equal(stanceFor({ dig: 5, nerve: 1, scope: "city" }).thinHandoff, "DISCARD");
+    assert.equal(stanceFor({ dig: 5, nerve: 1, scope: "city" }).thinHandoff, "HOLD FOR PATTERN");
     assert.equal(stanceFor({ dig: 5, nerve: 2, scope: "city" }).thinHandoff, "HOLD FOR PATTERN");
   });
 

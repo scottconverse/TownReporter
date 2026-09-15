@@ -58,10 +58,11 @@ and Reporting tabs and adapts to narrow screens. Follow-ups record who was
 asked, what is due and when; replies can be added to story reporting notes.
 Historical screenshots illustrate workflows, not the current layout.
 
-Dark Desk now separates speculative Black Desk signals (confidence ≤0.5) from
-structured Dark Signal verification. See [the doctrine and its limits](dark-desk.md).
-The verified label is a completed software protocol, not a substitute for
-checking sources. The five-topic live acceptance exercise remains outstanding.
+Dark Desk separates speculative Black Desk signals (confidence ≤0.5) from a
+structured adversarial review record. See [the doctrine and its limits](dark-desk.md).
+Protocol complete means the searches and four review questions were completed;
+it is not a factual verdict or a gate on the editor's lead handoff. The
+five-topic live acceptance exercise remains outstanding.
 
 Local models can be discovered on LM Studio, Ollama or llama.cpp and selected
 individually. **Captured-PDF OCR** renders scanned PDFs as actual PDF pages
@@ -327,6 +328,14 @@ parked. Nothing is deleted. Paste a URL, a person, an LLC, a contract number, a
 rumour or a paragraph of text and it opens a file: it searches, fetches, keeps
 copies, follows names, and writes down what it thinks connects — labelled, and
 always with what would kill the theory.
+
+For each material anomaly it keeps two explanations live: a concrete
+investigative theory about what may be happening underneath, and the strongest
+ordinary or benign explanation. Missing organization names, beneficiaries,
+money recipients, filings and permits become follow-up work. They are not
+grounds for deleting the lead. Lower-priority trails remain visible as deferred
+work and return to the active set on the next **Keep digging** run after the
+current higher-priority set drains.
 
 A file that stops mid-trail is normal. It says how many pages it has not opened
 yet and waits for **Keep digging**.
@@ -894,9 +903,9 @@ flowchart TB
     SEARCH --> CAP["Capture a copy"]
     CAP --> EXTRACT["Entities · relationships<br/>signals · dead ends"]
     EXTRACT --> HYG{"Claim hygiene"}
-    HYG -->|about our own digging| DROP["Dropped"]
+    HYG -->|operational model narration| DROP["Filtered from signals"]
     HYG -->|FACT with no citation| DOWN["Downgraded"]
-    HYG -->|ok| CLAMP["Confidence capped<br/>by label"]
+    HYG -->|lead| CLAMP["Confidence capped<br/>by label"]
     CLAMP --> SYN["Synthesise<br/>(Opus)"]
     SYN --> BRIEF["Brief:<br/>connections · hypothesis · strength<br/>supports · benign · what kills it"]
     BRIEF --> STOP{"Budget spent?"}
@@ -906,11 +915,10 @@ flowchart TB
     BRIEF --> SPEC["Black Desk signal<br/>confidence at most 0.5"]
     SPEC --> ADV["App adversarial searches<br/>four kinds, three source tiers"]
     ADV --> VER["Dark Signal gate answers<br/>disproof, independence, context, self-reference"]
-    VER --> DEC{"Verified and newsworthy?"}
-    DEC -->|yes| QUEUE["Send finding to queue"]
-    DEC -->|no| WATCH["Keep investigating or watch"]
-    WATCH --> TIP["Editor explicitly sends unverified tip"]
-    TIP --> QUEUE
+    VER --> STATE["Record protocol state,<br/>missing context and opposing account"]
+    STATE --> WATCH["Keep investigating or watch"]
+    STATE --> QUEUE["Editor sends lead to queue"]
+    WATCH --> QUEUE
 
     style DROP fill:#3a2a2a,color:#fff
     style QUEUE fill:#7a2d2d,color:#fff
