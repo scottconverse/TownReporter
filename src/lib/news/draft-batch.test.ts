@@ -15,8 +15,8 @@ import {
 const newsroomId = 99101;
 const context = { userId: "batch-editor", newsroomId };
 const runtimeSnapshot = {
-  runtime: "claude-cli" as const,
-  modelChoice: "claude-frontier",
+  runtime: "claude-sonnet" as const,
+  modelChoice: "claude-sonnet",
   model: "selected-claude",
   transport: "claude-code" as const,
 };

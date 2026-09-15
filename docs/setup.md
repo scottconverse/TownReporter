@@ -520,9 +520,9 @@ Two things stop working there, both by design:
 
 Also note there is normally no Codex or Claude Code CLI on a serverless host —
 set `ANTHROPIC_API_KEY` or the `LLM_*` trio for Scan, Dark Desk, and Story
-instead. Opinion Automatic requires a signed-in Claude Code CLI or a ready
-Codex Sol fallback and the configured voice file. Explicit Claude, Codex
-Terra, Codex Sol, Local model or custom choices stay selected. Explicit Local
+instead. Opinion Automatic requires a ready Codex Sol or signed-in Claude
+Sonnet fallback and the configured voice file. Every explicit named Claude or
+Codex model, Local model, or custom choice stays selected. Explicit Local
 model has no separate research pass. These provider options do not remove
 serverless job-lifetime limits.
 

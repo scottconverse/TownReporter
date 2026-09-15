@@ -62,8 +62,8 @@ async function fixture(newsroomId: number) {
     [userId, newsroomId],
   );
   const snapshot = {
-    runtime: "claude-cli",
-    modelChoice: "claude-frontier",
+    runtime: "claude-sonnet",
+    modelChoice: "claude-sonnet",
     transport: "claude-code",
     model: "selected-claude",
   };
@@ -72,7 +72,7 @@ async function fixture(newsroomId: number) {
     [newsroomId, userId, JSON.stringify(snapshot)],
   );
   const [row] = await sql.query<{ id: number }>(
-    "insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token,draft_batch_id) values($1,$2,'draft',$3,'claude-frontier','editor','public','default','running','Drafting','batch-claim',$4) returning id",
+    "insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token,draft_batch_id) values($1,$2,'draft',$3,'claude-sonnet','editor','public','default','running','Drafting','batch-claim',$4) returning id",
     [userId, newsroomId, lead.id, batch.id],
   );
   const job = {
@@ -81,7 +81,7 @@ async function fixture(newsroomId: number) {
     user_id: userId,
     kind: "draft",
     subject_id: lead.id,
-    model_choice: "claude-frontier",
+    model_choice: "claude-sonnet",
     model_choice_source: "editor",
     research_scope: "public",
     draft_batch_id: batch.id,

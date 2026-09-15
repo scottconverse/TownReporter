@@ -11,7 +11,7 @@ import {
 
 const claude = {
   runtime: "claude-cli",
-  modelChoice: "claude-frontier",
+  modelChoice: "claude-sonnet",
   transport: "claude-code",
   model: "selected-claude",
 } as const satisfies ForcedRuntimeSnapshot;
@@ -22,7 +22,7 @@ describe("forced runtime snapshots", () => {
   });
 
   for (const malformed of [
-    { runtime: "claude-cli", modelChoice: "claude-frontier", transport: "claude-code" },
+    { runtime: "claude-cli", modelChoice: "claude-sonnet", transport: "claude-code" },
     { runtime: "local", modelChoice: "local-model", transport: "local" },
     { ...claude, transport: "codex" },
   ]) {

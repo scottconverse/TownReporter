@@ -32,6 +32,30 @@ const stamp = Date.now();
 const email = `flows-${stamp}@townreporter.test`;
 const password = "desk-flows-e2e-pass";
 const leadHeadline = `Planning board meets on the Kimbark parcel ${stamp}`;
+const expectedModelNames = [
+  "Automatic",
+  "Codex Astra",
+  "Codex Sol",
+  "Codex Terra",
+  "Codex Luna",
+  "Claude Fable",
+  "Claude Opus",
+  "Claude Sonnet",
+  "Claude Haiku",
+  "Local model",
+];
+
+async function assertSharedModelPicker(picker, expectedValue, surface) {
+  const names = (await picker.locator("option").allInnerTexts()).map((line) =>
+    line.split("—")[0].trim(),
+  );
+  if (JSON.stringify(names) !== JSON.stringify(expectedModelNames)) {
+    throw new Error(`${surface} model picker choices differ: ${JSON.stringify(names)}`);
+  }
+  if ((await picker.inputValue()) !== expectedValue) {
+    throw new Error(`${surface} model picker default is not ${expectedValue}`);
+  }
+}
 
 let page;
 const done = [];
@@ -96,13 +120,10 @@ async function main() {
   await page.getByRole("heading", { name: "Opinion", exact: true }).waitFor();
   step("Opinion desk renders");
 
-  // Opinion uses the shared native provider registry: Automatic, Claude Opus,
-  // Codex Terra, Codex Sol, and Local model, with Sol selected by default.
+  // Opinion uses the shared native provider registry, with Sol selected by default.
   const opinionModel = page.getByLabel("Writing model");
-  if ((await opinionModel.locator("option").count()) !== 5 || (await opinionModel.inputValue()) !== "codex-frontier") {
-    throw new Error("Opinion model picker choices/default do not match the product contract");
-  }
-  step("Opinion exposes Automatic, Claude Opus, Codex Terra, Codex Sol, and Local model");
+  await assertSharedModelPicker(opinionModel, "codex-frontier", "Opinion");
+  step("Opinion exposes every named Codex and Claude model plus Local model");
 
   // UIUX-03: a live region has to exist before its content changes, or the
   // announcement is frequently never made.
@@ -165,23 +186,8 @@ async function main() {
     .fill(`https://example.org/agenda-${stamp} ${writeStoryHeadline}`);
   const writeStoryBtn = page.getByRole("button", { name: "Write draft", exact: true });
   await writeStoryBtn.click();
-  if (/\/desk\/story\//.test(page.url())) {
-    step("Write a story lands on the new story's page");
-  } else {
-    // CI has neither Codex nor Claude configured, so the commit boundary
-    // refuses the draft -- but the lead it filed before asking is unaffected.
-    // Scoped to the notice region beside the Write button (see the Opinion
-    // step above for why a page-wide text search is the wrong tool here: the
-    // model picker's collapsed help text hides a "Claude Code installation
-    // guide" link that a loose substring match finds first, and never becomes
-    // visible).
-    await page
-      .locator('[role="alert"][aria-live="assertive"]')
-      .filter({ hasText: /not installed|not available|sign in again|Claude Code|cannot write/i })
-      .first()
-      .waitFor({ timeout: 20_000 });
-    step("Write a story refuses clearly when it cannot draft, and the lead is still filed");
-  }
+  await page.waitForURL(/\/desk\/story\/\d+/, { timeout: 30_000 });
+  step("Write a story lands on the saved story page even when drafting cannot continue");
 
   // ── Queue: the Write a story lead landed, with the full paste kept ────────
   await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
@@ -199,11 +205,10 @@ async function main() {
   await page.getByLabel("Body").waitFor({ timeout: 30_000 });
   step("a lead can be filed by hand");
 
+  await page.getByRole("button", { name: /Model & research/ }).click();
   const storyModel = page.getByLabel("Writing model");
-  if ((await storyModel.locator("option").count()) !== 5 || (await storyModel.inputValue()) !== "auto") {
-    throw new Error("Story model picker choices/default do not match the product contract");
-  }
-  step("Story exposes the Claude/Codex/Local model ladder with Automatic selected");
+  await assertSharedModelPicker(storyModel, "auto", "Story");
+  step("Story exposes every named Codex and Claude model plus Local model with Automatic selected");
 
   await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
   const row = page.locator(".lead-row", { hasText: leadHeadline }).first();
@@ -211,22 +216,19 @@ async function main() {
 
   const queueModel = row.getByLabel("Writing model");
   await row.locator("summary").filter({ hasText: /^Model:.*change$/ }).click();
-  if ((await queueModel.locator("option").count()) !== 5 || (await queueModel.inputValue()) !== "auto") {
-    throw new Error("Queue row model picker choices/default do not match the product contract");
-  }
-  // CI has neither Codex nor Claude configured, so an explicit Codex choice
-  // must surface preflight's codex-missing guidance rather than enqueueing.
+  await assertSharedModelPicker(queueModel, "auto", "Queue row");
+  // This walk uses the fake Codex CLI so opening the desk and saving source
+  // material never depends on a developer's installed providers. Verify that
+  // the row preserves the editor's exact explicit selection; the dedicated
+  // preflight suite covers missing-provider guidance.
   await queueModel.selectOption("codex-balanced");
-  await row.getByRole("button", { name: `Draft ${leadHeadline} with Codex Terra` }).click();
-  await row
-    .getByText(
-      "Codex is not installed on this machine. Install the Codex CLI, open Codex and sign in, then choose Codex again. Nothing was queued or spent.",
-    )
-    .waitFor({ timeout: 20_000 });
+  if ((await queueModel.inputValue()) !== "codex-balanced") {
+    throw new Error("Queue row did not retain the explicit Codex Terra selection");
+  }
   if ((await row.locator("[aria-describedby]").getAttribute("aria-describedby")) === "model-picker-help") {
     throw new Error("Queue model picker still uses the old shared description id");
   }
-  step("Queue row sends its own explicit model and refuses missing Codex before enqueue");
+  step("Queue row retains its own explicit model selection");
 
   // The actions must be visible without hovering.
   const acts = row.locator(".row-acts");

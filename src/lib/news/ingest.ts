@@ -145,6 +145,11 @@ export type OcrOptions = {
     | { kind: "claude-code" | "codex"; model: string }
     | { kind: "local"; baseUrl: string; model: string };
   beforeModelCall?: () => Promise<void>;
+  /** Test-only seam for proving newsroom-scoped custom OCR resolution. */
+  resolveCustom?: (
+    newsroomId: number,
+    id: string,
+  ) => Promise<{ baseUrl: string; apiKey: string | null; modelId: string }>;
   /**
    * Test-only per-transport override (mirrors ai.ts's `GrokChatAdapters`),
    * keyed by the transport kind ("anthropic" | "codex" | "claude-code" |

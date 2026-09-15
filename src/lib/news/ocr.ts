@@ -156,7 +156,11 @@ type Plan =
 type PlanFailure = { needsOcr: true; reason: string };
 
 /** One vision transcription call. Overridable per-transport for hermetic tests. */
-export type OcrPageTranscriber = (image: PageImage, timeoutMs: number) => Promise<string>;
+export type OcrPageTranscriber = (
+  image: PageImage,
+  timeoutMs: number,
+  selected?: { transport: ProviderKind; model: string },
+) => Promise<string>;
 export type OcrAdapters = Partial<Record<ProviderKind, OcrPageTranscriber>>;
 
 async function resolveVisionLocal(
@@ -230,8 +234,10 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
       };
     }
     try {
-      const { resolveCustomAiChoice } = await import("./custom-ai-connections.server.ts");
-      const connection = await resolveCustomAiChoice(newsroomId, provider.slice("custom:".length));
+      const resolve =
+        opts.resolveCustom ??
+        (await import("./custom-ai-connections.server.ts")).resolveCustomAiChoice;
+      const connection = await resolve(newsroomId, provider.slice("custom:".length));
       return {
         kind: "openai",
         baseUrl: connection.baseUrl,
@@ -419,7 +425,7 @@ async function transcribePage(
   adapters?: OcrAdapters,
 ): Promise<string> {
   const adapter = adapters?.[plan.kind];
-  if (adapter) return adapter(image, timeoutMs);
+  if (adapter) return adapter(image, timeoutMs, { transport: plan.kind, model: plan.model });
   if (plan.kind === "anthropic")
     return anthropicTranscribePage(image, plan.apiKey, plan.model, timeoutMs);
   if (plan.kind === "codex") return codexTranscribePage(image, plan.model, timeoutMs);

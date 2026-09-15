@@ -228,10 +228,13 @@ Previous scans are listed underneath with what each one found.
 The owner can also configure a daily ordinary scan on the
 Server page. It starts disabled. The
 owner selects up to 12 accepted sources from any reporting beat, a local time
-in the paper's timezone, and one explicit runtime: the selected local model,
-Claude Code subscription CLI, Codex Terra subscription CLI or Codex Sol
-subscription CLI. Scheduled scans have no metered API-key or configured-gateway
-fallback and do not switch providers. They read bounded source excerpts rather
+in the paper's timezone, and one explicit model: Codex Astra, Sol, Terra, or
+Luna; Claude Fable, Opus, Sonnet, or Haiku; the selected local model; or a
+saved Custom AI connection such as an OpenAI-compatible Gemini endpoint.
+Legacy "Claude Code subscription" settings migrate to Claude Sonnet instead of
+Opus. Scheduled scans do not switch providers. Saved Custom AI credentials are
+resolved only when the scheduled run starts and are not copied into its job
+snapshot. They read bounded source excerpts rather
 than claiming complete coverage of each site.
 
 Only one daily reservation is made for a local calendar day and only one may

@@ -129,14 +129,14 @@ test("every story picker exposes keyboard-native setup help and real operator li
   place to update when a provider is added -- and a place that can be forgotten
   while still passing, because a hardcoded list agrees with itself. It now
   asserts the SHAPE (Automatic first, then exactly the registry's story
-  providers in registry order) so adding a local-model entry makes this test
+  providers in display order) so adding a local-model entry makes this test
   cover it with nothing here to edit.
 */
 test("the Story picker offers Automatic plus exactly the registry's story providers", () => {
   const html = render();
   const expected = [
     "Automatic",
-    ...registry.PROVIDER_REGISTRY.filter((e) => e.offeredFor.story).map((e) => e.label),
+    ...registry.providersFor("story").map((e) => e.label),
   ];
   const rendered = [...html.matchAll(/<option[^>]*>([^<—]+)—/g)].map((m) => m[1].trim());
   assert.deepEqual(rendered, expected);
@@ -151,19 +151,19 @@ test("the Dark Desk picker offers the registry's dark providers, and says it dig
   const html = render({ scope: "dark" });
   const expected = [
     "Automatic",
-    ...registry.PROVIDER_REGISTRY.filter((e) => e.offeredFor.dark).map((e) => e.label),
+    ...registry.providersFor("dark").map((e) => e.label),
   ];
   const rendered = [...html.matchAll(/<option[^>]*>([^<—]+)—/g)].map((m) => m[1].trim());
   assert.deepEqual(rendered, expected);
   assert.match(html, /Digging model/);
-  assert.match(html, /the round moves to the next/);
+  assert.match(html, /unfinished stage moves to the next provider/);
 });
 
 test("the Opinion picker offers the registry's opinion providers, including Codex Terra and Sol", () => {
   const html = render({ scope: "opinion" });
   const expected = [
     "Automatic",
-    ...registry.PROVIDER_REGISTRY.filter((e) => e.offeredFor.opinion).map((e) => e.label),
+    ...registry.providersFor("opinion").map((e) => e.label),
   ];
   const rendered = [...html.matchAll(/<option[^>]*>([^<—]+)—/g)].map((m) => m[1].trim());
   assert.deepEqual(rendered, expected);

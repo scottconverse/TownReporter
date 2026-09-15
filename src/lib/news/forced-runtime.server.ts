@@ -39,7 +39,7 @@ const choiceFor = (
   runtime === "local" || runtime === "local-model"
     ? "local-model"
     : runtime === "claude-cli"
-      ? "claude-frontier"
+      ? "claude-sonnet"
       : runtime === "codex-terra"
         ? "codex-balanced"
         : runtime === "codex-sol"

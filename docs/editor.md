@@ -667,10 +667,12 @@ Every available maintenance action explains its effect before you run it.
 The daily scan controls on Server are available to the owner.
 They start disabled. The owner chooses a local time in the paper's configured
 timezone, selects as many as 12 accepted sources from any reporting beat, and
-chooses one explicit runtime: the already selected local model, Claude Code
-subscription CLI, Codex Terra subscription CLI or Codex Sol subscription CLI.
-The scheduled run does not use a metered API key, a configured gateway or a
-different provider as fallback. It reads bounded excerpts from the selected
+chooses one explicit model: Codex Astra, Sol, Terra, or Luna; Claude Fable,
+Opus, Sonnet, or Haiku; the already selected local model; or a saved Custom AI
+connection such as an OpenAI-compatible Gemini endpoint. A legacy saved
+"Claude Code subscription" setting opens as Claude Sonnet. The scheduled run
+does not switch providers. Custom credentials stay encrypted in newsroom
+settings and are resolved only when the run starts. It reads bounded excerpts from the selected
 sources; it does not claim full-site coverage.
 
 At most one reservation is kept for each local calendar day, and only one

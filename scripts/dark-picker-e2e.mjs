@@ -132,7 +132,7 @@ async function thePickerIsThere() {
   step("an explicit choice says out loud that it will not fall back");
 
   await picker.selectOption("auto");
-  await actions.getByText(/otherwise tries Claude Sonnet, then Codex Terra/).waitFor();
+  await actions.getByText(/otherwise tries Codex Terra, then Claude Sonnet/).waitFor();
   await actions.getByText(/only the unfinished stage moves to the next provider/).waitFor();
   step("Automatic names its ladder and says that failover retries only the unfinished stage");
 }

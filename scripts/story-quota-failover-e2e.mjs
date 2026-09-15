@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * Browser acceptance for the real Story failure that prompted this repair.
- * Claude's readiness probe succeeds, its first uploaded-document read returns
- * a provider-shaped 429, and Automatic must move the same saved document to
- * Codex Terra and land a draft. The fake CLIs preserve the production process
+ * Codex's readiness probe succeeds, its first uploaded-document read returns
+ * a provider-shaped usage-limit error, and Automatic must move the same saved
+ * document to Claude Sonnet and land a draft. The fake CLIs preserve the production process
  * boundary without spending subscription allowance.
  */
 import assert from "node:assert/strict";
@@ -88,7 +88,7 @@ async function main() {
   await page.getByRole("heading", { name: "Story workspace", exact: true }).waitFor();
   const visibleSwitch = page
     .getByText(
-      "Model switch: This draft moved to Codex Terra because Claude Opus reached its usage limit",
+      "Model switch: This draft moved to Claude Sonnet because Codex Terra reached its usage limit",
       { exact: true },
     )
     .waitFor({ timeout: 45_000 });
@@ -105,32 +105,32 @@ async function main() {
 
   const finished = snapshots.findLast((entry) => entry.job.status === "completed");
   assert.ok(finished, `No completed Story job observed: ${JSON.stringify(snapshots.slice(-5))}`);
-  assert.equal(finished.job.model_choice, "codex-balanced");
+  assert.equal(finished.job.model_choice, "claude-sonnet");
   assert.equal(
     finished.job.failover_note,
-    "This draft moved to Codex Terra because Claude Opus reached its usage limit",
+    "This draft moved to Claude Sonnet because Codex Terra reached its usage limit",
   );
   const sawDurableSwitchWhileRunning = snapshots.some(
     (entry) =>
       entry.job.status === "running" &&
       entry.job.failover_note ===
-        "This draft moved to Codex Terra because Claude Opus reached its usage limit",
+        "This draft moved to Claude Sonnet because Codex Terra reached its usage limit",
   );
   assert.equal(
     sawDurableSwitchWhileRunning,
     true,
     "The running Story job never exposed its durable provider switch",
   );
-  step("the completed job records Codex Terra and the Claude quota reason");
+  step("the completed job records Claude Sonnet and the Codex quota reason");
 
   const body = await page.getByLabel("Body").inputValue();
   assert.match(
     body,
     new RegExp(marker),
-    "Codex draft did not contain the uploaded document marker",
+    "Claude Sonnet draft did not contain the uploaded document marker",
   );
   assert.doesNotMatch(await page.locator("body").innerText(), /failed Opinion request/i);
-  step("Codex read the retained upload and its marker reached the finished story");
+  step("Claude Sonnet read the retained upload and its marker reached the finished story");
 
   await browser.close();
   assert.deepEqual(browserErrors, [], `Browser errors: ${browserErrors.join(" | ")}`);

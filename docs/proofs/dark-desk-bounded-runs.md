@@ -9,7 +9,7 @@ Give the editor an explicit choice of every supported Codex and Claude model, ma
 ## Implementation evidence
 
 - The shared picker exposes Codex Astra, Sol, Terra, and Luna; Claude Fable, Opus, Sonnet, and Haiku; and Local model on Story, Scan, Opinion, and Dark Desk.
-- Dark Desk Automatic uses a configured gateway exclusively when present. Otherwise it starts with Claude Sonnet and can retry a timed-out or signed-out unfinished stage on Codex Terra.
+- Dark Desk Automatic uses a configured gateway exclusively when present. Otherwise it starts with Codex Terra and can retry a timed-out or signed-out unfinished stage on Claude Sonnet.
 - Research, synthesis, verification, and brief generation share one wall-clock, model-call, search, and document-read budget.
 - Research stops on evidence sufficiency, diminishing returns, repeated sources, no materially new finding, frontier exhaustion, or a hard budget.
 - Frontier ingestion rejects fragments, merges equivalent questions, caps additions per hop, and defers lower-priority questions instead of deleting them.
@@ -33,7 +33,7 @@ No live Claude or Codex generation was used for verification. Provider behavior 
 - Dark database, verification, preferences, preflight, and job suite: 82 passed, 0 failed, 1 skipped. The skipped test requires `TEST_POSTGRES_ADMIN_URL` and drops/recreates a scratch database; CI supplies it.
 - Production build: `npm run build` passed.
 - Built-server smoke: all public routes, browser hydration, unauthenticated desk redirect, console checks, and outside-request check passed.
-- Dark picker walkthrough uses a fake Claude CLI and starts no research run. It verifies the full picker, explicit no-fallback copy, the Sonnet-to-Terra Automatic ladder, and persisted per-provider timeout controls.
+- Dark picker walkthrough uses fake provider CLIs and starts no research run. It verifies the full picker, explicit no-fallback copy, the Terra-to-Sonnet Automatic ladder, and persisted per-provider timeout controls.
 
 ## Limits of this proof
 

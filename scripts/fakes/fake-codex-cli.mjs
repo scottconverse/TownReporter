@@ -9,6 +9,8 @@
  *   FAKE_CODEX_SIGNED_IN   "1" for signed in
  *   FAKE_CODEX_STATE_FILE  a file whose presence means "signed in"
  *   FAKE_CODEX_MODE        exit-ok | exit-fail | hang   (default exit-ok)
+ *   FAKE_CODEX_FAIL_PROMPTS "1" returns an authentication failure for every exec call
+ *   FAKE_CODEX_QUOTA_PROMPTS "1" returns a usage-limit failure for every exec call
  *
  * A third command, `exec`, matches what src/lib/news/ai-codex.server.ts's
  * `buildCodexArgs` actually spawns for a draft call: `exec --model <m>
@@ -83,6 +85,16 @@ if (argv[0] === "login" && argv.includes("--device-auth")) {
   // The whole prompt (SYSTEM INSTRUCTIONS + USER REQUEST, see
   // buildCodexPrompt) arrives on stdin, exactly like the real CLI reads it.
   const prompt = await readStdin();
+  if (process.env.FAKE_CODEX_FAIL_PROMPTS === "1") {
+    process.stderr.write(
+      "Codex error (401): Failed to authenticate. OAuth access token has expired. Re-authenticate to continue.\n",
+    );
+    process.exit(1);
+  }
+  if (process.env.FAKE_CODEX_QUOTA_PROMPTS === "1") {
+    process.stderr.write("Codex usage limit reached. It resets 7pm (America/Denver).\n");
+    process.exit(1);
+  }
   const documentMarker = prompt.match(/AUTOMATIC_DOCUMENT_MARKER_[A-Z0-9_]+/)?.[0] ?? "";
   // report.ts's research-pass user message opens with "Lead: "; the write
   // pass's opens with "NEWS ANGLE: ". Anything else (the occasional edit

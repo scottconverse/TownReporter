@@ -21,7 +21,7 @@ import {
   type PullRecord,
 } from "./absence-gate.ts";
 import { sha256 } from "./fetch-url.ts";
-import { ingestDocument, mapLimit, type PdfPage } from "./ingest.ts";
+import { ingestDocument, mapLimit, type IngestOptions, type PdfPage } from "./ingest.ts";
 import { rememberCapture } from "./investigate.ts";
 import { formatRetrievedEvidence, retrieveRelevantChunks } from "./retrieve.ts";
 import { webSearch } from "./search-web.ts";
@@ -1013,9 +1013,12 @@ async function hydrateCaptures(
   }
 }
 
-async function defaultIngest(url: string): Promise<FetchedDoc> {
+export async function defaultIngest(
+  url: string,
+  ocrOptions?: IngestOptions,
+): Promise<FetchedDoc> {
   try {
-    const got = await ingestDocument(url);
+    const got = await ingestDocument(url, ocrOptions);
     return {
       url,
       title: got.title || describeSourceUrl(url).title,
@@ -1314,7 +1317,11 @@ export async function reportAndDraft(
   const nameReserve = budget >= 20_000 ? Math.min(limits.callMs, Math.floor(budget * 0.3)) : 0;
   const timeLeft = () => budget - (Date.now() - started);
   const canFollow = () => !suppliedOnly && timeLeft() > reserve + nameReserve + 4_000;
-  const ingest = deps.ingest ?? defaultIngest;
+  const ingest = deps.ingest ?? ((url: string) => defaultIngest(url, {
+    provider: effectiveModelChoice,
+    newsroomId: String(newsroomId),
+    localModel: opts.providerOverrides?.["local-model"]?.localModel,
+  }));
   const search = suppliedOnly ? async (_q: string) => [] : deps.search ?? (async (q: string) => webSearch(q));
   const capture = deps.capture ?? ((userId, doc) => defaultCapture(userId, newsroomId, doc));
   const hydrate = deps.hydrate ?? ((userId, urls) => hydrateCaptures(userId, newsroomId, urls));

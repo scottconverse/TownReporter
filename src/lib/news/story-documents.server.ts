@@ -298,7 +298,7 @@ export async function readStoryDocuments(
     [room, association[1]],
   ) as StoredDocument[];
   if (!rows.length) return "";
-  const ready = await probeProvider(choice);
+  const ready = await probeProvider(choice, room);
   if (!ready.ok) throw new Error(ready.error);
   const selected = ready.choice;
   const evidence: string[] = [];

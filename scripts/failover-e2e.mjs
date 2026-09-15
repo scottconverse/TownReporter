@@ -5,20 +5,18 @@
  *
  * It has unit tests but had never been proven through the desk: an editor
  * files a lead, leaves the model picker on Automatic, clicks Draft with AI --
- * and Claude Code's login lapses mid-run. The desk should notice, move to
- * Codex Terra without asking, and land a draft anyway.
+ * and Codex's login lapses mid-run. The desk should notice, move to Claude
+ * Sonnet without asking, and land a draft anyway.
  *
  * Deliberately model-free, same trick as scripts/provider-signin-e2e.mjs:
  *
  *   CLAUDE_CLI_PATH=scripts/fakes/fake-claude-cli.mjs
  *   CODEX_CLI_PATH=scripts/fakes/fake-codex-cli.mjs
  *
- * The fake Claude answers `auth status --json` with loggedIn:true (so
- * Automatic's probe picks it first, same as a real signed-in operator) but
- * answers every `-p` chat call with the real 401 envelope a live token
- * expiring mid-run produced on 2026-09-02 (FAKE_CLAUDE_FAIL_PROMPTS=1). The
- * fake Codex reports itself signed in and answers `exec` with a plausible
- * JSON draft for whichever pass asked (see scripts/fakes/fake-codex-cli.mjs).
+ * The fake Codex reports itself signed in (so Automatic picks Terra first)
+ * but answers `exec` with an authentication failure
+ * (FAKE_CODEX_FAIL_PROMPTS=1). The fake Claude reports signed in and answers
+ * each writing pass with a plausible result (FAKE_CLAUDE_VALID_DRAFT=1).
  * Nothing here spends money or touches a real credential.
  *
  *   FAILOVER_BASE_URL=http://127.0.0.1:3317 node scripts/failover-e2e.mjs
@@ -219,22 +217,22 @@ async function main() {
   // once the job completes), and the client only learns about it through a
   // 2s poll (desk.story.$leadId.tsx's `refetchInterval`). Audit-lite 0.6.6
   // FINDING-001: asserting this transient stage as a hard requirement races
-  // that poll interval against FAKE_CODEX_DELAY_MS with no real margin, so a
+  // that poll interval against the fake provider delay with no real margin, so a
   // slow/loaded CI runner can miss the window even when the switch genuinely
   // happened -- flake, not a real failure. This is now informational only;
   // the durable, poll-independent proof is the model_choice and
   // failover_note assertions below, which read the FINISHED job's own
   // snapshot rather than depending on catching a live transient value.
   const sawSwitch = jobSnapshots.some((s) =>
-    /Switched to Codex Terra: Claude Opus sign-in lapsed/.test(String(s.job.stage ?? "")),
+    /Switched to Claude Sonnet: Codex Terra sign-in lapsed/.test(String(s.job.stage ?? "")),
   );
   step(
     sawSwitch
-      ? 'observed the transient stage "Switched to Codex Terra: Claude Opus sign-in lapsed" (informational)'
+      ? 'observed the transient stage "Switched to Claude Sonnet: Codex Terra sign-in lapsed" (informational)'
       : "did not catch the transient switch stage on the wire (informational -- not required, see durable checks below)",
   );
 
-  // --- the job that finished is pinned to Codex Terra, not Claude --------
+  // --- the job that finished is pinned to Claude Sonnet -------------------
   const finished = [...jobSnapshots].reverse().find((s) => s.job.status === "completed");
   if (!finished) {
     throw new Error(
@@ -242,13 +240,13 @@ async function main() {
         JSON.stringify(jobSnapshots.map((s) => s.job.status)),
     );
   }
-  if (finished.job.model_choice !== "codex-balanced") {
+  if (finished.job.model_choice !== "claude-sonnet") {
     throw new Error(
       `the completed job's model_choice is "${finished.job.model_choice}", expected ` +
-        `"codex-balanced" (Codex Terra) -- Automatic did not actually fail over`,
+        `"claude-sonnet" (Claude Sonnet) -- Automatic did not actually fail over`,
     );
   }
-  step('the completed job\'s model_choice is "codex-balanced" (Codex Terra)');
+  step('the completed job\'s model_choice is "claude-sonnet" (Claude Sonnet)');
 
   // --- the switch reason survives past "Done" (0.6.8) ---------------------
   // `stage` gets overwritten once the job finishes ("Done" replaces the
@@ -257,7 +255,7 @@ async function main() {
   // (src/lib/news/jobs.ts's `setJobFailoverNote`), and it must still read
   // back on the FINISHED job's own getLead snapshot, not just an earlier
   // running one.
-  const expectedNote = "This draft moved to Codex Terra because Claude Opus sign-in lapsed";
+  const expectedNote = "This draft moved to Claude Sonnet because Codex Terra sign-in lapsed";
   if (String(finished.job.failover_note ?? "") !== expectedNote) {
     throw new Error(
       `the completed job's failover_note read ${JSON.stringify(finished.job.failover_note)}, ` +

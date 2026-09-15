@@ -39,6 +39,7 @@ import {
   PLANNER_TEXT_CAP,
   chunksFromEvidence,
   ingestDocument,
+  type IngestOptions,
   type PdfPage,
 } from "./ingest.ts";
 import { storableText } from "./storable-text.ts";
@@ -971,9 +972,12 @@ export async function grokPlanner(
   return parsed;
 }
 
-async function defaultFetch(url: string): ReturnType<FetchFn> {
+export async function defaultFetch(
+  url: string,
+  ocrOptions?: IngestOptions,
+): ReturnType<FetchFn> {
   try {
-    const doc = await ingestDocument(url);
+    const doc = await ingestDocument(url, ocrOptions);
     if (!doc || typeof doc.ok !== "boolean") {
       return { ok: false, status: 0, text: "", title: url, extras: [] };
     }
@@ -2175,7 +2179,11 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   const officialDomainList = opts.officialDomains ?? [];
   const pressDomainList = opts.pressDomains ?? [];
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
-  const fetchDoc = opts.fetch ?? defaultFetch;
+  const fetchDoc = opts.fetch ?? ((url: string) => defaultFetch(url, {
+    provider: opts.choice,
+    newsroomId: String(newsroomId),
+    localModel: opts.providerOverrides?.["local-model"]?.localModel,
+  }));
   const planner = opts.planner;
   const readSelector = opts.readSelector ?? (!planner ? async (pack: string) => grokPlanner(
     pack,
@@ -3115,6 +3123,11 @@ async function responsiveResearchLoop(
   const contextTerms = [investigationTitle];
   let aggregateHops = 0;
   let summary = "";
+  const fetchDoc = opts.fetch ?? ((url: string) => defaultFetch(url, {
+    provider: opts.choice,
+    newsroomId: String(newsroomId),
+    localModel: opts.providerOverrides?.["local-model"]?.localModel,
+  }));
 
   async function capturedPageLinks(): Promise<string[]> {
     const rows = await sql<{ label: string }>`
@@ -3219,7 +3232,7 @@ async function responsiveResearchLoop(
         return searchReceipt;
       },
       fetch: async (url) => {
-        fetchReceipt = asFetched(await (opts.fetch ?? defaultFetch)(url), url);
+        fetchReceipt = asFetched(await fetchDoc(url), url);
         return fetchReceipt;
       },
     });
