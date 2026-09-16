@@ -70,6 +70,12 @@ export function codexFailureMessage(
   result: { code: number | null; timedOut: boolean },
 ): string {
   if (isCodexAuthFailure(output)) return CODEX_AUTH_REQUIRED;
+  // Keep a quota response classifiable by Automatic. Collapsing it into the
+  // generic failure below made uploaded-document reading terminal before its
+  // one permitted move to Claude Sonnet.
+  if (/\b429\b|rate limit|usage limit|session limit|quota|credits?\s+(?:are\s+)?exhausted|(?:token|spend)\s+limit/i.test(output)) {
+    return "Codex reached its usage limit.";
+  }
   if (classifyCodexDiagnostic(output, result) === "startup-permission") {
     return CODEX_STARTUP_PERMISSION;
   }

@@ -93,7 +93,7 @@ async function thePickerIsThere() {
   await page.goto(`${base}/desk/dark`, { waitUntil: "networkidle" });
   const actions = page.locator("#dark-start-actions");
   await actions.waitFor({ timeout: 30_000 });
-  const picker = actions.locator("select");
+  const picker = actions.getByLabel("Digging model");
   await picker.waitFor({ timeout: 30_000 });
 
   const labels = await picker.locator("option").allInnerTexts();
