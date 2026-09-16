@@ -119,7 +119,7 @@ async function thePickerIsThere() {
   step("the Dark Desk picker offers every supported subscription model and Local model");
 
   // Its label says digging, not writing: the model there digs.
-  const labelText = await actions.locator(".model-picker-label").innerText();
+  const labelText = await actions.getByText("Digging model", { exact: true }).innerText();
   if (!/Digging model/i.test(labelText)) {
     throw new Error(`picker label reads "${labelText}", expected "Digging model"`);
   }
