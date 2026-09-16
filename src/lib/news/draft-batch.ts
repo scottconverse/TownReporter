@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { deskMiddleware } from "./desk-auth.ts";
 import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
+import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 
 export type DraftBatchRuntime = Exclude<StoryModelChoice, "auto">;
 export type DraftBatchStoredRuntime =
@@ -47,7 +48,7 @@ const runtimes = new Set<string>(PICKER_PROVIDER_IDS);
 
 export function cleanDraftBatchInput(
   value: unknown,
-): { ok: true; items: DraftBatchStartItem[]; runtime: DraftBatchRuntime } | DraftBatchFailure {
+): { ok: true; items: DraftBatchStartItem[]; runtime: DraftBatchRuntime; modelEffort: ModelEffort | null } | DraftBatchFailure {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, code: "invalid-input", error: "Choose between one and five leads." };
   }
@@ -93,7 +94,12 @@ export function cleanDraftBatchInput(
       ...(item.researchScope ? { researchScope: item.researchScope } : {}),
     });
   }
-  return { ok: true, items, runtime: row.runtime as DraftBatchRuntime };
+  const runtime = row.runtime as DraftBatchRuntime;
+  const effort = modelEffort(runtime, row.modelEffort);
+  if (row.modelEffort !== undefined && effort !== row.modelEffort) {
+    return { ok: false, code: "invalid-input", error: "Choose an effort supported by this model." };
+  }
+  return { ok: true, items, runtime, modelEffort: effort };
 }
 
 export const startDraftBatch = createServerFn({ method: "POST" })
@@ -113,7 +119,7 @@ export const startDraftBatch = createServerFn({ method: "POST" })
     }
     let runtimeSnapshot;
     try {
-      runtimeSnapshot = await server.validateBatchRuntime(context.newsroomId, input.runtime);
+      runtimeSnapshot = await server.validateBatchRuntime(context.newsroomId, input.runtime, input.modelEffort);
     } catch (error) {
       return server.batchRuntimeFailure(error);
     }

@@ -1,5 +1,7 @@
 import { getSql, withTransaction } from "../db.ts";
 import { claudeCodeChat } from "./ai-claude-code.server.ts";
+import { grokChat, probeProvider } from "./ai.ts";
+import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import {
   orchestrateEditorial,
   type EffectiveOpinionModelChoice,
@@ -9,8 +11,8 @@ import {
 } from "./editorial-orchestration.ts";
 import { findVoiceFile, readVoiceTextForLocalModel } from "./voice.server.ts";
 import { getPaperConfig } from "./paper-settings.ts";
-import { opinionModelChoice, OPINION_AUTOMATIC_LADDER } from "./model-choice.ts";
-import { setJobStage } from "./jobs.ts";
+import { modelChoiceLabel, opinionModelChoice, OPINION_AUTOMATIC_LADDER } from "./model-choice.ts";
+import { setJobFailoverNote, setJobModelRuntime, setJobStage } from "./jobs.ts";
 import {
   persistEditorialCompletion,
   persistEditorialSuccess,
@@ -24,9 +26,11 @@ import {
   type Editorial,
   type EditorialPointer,
 } from "./editorial.ts";
-import { plannerModelFor, providerEntry, providerModel } from "./provider-registry.ts";
+import { modelEffort, plannerModelFor, providerEntry, providerModel, type ModelEffort } from "./provider-registry.ts";
+import { failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
 import { nameCheckText, type NameCheck } from "./name-check.ts";
 import { officialDomains } from "./absence-gate.ts";
+import { opinionFallbackRuntimeReceipt } from "./opinion-runtime-receipt.ts";
 
 export type { WriteEditorialInput, WriteEditorialResult } from "./editorial-orchestration.ts";
 
@@ -116,6 +120,10 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
       ),
     },
   };
+  // One completed gathering pass is a checkpoint. If the writer has a
+  // technical failure, a fallback writer receives this saved research text
+  // instead of repeating the searches and source opens already completed.
+  let completedResearch: string | null = null;
   return orchestrateEditorial(input, {
     findVoiceFile,
     runClaudePair: async ({ input: editorialInput, found, researchPack }) => {
@@ -131,14 +139,18 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
       if (!entry || entry.kind !== "claude-code") {
         return { ok: false, error: "The selected Claude model is unavailable." };
       }
-      const research = await claudeCodeChat({
-        system: RESEARCH_INSTRUCTIONS,
-        user: researchPack,
-        model: plannerModelFor(choice) || providerModel(entry),
-        allowedTools: EDITORIAL_TOOLS,
-        timeoutMs: editorialTimeoutMs(),
-      });
-      if (!research.ok) return research;
+      if (completedResearch === null) {
+        const research = await claudeCodeChat({
+          system: RESEARCH_INSTRUCTIONS,
+          user: researchPack,
+          model: plannerModelFor(choice) || providerModel(entry),
+          allowedTools: EDITORIAL_TOOLS,
+          timeoutMs: editorialTimeoutMs(),
+          reasoningEffort: modelEffort(choice, editorialInput.modelEffort),
+        });
+        if (!research.ok) return research;
+        completedResearch = research.text;
+      }
       if (editorialInput.completion)
         await setJobStage(editorialInput.completion.jobId, "Writing the editorial");
       return claudeCodeChat({
@@ -150,10 +162,11 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: research.text,
+          research: completedResearch,
         }),
         model: providerModel(entry),
         timeoutMs: editorialTimeoutMs(),
+        reasoningEffort: modelEffort(choice, editorialInput.modelEffort),
       });
     },
     runCodexPair: async ({ input: editorialInput, found, researchPack }) => {
@@ -163,14 +176,18 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
       if (!entry || entry.kind !== "codex") {
         return { ok: false, error: "The selected Codex model is unavailable." };
       }
-      const research = await codexChat({
-        system: RESEARCH_INSTRUCTIONS,
-        user: researchPack,
-        model: plannerModelFor(choice),
-        timeoutMs: editorialTimeoutMs(),
-        webSearch: true,
-      });
-      if (!research.ok) return research;
+      if (completedResearch === null) {
+        const research = await codexChat({
+          system: RESEARCH_INSTRUCTIONS,
+          user: researchPack,
+          model: plannerModelFor(choice),
+          timeoutMs: editorialTimeoutMs(),
+          webSearch: true,
+          reasoningEffort: modelEffort(choice, editorialInput.modelEffort),
+        });
+        if (!research.ok) return research;
+        completedResearch = research.text;
+      }
       if (editorialInput.completion)
         await setJobStage(editorialInput.completion.jobId, "Writing the editorial");
       return codexChat({
@@ -181,10 +198,11 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: research.text,
+          research: completedResearch,
         }),
         model: providerModel(entry),
         timeoutMs: editorialTimeoutMs(),
+        reasoningEffort: modelEffort(choice, editorialInput.modelEffort),
       });
     },
     /*
@@ -223,7 +241,16 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
           research: editorialInput.sourceText ?? "",
         }),
         4_000,
-        { timeoutMs: editorialTimeoutMs(), choice: "local-model", localModel },
+        {
+          timeoutMs: editorialTimeoutMs(),
+          choice: "local-model",
+          localModel,
+          reasoningEffort: modelEffort(
+            "local-model",
+            editorialInput.modelEffort,
+            localModel?.id,
+          ),
+        },
       );
     },
     runCustomPair: async ({ input: editorialInput }) => {
@@ -244,11 +271,37 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
           timeoutMs: editorialTimeoutMs(),
           choice: editorialInput.modelChoice,
           newsroomId: editorialInput.newsroomId,
+          // The custom resolver supplies the exact saved model to grokChat;
+          // its transport performs the final model-specific validation.
+          reasoningEffort: modelEffort(
+            editorialInput.modelChoice,
+            editorialInput.modelEffort,
+          ),
         },
       );
     },
     fileEditorial,
     timeoutMs: editorialTimeoutMs,
+    onTechnicalFallback: async ({ previous, next, reason }) => {
+      if (!input.completion) return;
+      const receipt = opinionFallbackRuntimeReceipt({
+        requestedRuntime: opinionModelChoice(input.requestedModelChoice ?? input.modelChoice),
+        requestedEffort: input.requestedModelEffort ?? input.modelEffort,
+        previous,
+        next,
+        reason,
+      });
+      await setJobModelRuntime(
+        input.completion.jobId,
+        receipt.actualRuntime,
+        receipt.actualEffort,
+        receipt.requestedRuntime,
+        receipt.requestedEffort,
+        "writer",
+      );
+      await setJobStage(input.completion.jobId, receipt.stage);
+      await setJobFailoverNote(input.completion.jobId, receipt.note);
+    },
   });
 }
 
@@ -278,10 +331,99 @@ export async function fileEditorial(
     await (deps.setJobStage ?? setJobStage)(input.completion.jobId, "Checking names and spellings");
     const checkEditorialNames =
       deps.checkEditorialNames ?? (await import("./editorial-name-check.ts")).checkEditorialNames;
+    let nameRuntime = {
+      modelChoice,
+      modelEffort: modelEffort(modelChoice, input.modelEffort),
+    };
+    const requestedRuntime = opinionModelChoice(input.requestedModelChoice ?? input.modelChoice);
+    const requestedEffort = input.requestedModelEffort ?? input.modelEffort ?? null;
+    // The provider that produced the saved prose and the provider that checks
+    // it are separate facts. Record the writer before a checker can switch.
+    await setJobModelRuntime(
+      input.completion.jobId,
+      nameRuntime.modelChoice,
+      nameRuntime.modelEffort,
+      requestedRuntime,
+      requestedEffort,
+      "writer",
+    );
+    await setJobModelRuntime(
+      input.completion.jobId,
+      nameRuntime.modelChoice,
+      nameRuntime.modelEffort,
+      requestedRuntime,
+      requestedEffort,
+      "checker",
+    );
+    const recordNameSwitch = async (
+      nextChoice: EffectiveOpinionModelChoice,
+      reason: import("./automatic-failover.ts").AutomaticFailoverReason,
+      suppliedNextLabel?: string,
+    ) => {
+      if (nextChoice === nameRuntime.modelChoice) return;
+      const previousLabel = modelChoiceLabel(nameRuntime.modelChoice);
+      const nextLabel = suppliedNextLabel ?? modelChoiceLabel(nextChoice);
+      const nextEffort = modelEffort(nextChoice, nameRuntime.modelEffort);
+      await setJobModelRuntime(
+        input.completion!.jobId,
+        nextChoice,
+        nextEffort,
+        requestedRuntime,
+        requestedEffort,
+        "checker",
+      );
+      await setJobStage(input.completion!.jobId, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+      await setJobFailoverNote(input.completion!.jobId, failoverNoteSentence(nextLabel, previousLabel, reason));
+      // The request's model_choice is author attribution. A checker-only
+      // fallback is recorded on runtimeByStage.checker and must not relabel
+      // the already-written editorial as the checker provider's work.
+      nameRuntime = { modelChoice: nextChoice, modelEffort: nextEffort };
+    };
+    const nameChat: import("./report.ts").ReportChat = async (
+      system,
+      user,
+      maxTokens,
+      _choice,
+      options,
+    ) => {
+      const attempted = await runPinnedCallWithFailover({
+        snapshot: nameRuntime,
+        source: "editor",
+        ladder: OPINION_AUTOMATIC_LADDER,
+        run: (snapshot) => grokChat(system, user, maxTokens, {
+          choice: snapshot.modelChoice,
+          newsroomId: input.newsroomId,
+          timeoutMs: options?.timeoutMs,
+          noTools: true,
+          reasoningEffort: snapshot.modelEffort,
+        }),
+        probe: (choice) => probeProvider(choice, input.newsroomId),
+        resolve: async (choice) => ({
+          modelChoice: choice as EffectiveOpinionModelChoice,
+          modelEffort: modelEffort(choice, nameRuntime.modelEffort),
+        }),
+        onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
+          void previousLabel;
+          await recordNameSwitch(nextChoice as EffectiveOpinionModelChoice, reason, nextLabel);
+        },
+      });
+      nameRuntime = attempted.snapshot;
+      return attempted.result;
+    };
     const checked = await checkEditorialNames({
       newsroomId: input.newsroomId,
       editorialRequestId: input.completion.requestId,
-      modelChoice,
+      modelChoice: nameRuntime.modelChoice,
+      modelEffort: nameRuntime.modelEffort,
+      onProviderSwitch: async ({ transport, model, reason }) => {
+        const nextChoice: EffectiveOpinionModelChoice | null = transport === "codex"
+          ? "codex-balanced"
+          : transport === "anthropic" || transport === "claude-code"
+            ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
+            : null;
+        if (nextChoice) await recordNameSwitch(nextChoice, reason);
+      },
+      chat: nameChat,
       userId: input.userId,
       publicResearchAllowed: true,
       officialDomains: input.paper?.officialDomains ?? [],
@@ -428,6 +570,8 @@ export async function ensureEditorialRequestSchema() {
 type EditorialWorkDeps = {
   writeEditorial?: (input: WriteEditorialInput) => Promise<WriteEditorialResult>;
   readEditorialDocuments?: typeof import("./story-documents.server.ts").readEditorialDocuments;
+  documentProbe?: typeof probeProvider;
+  documentChat?: typeof grokChat;
 };
 
 export async function performEditorialWork(
@@ -436,6 +580,9 @@ export async function performEditorialWork(
     user_id: string;
     newsroom_id: number;
     subject_id: number;
+    model_choice: string;
+    model_choice_source?: "editor" | "auto" | "scheduled";
+    result_json?: string;
   },
   deps: EditorialWorkDeps = {},
 ) {
@@ -460,6 +607,16 @@ export async function performEditorialWork(
   `;
   const req = rows[0];
   if (!req) throw new Error("Editorial request not found");
+  let jobReceipt: {
+    modelEffort?: unknown;
+    requestedRuntime?: unknown;
+    requestedEffort?: unknown;
+  } = {};
+  try {
+    jobReceipt = JSON.parse(job.result_json || "{}") as typeof jobReceipt;
+  } catch {
+    jobReceipt = {};
+  }
 
   if (req.source_kind === "legal-removed") {
     throw new Error(
@@ -510,27 +667,50 @@ export async function performEditorialWork(
   const readEditorialDocuments =
     deps.readEditorialDocuments ??
     (await import("./story-documents.server.ts")).readEditorialDocuments;
-  const requestedChoice = opinionModelChoice(req.model_choice);
-  const readingChoices =
-    requestedChoice === "auto" ? OPINION_AUTOMATIC_LADDER : ([requestedChoice] as const);
-  let readingFailure: unknown;
-  for (const choice of readingChoices) {
-    try {
-      documentEvidence = await readEditorialDocuments(
+  const requestedChoice = opinionModelChoice(
+    typeof jobReceipt.requestedRuntime === "string"
+      ? jobReceipt.requestedRuntime
+      : req.model_choice,
+  );
+  const requestedEffort = modelEffort(
+    requestedChoice,
+    jobReceipt.requestedEffort ?? jobReceipt.modelEffort,
+  );
+  const currentChoice = opinionModelChoice(req.model_choice);
+  let activeChoice = (currentChoice === "auto" ? OPINION_AUTOMATIC_LADDER[0] : currentChoice) as EffectiveOpinionModelChoice;
+  let activeEffort = modelEffort(activeChoice, jobReceipt.modelEffort);
+  try {
+    documentEvidence = await readEditorialDocuments(
         job.newsroom_id,
         req.id,
-        choice as Parameters<typeof readEditorialDocuments>[2],
+        activeChoice as Parameters<typeof readEditorialDocuments>[2],
         [req.subject, req.asked_for].filter(Boolean).join("\n"),
         (stage) => setJobStage(job.id, stage),
         job.user_id,
+        {
+          modelEffort: activeEffort,
+          source: requestedChoice === "auto" ? "auto" : (job.model_choice_source ?? "editor"),
+          ladder: OPINION_AUTOMATIC_LADDER,
+          probe: (choice) => (deps.documentProbe ?? probeProvider)(choice, job.newsroom_id),
+          chat: deps.documentChat,
+          onSwitch: async ({ previousLabel, nextLabel, nextChoice, nextEffort, reason }) => {
+            activeChoice = nextChoice as EffectiveOpinionModelChoice;
+            activeEffort = nextEffort;
+            await setJobModelRuntime(
+              job.id,
+              nextChoice,
+              nextEffort,
+              requestedChoice,
+              requestedEffort,
+              "documents",
+            );
+            await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+            await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+            await sql`update editorial_requests set model_choice=${nextChoice} where id=${req.id} and newsroom_id=${job.newsroom_id}`;
+          },
+        },
       );
-      readingFailure = undefined;
-      break;
-    } catch (error) {
-      readingFailure = error;
-    }
-  }
-  if (readingFailure) {
+  } catch (readingFailure) {
     const detail =
       readingFailure instanceof Error ? readingFailure.message : String(readingFailure);
     await sql`update editorial_requests set error=${detail.slice(0, 800)},finished_at=now()
@@ -548,7 +728,10 @@ export async function performEditorialWork(
     askedFor: req.asked_for,
     sourceKind: req.source_kind,
     sourceRef: req.source_ref,
-    modelChoice: opinionModelChoice(req.model_choice),
+    modelChoice: activeChoice,
+    modelEffort: activeEffort,
+    requestedModelChoice: requestedChoice,
+    requestedModelEffort: requestedEffort,
     completion: { requestId: req.id, jobId: job.id },
   });
 

@@ -68,6 +68,7 @@ import {
   rememberedStoryModelChoice,
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
+import { defaultModelEffort, modelEffort as validatedModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { integrityNoteItems } from "@/lib/news/coerce-draft";
 import {
   DraftReconcileControl,
@@ -138,6 +139,7 @@ function StoryPage() {
   const [scratch, setScratch] = useState("");
   const [researchScope, setResearchScope] = useState<"public" | "supplied">("public");
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
+  const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
   const [modelResearchOpen, setModelResearchOpen] = useState(false);
   const modelResearchPanel = useRef<HTMLElement>(null);
   const modelChoiceTouched = useRef(false);
@@ -324,9 +326,14 @@ function StoryPage() {
 
   useEffect(() => {
     if (!data?.job || modelChoiceTouched.current) return;
-    setModelChoice(
-      rememberedStoryModelChoice(data.job.model_choice, data.job.model_choice_source),
-    );
+    const remembered = rememberedStoryModelChoice(data.job.model_choice, data.job.model_choice_source);
+    setModelChoice(remembered);
+    try {
+      const receipt = JSON.parse(data.job.result_json || "{}") as { modelEffort?: unknown };
+      setModelEffort(validatedModelEffort(remembered, receipt.modelEffort));
+    } catch {
+      setModelEffort(defaultModelEffort(remembered));
+    }
   }, [data?.job]);
 
   useEffect(() => {
@@ -343,7 +350,7 @@ function StoryPage() {
       await saveReportingNotes({
         data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
-      return draftLead({ data: { leadId: id, modelChoice, researchScope } });
+      return draftLead({ data: { leadId: id, modelChoice, modelEffort, researchScope } });
     },
     onMutate: () => {
       setMsg("");
@@ -550,7 +557,7 @@ function StoryPage() {
   };
 
   const reconcile = useMutation({
-    mutationFn: () => requestDraftReconciliationFn({ data: { leadId: id, modelChoice } }),
+    mutationFn: () => requestDraftReconciliationFn({ data: { leadId: id, modelChoice, modelEffort } }),
     onMutate: () => {
       reconcileSnapshot.current = { ...currentDraftFields.current };
       appliedReconcileJob.current = reconcileStatus.data?.jobId ?? null;
@@ -1023,7 +1030,10 @@ function StoryPage() {
               onChange={(choice) => {
                 modelChoiceTouched.current = true;
                 setModelChoice(choice);
+                setModelEffort(defaultModelEffort(choice));
               }}
+              effort={modelEffort}
+              onEffortChange={setModelEffort}
               disabled={waiting || reconcileActive || savePending}
               compact
             />

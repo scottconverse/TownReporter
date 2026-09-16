@@ -7,6 +7,7 @@ import {
   extractEmbeddedPngs,
   extractEmbeddedPageImages,
   OCR_TOTAL_BUDGET_MS,
+  pdfPageCount,
   productionOcr,
   renderPdfPages,
 } from "./ocr.ts";
@@ -251,6 +252,48 @@ describe("productionOcr", () => {
     ]);
   });
 
+  it("treats injected adapters as a complete hermetic transport set", async () => {
+    let calls = 0;
+    const result = await withEnv({}, () =>
+      productionOcr(blankPagePdf(1), {
+        provider: "auto",
+        adapters: {
+          anthropic: async () => {
+            calls += 1;
+            return "Hermetic OCR text from the injected reader.";
+          },
+        },
+      }),
+    );
+    assert.equal(calls, 1);
+    assert.equal(result.provider, "Claude");
+    assert.match(result.text, /Hermetic OCR text/);
+  });
+
+  it("counts a large retained PDF without rendering or transcribing any page", async () => {
+    assert.equal(await pdfPageCount(blankPagePdf(44)), 44);
+  });
+
+  it("stops on the exact transcription-attempt budget and preserves earlier pages", async () => {
+    let calls = 0;
+    const result = await withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () =>
+      productionOcr(twoBlankPagePdf(), {
+        maxModelCalls: 1,
+        adapters: {
+          anthropic: async () => {
+            calls += 1;
+            return "Readable scanned packet page text for the call-budget test.";
+          },
+        },
+      }),
+    );
+    assert.equal(calls, 1);
+    assert.equal(result.modelCalls, 1);
+    assert.equal(result.pagesRead, 1);
+    assert.deepEqual(result.pages.map((page) => page.page), [1]);
+    assert.match(result.reason ?? "", /page 2 was not read \(model-call limit\)/);
+  });
+
   it("marks a rendered PDF over the page cap as incomplete instead of complete", async () => {
     const result = await withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () =>
       productionOcr(blankPagePdf(13), {
@@ -316,35 +359,22 @@ describe("productionOcr", () => {
     assert.match(result.text, /Page one text\.[\s\S]*Page two text\./);
   });
 
-  it("refuses a non-vision local model with the exact editor-facing reason", async () => {
+  it("routes a selected non-vision local model to the next ready vision reader", async () => {
     const pdf = blankPagePdf(1);
-
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: unknown) => {
-      const url = String(input);
-      if (url === "http://127.0.0.1:9500/v1/models") {
-        return new Response(JSON.stringify({ data: [{ id: "plain-chat-model" }] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      const err = new Error("aborted");
-      err.name = "TimeoutError";
-      throw err;
-    }) as typeof fetch;
-
-    try {
-      const result = await withEnv({ LLM_BASE_URL: "http://127.0.0.1:9500/v1" }, () =>
-        productionOcr(pdf, { provider: "local-model" }),
-      );
-      assert.equal(result.text, "");
-      assert.equal(
-        result.reason,
-        "the chosen local model cannot read images — pick a vision model (marked · vision in the picker).",
-      );
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    const switches: string[] = [];
+    const result = await withEnv({}, () =>
+      productionOcr(pdf, {
+        provider: "local-model",
+        localModel: { baseUrl: "http://127.0.0.1:9500/v1", id: "plain-chat-model" },
+        adapters: {
+          codex: async () => "Council packet text recovered by the next vision reader.",
+        },
+        onProviderSwitch: async ({ transport }) => { switches.push(transport); },
+      }),
+    );
+    assert.match(result.text, /recovered by the next vision reader/);
+    assert.equal(result.provider, "Codex");
+    assert.deepEqual(switches, ["codex"]);
   });
 
   it("says plainly when the chosen provider cannot read images at all", async () => {
@@ -353,7 +383,9 @@ describe("productionOcr", () => {
     // "configured" is the internal gateway id (an `openai`-kind entry never
     // offered a vision path) -- reaches the final "cannot read images"
     // branch deterministically, with no CLI or local-server probing at all.
-    const result = await withEnv({}, () => productionOcr(pdf, { provider: "configured" }));
+    const result = await withEnv({}, () =>
+      productionOcr(pdf, { provider: "configured", adapters: {} }),
+    );
     assert.equal(result.text, "");
     assert.match(result.reason ?? "", /cannot read images/);
   });

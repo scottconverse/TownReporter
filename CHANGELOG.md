@@ -1,8 +1,20 @@
 # Changelog
 
-Current release: **0.6.50**.
+Current release: **0.6.51**.
 
-## Unreleased
+## 0.6.51 — 2026-09-16
+
+This section records the source release. It does not assert a GitHub publication, production deployment, fresh packaged-install result, or live-model result.
+
+- Adds per-runtime effort selection. Codex and Claude expose only the effort levels their respective runtime accepts; the selected value is saved with the request and unsupported values are rejected rather than silently remapped.
+- A named runtime or Automatic remains the editor's first, recorded selection. For technical unavailability, authentication, quota, timeout, network, or no-output failures, the worker retries only the unfinished call on the next ready runtime and records the requested and actual model and effort. Completed searches, reads, and document chunks are not replayed. A provider content refusal remains terminal and never turns into a draft or a fallback call. Unattended ladders use Codex first and Claude Sonnet last; Opus runs only when an editor explicitly selects it.
+- Makes the owner Daily scan settings editable: local run time, named runtime, supported effort, source limit from 1 through 12, and the accepted sources to scan. Daily scans still file leads only. The settings describe fallback and refusal behavior before a schedule is enabled.
+- Makes Gemini connection saving actionable by supplying the normal Gemini model default and validating the required key/model state before a connection can appear ready in the picker. Migration 0061 preserves the encrypted key on an existing Google OpenAI-compatible connection and fills `gemini-2.5-flash` only when its model was blank. Saved connection state refreshes after add, update, enable, or delete.
+- Opens the SuperGrok device sign-in popup synchronously from the button gesture, redirects that popup after the device URL is available, and leaves a visible page-link fallback if the browser blocks the popup. Completing device authorization still requires the editor's xAI account.
+- Adds **Redraft** for a completed Queue batch so an editor can select a different available cloud or saved connection and create a new reviewable draft. A batch neither publishes nor turns a refusal into a successful draft.
+- Changes the Server work-queue reading to distinguish current queued/running work and the latest terminal status of each workflow kind from retained failed-job history. Retained failures remain visible as history rather than permanently making an idle queue read as failed.
+- Splits document limits honestly. Direct Story and Opinion uploads retain extracted document text through all readable PDF pages, subject to the 20-million-character document limit. Generic captures and Dark Desk image-PDF OCR use a 12-page per-call boundary; **Read entire PDF** checkpoints each batch and resumes only unread pages after interruption or a whole-click budget pause. Page-only vision fallback handles scans that have no usable text layer.
+- Repairs the released Windows packaged-install failure that followed a Node child relation into `csrss` and attempted to stop it. Shutdown now excludes protected system processes, verifies creation-time identities and parent-to-child ordering, and terminates through a verified process handle. If the app root has already crashed, detached provider/browser children may remain because their ownership cannot be proved safely without a persistent supervisor.
 
 ## 0.6.50 — 2026-09-16
 

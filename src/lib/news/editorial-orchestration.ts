@@ -11,7 +11,11 @@ import {
   OPINION_AUTOMATIC_LADDER,
   type OpinionModelChoice,
 } from "./model-choice.ts";
-import { providerEntry } from "./provider-registry.ts";
+import { providerEntry, type ModelEffort } from "./provider-registry.ts";
+import {
+  automaticFailoverReason,
+  type AutomaticFailoverReason,
+} from "./automatic-failover.ts";
 
 export type WriteEditorialInput = {
   userId: string;
@@ -29,6 +33,10 @@ export type WriteEditorialInput = {
   /** The paper this runs in, for the desk note; the Longmont default when absent. */
   paper?: NewsroomIdentity;
   modelChoice?: OpinionModelChoice;
+  modelEffort?: ModelEffort | null;
+  /** Immutable editor selection retained when an earlier Opinion stage switched. */
+  requestedModelChoice?: OpinionModelChoice;
+  requestedModelEffort?: ModelEffort | null;
   /** Present only for a queued Opinion job whose filing must complete atomically. */
   completion?: { requestId: number; jobId: number };
 };
@@ -91,6 +99,11 @@ export type EditorialOrchestrationRuntime = {
     modelChoice: EffectiveOpinionModelChoice,
   ) => Promise<FiledEditorialResult>;
   timeoutMs: () => number;
+  onTechnicalFallback?: (input: {
+    previous: EffectiveOpinionModelChoice;
+    next: EffectiveOpinionModelChoice;
+    reason: AutomaticFailoverReason;
+  }) => Promise<void>;
 };
 
 const REFUSAL_OPENING = [
@@ -183,8 +196,9 @@ export async function orchestrateEditorial(
     askedFor: input.askedFor,
   });
 
-  /* Automatic tries the two signed-in subscription providers in order.
-     Explicit Claude, Codex, local, and custom choices run only themselves. */
+  /* Automatic tries the subscription ladder in order. An explicit choice is
+     preferred; only a classified technical failure may move it to the same
+     ready-provider ladder. Provider refusals always stop. */
   const runPair = async (candidate: EffectiveOpinionModelChoice): Promise<ChatResult> => {
     const candidateInput = { ...input, modelChoice: candidate };
     if (isCustomModelChoice(candidate) || providerEntry(candidate)?.kind === "xai-oauth") {
@@ -201,15 +215,24 @@ export async function orchestrateEditorial(
   };
 
   const requested = opinionModelChoice(input.modelChoice);
-  const candidates: readonly EffectiveOpinionModelChoice[] =
-    requested === "auto" ? OPINION_AUTOMATIC_LADDER : [requested];
+  const candidates: readonly EffectiveOpinionModelChoice[] = requested === "auto"
+    ? OPINION_AUTOMATIC_LADDER
+    : [requested, ...OPINION_AUTOMATIC_LADDER.filter((choice) => choice !== requested)];
   const failures: string[] = [];
+  let pendingFallback: { previous: EffectiveOpinionModelChoice; reason: AutomaticFailoverReason } | null = null;
 
   for (const candidate of candidates) {
+    if (pendingFallback) {
+      await runtime.onTechnicalFallback?.({ ...pendingFallback, next: candidate });
+      pendingFallback = null;
+    }
     const out = await runPair(candidate);
     if (!out.ok) {
       if (isProviderRefusal(out.error)) return { ok: false, error: out.error };
       failures.push(out.error);
+      const reason = automaticFailoverReason(out.error);
+      if (requested !== "auto" && !reason) return { ok: false, error: out.error };
+      if (reason) pendingFallback = { previous: candidate, reason };
       continue;
     }
 
@@ -220,6 +243,9 @@ export async function orchestrateEditorial(
         return { ok: false, error: invalid };
       }
       failures.push(invalid);
+      if (requested !== "auto") {
+        return { ok: false, error: invalid };
+      }
       continue;
     }
 
@@ -228,7 +254,10 @@ export async function orchestrateEditorial(
     return { ...filed, modelChoice: candidate };
   }
 
-  if (requested !== "auto") return { ok: false, error: failures[0] ?? "The model failed." };
+  if (requested !== "auto") {
+    const detail = failures.filter(Boolean).join(" ");
+    return { ok: false, error: `No fallback Opinion provider could produce an editorial. ${detail} Nothing was filed.`.replace(/\s+/g, " ").trim() };
+  }
   const detail = failures.filter(Boolean).join(" ");
   return {
     ok: false,

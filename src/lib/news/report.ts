@@ -1,5 +1,6 @@
 import { grokChat, parseJsonBlock, providerBudget, type ProviderProbe } from "./ai.ts";
-import type { ProviderOverrides } from "./provider-registry.ts";
+import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
+import type { OcrOptions } from "./ingest.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import {
   extractReferences,
@@ -1235,6 +1236,8 @@ export async function reportAndDraft(
     /** Exact captured material filed by the editor, not the latest URL snapshot. */
     retainedSources?: RetainedSource[];
     modelChoice?: EffectiveProviderChoice;
+    modelEffort?: ModelEffort | null;
+    onProviderSwitch?: OcrOptions["onProviderSwitch"];
     /**
      * The paper's stored deviations from the shipped time budgets (0.6.2).
      * Loaded once by `performDraftWork` and threaded through the Automatic
@@ -1273,6 +1276,7 @@ export async function reportAndDraft(
     if (!ready.ok) return { error: ready.error };
     effectiveModelChoice = ready.choice;
   }
+  let effectiveModelEffort = modelEffort(effectiveModelChoice, opts.modelEffort);
   const suppliedOnly = opts.researchScope === "supplied";
   const limits = providerBudget(effectiveModelChoice, opts.providerOverrides);
   const budget = deps.budgetMs ?? limits.wallMs;
@@ -1282,6 +1286,19 @@ export async function reportAndDraft(
   const canFollow = () => !suppliedOnly && timeLeft() > reserve + nameReserve + 4_000;
   const ingest = deps.ingest ?? ((url: string) => defaultIngest(url, {
     provider: effectiveModelChoice,
+    reasoningEffort: effectiveModelEffort,
+    onProviderSwitch: async (receipt) => {
+      const nextChoice: EffectiveProviderChoice | null = receipt.transport === "codex"
+        ? "codex-balanced"
+        : receipt.transport === "anthropic" || receipt.transport === "claude-code"
+          ? (/haiku/i.test(receipt.model) ? "claude-haiku" : "claude-sonnet")
+          : null;
+      if (nextChoice) {
+        effectiveModelChoice = nextChoice;
+        effectiveModelEffort = modelEffort(nextChoice, effectiveModelEffort);
+      }
+      await opts.onProviderSwitch?.(receipt);
+    },
     newsroomId: String(newsroomId),
     localModel: opts.providerOverrides?.["local-model"]?.localModel,
   }));
@@ -1297,6 +1314,7 @@ export async function reportAndDraft(
         newsroomId,
         noTools: suppliedOnly,
         localModel: opts.providerOverrides?.["local-model"]?.localModel,
+        reasoningEffort: effectiveModelEffort,
       });
     });
   const timedChat = (reserveMs: number): ReportChat => (system, user, maxTokens) => {

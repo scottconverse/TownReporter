@@ -23,13 +23,21 @@ test("saving and row actions use one interaction lock", () => {
 });
 
 test("save status confirms persistence without changing the model choice", () => {
+  const saved = {
+    id: "conn-1",
+    name: "Gemini",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    modelId: "gemini-2.5-flash",
+    enabled: true,
+    hasApiKey: true,
+  };
   assert.equal(
-    connectionSaveMessage(),
-    "Connection saved. Your current model choice did not change.",
+    connectionSaveMessage(saved),
+    "Gemini saved with gemini-2.5-flash. It is ready to choose in the writing model picker.",
   );
   assert.match(
-    connectionSaveMessage(),
-    /Connection saved\. Your current model choice did not change/i,
+    connectionSaveMessage({ ...saved, modelId: null }),
+    /Choose a model in Server settings before it can be selected/i,
   );
 });
 
@@ -93,5 +101,5 @@ test("save callback caches the authoritative server response before reconciliati
   );
   assert.deepEqual(key, ["custom-ai-connections"]);
   assert.deepEqual(cached, [saved]);
-  assert.equal(outcome, undefined);
+  assert.deepEqual(outcome, saved);
 });

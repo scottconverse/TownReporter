@@ -134,10 +134,38 @@ export function databaseValue(
 }
 
 /** Queue health. A job stuck running for an hour is not running. */
-export function jobsState(running: number, failed: number, oldestRunningMs: number): HealthState {
+export function jobsState(running: number, latestFailed: number, oldestRunningMs: number): HealthState {
   if (running > 0 && oldestRunningMs > 60 * 60_000) return "warn";
-  if (failed > 0) return "warn";
+  if (latestFailed > 0) return "warn";
   return "ok";
+}
+
+/**
+ * Describe current work separately from retained job history.
+ *
+ * Failed jobs are deliberately retained for diagnosis. Counting every one as
+ * current queue health made a healthy idle server read "26 failed" forever.
+ * Only a workflow whose most recent terminal run failed belongs in the main
+ * reading; the historical total is supporting context.
+ */
+export function jobQueueCopy(
+  running: number,
+  queued: number,
+  latestFailed: number,
+  historicalFailed: number,
+): { value: string; historyNote: string } {
+  const workflowWord = latestFailed === 1 ? "workflow" : "workflows";
+  const recordWord = historicalFailed === 1 ? "record" : "records";
+  return {
+    value:
+      latestFailed > 0
+        ? `${running} running · ${queued} queued · ${latestFailed} ${workflowWord} last failed`
+        : `${running} running · ${queued} queued · no current failures`,
+    historyNote:
+      historicalFailed > 0
+        ? `${historicalFailed} retained failure ${recordWord}; older failures are history, not queued work`
+        : "",
+  };
 }
 
 /**

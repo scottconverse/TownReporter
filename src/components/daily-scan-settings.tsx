@@ -14,10 +14,11 @@ import {
   type DailyScanRuntime,
 } from "@/lib/news/daily-scan";
 import { ModelPicker } from "@/components/model-picker";
+import { defaultModelEffort } from "@/lib/news/provider-registry";
 
 type Draft = Pick<
   DailyScanPolicy,
-  "enabled" | "localTime" | "runtime" | "sourceCap" | "selectedSourceIds"
+  "enabled" | "localTime" | "runtime" | "modelEffort" | "sourceCap" | "selectedSourceIds"
 >;
 
 function policyDraft(policy: DailyScanPolicy): Draft {
@@ -25,6 +26,7 @@ function policyDraft(policy: DailyScanPolicy): Draft {
     enabled: policy.enabled,
     localTime: policy.localTime,
     runtime: policy.runtime,
+    modelEffort: policy.modelEffort,
     sourceCap: policy.sourceCap,
     selectedSourceIds: policy.selectedSourceIds,
   };
@@ -51,6 +53,7 @@ function sameScheduleConfig(a: Draft, b: Draft): boolean {
     a.enabled === b.enabled &&
     a.localTime === b.localTime &&
     a.runtime === b.runtime &&
+    a.modelEffort === b.modelEffort &&
     a.sourceCap === b.sourceCap &&
     a.selectedSourceIds.length === b.selectedSourceIds.length &&
     a.selectedSourceIds.every((id, index) => id === b.selectedSourceIds[index])
@@ -278,8 +281,11 @@ export function DailyScanSettings() {
         sub="A scheduled reporter pass for leads only. It does not draft or publish anything."
       />
       <p id="daily-scan-heading" className="mt-3 max-w-2xl text-sm text-muted">
-        Choose one exact model for every scheduled run. Saved Custom AI connections, including
-        OpenAI-compatible Gemini endpoints, resolve their encrypted credential only when the run starts.
+        Choose the preferred model for every scheduled run. If it is unavailable, out of quota,
+        signed out, or returns no output, the unfinished model call can move to the next ready
+        writing model and the run records that switch. A content refusal stops the run. Saved Custom
+        AI connections, including OpenAI-compatible Gemini endpoints, resolve their encrypted
+        credential only when the run starts.
       </p>
       <div className="mt-5 max-w-2xl space-y-4">
         <label className="flex items-start gap-3 border border-rule p-4">
@@ -309,8 +315,10 @@ export function DailyScanSettings() {
             scope="scan"
             value={draft.runtime}
             onChange={(runtime) => {
-              if (runtime !== "auto") changeDraft({ ...draft, runtime: runtime as DailyScanRuntime });
+              if (runtime !== "auto") changeDraft({ ...draft, runtime: runtime as DailyScanRuntime, modelEffort: defaultModelEffort(runtime) });
             }}
+            effort={draft.modelEffort}
+            onEffortChange={(modelEffort) => changeDraft({ ...draft, modelEffort })}
             excludeAutomatic
             compact
           />
@@ -469,6 +477,11 @@ export function DailyScanSettings() {
         <p className="mt-1">
           <span className="text-muted">Current or last run:</span> {runStatus(current)}
         </p>
+        {current.lastRun?.failoverNote ? (
+          <p className="mt-1" role="status">
+            <span className="text-muted">Model switch:</span> {current.lastRun.failoverNote}
+          </p>
+        ) : null}
         <p className="mt-3">
           <Link to="/desk/scan" className="underline">
             Open scan history

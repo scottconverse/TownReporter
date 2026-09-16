@@ -5,6 +5,75 @@ function Read-Function([string]$Path, [string]$Name) {
   $ast = [Management.Automation.Language.Parser]::ParseInput((Get-Content -LiteralPath $Path -Raw), [ref]$null, [ref]$null)
   return $ast.Find({param($a) $a -is [Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq $Name}, $true).Extent.Text
 }
+& {
+  $common = Join-Path $AppRoot 'installer\Common.ps1'
+  Invoke-Expression (Read-Function $common 'Get-VerifiedAppProcessTree')
+  Invoke-Expression (Read-Function $common 'Test-ProcessCreationIdentity')
+  Invoke-Expression (Read-Function $common 'Stop-VerifiedAppProcessTree')
+  Invoke-Expression (Read-Function $common 'Clear-AppProcessStateAfterStop')
+  Invoke-Expression (Read-Function $common 'Archive-StaleAppProcessState')
+  $selfCim = Get-CimInstance Win32_Process -Filter "ProcessId=$PID"
+  $selfHandle = [Diagnostics.Process]::GetCurrentProcess()
+  try {
+    if (!(Test-ProcessCreationIdentity $selfCim.CreationDate $selfHandle.StartTime)) { throw 'CIM and process-handle creation time precision did not reconcile.' }
+    if (Test-ProcessCreationIdentity $selfCim.CreationDate ($selfHandle.StartTime.AddTicks(10))) { throw 'A distinct one-microsecond process creation time was accepted.' }
+  } finally { $selfHandle.Dispose() }
+  $base = [datetime]::SpecifyKind([datetime]'2026-09-16T12:00:00', [DateTimeKind]::Utc)
+  $script:ownedTreeInventory = @(
+    [pscustomobject]@{ ProcessId=100; ParentProcessId=80; CreationDate=$base; Name='node.exe' },
+    [pscustomobject]@{ ProcessId=200; ParentProcessId=100; CreationDate=$base.AddSeconds(1); Name='codex.exe' },
+    [pscustomobject]@{ ProcessId=300; ParentProcessId=200; CreationDate=$base.AddSeconds(2); Name='powershell.exe' },
+    [pscustomobject]@{ ProcessId=4000; ParentProcessId=100; CreationDate=$base.AddSeconds(1); Name='csrss.exe' },
+    [pscustomobject]@{ ProcessId=4; ParentProcessId=100; CreationDate=$base.AddSeconds(1); Name='System' },
+    [pscustomobject]@{ ProcessId=500; ParentProcessId=100; CreationDate=$base.AddSeconds(3); Name='python.exe' },
+    [pscustomobject]@{ ProcessId=600; ParentProcessId=500; CreationDate=$base.AddSeconds(2); Name='stale-child.exe' },
+    [pscustomobject]@{ ProcessId=700; ParentProcessId=100; CreationDate=$base.AddSeconds(4); Name='restart-worker.exe' },
+    [pscustomobject]@{ ProcessId=800; ParentProcessId=700; CreationDate=$base.AddSeconds(5); Name='worker-child.exe' },
+    [pscustomobject]@{ ProcessId=900; ParentProcessId=999; CreationDate=$base.AddSeconds(5); Name='unrelated.exe' }
+  )
+  $reusedRoot = [pscustomobject]@{ ProcessId=100; ParentProcessId=80; CreationDate=$base.AddSeconds(-1); Name='stale-node.exe' }
+  if (@(Get-VerifiedAppProcessTree $reusedRoot $script:ownedTreeInventory).Count -ne 0) {
+    throw 'A reused application PID was accepted as the original installation process.'
+  }
+  $script:ownedTreeStopped = @()
+  function Get-CimInstance {
+    param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    if ($ClassName -ne 'Win32_Process') { throw 'Unexpected process inventory query in lifecycle fixture.' }
+    return @($script:ownedTreeInventory)
+  }
+  function Stop-VerifiedProcessIdentity([object]$Identity) { $script:ownedTreeStopped += [int]$Identity.ProcessId; return $true }
+  $root = $script:ownedTreeInventory | Where-Object ProcessId -eq 100
+  $fullInventory = $script:ownedTreeInventory
+  $script:ownedTreeInventory = @($fullInventory | Where-Object ProcessId -ne 100)
+  if (Stop-VerifiedAppProcessTree $root) { throw 'A missing app root was reported stopped.' }
+  if ($script:ownedTreeStopped.Count -ne 0) { throw 'A missing app root allowed descendant termination.' }
+  $script:ownedTreeInventory = $fullInventory
+  if (!(Stop-VerifiedAppProcessTree $root @([int]700))) { throw 'A verified app root was not reported stopped.' }
+  $expected = @(300, 200, 500, 100)
+  if (($script:ownedTreeStopped -join ',') -ne ($expected -join ',')) {
+    throw "Owned process shutdown targeted '$($script:ownedTreeStopped -join ',')'; expected '$($expected -join ',')'."
+  }
+  $commonSource = Get-Content -LiteralPath $common -Raw
+  if ($commonSource -match '(?m)^\s*Stop-Process\s+-Id' -or $commonSource -notmatch 'Test-ProcessCreationIdentity\s+\$expectedCreated\s+\$process\.StartTime') {
+    throw 'Lifecycle stop must verify and kill through the same process handle, never by a bare PID.'
+  }
+  $stopSource = Get-Content -LiteralPath (Join-Path $AppRoot 'installer\Stop.ps1') -Raw
+  if ($stopSource -match '(?m)^\s*Remove-Item\s+-LiteralPath\s+\$state' -or $stopSource -notmatch 'Clear-AppProcessStateAfterStop\s+\$state\s+\$rootStopped') {
+    throw 'Stop must retain app state when the root process is not verified stopped.'
+  }
+  $fixtureStateRoot = Join-Path $env:TEMP ('tr-app-state-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $fixtureStateRoot | Out-Null
+  try {
+    $fixtureState = Join-Path $fixtureStateRoot 'app-process.json'
+    '{"ProcessId":77,"Created":"2026-09-16T12:00:00.0000000Z"}' | Set-Content -LiteralPath $fixtureState -Encoding ASCII
+    if (Clear-AppProcessStateAfterStop $fixtureState $false) { throw 'Unverified app shutdown cleared the ownership record.' }
+    if (!(Test-Path -LiteralPath $fixtureState)) { throw 'Unverified app shutdown did not retain the ownership record.' }
+    $archive = Archive-StaleAppProcessState $fixtureState
+    if (!$archive -or !(Test-Path -LiteralPath $archive) -or (Test-Path -LiteralPath $fixtureState)) { throw 'Starting after a crash did not preserve the stale ownership record.' }
+    if (!(Clear-AppProcessStateAfterStop $archive $true) -or (Test-Path -LiteralPath $archive)) { throw 'A verified shutdown did not clear its ownership record.' }
+  } finally { Remove-Item -LiteralPath $fixtureStateRoot -Recurse -Force }
+  Write-Output 'PASS shutdown verifies root and descendants, skips reused/system PIDs, retains state for missing roots, and archives stale state on restart.'
+}
 Invoke-Expression (Read-Function (Join-Path $AppRoot 'installer\Common.ps1') 'Assert-PlainDirectory')
 Invoke-Expression (Read-Function (Join-Path $AppRoot 'installer\Common.ps1') 'Protect-LocalPath')
 & {

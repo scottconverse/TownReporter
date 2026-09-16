@@ -273,7 +273,7 @@ export async function findOpenJob(opts: {
   const rows =
     opts.subjectId != null
       ? await sql<DeskJob>`
-          select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error,
+          select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
                  created_at, updated_at, started_at, finished_at
           from desk_jobs
           where newsroom_id = ${opts.newsroomId}
@@ -284,7 +284,7 @@ export async function findOpenJob(opts: {
           limit 1
         `
       : await sql<DeskJob>`
-          select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error,
+          select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
                  created_at, updated_at, started_at, finished_at
           from desk_jobs
           where newsroom_id = ${opts.newsroomId}
@@ -429,6 +429,75 @@ export async function setJobModelChoice(id: number, modelChoice: string) {
   `;
 }
 
+/** Persist a technical provider switch together with the effort that is valid
+ * for the destination model. Keeping both in one write prevents a reclaimed
+ * job from pairing the new provider with the old provider's unsupported level. */
+export async function setJobModelRuntime(
+  id: number,
+  modelChoice: string,
+  modelEffort: string | null,
+  requestedRuntime?: string,
+  requestedEffort?: string | null,
+  phase?: "documents" | "writer" | "checker",
+) {
+  const sql = await getSql();
+  await sql.query(
+    `with current as (
+       select id, model_choice as previous_choice,
+              coalesce(nullif(result_json,'')::jsonb,'{}'::jsonb) as payload
+       from desk_jobs where id=$1
+     ), receipt as (
+       select id,
+         jsonb_set(
+           jsonb_set(
+             jsonb_set(
+               jsonb_set(
+                 payload,
+                 '{requestedRuntime}',
+                 case when payload ? 'requestedRuntime' then payload->'requestedRuntime'
+                      else to_jsonb(coalesce($4::text, previous_choice)) end,
+                 true
+               ),
+               '{requestedEffort}',
+               case when payload ? 'requestedEffort' then payload->'requestedEffort'
+                    when $4::text is not null then coalesce(to_jsonb($5::text),'null'::jsonb)
+                    else coalesce(payload->'modelEffort','null'::jsonb) end,
+               true
+             ),
+               '{actualRuntime}',
+               case when $6::text = 'checker' and payload ? 'actualRuntime'
+                    then payload->'actualRuntime'
+                    else to_jsonb($2::text) end,
+               true
+           ),
+           '{modelEffort}',
+           case when $6::text = 'checker' and payload ? 'modelEffort'
+                then payload->'modelEffort'
+                else coalesce(to_jsonb($3::text),'null'::jsonb) end,
+           true
+         ) as payload
+       from current
+     )
+     update desk_jobs j
+       set model_choice=case when $6::text = 'checker' then j.model_choice else $2 end,
+           result_json=(case when $6::text is null then receipt.payload else
+             jsonb_set(
+               receipt.payload,
+               '{runtimeByStage}',
+               coalesce(receipt.payload->'runtimeByStage','{}'::jsonb) ||
+                 jsonb_build_object($6::text, jsonb_build_object(
+                   'modelChoice', $2::text,
+                   'modelEffort', coalesce(to_jsonb($3::text),'null'::jsonb)
+                 )),
+               true
+             )
+           end)::text,
+           updated_at=now()
+     from receipt where j.id=receipt.id`,
+    [id, modelChoice, modelEffort, requestedRuntime ?? null, requestedEffort ?? null, phase ?? null],
+  );
+}
+
 /**
  * Drain one lane. Each lane has its own `draining` flag, so a caller already
  * draining `editorial` does not block a caller trying to drain `default` --
@@ -457,7 +526,7 @@ async function drainLane(lane: JobLane): Promise<{ ran: number }> {
       (async () => {
         for (let n = 0; n < 8; n++) {
           const next = await sql<DeskJob>`
-            select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error,
+            select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
                    created_at, updated_at, started_at, finished_at
             from desk_jobs
             where lane = ${lane}

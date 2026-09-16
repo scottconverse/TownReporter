@@ -6,12 +6,12 @@ TownReporter can connect directly to xAI with the SuperGrok account you already 
 
 1. Sign in as the newsroom owner.
 2. Open **Server → Writing models**.
-3. Under **Grok (SuperGrok)**, choose **Sign in with SuperGrok**.
-4. Open the xAI URL TownReporter displays and enter the one-time code. The xAI approval page identifies the client as **Grok Build**; that is the upstream OAuth client used by the direct integration.
+3. Under **Grok (SuperGrok)**, choose **Sign in with SuperGrok**. The click opens a popup immediately and redirects it when xAI returns the device-login URL. If the browser blocks or closes the popup, use the visible authorization link in the card.
+4. Enter the one-time code. The xAI approval page identifies the client as **Grok Build**; that is the upstream OAuth client used by the direct integration.
 5. Return to TownReporter. It polls for completion, discovers the account's text models, and selects the strongest available model. You can choose another discovered model in the same card.
 6. Choose **Test connection** to send one tiny real request. This may count against the subscription.
 
-After connection, **Grok (SuperGrok)** appears in the same model picker used by Story, Scan, Opinion, Dark Desk, Queue batch, and Daily Scan. An explicit Grok choice stays on Grok and does not silently fall back to another provider.
+After connection, **Grok (SuperGrok)** appears in the same model picker used by Story, Scan, Opinion, Dark Desk, Queue batch, and Daily Scan. An explicit Grok choice is the requested first runtime. A recognized technical failure can move only the unfinished call to the next ready runtime and records requested and actual model and effort; a content refusal remains terminal.
 
 ## Credential ownership
 

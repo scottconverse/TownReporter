@@ -93,7 +93,7 @@ async function thePickerIsThere() {
   await page.goto(`${base}/desk/dark`, { waitUntil: "networkidle" });
   const actions = page.locator("#dark-start-actions");
   await actions.waitFor({ timeout: 30_000 });
-  const picker = actions.locator("select");
+  const picker = actions.getByLabel("Digging model");
   await picker.waitFor({ timeout: 30_000 });
 
   const labels = await picker.locator("option").allInnerTexts();
@@ -119,21 +119,21 @@ async function thePickerIsThere() {
   step("the Dark Desk picker offers every supported subscription model and Local model");
 
   // Its label says digging, not writing: the model there digs.
-  const labelText = await actions.locator(".model-picker-label").innerText();
+  const labelText = await actions.getByText("Digging model", { exact: true }).innerText();
   if (!/Digging model/i.test(labelText)) {
     throw new Error(`picker label reads "${labelText}", expected "Digging model"`);
   }
   step("the picker is labelled for what it does on this page");
 
-  // Choosing a model rewrites the help line to the no-fallback promise.
+  // Choosing a model names that provider first and describes technical failover.
   await picker.selectOption("codex-frontier");
   await actions
-    .getByText("Uses only Codex Sol for this run; no fallback.")
+    .getByText(/Prefers Codex Sol for this run\. If it has a technical failure/)
     .waitFor({ timeout: 10_000 });
-  step("an explicit choice says out loud that it will not fall back");
+  step("an explicit choice names its preferred provider and technical failover");
 
   await picker.selectOption("auto");
-  await actions.getByText(/otherwise tries Codex Terra, then Claude Sonnet/).waitFor();
+  await actions.getByText(/Uses your configured gateway when set; otherwise tries/).waitFor();
   await actions.getByText(/only the unfinished stage moves to the next provider/).waitFor();
   step("Automatic names its ladder and says that failover retries only the unfinished stage");
 }

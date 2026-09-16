@@ -12,6 +12,12 @@ import {
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
 import {
+  defaultModelEffort,
+  modelEffortLabel,
+  modelEffortsFor,
+  type ModelEffort,
+} from "@/lib/news/provider-registry";
+import {
   providerAvailability,
   localModelCatalog,
   refreshLocalModelCatalog,
@@ -49,6 +55,8 @@ type Props =
       disabled?: boolean;
       compact?: boolean;
       excludeAutomatic?: boolean;
+      effort?: ModelEffort | null;
+      onEffortChange?: (value: ModelEffort | null) => void;
     }
   | {
       scope: "opinion";
@@ -57,6 +65,8 @@ type Props =
       disabled?: boolean;
       compact?: boolean;
       excludeAutomatic?: boolean;
+      effort?: ModelEffort | null;
+      onEffortChange?: (value: ModelEffort | null) => void;
     }
   | {
       /**
@@ -71,6 +81,8 @@ type Props =
       disabled?: boolean;
       compact?: boolean;
       excludeAutomatic?: boolean;
+      effort?: ModelEffort | null;
+      onEffortChange?: (value: ModelEffort | null) => void;
     }
   | {
       scope: "forced";
@@ -79,6 +91,8 @@ type Props =
       disabled?: boolean;
       compact?: boolean;
       excludeAutomatic?: boolean;
+      effort?: ModelEffort | null;
+      onEffortChange?: (value: ModelEffort | null) => void;
     };
 
 /**
@@ -146,7 +160,7 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
   return (
     <div className="model-picker local-model-picker" style={{ gridColumn: "1 / -1" }}>
       <label htmlFor={selectId} className="model-picker-label">
-        Local model
+        {selectedModel?.cloud ? "Ollama Cloud model" : "On-device model"}
       </label>
       {reachable.length === 0 ? (
         <span className="model-picker-help">
@@ -176,8 +190,8 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
           </select>
           <span className="model-picker-help">
             {selectedModel?.cloud
-              ? `This model runs in Ollama Cloud and is routed through Ollama here${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. Reasoning is off by default for drafting so the output budget can go to the story.`
-              : "Loaded models answer fast. A model that is not loaded gets loaded on the first call, which can take a minute or more."}
+              ? `This model runs on Ollama's hosted service, not on this computer${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. Reasoning is off by default for drafting so the output budget can go to the story.${selectedModel.vision ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it." : ""}`
+              : `This model runs on the computer hosting TownReporter. Loaded models answer faster; the first call can take a minute or more.${selectedModel?.vision ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it." : ""}`}
           </span>
           {notice ? <span className="model-picker-help">{notice}</span> : null}
         </>
@@ -200,6 +214,19 @@ export function ModelPicker(props: Props) {
     queryKey: ["custom-ai-connections"],
     queryFn: () => getCustomAiConnectionsFn(),
     staleTime: 15_000,
+  });
+  const localScope = props.scope ?? "story";
+  const selectedLocalChoice = useQuery({
+    queryKey: ["local-model-choice", localScope],
+    queryFn: () => getLocalModelChoice(),
+    staleTime: 15_000,
+    enabled: props.value === "local-model",
+  });
+  const selectedLocalCatalog = useQuery({
+    queryKey: ["local-model-catalog"],
+    queryFn: () => localModelCatalog(),
+    staleTime: 15_000,
+    enabled: props.value === "local-model",
   });
   const builtInOptions =
     props.scope === "opinion"
@@ -227,6 +254,7 @@ export function ModelPicker(props: Props) {
   }
   const selected = options.find((option) => option.value === props.value) ?? options[0];
   const helpId = useId();
+  const effortId = useId();
   const flagId = useId();
   const selectId = useId();
   /*
@@ -267,11 +295,22 @@ export function ModelPicker(props: Props) {
   const flagged = !selectedUnavailable && unavailable.length === 1 ? unavailable[0] : null;
   const help = isCustomModelChoice(props.value)
     ? selectedUnavailable
-      ? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model. No automatic fallback."
-      : `Uses only ${selected.label} (${selected.detail}) for this run; no fallback. Your provider's usage charges may apply.`
+      ? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model."
+      : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
     : selectedUnavailable
       ? notSetUpHelp(selected)
       : modelChoiceHelp(selected.value, props.scope ?? "story");
+  const customConnection = isCustomModelChoice(props.value)
+    ? connections.data?.find((row) => `custom:${row.id}` === props.value)
+    : null;
+  const exactModel = props.value === "local-model"
+    ? selectedLocalChoice.data?.override?.id ?? selectedLocalCatalog.data?.defaultModel?.id ?? null
+    : customConnection?.modelId ?? null;
+  const effortOptions = modelEffortsFor(props.value, exactModel);
+  const selectedEffort =
+    props.effort && effortOptions.includes(props.effort)
+      ? props.effort
+      : defaultModelEffort(props.value, exactModel);
   return (
     <div className={props.compact ? "model-picker compact" : "model-picker"}>
       <label htmlFor={selectId} className="model-picker-label">
@@ -297,6 +336,27 @@ export function ModelPicker(props: Props) {
       <span id={helpId} className="model-picker-help">
         {help}
       </span>
+      {props.onEffortChange ? (
+        <div className="model-picker" style={{ gridColumn: "1 / -1" }}>
+          <label htmlFor={effortId} className="model-picker-label">Thinking effort</label>
+          <select
+            id={effortId}
+            value={selectedEffort ?? ""}
+            disabled={props.disabled || effortOptions.length === 0}
+            onChange={(event) => props.onEffortChange?.(event.target.value ? event.target.value as ModelEffort : null)}
+          >
+            {selectedEffort == null ? <option value="">Provider default</option> : null}
+            {effortOptions.map((effort) => (
+              <option key={effort} value={effort}>{modelEffortLabel(effort, exactModel)}</option>
+            ))}
+          </select>
+          <span className="model-picker-help">
+            {effortOptions.length
+              ? "Changes how much this exact model reasons for this run. The model name stays the same; higher effort can take longer."
+              : "This exact model does not declare safe per-run effort levels through its configured transport, so TownReporter uses the provider default."}
+          </span>
+        </div>
+      ) : null}
       {flagged ? (
         <span id={flagId} className="model-picker-help">
           {notSetUpHelp(flagged)}
@@ -345,8 +405,8 @@ export function ModelPicker(props: Props) {
               >
                 Claude Code installation guide
               </a>
-              . For the local model, start llama.cpp, LM Studio, or Ollama on that computer.
-              TownReporter discovers their default local addresses automatically. Use{" "}
+              . For an on-device model, start llama.cpp, LM Studio, or Ollama on that computer.
+              Ollama Cloud models are hosted and appear separately after Ollama is connected. TownReporter discovers default local addresses automatically. Use{" "}
               <code>LLM_BASE_URL</code>, <code>LLM_MODEL</code> and <code>LLM_API_KEY</code> only
               for a different address, model or authenticated server -- see{" "}
               <a
@@ -382,7 +442,8 @@ export function ModelPicker(props: Props) {
             ) : null}
             <li>
               Return here, reload this page to check readiness again, choose the model, then start
-              your draft. An explicit choice never switches to another provider.
+              your draft. TownReporter starts with that model and records any technical switch to
+              another ready provider; a content refusal still stops the work.
             </li>
           </ol>
           <p>

@@ -8,6 +8,7 @@ import {
   validateXaiOauthCredential,
   materializeXaiOauthModel,
   loginFailureState,
+  xaiOauthLoginError,
   xaiOauthChat,
   refreshXaiOauthModels,
 } from "./xai-oauth.server.ts";
@@ -84,6 +85,17 @@ test("shapes public status with Grok Build identity and no credential", () => {
 test("failed replacement login keeps a prior credential signed in", () => {
   assert.equal(loginFailureState(true), "signed_in");
   assert.equal(loginFailureState(false), "failed");
+});
+
+test("surfaces safe xAI device-login diagnostics without echoing arbitrary errors", () => {
+  assert.equal(
+    xaiOauthLoginError(new Error("xAI OAuth device authorization failed (HTTP 403): access_denied")),
+    "Grok Build sign-in failed: xAI OAuth device authorization failed (HTTP 403): access_denied",
+  );
+  assert.equal(
+    xaiOauthLoginError(new Error("secret internal database value")),
+    "Grok Build sign-in failed. Try again.",
+  );
 });
 
 test("pins OAuth auth when a concurrent disconnect removes the store entry", async () => {

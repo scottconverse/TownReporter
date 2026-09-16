@@ -7,6 +7,8 @@ import type { ReportChat } from "./report.ts";
 import type { FetchedDoc, ReportSearchHit } from "./report.ts";
 import { webSearch } from "./search-web.ts";
 import { ingestDocument } from "./ingest.ts";
+import type { OcrOptions } from "./ingest.ts";
+import type { ModelEffort } from "./provider-registry.ts";
 import { rememberCapture } from "./investigate.ts";
 import { sha256 } from "./fetch-url.ts";
 
@@ -18,6 +20,8 @@ type Options = {
   stage?: (message:string)=>void|Promise<void>;
   /** Focused-test seam; production always uses the authorized request query. */
   documents?: EditorialNameDocument[]; chat?: ReportChat;
+  modelEffort?: ModelEffort | null;
+  onProviderSwitch?: OcrOptions["onProviderSwitch"];
   publicDocs?: FetchedDoc[];
   search?: (query:string)=>Promise<ReportSearchHit[]>;
   ingest?: typeof ingestDocument;
@@ -58,7 +62,7 @@ export async function checkEditorialNames(opts:Options):Promise<CheckedEditorial
       const load=opts.ingest ?? ingestDocument;
       for(const url of urls) {
         if(Date.now()-started>totalMs-12_000) break;
-        const got=await load(url,{provider:opts.modelChoice,newsroomId:String(opts.newsroomId)}).catch(()=>null);
+        const got=await load(url,{provider:opts.modelChoice,reasoningEffort:opts.modelEffort,onProviderSwitch:opts.onProviderSwitch,newsroomId:String(opts.newsroomId)});
         if(!got?.ok || !got.text.trim()) continue;
         let version_id:number|null=null,capture_event_id:number|null=null;
         if(opts.capturePublic) {

@@ -11,9 +11,17 @@
  */
 import type { EffectiveProviderChoice, ProviderProbe, grokChat } from "./ai.ts";
 import { providerBudget } from "./ai.ts";
-import type { ProviderOverrides } from "./provider-registry.ts";
+import {
+  modelEffort as validatedModelEffort,
+  type ModelEffort,
+  type ProviderOverrides,
+} from "./provider-registry.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel } from "./model-choice.ts";
-import { planAutomaticFailover, failoverReasonPhrase } from "./automatic-failover.ts";
+import {
+  planAutomaticFailover,
+  failoverReasonPhrase,
+  failoverNoteSentence,
+} from "./automatic-failover.ts";
 
 /**
  * The scan's one AI read used to hardcode 90s regardless of provider, while
@@ -51,6 +59,7 @@ type GrokChatFn = (
     model?: string;
     choice?: EffectiveProviderChoice;
     newsroomId?: number;
+    reasoningEffort?: ModelEffort | null;
   },
 ) => Promise<GrokResult>;
 
@@ -67,6 +76,7 @@ export type RunScanChatWithFailoverInput = {
   system: string;
   user: string;
   maxTokens: number;
+  modelEffort?: ModelEffort | null;
   /**
    * Sized per attempt, not once up front: when Automatic fails over mid-run
    * to a later ladder rung, the retry runs on THAT rung's own budget (a CLI
@@ -78,14 +88,25 @@ export type RunScanChatWithFailoverInput = {
   probe: (choice: string) => Promise<ProviderProbe>;
   setModelChoice: (id: number, choice: string) => Promise<void>;
   setStage: (id: number, stage: string) => Promise<void>;
+  setFailoverNote?: (id: number, note: string) => Promise<void>;
+  onSwitch?: (receipt: {
+    previousChoice: string;
+    nextChoice: string;
+    previousLabel: string;
+    nextLabel: string;
+    nextEffort: ModelEffort | null;
+    reason: import("./automatic-failover.ts").AutomaticFailoverReason;
+    switchReason: string;
+    switchNote: string;
+  }) => Promise<void>;
 };
 
 /**
  * Run the scan's one AI read on the job's pinned model. If it fails and the
- * job is on Automatic with a login-lapse-shaped OR timeout/no-output-shaped
+ * job has a login-lapse-shaped OR timeout/no-output-shaped
  * error, try exactly one later rung of AUTOMATIC_LADDER, once -- reusing the
- * SAME `system`/`user` text, never re-fetching sources. An editor's explicit
- * model choice, a refusal, or any second failure on the new rung is returned
+ * SAME `system`/`user` text, never re-fetching sources. A refusal or any
+ * second failure on the new rung is returned
  * as-is (see automatic-failover.ts's `planAutomaticFailover` for exactly
  * what counts).
  */
@@ -104,10 +125,14 @@ export async function runScanChatWithFailover(
     setStage,
   } = input;
   const firstChoice = effectiveStoryModelChoice(job.model_choice);
+  const firstEffort = input.modelEffort == null
+    ? null
+    : validatedModelEffort(firstChoice, input.modelEffort);
   const ai = await chat(system, user, maxTokens, {
     timeoutMs: timeoutMs(firstChoice),
     choice: firstChoice,
     newsroomId: input.newsroomId,
+    ...(firstEffort ? { reasoningEffort: firstEffort } : {}),
   });
   if (ai.ok) return ai;
 
@@ -120,12 +145,28 @@ export async function runScanChatWithFailover(
   if (!plan) return ai;
 
   const previousLabel = modelChoiceLabel(job.model_choice);
+  const nextEffort = input.modelEffort == null
+    ? null
+    : validatedModelEffort(plan.next, input.modelEffort);
+  const switchReason = failoverReasonPhrase(previousLabel, plan.reason);
+  const switchNote = failoverNoteSentence(plan.label, previousLabel, plan.reason);
+  await input.onSwitch?.({
+    previousChoice: job.model_choice,
+    nextChoice: plan.next,
+    previousLabel,
+    nextLabel: plan.label,
+    nextEffort,
+    reason: plan.reason,
+    switchReason,
+    switchNote,
+  });
   await setModelChoice(job.id, plan.next);
-  const switchedBecause = failoverReasonPhrase(previousLabel, plan.reason);
-  await setStage(job.id, `Switched to ${plan.label}: ${switchedBecause}`);
+  await setStage(job.id, `Switched to ${plan.label}: ${switchReason}`);
+  await input.setFailoverNote?.(job.id, switchNote);
   return chat(system, user, maxTokens, {
     timeoutMs: timeoutMs(plan.next),
     choice: plan.next,
     newsroomId: input.newsroomId,
+    ...(nextEffort ? { reasoningEffort: nextEffort } : {}),
   });
 }

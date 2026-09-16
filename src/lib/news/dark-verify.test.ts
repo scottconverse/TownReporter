@@ -166,6 +166,7 @@ describe("Dark Signal Desk — stage 2", { timeout: 60000 }, () => {
     const user = `verify-log-${Date.now()}`;
     const seeded = await seedSignal(user);
     const search = fakeSearch();
+    let seenEffort: unknown = null;
     const out = await verifyRunSignals({
       userId: user,
       newsroomId: DEFAULT_NEWSROOM_ID,
@@ -173,10 +174,18 @@ describe("Dark Signal Desk — stage 2", { timeout: 60000 }, () => {
       investigationId: seeded.investigationId,
       place: PLACE,
       officialDomains: ["longmontcolorado.gov"],
-      deps: { search: search.fn, model: async () => FULL_ANSWER },
+      deps: {
+        search: search.fn,
+        model: async (_system, _pack, effort) => {
+          seenEffort = effort;
+          return FULL_ANSWER;
+        },
+      },
+      reasoningEffort: "xhigh",
     });
 
     assert.ok(search.seen.length >= 4, `only ${search.seen.length} adversarial searches were run`);
+    assert.equal(seenEffort, "xhigh");
     assert.equal(out.searches.length, search.seen.length);
     for (const r of out.searches) {
       assert.ok(r.query, "a logged search with no query");

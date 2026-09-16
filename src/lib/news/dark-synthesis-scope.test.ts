@@ -136,16 +136,20 @@ it("synthesis keeps an older focus-matching capture and its stored page evidence
   }
 
   let briefPrompt = "";
+  let briefEffort: unknown = null;
   const brief = await buildBrief(
     userId,
     newsroomId,
     inv,
     undefined,
     null,
-    async (_system, prompt) => {
+    async (_system, prompt, _maxTokens, opts) => {
       briefPrompt = prompt;
+      briefEffort = opts?.reasoningEffort;
       return { ok: true, text: '{"headline":"Cedar record","tldr":"A captured record is available."}' };
     },
+    undefined,
+    "xhigh",
   );
   assert.equal(brief.ok, true);
   if (brief.ok) assert.equal(brief.brief.evidence_status, "unverified");
@@ -155,6 +159,7 @@ it("synthesis keeps an older focus-matching capture and its stored page evidence
   assert.match(briefPrompt, /page:7:char:6400-6500/);
   assert.match(briefPrompt, /COFFMAN_ROW_HEADING: Coffman Apartments/);
   assert.equal((briefPrompt.match(/TARGET_ROW: FILE-4242/g) ?? []).length, 1);
+  assert.equal(briefEffort, "xhigh");
 });
 
 it("stores the complete parsed brief without cutting serialized JSON or citations", async () => {

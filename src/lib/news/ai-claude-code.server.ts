@@ -34,6 +34,7 @@ import { join } from "node:path";
 import { assertNotAnArgument } from "./voice.server.ts";
 import { spawnPlan } from "./cli-spawn.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
+import { CLAUDE_CLI_EFFORTS, type ModelEffort } from "./provider-registry.ts";
 
 /**
  * Mirrors the limit in `assertNotAnArgument` (voice.server.ts): the point
@@ -263,6 +264,8 @@ export async function claudeCodeChat(opts: {
    * a call that legitimately needs `allowedTools`.
    */
   noTools?: boolean;
+  /** Per-run Claude CLI effort. Only values advertised by this installed CLI are accepted. */
+  reasoningEffort?: ModelEffort | null;
 }): Promise<ClaudeCodeResult> {
   // Research capability is selected by the caller, including editorial writing.
   /*
@@ -312,6 +315,12 @@ export async function claudeCodeChat(opts: {
         "Pass one or the other.",
     );
   }
+  if (opts.reasoningEffort && !CLAUDE_CLI_EFFORTS.includes(opts.reasoningEffort)) {
+    cleanupTempDir();
+    throw new Error(
+      `Unsupported Claude effort ${opts.reasoningEffort}. Supported values: ${CLAUDE_CLI_EFFORTS.join(", ")}.`,
+    );
+  }
 
   const bin = await findClaudeCli();
   if (!bin) {
@@ -351,6 +360,7 @@ export async function claudeCodeChat(opts: {
     ...(opts.noTools ? ["--tools", ""] : ["--allowed-tools", (opts.allowedTools ?? []).join(",")]),
     "--model",
     opts.model,
+    ...(opts.reasoningEffort ? ["--effort", opts.reasoningEffort] : []),
     "--output-format",
     "json",
   ];
@@ -461,6 +471,7 @@ export async function claudeCodeReadChat(opts: {
   filePath: string;
   model: string;
   timeoutMs: number;
+  reasoningEffort?: ModelEffort | null;
 }): Promise<ClaudeCodeResult> {
   const bin = await findClaudeCli();
   if (!bin) return { ok: false, error: CLAUDE_CLI_MISSING };
@@ -473,6 +484,7 @@ export async function claudeCodeReadChat(opts: {
     "",
     "--model",
     opts.model,
+    ...(opts.reasoningEffort ? ["--effort", opts.reasoningEffort] : []),
     "--output-format",
     "json",
   ];

@@ -45,6 +45,8 @@ async function reset() {
     "create table if not exists sources(id integer primary key,newsroom_id integer,url text,title text,kind text,tier integer,status text,last_hash text,last_fetched_at timestamptz,last_error text)",
   ])
     await sql.query(q);
+  await sql.query("alter table desk_jobs add column if not exists failover_note text not null default ''");
+  await sql.query("alter table desk_jobs add column if not exists result_json text not null default '{}'");
   for (const t of [
     "daily_commit_marker",
     "daily_scan_reservations",

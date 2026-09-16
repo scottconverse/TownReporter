@@ -1,6 +1,6 @@
 # Editor desk: current workflow
 
-For [TownReporter 0.6.50](releases/0.6.50.md). The sidebar contains Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats. New story opens document intake. Dark Desk opens investigations; the TownReporter logo, breadcrumb and Public news page control return to the public newspaper. The public header’s labeled Editor’s desk button opens this workspace on desktop and phones. On narrow desk screens, open the navigation menu.
+For [TownReporter 0.6.51](releases/0.6.51.md). The sidebar contains Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats. New story opens document intake. Dark Desk opens investigations; the TownReporter logo, breadcrumb and Public news page control return to the public newspaper. The public header’s labeled Editor’s desk button opens this workspace on desktop and phones. On narrow desk screens, open the navigation menu.
 
 ## Start with evidence
 
@@ -10,7 +10,7 @@ You can attach up to 20 files, each up to 100 MB. Supported intake includes Mark
 
 URL intake supports web pages, PDFs and YouTube transcripts where available. A URL does not guarantee that the host will supply its contents or captions. An inaccessible or unsupported source must be replaced with an accessible source or uploaded document.
 
-Choose the writing model and research scope, then start writing. Opinion defaults to Codex Sol. Automatic tries Codex Sol, then Claude Sonnet if needed; named choices stay selected. Local model and saved API connections follow their configured capabilities. Subscription writers receive the full configured voice and retain their research tools.
+Choose the writing model and research scope, then start writing. Opinion defaults to Codex Sol. Automatic tries Codex Sol, then Claude Sonnet if needed. A named choice remains the requested first runtime; a recognized technical failure may move only the unfinished call and records the requested and actual model and effort. A content refusal is final. Local model and saved API connections follow the same first-choice rule and their configured capabilities. Subscription writers receive the full configured voice and retain their research tools. Unattended ladders put Claude last and use Sonnet; Opus is an explicit editor choice only.
 
 ## Find the result
 
@@ -27,3 +27,11 @@ Names and spellings are checked against opened written evidence. Supported corre
 Opinion must contain **Claims and sources**. Missing or unusable appendix material is an explicit review problem and blocks publication until repaired. The private fact sheet and image prompt do not print. Review sources, names, quotations and the preview, then use **Publish to the paper** and its existing confirmation. Published stories appear on the public paper and under Published.
 
 See the [complete editor guide](editor.md) for Sources, Scan, investigations, settings, routine notices and Stats.
+
+## 0.6.51 behavior
+
+The model row includes the model-specific effort values that the selected Codex or Claude runtime accepts. A named choice or Automatic is recorded as the first runtime. A technical failure can be retried on a ready runtime and records the requested and actual model and effort; a provider refusal is final and creates no replacement draft.
+
+In Queue, a completed batch offers **Redraft**. Choose a runtime again and create a new reviewable draft; it does not publish. In Server, the owner may edit Daily scan time, model, allowed effort, selected accepted sources and a limit from 1 through 12. Daily scans file leads only.
+
+For uploaded Story and Opinion packets, all readable PDF pages are retained through the 20-million-character document-text limit. Generic captures and Dark Desk scanned-image OCR start with a bounded batch; **Read entire PDF** saves consecutive batches of up to 12 pages and resumes from retained page chunks after interruption. Failed or oversized pages remain explicitly unread. See [the release guide](releases/0.6.51.md) for current limits and evidence boundaries.

@@ -4,6 +4,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { spawnPlan } from "./cli-spawn.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
+import { modelEffortsForModel, type ModelEffort } from "./provider-registry.ts";
 
 
 /** Safe, bounded labels for opt-in native transport diagnostics. */
@@ -69,6 +70,12 @@ export function codexFailureMessage(
   result: { code: number | null; timedOut: boolean },
 ): string {
   if (isCodexAuthFailure(output)) return CODEX_AUTH_REQUIRED;
+  // Keep a quota response classifiable by Automatic. Collapsing it into the
+  // generic failure below made uploaded-document reading terminal before its
+  // one permitted move to Claude Sonnet.
+  if (/\b429\b|rate limit|usage limit|session limit|quota|credits?\s+(?:are\s+)?exhausted|(?:token|spend)\s+limit/i.test(output)) {
+    return "Codex reached its usage limit.";
+  }
   if (classifyCodexDiagnostic(output, result) === "startup-permission") {
     return CODEX_STARTUP_PERMISSION;
   }
@@ -271,11 +278,13 @@ export function buildCodexArgs(input: {
    * a normal text draft — that path never sets this.
    */
   imagePaths?: string[];
+  reasoningEffort?: ModelEffort | null;
 }): string[] {
-  const configuredReasoning = process.env.TOWNREPORTER_CODEX_REASONING_EFFORT?.trim();
-  if (configuredReasoning && configuredReasoning !== "high") {
+  const configuredReasoning = input.reasoningEffort ?? process.env.TOWNREPORTER_CODEX_REASONING_EFFORT?.trim();
+  const supported = modelEffortsForModel(input.model);
+  if (configuredReasoning && !supported.includes(configuredReasoning as ModelEffort)) {
     throw new Error(
-      `Unsupported TOWNREPORTER_CODEX_REASONING_EFFORT: ${configuredReasoning}. The only verified value is high.`,
+      `Unsupported reasoning effort ${configuredReasoning} for ${input.model}. Supported values: ${supported.join(", ") || "provider default"}.`,
     );
   }
   return [
@@ -391,6 +400,7 @@ export async function codexChat(input: {
   systemPromptFile?: string;
   webSearch?: boolean;
   imagePaths?: string[];
+  reasoningEffort?: ModelEffort | null;
 }): Promise<ChatResult> {
   const bin = await findCodexCli();
   if (!bin) return { ok: false, error: CODEX_CLI_MISSING };
@@ -403,7 +413,7 @@ export async function codexChat(input: {
   }
   const result = await run(
     bin,
-    buildCodexArgs({ model: input.model, systemPromptFile: input.systemPromptFile, webSearch: input.webSearch, imagePaths: input.imagePaths }),
+    buildCodexArgs({ model: input.model, systemPromptFile: input.systemPromptFile, webSearch: input.webSearch, imagePaths: input.imagePaths, reasoningEffort: input.reasoningEffort }),
     buildCodexPrompt(input),
     input.timeoutMs,
     // Match Claude's standalone writing context without changing the user's

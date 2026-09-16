@@ -8,6 +8,7 @@ import {
   formatBytes,
   formatIn,
   formatUptime,
+  jobQueueCopy,
   jobsState,
   overallState,
   publicState,
@@ -141,6 +142,17 @@ describe("health readings", () => {
     assert.equal(jobsState(1, 0, 5 * 60_000), "ok");
     assert.equal(jobsState(1, 0, 90 * 60_000), "warn");
     assert.equal(jobsState(0, 2, 0), "warn");
+  });
+
+  it("separates the live queue from retained failure history", () => {
+    assert.deepEqual(jobQueueCopy(0, 0, 0, 26), {
+      value: "0 running · 0 queued · no current failures",
+      historyNote: "26 retained failure records; older failures are history, not queued work",
+    });
+    assert.deepEqual(jobQueueCopy(1, 2, 1, 1), {
+      value: "1 running · 2 queued · 1 workflow last failed",
+      historyNote: "1 retained failure record; older failures are history, not queued work",
+    });
   });
 
   /**

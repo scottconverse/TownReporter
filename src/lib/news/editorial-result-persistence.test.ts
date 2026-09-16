@@ -11,6 +11,7 @@ import {
 } from "./editorial.server.ts";
 import { enqueueJob, ensureJobsSchema } from "./jobs.ts";
 import { persistEditorialSuccess } from "./editorial-result-persistence.ts";
+import { ensureStoryDocuments, readEditorialDocuments } from "./story-documents.server.ts";
 
 const TEST_EDITORIAL: Editorial = {
   headline: "Keep local history public",
@@ -34,6 +35,11 @@ async function ensureCompletionSchema() {
   await ensureEditorialRequestSchema();
   await ensureEditorialSchema();
   const sql = await getSql();
+  await sql.query(`
+    create table if not exists leads (
+      id serial primary key
+    )
+  `);
   await sql.query(`
     create table if not exists drafts (
       id serial primary key,
@@ -71,6 +77,7 @@ async function insertRequest(
 
 async function cleanCompletionFixture(sql: Sql, userId: string) {
   await sql`delete from desk_jobs where user_id = ${userId}`;
+  await sql`delete from story_documents where user_id = ${userId}`;
   await sql`delete from editorial_requests where user_id = ${userId}`;
   await sql`
     delete from editorial_extras
@@ -86,13 +93,25 @@ describe("Automatic Opinion provider persistence", () => {
     const userId = uniqueUser("opinion-document-failure");
     const request = await insertRequest(sql, { userId, modelChoice: "auto" });
     const job = await enqueueJob({ userId, newsroomId: 1, kind: "editorial", subjectId: request.id, modelChoice: "auto", kick: false });
+    await ensureStoryDocuments(sql);
+    await sql.query(
+      "insert into story_documents(id,newsroom_id,user_id,editorial_request_id,filename,mime,original) values($1,1,$2,$3,'retained.txt','text/plain',$4)",
+      [`opinion-doc-${Date.now()}`, userId, request.id, Buffer.from("Retained document evidence for the editorial.")],
+    );
     const choices: string[] = [];
     try {
       await assert.rejects(
         performEditorialWork(job, {
-          readEditorialDocuments: async (_room, _request, choice) => {
+          readEditorialDocuments,
+          documentProbe: async (choice) => ({
+            ok: true as const,
+            label: choice === "codex-frontier" ? "Codex Sol" : "Claude Sonnet",
+            choice: choice as "codex-frontier" | "claude-sonnet",
+          }),
+          documentChat: async (_system, _user, _tokens, options) => {
+            const choice = String(options?.choice);
             choices.push(choice);
-            throw new Error(`${choice} reading unavailable`);
+            return { ok: false as const, error: `${choice} reading unavailable` };
           },
           writeEditorial: async () => assert.fail("writing must not start without the retained document reading"),
         }),

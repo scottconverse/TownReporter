@@ -25,10 +25,14 @@ export const createPageWatch = createServerFn({ method: "POST" })
         reason: z.string().max(2000),
         investigationId: id.nullable().optional(),
         modelChoice: z.string().max(40).optional(),
+        modelEffort: z.string().max(20).nullable().optional(),
       })
       .parse(input),
   )
-  .handler(({ context, data }) => createPageWatchFor(context, data));
+  .handler(({ context, data }) => createPageWatchFor(context, {
+    ...data,
+    modelEffort: data.modelEffort as import("./provider-registry.ts").ModelEffort | null | undefined,
+  }));
 export const checkPageWatch = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => id.parse(input))
@@ -62,8 +66,8 @@ export const actOnPageWatch = createServerFn({ method: "POST" })
 
 export const setPageWatchModel = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: unknown) => z.object({ id, choice: z.string().max(40) }).parse(input))
-  .handler(({ context, data }) => setPageWatchModelFor(context, data.id, data.choice));
+  .validator((input: unknown) => z.object({ id, choice: z.string().max(40), effort: z.string().max(20).nullable().optional() }).parse(input))
+  .handler(({ context, data }) => setPageWatchModelFor(context, data.id, data.choice, data.effort as import("./provider-registry.ts").ModelEffort | null | undefined));
 export const readPageWatchCapture = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .validator((input: unknown) =>

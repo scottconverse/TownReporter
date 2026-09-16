@@ -3,7 +3,7 @@ import { getSql, type Sql } from "../db.ts";
 import { deskMiddleware, assertOwner } from "./desk-auth.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
-import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
+import { PICKER_PROVIDER_IDS, modelEffort, type ModelEffort } from "./provider-registry.ts";
 
 export type DailyScanRuntime = Exclude<StoryModelChoice, "auto">;
 type LegacyDailyScanRuntime = "local" | "claude-cli" | "codex-terra" | "codex-sol";
@@ -15,6 +15,7 @@ export type DailyScanPolicy = {
   localTime: string;
   timezone: string;
   runtime: DailyScanRuntime;
+  modelEffort: ModelEffort | null;
   sourceCap: number;
   selectedSourceIds: number[];
   revision: number;
@@ -30,12 +31,14 @@ export type DailyScanPolicy = {
     error: string | null;
     createdAt: string;
     finishedAt: string | null;
+    failoverNote: string | null;
   };
 };
 export type SaveDailyScanPolicyInput = {
   enabled: boolean;
   localTime: string;
   runtime: DailyScanRuntime;
+  modelEffort: ModelEffort | null;
   sourceCap: number;
   selectedSourceIds: number[];
   expectedRevision: number;
@@ -90,11 +93,16 @@ export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInp
     enabled: value.enabled === true,
     localTime: typeof value.localTime === "string" ? value.localTime.trim() : "",
     runtime: typeof value.runtime === "string" ? dailyScanRuntime(value.runtime) : "local-model",
+    modelEffort: null,
     sourceCap: typeof value.sourceCap === "number" ? value.sourceCap : Number.NaN,
     selectedSourceIds: sourceIds.filter((id): id is number => typeof id === "number"),
     expectedRevision:
       typeof value.expectedRevision === "number" ? value.expectedRevision : Number.NaN,
   };
+  input.modelEffort = modelEffort(input.runtime, value.modelEffort);
+  if (value.modelEffort !== undefined && value.modelEffort !== null && input.modelEffort !== value.modelEffort) {
+    input.invalidError = "Choose an effort supported by the scheduled model.";
+  }
   if (
     typeof value.enabled !== "boolean" ||
     typeof value.localTime !== "string" ||
@@ -122,6 +130,7 @@ export async function persistDailyScanPolicy(
     data.enabled,
     data.localTime,
     data.runtime,
+    data.modelEffort,
     data.sourceCap,
     JSON.stringify(selectedSourceIds),
     userId,
@@ -129,11 +138,11 @@ export async function persistDailyScanPolicy(
   const rows =
     data.expectedRevision === 0
       ? await sql.query(
-          "insert into daily_scan_policies(newsroom_id,enabled,paused,pause_reason,local_time,runtime,source_cap,selected_source_ids,revision,updated_at,configured_by_user_id) values($1,$2,false,null,$3,$4,$5,$6::jsonb,1,now(),$7) on conflict(newsroom_id) do nothing returning revision",
+          "insert into daily_scan_policies(newsroom_id,enabled,paused,pause_reason,local_time,runtime,model_effort,source_cap,selected_source_ids,revision,updated_at,configured_by_user_id) values($1,$2,false,null,$3,$4,$5,$6,$7::jsonb,1,now(),$8) on conflict(newsroom_id) do nothing returning revision",
           params,
         )
       : await sql.query(
-          "update daily_scan_policies set enabled=$2,local_time=$3,runtime=$4,source_cap=$5,selected_source_ids=$6::jsonb,configured_by_user_id=$7,paused=case when $2 then paused else false end,pause_reason=case when $2 then pause_reason else null end,revision=revision+1,updated_at=now() where newsroom_id=$1 and revision=$8 returning revision",
+          "update daily_scan_policies set enabled=$2,local_time=$3,runtime=$4,model_effort=$5,source_cap=$6,selected_source_ids=$7::jsonb,configured_by_user_id=$8,paused=case when $2 then paused else false end,pause_reason=case when $2 then pause_reason else null end,revision=revision+1,updated_at=now() where newsroom_id=$1 and revision=$9 returning revision",
           [...params, data.expectedRevision],
         );
   return Boolean(rows[0]);
@@ -207,6 +216,10 @@ export async function readDailyScanPolicy(
         error: r.job_error ?? r.error ?? null,
         createdAt: String(r.created_at),
         finishedAt: r.finished_at ? String(r.finished_at) : null,
+        failoverNote:
+          r.model_snapshot && typeof r.model_snapshot === "object" && typeof r.model_snapshot.switchNote === "string"
+            ? r.model_snapshot.switchNote
+            : null,
       }
     : null;
   const lastLocalDay = r ? String(r.local_day) : null;
@@ -217,6 +230,7 @@ export async function readDailyScanPolicy(
     localTime,
     timezone: paper.timezone,
     runtime: dailyScanRuntime(p?.runtime),
+    modelEffort: modelEffort(dailyScanRuntime(p?.runtime), p?.model_effort),
     sourceCap: p?.source_cap ?? CAP,
     selectedSourceIds: p?.selected_source_ids ?? [],
     revision: p?.revision ?? 0,
@@ -310,7 +324,7 @@ export const saveDailyScanPolicy = createServerFn({ method: "POST" })
       try {
         await (
           await import("./daily-scan.server.ts")
-        ).validateDailyRuntime(context.newsroomId, data.runtime);
+        ).validateDailyRuntime(context.newsroomId, data.runtime, data.modelEffort);
       } catch (e) {
         return {
           ok: false,
@@ -342,8 +356,8 @@ async function pause(
   }
   const sql = await getSql();
   if (!value) {
-    const [current] = await sql.query<{ runtime: StoredDailyScanRuntime }>(
-      "select runtime from daily_scan_policies where newsroom_id=$1 and revision=$2",
+    const [current] = await sql.query<{ runtime: StoredDailyScanRuntime; model_effort: ModelEffort | null }>(
+      "select runtime,model_effort from daily_scan_policies where newsroom_id=$1 and revision=$2",
       [context.newsroomId, revision],
     );
     if (!current)
@@ -355,7 +369,11 @@ async function pause(
     try {
       await (
         await import("./daily-scan.server.ts")
-      ).validateDailyRuntime(context.newsroomId, dailyScanRuntime(current.runtime));
+      ).validateDailyRuntime(
+        context.newsroomId,
+        dailyScanRuntime(current.runtime),
+        modelEffort(dailyScanRuntime(current.runtime), current.model_effort),
+      );
     } catch (e) {
       return {
         ok: false,

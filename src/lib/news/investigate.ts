@@ -7,7 +7,7 @@ import {
   providerBudget,
   type EffectiveProviderChoice,
 } from "./ai.ts";
-import type { ProviderOverrides } from "./provider-registry.ts";
+import type { ModelEffort, ProviderOverrides } from "./provider-registry.ts";
 import { isSelfReferential, labelAfterCitationCheck } from "./claim-hygiene.ts";
 import { readableCapture } from "./html-text.ts";
 import { darkPlannerFor } from "./dark-prompt.ts";
@@ -263,6 +263,7 @@ export type ResearchLoopOptions = {
   hops?: number;
   choice?: EffectiveProviderChoice;
   providerOverrides?: ProviderOverrides | null;
+  reasoningEffort?: ModelEffort | null;
   search?: SearchFn;
   searchAttempt?: SearchAttemptFn;
   fetch?: FetchFn;
@@ -906,6 +907,8 @@ export async function grokPlanner(
   runBudget?: DarkRunBudget,
   stage = "planning",
   onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>,
+  reasoningEffort?: ModelEffort | null,
+  chat: typeof grokChat = grokChat,
 ): Promise<HopPlan> {
   /*
     The provider's own per-call budget, not the 45-second default.
@@ -936,7 +939,7 @@ export async function grokPlanner(
     return { ...emptyPlan(), planner_error: `Run stopped: ${runBudget.stopReason ?? "budget-limit"}` };
   }
   if (call) await onUsage?.(runBudget!.snapshot());
-  const ai = await grokChat(darkPlannerFor(place), pack.slice(0, PLANNER_INPUT_CAP), 2200, {
+  const ai = await chat(darkPlannerFor(place), pack.slice(0, PLANNER_INPUT_CAP), 2200, {
     timeoutMs: Math.max(1, Math.min(callMs, runBudget?.remainingMs() ?? callMs)),
     model: plannerModel(choice),
     choice,
@@ -946,6 +949,7 @@ export async function grokPlanner(
     // for the app to run) — it must never be handed a live tool surface to
     // try and get denied on. See ai-claude-code.server.ts's noTools comment.
     noTools: true,
+    reasoningEffort,
   });
   if (call) {
     const meta = "meta" in ai ? ai.meta : undefined;
@@ -2194,6 +2198,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     opts.runBudget,
     "selecting documents",
     opts.onUsage,
+    opts.reasoningEffort,
   ) : undefined);
   const tried = new Set<string>();
   /** Every hop that had to fall back, so the run can say so. */
@@ -2329,6 +2334,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         opts.runBudget,
         `planning hop ${hop + 1}`,
         opts.onUsage,
+        opts.reasoningEffort,
       );
       const heur = heuristicPlan(graph, tried);
       plan = grok.searches.length || grok.fetch_urls.length ? grok : heur;
@@ -3085,7 +3091,7 @@ Planner could not start research: ${[...new Set(plannerFailures)].join("; ")}`
 
 async function defaultResearchActionChooser(
   context: string,
-  opts: Pick<ResearchLoopOptions, "choice" | "providerOverrides" | "newsroomId">,
+  opts: Pick<ResearchLoopOptions, "choice" | "providerOverrides" | "newsroomId" | "reasoningEffort">,
 ): Promise<ResearchAction> {
   const { callMs } = providerBudget(opts.choice, opts.providerOverrides);
   const ai = await grokChat(
@@ -3099,6 +3105,7 @@ async function defaultResearchActionChooser(
       newsroomId: opts.newsroomId,
       localModel: opts.providerOverrides?.["local-model"]?.localModel,
       noTools: true,
+      reasoningEffort: opts.reasoningEffort,
     },
   );
   if (!ai.ok) throw new Error("error" in ai ? ai.error : "responsive action model returned no response");
@@ -3118,6 +3125,7 @@ async function responsiveResearchLoop(
     choice: opts.choice,
     providerOverrides: opts.providerOverrides,
     newsroomId,
+    reasoningEffort: opts.reasoningEffort,
   }));
   const receipts: ResearchActionReceipt[] = [];
   const contextTerms = [investigationTitle];

@@ -111,7 +111,7 @@ async function theScreenRenders() {
   // The model picker beside Run scan is the same component Story/Dark Desk
   // use; proving it renders here is proving Scan is wired into the
   // "every AI call site gets the picker" rule, without starting a round.
-  const picker = page.locator(".scan-bar select");
+  const picker = page.getByLabel("Writing model");
   await picker.waitFor({ timeout: 30_000 });
   const optionCount = await picker.locator("option").count();
   if (optionCount < 2) {

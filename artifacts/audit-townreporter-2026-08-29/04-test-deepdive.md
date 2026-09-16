@@ -2,7 +2,7 @@
 
 **Audit date:** 2026-08-29
 **Role:** Test Engineer
-**Scope audited:** `npm test` (node:test — 12 files under `scripts/`, 46 under `src/`), the Playwright scripts under `scripts/` (`lifecycle-e2e.mjs`, `desk-flows-e2e.mjs`, `smoke-built-server.mjs`, `browser-smoke.mjs`, `site-walkthrough.mjs`, `search-index-proof.mjs`), and `.github/workflows/ci.yml`. Full scope.
+**Scope audited:** `npm test` (node:test — 12 files under `scripts/`, 46 under `src/`), the Playwright scripts under `scripts/` (`lifecycle-e2e.mjs`, `desk-flows-e2e.mjs`, `smoke-built-server.mjs`, `browser-smoke.mjs`, `search-index-proof.mjs`), and `.github/workflows/ci.yml`. Full scope.
 **Auditor posture:** Balanced
 
 ---
@@ -122,7 +122,7 @@ test("CI walks the 0.5.1 desk flows in a browser", () => {
 Everything shipped in 0.5.1 — Opinion, delete, Undo, the trash and its restore, the Server page, the Dark Desk dials — has, in practice, no automatic browser coverage. That absence is precisely what a prior audit filed as TE-04, and it is the stated reason a locator leak and an unreachable editorial reached the paper. The fix was written, it works, and it is wired into CI in a way that means either (a) the `lifecycle` job is permanently red and the team is merging past a failing required job, or (b) it has never been run since the second step was added. Both outcomes leave the release with the same blind spot it was supposed to have closed, while a green-looking guard test asserts otherwise. That combination — a coverage gap plus a test that reports it as closed — is worse than the original gap.
 
 **Blast radius**
-- Adjacent code: `scripts/lifecycle-e2e.mjs` and `scripts/desk-flows-e2e.mjs` both assume they are the first account. Any third browser walk added to this job inherits the same conflict. `scripts/site-walkthrough.mjs` and `scripts/browser-smoke.mjs` share the throwaway-account pattern and would collide identically if ever added to CI.
+- Adjacent code: `scripts/lifecycle-e2e.mjs` and `scripts/desk-flows-e2e.mjs` both assume they are the first account. Any third browser walk added to this job inherits the same conflict. The historical one-off browser walkthrough and `scripts/browser-smoke.mjs` share the throwaway-account pattern and would collide identically if ever added to CI.
 - Shared state: the dev server's PGLite database, which is per-process and persists for the life of the job. `newsroom_members` carries a unique partial index on `(newsroom_id) WHERE role = 'owner'` (verified: migration 0012, confirmed live on a migrated Postgres — a second owner insert raises `duplicate key value violates unique constraint "newsroom_members_one_owner"`), so "first account owns the desk" is a hard database-level fact, not a soft one that could be worked around in the app.
 - User-facing: no direct change. The change is that the 0.5.1 desk flows would actually be regression-tested on every PR.
 - Migration: none.
@@ -513,7 +513,6 @@ Scripts present in `scripts/`, referenced by npm scripts or by their own tests, 
 |---|---|
 | `check-auth-invariant.mjs` | `npm run check:auth` exists; has a 130-line unit test (`check-auth-invariant.test.mjs`) | **never runs in CI** |
 | `browser-smoke.mjs` | executable; its docstring says it runs the auth-invariant comparison "on every smoke" | **never runs in CI** |
-| `site-walkthrough.mjs` | 9.9 KB browser walk | **never runs in CI** |
 | `audit-038.mjs`, `sweep-claims.mjs`, `preview-thumbnail.mjs` | one-off / operator tools | not expected in CI |
 
 Confirmed by grep of `ci.yml`. What CI actually invokes: `npm ci`, `npm run typecheck`, `npm test`, `npm run build`, `npm run dev`, `npm start`, `node scripts/migrate.mjs`, `node scripts/lifecycle-e2e.mjs`, `node scripts/desk-flows-e2e.mjs` (see TEST-001), `node scripts/smoke-built-server.mjs`, `node scripts/search-index-proof.mjs`.
@@ -524,7 +523,7 @@ Confirmed by grep of `ci.yml`. What CI actually invokes: `npm ci`, `npm run type
 
 A guard that never runs is a guard that has been written, tested, documented, and then not deployed — the same shape as TEST-001, and the same shape as the meta-test that passes because a filename appears in a YAML file. The auth-invariant check specifically covers a divergence between the dev path and the built path, which is precisely the class of defect the `smoke-built` / `smoke-dev` job pair was created to catch. It is the third instrument for that failure mode and the only one not wired in.
 
-`site-walkthrough.mjs` overlaps `desk-flows-e2e.mjs`; if it is superseded, deleting it is better than leaving 9.9 KB of executable that reads like coverage.
+The historical one-off browser walk overlapped `desk-flows-e2e.mjs`; it was removed rather than left as executable that reads like coverage.
 
 **Blast radius**
 - Adjacent code: `.github/workflows/ci.yml`; `scripts/browser-smoke.mjs` (the intended host for the invariant check); `package.json`'s `check:auth` script.
@@ -543,7 +542,7 @@ Add `npm run check:auth` as a step in the existing `smoke-dev` job, after the de
           DEV_URL=http://127.0.0.1:8080 npm run check:auth
 ```
 
-(Confirm the environment variable name against `check-auth-invariant.mjs`'s `DEFAULT_DEV_URL` handling.) Then decide `site-walkthrough.mjs`'s fate: wire it in behind its own server like the TEST-001 fix, or delete it and say in the commit that `desk-flows-e2e.mjs` replaces it.
+(Confirm the environment variable name against `check-auth-invariant.mjs`'s `DEFAULT_DEV_URL` handling.) The historical one-off browser walk was removed; `desk-flows-e2e.mjs` remains the focused flow coverage.
 
 ---
 

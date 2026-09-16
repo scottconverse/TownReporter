@@ -20,7 +20,11 @@ test("custom connection save clears after persistence even when refresh fails", 
   assert.match(settings, /upsertCustomAiConnection\(current, saved\)/);
   assert.match(route, /invalidateQueries\(\{ queryKey: \["custom-ai-connections"\]\s*\}\)/);
   assert.match(route, /connections\.isError && !connections\.data/);
-  assert.match(settings, /Connection saved\. Your current model choice did not change/);
+  assert.match(
+    settings,
+    /It is ready to choose in the writing model picker/,
+    "a saved connection with a model should say it is ready without claiming the current picker changed",
+  );
   assert.match(route, /updateCustomAiConnectionEnabled\(current, id, enabled\)/);
   assert.match(route, /removeCustomAiConnection\(current, id\)/);
 });

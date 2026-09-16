@@ -100,7 +100,7 @@ describe("planDarkRoundFailover", () => {
     assert.deepEqual(stageMessages, ["Switched to Claude Sonnet: Codex Terra timed out"]);
   });
 
-  it("never fails over an editor's explicit model choice", async () => {
+  it("routes an editor's explicit model choice around a technical failure", async () => {
     let probed = false;
     let modelChoiceSet = false;
     let stageSet = false;
@@ -108,7 +108,7 @@ describe("planDarkRoundFailover", () => {
     const result = await planDarkRoundFailover(job({ model_choice_source: "editor" }), LIVE_401, {
       probe: async () => {
         probed = true;
-        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+        return { ok: true, label: "Claude Sonnet", choice: "claude-sonnet" };
       },
       setModelChoice: async () => {
         modelChoiceSet = true;
@@ -118,26 +118,34 @@ describe("planDarkRoundFailover", () => {
       },
     });
 
-    assert.equal(result, null);
-    assert.equal(probed, false, "an explicit editor choice must never even probe another provider");
-    assert.equal(modelChoiceSet, false);
-    assert.equal(stageSet, false);
+    assert.deepEqual(result, {
+      next: "claude-sonnet",
+      label: "Claude Sonnet",
+      switchedBecause: "Codex Terra sign-in lapsed",
+    });
+    assert.equal(probed, true);
+    assert.equal(modelChoiceSet, true);
+    assert.equal(stageSet, true);
   });
 
-  it("keeps a configured Automatic gateway exclusive", async () => {
+  it("routes a configured gateway around a technical failure", async () => {
     let probed = false;
+    let saved = "";
     const result = await planDarkRoundFailover(
       job({ model_choice: "configured" }),
       LIVE_TIMEOUT_NO_OUTPUT,
       {
         probe: async () => {
           probed = true;
-          return { ok: true, label: "Claude Sonnet", choice: "claude-sonnet" };
+          return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
         },
+        setModelChoice: async (_id, choice) => { saved = choice; },
+        setStage: async () => undefined,
       },
     );
-    assert.equal(result, null);
-    assert.equal(probed, false);
+    assert.equal(result?.next, "codex-balanced");
+    assert.equal(probed, true);
+    assert.equal(saved, "codex-balanced");
   });
 
   it("returns null when Automatic's next rung is not ready either, without writing anything", async () => {

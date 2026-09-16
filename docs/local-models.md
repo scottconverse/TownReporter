@@ -161,9 +161,9 @@ Story routing and a separate Opinion frontier path:
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | Scan and Dark Desk | the configured provider (`LLM_*`, Anthropic, Claude Code, or Grok), or an explicit picker choice including Local model            |
 | Story — Automatic  | configured `LLM_*` gateway when present; otherwise first ready Codex Terra → Claude Sonnet rung                                    |
-| Story — explicit   | Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or Local model; no fallback |
-| Dark — Automatic  | configured gateway when present; otherwise Codex Terra → Claude Sonnet for a synthesis-stage retry only |
-| Opinion            | Automatic uses Codex Sol → Claude Sonnet; any named Codex or Claude model, Local model or custom choice stays selected |
+| Story — named      | Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; Local model; Grok; or a saved custom connection is tried first; recognized technical failures move only the unfinished call |
+| Dark — Automatic   | configured gateway when present; otherwise Codex Terra → Claude Sonnet; technical retry is per failed call and does not replay searches or completed reads |
+| Opinion            | Automatic uses Codex Sol → Claude Sonnet; a named choice is tried first and the same technical-only per-call retry applies |
 
 Pointing `LLM_BASE_URL` at LM Studio therefore makes that gateway the configured
 provider for Scan and Dark Desk and the forced provider for **Story Automatic**.
@@ -285,8 +285,10 @@ Two things it deliberately does NOT get for free:
 
 **Opinion offers it too.** Opinion shares the provider registry with the other
 desks: Automatic retains its documented Codex-to-Claude path, while every named
-Codex and Claude model, Local model and custom choice stays selected. A provider
-can still refuse or return an invalid editorial, which leaves the request failed.
+Codex and Claude model, Local model and custom choice is the requested first
+runtime. A recognized technical failure can move only the unfinished call and
+records requested and actual model and effort. A provider refusal or invalid
+editorial remains terminal and leaves the request failed.
 
 **On time budgets.** `KIND_BUDGETS.local` allows ten minutes for one call
 against the CLIs' two and a half, because that is the measured shape of a 30B
@@ -388,12 +390,13 @@ is no per-page provider logic to keep in sync.
 
 A council packet with no text layer — a fax-quality scan of a paper agenda —
 cannot be read by extracting text that was never stored in the file. This
-desk extracts supported embedded JPEG/PNG images and asks the selected
-vision-capable provider to transcribe them (`src/lib/news/ocr.ts`). The Anthropic API, Codex CLI and
-Claude Code CLI provide vision paths when their prerequisites are met. Grok
-(SuperGrok) is a text-only connection for this path and fails clearly when
-selected for OCR. Automatic OCR checks Anthropic API, Codex, Claude Code and
-then a discovered local vision model in that order. This
+desk renders the PDF pages in numeric order and asks a vision-capable provider
+to transcribe pages without usable text (`src/lib/news/ocr.ts`). Codex and
+Claude provide vision paths when their prerequisites are met. Grok (SuperGrok)
+is text-only for this path. OCR starts with the model selected for the run and,
+after a recognized technical failure, can try the next ready vision-capable
+cloud runtime. Claude is last in the unattended order and uses Sonnet or Haiku,
+never an automatic Opus default. This
 does not guarantee that a particular scan will be readable. A **local** model can only do it if it
 was built to accept images at all — an ordinary text-only local model
 cannot, no matter how good it is at writing.
@@ -408,14 +411,29 @@ without opening the picker.
 Pick "Local model" for a scan without a vision-marked model selected, and the
 desk says so honestly rather than guessing at the page's contents: *"the
 chosen local model cannot read images — pick a vision model (marked ·
-vision in the picker)."* A PDF whose scanner used CCITT/JBIG2 fax
-compression (no supported embedded JPEG or PNG image) cannot be read by any provider yet; the desk says
-that plainly too, rather than returning empty text with no explanation.
+vision in the picker)."* The current retained-PDF reader renders actual PDF
+pages, including scan encodings that are not exposed as embedded JPEG or PNG
+streams. A page that still cannot be rendered or transcribed is reported as
+unread rather than returned as empty text.
 
-OCR attempts at most 12 extracted images, at most 2 MiB each. The extractor
-does not establish PDF page order or an image-to-page mapping. New OCR
-references therefore use image indices (`image:N`) with no PDF page number;
-they are not evidence that the first 12 pages were read. The reader names
-the provider and image coverage. Historical stored OCR page labels are not
-automatically corrected: re-ingest or operator review is needed before
-relying on them as page citations. Native text PDF page references are unchanged.
+One OCR provider call contains at most 12 rendered pages, at most 2 MiB each.
+That is a per-call safety boundary, not a packet limit. In Dark Desk, **Read
+entire PDF** checkpoints each batch and resumes only missing pages after an
+interruption or whole-click budget pause. Current rendered-page references use
+numeric PDF page labels. Legacy records created by the older embedded-image
+extractor can remain unordered and use image indices (`image:N`); historical
+labels are not automatically rewritten, so re-ingest or operator review is
+needed before relying on them as page citations. Native text PDF references are
+unchanged.
+
+## 0.6.51 scope
+
+0.6.51 keeps 12 pages as the generic capture/Dark Desk OCR
+boundary for one provider call, then adds **Read entire PDF** to checkpoint and
+resume consecutive batches until every page is saved or explicitly unread.
+Page-only vision is used when usable text is absent. Direct Story and Opinion
+document intake independently retains and sections all readable PDF pages
+subject to a 20-million-character document-text limit. An upload alone is not
+evidence that OCR succeeded; the saved/total and unread-page result is.
+
+No local model was loaded or invoked to document this release. See [the release guide](releases/0.6.51.md) for model-selection and evidence boundaries.

@@ -85,6 +85,7 @@ const { ModelPicker } = await import(
     "model-picker.tsx",
     {
       "@/lib/news/model-choice": choices,
+      "@/lib/news/provider-registry": registryUrl,
       "@/lib/news/provider-availability": availabilityStubUrl,
       "@/lib/news/provider-availability-key": availabilityStubUrl,
       "@/lib/news/provider-settings": availabilityStubUrl,
@@ -182,10 +183,12 @@ test("Opinion setup help explains its voice prerequisite without advertising Sto
   assert.doesNotMatch(html, /Local Qwen|Zen MiMo/);
 });
 
-test("disabled picker retains accessible setup help, associated label, and no-fallback explanation", () => {
+test("disabled picker retains accessible setup help, associated label, and technical-fallback explanation", () => {
   const html = render({ value: "codex-frontier", disabled: true });
   assert.match(html, /<select[^>]* disabled=""/);
-  assert.match(html, /Uses only Codex Sol for this run; no fallback/);
+  assert.match(html, /Prefers Codex Sol for this run/);
+  assert.match(html, /technical failure.*unfinished call.*next ready writing model/);
+  assert.match(html, /content refusal stops the run/);
   assert.match(html, /<summary[^>]*>Set up a writing model<\/summary>/);
   const selectId = html.match(/<select[^>]*id="([^"]+)"/)?.[1];
   assert.ok(selectId, "select must have an ID for its explicit label");
@@ -233,7 +236,8 @@ test("saved API connections supplement rather than replace all built-in picker c
     const html = render({ scope, value: "custom:abc" });
     assert.match(html, /value="custom:abc" selected=""/);
     assert.match(html, /Newsroom LiteLLM — my-model/);
-    assert.match(html, /Uses only Newsroom LiteLLM \(my-model\) for this run; no fallback/);
+    assert.match(html, /Prefers Newsroom LiteLLM \(my-model\) for this run/);
+    assert.match(html, /technical failure can move the unfinished call/);
     assert.match(html, /value="auto"/);
     assert.match(html, /value="local-model"/);
     assert.match(html, /value="claude-frontier"/);
@@ -247,7 +251,8 @@ test("disabled and deleted custom picks remain visible without selecting Automat
     const html = render({ value: "custom:abc" });
     assert.match(html, /value="custom:abc"[^>]*selected=""/);
     assert.doesNotMatch(html, /value="auto"[^>]*selected=""/);
-    assert.match(html, /No automatic fallback/);
+    assert.match(html, /custom connection is unavailable or has no model/i);
+    assert.match(html, /choose another model/i);
   }
   availabilityStub.__setConnections([]);
 });

@@ -53,6 +53,18 @@ export type ProviderKind =
 /** The four places this desk asks a model for something. */
 export type ProviderSurface = "story" | "scan" | "opinion" | "dark" | "forced";
 
+/** Per-request reasoning depth. Entries declare this only when their actual
+ * transport accepts a run-scoped setting. */
+export type ModelEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max";
+export const MODEL_EFFORT_LABELS: Readonly<Record<ModelEffort, string>> = {
+  none: "None — fastest",
+  low: "Low — faster",
+  medium: "Medium — balanced",
+  high: "High — deeper",
+  xhigh: "Extra high — longest",
+  max: "Maximum — hardest work",
+};
+
 export type ProviderBudget = {
   /** Wall clock for a whole multi-call pipeline, e.g. one draft. */
   wallMs: number;
@@ -135,6 +147,9 @@ export type ProviderEntry = {
    * unattended work. The configured gateway is checked before that ladder.
    */
   ladderRank?: number;
+  /** Values verified for this exact named model and transport. */
+  efforts?: readonly ModelEffort[];
+  defaultEffort?: ModelEffort;
 };
 
 function env(key: string): string | undefined {
@@ -472,6 +487,126 @@ const BY_ID = new Map(PROVIDER_REGISTRY.map((entry) => [entry.id, entry]));
 
 export function providerEntry(id: string | undefined | null): ProviderEntry | null {
   return (id && BY_ID.get(id as ProviderId)) || null;
+}
+
+const ASTRA_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
+const CODEX_56_EFFORTS: readonly ModelEffort[] = ["none", "low", "medium", "high", "xhigh", "max"];
+export const CLAUDE_CLI_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
+const AUTOMATIC_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
+const GROK_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high"];
+const DEEPSEEK_V4_1_FLASH_EFFORTS: readonly ModelEffort[] = ["none", "low", "high", "max"];
+
+/**
+ * Run-scoped effort is a model capability, not an OpenAI-compatible protocol
+ * capability. Unknown/custom models therefore get provider default rather
+ * than a made-up portable list. The DeepSeek cloud model is the first local
+ * catalog model with an exact declared mapping: DSH exposes off/low/high/max;
+ * TownReporter persists `none` for the shared effort type and the Ollama
+ * OpenAI-compatible transport maps it to the explicit `reasoning_effort:
+ * "none"` disable value. Omitting the field means provider default and can
+ * turn thinking back on.
+ */
+export function openAiCompatibleModelEfforts(
+  model: string | undefined | null,
+): readonly ModelEffort[] {
+  const id = model?.trim() ?? "";
+  if (/^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)) {
+    return DEEPSEEK_V4_1_FLASH_EFFORTS;
+  }
+  // Gemini's OpenAI-compatible endpoint does not declare the same effort
+  // vocabulary for the saved 2.5 preset. Use its provider default safely.
+  if (/^(?:models\/)?gemini-/i.test(id)) return [];
+  return [];
+}
+
+export function modelEffortLabel(
+  effort: ModelEffort,
+  model?: string | null,
+): string {
+  if (
+    effort === "none" &&
+    /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(model?.trim() ?? "")
+  ) {
+    return "Off — no extra thinking";
+  }
+  return MODEL_EFFORT_LABELS[effort];
+}
+
+/** Effort values accepted by TownReporter's transport for this choice.
+ * Automatic uses the Codex/Claude intersection and revalidates after pinning.
+ * OpenAI-compatible choices need their exact resolved model id; unknown
+ * models return no levels and use provider default. */
+export function modelEffortsFor(
+  id: string | undefined | null,
+  exactModel?: string | null,
+): readonly ModelEffort[] {
+  if (id === "auto") return AUTOMATIC_EFFORTS;
+  if (typeof id === "string" && /^custom:[0-9a-f-]+$/i.test(id)) {
+    return openAiCompatibleModelEfforts(exactModel);
+  }
+  const entry = providerEntry(id);
+  if (!entry) return [];
+  if (entry.efforts) return entry.efforts;
+  if (entry.kind === "codex") return modelEffortsForModel(providerModel(entry));
+  if (entry.kind === "claude-code") return CLAUDE_CLI_EFFORTS;
+  if (entry.kind === "xai-oauth") return GROK_EFFORTS;
+  if (entry.kind === "local" || entry.kind === "openai") {
+    return openAiCompatibleModelEfforts(exactModel);
+  }
+  return [];
+}
+
+export function modelEffortsForModel(model: string | undefined | null): readonly ModelEffort[] {
+  if (!model) return [];
+  if (/^gpt-6-astra$/i.test(model)) return ASTRA_EFFORTS;
+  if (/^gpt-5\.6-(?:sol|terra|luna)$/i.test(model)) return CODEX_56_EFFORTS;
+  return [];
+}
+
+export function defaultModelEffort(
+  id: string | undefined | null,
+  exactModel?: string | null,
+): ModelEffort | null {
+  const entry = providerEntry(id);
+  const choices = modelEffortsFor(id, exactModel);
+  if (!choices.length) return null;
+  // DeepSeek V4.1 Flash defaults to an explicit Off. Its Ollama transport
+  // distinguishes that from an omitted effort, which means provider default.
+  if (
+    choices.includes("none") &&
+    /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(exactModel?.trim() ?? "")
+  ) {
+    return "none";
+  }
+  if (id !== "auto" && (!entry || (entry.kind !== "codex" && entry.kind !== "claude-code"))) {
+    return null;
+  }
+  return entry?.defaultEffort && choices.includes(entry.defaultEffort)
+    ? entry.defaultEffort
+    : "medium";
+}
+
+export function modelEffort(
+  id: string | undefined | null,
+  value: unknown,
+  exactModel?: string | null,
+): ModelEffort | null {
+  // Forms validate before the server resolves a newsroom's saved local/custom
+  // model. Preserve a syntactically valid explicit value at that boundary;
+  // `validateForcedRuntime` and the transport revalidate it against the exact
+  // resolved model before sending anything.
+  if (
+    exactModel === undefined &&
+    (id === "local-model" || (typeof id === "string" && /^custom:[0-9a-f-]+$/i.test(id)))
+  ) {
+    return typeof value === "string" && value in MODEL_EFFORT_LABELS
+      ? (value as ModelEffort)
+      : null;
+  }
+  const choices = modelEffortsFor(id, exactModel);
+  return typeof value === "string" && choices.includes(value as ModelEffort)
+    ? (value as ModelEffort)
+    : defaultModelEffort(id, exactModel);
 }
 
 /** Every entry a given picker should offer, registry order, Automatic aside. */

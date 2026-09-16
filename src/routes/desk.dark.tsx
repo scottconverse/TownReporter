@@ -70,6 +70,11 @@ import {
   shouldHydrateDarkModel,
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
+import {
+  defaultModelEffort,
+  modelEffort as validatedModelEffort,
+  type ModelEffort,
+} from "@/lib/news/provider-registry";
 
 export const Route = createFileRoute("/desk/dark")({
   component: DarkPage,
@@ -174,6 +179,7 @@ function DarkPage() {
     started on Codex stays on Codex rather than quietly changing author.
   */
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
+  const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
   const pickedFor = useRef<number | null>(null);
   const observedActiveDarkJob = useRef<{ investigationId: number; jobId: number } | null>(null);
   const [briefWaiting, setBriefWaiting] = useState(false);
@@ -223,7 +229,9 @@ function DarkPage() {
       detail.data.investigation.status,
     )) return;
     pickedFor.current = openId;
-    setModelChoice(darkModelChoice(last));
+    const remembered = darkModelChoice(last);
+    setModelChoice(remembered);
+    setModelEffort(validatedModelEffort(remembered, detail.data.run?.model_effort));
   }, [openId, detail.data]);
 
   /** A queued brief has landed (or failed); say so once and stop polling. */
@@ -268,7 +276,7 @@ function DarkPage() {
   }, [openId, detailInvestigationId, currentDarkJob, qc]);
 
   const advance = useMutation({
-    mutationFn: (id: number) => continueInvestigation({ data: { id, modelChoice } }),
+    mutationFn: (id: number) => continueInvestigation({ data: { id, modelChoice, modelEffort } }),
     onSuccess: (res) => {
       if (!res || res.ok !== true) {
         const raw = res && "error" in res ? String(res.error ?? "") : "Research failed";
@@ -553,7 +561,7 @@ function DarkPage() {
   }, [reddit.isPending, redditLabel]);
 
   const writeBrief = useMutation({
-    mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice } }),
+    mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice, modelEffort } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         showWorkNotice(res?.error ? `No brief: ${res.error}` : "No brief written.");
@@ -660,7 +668,12 @@ function DarkPage() {
           <ModelPicker
             scope="dark"
             value={modelChoice}
-            onChange={setModelChoice}
+            onChange={(choice) => {
+              setModelChoice(choice);
+              setModelEffort(defaultModelEffort(choice));
+            }}
+            effort={modelEffort}
+            onEffortChange={setModelEffort}
             disabled={busyStart || digging}
             compact
           />
@@ -719,7 +732,12 @@ function DarkPage() {
           onWriteBrief={() => writeBrief.mutate(openId)}
           briefPending={writeBrief.isPending || briefWaiting}
           modelChoice={modelChoice}
-          onModelChoice={setModelChoice}
+          onModelChoice={(choice) => {
+            setModelChoice(choice);
+            setModelEffort(defaultModelEffort(choice));
+          }}
+          modelEffort={modelEffort}
+          onModelEffort={setModelEffort}
         />
       ) : null}
 
@@ -1224,6 +1242,8 @@ function InvestigationWorkspace({
   briefPending,
   modelChoice,
   onModelChoice,
+  modelEffort,
+  onModelEffort,
 }: {
   openId: number;
   detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
@@ -1250,6 +1270,8 @@ function InvestigationWorkspace({
   briefPending: boolean;
   modelChoice: StoryModelChoice;
   onModelChoice: (value: StoryModelChoice) => void;
+  modelEffort: ModelEffort | null;
+  onModelEffort: (value: ModelEffort | null) => void;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   const [frN, setFrN] = useState(6);
@@ -1384,13 +1406,14 @@ function InvestigationWorkspace({
           {/*
             The picker sits next to the button that spends, not in a settings
             page: the editor decides which model digs at the moment they press
-            Keep digging, the same way they do on a Story draft. An explicit
-            choice never falls back to another provider.
+            Keep digging, the same way they do on a Story draft.
           */}
           <ModelPicker
             scope="dark"
             value={modelChoice}
             onChange={onModelChoice}
+            effort={modelEffort}
+            onEffortChange={onModelEffort}
             disabled={keepDisabled}
             compact
           />
@@ -1669,7 +1692,7 @@ function ocrStatusLine(method: string | null | undefined): string | null {
   const refusal = captureRefusalLabel(method);
   if (refusal) return refusal;
   const raw = (method ?? "").trim();
-  if (!/^(ocr|needs-ocr):/.test(raw)) return null;
+  if (!/^(?:ocr(?:-pages(?:-partial)?)?|needs-ocr):/.test(raw)) return null;
   return describeExtractionMethod(raw);
 }
 
@@ -1691,6 +1714,7 @@ function OpenedRecords({
   }[];
   modelChoice: StoryModelChoice;
 }) {
+  const qc = useQueryClient();
   const { formatShortDate } = usePaperDateFormatters();
   const ordered = artifacts.slice().reverse();
   function previewOf(a: (typeof ordered)[number]) {
@@ -1739,13 +1763,14 @@ function OpenedRecords({
     },
   });
   const requestPageRead = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (mode: "range" | "complete") => {
       const queued = await queueArtifactOcr({
         data: {
           artifactId: selected!.id,
           start: Number(pageStart),
           end: Number(pageEnd),
           modelChoice,
+          mode,
         },
       });
       if (!queued.ok) throw new Error(queued.error);
@@ -1753,6 +1778,11 @@ function OpenedRecords({
     },
     onSuccess: () => void pageRead.refetch(),
   });
+  useEffect(() => {
+    if (pageRead.data?.status !== "completed") return;
+    void qc.invalidateQueries({ queryKey: ["artifact", selected?.id ?? 0] });
+    void qc.invalidateQueries({ queryKey: ["investigation"] });
+  }, [pageRead.data?.status, qc, selected?.id]);
 
   if (!ordered.length) return null;
 
@@ -1862,7 +1892,7 @@ function OpenedRecords({
             className="read-acts"
             onSubmit={(event) => {
               event.preventDefault();
-              requestPageRead.mutate();
+              requestPageRead.mutate("range");
             }}
           >
             <label>
@@ -1889,7 +1919,15 @@ function OpenedRecords({
             <button type="submit" className="inline-link" disabled={mustChooseReader || requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}>
               {pageRead.data?.status === "queued" || pageRead.data?.status === "running" ? "Reading retained PDF…" : "Read selected pages"}
             </button>
-            <span className="np-meta">{mustChooseReader ? "Choose a named model in the Dark Desk picker before sending retained PDF pages." : `Uses ${modelChoiceLabel(modelChoice)} · up to 12 pages · original retained PDF only`}</span>
+            <button
+              type="button"
+              className="inline-link"
+              disabled={mustChooseReader || requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}
+              onClick={() => requestPageRead.mutate("complete")}
+            >
+              Read entire PDF
+            </button>
+            <span className="np-meta">{mustChooseReader ? "Choose a named model in the Dark Desk picker before sending retained PDF pages." : `Uses ${modelChoiceLabel(modelChoice)} · the entire packet is saved in batches of up to 12 pages · original retained PDF only`}</span>
           </form> : null}
           {requestPageRead.error ? <p className="note err">{requestPageRead.error.message}</p> : null}
           {pageRead.data?.error ? <p className="note err">{pageRead.data.error}</p> : null}
@@ -1898,14 +1936,20 @@ function OpenedRecords({
           ) : null}
           {(() => {
             const result = pageRead.data?.result as
-              | { start?: number; end?: number; provider?: string; reason?: string | null; pages?: { page: number; text: string }[] }
+              | { mode?: "range" | "complete"; start?: number; end?: number; provider?: string; reason?: string | null; pages?: { page: number; text: string }[]; pagesRead?: number; pagesTotal?: number; batchesCompleted?: number; batchesTotal?: number; unreadPages?: number[]; modelCalls?: number; budgetPaused?: boolean }
               | undefined;
-            if (!result?.pages?.length && !result?.reason) return null;
+            if (!result?.pages?.length && !result?.reason && result?.pagesTotal == null) return null;
             return (
               <section className="read-full">
-                <p className="meta">Requested PDF pages {result.start}-{result.end} · {result.provider ?? modelChoiceLabel(modelChoice)}</p>
+                <p className="meta">
+                  {result.mode === "complete"
+                    ? `Entire PDF · ${result.pagesRead ?? 0} of ${result.pagesTotal ?? "?"} pages saved${result.batchesTotal ? ` · batch ${result.batchesCompleted ?? 0} of ${result.batchesTotal}` : ""}${result.modelCalls != null ? ` · ${result.modelCalls} model calls` : ""}${result.budgetPaused ? " · paused at run budget" : ""}`
+                    : `Requested PDF pages ${result.start}-${result.end}`}
+                  {` · ${result.provider ?? modelChoiceLabel(modelChoice)}`}
+                </p>
                 {result.pages?.map((page) => <p key={page.page}><strong>Page {page.page}</strong><br />{page.text}</p>)}
                 {result.reason ? <p className="meta">{result.reason}</p> : null}
+                {result.unreadPages?.length ? <p className="note err">Still unread: {result.unreadPages.slice(0, 16).join(", ")}{result.unreadPages.length > 16 ? `, and ${result.unreadPages.length - 16} more` : ""}. Run Read entire PDF again to retry only these pages.</p> : null}
               </section>
             );
           })()}

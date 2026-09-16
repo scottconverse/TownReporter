@@ -11,9 +11,15 @@ import {
   type EffectiveProviderChoice,
 } from "./ai.ts";
 import { DARK_AUTOMATIC_LADDER, effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
-import { planAutomaticFailover, failoverReasonPhrase } from "./automatic-failover.ts";
+import { planAutomaticFailover, failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
+import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
-import type { ProviderOverrides } from "./provider-registry.ts";
+import {
+  modelEffort as validatedModelEffort,
+  type ModelEffort,
+  type ProviderOverrides,
+} from "./provider-registry.ts";
+import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { darkSystemFor } from "./dark-prompt.ts";
 import {
   GATE_KEYS,
@@ -38,7 +44,13 @@ import {
 } from "./investigate.ts";
 import { readableCapture } from "./html-text.ts";
 import { chunksFromEvidence } from "./ingest.ts";
-import { productionOcr } from "./ocr.ts";
+import { OCR_TOTAL_BUDGET_MS, pdfPageCount, productionOcr } from "./ocr.ts";
+import {
+  pageListSummary,
+  planMissingOcrBatches,
+  unreadOcrPages,
+  type OcrPageBatch,
+} from "./ocr-batches.ts";
 import { storableText } from "./storable-text.ts";
 import { queryTokens } from "./retrieve.ts";
 import { sanitizePublicUrls } from "./schema.ts";
@@ -73,6 +85,8 @@ import {
   latestJob,
   runLooksStalled,
   setJobModelChoice,
+  setJobModelRuntime,
+  setJobFailoverNote,
   setJobStage,
   type DeskJob,
 } from "./jobs.ts";
@@ -360,7 +374,31 @@ const snapshotDarkSettingsFor = createServerOnlyFn(async (newsroomId: number, ru
  * the queue to mark completed while lying about what happened.
  */
 async function probeDarkProvider(choice?: string, newsroomId?: number) {
-  if (choice !== "auto") return probeProvider(choice, newsroomId);
+  if (choice !== "auto") {
+    const first = await probeProvider(choice, newsroomId);
+    if (first.ok) return first;
+    const plan = await planAutomaticFailover({
+      source: "editor",
+      current: choice ?? "auto",
+      error: first.error,
+      probe: (candidate) => probeProvider(candidate, newsroomId),
+      ladder: DARK_AUTOMATIC_LADDER,
+    });
+    if (!plan) return first;
+    const resolved = await probeProvider(plan.next, newsroomId);
+    if (!resolved.ok) return first;
+    const previousLabel = modelChoiceLabel(choice ?? "auto");
+    return {
+      ...resolved,
+      switchReceipt: {
+        requested: choice,
+        resolved: plan.next,
+        reason: failoverReasonPhrase(previousLabel, plan.reason),
+        note: failoverNoteSentence(plan.label, previousLabel, plan.reason),
+        stage: `Switched to ${plan.label}: ${failoverReasonPhrase(previousLabel, plan.reason)}`,
+      },
+    };
+  }
   const failures: string[] = [];
   for (const rung of ["configured", ...DARK_AUTOMATIC_LADDER]) {
     const result = await probeProvider(rung, newsroomId);
@@ -433,6 +471,7 @@ export type DarkRunRow = {
   error: string | null;
   /** Null on every round dug before 0.6.2 gave Dark Desk a picker. */
   model_choice: string | null;
+  model_effort: ModelEffort | null;
   investigation_id: number | null;
   stopReason: string | null;
   usage: import("./dark-run-budget.ts").DarkRunUsageSnapshot;
@@ -700,6 +739,7 @@ export const DARK_SCHEMA_STATEMENTS: readonly string[] = [
     that dug on a different model are different facts about the same file.
   */
   `alter table dark_runs add column if not exists model_choice text`,
+  `alter table dark_runs add column if not exists model_effort text`,
   // Mirrors migrations/0012_newsroom_appliance.sql. A rebuild-under-live-
   // process (ensureDarkSchema's whole reason to exist) must recreate a
   // dark_runs/dark_signals/dark_promises the rest of this file can actually
@@ -800,7 +840,7 @@ export const listDarkRuns = createServerFn({ method: "GET" })
     await ensureDarkSchema();
     const sql = await getSql();
     const rows = await sql<StoredDarkRunRow>`
-      select id, started_at, finished_at, summary, error, model_choice, investigation_id,
+      select id, started_at, finished_at, summary, error, model_choice, model_effort, investigation_id,
              stop_reason, usage_totals_json, usage_ledger_json
       from dark_runs
       where newsroom_id = ${owned(context)}
@@ -1164,7 +1204,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
     const job = await latestJob({ newsroomId: owned(context), kind: "dark", subjectId: id });
     const stalled = runLooksStalled({ runOpen: inv[0].status === "investigating", job });
     const runRows = await sql<StoredDarkRunRow>`
-      select id, started_at, finished_at, summary, error, model_choice, investigation_id,
+      select id, started_at, finished_at, summary, error, model_choice, model_effort, investigation_id,
              stop_reason, usage_totals_json, usage_ledger_json
       from dark_runs
       where newsroom_id = ${owned(context)} and investigation_id = ${id}
@@ -1233,32 +1273,51 @@ export const getArtifact = createServerFn({ method: "GET" })
     return rows[0] ?? null;
   });
 
-type ArtifactOcrRequest = { artifactId: number; start: number; end: number; modelChoice: string };
+type ArtifactOcrRequest = {
+  artifactId: number;
+  start: number;
+  end: number;
+  modelChoice: string;
+  mode: "range" | "complete";
+};
 type ArtifactOcrReceipt = {
+  request?: ArtifactOcrRequest;
   artifactId?: number;
+  mode?: "range" | "complete";
   start?: number;
   end?: number;
   pages?: { page: number | null; text: string }[];
   pagesRead?: number;
   pagesTotal?: number;
+  batchesCompleted?: number;
+  batchesTotal?: number;
+  unreadPages?: number[];
+  modelCalls?: number;
+  budgetPaused?: boolean;
   provider?: string;
   reason?: string | null;
 };
 
-function artifactOcrRequest(raw: ArtifactOcrRequest): ArtifactOcrRequest {
-  const artifactId = Number(raw?.artifactId);
-  const start = Number(raw?.start);
-  const end = Number(raw?.end);
+/** One click may spend at most this many page-transcription attempts, including fallbacks. */
+export const ARTIFACT_OCR_MAX_MODEL_CALLS = 48;
+
+function artifactOcrRequest(raw: ArtifactOcrRequest | ArtifactOcrReceipt): ArtifactOcrRequest {
+  const input: Partial<ArtifactOcrRequest> =
+    "request" in raw && raw.request ? raw.request : (raw as ArtifactOcrRequest);
+  const artifactId = Number(input?.artifactId);
+  const mode = input?.mode === "complete" ? "complete" : "range";
+  const start = mode === "complete" ? 1 : Number(input?.start);
+  const end = mode === "complete" ? 1 : Number(input?.end);
   if (!Number.isInteger(artifactId) || artifactId < 1) throw new Error("Choose a captured PDF.");
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || end - start >= 12) {
     throw new Error("Choose one to twelve PDF pages.");
   }
-  const modelChoice = storyModelChoice(raw?.modelChoice);
+  const modelChoice = storyModelChoice(input?.modelChoice);
   if (modelChoice === "auto") throw new Error("Choose the named model that will read these retained PDF pages.");
-  return { artifactId, start, end, modelChoice };
+  return { artifactId, start, end, modelChoice, mode };
 }
 
-/** Queue a bounded OCR reread from retained bytes; never refetches a live URL. */
+/** Queue a bounded range or a checkpointed complete read; never refetches a live URL. */
 export const queueArtifactOcr = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(artifactOcrRequest)
@@ -1419,6 +1478,7 @@ async function synthesizeSignals(
   preferences?: ResearchSnapshot,
   runBudget?: DarkRunBudget,
   onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>,
+  reasoningEffort?: ModelEffort | null,
 ) {
   const sql = await getSql();
   const researchWindow = preferences ? `${describeResearchWindow(preferences)}\n\n` : "";
@@ -1464,6 +1524,7 @@ async function synthesizeSignals(
       // Dark Desk F1: synthesis reads the pack already assembled above and
       // returns JSON only — it never fetches or searches itself.
       noTools: true,
+      reasoningEffort,
     });
   } catch (err) {
     call?.finish({
@@ -1631,9 +1692,45 @@ async function runVerificationStage(
   runBudget?: DarkRunBudget,
   onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>,
   onStage?: (stage: string) => Promise<unknown>,
+  reasoningEffort?: ModelEffort | null,
+  job?: DeskJob,
 ): Promise<string> {
-  try {
-    const { place, official, press } = await readDarkPlace(newsroomId);
+  const { place, official, press } = await readDarkPlace(newsroomId);
+  let active = {
+    modelChoice: choice ?? "codex-balanced" as EffectiveProviderChoice,
+    modelEffort: effortForChoice(choice ?? "codex-balanced", reasoningEffort ?? null),
+  };
+  const verifyModel = async (system: string, pack: string) => {
+    const attempted = await runPinnedCallWithFailover({
+      snapshot: active,
+      source: job?.model_choice_source ?? "editor",
+      ladder: DARK_AUTOMATIC_LADDER,
+      run: (snapshot) => grokChat(system, pack, 1400, {
+        choice: snapshot.modelChoice,
+        newsroomId,
+        localModel: overrides?.["local-model"]?.localModel,
+        noTools: true,
+        reasoningEffort: snapshot.modelEffort,
+      }),
+      probe: (candidate) => probeProvider(candidate, newsroomId),
+      resolve: async (candidate) => ({
+        modelChoice: candidate,
+        modelEffort: effortForChoice(candidate, active.modelEffort),
+      }),
+      onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
+        if (job) {
+          const resolvedChoice = effectiveStoryModelChoice(nextChoice);
+          const nextEffort = effortForChoice(resolvedChoice, active.modelEffort);
+          await setJobModelRuntime(job.id, resolvedChoice, nextEffort);
+          await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+          await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+        }
+      },
+    });
+    active = attempted.snapshot;
+    if (!attempted.result.ok) throw new Error(attempted.result.error);
+    return attempted.result.text;
+  };
     const out = await verifyRunSignals({
       userId,
       newsroomId,
@@ -1642,25 +1739,36 @@ async function runVerificationStage(
       place,
       officialDomains: official,
       pressDomains: press,
-      choice,
+      choice: active.modelChoice,
       overrides,
       preferences,
       runBudget,
       onUsage,
       onStage,
+      reasoningEffort: active.modelEffort,
+      deps: { model: verifyModel },
     });
     return out.summary;
-  } catch (err) {
-    return `Verification could not run this round (${
-      err instanceof Error ? err.message : "unknown"
-    }). Every signal from this round stays unverified.`;
-  }
 }
 
 function asDarkError(err: unknown): string {
   if (err && typeof err === "object" && "error" in err)
     return String((err as { error: unknown }).error);
   return err instanceof Error ? err.message : "Dark desk failed";
+}
+
+function savedJobEffort(job: Pick<DeskJob, "model_choice" | "result_json">): ModelEffort | null {
+  try {
+    const parsed = JSON.parse(job.result_json || "{}") as { modelEffort?: unknown };
+    if (!("modelEffort" in parsed)) return null;
+    return validatedModelEffort(job.model_choice, parsed.modelEffort);
+  } catch {
+    return null;
+  }
+}
+
+function effortForChoice(choice: EffectiveProviderChoice, saved: ModelEffort | null): ModelEffort | null {
+  return saved == null ? null : validatedModelEffort(choice, saved);
 }
 
 async function markInvestigationPaused(userId: string, investigationId: number, error: string) {
@@ -1697,6 +1805,7 @@ async function executeDarkRun(
     title?: string;
     choice?: EffectiveProviderChoice;
     automatic?: boolean;
+    modelEffort?: ModelEffort | null;
   },
   newsroomId: number = DEFAULT_NEWSROOM_ID,
 ) {
@@ -1704,8 +1813,8 @@ async function executeDarkRun(
   const choice = opts.choice;
   const overrides = await readProviderOverrides(newsroomId).catch(() => ({}));
   const runRows = await sql<{ id: number }>`
-    insert into dark_runs (user_id, newsroom_id, model_choice)
-    values (${userId}, ${newsroomId}, ${choice ?? null}) returning id
+    insert into dark_runs (user_id, newsroom_id, model_choice, model_effort)
+    values (${userId}, ${newsroomId}, ${choice ?? null}, ${opts.modelEffort ?? null}) returning id
   `;
   const runId = runRows[0]!.id;
   const paste = opts.paste.trim().slice(0, 14000);
@@ -1758,6 +1867,7 @@ async function executeDarkRun(
           actionLimit: snapshot.preferences.actionLimit ?? 6,
           runBudget,
           onUsage: saveUsage,
+          reasoningEffort: effortForChoice(remembered, opts.modelEffort ?? null),
         }),
       });
     };
@@ -1775,6 +1885,7 @@ async function executeDarkRun(
         snapshot.preferences,
         runBudget,
         saveUsage,
+        effortForChoice(on, opts.modelEffort ?? null),
       );
     };
     const checkpointed = await runCheckpointedDarkStages({
@@ -1811,6 +1922,8 @@ async function executeDarkRun(
       snapshot.preferences,
       runBudget,
       saveUsage,
+      undefined,
+      effortForChoice(activeChoice, opts.modelEffort ?? null),
     );
     const stopReason: DarkRunStopReason = runBudget.stopReason ?? loop.stopReason ?? (synth.error ? "synthesis-failed" : loop.paused ? "hop-limit" : "completed");
     await persistDarkRunUsage(runId, newsroomId, runBudget.snapshot(), stopReason);
@@ -1975,6 +2088,7 @@ export async function startDarkRound(
   context: { userId: string; newsroomId?: number },
   id: number,
   modelChoice: string = "auto",
+  effortValue?: unknown,
 ) {
   const asked = storyModelChoice(modelChoice);
   /*
@@ -1995,6 +2109,7 @@ export async function startDarkRound(
   if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
 
   const effectiveChoice = probe.ok ? probe.choice : asked;
+  const modelEffort = validatedModelEffort(effectiveChoice, effortValue);
 
   /*
     A round already digging this file on a different model is the same
@@ -2006,11 +2121,12 @@ export async function startDarkRound(
   const open = await findOpenJob({ newsroomId: owned(context), kind: "dark", subjectId: id });
   if (open) {
     const persisted = effectiveStoryModelChoice(open.model_choice);
-    if (persisted !== effectiveChoice) {
+    const persistedEffort = savedJobEffort(open);
+    if (persisted !== effectiveChoice || persistedEffort !== modelEffort) {
       return {
         ok: false as const,
         kind: "model-conflict" as const,
-        error: `This file is already digging with ${modelChoiceLabel(persisted)}. Watch that round finish before choosing another model.`,
+        error: `This file is already digging with ${modelChoiceLabel(persisted)}${persistedEffort ? ` at ${persistedEffort} effort` : ""}. Watch that round finish before choosing another model or effort.`,
         modelChoice: persisted,
         jobId: open.id,
       };
@@ -2038,7 +2154,18 @@ export async function startDarkRound(
     // "auto" means Automatic picked it, which is the ONLY case allowed to
     // fail over mid-round. See automatic-failover.ts.
     modelChoiceSource: asked === "auto" ? "auto" : "editor",
+    resultJson: JSON.stringify(initialModelRuntimeReceipt({
+      requestedRuntime: asked,
+      requestedEffort: validatedModelEffort(asked, effortValue),
+      actualRuntime: effectiveChoice,
+      actualEffort: modelEffort,
+      preflightFailover: "switchReceipt" in probe ? probe.switchReceipt : null,
+    })),
   });
+  if ("switchReceipt" in probe) {
+    await setJobStage(job.id, probe.switchReceipt.stage);
+    await setJobFailoverNote(job.id, probe.switchReceipt.note);
+  }
   return {
     ok: true as const,
     pending: true as const,
@@ -2050,11 +2177,11 @@ export async function startDarkRound(
 
 export const continueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { id: number; modelChoice?: string }) => input)
+  .validator((input: number | { id: number; modelChoice?: string; modelEffort?: unknown }) => input)
   .handler(async ({ context, data }) =>
     typeof data === "number"
       ? startDarkRound(context, data)
-      : startDarkRound(context, data.id, data.modelChoice),
+      : startDarkRound(context, data.id, data.modelChoice, data.modelEffort),
   );
 
 /** Injectable seam for `planDarkRoundFailover`, the same pattern
@@ -2088,10 +2215,6 @@ export async function planDarkRoundFailover(
   const probe = deps.probe ?? probeProvider;
   const setModelChoice = deps.setModelChoice ?? setJobModelChoice;
   const setStage = deps.setStage ?? setJobStage;
-  // An operator-configured gateway is an explicit installation policy. Dark
-  // Automatic uses it exclusively, matching the other desk surfaces.
-  if (job.model_choice === "configured") return null;
-
   const plan = await planAutomaticFailover({
     source: job.model_choice_source ?? "editor",
     current: job.model_choice,
@@ -2167,10 +2290,21 @@ export function terminalPlannerStartupFailure(
     : null;
 }
 
-/** Worker for an editor-requested later-page read from the exact retained PDF. */
+/**
+ * Worker for editor-requested OCR from the exact retained PDF.
+ *
+ * Complete reads keep each model call bounded, then commit the extracted page
+ * chunks and the job receipt before starting the next batch. A reclaimed or
+ * newly retried job plans only pages that do not already have retained chunks.
+ */
 export async function performArtifactOcrWork(
   job: DeskJob,
-  deps: { ocr?: typeof productionOcr } = {},
+  deps: {
+    ocr?: typeof productionOcr;
+    pageCount?: typeof pdfPageCount;
+    /** Test seam for replacing a claim immediately before the checkpoint transaction. */
+    beforeCheckpoint?: () => Promise<void>;
+  } = {},
 ) {
   await ensureDarkSchema();
   const sql = await getSql();
@@ -2196,55 +2330,216 @@ export async function performArtifactOcrWork(
   if (!retained?.version_id || !retained.body_b64 || !/pdf/i.test(retained.mime)) {
     throw new Error("The original retained PDF is unavailable; this read will not refetch the live URL.");
   }
-  await setJobStage(job.id, `Reading PDF pages ${request.start}-${request.end} with ${modelChoiceLabel(job.model_choice)}…`);
-  const read = await (deps.ocr ?? productionOcr)(new Uint8Array(Buffer.from(retained.body_b64, "base64")), {
-    provider: job.model_choice,
-    pageRange: { start: request.start, end: request.end },
-    newsroomId: String(job.newsroom_id),
-    jobLabel: `Dark artifact ${request.artifactId}, pages ${request.start}-${request.end}`,
-  });
-  const pages = read.pages.map((page) => ({ page: page.page, text: storableText(page.text) }));
-  const result = {
-    artifactId: request.artifactId,
-    start: request.start,
-    end: request.end,
-    pages,
-    pagesRead: read.pagesRead ?? pages.length,
-    pagesTotal: read.pagesTotal ?? 0,
-    provider: read.provider ?? modelChoiceLabel(job.model_choice),
-    reason: read.reason ?? null,
+  const assertClaim = async () => {
+    const owns = await sql<{ id: number }>`
+      select id from desk_jobs
+      where id = ${job.id} and newsroom_id = ${job.newsroom_id}
+        and status = ${"running"} and claim_token = ${job.claim_token}
+      limit 1
+    `;
+    if (!owns[0]) throw new Error("This PDF read was replaced by a newer worker; stopping without changing retained evidence.");
   };
-  await withTransaction(async (tx) => {
-    if (pages.length) {
-      const chunks = chunksFromEvidence(read.text, pages);
-      const next = await tx<{ next: number }>`
-        select coalesce(max(chunk_index), -1) + 1 as next from artifact_chunks
-        where version_id = ${retained.version_id} and newsroom_id = ${job.newsroom_id}
+  const setOwnedStage = async (stage: string) => {
+    const owns = await sql<{ id: number }>`
+      update desk_jobs set stage = ${stage}, updated_at = now()
+      where id = ${job.id} and newsroom_id = ${job.newsroom_id}
+        and status = ${"running"} and claim_token = ${job.claim_token}
+      returning id
+    `;
+    if (!owns[0]) throw new Error("This PDF read was replaced by a newer worker; stopping without changing retained evidence.");
+  };
+  await assertClaim();
+  const bytes = new Uint8Array(Buffer.from(retained.body_b64, "base64"));
+  const existingRows = await sql<{ page_number: number }>`
+    select distinct page_number from artifact_chunks
+    where version_id = ${retained.version_id} and newsroom_id = ${job.newsroom_id}
+      and page_number is not null
+    order by page_number
+  `;
+  const retainedPages = new Set(existingRows.map((row) => Number(row.page_number)));
+  const jobStarted = Date.now();
+  let ocrChoice = effectiveStoryModelChoice(job.model_choice);
+  let ocrEffort = savedJobEffort(job);
+  let modelCalls = 0;
+  let budgetPaused = false;
+  let totalPages = 0;
+  let batches: OcrPageBatch[];
+  if (request.mode === "complete") {
+    await setOwnedStage("Opening the retained PDF and counting its pages…");
+    totalPages = await (deps.pageCount ?? pdfPageCount)(bytes);
+    if (totalPages < 1) throw new Error("The retained PDF could not be opened to count its pages.");
+    for (const page of retainedPages) {
+      if (page < 1 || page > totalPages) retainedPages.delete(page);
+    }
+    batches = planMissingOcrBatches(totalPages, retainedPages);
+  } else {
+    batches = [{ start: request.start, end: request.end }];
+  }
+
+  const saveBatch = async (
+    batch: OcrPageBatch,
+    pages: { page: number | null; text: string }[],
+    provider: string,
+    reason: string | null,
+    batchIndex: number,
+  ) => {
+    for (const page of pages) if (page.page != null && page.text.trim()) retainedPages.add(page.page);
+    const unread = totalPages > 0 ? unreadOcrPages(totalPages, retainedPages) : [];
+    const safeProvider = provider.replace(/:/g, "-");
+    const method = totalPages > 0
+      ? `ocr-pages${unread.length ? "-partial" : ""}:${safeProvider}:${retainedPages.size}/${totalPages}`
+      : null;
+    const result: ArtifactOcrReceipt = {
+      request,
+      artifactId: request.artifactId,
+      mode: request.mode,
+      start: batch.start,
+      end: batch.end,
+      pages,
+      pagesRead: request.mode === "complete" ? retainedPages.size : pages.length,
+      pagesTotal: totalPages,
+      batchesCompleted: batchIndex,
+      batchesTotal: batches.length,
+      unreadPages: unread,
+      modelCalls,
+      budgetPaused,
+      provider,
+      reason,
+    };
+    await withTransaction(async (tx) => {
+      const owns = await tx<{ id: number }>`
+        select id from desk_jobs
+        where id = ${job.id} and newsroom_id = ${job.newsroom_id}
+          and status = ${"running"} and claim_token = ${job.claim_token}
+        for update
       `;
-      let offset = next[0]?.next ?? 0;
-      for (const chunk of chunks) {
-        const duplicate = await tx<{ id: number }>`
-          select id from artifact_chunks
+      if (!owns[0])
+        throw new Error("This PDF read was replaced by a newer worker; stopping without changing retained evidence.");
+      if (pages.length) {
+        const chunks = chunksFromEvidence(pages.map((page) => page.text).join("\n\n"), pages);
+        const next = await tx<{ next: number }>`
+          select coalesce(max(chunk_index), -1) + 1 as next from artifact_chunks
           where version_id = ${retained.version_id} and newsroom_id = ${job.newsroom_id}
-            and page_number is not distinct from ${chunk.page_number} and excerpt = ${chunk.excerpt}
-          limit 1
         `;
-        if (duplicate[0]) continue;
+        let offset = next[0]?.next ?? 0;
+        for (const chunk of chunks) {
+          const duplicate = await tx<{ id: number }>`
+            select id from artifact_chunks
+            where version_id = ${retained.version_id} and newsroom_id = ${job.newsroom_id}
+              and page_number is not distinct from ${chunk.page_number} and excerpt = ${chunk.excerpt}
+            limit 1
+          `;
+          if (duplicate[0]) continue;
+          await tx`
+            insert into artifact_chunks (version_id, user_id, newsroom_id, chunk_index, page_number, section, excerpt, locator)
+            values (
+              ${retained.version_id}, ${job.user_id}, ${job.newsroom_id}, ${offset++},
+              ${chunk.page_number}, ${"editor-requested OCR"}, ${chunk.excerpt},
+              ${`editor-ocr:${job.id}:${chunk.locator}`}
+            )
+          `;
+        }
+      }
+      if (method) {
         await tx`
-          insert into artifact_chunks (version_id, user_id, newsroom_id, chunk_index, page_number, section, excerpt, locator)
-          values (
-            ${retained.version_id}, ${job.user_id}, ${job.newsroom_id}, ${offset++},
-            ${chunk.page_number}, ${"editor-requested OCR"}, ${chunk.excerpt},
-            ${`editor-ocr:${job.id}:${chunk.locator}`}
-          )
+          update artifact_versions set extraction_method = ${method}, page_count = ${totalPages}
+          where id = ${retained.version_id} and newsroom_id = ${job.newsroom_id}
+        `;
+        await tx`
+          update artifacts set extraction_method = ${method}
+          where id = ${request.artifactId} and newsroom_id = ${job.newsroom_id}
         `;
       }
+      await tx`
+        update desk_jobs set result_json = ${JSON.stringify(result)}, updated_at = now()
+        where id = ${job.id} and newsroom_id = ${job.newsroom_id} and claim_token = ${job.claim_token}
+      `;
+    });
+  };
+
+  if (!batches.length) {
+    totalPages ||= retainedPages.size;
+    await saveBatch({ start: 1, end: totalPages }, [], modelChoiceLabel(job.model_choice), null, 0);
+    await setOwnedStage(`All ${totalPages} PDF pages were already retained.`);
+    return;
+  }
+
+  let accumulatedReason: string | null = null;
+  let lastProvider = modelChoiceLabel(job.model_choice);
+  for (let index = 0; index < batches.length; index++) {
+    const batch = batches[index]!;
+    await assertClaim();
+    const elapsed = Date.now() - jobStarted;
+    if (elapsed >= OCR_TOTAL_BUDGET_MS || modelCalls >= ARTIFACT_OCR_MAX_MODEL_CALLS) {
+      budgetPaused = true;
+      const limit = elapsed >= OCR_TOTAL_BUDGET_MS
+        ? "the 10-minute whole-run time budget"
+        : `the ${ARTIFACT_OCR_MAX_MODEL_CALLS}-call whole-run model budget`;
+      accumulatedReason = [
+        accumulatedReason,
+        `OCR paused at ${limit}. Saved pages are retained; run Read entire PDF again to continue only the unread pages.`,
+      ].filter(Boolean).join(" ");
+      await saveBatch(batch, [], lastProvider, accumulatedReason, index);
+      break;
     }
-    await tx`
-      update desk_jobs set result_json = ${JSON.stringify(result)}, updated_at = now()
-      where id = ${job.id} and newsroom_id = ${job.newsroom_id} and claim_token = ${job.claim_token}
-    `;
-  });
+    await setOwnedStage(
+      `Reading batch ${index + 1} of ${batches.length} · PDF pages ${batch.start}-${batch.end} · ${retainedPages.size}${totalPages ? ` of ${totalPages}` : ""} already saved…`,
+    );
+    const read = await (deps.ocr ?? productionOcr)(bytes, {
+      provider: ocrChoice,
+      reasoningEffort: ocrEffort,
+      pageRange: batch,
+      newsroomId: String(job.newsroom_id),
+      jobLabel: `Dark artifact ${request.artifactId}, pages ${batch.start}-${batch.end}`,
+      startedAt: jobStarted,
+      maxModelCalls: ARTIFACT_OCR_MAX_MODEL_CALLS - modelCalls,
+      onProviderSwitch: async ({ transport, model, reason }) => {
+        const nextChoice: EffectiveProviderChoice | null = transport === "codex"
+          ? "codex-balanced"
+          : transport === "anthropic" || transport === "claude-code"
+            ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
+            : null;
+        if (!nextChoice || nextChoice === ocrChoice) return;
+        const previousLabel = modelChoiceLabel(ocrChoice);
+        const nextLabel = modelChoiceLabel(nextChoice);
+        const nextEffort = validatedModelEffort(nextChoice, ocrEffort);
+        await setJobModelRuntime(job.id, nextChoice, nextEffort);
+        await setOwnedStage(`Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+        await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+        ocrChoice = nextChoice;
+        ocrEffort = nextEffort;
+      },
+    });
+    modelCalls += read.modelCalls ?? read.pages.length;
+    totalPages ||= read.pagesTotal ?? 0;
+    const pages = read.pages.map((page) => ({ page: page.page, text: storableText(page.text) }));
+    accumulatedReason = [accumulatedReason, read.reason].filter(Boolean).join(" ") || null;
+    if (/\b(?:model-call|time) limit\b/i.test(read.reason ?? "")) {
+      budgetPaused = true;
+      accumulatedReason = [
+        accumulatedReason,
+        "Saved pages are retained; run Read entire PDF again to continue only the unread pages.",
+      ].filter(Boolean).join(" ");
+    }
+    lastProvider = read.provider ?? lastProvider;
+    await setOwnedStage(`Saving PDF pages ${batch.start}-${batch.end} before continuing…`);
+    await deps.beforeCheckpoint?.();
+    await saveBatch(
+      batch,
+      pages,
+      lastProvider,
+      accumulatedReason,
+      index + 1,
+    );
+    if (budgetPaused) break;
+  }
+
+  const unread = totalPages > 0 ? unreadOcrPages(totalPages, retainedPages) : [];
+  await setOwnedStage(
+    unread.length
+      ? `${budgetPaused ? "Paused safely. " : ""}Saved ${retainedPages.size} of ${totalPages} PDF pages. Still unread: ${pageListSummary(unread)}.`
+      : `Saved all ${totalPages} PDF pages as retained evidence.`,
+  );
 }
 
 export async function performDarkRound(job: DeskJob) {
@@ -2267,10 +2562,11 @@ export async function performDarkRound(job: DeskJob) {
     one-shot failover below is allowed to act on.
   */
   let choice = effectiveStoryModelChoice(job.model_choice);
+  const modelEffort = savedJobEffort(job);
   const overrides = await readProviderOverrides(owned(context)).catch(() => ({}));
   const runRows = await sql<{ id: number }>`
-    insert into dark_runs (user_id, newsroom_id, model_choice, investigation_id)
-    values (${context.userId}, ${owned(context)}, ${choice}, ${id}) returning id
+    insert into dark_runs (user_id, newsroom_id, model_choice, model_effort, investigation_id)
+    values (${context.userId}, ${owned(context)}, ${choice}, ${modelEffort}, ${id}) returning id
   `;
   const runId = runRows[0]!.id;
   try {
@@ -2310,6 +2606,7 @@ export async function performDarkRound(job: DeskJob) {
           runBudget,
           onUsage: saveUsage,
           onStage: (stage) => setJobStage(job.id, stage),
+          reasoningEffort: effortForChoice(rememberedChoice, modelEffort),
         }),
       });
     const synthesize = async (on: EffectiveProviderChoice) => {
@@ -2326,6 +2623,7 @@ export async function performDarkRound(job: DeskJob) {
         snapshot.preferences,
         runBudget,
         saveUsage,
+        effortForChoice(on, modelEffort),
       );
     };
 
@@ -2352,6 +2650,8 @@ export async function performDarkRound(job: DeskJob) {
       runBudget,
       saveUsage,
       (stage) => setJobStage(job.id, stage),
+      effortForChoice(choice, modelEffort),
+      job,
     );
     await rememberLastModelChoice(id, choice);
     const names = (
@@ -2400,6 +2700,7 @@ export async function performDarkRound(job: DeskJob) {
           onUsage: saveUsage,
           onStage: (stage) => setJobStage(job.id, stage),
         },
+        effortForChoice(choice, modelEffort),
       );
       if (!briefResult.ok) briefError = briefResult.error;
     } catch (error) {
@@ -3064,6 +3365,7 @@ export async function buildBrief(
     onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>;
     onStage?: (stage: string) => Promise<unknown>;
   },
+  reasoningEffort?: ModelEffort | null,
 ) {
   const sql = await getSql();
   const pack = await buildDarkBriefPromptPack(newsroomId, id);
@@ -3102,6 +3404,7 @@ export async function buildBrief(
       // Dark Desk F1: the brief reads the file already assembled above and
       // returns JSON only — it never fetches or searches itself.
       noTools: true,
+      reasoningEffort,
     });
   } catch (err) {
     modelCall?.finish({
@@ -3148,6 +3451,7 @@ export async function startBriefJob(
   context: { userId: string; newsroomId?: number },
   id: number,
   modelChoice: string = "auto",
+  effortValue?: unknown,
 ) {
   const asked = storyModelChoice(modelChoice);
   const probe = await probeDarkProvider(asked, owned(context));
@@ -3155,15 +3459,17 @@ export async function startBriefJob(
   if (refusal) return refusal;
   await ensureDarkSchema();
   const effectiveChoice = probe.ok ? probe.choice : asked;
+  const modelEffort = validatedModelEffort(effectiveChoice, effortValue);
 
   const open = await findOpenJob({ newsroomId: owned(context), kind: "brief", subjectId: id });
   if (open) {
     const persisted = effectiveStoryModelChoice(open.model_choice);
-    if (persisted !== effectiveChoice) {
+    const persistedEffort = savedJobEffort(open);
+    if (persisted !== effectiveChoice || persistedEffort !== modelEffort) {
       return {
         ok: false as const,
         kind: "model-conflict" as const,
-        error: `A brief is already being written with ${modelChoiceLabel(persisted)}. Wait for it to finish before choosing another model.`,
+        error: `A brief is already being written with ${modelChoiceLabel(persisted)}${persistedEffort ? ` at ${persistedEffort} effort` : ""}. Wait for it to finish before choosing another model or effort.`,
         modelChoice: persisted,
         jobId: open.id,
       };
@@ -3179,7 +3485,18 @@ export async function startBriefJob(
     subjectId: id,
     modelChoice: effectiveChoice,
     modelChoiceSource: asked === "auto" ? "auto" : "editor",
+    resultJson: JSON.stringify(initialModelRuntimeReceipt({
+      requestedRuntime: asked,
+      requestedEffort: validatedModelEffort(asked, effortValue),
+      actualRuntime: effectiveChoice,
+      actualEffort: modelEffort,
+      preflightFailover: "switchReceipt" in probe ? probe.switchReceipt : null,
+    })),
   });
+  if ("switchReceipt" in probe) {
+    await setJobStage(job.id, probe.switchReceipt.stage);
+    await setJobFailoverNote(job.id, probe.switchReceipt.note);
+  }
   return {
     ok: true as const,
     pending: true as const,
@@ -3193,12 +3510,45 @@ export async function performBriefWork(job: DeskJob) {
   const newsroomId = job.newsroom_id;
   const overrides = await readProviderOverrides(newsroomId).catch(() => ({}));
   await setJobStage(job.id, "Writing editor brief");
+  let active = {
+    modelChoice: effectiveStoryModelChoice(job.model_choice),
+    modelEffort: savedJobEffort(job),
+  };
+  const callWithFallback: typeof grokChat = async (system, user, maxTokens, options) => {
+    const attempted = await runPinnedCallWithFailover({
+      snapshot: active,
+      source: job.model_choice_source ?? "editor",
+      ladder: DARK_AUTOMATIC_LADDER,
+      run: (snapshot) => grokChat(system, user, maxTokens, {
+        ...options,
+        choice: snapshot.modelChoice,
+        reasoningEffort: snapshot.modelEffort,
+      }),
+      probe: (choice) => probeProvider(choice, newsroomId),
+      resolve: async (choice) => ({
+        modelChoice: choice,
+        modelEffort: effortForChoice(choice, active.modelEffort),
+      }),
+      onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
+        const resolvedChoice = effectiveStoryModelChoice(nextChoice);
+        const nextEffort = effortForChoice(resolvedChoice, active.modelEffort);
+        await setJobModelRuntime(job.id, resolvedChoice, nextEffort);
+        await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+        await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+      },
+    });
+    active = attempted.snapshot;
+    return attempted.result;
+  };
   const result = await buildBrief(
     job.user_id,
     newsroomId,
     job.subject_id,
-    effectiveStoryModelChoice(job.model_choice),
+    active.modelChoice,
     overrides,
+    callWithFallback,
+    undefined,
+    active.modelEffort,
   );
   /*
     A brief that could not be written is a real failure of a job the editor
@@ -3212,9 +3562,9 @@ export async function performBriefWork(job: DeskJob) {
 
 export const refreshBrief = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { id: number; modelChoice?: string }) => input)
+  .validator((input: number | { id: number; modelChoice?: string; modelEffort?: unknown }) => input)
   .handler(async ({ context, data }) =>
     typeof data === "number"
       ? startBriefJob(context, data)
-      : startBriefJob(context, data.id, data.modelChoice),
+      : startBriefJob(context, data.id, data.modelChoice, data.modelEffort),
   );

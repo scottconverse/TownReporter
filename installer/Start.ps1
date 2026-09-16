@@ -8,6 +8,8 @@ if (Test-Path -LiteralPath (Join-Path $AppRoot '.env')) { throw 'Unexpected .env
 & $config.NodeExe (Join-Path $AppRoot 'scripts\install-build-manifest.mjs') verify $AppRoot
 if ($LASTEXITCODE -ne 0) { throw 'Build identity is not current. Run Install TownReporter.cmd again.' }
 if (!(Get-OwnedApp)) {
+  $staleState = Archive-StaleAppProcessState (Join-Path $DataRoot 'app-process.json')
+  if ($staleState) { Write-Warning "The prior app process ended. Its ownership record was archived at $staleState; detached child processes may remain because their ownership cannot be proven safely." }
   Assert-PortFree $config.Port
   if (!(Get-OwnedPostgres)) {
     Assert-PortFree $config.PgPort

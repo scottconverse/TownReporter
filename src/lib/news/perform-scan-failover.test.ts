@@ -151,7 +151,7 @@ describe("runScanChatWithFailover", () => {
     );
   });
 
-  it("never fails over an editor's explicit model choice", async () => {
+  it("routes an editor's explicit model choice around a technical failure", async () => {
     const grokCalls: unknown[] = [];
     let probeCalled = false;
 
@@ -169,21 +169,83 @@ describe("runScanChatWithFailover", () => {
         probeCalled = true;
         return { ok: true as const, label: "Codex Terra", choice: "codex-balanced" as const };
       },
-      setModelChoice: async () => {
-        assert.fail("an explicit editor choice must never switch models");
-      },
-      setStage: async () => {
-        assert.fail("an explicit editor choice must never rewrite the stage");
-      },
+      setModelChoice: async () => undefined,
+      setStage: async () => undefined,
     });
 
     assert.equal(result.ok, false);
-    assert.deepEqual(grokCalls, ["claude-frontier"], "must never retry on another rung");
-    assert.equal(
-      probeCalled,
-      false,
-      "planAutomaticFailover must not even probe for an explicit choice",
-    );
+    assert.deepEqual(grokCalls, ["claude-frontier", "codex-balanced"]);
+    assert.equal(probeCalled, true);
+  });
+
+  it("emits the scheduled runtime receipt before retrying a timed-out call", async () => {
+    const events: string[] = [];
+    const receipts: unknown[] = [];
+    const result = await runScanChatWithFailover({
+      job: { id: 47, model_choice: "codex-balanced", model_choice_source: "scheduled" },
+      system: "SYSTEM",
+      user: "FETCHED ONCE",
+      maxTokens: 3500,
+      modelEffort: "none",
+      timeoutMs: () => 90_000,
+      grokChat: async (_system, _user, _maxTokens, opts) => {
+        events.push(`chat:${opts?.choice}`);
+        return events.length === 1
+          ? { ok: false as const, error: CODEX_TIMEOUT_NO_OUTPUT }
+          : { ok: true as const, text: '{"leads":[]}' };
+      },
+      probe: async () => ({
+        ok: true as const,
+        label: "Claude Sonnet",
+        choice: "claude-sonnet" as const,
+      }),
+      onSwitch: async (receipt) => {
+        events.push("persist-receipt");
+        receipts.push(receipt);
+      },
+      setModelChoice: async () => undefined,
+      setStage: async () => undefined,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(events, ["chat:codex-balanced", "persist-receipt", "chat:claude-sonnet"]);
+    assert.deepEqual(receipts, [{
+      previousChoice: "codex-balanced",
+      nextChoice: "claude-sonnet",
+      previousLabel: "Codex Terra",
+      nextLabel: "Claude Sonnet",
+      nextEffort: "medium",
+      reason: "timeout",
+      switchReason: "Codex Terra timed out",
+      switchNote: "This draft moved to Claude Sonnet because Codex Terra timed out",
+    }]);
+  });
+
+  it("revalidates Codex none effort to the Claude destination default", async () => {
+    const efforts: unknown[] = [];
+    const result = await runScanChatWithFailover({
+      job: { id: 101, model_choice: "codex-balanced", model_choice_source: "editor" },
+      system: "S",
+      user: "U",
+      maxTokens: 3500,
+      modelEffort: "none",
+      timeoutMs: () => 90_000,
+      grokChat: async (_s, _u, _m, opts) => {
+        efforts.push(opts?.reasoningEffort);
+        return efforts.length === 1
+          ? { ok: false as const, error: CODEX_TIMEOUT_NO_OUTPUT }
+          : { ok: true as const, text: '{"leads":[]}' };
+      },
+      probe: async () => ({
+        ok: true as const,
+        label: "Claude Sonnet",
+        choice: "claude-sonnet" as const,
+      }),
+      setModelChoice: async () => undefined,
+      setStage: async () => undefined,
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(efforts, ["none", "medium"]);
   });
 
   it("never fails over a non-auth failure, even on Automatic", async () => {

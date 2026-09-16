@@ -26,7 +26,9 @@
 import type { OcrImpl, OcrOptions, PdfPage } from "./ingest.ts";
 import { isSelfReferential } from "./claim-hygiene.ts";
 import { isCustomModelChoice } from "./model-choice.ts";
-import { providerEntry, providerModel, type ProviderKind } from "./provider-registry.ts";
+import { modelEffort, providerEntry, providerModel, type ProviderKind } from "./provider-registry.ts";
+import { automaticFailoverReason, looksLikeContentRefusal } from "./automatic-failover.ts";
+import { OCR_BATCH_PAGE_LIMIT } from "./ocr-batches.ts";
 
 const JPEG_SOI = [0xff, 0xd8, 0xff];
 
@@ -122,7 +124,8 @@ export function extractEmbeddedPageImages(buf: Uint8Array, max = 12): PageImage[
     - at most 10 minutes wall clock for the whole read, checked before every
       image so a slow provider stops taking images rather than blowing past it.
 */
-export const OCR_MAX_PAGES = 12;
+/** Maximum pages in one bounded provider call. Complete packet jobs chain and checkpoint batches. */
+export const OCR_MAX_PAGES = OCR_BATCH_PAGE_LIMIT;
 // Historical API name retained; this is an extracted-image cap, not a PDF page count.
 export const OCR_MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 export const OCR_TOTAL_BUDGET_MS = 10 * 60 * 1000;
@@ -188,8 +191,91 @@ async function resolveVisionLocal(
 const NO_VISION_AVAILABLE =
   "No vision-capable model is available to read this scan: no ANTHROPIC_API_KEY, no Codex CLI, no signed-in Claude Code CLI, and no local model marked vision (· vision in the picker) was found.";
 
+/**
+ * Tests inject complete transports, not partial spies over the live machine.
+ * Resolve only from that closed set so a cached readiness probe or developer
+ * login can never turn a hermetic OCR test into a real provider call.
+ */
+function resolveInjectedPlan(opts: OcrOptions): Plan | PlanFailure | null {
+  const adapters = opts.adapters as OcrAdapters | undefined;
+  if (!adapters) return null;
+
+  const unavailable = (kind: ProviderKind): PlanFailure => ({
+    needsOcr: true,
+    reason: `The selected ${kind} OCR reader is unavailable in the injected adapter set.`,
+  });
+  if (opts.forcedPlan) {
+    if (!adapters[opts.forcedPlan.kind]) return unavailable(opts.forcedPlan.kind);
+    if (opts.forcedPlan.kind === "local") {
+      return {
+        kind: "local",
+        baseUrl: opts.forcedPlan.baseUrl,
+        model: opts.forcedPlan.model,
+        apiKey: "test-adapter",
+      };
+    }
+    return opts.forcedPlan;
+  }
+
+  const provider = opts.provider;
+  if (!provider || provider === "auto") {
+    if (adapters.codex) {
+      return { kind: "codex", model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra" };
+    }
+    if (adapters.anthropic) {
+      return {
+        kind: "anthropic",
+        apiKey: "test-adapter",
+        model: env("ANTHROPIC_MODEL") || "claude-sonnet-4-5",
+      };
+    }
+    if (adapters["claude-code"]) {
+      return { kind: "claude-code", model: env("ANTHROPIC_MODEL") || "claude-haiku-4-5" };
+    }
+    if (adapters.local && opts.localModel) {
+      return {
+        kind: "local",
+        baseUrl: opts.localModel.baseUrl,
+        model: opts.localModel.id,
+        apiKey: "test-adapter",
+      };
+    }
+    return { needsOcr: true, reason: NO_VISION_AVAILABLE };
+  }
+
+  // Custom connections still need their injected resolver to supply the
+  // endpoint/model identity; transcribePage below keeps the transport closed.
+  if (isCustomModelChoice(provider)) return null;
+  const entry = providerEntry(provider);
+  if (!entry) return null;
+  if (entry.kind === "codex") {
+    return adapters.codex ? { kind: "codex", model: providerModel(entry) } : unavailable("codex");
+  }
+  if (entry.kind === "claude-code") {
+    if (adapters.anthropic) {
+      return { kind: "anthropic", apiKey: "test-adapter", model: providerModel(entry) };
+    }
+    return adapters["claude-code"]
+      ? { kind: "claude-code", model: providerModel(entry) }
+      : unavailable("claude-code");
+  }
+  if (entry.kind === "local") {
+    return adapters.local && opts.localModel
+      ? {
+          kind: "local",
+          baseUrl: opts.localModel.baseUrl,
+          model: opts.localModel.id,
+          apiKey: "test-adapter",
+        }
+      : unavailable("local");
+  }
+  return null;
+}
+
 /** Which provider actually reads the pages, honouring the editor's picker choice. */
 async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
+  const injected = resolveInjectedPlan(opts);
+  if (injected) return injected;
   if (opts.forcedPlan) {
     if (opts.forcedPlan.kind === "local") {
       const local = await resolveVisionLocal({
@@ -207,20 +293,19 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
   }
   const provider = opts.provider;
   if (!provider || provider === "auto") {
-    // Keep OCR's established availability order independent of the writing
-    // model ladder. Anthropic API is the first vision path when configured;
-    // Codex and Claude Code are checked next, then a discovered local vision
-    // model. This is selection by availability, not per-page fallback.
-    const apiKey = env("ANTHROPIC_API_KEY");
-    if (apiKey)
-      return { kind: "anthropic", apiKey, model: env("ANTHROPIC_MODEL") || "claude-opus-5" };
+    // Keep Automatic OCR on the current unattended order: Codex first,
+    // Anthropic and Claude Code later, then a discovered local vision model.
+    // This is selection by availability, not per-page fallback.
     const { probeCodex } = await import("./ai-codex.server.ts");
     const codex = await probeCodex();
     if (codex.ok)
       return { kind: "codex", model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra" };
+    const apiKey = env("ANTHROPIC_API_KEY");
+    if (apiKey)
+      return { kind: "anthropic", apiKey, model: env("ANTHROPIC_MODEL") || "claude-sonnet-4-5" };
     const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
     const claude = await probeClaudeCode();
-    if (claude.ok) return { kind: "claude-code", model: env("ANTHROPIC_MODEL") || "claude-opus-5" };
+    if (claude.ok) return { kind: "claude-code", model: env("ANTHROPIC_MODEL") || "claude-haiku-4-5" };
     const local = await resolveVisionLocal(opts.localModel);
     if (local) return local;
     return { needsOcr: true, reason: NO_VISION_AVAILABLE };
@@ -296,6 +381,84 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
   return { needsOcr: true, reason: `${entry.label} cannot read images.` };
 }
 
+function samePlan(a: Plan, b: Plan): boolean {
+  return a.kind === b.kind && a.model === b.model &&
+    (!("baseUrl" in a) || !("baseUrl" in b) || a.baseUrl === b.baseUrl);
+}
+
+/** Resolve fallback transports only after a page's selected reader has a
+ * classified technical failure. Every returned plan is vision-capable by
+ * construction: named Claude/Codex readers, an Anthropic image model, or a
+ * discovered local model explicitly marked vision. Grok never enters this list. */
+async function resolveVisionFallbackPlans(opts: OcrOptions, primary?: Plan): Promise<Plan[]> {
+  const candidates: Plan[] = [];
+  const adapters = opts.adapters as OcrAdapters | undefined;
+  for (const forced of opts.visionFallbackPlans ?? []) {
+    if (adapters && !adapters[forced.kind]) continue;
+    if (forced.kind === "local") {
+      const local = adapters
+        ? { kind: "local" as const, baseUrl: forced.baseUrl, model: forced.model, apiKey: "test-adapter" }
+        : await resolveVisionLocal({ baseUrl: forced.baseUrl, id: forced.model });
+      if (local) candidates.push(local);
+    } else candidates.push(forced);
+  }
+  if (!opts.visionFallbackPlans) {
+    if (adapters) {
+      if (adapters.codex) candidates.push({ kind: "codex", model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra" });
+      if (adapters.anthropic) candidates.push({ kind: "anthropic", apiKey: "test-adapter", model: env("ANTHROPIC_MODEL") || "claude-sonnet-4-5" });
+      if (adapters["claude-code"]) candidates.push({ kind: "claude-code", model: env("ANTHROPIC_MODEL") || "claude-haiku-4-5" });
+      if (adapters.local && opts.localModel) {
+        candidates.push({
+          kind: "local",
+          baseUrl: opts.localModel.baseUrl,
+          model: opts.localModel.id,
+          apiKey: "test-adapter",
+        });
+      }
+    } else {
+      const { probeCodex } = await import("./ai-codex.server.ts");
+      const codex = await probeCodex();
+      if (codex.ok) candidates.push({ kind: "codex", model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra" });
+      const apiKey = env("ANTHROPIC_API_KEY");
+      if (apiKey) candidates.push({ kind: "anthropic", apiKey, model: env("ANTHROPIC_MODEL") || "claude-sonnet-4-5" });
+      const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
+      const claude = await probeClaudeCode();
+      if (claude.ok) candidates.push({ kind: "claude-code", model: env("ANTHROPIC_MODEL") || "claude-haiku-4-5" });
+      const local = await resolveVisionLocal(opts.localModel);
+      if (local) candidates.push(local);
+    }
+  }
+  return candidates.filter(
+    (candidate, index) =>
+      (!primary || !samePlan(candidate, primary)) &&
+      candidates.findIndex((earlier) => samePlan(earlier, candidate)) === index,
+  );
+}
+
+function effortForPlan(plan: Plan, effort: OcrOptions["reasoningEffort"]) {
+  if (plan.kind === "local" || plan.kind === "openai") {
+    // OpenAI-compatible is a wire shape, not an effort capability. Revalidate
+    // against the exact resolved model before adding anything to the payload.
+    return modelEffort("local-model", effort, plan.model);
+  }
+  const choice = plan.kind === "codex"
+    ? "codex-balanced"
+    : plan.kind === "anthropic" || plan.kind === "claude-code"
+      ? (/haiku/i.test(plan.model) ? "claude-haiku" : "claude-sonnet")
+      : "local-model";
+  return modelEffort(choice, effort);
+}
+
+function isTechnicalOcrFailure(error: unknown): boolean {
+  const detail = error instanceof Error ? error.message : String(error);
+  return automaticFailoverReason(detail) !== null;
+}
+
+function acceptedOcrText(raw: string): string {
+  if (looksLikeContentRefusal(raw)) throw new Error(raw);
+  return stripNarration(raw);
+}
+
 function planLabel(plan: Plan): string {
   if (plan.kind === "anthropic" || plan.kind === "claude-code") return "Claude";
   if (plan.kind === "codex") return "Codex";
@@ -327,12 +490,19 @@ async function anthropicTranscribePage(
   apiKey: string,
   model: string,
   timeoutMs: number,
+  reasoningEffort?: import("./provider-registry.ts").ModelEffort | null,
 ): Promise<string> {
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey, timeout: timeoutMs, maxRetries: 1 });
   const res = await client.messages.create({
     model,
     max_tokens: 4000,
+    ...(reasoningEffort
+      ? {
+          thinking: { type: "adaptive" as const },
+          output_config: { effort: reasoningEffort as "low" | "medium" | "high" | "max" },
+        }
+      : {}),
     messages: [
       {
         role: "user",
@@ -357,6 +527,7 @@ async function codexTranscribePage(
   image: PageImage,
   model: string,
   timeoutMs: number,
+  reasoningEffort?: import("./provider-registry.ts").ModelEffort | null,
 ): Promise<string> {
   return withTempImageFile(image, async (filePath) => {
     const { codexChat } = await import("./ai-codex.server.ts");
@@ -366,6 +537,7 @@ async function codexTranscribePage(
       model,
       timeoutMs,
       imagePaths: [filePath],
+      reasoningEffort,
     });
     if (!result.ok) throw new Error(result.error);
     return result.text;
@@ -376,6 +548,7 @@ async function claudeCodeTranscribePage(
   image: PageImage,
   model: string,
   timeoutMs: number,
+  reasoningEffort?: import("./provider-registry.ts").ModelEffort | null,
 ): Promise<string> {
   return withTempImageFile(image, async (filePath) => {
     const { claudeCodeReadChat } = await import("./ai-claude-code.server.ts");
@@ -384,6 +557,7 @@ async function claudeCodeTranscribePage(
       filePath,
       model,
       timeoutMs,
+      reasoningEffort,
     });
     if (!result.ok) throw new Error(result.error);
     return result.text;
@@ -396,6 +570,7 @@ async function openAiCompatibleTranscribePage(
   apiKey: string,
   model: string,
   timeoutMs: number,
+  reasoningEffort?: import("./provider-registry.ts").ModelEffort | null,
 ): Promise<string> {
   const dataUri = `data:${image.mime};base64,${b64(image.bytes)}`;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -407,6 +582,7 @@ async function openAiCompatibleTranscribePage(
       model,
       temperature: 0,
       max_tokens: 4000,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       messages: [
         {
           role: "user",
@@ -431,19 +607,24 @@ async function transcribePage(
   image: PageImage,
   timeoutMs: number,
   adapters?: OcrAdapters,
+  reasoningEffort?: import("./provider-registry.ts").ModelEffort | null,
 ): Promise<string> {
   const adapter = adapters?.[plan.kind];
   if (adapter) return adapter(image, timeoutMs, { transport: plan.kind, model: plan.model });
+  if (adapters) {
+    throw new Error(`${planLabel(plan)} OCR reader is unavailable in the injected adapter set.`);
+  }
   if (plan.kind === "anthropic")
-    return anthropicTranscribePage(image, plan.apiKey, plan.model, timeoutMs);
-  if (plan.kind === "codex") return codexTranscribePage(image, plan.model, timeoutMs);
-  if (plan.kind === "claude-code") return claudeCodeTranscribePage(image, plan.model, timeoutMs);
+    return anthropicTranscribePage(image, plan.apiKey, plan.model, timeoutMs, reasoningEffort);
+  if (plan.kind === "codex") return codexTranscribePage(image, plan.model, timeoutMs, reasoningEffort);
+  if (plan.kind === "claude-code") return claudeCodeTranscribePage(image, plan.model, timeoutMs, reasoningEffort);
   return openAiCompatibleTranscribePage(
     image,
     plan.baseUrl,
     plan.apiKey,
     plan.model,
     timeoutMs,
+    reasoningEffort,
   );
 }
 
@@ -462,9 +643,9 @@ function stripNarration(text: string): string {
     .trim();
 }
 
-function callTimeoutMs(startedAt: number, imagesLeft: number): number {
-  const remaining = OCR_TOTAL_BUDGET_MS - (Date.now() - startedAt);
-  if (remaining <= 0) return 0;
+function callTimeoutMs(startedAt: number, imagesLeft: number, now: () => number = Date.now): number {
+  const remaining = OCR_TOTAL_BUDGET_MS - (now() - startedAt);
+  if (remaining < OCR_MIN_CALL_MS) return 0;
   const share = Math.floor(remaining / Math.max(1, imagesLeft));
   return Math.max(OCR_MIN_CALL_MS, Math.min(OCR_MAX_CALL_MS, share));
 }
@@ -480,6 +661,7 @@ export async function renderPdfPages(
   buf: Uint8Array,
   startedAt = Date.now(),
   pageRange?: OcrOptions["pageRange"],
+  now: () => number = Date.now,
 ): Promise<RenderedPdfPages> {
   const { createIsomorphicCanvasFactory, getDocumentProxy, renderPageAsImage } = await import("unpdf");
   let pdf: Awaited<ReturnType<typeof getDocumentProxy>> | null = null;
@@ -509,7 +691,7 @@ export async function renderPdfPages(
     const images: RenderedPdfPageImage[] = [];
     const omitted: string[] = [];
     for (let page = requestedStart; page <= requestedEnd; page++) {
-      if (Date.now() - startedAt >= OCR_TOTAL_BUDGET_MS) {
+      if (now() - startedAt >= OCR_TOTAL_BUDGET_MS) {
         omitted.push(`pages ${page}-${requestedEnd} were not attempted (time limit)`);
         break;
       }
@@ -552,14 +734,67 @@ export async function renderPdfPages(
  */
 export async function transcribeDocumentImage(image: PageImage, opts: OcrOptions = {}): Promise<string> {
   const plan = await resolvePlan(opts);
-  if ("needsOcr" in plan) throw new Error(plan.reason);
+  if ("needsOcr" in plan) {
+    const reason = "unavailable" as const;
+    for (const fallback of await resolveVisionFallbackPlans(opts)) {
+      await opts.beforeModelCall?.();
+      try {
+        const text = acceptedOcrText(await transcribePage(fallback, image, 180000, opts.adapters as OcrAdapters | undefined, effortForPlan(fallback, opts.reasoningEffort)));
+        if (text) {
+          await opts.onProviderSwitch?.({ transport: fallback.kind, model: fallback.model, reason });
+          return text;
+        }
+      } catch (error) {
+        if (!isTechnicalOcrFailure(error)) throw error;
+      }
+    }
+    throw new Error(plan.reason);
+  }
   await opts.beforeModelCall?.();
-  return stripNarration(await transcribePage(plan, image, 180000, opts.adapters as OcrAdapters | undefined));
+  try {
+    const first = acceptedOcrText(await transcribePage(plan, image, 180000, opts.adapters as OcrAdapters | undefined, effortForPlan(plan, opts.reasoningEffort)));
+    if (first) return first;
+    throw new Error("empty model response");
+  } catch (error) {
+    if (!isTechnicalOcrFailure(error)) throw error;
+    const reason = automaticFailoverReason(error instanceof Error ? error.message : String(error))!;
+    for (const fallback of await resolveVisionFallbackPlans(opts, plan)) {
+      await opts.beforeModelCall?.();
+      try {
+        const text = acceptedOcrText(await transcribePage(fallback, image, 180000, opts.adapters as OcrAdapters | undefined, effortForPlan(fallback, opts.reasoningEffort)));
+        if (text) {
+          await opts.onProviderSwitch?.({ transport: fallback.kind, model: fallback.model, reason });
+          return text;
+        }
+      } catch (fallbackError) {
+        if (!isTechnicalOcrFailure(fallbackError)) throw fallbackError;
+        // Try the next already-verified vision reader for this image only.
+      }
+    }
+    throw error;
+  }
+}
+
+/** Read only the PDF directory. No page is rendered and no model is called. */
+export async function pdfPageCount(buf: Uint8Array): Promise<number> {
+  const { getDocumentProxy } = await import("unpdf");
+  let pdf: Awaited<ReturnType<typeof getDocumentProxy>> | null = null;
+  try {
+    pdf = await getDocumentProxy(Uint8Array.from(buf));
+    return pdf.numPages;
+  } catch {
+    return 0;
+  } finally {
+    await pdf?.cleanup().catch(() => {
+      /* Cleanup must not hide the page count. */
+    });
+  }
 }
 
 export const productionOcr: OcrImpl = async (buf, opts = {}) => {
-  const started = Date.now();
-  const rendered = await renderPdfPages(buf, started, opts.pageRange);
+  const now = opts.now ?? Date.now;
+  const started = opts.startedAt ?? now();
+  const rendered = await renderPdfPages(buf, started, opts.pageRange, now);
   const images = rendered.images;
   if (images.length === 0) {
     return {
@@ -569,37 +804,113 @@ export const productionOcr: OcrImpl = async (buf, opts = {}) => {
     };
   }
 
-  await opts.beforeModelCall?.();
-  const plan = await resolvePlan(opts);
-  if ("needsOcr" in plan) {
-    return { text: "", pages: [], reason: plan.reason };
+  const resolvedPrimary = await resolvePlan(opts);
+  let primaryPlan: Plan;
+  let fallbackPlans: Plan[] | null = null;
+  if ("needsOcr" in resolvedPrimary) {
+    // A named reader is preferred, not terminal: technical unavailability may
+    // move this unfinished page to the next ready vision transport. Injected
+    // test adapters remain a closed universe inside the resolver.
+    const ready = await resolveVisionFallbackPlans(opts);
+    primaryPlan = ready.shift()!;
+    if (!primaryPlan) return { text: "", pages: [], reason: resolvedPrimary.reason };
+    fallbackPlans = ready;
+    await opts.onProviderSwitch?.({ transport: primaryPlan.kind, model: primaryPlan.model, reason: "unavailable" });
+  } else {
+    primaryPlan = resolvedPrimary;
   }
 
   const pages: PdfPage[] = [];
   let pagesRead = 0;
   const unread: string[] = [];
+  const providersUsed = new Set<string>();
+  let modelCalls = 0;
+  const maxModelCalls = Math.max(0, opts.maxModelCalls ?? Number.MAX_SAFE_INTEGER);
+  let callBudgetReached = false;
+  let timeBudgetReached = false;
   for (let i = 0; i < images.length; i++) {
     const imagesLeft = images.length - i;
-    const timeoutMs = callTimeoutMs(started, imagesLeft);
-    if (timeoutMs <= 0) {
+    const image = images[i]!;
+    let raw = "";
+    let usedPlan = primaryPlan;
+    if (modelCalls >= maxModelCalls) {
+      unread.push(
+        ...images.slice(i).map((remaining) => `page ${remaining.page} was not read (model-call limit)`),
+      );
+      callBudgetReached = true;
+      break;
+    }
+    await opts.beforeModelCall?.();
+    const primaryTimeoutMs = callTimeoutMs(started, imagesLeft, now);
+    if (primaryTimeoutMs <= 0) {
       unread.push(
         ...images.slice(i).map((remaining) => `page ${remaining.page} was not read (time limit)`),
       );
       break;
     }
-    const image = images[i]!;
-    let raw: string;
-    await opts.beforeModelCall?.();
     try {
-      raw = await transcribePage(plan, image, timeoutMs, opts.adapters as OcrAdapters | undefined);
-    } catch {
-      unread.push(`page ${image.page} could not be read`);
-      continue; // one page failing should not lose the pages already read
+      modelCalls += 1;
+      raw = await transcribePage(primaryPlan, image, primaryTimeoutMs, opts.adapters as OcrAdapters | undefined, effortForPlan(primaryPlan, opts.reasoningEffort));
+      if (!acceptedOcrText(raw)) throw new Error("empty model response");
+    } catch (error) {
+      if (!isTechnicalOcrFailure(error)) throw error;
+      const reason = automaticFailoverReason(error instanceof Error ? error.message : String(error))!;
+      raw = "";
+      if (isTechnicalOcrFailure(error)) {
+        fallbackPlans ??= await resolveVisionFallbackPlans(opts, primaryPlan);
+        for (let fallbackIndex = 0; fallbackIndex < fallbackPlans.length; fallbackIndex++) {
+          const fallback = fallbackPlans[fallbackIndex]!;
+          if (modelCalls >= maxModelCalls) {
+            callBudgetReached = true;
+            break;
+          }
+          await opts.beforeModelCall?.();
+          const fallbackTimeoutMs = callTimeoutMs(started, imagesLeft, now);
+          if (fallbackTimeoutMs <= 0) {
+            timeBudgetReached = true;
+            break;
+          }
+          try {
+            modelCalls += 1;
+            const candidate = await transcribePage(fallback, image, fallbackTimeoutMs, opts.adapters as OcrAdapters | undefined, effortForPlan(fallback, opts.reasoningEffort));
+            if (!acceptedOcrText(candidate)) continue;
+            raw = candidate;
+            usedPlan = fallback;
+            await opts.onProviderSwitch?.({ transport: fallback.kind, model: fallback.model, reason });
+            // The switch is real for the rest of this document. Do not burn a
+            // call on the known-dead primary again for every later page.
+            primaryPlan = fallback;
+            fallbackPlans = fallbackPlans.slice(fallbackIndex + 1);
+            break;
+          } catch (fallbackError) {
+            if (!isTechnicalOcrFailure(fallbackError)) throw fallbackError;
+            // Keep this page isolated; a failed fallback never re-runs prior pages.
+          }
+        }
+      }
+      if (!raw) {
+        unread.push(
+          callBudgetReached
+            ? `page ${image.page} was not read (model-call limit)`
+            : timeBudgetReached
+              ? `page ${image.page} was not read (time limit)`
+            : `page ${image.page} could not be read`,
+        );
+        if (callBudgetReached || timeBudgetReached) {
+          const limit = callBudgetReached ? "model-call limit" : "time limit";
+          unread.push(
+            ...images.slice(i + 1).map((remaining) => `page ${remaining.page} was not read (${limit})`),
+          );
+          break;
+        }
+        continue; // one page failing should not lose the pages already read
+      }
     }
     const cleaned = stripNarration(raw);
     if (cleaned) {
       pages.push({ page: image.page, text: cleaned });
       pagesRead++;
+      providersUsed.add(planLabel(usedPlan));
     } else {
       unread.push(`page ${image.page} returned no readable text`);
     }
@@ -612,10 +923,11 @@ export const productionOcr: OcrImpl = async (buf, opts = {}) => {
   return {
     text,
     pages,
-    provider: planLabel(plan),
+    provider: [...providersUsed].join(" → ") || planLabel(primaryPlan),
     pagesRead,
     // Historical field names retained; rendered OCR now reports the actual PDF page count.
     pagesTotal: rendered.totalPages,
+    modelCalls,
     reason:
       rendered.reason || unread.length
         ? [rendered.reason, unread.length ? `OCR incomplete: ${unread.join("; ")}.` : undefined]

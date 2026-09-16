@@ -13,7 +13,7 @@
  */
 import type { reportAndDraft } from "./report.ts";
 import type { probeProvider } from "./ai.ts";
-import type { DeskJob, setJobModelChoice, setJobStage, setJobFailoverNote } from "./jobs.ts";
+import type { DeskJob, setJobModelChoice, setJobModelRuntime, setJobStage, setJobFailoverNote } from "./jobs.ts";
 import { modelChoiceLabel } from "./model-choice.ts";
 import {
   planAutomaticFailover,
@@ -22,9 +22,50 @@ import {
   failoverReasonPhrase,
   failoverNoteSentence,
 } from "./automatic-failover.ts";
+import { modelEffort as validatedModelEffort } from "./provider-registry.ts";
 
 export type ReportedDraftResult = Awaited<ReturnType<typeof reportAndDraft>>;
 export type DraftInput = Omit<Parameters<typeof reportAndDraft>[0], "modelChoice">;
+
+/** Retry one already-built model call on a technical failure. Callers keep
+ * every completed research/checkpoint outside this helper and pass the exact
+ * same call payload to `run`, so fallback cannot repeat earlier work. */
+export async function runPinnedCallWithFailover<
+  TSnapshot extends { modelChoice: string },
+  TResult extends { ok: boolean; error?: string },
+>(opts: {
+  snapshot: TSnapshot;
+  source: "editor" | "auto" | "scheduled";
+  run: (snapshot: TSnapshot) => Promise<TResult>;
+  probe: typeof probeProvider;
+  ladder?: readonly string[];
+  resolve: (choice: Exclude<ReturnType<typeof import("./model-choice.ts").storyModelChoice>, "auto">) => Promise<TSnapshot>;
+  onSwitch: (input: {
+    previousLabel: string;
+    nextLabel: string;
+    nextChoice: string;
+    reason: import("./automatic-failover.ts").AutomaticFailoverReason;
+  }) => Promise<void>;
+}): Promise<{ result: TResult; snapshot: TSnapshot }> {
+  const first = await opts.run(opts.snapshot);
+  if (first.ok || !first.error) return { result: first, snapshot: opts.snapshot };
+  const plan = await planAutomaticFailover({
+    source: opts.source,
+    current: opts.snapshot.modelChoice,
+    error: first.error,
+    probe: opts.probe,
+    ladder: opts.ladder,
+  });
+  if (!plan || plan.next === "auto") return { result: first, snapshot: opts.snapshot };
+  const next = await opts.resolve(plan.next);
+  await opts.onSwitch({
+    previousLabel: modelChoiceLabel(opts.snapshot.modelChoice),
+    nextLabel: plan.label,
+    nextChoice: plan.next,
+    reason: plan.reason,
+  });
+  return { result: await opts.run(next), snapshot: next };
+}
 
 /** Keep terminal provider-limit errors in the Story vocabulary. The shared
  * desk renderer also serves Opinion, whose quota copy must not be shown for a
@@ -111,12 +152,15 @@ export async function failOverOperationAndRetry<T>(opts: {
  * `ReportDeps`. */
 export type PerformDraftWorkDeps = {
   reportAndDraft?: typeof reportAndDraft;
+  /** Fakeable provider boundary for the ordinary Story call-level fallback. */
+  chat?: typeof import("./ai.ts").grokChat;
   /** Test seam for the pre-writer uploaded-document stage. Production uses
    * readStoryDocuments; the seam keeps its provider failure at the same
    * Automatic failover boundary without requiring a live provider in tests. */
   readStoryDocuments?: typeof import("./story-documents.server.ts").readStoryDocuments;
   probe?: typeof probeProvider;
   setJobModelChoice?: typeof setJobModelChoice;
+  setJobModelRuntime?: typeof setJobModelRuntime;
   setJobStage?: typeof setJobStage;
   setJobFailoverNote?: typeof setJobFailoverNote;
   batchChatAdapters?: {
@@ -126,6 +170,7 @@ export type PerformDraftWorkDeps = {
       model: string;
       timeoutMs: number;
       noTools?: boolean;
+      reasoningEffort?: import("./provider-registry.ts").ModelEffort | null;
     }) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
     codex: (input: {
       system: string;
@@ -138,6 +183,9 @@ export type PerformDraftWorkDeps = {
     xai: typeof import("./ai.ts").grokChat;
   };
   batchOcrAdapters?: import("./ocr.ts").OcrAdapters;
+  /** Hermetic resolver for batch failover tests; production uses the shared
+   * forced-runtime validator. */
+  validateBatchRuntime?: typeof import("./forced-runtime.server.ts").validateForcedRuntime;
 };
 
 /**
@@ -199,6 +247,13 @@ export async function failOverAndRetry(opts: {
   // "Done" once the job finishes, so without this the editor could see the
   // switch reason mid-run but never again once the draft landed.
   await setFailoverNote(job.id, failoverNoteSentence(plan.label, previousLabel, plan.reason));
-  const retried = await runReport({ ...draftInput, modelChoice: plan.next });
+  const retried = await runReport({
+    ...draftInput,
+    modelChoice: plan.next,
+    modelEffort:
+      draftInput.modelEffort == null
+        ? null
+        : validatedModelEffort(plan.next, draftInput.modelEffort),
+  });
   return "error" in retried ? { error: storyProviderFailure(retried.error) } : retried;
 }
