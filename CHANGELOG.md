@@ -1,10 +1,10 @@
 # Changelog
 
-Current release: **0.6.48**.
+Current release: **0.6.49**.
 
 ## Unreleased
 
-## 0.6.49 — Unreleased draft
+## 0.6.49 — 2026-09-15
 
 - Restores Dark Desk as a lead-development system: it follows unnamed actors, beneficiaries, organizations, money and missing records; keeps investigative and benign explanations live together; preserves thin and deferred trails; and prevents low-yield stop rules from closing high-value open work.
 - Adds selectable Dark Desk provider/model controls, bounded model/search/document/time budgets, live usage and stage reporting, checkpointed synthesis recovery, controlled frontier growth and evidence-based stopping.
@@ -16,6 +16,8 @@ Current release: **0.6.48**.
 - Extends Automatic recovery to quota, unavailable, authentication, timeout and network failures. Uploaded documents remain saved and are reread by the provider that takes over.
 - Expands batch drafting and Daily Scan to all eight named cloud models, discovered Local models and encrypted Custom AI connections such as Gemini. Each run pins one explicit runtime and never falls back; a batch never publishes.
 - Keeps document and image OCR on the model selected for the Story, Dark Desk, scheduled Scan or batch run, including saved Custom AI/Gemini connections.
+- Connects TownReporter directly to a SuperGrok subscription through xAI device-code OAuth, stores the refreshable newsroom credential encrypted, and exposes the returned Grok models in the same shared editor model picker.
+- Adds newsroom-managed OpenAI-compatible connections for Gemini and other services, including encrypted API-key storage, model discovery, connection tests, clear duplicate-name guidance and immediate picker updates after save, enable or delete.
 
 ## 0.6.48 — 2026-09-14
 
