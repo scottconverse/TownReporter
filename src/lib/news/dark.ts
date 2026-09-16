@@ -2358,6 +2358,8 @@ export async function performArtifactOcrWork(
   `;
   const retainedPages = new Set(existingRows.map((row) => Number(row.page_number)));
   const jobStarted = Date.now();
+  let ocrChoice = effectiveStoryModelChoice(job.model_choice);
+  let ocrEffort = savedJobEffort(job);
   let modelCalls = 0;
   let budgetPaused = false;
   let totalPages = 0;
@@ -2484,12 +2486,29 @@ export async function performArtifactOcrWork(
       `Reading batch ${index + 1} of ${batches.length} · PDF pages ${batch.start}-${batch.end} · ${retainedPages.size}${totalPages ? ` of ${totalPages}` : ""} already saved…`,
     );
     const read = await (deps.ocr ?? productionOcr)(bytes, {
-      provider: job.model_choice,
+      provider: ocrChoice,
+      reasoningEffort: ocrEffort,
       pageRange: batch,
       newsroomId: String(job.newsroom_id),
       jobLabel: `Dark artifact ${request.artifactId}, pages ${batch.start}-${batch.end}`,
       startedAt: jobStarted,
       maxModelCalls: ARTIFACT_OCR_MAX_MODEL_CALLS - modelCalls,
+      onProviderSwitch: async ({ transport, model, reason }) => {
+        const nextChoice: EffectiveProviderChoice | null = transport === "codex"
+          ? "codex-balanced"
+          : transport === "anthropic" || transport === "claude-code"
+            ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
+            : null;
+        if (!nextChoice || nextChoice === ocrChoice) return;
+        const previousLabel = modelChoiceLabel(ocrChoice);
+        const nextLabel = modelChoiceLabel(nextChoice);
+        const nextEffort = validatedModelEffort(nextChoice, ocrEffort);
+        await setJobModelRuntime(job.id, nextChoice, nextEffort);
+        await setOwnedStage(`Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+        await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+        ocrChoice = nextChoice;
+        ocrEffort = nextEffort;
+      },
     });
     modelCalls += read.modelCalls ?? read.pages.length;
     totalPages ||= read.pagesTotal ?? 0;

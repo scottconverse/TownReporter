@@ -526,7 +526,7 @@ async function drainLane(lane: JobLane): Promise<{ ran: number }> {
       (async () => {
         for (let n = 0; n < 8; n++) {
           const next = await sql<DeskJob>`
-            select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error,
+            select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
                    created_at, updated_at, started_at, finished_at
             from desk_jobs
             where lane = ${lane}

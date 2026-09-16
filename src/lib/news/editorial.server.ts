@@ -389,6 +389,7 @@ export async function fileEditorial(
       const attempted = await runPinnedCallWithFailover({
         snapshot: nameRuntime,
         source: "editor",
+        ladder: OPINION_AUTOMATIC_LADDER,
         run: (snapshot) => grokChat(system, user, maxTokens, {
           choice: snapshot.modelChoice,
           newsroomId: input.newsroomId,
