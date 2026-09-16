@@ -244,9 +244,7 @@ export async function orchestrateEditorial(
       }
       failures.push(invalid);
       if (requested !== "auto") {
-        const reason = /no usable headline/i.test(invalid) ? "timeout" : null;
-        if (!reason) return { ok: false, error: invalid };
-        pendingFallback = { previous: candidate, reason };
+        return { ok: false, error: invalid };
       }
       continue;
     }
