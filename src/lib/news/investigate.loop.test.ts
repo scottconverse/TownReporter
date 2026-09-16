@@ -140,6 +140,46 @@ async function bootInv(user: string, title: string) {
 }
 
 describe("researchLoop integration", { timeout: 120000 }, () => {
+  it("resumes the strongest deferred trail when the active working set is empty", async () => {
+    const user = `loop-resume-deferred-${Date.now()}`;
+    const { id, sql } = await bootInv(user, "Follow every saved beneficiary trail");
+    const label = "unnamed nonprofit beneficiary and distribution terms";
+    await sql`
+      insert into frontier_items (
+        user_id, newsroom_id, investigation_id, kind, label, label_norm,
+        why, priority, status, next_steps
+      ) values (
+        ${user}, 1, ${id}, ${"entity"}, ${label}, ${label},
+        ${"The event did not name the organization receiving proceeds"}, 12,
+        ${"deferred"}, ${"Find the entity filing, named beneficiaries, organizers and revenue-sharing terms"}
+      )
+    `;
+
+    let plannerInput = "";
+    const result = await researchLoop({
+      userId: user,
+      investigationId: id,
+      hops: 1,
+      planner: async (pack) => {
+        plannerInput = pack;
+        return emptyPlan();
+      },
+      search: async () => [],
+      fetch: fetchDoc,
+      archives: async () => [],
+    });
+
+    assert.match(plannerInput, /unnamed nonprofit beneficiary and distribution terms/i);
+    const rows = await sql<{ status: string; prior_status: string | null }>`
+      select status, prior_status from frontier_items
+      where investigation_id = ${id} and label = ${label}
+    `;
+    assert.equal(rows[0]?.prior_status, "deferred");
+    assert.notEqual(rows[0]?.status, "deferred");
+    assert.equal(result.paused, true);
+    assert.ok(result.frontier >= 1);
+  });
+
   it("keeps the title, unread result, and relevant capture inside the real planner boundary", async () => {
     const user = `loop-planner-budget-${Date.now()}`;
     const title = "Transit award investigation subject";

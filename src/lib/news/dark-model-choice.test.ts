@@ -54,7 +54,7 @@ async function withEnv<T>(vars: Record<string, string>, fn: () => Promise<T>): P
 /*
   Claude reachable, everything else off.
 
-  The stubbed fetch is what makes `probeProvider("claude-frontier")` succeed
+  The stubbed fetch is what makes the named Claude probe succeed
   without a real key or a real request; Codex is switched off so a probe can
   never reach the CLI that is genuinely installed on a developer machine and
   make this test depend on whether that login happens to be live.
@@ -153,7 +153,7 @@ describe("Dark Desk carries the editor's model choice onto the job", { timeout: 
         so the round cannot change author between the press and the queue
         reaching it. That is the defect migrations/0026 fixed for Story.
       */
-      assert.equal(jobs[0]!.model_choice, "claude-frontier");
+      assert.equal(jobs[0]!.model_choice, "claude-sonnet");
       assert.equal(jobs[0]!.model_choice_source, "auto");
     });
   });

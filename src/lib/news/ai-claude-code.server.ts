@@ -33,6 +33,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertNotAnArgument } from "./voice.server.ts";
 import { spawnPlan } from "./cli-spawn.server.ts";
+import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
 
 /**
  * Mirrors the limit in `assertNotAnArgument` (voice.server.ts): the point
@@ -42,7 +43,7 @@ import { spawnPlan } from "./cli-spawn.server.ts";
  */
 const SAFE_SYSTEM_ARG_CHARS = 8000;
 
-export type ClaudeCodeResult = { ok: true; text: string } | { ok: false; error: string };
+export type ClaudeCodeResult = ChatResult;
 
 /** Shape of `--output-format json`. Only the fields this module reads. */
 type CliEnvelope = {
@@ -50,7 +51,36 @@ type CliEnvelope = {
   result?: unknown;
   subtype?: string;
   api_error_status?: unknown;
+  duration_ms?: unknown;
+  model?: unknown;
+  modelUsage?: unknown;
+  usage?: unknown;
 };
+
+type CliResultContext = Omit<ChatResultMetadata, "durationMs"> & { durationMs: number };
+
+function reportedCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function cliMetadata(envelope: CliEnvelope, fallback: CliResultContext): ChatResultMetadata {
+  const usage = envelope.usage && typeof envelope.usage === "object"
+    ? envelope.usage as Record<string, unknown>
+    : undefined;
+  const reportedModel = typeof envelope.model === "string" && envelope.model.trim()
+    ? envelope.model
+    : envelope.modelUsage && typeof envelope.modelUsage === "object"
+      ? Object.keys(envelope.modelUsage as Record<string, unknown>).find(Boolean)
+      : undefined;
+  return {
+    ...fallback,
+    model: reportedModel ?? fallback.model,
+    durationMs: reportedCount(envelope.duration_ms) ?? fallback.durationMs,
+    ...(reportedCount(usage?.input_tokens) !== undefined ? { inputTokens: reportedCount(usage?.input_tokens) } : {}),
+    ...(reportedCount(usage?.output_tokens) !== undefined ? { outputTokens: reportedCount(usage?.output_tokens) } : {}),
+    ...(reportedCount(usage?.total_tokens) !== undefined ? { totalTokens: reportedCount(usage?.total_tokens) } : {}),
+  };
+}
 
 /**
  * Where the CLI lives. `claude` on PATH is a shim (`claude.cmd` on Windows,
@@ -326,6 +356,13 @@ export async function claudeCodeChat(opts: {
   ];
 
   return new Promise<ClaudeCodeResult>((resolve) => {
+    const startedAt = Date.now();
+    const baseMeta = (timedOut: boolean): CliResultContext => ({
+      provider: "claude-code",
+      model: opts.model,
+      durationMs: Date.now() - startedAt,
+      timedOut,
+    });
     let child: ReturnType<typeof spawn>;
     try {
       const plan = spawnPlan(bin, args);
@@ -337,7 +374,7 @@ export async function claudeCodeChat(opts: {
       });
     } catch {
       cleanupTempDir();
-      resolve({ ok: false, error: CLAUDE_CLI_MISSING });
+      resolve({ ok: false, error: CLAUDE_CLI_MISSING, meta: baseMeta(false) });
       return;
     }
 
@@ -374,6 +411,7 @@ export async function claudeCodeChat(opts: {
       finish({
         ok: false,
         error: `Claude Code request timed out after ${seen}${tail ? ` — ${tail}` : ""}`,
+        meta: baseMeta(true),
       });
     }, opts.timeoutMs);
 
@@ -383,14 +421,14 @@ export async function claudeCodeChat(opts: {
     child.stderr?.on("data", (d) => {
       stderr += String(d);
     });
-    child.on("error", () => finish({ ok: false, error: CLAUDE_CLI_MISSING }));
+    child.on("error", () => finish({ ok: false, error: CLAUDE_CLI_MISSING, meta: baseMeta(false) }));
     child.on("close", (code) => {
       if (code !== 0 && !stdout.trim()) {
         const detail = stderr.trim().split("\n").pop()?.slice(0, 200) || `exit ${code}`;
-        finish({ ok: false, error: `Claude Code failed: ${detail}` });
+        finish({ ok: false, error: `Claude Code failed: ${detail}`, meta: baseMeta(false) });
         return;
       }
-      finish(parseCliEnvelope(stdout));
+      finish(parseCliEnvelope(stdout, baseMeta(false)));
     });
 
     child.stdin?.on("error", () => {
@@ -441,6 +479,13 @@ export async function claudeCodeReadChat(opts: {
   const userMessage = `${opts.prompt}\n\nRead the file at exactly this path and use only its contents: ${opts.filePath}`;
 
   return new Promise<ClaudeCodeResult>((resolve) => {
+    const startedAt = Date.now();
+    const baseMeta = (timedOut: boolean): CliResultContext => ({
+      provider: "claude-code",
+      model: opts.model,
+      durationMs: Date.now() - startedAt,
+      timedOut,
+    });
     let child: ReturnType<typeof spawn>;
     try {
       const plan = spawnPlan(bin, args);
@@ -450,7 +495,7 @@ export async function claudeCodeReadChat(opts: {
         windowsHide: true,
       });
     } catch {
-      resolve({ ok: false, error: CLAUDE_CLI_MISSING });
+      resolve({ ok: false, error: CLAUDE_CLI_MISSING, meta: baseMeta(false) });
       return;
     }
 
@@ -470,6 +515,7 @@ export async function claudeCodeReadChat(opts: {
       finish({
         ok: false,
         error: `Claude Code request timed out after ${seen}${tail ? ` — ${tail}` : ""}`,
+        meta: baseMeta(true),
       });
     }, opts.timeoutMs);
 
@@ -479,14 +525,14 @@ export async function claudeCodeReadChat(opts: {
     child.stderr?.on("data", (d) => {
       stderr += String(d);
     });
-    child.on("error", () => finish({ ok: false, error: CLAUDE_CLI_MISSING }));
+    child.on("error", () => finish({ ok: false, error: CLAUDE_CLI_MISSING, meta: baseMeta(false) }));
     child.on("close", (code) => {
       if (code !== 0 && !stdout.trim()) {
         const detail = stderr.trim().split("\n").pop()?.slice(0, 200) || `exit ${code}`;
-        finish({ ok: false, error: `Claude Code failed: ${detail}` });
+        finish({ ok: false, error: `Claude Code failed: ${detail}`, meta: baseMeta(false) });
         return;
       }
-      finish(parseCliEnvelope(stdout));
+      finish(parseCliEnvelope(stdout, baseMeta(false)));
     });
     child.stdin?.on("error", () => {
       /* close/error reports the process result */
@@ -496,24 +542,25 @@ export async function claudeCodeReadChat(opts: {
 }
 
 /** Pull the answer out of `--output-format json`. Exported for tests. */
-export function parseCliEnvelope(stdout: string): ClaudeCodeResult {
+export function parseCliEnvelope(stdout: string, context?: CliResultContext): ClaudeCodeResult {
   const raw = stdout.trim();
-  if (!raw) return { ok: false, error: "Claude Code returned nothing" };
+  if (!raw) return { ok: false, error: "Claude Code returned nothing", ...(context ? { meta: context } : {}) };
   let parsed: CliEnvelope;
   try {
     parsed = JSON.parse(raw) as CliEnvelope;
   } catch {
-    return { ok: false, error: "Claude Code returned unreadable output" };
+    return { ok: false, error: "Claude Code returned unreadable output", ...(context ? { meta: context } : {}) };
   }
+  const meta = context ? cliMetadata(parsed, context) : undefined;
   if (parsed.is_error) {
     const detail =
       typeof parsed.api_error_status === "string" || typeof parsed.api_error_status === "number"
         ? ` (${parsed.api_error_status})`
         : "";
     const text = typeof parsed.result === "string" ? parsed.result.slice(0, 200) : "";
-    return { ok: false, error: `Claude Code error${detail}${text ? `: ${text}` : ""}` };
+    return { ok: false, error: `Claude Code error${detail}${text ? `: ${text}` : ""}`, ...(meta ? { meta } : {}) };
   }
   const text = typeof parsed.result === "string" ? parsed.result.trim() : "";
-  if (!text) return { ok: false, error: "Empty model response" };
-  return { ok: true, text };
+  if (!text) return { ok: false, error: "Empty model response", ...(meta ? { meta } : {}) };
+  return { ok: true, text, ...(meta ? { meta } : {}) };
 }

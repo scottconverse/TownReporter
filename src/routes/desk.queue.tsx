@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { DraftBatchResult } from "@/components/draft-batch-result";
+import { ModelPicker } from "@/components/model-picker";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { LeadRowView, SEEN_AGAIN_EXPLAINER } from "@/components/desk-leads";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
@@ -17,13 +18,6 @@ import {
   startDraftBatch,
   type DraftBatchRuntime,
 } from "@/lib/news/draft-batch";
-
-const BATCH_RUNTIMES: ReadonlyArray<{ value: DraftBatchRuntime; label: string }> = [
-  { value: "local", label: "Local model" },
-  { value: "claude-cli", label: "Claude Code" },
-  { value: "codex-terra", label: "Codex Terra" },
-  { value: "codex-sol", label: "Codex Sol" },
-];
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
 
@@ -85,7 +79,7 @@ function QueuePage() {
   const [draftNotices, setDraftNotices] = useState<Record<number, { kind: "ok" | "err"; text: string }>>({});
   const [draftingIds, setDraftingIds] = useState<number[]>([]);
   const [selectedBatchLeadIds, setSelectedBatchLeadIds] = useState<number[]>([]);
-  const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("local");
+  const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("local-model");
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
   const [batchNotice, setBatchNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const leadRefreshAfterTerminalBatch = useRef<number | null>(null);
@@ -325,21 +319,14 @@ function QueuePage() {
             Add suggested focus ({Math.min(focusAddable.length, 5 - selectedBatchLeads.length)})
           </InkButton>
         </div>
-        <div className="form-grid">
-          <Field label="Batch runtime">
-            <select
-              value={batchRuntime}
-              disabled={startBatch.isPending}
-              onChange={(event) => setBatchRuntime(event.target.value as DraftBatchRuntime)}
-            >
-              {BATCH_RUNTIMES.map((runtime) => (
-                <option key={runtime.value} value={runtime.value}>
-                  {runtime.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
+        <ModelPicker
+          scope="forced"
+          value={batchRuntime}
+          onChange={(choice) => setBatchRuntime(choice as DraftBatchRuntime)}
+          disabled={startBatch.isPending}
+          compact
+          excludeAutomatic
+        />
         <p className="meta">{selectedBatchLeads.length} of 5 selected</p>
         <InkButton
           disabled={newsroomId === null || selectedBatchLeads.length === 0 || startBatch.isPending}

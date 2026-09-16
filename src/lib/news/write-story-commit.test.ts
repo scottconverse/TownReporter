@@ -131,7 +131,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
     const [job] = await sql<{research_scope:string}>`select research_scope from desk_jobs where newsroom_id = 811`;
     assert.equal(job.research_scope, "supplied");
   });
-  it("refuses a tool-capable Automatic result before enqueue in supplied-material scope", async () => {
+  it("allows Automatic to enqueue Codex with supplied material", async () => {
     const sql = await ensureWriteStorySchema();
     let enqueued = false;
     const res = await writeStoryForAuthenticatedEditor({ context: { userId: "scope-codex", newsroomId: 812 }, text: "Library hours change Tuesday. Opens at noon.", researchScope: "supplied", modelChoice: "auto" }, {
@@ -139,9 +139,11 @@ describe("writeStoryForAuthenticatedEditor", () => {
       probeProvider: async () => ({ ok: true, choice: "codex-balanced", label: "Codex" }),
       enqueueJob: async (opts) => { enqueued = true; return enqueueJob({ ...opts, kick: false }); },
     });
-    assert.equal(res.ok, false);
-    assert.equal(enqueued, false);
-    if (!res.ok) assert.match(res.error, /Claude or a local\/API model/);
+    assert.equal(res.ok, true);
+    assert.equal(enqueued, true);
+    const [job] = await sql<{ model_choice: string; research_scope: string }>`select model_choice, research_scope from desk_jobs where newsroom_id = 812`;
+    assert.equal(job.model_choice, "codex-balanced");
+    assert.equal(job.research_scope, "supplied");
   });
   it("refuses without touching the database when the text does not parse into a lead", async () => {
     const sql = await ensureWriteStorySchema();

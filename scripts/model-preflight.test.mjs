@@ -28,6 +28,8 @@ const src = readFileSync(join(ROOT, "src/lib/news/desk.ts"), "utf8");
 const opinionSrc = readFileSync(join(ROOT, "src/lib/news/opinion.ts"), "utf8");
 const commitSrc = readFileSync(join(ROOT, "src/lib/news/model-request-commit.server.ts"), "utf8");
 const deskAuthSrc = readFileSync(join(ROOT, "src/lib/news/desk-auth.ts"), "utf8");
+const pullWorkerSrc = readFileSync(join(ROOT, "src/lib/news/pull.server.ts"), "utf8");
+const MECHANICAL_ENQUEUERS = new Set(["pullTodo", "continuePullJob"]);
 
 /** Split the file into `export const <name> = createServerFn(...)` blocks. */
 function serverFunctions(source = src, file = "desk.ts") {
@@ -62,10 +64,34 @@ function modelSpenders() {
     ...serverFunctions(src, "desk.ts"),
     ...serverFunctions(opinionSrc, "opinion.ts"),
     ...exportedAsyncFunctions(commitSrc, "model-request-commit.server.ts"),
-  ].filter((f) => /enqueueJob\b/.test(f.body));
+  ].filter((f) => /enqueueJob\b/.test(f.body) && !MECHANICAL_ENQUEUERS.has(f.name));
 }
 
 test("every server function that enqueues model work preflights first", () => {
+  // Reporting-line Pull also uses the durable job queue, but its worker is
+  // mechanical web search and document extraction. Keep that distinction
+  // explicit so adding durability does not misclassify it as model spend.
+  const pullEnqueuers = serverFunctions(src, "desk.ts").filter(
+    (f) => /enqueueJob\b/.test(f.body) && /kind:\s*"pull"/.test(f.body),
+  );
+  assert.deepEqual(
+    pullEnqueuers.map((f) => f.name),
+    ["pullTodo", "continuePullJob"],
+    "the two durable Pull entry points should remain explicit mechanical jobs",
+  );
+  for (const pull of pullEnqueuers) {
+    assert.doesNotMatch(
+      pull.body,
+      /\b(?:grokChat|scanSystem|reportAndDraft|probeProvider|checkReadiness)\b/,
+      `${pull.name} must not quietly become model work`,
+    );
+  }
+  assert.match(
+    pullWorkerSrc,
+    /ingestDocument\(url, \{ allowModelOcr: false \}, signal\)/,
+    "the mechanical Pull worker must explicitly forbid shared model OCR",
+  );
+
   const spenders = modelSpenders();
   assert.ok(spenders.length >= 3, "expected Scan, Draft, and Opinion model enqueuers");
 

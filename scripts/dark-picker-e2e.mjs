@@ -9,8 +9,8 @@
  *    model."  Dark Desk was the one surface with no picker at all -- a round
  *    ran on whatever the machine happened to prefer, while the desk's own
  *    documentation said the editor decides. This walk opens the Dark Desk
- *    page, opens a file, and proves the picker is there with the same four
- *    options the Story picker has.
+ *    page and proves the picker exposes every supported subscription model
+ *    plus the selected local model.
  *
  *   "Timeouts are likely too short for local models -- give the editor the
  *    option to make them longer or shorter in the interface."  This walk types
@@ -98,13 +98,25 @@ async function thePickerIsThere() {
 
   const labels = await picker.locator("option").allInnerTexts();
   const names = labels.map((line) => line.split("—")[0].trim());
-  const expected = ["Automatic", "Codex Terra", "Codex Sol", "Claude Opus", "Local model"];
+  const expected = [
+    "Automatic",
+    "Codex Astra",
+    "Codex Sol",
+    "Codex Terra",
+    "Codex Luna",
+    "Claude Fable",
+    "Claude Opus",
+    "Claude Sonnet",
+    "Claude Haiku",
+    "Grok (SuperGrok)",
+    "Local model",
+  ];
   if (JSON.stringify(names) !== JSON.stringify(expected)) {
     throw new Error(
       `Dark Desk picker offers ${JSON.stringify(names)}, expected ${JSON.stringify(expected)}`,
     );
   }
-  step("the Dark Desk picker offers the same five options Story has");
+  step("the Dark Desk picker offers every supported subscription model and Local model");
 
   // Its label says digging, not writing: the model there digs.
   const labelText = await actions.locator(".model-picker-label").innerText();
@@ -121,9 +133,9 @@ async function thePickerIsThere() {
   step("an explicit choice says out loud that it will not fall back");
 
   await picker.selectOption("auto");
-  await actions.getByText(/otherwise tries Claude Opus, then Codex Terra/).waitFor();
-  await actions.getByText(/the round moves to the next/).waitFor();
-  step("Automatic names the ladder in the order it is actually tried");
+  await actions.getByText(/otherwise tries Codex Terra, then Claude Sonnet/).waitFor();
+  await actions.getByText(/only the unfinished stage moves to the next provider/).waitFor();
+  step("Automatic names its ladder and says that failover retries only the unfinished stage");
 }
 
 async function theTimeoutFieldSaves() {

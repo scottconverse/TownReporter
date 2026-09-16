@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.48**. See the [release guide](docs/releases/0.6.48.md).
+Repository documentation version: **0.6.49**. See the [release guide](docs/releases/0.6.49.md).
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -11,7 +11,7 @@ remote development machine as production. The paper is hosted at
 **https://townreporter.org** on the Halo box in Longmont, through a Cloudflare
 Tunnel. “This machine” below refers to Halo.
 
-Production was independently checked on 2026-09-13 at source `c926fc48e8e11ebce437a47bc0fd3c990671ecb8` before packaging 0.6.44. The local and public app answered, the served version matched the build, and published articles were preserved. The [current release record](docs/releases/0.6.48.md) links the release and its dated deployment evidence. A repository version, GitHub tag or release does not establish production version. Earlier machine inventories and receipts below describe their observation dates.
+Production was independently checked on 2026-09-13 at source `c926fc48e8e11ebce437a47bc0fd3c990671ecb8` before packaging 0.6.44. The local and public app answered, the served version matched the build, and published articles were preserved. The [current release record](docs/releases/0.6.49.md) links the release and its dated deployment evidence. A repository version, GitHub tag or release does not establish production version. Earlier machine inventories and receipts below describe their observation dates.
 
 Current development boundaries and queue: [handoff](HANDOFF-NEXT-AGENT.md),
 [TODO](TODO.md). Staging and promotion below require a Halo-local operator.
@@ -195,10 +195,11 @@ the run.
 
 | Desk work           | Provider rule                                                                                                | Recovery                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| Scan and Dark Desk  | per-run picker; Automatic uses configured gateway or readiness ladder                                                      | repair the configured endpoint/key or sign back into Claude Code                                              |
-| Story — Automatic   | configured `LLM_*` exclusively when present; otherwise Claude Opus → Codex Terra readiness ladder            | repair the provider named on the failed job; a run stays pinned to one provider                               |
-| Story — explicit    | Codex Terra, Codex Sol, Claude Opus, or Local model; no fallback                                             | open and sign into the named CLI, or set `LLM_BASE_URL` for Local model                                        |
-| Opinion             | Automatic: Claude Opus → Codex Terra once when needed; explicit Claude Opus, Codex Sol, Codex Sol, Local model or custom choice stays selected | repair or sign into the selected provider; the completed row records the provider that delivered              |
+| Scan and Dark Desk  | per-run picker; Automatic uses configured gateway or Codex Terra → Claude Sonnet readiness ladder                         | repair the configured endpoint/key or sign into the provider named on the failed job                          |
+| Daily scan          | one exact named Codex or Claude model, Local model, or saved Custom AI connection; never falls back                       | repair the saved provider and resume the schedule manually                                                     |
+| Story — Automatic   | configured `LLM_*` exclusively when present; otherwise Codex Terra → Claude Sonnet readiness ladder          | repair the provider named on the failed job; a run stays pinned to one provider                               |
+| Story — explicit    | Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or Haiku; Local model; or a saved custom connection; never falls back | fix that provider, or deliberately redraft with another model                                                 |
+| Opinion             | Automatic: Codex Sol → Claude Sonnet once when needed; every named Codex or Claude model, Local model, or custom choice stays selected | repair or sign into the selected provider; the completed row records the provider that delivered             |
 
 For ordinary Story calls, Codex reuses the signed-in user's native configuration and full available
 Windows access. TownReporter does not disable search, shell/files,
@@ -210,8 +211,8 @@ does not read or store the token.
 
 Opinion rejects provider refusals, assistant notes, implausible headlines, and
 incomplete bodies before draft storage. The Opinion picker offers Automatic,
-Claude Opus, Codex Terra, Codex Sol, Local model and custom connections;
-Automatic can move to Codex Terra once when Claude is unavailable. A failed request has no draft
+Codex Astra, Sol, Terra, and Luna; Claude Fable, Opus, Sonnet, and Haiku; Local model; and custom connections;
+Automatic can move from Codex Sol to Claude Sonnet once when Codex is unavailable. A failed request has no draft
 or Publish action.
 
 `npm test` makes no model call and costs nothing: it runs the whole suite with
@@ -342,4 +343,4 @@ jobs. That is why self-hosting is the default.
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Claude Opus, then Sol. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.

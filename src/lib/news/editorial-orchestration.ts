@@ -11,6 +11,7 @@ import {
   OPINION_AUTOMATIC_LADDER,
   type OpinionModelChoice,
 } from "./model-choice.ts";
+import { providerEntry } from "./provider-registry.ts";
 
 export type WriteEditorialInput = {
   userId: string;
@@ -98,6 +99,24 @@ const REFUSAL_OPENING = [
   /^as an (?:ai|artificial intelligence|language model)\b/i,
 ];
 
+/** Provider adapters can report a refusal as an error rather than a successful
+ * text response. Automatic must not use another model to bypass it. */
+function isProviderRefusal(error: string): boolean {
+  const opening = error
+    .replace(/[\u2018\u2019]/g, "'")
+    .trim()
+    .slice(0, 1_200);
+  return (
+    /\b(?:declined|refused) (?:this request|to (?:write|produce|draft|create|deliver))\b/i.test(
+      opening,
+    ) ||
+    /\b(?:i|we) (?:cannot|can't|won't|will not|am unable to|are unable to) (?:provide|write|produce|draft|create|deliver)\b/i.test(
+      opening,
+    ) ||
+    /EDITORIAL_REFUSAL\s*:/i.test(opening)
+  );
+}
+
 /**
  * Transport success is not editorial success. This gate is deliberately
  * provider-neutral: a refusal or assistant note from any model must never be
@@ -124,7 +143,9 @@ export function validateEditorialDelivery(raw: string, editorial: Editorial): st
   });
 
   if (refused) {
-    const reason = String(raw).match(/EDITORIAL_REFUSAL\s*:\s*([^\r\n]{1,500})/i)?.[1]?.trim();
+    const reason = String(raw)
+      .match(/EDITORIAL_REFUSAL\s*:\s*([^\r\n]{1,500})/i)?.[1]
+      ?.trim();
     return `The selected model declined to produce the requested editorial${reason ? `: ${reason}` : ""}. Nothing was filed.`;
   }
   const headline = editorial.headline.trim();
@@ -165,17 +186,18 @@ export async function orchestrateEditorial(
   /* Automatic tries the two signed-in subscription providers in order.
      Explicit Claude, Codex, local, and custom choices run only themselves. */
   const runPair = async (candidate: EffectiveOpinionModelChoice): Promise<ChatResult> => {
-    if (isCustomModelChoice(candidate)) {
-      return runtime.runCustomPair({ input, found, researchPack });
+    const candidateInput = { ...input, modelChoice: candidate };
+    if (isCustomModelChoice(candidate) || providerEntry(candidate)?.kind === "xai-oauth") {
+      return runtime.runCustomPair({ input: candidateInput, found, researchPack });
     }
-    if (candidate === "codex-balanced" || candidate === "codex-frontier") {
+    if (providerEntry(candidate)?.kind === "codex") {
       return runtime.runCodexPair
-        ? runtime.runCodexPair({ input: { ...input, modelChoice: candidate }, found, researchPack })
+        ? runtime.runCodexPair({ input: candidateInput, found, researchPack })
         : { ok: false, error: "Codex is unavailable." };
     }
     return candidate === "local-model"
-      ? runtime.runLocalPair({ input, found, researchPack })
-      : runtime.runClaudePair({ input, found, researchPack });
+      ? runtime.runLocalPair({ input: candidateInput, found, researchPack })
+      : runtime.runClaudePair({ input: candidateInput, found, researchPack });
   };
 
   const requested = opinionModelChoice(input.modelChoice);
@@ -186,6 +208,7 @@ export async function orchestrateEditorial(
   for (const candidate of candidates) {
     const out = await runPair(candidate);
     if (!out.ok) {
+      if (isProviderRefusal(out.error)) return { ok: false, error: out.error };
       failures.push(out.error);
       continue;
     }

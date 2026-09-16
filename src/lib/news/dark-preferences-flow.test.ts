@@ -48,7 +48,7 @@ test("verification applies date preference, actual cap and full eligible denomin
   assert.equal(out.failed, 2);
   assert.ok(queries.every((q) => q.includes("after:2023-12-31 before:2025-01-01")));
   assert.ok(packs.every((p) => p.includes("2024-01-01 through 2024-12-31")));
-  assert.match(out.summary, /0 of 8.*verified/);
+  assert.match(out.summary, /0 of 8.*completed the four-question protocol/);
 });
 test("discovery query and planner pack use the same saved date window", async () => {
   await ensureDarkSchema();

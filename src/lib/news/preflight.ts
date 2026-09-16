@@ -47,7 +47,7 @@ const GUIDANCE: Record<PreflightKind, string> = {
   "provider-auth":
     "The selected model is signed out. Open that provider on this machine, sign in, then choose it again. Nothing was queued or spent.",
   timeout:
-    "The model was reachable but did not answer in time. This one is worth starting again. If it keeps happening, the machine may be busy or the provider slow.",
+    "The selected model was reachable but did not answer the readiness check in time. No model job was started, nothing was spent, and your saved work is unchanged. Choose another model, or try this one again if the machine was busy.",
   unknown:
     "The model did not answer, and the reason is not one the desk recognises. The provider's own message is below; docs/setup.md covers how the desk picks a provider.",
 };

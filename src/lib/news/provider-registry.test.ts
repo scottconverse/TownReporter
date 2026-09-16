@@ -24,6 +24,7 @@ import {
 const ENV_KEYS = [
   "TOWNREPORTER_CODEX",
   "TOWNREPORTER_CLAUDE_CODE",
+  "TOWNREPORTER_GROK_OAUTH",
   "TOWNREPORTER_LOCAL",
   "TOWNREPORTER_CODEX_TERRA_MODEL",
   "TOWNREPORTER_CODEX_SOL_MODEL",
@@ -50,7 +51,7 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   }
 }
 
-const SURFACES: ProviderSurface[] = ["story", "scan", "opinion", "dark"];
+const SURFACES: ProviderSurface[] = ["story", "scan", "opinion", "dark", "forced"];
 
 describe("the provider registry is the one description of a writing model", () => {
   it("gives every entry the fields the rest of the desk reads off it", () => {
@@ -101,7 +102,18 @@ describe("the provider registry is the one description of a writing model", () =
     // remain failed requests, while editors can select each supported runtime.
     assert.deepEqual(
       providersFor("opinion").map((entry) => entry.id),
-      ["codex-balanced", "codex-frontier", "claude-frontier", "local-model"],
+      [
+        "codex-astra",
+        "codex-frontier",
+        "codex-balanced",
+        "codex-luna",
+        "claude-fable",
+        "claude-frontier",
+        "claude-sonnet",
+        "claude-haiku",
+        "grok-oauth",
+        "local-model",
+      ],
     );
     // Everything Opinion offers, Story and Dark offer too.
     for (const entry of providersFor("opinion")) {
@@ -118,12 +130,10 @@ describe("the provider registry is the one description of a writing model", () =
 });
 
 describe("the Automatic ladder is derived, not typed out", () => {
-  it("orders the ladder by ladderRank, which is not the picker's order", () => {
+  it("orders Automatic with Codex first and the cheaper Claude Sonnet fallback last", () => {
     const ladder = automaticLadder();
-    assert.deepEqual(ladder, ["claude-frontier", "codex-balanced"]);
-    // The picker reads Codex, Codex, Claude; the ladder tries Claude first.
-    // Two different orders on purpose -- see ProviderEntry.ladderRank.
-    assert.notDeepEqual(
+    assert.deepEqual(ladder, ["codex-balanced", "claude-sonnet"]);
+    assert.deepEqual(
       ladder,
       providersFor("story")
         .map((entry) => entry.id)
@@ -139,14 +149,15 @@ describe("the Automatic ladder is derived, not typed out", () => {
     // before the ladder runs at all.
     assert.ok(!automaticLadder().includes("codex-frontier"));
     assert.ok(!automaticLadder().includes("configured"));
+    assert.ok(!automaticLadder().includes("grok-oauth"));
   });
 
   it("drops a rung the machine has switched off, without changing the static ladder", () => {
     withEnv({ TOWNREPORTER_CODEX: "0" }, () => {
-      assert.deepEqual(enabledAutomaticLadder(), ["claude-frontier"]);
+      assert.deepEqual(enabledAutomaticLadder(), ["claude-sonnet"]);
       // The static list is unchanged: it is read at module load by ai.ts, and
       // the probe loop already copes with a rung that turns out to be gone.
-      assert.deepEqual(automaticLadder(), ["claude-frontier", "codex-balanced"]);
+      assert.deepEqual(automaticLadder(), ["codex-balanced", "claude-sonnet"]);
     });
     withEnv({ TOWNREPORTER_CLAUDE_CODE: "0", TOWNREPORTER_CODEX: "0" }, () => {
       assert.deepEqual(enabledAutomaticLadder(), []);
@@ -177,7 +188,10 @@ describe("environment overrides are config, not code", () => {
     withEnv({ TOWNREPORTER_CODEX: "0" }, () => {
       assert.equal(providerEnabled("codex-balanced"), false);
       // The paper cannot turn on what the machine does not have.
-      assert.equal(providerEnabled("codex-balanced", { "codex-balanced": { enabled: true } }), false);
+      assert.equal(
+        providerEnabled("codex-balanced", { "codex-balanced": { enabled: true } }),
+        false,
+      );
     });
     withEnv({}, () => {
       assert.equal(providerEnabled("codex-balanced"), true);
@@ -197,6 +211,11 @@ describe("the planner substitution rule", () => {
       // Claude plans on Haiku: same searches as Opus, more claims, a quarter
       // of the cost. Both Codex entries plan on Terra.
       assert.match(plannerModelFor("claude-frontier"), /haiku/i);
+      assert.match(plannerModelFor("claude-fable"), /haiku/i);
+      assert.match(plannerModelFor("claude-sonnet"), /haiku/i);
+      assert.match(plannerModelFor("claude-haiku"), /haiku/i);
+      assert.equal(plannerModelFor("codex-astra"), "gpt-5.6-luna");
+      assert.equal(plannerModelFor("codex-luna"), "gpt-5.6-luna");
       assert.equal(plannerModelFor("codex-balanced"), "gpt-5.6-terra");
       assert.equal(plannerModelFor("codex-frontier"), "gpt-5.6-terra");
       /*
@@ -375,9 +394,8 @@ describe("the local model is a named pick, everywhere an AI acts", () => {
     probes flip this flag, and `local-model.enabled()` OR's it in.
   */
   it("becomes enabled from discovery alone, with no LLM_BASE_URL set", async () => {
-    const { setLocalDiscoveryReachable, resetLocalDiscoveryReachableForTests } = await import(
-      "./provider-registry.ts"
-    );
+    const { setLocalDiscoveryReachable, resetLocalDiscoveryReachableForTests } =
+      await import("./provider-registry.ts");
     try {
       withEnv({}, () => assert.equal(providerEnabled("local-model"), false));
       setLocalDiscoveryReachable(true);

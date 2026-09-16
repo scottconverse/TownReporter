@@ -49,13 +49,18 @@ import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider
 import { DailyScanSettings } from "@/components/daily-scan-settings";
 import { RoutineNoticePermissions } from "@/components/routine-notice-permissions";
 import { CustomAiConnections } from "@/components/custom-ai-connections";
+import { XaiOauthConnection } from "@/components/xai-oauth-connection";
 import {
   getCustomAiConnectionsFn,
   saveCustomAiConnectionFn,
   enableCustomAiConnectionFn,
   deleteCustomAiConnectionFn,
   discoverCustomAiModelsFn,
+  removeCustomAiConnection,
+  saveCustomAiConnectionAndCache,
   testCustomAiConnectionFn,
+  updateCustomAiConnectionEnabled,
+  type PublicCustomAiConnection,
 } from "@/lib/news/custom-ai-settings";
 
 export const Route = createFileRoute("/desk/ops")({
@@ -387,14 +392,16 @@ function CustomAiSettings() {
     queryKey: ["custom-ai-connections"],
     queryFn: () => getCustomAiConnectionsFn(),
   });
-  async function refresh() {
-    await qc.invalidateQueries({ queryKey: ["custom-ai-connections"] });
+  function refresh() {
+    void qc
+      .invalidateQueries({ queryKey: ["custom-ai-connections"] })
+      .catch(() => undefined);
   }
   return (
     <div id="custom-ai-connections" className="mt-12 min-w-0 border-t border-rule pt-8">
       {connections.isPending ? (
         <p role="status">Loading your API connections…</p>
-      ) : connections.isError ? (
+      ) : connections.isError && !connections.data ? (
         <div role="alert">
           <p>Could not load your API connections. Existing writing models are unchanged.</p>
           <InkButton tone="quiet" onClick={() => void connections.refetch()}>
@@ -405,16 +412,28 @@ function CustomAiSettings() {
         <CustomAiConnections
           connections={connections.data ?? []}
           onSave={async (data) => {
-            await saveCustomAiConnectionFn({ data });
-            await refresh();
+            await saveCustomAiConnectionAndCache(
+              data,
+              (input) => saveCustomAiConnectionFn({ data: input }),
+              qc,
+            );
+            refresh();
           }}
           onEnable={async (id, enabled) => {
             await enableCustomAiConnectionFn({ data: { id, enabled } });
-            await refresh();
+            qc.setQueryData<PublicCustomAiConnection[] | undefined>(
+              ["custom-ai-connections"],
+              (current) => updateCustomAiConnectionEnabled(current, id, enabled),
+            );
+            refresh();
           }}
           onDelete={async (id) => {
             await deleteCustomAiConnectionFn({ data: { id } });
-            await refresh();
+            qc.setQueryData<PublicCustomAiConnection[] | undefined>(
+              ["custom-ai-connections"],
+              (current) => removeCustomAiConnection(current, id),
+            );
+            refresh();
           }}
           onDiscover={(id) => discoverCustomAiModelsFn({ data: { id } })}
           onTest={(id) => testCustomAiConnectionFn({ data: { id } })}
@@ -516,6 +535,7 @@ function WritingModels() {
           ))}
         </ul>
       )}
+      <XaiOauthConnection onNote={setNote} />
       {/*
         Providers with no sign-in row of their own.
 
@@ -529,7 +549,8 @@ function WritingModels() {
       {(times.data ?? [])
         .filter(
           (row) =>
-            !["claude-code", "anthropic", "codex"].includes(row.kind) && row.availableOnThisMachine,
+            !["claude-code", "anthropic", "codex", "xai-oauth"].includes(row.kind) &&
+            row.availableOnThisMachine,
         )
         .map((row) => (
           <div key={row.providerId} className="mt-3 border border-rule p-4">

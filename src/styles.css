@@ -950,6 +950,8 @@
 .desk-ltr .note-one {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:2px 0 0;text-wrap:pretty}
 .desk-ltr .todo {display:flex;gap:8px;align-items:baseline;font-size:calc(0.875rem * var(--ts));margin:0;width:100%;background:none;border:0;padding:0;color:inherit;font:inherit;cursor:pointer;text-align:left}
 .desk-ltr .todo-row {display:flex;gap:8px;align-items:flex-start;margin:6px 0 0}
+.desk-ltr .todo-pull-group {margin-top:6px}
+.desk-ltr .todo-pull-group .todo-row {margin-top:0}
 .desk-ltr .todo-pull {flex:none;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;border:1px solid var(--fg);background:transparent;color:var(--fg);padding:3px 8px;cursor:pointer;font:inherit}
 .desk-ltr .todo-pull:hover {background:var(--bg2)}
 .desk-ltr .todo-pull:disabled {opacity:.5;cursor:wait}
@@ -959,6 +961,20 @@
 .desk-ltr .todo.done .todo-t {text-decoration:line-through;color:var(--mut)}
 .desk-ltr .todo-t {text-align:left;flex:1;min-width:0}
 .desk-ltr .todo-src {font-size:calc(0.875rem * var(--ts));color:var(--mut);text-transform:uppercase;letter-spacing:.12em;flex:none}
+.desk-ltr .pull-progress {margin:8px 0 12px 19px;padding:10px 12px;border:1px solid var(--line);background:var(--bg2);font-size:calc(0.875rem * var(--ts));color:var(--fg2)}
+.desk-ltr .pull-progress.active {border-left:4px solid var(--adeep)}
+.desk-ltr .pull-progress-head {display:flex;align-items:baseline;justify-content:space-between;gap:12px;color:var(--fg)}
+.desk-ltr .pull-progress-head strong {font-weight:650;text-wrap:pretty}
+.desk-ltr .pull-progress p {margin:5px 0 0;text-wrap:pretty}
+.desk-ltr .pull-counts {font-variant-numeric:tabular-nums;color:var(--fg)}
+.desk-ltr .pull-progress-actions {display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-top:8px}
+.desk-ltr .pull-progress .text-action {border:1px solid var(--fg);background:var(--bg);color:var(--fg);font:inherit;font-weight:600;padding:5px 9px;cursor:pointer}
+.desk-ltr .pull-progress .text-action:hover {background:var(--fg);color:var(--bg)}
+.desk-ltr .pull-progress .text-action:disabled {opacity:.55;cursor:wait}
+.desk-ltr .pull-progress details {min-width:min(100%,280px)}
+.desk-ltr .pull-progress summary {cursor:pointer;color:var(--warn)}
+.desk-ltr .pull-progress ul {margin:6px 0 0;padding-left:18px;overflow-wrap:anywhere}
+.desk-ltr .pull-progress li {margin-top:4px}
 /*
   Claims of absence (2026-09-05). A story saying a public document does not
   exist is the one thing this desk cannot let through on a model's word, so

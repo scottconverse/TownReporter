@@ -68,9 +68,6 @@ export async function commitStoryDraftForAuthenticatedEditor(
   }
 
   const effectiveChoice = providerProbe.ok ? providerProbe.choice : input.modelChoice;
-  if (researchScope === "supplied" && effectiveChoice.startsWith("codex")) {
-    return { ok: false as const, error: "Use only supplied material requires Claude or a local/API model. Codex has external tools enabled. Choose another model or Research public sources." };
-  }
   const open = await (deps.findOpenJob ?? findOpenJob)({
     newsroomId: input.context.newsroomId,
     kind: "draft",

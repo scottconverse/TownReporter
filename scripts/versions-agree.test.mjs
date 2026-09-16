@@ -29,6 +29,9 @@ test("package.json, APP_VERSION, CHANGELOG, and doc headers name one version", (
     ["docs/setup.md", /Current release: \[([^\]]+)\]/],
     ["docs/editor.md", /Current release: \[([^\]]+)\]/],
     ["docs/manual.md", /\*\*Version ([0-9.]+) ·/],
+    ["docs/editor-desk.md", /For \[TownReporter ([0-9.]+)\]/],
+    ["docs/reader.md", /For TownReporter ([0-9.]+)\./],
+    ["docs/windows-install.md", /Open \[TownReporter ([0-9.]+)\]/],
     ["SELF-HOSTING.md", /Repository documentation version: \*\*([0-9.]+)\*\*/],
     ["docs/index.html", /Repository release: <b>([0-9.]+)<\/b>/],
   ];

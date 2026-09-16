@@ -120,6 +120,48 @@ describe("scheduled final commit fence", () => {
 });
 
 describe("scheduled tick and policy status", () => {
+  it("stores a selected custom model for the scheduled run without copying its secret", async () => {
+    const sql = await getSql();
+    await sql.query("delete from daily_scan_reservations");
+    await sql.query("delete from desk_jobs");
+    await sql.query("delete from scan_runs");
+    await sql.query("update daily_scan_policies set runtime=$1 where newsroom_id=501", [
+      "custom:11111111-1111-4111-8111-111111111111",
+    ]);
+    await sql.query(
+      "insert into sources values(1,501,'https://example.test/custom','Custom','rss',1,'accepted',null,null,null)",
+    );
+    const snapshot = {
+      runtime: "custom:11111111-1111-4111-8111-111111111111" as const,
+      modelChoice: "custom:11111111-1111-4111-8111-111111111111" as const,
+      transport: "custom" as const,
+      model: "gemini-2.5-flash",
+      newsroomId: 501,
+      label: "Gemini",
+    };
+    let selected = "";
+    assert.deepEqual(
+      await tickDailyScans(new Date("2026-09-04T12:00:00Z"), {
+        kick: false,
+        runtimeSnapshot: async (_room, runtime) => {
+          selected = runtime;
+          return snapshot;
+        },
+      }),
+      { reserved: 1 },
+    );
+    assert.equal(selected, snapshot.runtime);
+    const [reservation] = await sql.query<{ model_snapshot: unknown }>(
+      "select model_snapshot from daily_scan_reservations where newsroom_id=501",
+    );
+    assert.deepEqual(reservation.model_snapshot, snapshot);
+    assert.doesNotMatch(JSON.stringify(reservation.model_snapshot), /api.?key|secret|base.?url/i);
+    const [queued] = await sql.query<{ model_choice: string }>(
+      "select model_choice from desk_jobs where newsroom_id=501",
+    );
+    assert.equal(queued.model_choice, snapshot.modelChoice);
+  });
+
   for (const timezone of [null, "   ", "missing-row"] as const) {
     it(`uses the UI's effective timezone for ${String(timezone)} legacy settings`, async () => {
       const sql = await getSql();
@@ -300,7 +342,7 @@ describe("scheduled runtime transport", () => {
               runtime,
               modelChoice:
                 runtime === "claude-cli"
-                  ? "claude-frontier"
+                  ? "claude-sonnet"
                   : runtime === "codex-terra"
                     ? "codex-balanced"
                     : "codex-frontier",
@@ -325,4 +367,52 @@ describe("scheduled runtime transport", () => {
       assert.equal(result, `${expected[0].split(":")[0]}-result`);
     });
   }
+
+  it("calls only the saved Custom AI adapter with its newsroom and exact Gemini model", async () => {
+    const snapshot = {
+      runtime: "custom:11111111-1111-4111-8111-111111111111",
+      modelChoice: "custom:11111111-1111-4111-8111-111111111111",
+      transport: "custom",
+      model: "gemini-2.5-flash",
+      newsroomId: 501,
+      label: "Gemini",
+    } as const;
+    assert.doesNotMatch(JSON.stringify(snapshot), /api.?key|secret|base.?url/i);
+    const calls: string[] = [];
+    const result = await runForcedDailyChat(snapshot, "system", "user", 99, undefined, {
+      claude: async () => { throw new Error("wrong transport"); },
+      codex: async () => { throw new Error("wrong transport"); },
+      local: async () => { throw new Error("wrong transport"); },
+      custom: async (_system, _user, _maxTokens, options) => {
+        calls.push(`${options.choice}:${options.newsroomId}:${options.model}`);
+        return "gemini-result";
+      },
+    });
+    assert.deepEqual(calls, [
+      "custom:11111111-1111-4111-8111-111111111111:501:gemini-2.5-flash",
+    ]);
+    assert.equal(result, "gemini-result");
+  });
+
+  it("calls only the saved SuperGrok OAuth adapter with its newsroom and exact model", async () => {
+    const snapshot = {
+      runtime: "grok-oauth",
+      modelChoice: "grok-oauth",
+      transport: "xai-oauth",
+      model: "grok-4.6",
+      newsroomId: 501,
+    } as const;
+    const calls: string[] = [];
+    const result = await runForcedDailyChat(snapshot, "system", "user", 99, undefined, {
+      claude: async () => { throw new Error("wrong transport"); },
+      codex: async () => { throw new Error("wrong transport"); },
+      local: async () => { throw new Error("wrong transport"); },
+      xai: async (_system, _user, _maxTokens, options) => {
+        calls.push(`${options.choice}:${options.newsroomId}:${options.model}`);
+        return "grok-result";
+      },
+    });
+    assert.deepEqual(calls, ["grok-oauth:501:grok-4.6"]);
+    assert.equal(result, "grok-result");
+  });
 });

@@ -160,9 +160,10 @@ Story routing and a separate Opinion frontier path:
 | Work               | Current provider rule                                                                                                             |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | Scan and Dark Desk | the configured provider (`LLM_*`, Anthropic, Claude Code, or Grok), or an explicit picker choice including Local model            |
-| Story — Automatic  | configured `LLM_*` gateway when present; otherwise first ready Claude Opus → Codex Terra rung                                     |
-| Story — explicit   | Codex Terra, Codex Sol, Claude Opus, or Local model; no fallback (Zen MiMo and Local Qwen were removed 2026-09-02; a generic Local model returned 2026-09-03) |
-| Opinion            | Automatic: Claude Opus → Codex Terra once when needed; explicit Claude Opus, Codex Sol, Codex Sol, Local model or custom choice stays selected |
+| Story — Automatic  | configured `LLM_*` gateway when present; otherwise first ready Codex Terra → Claude Sonnet rung                                    |
+| Story — explicit   | Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or Local model; no fallback |
+| Dark — Automatic  | configured gateway when present; otherwise Codex Terra → Claude Sonnet for a synthesis-stage retry only |
+| Opinion            | Automatic uses Codex Sol → Claude Sonnet; any named Codex or Claude model, Local model or custom choice stays selected |
 
 Pointing `LLM_BASE_URL` at LM Studio therefore makes that gateway the configured
 provider for Scan and Dark Desk and the forced provider for **Story Automatic**.
@@ -283,8 +284,8 @@ Two things it deliberately does NOT get for free:
   silent: the planner falls back to keyword matching without a word.
 
 **Opinion offers it too.** Opinion shares the provider registry with the other
-desks: Automatic tries Claude Opus then Codex Terra once, while explicit Claude,
-Codex Terra, Codex Sol, Local model and custom choices stay selected. A provider
+desks: Automatic retains its documented Codex-to-Claude path, while every named
+Codex and Claude model, Local model and custom choice stays selected. A provider
 can still refuse or return an invalid editorial, which leaves the request failed.
 
 **On time budgets.** `KIND_BUDGETS.local` allows ten minutes for one call
@@ -386,7 +387,10 @@ A council packet with no text layer — a fax-quality scan of a paper agenda —
 cannot be read by extracting text that was never stored in the file. This
 desk extracts supported embedded JPEG/PNG images and asks the selected
 vision-capable provider to transcribe them (`src/lib/news/ocr.ts`). The Anthropic API, Codex CLI and
-Claude Code CLI provide vision paths when their prerequisites are met. This
+Claude Code CLI provide vision paths when their prerequisites are met. Grok
+(SuperGrok) is a text-only connection for this path and fails clearly when
+selected for OCR. Automatic OCR checks Anthropic API, Codex, Claude Code and
+then a discovered local vision model in that order. This
 does not guarantee that a particular scan will be readable. A **local** model can only do it if it
 was built to accept images at all — an ordinary text-only local model
 cannot, no matter how good it is at writing.

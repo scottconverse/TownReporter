@@ -6,6 +6,9 @@ const LIVE_401 =
   "Claude Code error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
 
 const LIVE_TIMEOUT_NO_OUTPUT = "Claude Code request timed out after 150s, 0 bytes out";
+const CODEX_AUTH_FAILURE =
+  "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";
+const CODEX_TIMEOUT_NO_OUTPUT = "Codex request timed out after 150s, 0 bytes out";
 
 /**
  * `performScanWork` delegates its one AI read, and the Automatic failover
@@ -52,19 +55,19 @@ describe("runScanChatWithFailover", () => {
     let modelChoiceSetTo: string | undefined;
 
     const result = await runScanChatWithFailover({
-      job: { id: 41, model_choice: "claude-frontier", model_choice_source: "auto" },
+      job: { id: 41, model_choice: "codex-balanced", model_choice_source: "auto" },
       system: "SYSTEM PROMPT",
       user: "USER PAYLOAD",
       maxTokens: 3500,
       timeoutMs: () => 90_000,
       grokChat: async (system, user, _maxTokens, opts) => {
         grokCalls.push({ system, user, choice: opts?.choice });
-        if (grokCalls.length === 1) return { ok: false as const, error: LIVE_401 };
+        if (grokCalls.length === 1) return { ok: false as const, error: CODEX_AUTH_FAILURE };
         return { ok: true as const, text: '{"leads":[]}' };
       },
       probe: async (choice) => {
         probeCalls.push(choice);
-        return { ok: true as const, label: "Codex Terra", choice: "codex-balanced" as const };
+        return { ok: true as const, label: "Claude Sonnet", choice: "claude-sonnet" as const };
       },
       setModelChoice: async (_id, choice) => {
         modelChoiceSetTo = choice;
@@ -77,7 +80,7 @@ describe("runScanChatWithFailover", () => {
     assert.equal(result.ok, true);
     assert.deepEqual(
       grokCalls.map((c) => c.choice),
-      ["claude-frontier", "codex-balanced"],
+      ["codex-balanced", "claude-sonnet"],
       "the retry must run on the next ladder rung, not the one that just failed",
     );
     assert.ok(
@@ -86,12 +89,12 @@ describe("runScanChatWithFailover", () => {
     );
     assert.deepEqual(
       probeCalls,
-      ["codex-balanced"],
+      ["claude-sonnet"],
       "must probe only the rung strictly after the current one",
     );
-    assert.equal(modelChoiceSetTo, "codex-balanced");
+    assert.equal(modelChoiceSetTo, "claude-sonnet");
     assert.ok(
-      stageMessages.some((s) => /Switched to Codex Terra: .* sign-in lapsed/.test(s)),
+      stageMessages.some((s) => /Switched to Claude Sonnet: .* sign-in lapsed/.test(s)),
       `expected a "Switched to" stage message, got: ${JSON.stringify(stageMessages)}`,
     );
   });
@@ -108,19 +111,19 @@ describe("runScanChatWithFailover", () => {
     let modelChoiceSetTo: string | undefined;
 
     const result = await runScanChatWithFailover({
-      job: { id: 46, model_choice: "claude-frontier", model_choice_source: "auto" },
+      job: { id: 46, model_choice: "codex-balanced", model_choice_source: "auto" },
       system: "SYSTEM PROMPT",
       user: "USER PAYLOAD",
       maxTokens: 3500,
       timeoutMs: () => 90_000,
       grokChat: async (system, user, _maxTokens, opts) => {
         grokCalls.push({ system, user, choice: opts?.choice });
-        if (grokCalls.length === 1) return { ok: false as const, error: LIVE_TIMEOUT_NO_OUTPUT };
+        if (grokCalls.length === 1) return { ok: false as const, error: CODEX_TIMEOUT_NO_OUTPUT };
         return { ok: true as const, text: '{"leads":[]}' };
       },
       probe: async (choice) => {
         probeCalls.push(choice);
-        return { ok: true as const, label: "Codex Terra", choice: "codex-balanced" as const };
+        return { ok: true as const, label: "Claude Sonnet", choice: "claude-sonnet" as const };
       },
       setModelChoice: async (_id, choice) => {
         modelChoiceSetTo = choice;
@@ -133,13 +136,13 @@ describe("runScanChatWithFailover", () => {
     assert.equal(result.ok, true);
     assert.deepEqual(
       grokCalls.map((c) => c.choice),
-      ["claude-frontier", "codex-balanced"],
+      ["codex-balanced", "claude-sonnet"],
       "the retry must run on the next ladder rung, not the one that just failed",
     );
-    assert.deepEqual(probeCalls, ["codex-balanced"]);
-    assert.equal(modelChoiceSetTo, "codex-balanced");
+    assert.deepEqual(probeCalls, ["claude-sonnet"]);
+    assert.equal(modelChoiceSetTo, "claude-sonnet");
     assert.ok(
-      stageMessages.some((s) => s === "Switched to Codex Terra: Claude Opus timed out"),
+      stageMessages.some((s) => s === "Switched to Claude Sonnet: Codex Terra timed out"),
       `expected the "timed out" stage wording, got: ${JSON.stringify(stageMessages)}`,
     );
     assert.ok(
@@ -276,20 +279,20 @@ describe("runScanChatWithFailover per-attempt timeout", () => {
     const seenTimeouts: number[] = [];
 
     const result = await runScanChatWithFailover({
-      job: { id: 99, model_choice: "claude-frontier", model_choice_source: "auto" },
+      job: { id: 99, model_choice: "codex-balanced", model_choice_source: "auto" },
       system: "S",
       user: "U",
       maxTokens: 3500,
       timeoutMs: scanCallTimeoutMs,
       grokChat: async (_s, _u, _m, opts) => {
         seenTimeouts.push(opts!.timeoutMs!);
-        if (seenTimeouts.length === 1) return { ok: false as const, error: LIVE_401 };
+        if (seenTimeouts.length === 1) return { ok: false as const, error: CODEX_AUTH_FAILURE };
         return { ok: true as const, text: '{"leads":[]}' };
       },
       probe: async () => ({
         ok: true as const,
-        label: "Codex Terra",
-        choice: "codex-balanced" as const,
+        label: "Claude Sonnet",
+        choice: "claude-sonnet" as const,
       }),
       setModelChoice: async () => undefined,
       setStage: async () => undefined,

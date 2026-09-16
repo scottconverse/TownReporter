@@ -31,6 +31,10 @@
  *                           what a lapsed login mid-draft actually looks
  *                           like, and it is what src/lib/news/automatic-failover.ts
  *                           exists to catch.
+ *   FAKE_CLAUDE_QUOTA_PROMPTS
+ *                           "1" to keep auth ready but return the same 429
+ *                           usage-limit shape the live subscription CLI emits
+ *                           when its allowance is exhausted.
  *   FAKE_CLAUDE_VALID_DRAFT "1" to return a small valid draft JSON for every
  *                           chat call. This is for an offline browser fixture
  *                           only; it never invokes a provider.
@@ -127,7 +131,9 @@ if (argv[0] === "auth" && argv[1] === "login") {
     flag = "--allowed-tools";
     value = argv[allowedIdx + 1] ?? "";
   }
-  process.stdout.write(JSON.stringify({ is_error: false, result: JSON.stringify({ flag, value }) }) + "\n");
+  process.stdout.write(
+    JSON.stringify({ is_error: false, result: JSON.stringify({ flag, value }) }) + "\n",
+  );
   process.exit(0);
 } else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_ECHO_READ_CALL === "1") {
   /*
@@ -145,6 +151,15 @@ if (argv[0] === "auth" && argv[1] === "login") {
     JSON.stringify({ is_error: false, result: JSON.stringify({ tools, stdin }) }) + "\n",
   );
   process.exit(0);
+} else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_QUOTA_PROMPTS === "1") {
+  process.stdout.write(
+    JSON.stringify({
+      is_error: true,
+      api_error_status: 429,
+      result: "Usage limit reached. It resets 7pm (America/Denver).",
+    }) + "\n",
+  );
+  process.exit(0);
 } else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_FAIL_PROMPTS === "1") {
   // The exact envelope a real 401 mid-run produced. Exit 0: the CLI's own
   // process succeeded, it is the *call* that failed -- parseCliEnvelope in
@@ -160,16 +175,46 @@ if (argv[0] === "auth" && argv[1] === "login") {
   );
   process.exit(0);
 } else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_VALID_DRAFT === "1") {
+  let prompt = "";
+  for await (const chunk of process.stdin) prompt += chunk;
+  const documentMarker = prompt.match(/AUTOMATIC_DOCUMENT_MARKER_[A-Z0-9_]+/)?.[0] ?? "";
+  const isDocumentRead = /UNTRUSTED SOURCE TEXT:/.test(prompt);
+  const isResearchPass = /\bLead:\s/.test(prompt) && !/NEWS ANGLE:/.test(prompt);
+  const delay = Number(process.env.FAKE_CLAUDE_DELAY_MS || 0);
+  if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+  const result = isDocumentRead
+    ? `The uploaded document says ${documentMarker || "the filed evidence was retained"}.`
+    : isResearchPass
+      ? JSON.stringify({
+          news: "The council approved the item in the supplied material.",
+          why_it_matters: "It proves a retained document can continue on Claude Sonnet.",
+          angle: "A one-shot Automatic failover completed from the retained evidence.",
+          form: "brief",
+          questions: [],
+          unknowns: [],
+          follow: "",
+          fetch_urls: [],
+        })
+      : JSON.stringify({
+          headline: "Claude Sonnet finished after Codex Terra became unavailable",
+          dek: "Automatic preserved the work and moved once to its configured fallback.",
+          body:
+            "The newsroom started this draft on Codex Terra, then moved the unfinished work to Claude Sonnet. " +
+            `The retained evidence marker is ${documentMarker || "not applicable"}.`,
+          topic: "council",
+          source_urls: [],
+          integrity_notes: "",
+          memory_entities: [],
+          form: "brief",
+          found: [],
+          unanswered: [],
+          claims: [],
+          reporting_trail: [],
+        });
   process.stdout.write(
     JSON.stringify({
       is_error: false,
-      result: JSON.stringify({
-        headline: "TEST FIXTURE — Library registration opens",
-        dek: "TEST FIXTURE: a supplied-material draft for queue refresh coverage.",
-        body: "TEST FIXTURE: Registration is open. Editors review this draft before publication.",
-        topic: "community",
-        source_urls: [],
-      }),
+      result,
     }) + "\n",
   );
   process.exit(0);

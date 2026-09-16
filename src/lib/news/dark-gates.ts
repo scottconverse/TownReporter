@@ -319,10 +319,21 @@ export type AdversarialRecord = {
   state?: import("./fetch-outcome.ts").SearchState;
 };
 
+/**
+ * Kinds of source the desk actually tried successfully.
+ *
+ * A completed search with zero results still counts as an attempted platform.
+ * The source prompt explicitly requires those empty searches to be documented;
+ * requiring a returned result in every category changed "look there" into
+ * "find something there" and made protocol completion depend on the web
+ * containing a convenient answer.
+ */
 export function platformsCovered(records: AdversarialRecord[]): SearchTier[] {
   const seen = new Set<SearchTier>();
   for (const r of records) {
-    if (r.hits > 0 && r.url && (!r.state || r.state === "SEARCH_SUCCESS_RESULTS")) seen.add(r.tier);
+    if (r.state ? r.state.startsWith("SEARCH_SUCCESS") : !/failed|blocked|timeout/i.test(r.outcome)) {
+      seen.add(r.tier);
+    }
   }
   return SEARCH_TIERS.filter((t) => seen.has(t));
 }
@@ -385,9 +396,10 @@ export function readGates(raw: unknown): GateReading {
 
   for (const key of ["disproof_attempted", "source_independence", "missing_context"] as const) {
     const v = String(src[key] ?? "").trim();
-    // A one-word shrug is a missing gate, not a filled one. The original
-    // wants documented searches, not a checkbox.
-    if (v.length < 12) missing.push(key);
+    // The source doctrine requires an answer and lets the editor judge its
+    // quality. Character count was an invented proxy that rejected honest,
+    // concise answers and had no editorial meaning.
+    if (!v) missing.push(key);
     else gates[key] = v.slice(0, 4000);
   }
 
@@ -413,9 +425,10 @@ export type Verdict = {
  * "If ANY item unchecked -> Signal is INCOMPLETE. Do not publish."
  * (04-dark-signal-desk.md:147)
  *
- * Gate 4 is absolute: "IF YES: Apply EXTRA scrutiny." Here that is spelled as
- * never finalizing on its own — the sandbox-narration garbage of 0.6.14 was
- * exactly a signal about the tool itself, and this is the gate that stops it.
+ * Gate 4 says "Apply EXTRA scrutiny." It is a warning, not a veto. Operational
+ * narration is filtered where model output is parsed; a real lead about AI,
+ * journalism or information integrity must remain visible like every other
+ * lead.
  */
 export function verify(input: {
   gates: Partial<FourGates>;
@@ -433,14 +446,6 @@ export function verify(input: {
   }
   const selfRef =
     input.gates.self_referential === true || (input.text ? isSelfReferential(input.text) : false);
-  if (selfRef) {
-    return {
-      status: "unverified",
-      missing: [...missing, "it is about this tool or its own kind of work"],
-      reason:
-        "Held back on purpose. This signal is about AI, journalism or the tool itself, and the desk never finalizes those on its own — the original doctrine calls that a blind spot, not a story.",
-    };
-  }
   if (missing.length)
     return {
       status: "unverified",
@@ -451,7 +456,9 @@ export function verify(input: {
     status: "verified",
     missing: [],
     reason:
-      "Verified. The desk ran the adversarial searches itself and the model answered all four gates.",
+      "Protocol complete. The desk ran the adversarial searches and answered the review questions" +
+      (selfRef ? "; this subject is self-referential and needs extra editor scrutiny" : "") +
+      ". This records research effort, not factual proof.",
   };
 }
 
@@ -464,16 +471,16 @@ export function stageWords(row: {
   const missing = String(row.gates_missing ?? "").trim();
   if (row.verification_status === "verified")
     return {
-      chip: "Verified · four gates",
+      chip: "Protocol complete · four gates",
       sentence:
-        "The desk searched for the ordinary explanation, the official record, local press and the opposing account, then the model answered all four gates.",
+        "The desk completed its search-and-review protocol, including searches that returned no result. This records research effort; it does not turn the working theory into a fact.",
     };
   if (row.stage === "dark-signal-desk")
     return {
       chip: "Unverified · gates missing",
       sentence: missing
-        ? `Verification ran but did not finish. Still missing: ${missing}`
-        : "Verification ran but did not finish. Treat this as a question, not a finding.",
+        ? `Adversarial review ran but the protocol is incomplete. Still missing: ${missing}`
+        : "Adversarial review ran but the protocol is incomplete. Treat this as a lead to pursue, not a factual finding.",
     };
   return {
     chip: "Black Desk · speculative, ≤50%",
@@ -483,17 +490,12 @@ export function stageWords(row: {
 }
 
 /* -------------------------------------------------------------------------
-   The newsworthiness gate
+   Editor triage
    ------------------------------------------------------------------------- */
 
 /**
- * civic-scanner's ninth-agent gate, in the plain form the operator's originals
- * put it: "This gate can KILL or DEMOTE stories. A well-sourced story that
- * fails the newsworthiness test does not advance to verification"
- * (civic-scanner/SKILL.md:560-563).
- *
- * Three questions, three answers, stored on the lead. A no to all three is a
- * watch item, not a lead.
+ * Three useful triage questions, stored with the signal. They describe likely
+ * urgency; they never decide whether an editor may keep or hand off a lead.
  */
 export type Newsworthiness = {
   /** Does anyone's life change? (Impact) */
@@ -527,7 +529,7 @@ export function newsworthyDecision(n: Newsworthiness | null): NewsworthyDecision
 }
 
 export function newsworthinessWords(n: Newsworthiness | null): string {
-  if (!n) return "The newsworthiness gate has not been answered for this signal yet.";
+  if (!n) return "The editor-triage questions have not been answered for this signal yet.";
   const yes = (b: boolean) => (b ? "yes" : "no");
   return [
     `Does anyone's life change? ${yes(n.life_changes)}.`,
@@ -558,15 +560,15 @@ GATE 2 — DISPROOF. Write what was tried to DISPROVE this signal and what came 
 
 GATE 3 — INDEPENDENCE AND MISSING CONTEXT. Say which of the sources here trace back to a single origin (one press release, one poster, one meeting) and which are genuinely independent. Then say what a reader would need that this signal does not have. Fields: source_independence, missing_context.
 
-GATE 4 — SELF-REFERENTIAL WARNING. Is this signal about AI, journalism, information integrity, media, or this tool itself? These topics create cognitive blind spots and you are more likely to rationalize away from uncomfortable protocol requirements when analyzing mirrors of your own function. Answer honestly: true means this is NEVER finalized. Field: self_referential.
+GATE 4 — SELF-REFERENTIAL WARNING. Is this signal about AI, journalism, information integrity, media, or this tool itself? These topics create cognitive blind spots and deserve extra scrutiny. Answer honestly. A true answer is a warning for the editor, not a reason to hide or block the lead. Field: self_referential.
 
 A gate you cannot answer stays empty. Do not fill it with a phrase to get past it — an unanswered gate leaves the signal unverified, which is a correct outcome, and a faked one is a protocol violation.
 
-NEWSWORTHINESS GATE — three questions, answered before this can become a lead:
+EDITOR TRIAGE — three questions that help rank the lead:
   Does anyone's life change because of this? (life_changes)
   Is it new, or a routine recurrence? (is_new)
   Is there a record — a document, an agenda item, a filing — that anyone could check? (has_record)
-No to all three is a watch item, not a story. Say so plainly in note.
+No to all three suggests a watch item. It does not hide, delete, or block the lead.
 
 Return ONLY JSON:
 {
@@ -579,5 +581,5 @@ Return ONLY JSON:
   "counter_narrative": "the strongest version of the opposing account, or 'none found' with what was searched",
   "newsworthiness": {"life_changes": false, "is_new": false, "has_record": false, "note": ""},
   "confidence": 0.0,
-  "handoff": "DISCARD|HOLD FOR PATTERN|MONITOR|FOR VERIFICATION"
+  "handoff": "HOLD FOR PATTERN|MONITOR|FOR VERIFICATION"
 }`;

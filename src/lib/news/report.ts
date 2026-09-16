@@ -1,4 +1,4 @@
-import { grokChat, parseJsonBlock, providerBudget, resolveProvider, type ProviderProbe } from "./ai.ts";
+import { grokChat, parseJsonBlock, providerBudget, type ProviderProbe } from "./ai.ts";
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import {
@@ -21,7 +21,7 @@ import {
   type PullRecord,
 } from "./absence-gate.ts";
 import { sha256 } from "./fetch-url.ts";
-import { ingestDocument, mapLimit, type PdfPage } from "./ingest.ts";
+import { ingestDocument, mapLimit, type IngestOptions, type PdfPage } from "./ingest.ts";
 import { rememberCapture } from "./investigate.ts";
 import { formatRetrievedEvidence, retrieveRelevantChunks } from "./retrieve.ts";
 import { webSearch } from "./search-web.ts";
@@ -38,8 +38,10 @@ import type { EditorialAssignment } from "./write-story.ts";
 import { checkStoryNames, replaceName, type UploadedNameEvidence } from "./name-check-work.ts";
 import { nameCheckNotes, nameCheckText, type NameCheck } from "./name-check.ts";
 import { parseDocumentClaims, type DocumentReportedClaim } from "./document-reconcile-evidence.ts";
+import { outletNamesForHost, uncreditedOutlets } from "./source-credit.ts";
 
 export { stripReporterNotebook } from "./strip-draft.ts";
+export { outletNamesForHost, uncreditedOutlets } from "./source-credit.ts";
 
 export const STORY_FORMS = ["brief", "reported", "explainer", "investigation"] as const;
 export type StoryForm = (typeof STORY_FORMS)[number];
@@ -436,19 +438,6 @@ export function preferStoryUrls(used: string[], candidates: string[], headline: 
   return sanitizePublicUrls(out);
 }
 
-export function outletNamesForHost(url: string): string[] {
-  try {
-    const host = new URL(url).hostname.replace(/^www\./i, "").toLowerCase();
-    if (host.includes("longmontleader")) return ["Longmont Leader", "the Leader"];
-    if (host.includes("timescall")) return ["Longmont Times-Call", "Times-Call"];
-    if (host.includes("dailycamera")) return ["Daily Camera"];
-    if (host.includes("longmontcolorado.gov")) return ["City of Longmont"];
-  } catch {
-    /* ignore */
-  }
-  return [];
-}
-
 /*
   "We name them" is a promise about the printed body, and nothing checked it.
 
@@ -478,32 +467,6 @@ export function outletNamesForHost(url: string): string[] {
  * withheld the warning. Padding both sides means the comparison can only
  * succeed on whole words: " the leadership " does not contain " the leader ".
  */
-function spacedWords(text: string): string {
-  return ` ${text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()} `;
-}
-
-export function uncreditedOutlets(body: string, sourceUrls: string[]): string[] {
-  const seen = new Set<string>();
-  const missing: string[] = [];
-  for (const url of sourceUrls) {
-    const names = outletNamesForHost(url);
-    if (names.length === 0) continue;
-    const primary = names[0]!;
-    if (seen.has(primary)) continue;
-    const credited = names.some((name) => spacedWords(body).includes(spacedWords(name)));
-    if (!credited) {
-      seen.add(primary);
-      missing.push(primary);
-    } else {
-      seen.add(primary);
-    }
-  }
-  return missing;
-}
-
 /** Preserve authored links; organization-name matching cannot establish attribution. */
 export function linkOutletInBody(body: string, _urls: string[]): string {
   return body;
@@ -1013,9 +976,12 @@ async function hydrateCaptures(
   }
 }
 
-async function defaultIngest(url: string): Promise<FetchedDoc> {
+export async function defaultIngest(
+  url: string,
+  ocrOptions?: IngestOptions,
+): Promise<FetchedDoc> {
   try {
-    const got = await ingestDocument(url);
+    const got = await ingestDocument(url, ocrOptions);
     return {
       url,
       title: got.title || describeSourceUrl(url).title,
@@ -1308,16 +1274,17 @@ export async function reportAndDraft(
     effectiveModelChoice = ready.choice;
   }
   const suppliedOnly = opts.researchScope === "supplied";
-  if (suppliedOnly && resolveProvider(effectiveModelChoice)?.kind === "codex") {
-    return { error: "Supplied material requires Claude or a local/API model with tools disabled. Choose one of those models, or choose Research public sources." };
-  }
   const limits = providerBudget(effectiveModelChoice, opts.providerOverrides);
   const budget = deps.budgetMs ?? limits.wallMs;
   const reserve = deps.budgetMs ? DRAFT_WRITE_RESERVE_MS : limits.reserveMs;
   const nameReserve = budget >= 20_000 ? Math.min(limits.callMs, Math.floor(budget * 0.3)) : 0;
   const timeLeft = () => budget - (Date.now() - started);
   const canFollow = () => !suppliedOnly && timeLeft() > reserve + nameReserve + 4_000;
-  const ingest = deps.ingest ?? defaultIngest;
+  const ingest = deps.ingest ?? ((url: string) => defaultIngest(url, {
+    provider: effectiveModelChoice,
+    newsroomId: String(newsroomId),
+    localModel: opts.providerOverrides?.["local-model"]?.localModel,
+  }));
   const search = suppliedOnly ? async (_q: string) => [] : deps.search ?? (async (q: string) => webSearch(q));
   const capture = deps.capture ?? ((userId, doc) => defaultCapture(userId, newsroomId, doc));
   const hydrate = deps.hydrate ?? ((userId, urls) => hydrateCaptures(userId, newsroomId, urls));

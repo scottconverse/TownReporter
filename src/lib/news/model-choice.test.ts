@@ -7,23 +7,50 @@ import {
   modelChoiceLabel,
   modelChoiceHelp,
   OPINION_MODEL_CHOICES,
+  FORCED_MODEL_CHOICES,
   opinionModelChoice,
   opinionProviderProblem,
+  rememberedStoryModelChoice,
   STORY_MODEL_CHOICES,
   storyModelChoice,
   shouldHydrateDarkModel,
 } from "./model-choice.ts";
 import { LOCAL_MODEL_UNCONFIGURED } from "./preflight.ts";
+import { providersFor } from "./provider-registry.ts";
 
 const STORY_VALUES = [
   "auto",
-  "codex-balanced",
+  "codex-astra",
   "codex-frontier",
+  "codex-balanced",
+  "codex-luna",
+  "claude-fable",
   "claude-frontier",
+  "claude-sonnet",
+  "claude-haiku",
+  "grok-oauth",
   "local-model",
 ] as const;
 
 describe("model choice contract", () => {
+  it("offers every named subscription model in the shared Story picker", () => {
+    assert.deepEqual(
+      STORY_MODEL_CHOICES.map((choice) => choice.label),
+      [
+        "Automatic",
+        "Codex Astra",
+        "Codex Sol",
+        "Codex Terra",
+        "Codex Luna",
+        "Claude Fable",
+        "Claude Opus",
+        "Claude Sonnet",
+        "Claude Haiku",
+        "Grok (SuperGrok)",
+        "Local model",
+      ],
+    );
+  });
   it("never converts a missing or malformed custom connection into Automatic", () => {
     for (const value of ["custom:", "custom:deleted", "custom:untrusted/input"]) {
       for (const normalize of [storyModelChoice, opinionModelChoice, darkModelChoice]) {
@@ -33,13 +60,21 @@ describe("model choice contract", () => {
   });
   it("preserves an explicit saved API connection in every workflow without changing built-in choices", () => {
     const choice = "custom:2ff67746-9c53-465d-9d63-fb96a7ec1175";
-    for (const normalize of [storyModelChoice, opinionModelChoice, darkModelChoice, effectiveStoryModelChoice]) {
+    for (const normalize of [
+      storyModelChoice,
+      opinionModelChoice,
+      darkModelChoice,
+      effectiveStoryModelChoice,
+    ]) {
       assert.equal(normalize(choice), choice);
     }
     assert.match(modelChoiceLabel(choice), /custom api/i);
     assert.match(modelChoiceHelp(choice), /no fallback/i);
     assert.doesNotMatch(modelChoiceHelp(choice), /tries Claude/);
-    assert.deepEqual(STORY_MODEL_CHOICES.map((option) => option.value), STORY_VALUES);
+    assert.deepEqual(
+      STORY_MODEL_CHOICES.map((option) => option.value),
+      STORY_VALUES,
+    );
   });
   it("ignores stale Dark Desk detail, then hydrates when the selected file's detail arrives", () => {
     assert.equal(shouldHydrateDarkModel(8, 7, "codex-balanced", "briefed"), false);
@@ -59,9 +94,21 @@ describe("model choice contract", () => {
   it("offers the signed-in Codex providers on Opinion", () => {
     assert.deepEqual(
       OPINION_MODEL_CHOICES.map((choice) => choice.value),
-      ["auto", "codex-balanced", "codex-frontier", "claude-frontier", "local-model"],
+      STORY_VALUES,
     );
-    assert.ok(OPINION_MODEL_CHOICES.every((choice) => STORY_MODEL_CHOICES.includes(choice)));
+    assert.deepEqual(
+      OPINION_MODEL_CHOICES.map((choice) => choice.value),
+      STORY_MODEL_CHOICES.map((choice) => choice.value),
+    );
+  });
+
+  it("derives the forced batch list directly and excludes Automatic", () => {
+    assert.deepEqual(
+      FORCED_MODEL_CHOICES.map((choice) => choice.value),
+      providersFor("forced").map((entry) => entry.id),
+    );
+    assert.ok(!FORCED_MODEL_CHOICES.some((choice) => choice.value === "auto"));
+    assert.equal(modelChoiceLabel("codex-balanced", "forced"), "Codex Terra");
   });
 
   it("round-trips every valid Story choice and defaults invalid input safely", () => {
@@ -86,8 +133,21 @@ describe("model choice contract", () => {
     assert.equal(modelChoiceLabel("configured"), "Configured gateway");
   });
 
+  it("restores the editor's visible Story choice from the latest job", () => {
+    assert.equal(rememberedStoryModelChoice("claude-frontier", "auto"), "auto");
+    assert.equal(rememberedStoryModelChoice("codex-frontier", "editor"), "codex-frontier");
+    assert.equal(rememberedStoryModelChoice("local-model", "editor"), "local-model");
+  });
+
   it("round-trips Opinion choices and defaults missing or invalid input to Sol", () => {
-    for (const value of ["auto", "claude-frontier", "codex-balanced", "codex-frontier", "local-model"] as const) {
+    for (const value of [
+      "auto",
+      "claude-frontier",
+      "codex-balanced",
+      "codex-frontier",
+      "grok-oauth",
+      "local-model",
+    ] as const) {
       assert.equal(opinionModelChoice(value), value);
     }
     for (const invalid of ["local", "zen", "codex", undefined, null, {}]) {
@@ -106,11 +166,15 @@ describe("model choice contract", () => {
   it("explains each automatic order and makes explicit choices no-fallback", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries Claude Opus, then Codex Terra. If the first one's login has lapsed or it does not respond in time, the draft moves to the next.",
+      "Uses your configured gateway when set; otherwise tries Codex Terra, then Claude Sonnet. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the draft moves to the next. A content refusal stops the run, and an explicit pick never falls back.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
-      "Tries Claude Opus, then Codex Sol. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.",
+      "Tries Codex Sol, then Claude Sonnet. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.",
+    );
+    assert.equal(
+      modelChoiceHelp("auto", "dark"),
+      "Uses your configured gateway when set; otherwise tries Codex Terra, then Claude Sonnet. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),
@@ -132,6 +196,16 @@ describe("model choice contract", () => {
       modelChoiceHelp("local-model", "dark"),
       "Uses only Local model for this run; no fallback.",
     );
+  });
+
+  it("names SuperGrok in every picker, with no fallback when chosen explicitly", () => {
+    assert.equal(modelChoiceLabel("grok-oauth"), "Grok (SuperGrok)");
+    for (const surface of [undefined, "opinion", "dark"] as const) {
+      assert.equal(
+        modelChoiceHelp("grok-oauth", surface),
+        "Uses only Grok (SuperGrok) for this run; no fallback.",
+      );
+    }
   });
 
   it("gives Opinion setup steps for its one provider, and does not send anyone to Codex", () => {
@@ -173,7 +247,12 @@ describe("localModelOptionLabel", () => {
   });
 
   it("never claims vision for a plain chat model", () => {
-    const label = localModelOptionLabel({ id: "gemma4:12b", loaded: true, thinking: true, vision: false });
+    const label = localModelOptionLabel({
+      id: "gemma4:12b",
+      loaded: true,
+      thinking: true,
+      vision: false,
+    });
     assert.doesNotMatch(label, /vision/);
     assert.equal(label, "gemma4:12b · loaded · thinking off");
   });

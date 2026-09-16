@@ -110,28 +110,37 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
     paper: {
       name: cfg.name,
       city: cfg.city,
-      officialDomains: officialDomains(cfg.city, input.pointers.map((pointer) => pointer.url)),
+      officialDomains: officialDomains(
+        cfg.city,
+        input.pointers.map((pointer) => pointer.url),
+      ),
     },
   };
   return orchestrateEditorial(input, {
     findVoiceFile,
     runClaudePair: async ({ input: editorialInput, found, researchPack }) => {
-      const { resolveClaudeCode, plannerModel } = await import("./ai");
+      const { resolveClaudeCode } = await import("./ai");
       if (!resolveClaudeCode()) {
         return {
           ok: false,
           error: "Claude is unavailable. Open Claude Code, sign in, then try again.",
         };
       }
+      const choice = opinionModelChoice(editorialInput.modelChoice);
+      const entry = providerEntry(choice);
+      if (!entry || entry.kind !== "claude-code") {
+        return { ok: false, error: "The selected Claude model is unavailable." };
+      }
       const research = await claudeCodeChat({
         system: RESEARCH_INSTRUCTIONS,
         user: researchPack,
-        model: plannerModel() || "claude-haiku-4-5-20251001",
+        model: plannerModelFor(choice) || providerModel(entry),
         allowedTools: EDITORIAL_TOOLS,
         timeoutMs: editorialTimeoutMs(),
       });
       if (!research.ok) return research;
-      if (editorialInput.completion) await setJobStage(editorialInput.completion.jobId, "Writing the editorial");
+      if (editorialInput.completion)
+        await setJobStage(editorialInput.completion.jobId, "Writing the editorial");
       return claudeCodeChat({
         system: "",
         systemPromptFile: found.voice.path,
@@ -143,14 +152,17 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
           askedFor: editorialInput.askedFor,
           research: research.text,
         }),
-        model: process.env.TOWNREPORTER_EDITORIAL_MODEL?.trim() || "claude-opus-5",
+        model: providerModel(entry),
         timeoutMs: editorialTimeoutMs(),
       });
     },
     runCodexPair: async ({ input: editorialInput, found, researchPack }) => {
       const { codexChat } = await import("./ai-codex.server.ts");
-      const choice = editorialInput.modelChoice === "codex-frontier" ? "codex-frontier" : "codex-balanced";
-      const entry = providerEntry(choice)!;
+      const choice = opinionModelChoice(editorialInput.modelChoice);
+      const entry = providerEntry(choice);
+      if (!entry || entry.kind !== "codex") {
+        return { ok: false, error: "The selected Codex model is unavailable." };
+      }
       const research = await codexChat({
         system: RESEARCH_INSTRUCTIONS,
         user: researchPack,
@@ -159,7 +171,8 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
         webSearch: true,
       });
       if (!research.ok) return research;
-      if (editorialInput.completion) await setJobStage(editorialInput.completion.jobId, "Writing the editorial");
+      if (editorialInput.completion)
+        await setJobStage(editorialInput.completion.jobId, "Writing the editorial");
       return codexChat({
         system: "",
         systemPromptFile: found.voice.path,
@@ -263,7 +276,8 @@ export async function fileEditorial(
   let integrityNotes = editorialSourcesError(ed.appendix) ?? "";
   if (input.completion && modelChoice) {
     await (deps.setJobStage ?? setJobStage)(input.completion.jobId, "Checking names and spellings");
-    const checkEditorialNames = deps.checkEditorialNames ?? (await import("./editorial-name-check.ts")).checkEditorialNames;
+    const checkEditorialNames =
+      deps.checkEditorialNames ?? (await import("./editorial-name-check.ts")).checkEditorialNames;
     const checked = await checkEditorialNames({
       newsroomId: input.newsroomId,
       editorialRequestId: input.completion.requestId,
@@ -284,7 +298,8 @@ export async function fileEditorial(
   const body = ed.appendix ? `${ed.body}\n\n---\n\nCLAIMS AND SOURCES\n\n${ed.appendix}` : ed.body;
 
   const headline = opinionHeadline(ed.headline);
-  if (nameCheck) nameCheck = { ...nameCheck, checkedText: nameCheckText({ headline, dek: "", body }) };
+  if (nameCheck)
+    nameCheck = { ...nameCheck, checkedText: nameCheckText({ headline, dek: "", body }) };
   return withTransaction(async (sql) => {
     if (input.completion) {
       const [request] = await sql<{
@@ -492,26 +507,32 @@ export async function performEditorialWork(
   }
 
   let documentEvidence = "";
-  const readEditorialDocuments = deps.readEditorialDocuments ?? (await import("./story-documents.server.ts")).readEditorialDocuments;
+  const readEditorialDocuments =
+    deps.readEditorialDocuments ??
+    (await import("./story-documents.server.ts")).readEditorialDocuments;
   const requestedChoice = opinionModelChoice(req.model_choice);
-  const readingChoices = requestedChoice === "auto"
-    ? OPINION_AUTOMATIC_LADDER
-    : ([requestedChoice] as const);
+  const readingChoices =
+    requestedChoice === "auto" ? OPINION_AUTOMATIC_LADDER : ([requestedChoice] as const);
   let readingFailure: unknown;
   for (const choice of readingChoices) {
     try {
       documentEvidence = await readEditorialDocuments(
-        job.newsroom_id, req.id,
+        job.newsroom_id,
+        req.id,
         choice as Parameters<typeof readEditorialDocuments>[2],
         [req.subject, req.asked_for].filter(Boolean).join("\n"),
-        (stage) => setJobStage(job.id, stage), job.user_id,
+        (stage) => setJobStage(job.id, stage),
+        job.user_id,
       );
       readingFailure = undefined;
       break;
-    } catch (error) { readingFailure = error; }
+    } catch (error) {
+      readingFailure = error;
+    }
   }
   if (readingFailure) {
-    const detail = readingFailure instanceof Error ? readingFailure.message : String(readingFailure);
+    const detail =
+      readingFailure instanceof Error ? readingFailure.message : String(readingFailure);
     await sql`update editorial_requests set error=${detail.slice(0, 800)},finished_at=now()
       where id=${req.id} and newsroom_id=${job.newsroom_id} and draft_id is null`;
     throw readingFailure;

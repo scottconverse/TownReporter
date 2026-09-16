@@ -188,9 +188,19 @@ describe("the four gates", () => {
     assert.match(v.reason, /Still missing/);
   });
 
-  it("treats a one-word shrug as a missing gate, not a filled one", () => {
+  it("does not invent a character-count requirement for concise gate answers", () => {
     const reading = readGates({ ...FULL_GATES, disproof_attempted: "none" });
-    assert.ok(reading.missing.includes("disproof_attempted"));
+    assert.ok(!reading.missing.includes("disproof_attempted"));
+  });
+
+  it("counts a completed zero-result search as an attempted source category", () => {
+    const emptyButRun: AdversarialRecord[] = [
+      { query: "a", kind: "ordinary", tier: "official", url: null, outcome: "no results found", hits: 0, state: "SEARCH_SUCCESS_ZERO_RESULTS" },
+      { query: "b", kind: "official", tier: "official", url: null, outcome: "no results found", hits: 0, state: "SEARCH_SUCCESS_ZERO_RESULTS" },
+      { query: "c", kind: "press", tier: "local-press", url: null, outcome: "no results found", hits: 0, state: "SEARCH_SUCCESS_ZERO_RESULTS" },
+      { query: "d", kind: "counter", tier: "community", url: null, outcome: "no results found", hits: 0, state: "SEARCH_SUCCESS_ZERO_RESULTS" },
+    ];
+    assert.equal(verify({ ...readGates(FULL_GATES), adversarial: emptyButRun }).status, "verified");
   });
 
   it("will not finalize when the adversarial searches were not all run", () => {
@@ -208,22 +218,23 @@ describe("the four gates", () => {
     (04-dark-signal-desk.md:128-136). This is the gate that would have caught
     the sandbox-narration garbage of 0.6.14.
   */
-  it("never finalizes a self-referential signal, even with every other gate answered", () => {
+  it("flags self-reference for extra scrutiny without turning the warning into a veto", () => {
     const v = verify({
       ...readGates({ ...FULL_GATES, self_referential: true }),
       adversarial: FULL_SEARCHES,
     });
-    assert.equal(v.status, "unverified");
-    assert.match(v.reason, /about AI, journalism or the tool itself/);
+    assert.equal(v.status, "verified");
+    assert.match(v.reason, /extra editor scrutiny/);
   });
 
-  it("catches the 0.6.14 sandbox-narration pattern even when the model says self_referential is false", () => {
+  it("does not use self-reference detection as a lead veto", () => {
     const v = verify({
       ...readGates(FULL_GATES),
       adversarial: FULL_SEARCHES,
       text: `${SANDBOX_SIGNAL.name} ${SANDBOX_SIGNAL.observation}`,
     });
-    assert.equal(v.status, "unverified");
+    assert.equal(v.status, "verified");
+    assert.match(v.reason, /extra editor scrutiny/);
   });
 
   it("says which stage a signal is at, in words", () => {
@@ -231,7 +242,11 @@ describe("the four gates", () => {
     assert.match(stageWords({ stage: "black-desk" }).sentence, /capped at 50%/);
     assert.match(
       stageWords({ stage: "dark-signal-desk", verification_status: "verified" }).chip,
-      /Verified · four gates/,
+      /Protocol complete · four gates/,
+    );
+    assert.match(
+      stageWords({ stage: "dark-signal-desk", verification_status: "verified" }).sentence,
+      /does not turn the working theory into a fact/i,
     );
     const un = stageWords({
       stage: "dark-signal-desk",
@@ -243,12 +258,12 @@ describe("the four gates", () => {
   });
 });
 
-describe("the newsworthiness gate", () => {
+describe("editor triage", () => {
   /*
-    civic-scanner's ninth agent: "This gate can KILL or DEMOTE stories"
-    (SKILL.md:560-563). Three questions; a no to all three is a watch item.
+    These answers rank likely urgency. Queue handoff tests prove they do not
+    decide what the editor is allowed to pursue.
   */
-  it("keeps a no / no / no signal in the file as a watch item, not a lead", () => {
+  it("suggests watch for a no / no / no signal without controlling handoff", () => {
     const n = readNewsworthiness({
       life_changes: false,
       is_new: false,
@@ -258,7 +273,7 @@ describe("the newsworthiness gate", () => {
     assert.equal(newsworthyDecision(n), "watch");
   });
 
-  it("advances a signal that answers yes to any of the three", () => {
+  it("suggests lead when any answer is yes", () => {
     assert.equal(
       newsworthyDecision(
         readNewsworthiness({ life_changes: false, is_new: false, has_record: true }),
@@ -267,7 +282,7 @@ describe("the newsworthiness gate", () => {
     );
   });
 
-  it("treats an unanswered gate as a watch item rather than assuming a story", () => {
+  it("suggests watch when triage is unanswered", () => {
     assert.equal(newsworthyDecision(readNewsworthiness(null)), "watch");
     assert.equal(newsworthyDecision(readNewsworthiness({})), "watch");
   });

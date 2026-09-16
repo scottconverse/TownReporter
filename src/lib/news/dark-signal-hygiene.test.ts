@@ -9,8 +9,8 @@ import { isPoisonedSignal } from "./dark.ts";
  * (observation/pattern/linkage_map/alternatives/counter_narrative/
  * what_would_kill/pathway), and it was not filtered at all — a signal built
  * entirely from tool-refusal narration would insert straight into
- * dark_signals. This proves `isPoisonedSignal` catches it in every field,
- * not just `observation`, and leaves a real signal alone.
+ * dark_signals. This proves `isPoisonedSignal` rejects a wholly operational
+ * response without deleting a real lead because one field is awkward.
  */
 describe("isPoisonedSignal", () => {
   it("catches tool-refusal narration in the name", () => {
@@ -20,36 +20,27 @@ describe("isPoisonedSignal", () => {
     );
   });
 
-  it("catches it in observation even when the name is clean", () => {
+  it("keeps a real named lead even when one field contains operational narration", () => {
     assert.equal(
       isPoisonedSignal({
         name: "Contract award pattern",
         observation: "This command requires approval and the fetch was refused",
       }),
-      true,
+      false,
     );
   });
 
-  it("catches it in pattern, linkage_map, alternatives, counter_narrative, what_would_kill, or pathway", () => {
-    const base = { name: "Contract award pattern" };
-    assert.equal(isPoisonedSignal({ ...base, pattern: "ToolSearch returned nothing" }), true);
-    assert.equal(isPoisonedSignal({ ...base, linkage_map: "MCP tool schema blackout" }), true);
-    assert.equal(
-      isPoisonedSignal({ ...base, alternatives: "curl was blocked by an allow-rule" }),
-      true,
-    );
-    assert.equal(
-      isPoisonedSignal({ ...base, counter_narrative: "Bash tool call was denied" }),
-      true,
-    );
-    assert.equal(
-      isPoisonedSignal({ ...base, what_would_kill: "WebSearch access, currently refused" }),
-      true,
-    );
-    assert.equal(
-      isPoisonedSignal({ ...base, pathway: "attempted a sandbox escape via the command line" }),
-      true,
-    );
+  it("rejects a response whose substantive fields are all operational narration", () => {
+    assert.equal(isPoisonedSignal({
+      name: "WebFetch was blocked by the sandbox policy",
+      observation: "This command requires approval and the fetch was refused",
+      pattern: "ToolSearch returned nothing",
+      linkage_map: "MCP tool schema blackout",
+      alternatives: "curl was blocked by an allow-rule",
+      counter_narrative: "Bash tool call was denied",
+      what_would_kill: "WebSearch access, currently refused",
+      pathway: "attempted a sandbox escape via the command line",
+    }), true);
   });
 
   it("leaves a real signal alone", () => {

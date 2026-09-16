@@ -1,7 +1,7 @@
 # Add your own AI API
 
 TownReporter can use a saved OpenAI-compatible API connection for a specific
-Scan, Story draft, Opinion, or Dark Desk run. The connection is an optional
+Daily Scan, Scan, Story draft, Opinion, Dark Desk or Queue batch run. The connection is an optional
 operator setting: it does not install or manage a provider, change
 **Automatic**, or change any existing default or fallback behavior.
 
@@ -25,6 +25,10 @@ Open **Server** and find **Add your own AI API**.
 5. Select **Save connection** (or **Save changes** while editing).
 
 The endpoint must support the OpenAI-compatible `/chat/completions` protocol.
+For Gemini, the **Set up Gemini** button fills the connection name and Google
+AI Studio OpenAI-compatible base URL for you. Add the key, save the connection,
+then use **Discover models** on the saved connection, choose a model, save the
+changes, and only then use **Test connection**.
 The URL is validated when saved, but saving itself does not call a model.
 
 ## Test and manage it
@@ -55,6 +59,11 @@ After the connection has an enabled model, it appears by its saved name in the
 model picker. Select that named connection explicitly for the desk operation,
 then start the operation. The selected connection is pinned to the queued job.
 
+Daily Scan and Queue batch drafting also accept a saved Custom AI connection. The batch pins
+the selected connection and model for every chosen lead. The API key is
+resolved on the server only when each job runs; it is never copied into the
+batch record.
+
 - **Scan** is queued and runs against the selected custom endpoint. An explicit
   custom choice does not fail over to Claude, Codex, Automatic, a local model,
   or another paid endpoint. If the connection is later disabled, deleted, or
@@ -75,6 +84,30 @@ The model picker labels an explicit custom choice as “Uses only … for this
 run; no fallback.” Provider usage charges and retention/privacy policies still
 belong to the endpoint operator, so review those policies before sending
 newsroom material.
+
+## Google Gemini
+
+Google's Gemini API provides an OpenAI-compatible endpoint. Create the key in
+Google AI Studio, then enter it only in TownReporter's authenticated **Server →
+Add your own AI API** form:
+
+| Field | Value |
+| --- | --- |
+| Connection name | A clear editor label such as `Gemini Flash` |
+| Base URL | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| API key | The Gemini API key from Google AI Studio |
+| Model id | Use **Discover models** or enter the exact Gemini model id |
+
+Save the connection first. Then use **Discover models**, choose a model, save
+the changes, and use **Test connection**. Finally select that named connection
+for a Story, Daily Scan, Scan, Opinion, Dark Desk or Queue batch run. The key stays encrypted in
+TownReporter's database and is not written to source code, documentation or a
+batch job. See Google's [official OpenAI compatibility
+guide](https://ai.google.dev/gemini-api/docs/openai).
+
+Google Antigravity is a managed research agent using Google's separate
+Interactions API. It is not a Gemini chat model and does not use this
+OpenAI-compatible connection form.
 
 ## Optional LiteLLM example
 

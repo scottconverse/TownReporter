@@ -2,8 +2,9 @@
  * Stage 2 — the Dark Signal Desk.
  *
  * The Black Desk (stage 1, `synthesizeSignals` in dark.ts) files speculative
- * signals capped at 0.5. Nothing it filed may be shown as finalized, sent to
- * the queue, or treated as a finding until this runs.
+ * signals capped at 0.5. This stage records adversarial searches and review
+ * questions for the editor. It does not decide whether a lead may remain open
+ * or move to the working queue.
  *
  * The original is blunt about why this exists: "Without adversarial checking,
  * AI systems will naturally analyze contested situations from whatever
@@ -29,6 +30,7 @@ import { grokChat, parseJsonBlock, providerBudget, type EffectiveProviderChoice 
 import type { ProviderOverrides } from "./provider-registry.ts";
 import { searchWithFallback } from "./search-web.ts";
 import type { WebHit, SearchAttempt } from "./search-web.ts";
+import type { DarkRunBudget, DarkRunUsageSnapshot } from "./dark-run-budget.ts";
 import {
   DARK_VERIFY_SYSTEM,
   adversarialQueries,
@@ -41,7 +43,7 @@ import {
   type Place,
 } from "./dark-gates.ts";
 
-/** Signals verified per round. A round that files thirty does not pay for thirty model calls. */
+/** Signals reviewed per round. A round that files thirty does not pay for thirty model calls. */
 export const VERIFY_PER_ROUND = 6;
 
 export type VerifySearchFn = (query: string) => Promise<WebHit[] | SearchAttempt>;
@@ -87,6 +89,9 @@ export async function verifyRunSignals(opts: {
   overrides?: ProviderOverrides | null;
   deps?: VerifyDeps;
   preferences?: ResearchSnapshot;
+  runBudget?: DarkRunBudget;
+  onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>;
+  onStage?: (stage: string) => Promise<unknown>;
 }): Promise<{
   eligible: number | null;
   deferred: number;
@@ -132,7 +137,9 @@ export async function verifyRunSignals(opts: {
   const selected = rows.slice(0, limit);
   const deferred = rows.length - selected.length;
 
-  for (const sig of selected) {
+  signalLoop: for (let signalIndex = 0; signalIndex < selected.length; signalIndex++) {
+    const sig = selected[signalIndex]!;
+    await opts.onStage?.(`Testing explanations for signal ${signalIndex + 1} of ${selected.length}`);
     const plan = adversarialQueries(sig, opts.place, official).map((q) => ({
       ...q,
       query: queryWithResearchWindow(q.query, opts.preferences),
@@ -142,6 +149,11 @@ export async function verifyRunSignals(opts: {
     const evidence: string[] = [];
     let trailSaved = true;
     for (const q of plan) {
+      if (opts.runBudget && !opts.runBudget.consumeSearch()) {
+        failed += 1;
+        unverified += selected.length - signalIndex;
+        break signalLoop;
+      }
       let hits: WebHit[] = [];
       let outcome = "no results found";
       let state: SearchAttempt["state"] = "SEARCH_SUCCESS_ZERO_RESULTS";
@@ -166,6 +178,7 @@ export async function verifyRunSignals(opts: {
         state = "SEARCH_FAILED_NETWORK";
         outcome = `search failed: ${err instanceof Error ? err.message : "unknown"}`.slice(0, 500);
       }
+      if (opts.runBudget) await opts.onUsage?.(opts.runBudget.snapshot());
       hits = hits.slice(0, 6).map((h) => ({
         url: h.url.slice(0, 1000),
         title: h.title.slice(0, 300),
@@ -216,7 +229,7 @@ export async function verifyRunSignals(opts: {
       `SIGNAL: ${sig.name}`,
       `OBSERVATION: ${sig.observation.slice(0, 1000)}`,
       `PATTERN: ${sig.pattern.slice(0, 1000)}`,
-      `BORING EXPLANATION AS FILED: ${sig.alternatives.slice(0, 1000) || "(none written — say so)"}`,
+      `BENIGN EXPLANATION AS FILED: ${sig.alternatives.slice(0, 1000) || "(none written — say so)"}`,
       `WHAT WOULD KILL IT: ${String(sig.what_would_kill ?? "").slice(0, 1000)}`,
       `PLACE: ${opts.place.city}${opts.place.county ? `, ${opts.place.county} County` : ""}, ${opts.place.state}`,
       "",
@@ -231,11 +244,26 @@ export async function verifyRunSignals(opts: {
       .slice(0, 20000);
 
     let text: string | null = null;
+    const modelCall = opts.runBudget?.startModelCall({
+      stage: `verification signal ${signalIndex + 1}`,
+      provider: opts.deps?.model ? "injected" : (opts.choice ?? "automatic"),
+      model: opts.deps?.model ? "injected" : (opts.choice ?? "provider-default"),
+    });
+    if (opts.runBudget && !modelCall) {
+      failed += 1;
+      unverified += selected.length - signalIndex;
+      break;
+    }
+    if (modelCall) await opts.onUsage?.(opts.runBudget!.snapshot());
     try {
-      if (opts.deps?.model) text = await opts.deps.model(DARK_VERIFY_SYSTEM, pack);
+      if (opts.deps?.model) {
+        text = await opts.deps.model(DARK_VERIFY_SYSTEM, pack);
+        modelCall?.finish({ result: text ? "ok" : "error" });
+      }
       else {
+        const callMs = providerBudget(opts.choice, opts.overrides).callMs;
         const ai = await grokChat(DARK_VERIFY_SYSTEM, pack, 1400, {
-          timeoutMs: providerBudget(opts.choice, opts.overrides).callMs,
+          timeoutMs: Math.max(1, Math.min(callMs, opts.runBudget?.remainingMs() ?? callMs)),
           choice: opts.choice,
           newsroomId: opts.newsroomId,
           localModel: opts.overrides?.["local-model"]?.localModel,
@@ -243,10 +271,23 @@ export async function verifyRunSignals(opts: {
           noTools: true,
         });
         text = ai?.ok ? ai.text : null;
+        const error = ai && !ai.ok ? ai.error : "";
+        modelCall?.finish({
+          result: ai?.ok ? "ok" : (/timed out|timeout/i.test(error) ? "timeout" : "error"),
+          durationMs: ai?.meta?.durationMs,
+          timedOut: ai?.meta?.timedOut ?? (!ai?.ok && /timed out|timeout/i.test(error)),
+          provider: ai?.meta?.provider,
+          model: ai?.meta?.model,
+          inputTokens: ai?.meta?.inputTokens,
+          outputTokens: ai?.meta?.outputTokens,
+          totalTokens: ai?.meta?.totalTokens,
+        });
       }
     } catch {
       text = null;
+      modelCall?.finish({ result: "error" });
     }
+    if (opts.runBudget) await opts.onUsage?.(opts.runBudget.snapshot());
 
     const parsed = text
       ? (parseJsonBlock<{
@@ -317,8 +358,8 @@ export async function verifyRunSignals(opts: {
     .catch(() => false);
 
   const summary = rows.length
-    ? `Verification: ${verified} of ${rows.length} eligible signal(s) verified. Attempted ${selected.length} through the four gates with ${allSearches.length} adversarial searches; ${unverified} left unverified (${failed} encountered failures). ${deferred} deferred by the ${limit}-signal round limit.`
-    : "Verification: no new signals to check this round.";
+    ? `Adversarial review: ${verified} of ${rows.length} eligible signal(s) completed the four-question protocol. Attempted ${selected.length} with ${allSearches.length} searches; ${unverified} remain protocol-incomplete (${failed} encountered failures). ${deferred} saved for a later review round.`
+    : "Adversarial review: no new signals to check this round.";
 
   return {
     checked: selected.length,
@@ -331,7 +372,7 @@ export async function verifyRunSignals(opts: {
     summary:
       summary +
       (unsaved
-        ? ` ${unsaved} verification result(s) could not be saved; retry verification.`
+        ? ` ${unsaved} review result(s) could not be saved; retry the review.`
         : "") +
       (!runSaved ? " The round search summary could not be saved." : ""),
   };

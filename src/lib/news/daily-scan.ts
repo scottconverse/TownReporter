@@ -2,8 +2,12 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql, type Sql } from "../db.ts";
 import { deskMiddleware, assertOwner } from "./desk-auth.ts";
 import { getPaperConfig } from "./paper-settings.ts";
+import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
+import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
 
-export type DailyScanRuntime = "local" | "claude-cli" | "codex-terra" | "codex-sol";
+export type DailyScanRuntime = Exclude<StoryModelChoice, "auto">;
+type LegacyDailyScanRuntime = "local" | "claude-cli" | "codex-terra" | "codex-sol";
+export type StoredDailyScanRuntime = DailyScanRuntime | LegacyDailyScanRuntime;
 export type DailyScanPolicy = {
   enabled: boolean;
   paused: boolean;
@@ -51,8 +55,33 @@ export type DailyScanPolicyResult =
         | "provider-unavailable";
     };
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
-const RUNTIMES = new Set(["local", "claude-cli", "codex-terra", "codex-sol"]);
 const CAP = 12;
+const LEGACY_DAILY_SCAN_RUNTIMES = new Set<string>([
+  "local",
+  "claude-cli",
+  "codex-terra",
+  "codex-sol",
+]);
+
+function validDailyScanRuntime(value: string): value is DailyScanRuntime {
+  return isCustomModelChoice(value) || PICKER_PROVIDER_IDS.includes(value as (typeof PICKER_PROVIDER_IDS)[number]);
+}
+
+function validStoredDailyScanRuntime(value: unknown): value is StoredDailyScanRuntime {
+  return typeof value === "string" &&
+    (validDailyScanRuntime(value) || LEGACY_DAILY_SCAN_RUNTIMES.has(value));
+}
+
+export function dailyScanRuntime(value: unknown): DailyScanRuntime {
+  if (value === "local") return "local-model";
+  if (value === "claude-cli") return "claude-sonnet";
+  if (value === "codex-terra") return "codex-balanced";
+  if (value === "codex-sol") return "codex-frontier";
+  if (isCustomModelChoice(value)) return value;
+  return validDailyScanRuntime(String(value))
+    ? (value as DailyScanRuntime)
+    : "local-model";
+}
 
 export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInput {
   const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
@@ -60,7 +89,7 @@ export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInp
   const input: CleanDailyScanPolicyInput = {
     enabled: value.enabled === true,
     localTime: typeof value.localTime === "string" ? value.localTime.trim() : "",
-    runtime: typeof value.runtime === "string" ? (value.runtime as DailyScanRuntime) : "local",
+    runtime: typeof value.runtime === "string" ? dailyScanRuntime(value.runtime) : "local-model",
     sourceCap: typeof value.sourceCap === "number" ? value.sourceCap : Number.NaN,
     selectedSourceIds: sourceIds.filter((id): id is number => typeof id === "number"),
     expectedRevision:
@@ -70,6 +99,7 @@ export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInp
     typeof value.enabled !== "boolean" ||
     typeof value.localTime !== "string" ||
     typeof value.runtime !== "string" ||
+    !validStoredDailyScanRuntime(value.runtime) ||
     typeof value.sourceCap !== "number" ||
     !Array.isArray(value.selectedSourceIds) ||
     input.selectedSourceIds.length !== sourceIds.length ||
@@ -186,7 +216,7 @@ export async function readDailyScanPolicy(
     pauseReason: p?.pause_reason ?? null,
     localTime,
     timezone: paper.timezone,
-    runtime: p?.runtime ?? "local",
+    runtime: dailyScanRuntime(p?.runtime),
     sourceCap: p?.source_cap ?? CAP,
     selectedSourceIds: p?.selected_source_ids ?? [],
     revision: p?.revision ?? 0,
@@ -234,7 +264,7 @@ export const saveDailyScanPolicy = createServerFn({ method: "POST" })
     if (data.invalidError) return { ok: false, code: "invalid-config", error: data.invalidError };
     if (
       !TIME_RE.test(data.localTime) ||
-      !RUNTIMES.has(data.runtime) ||
+      !validDailyScanRuntime(data.runtime) ||
       !Number.isInteger(data.sourceCap) ||
       data.sourceCap < 1 ||
       data.sourceCap > 12
@@ -312,7 +342,7 @@ async function pause(
   }
   const sql = await getSql();
   if (!value) {
-    const [current] = await sql.query<{ runtime: DailyScanRuntime }>(
+    const [current] = await sql.query<{ runtime: StoredDailyScanRuntime }>(
       "select runtime from daily_scan_policies where newsroom_id=$1 and revision=$2",
       [context.newsroomId, revision],
     );
@@ -325,7 +355,7 @@ async function pause(
     try {
       await (
         await import("./daily-scan.server.ts")
-      ).validateDailyRuntime(context.newsroomId, current.runtime);
+      ).validateDailyRuntime(context.newsroomId, dailyScanRuntime(current.runtime));
     } catch (e) {
       return {
         ok: false,

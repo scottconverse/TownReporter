@@ -154,6 +154,23 @@ describe("resolveAnthropic", () => {
 });
 
 describe("resolveProvider", () => {
+  it("routes each named subscription choice to its own model", async () => {
+    await withEnv({ ANTHROPIC_API_KEY: undefined, TOWNREPORTER_CLAUDE_CODE: undefined, TOWNREPORTER_CODEX: undefined }, () => {
+      for (const [choice, model] of [
+        ["codex-astra", "gpt-6-astra"],
+        ["codex-frontier", "gpt-5.6-sol"],
+        ["codex-balanced", "gpt-5.6-terra"],
+        ["codex-luna", "gpt-5.6-luna"],
+        ["claude-fable", "fable"],
+        ["claude-frontier", "claude-opus-5"],
+        ["claude-sonnet", "sonnet"],
+        ["claude-haiku", "haiku"],
+      ] as const) {
+        const provider = resolveProvider(choice);
+        assert.equal(provider?.model, model, choice);
+      }
+    });
+  });
   it("honours deployment overrides for every picker-backed provider", () => {
     withEnv(
       {
@@ -514,7 +531,12 @@ describe("grokChat", () => {
           }),
         },
       );
-      assert.deepEqual(result, { ok: false, error: "Custom AI API error 400" });
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.equal(result.error, "Custom AI API error 400");
+        assert.equal(result.meta?.provider, "openai-compatible");
+        assert.equal(result.meta?.model, "manual-model");
+      }
       assert.doesNotMatch(JSON.stringify(result), /test-only-key/);
     } finally {
       globalThis.fetch = originalFetch;
@@ -523,6 +545,42 @@ describe("grokChat", () => {
 });
 
 describe("model-picker provider readiness", () => {
+  it("preflights the explicit SuperGrok choice only through its newsroom OAuth connection", async () => {
+    const result = await probeProvider("grok-oauth", 44, {
+      resolveXaiOauth: async (newsroomId) => {
+        assert.equal(newsroomId, 44);
+        return { modelId: "grok-4.6", label: "Grok Build" };
+      },
+    });
+    assert.deepEqual(result, { ok: true, label: "Grok Build", choice: "grok-oauth" });
+  });
+
+  it("routes an explicit SuperGrok draft only through OAuth with the selected model", async () => {
+    const calls: unknown[] = [];
+    const result = await grokChat(
+      "system prompt",
+      "user prompt",
+      32,
+      { choice: "grok-oauth", newsroomId: 44, timeoutMs: 12_345 },
+      {
+        resolveXaiOauth: async () => ({ modelId: "grok-4.6", label: "Grok Build" }),
+        xaiChat: async (input) => {
+          calls.push(input);
+          return { text: "GROK_CONNECTION_OK" };
+        },
+      },
+    );
+    assert.deepEqual(result, { ok: true, text: "GROK_CONNECTION_OK" });
+    assert.deepEqual(calls, [{
+      newsroomId: 44,
+      system: "system prompt",
+      user: "user prompt",
+      maxTokens: 32,
+      model: "grok-4.6",
+      timeoutMs: 12_345,
+    }]);
+  });
+
   it("preflights the discovered newsroom local model without requiring environment variables", async () => {
     const originalFetch = globalThis.fetch;
     const calls: string[] = [];
@@ -622,6 +680,22 @@ describe("model-picker provider readiness", () => {
     }
   });
 
+  it("keeps the editor's named Claude model after API-key preflight", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: [] }), { status: 200 });
+    try {
+      await withEnvAsync({ ...BARE, ANTHROPIC_API_KEY: "test-key" }, async () => {
+        for (const choice of ["claude-fable", "claude-sonnet", "claude-haiku"] as const) {
+          const result = await probeProvider(choice);
+          assert.equal(result.ok, true);
+          if (result.ok) assert.equal(result.choice, choice);
+        }
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("proves the selected configured gateway model is actually loaded", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
@@ -658,6 +732,39 @@ describe("model-picker provider readiness", () => {
     }
   });
 
+  it("matches a bare Gemini model against Google's prefixed catalog only", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ data: [{ id: "models/gemini-3.8-flash" }] }), { status: 200 });
+    try {
+      await withEnvAsync(
+        {
+          ...BARE,
+          LLM_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai",
+          LLM_MODEL: "gemini-3.8-flash",
+        },
+        async () => {
+          const gemini = await probeProvider("configured");
+          assert.deepEqual(gemini, {
+            ok: true,
+            label: "LLM",
+            choice: "configured",
+          });
+        },
+      );
+      await withEnvAsync(
+        { ...BARE, LLM_BASE_URL: "https://other.example/v1", LLM_MODEL: "gemini-3.8-flash" },
+        async () => {
+          const other = await probeProvider("configured");
+          assert.equal(other.ok, false);
+          if (!other.ok) assert.match(other.error, /not loaded/i);
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("preflights the explicit local-model pick against its own /models, and drafts through /chat/completions", async () => {
     // 0.6.10: the local entry is a NAME an editor picks, resolved to the same
     // OpenAI-compatible transport the configured gateway already uses -- so
@@ -673,7 +780,11 @@ describe("model-picker provider readiness", () => {
         });
       }
       return new Response(
-        JSON.stringify({ choices: [{ message: { content: "drafted locally" } }] }),
+        JSON.stringify({
+          model: "local-test-model",
+          usage: { prompt_tokens: 41, completion_tokens: 9, total_tokens: 50 },
+          choices: [{ message: { content: "drafted locally" } }],
+        }),
         { status: 200 },
       );
     };
@@ -693,7 +804,14 @@ describe("model-picker provider readiness", () => {
             choice: "local-model",
           });
           assert.equal(draft.ok, true);
-          if (draft.ok) assert.equal(draft.text, "drafted locally");
+          if (draft.ok) {
+            assert.equal(draft.text, "drafted locally");
+            assert.equal(draft.meta?.provider, "openai-compatible");
+            assert.equal(draft.meta?.model, "local-test-model");
+            assert.equal(draft.meta?.inputTokens, 41);
+            assert.equal(draft.meta?.outputTokens, 9);
+            assert.equal(draft.meta?.totalTokens, 50);
+          }
         },
       );
       assert.equal(calls[0]!.url, "http://127.0.0.1:1234/v1/models");
@@ -736,10 +854,8 @@ describe("model-picker provider readiness", () => {
     });
   });
 
-  it("Automatic's ladder reaches Claude before Codex", async () => {
-    // Zen and Local Qwen were removed from Automatic 2026-09-02; the ladder is
-    // now exactly ["claude-frontier", "codex-balanced"], Claude first.
-    const originalFetch = globalThis.fetch;
+  it("Automatic falls through to Claude Sonnet when Codex is switched off", async () => {
+        const originalFetch = globalThis.fetch;
     const urls: string[] = [];
     globalThis.fetch = async (input) => {
       urls.push(String(input));
@@ -749,10 +865,10 @@ describe("model-picker provider readiness", () => {
       await withEnvAsync({ ANTHROPIC_API_KEY: "sk-ant-test", TOWNREPORTER_CODEX: "0" }, async () => {
         const result = await probeProvider("auto");
         assert.equal(result.ok, true);
-        if (result.ok) assert.equal(result.choice, "claude-frontier");
+        if (result.ok) assert.equal(result.choice, "claude-sonnet");
       });
-      // Only Claude was probed -- Codex is disabled here, and neither Zen nor
-      // Local Qwen exist as rungs to fall through to.
+      // Codex was skipped by its off switch, so the first network probe is the
+      // lower-cost Claude fallback.
       assert.deepEqual(urls, ["https://api.anthropic.com/v1/models?limit=1"]);
     } finally {
       globalThis.fetch = originalFetch;

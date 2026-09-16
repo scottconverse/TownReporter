@@ -647,9 +647,9 @@
               approved routine notices use fixed templates and approved sources.
             </p>
             <p class="cap">
-              Repository release: <b>0.6.48</b> — reliable local-model drafting with reviewable evidence, citations and name checks.
-              <a href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.48">Download the Windows release</a>.
-              <a href="https://github.com/scottconverse/TownReporter/blob/main/docs/releases/0.6.48.md">Release guide and verification</a>.
+              Repository release: <b>0.6.49</b> — direct SuperGrok and Gemini connections, shared model routing, bounded Dark Desk research and durable reporting Pull.
+              <a href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.49">Download the Windows release</a>.
+              <a href="https://github.com/scottconverse/TownReporter/blob/main/docs/releases/0.6.49.md">Release guide and verification</a>.
             </p>
             <div class="cta-row">
               <a class="btn" href="#start">Run it yourself</a>
@@ -787,8 +787,9 @@
             <h3>Pick the model everywhere</h3>
             <p class="cap" style="margin: 0 0 10px">One registry</p>
             <p style="font-size: 15px; color: var(--ink-2); margin: 0">
-              Story, Scan and Dark Desk now all show the same Writing model picker
-              &mdash; Automatic, Codex Terra, Codex Sol, Claude Opus or Local model &mdash; each
+              Story, Scan, Opinion and Dark Desk show the same Writing model picker:
+              Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku;
+              Local model; and saved custom connections. Each
               one reading from a single provider registry instead of four files that had to
               agree by hand.
             </p>
@@ -998,7 +999,7 @@
           The installation target is under an hour; the release records measured timings and limits.
         </p>
         <p>
-          <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.48">Windows download · 0.6.48</a>
+          <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.49">Windows download · 0.6.49</a>
           <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/latest">Latest stable Windows</a>
           <a class="btn" href="https://github.com/scottconverse/TownReporter/blob/main/docs/windows-install.md">Installation guide</a>
         </p>
@@ -1024,9 +1025,15 @@ npm run dev
               <p>
                 <strong>Pick per story.</strong> Every Queue row and the story workbench put a model
                 picker beside <b>Draft with AI</b>. Automatic uses your configured gateway when set;
-                otherwise it tries Claude Opus, then Codex Terra, before the job starts, then keeps
+                otherwise it tries Codex Terra, then Claude Sonnet, before the job starts, then keeps
                 that provider for every pass unless Automatic moves to the next ready provider
                 after an eligible failure. Named choices never fall back.
+              </p>
+              <p>
+                <strong>Bound Dark Desk cost.</strong> Dark Automatic uses a configured gateway when
+                present; otherwise Sonnet writes with one Terra retry. Haiku or Luna handles the
+                mechanical planning. Completed searches and reads are checkpointed before synthesis,
+                and each round has total limits for time, calls, searches and document reads.
               </p>
               <p>
                 <b>Set up a writing model</b> opens help under every Queue, workbench and Opinion
@@ -1055,8 +1062,8 @@ npm run dev
                 configured provider for Scan and Dark Desk.
               </p>
               <p>
-                Opinion offers Automatic, Claude Opus, Codex Terra, Codex Sol and Local model,
-                plus saved custom connections. Codex Sol is the default. Automatic tries Claude Opus, then Codex Sol once
+                Opinion offers Automatic, every named Codex and Claude model, and Local model,
+                plus saved custom connections. Codex Sol is the default. Automatic tries Codex Sol, then Claude Sonnet once
                 if needed; explicit choices stay selected. Both Claude and Codex read the complete editorial voice through native instruction-file options, with research tools available while writing. A refusal, assistant note, implausible
                 headline or incomplete body is marked failed and never becomes a draft.
               </p>
@@ -1138,6 +1145,7 @@ npm run dev
             meeting channels or local title vocabulary from a city name. The owner supplies them.
           </li>
           <li><b>Dark Desk has no publish button.</b> Its speculative signals and structured verification still require editorial judgment. Five live investigations remain an acceptance exercise.</li>
+          <li><b>0.6.49:</b> Direct SuperGrok OAuth and newsroom Gemini connections join the shared model picker; Dark Desk develops leads within explicit run budgets, reporting Pull persists progress and partial documents, and Automatic can recover uploaded-document work after a technical provider failure.</li>
           <li><b>0.6.48:</b> Local-model Story drafting uses the newsroom's discovered model; evidence checks show durable progress and before-and-after results; saved written records verify names; missing citation ledgers are repaired only from exact retained passages.</li>
           <li><b>0.6.47:</b> A labeled Editor’s desk button now stays in the public header on desktop and phones.</li>
           <li><b>0.6.46:</b> A redesigned public newspaper with a complete searchable archive, section filters, saved stories, dark mode, reading sizes, sharing and correction email. Published records and comparisons remain linked to each story.</li>

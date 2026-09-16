@@ -1,5 +1,8 @@
-type GrokOk = { ok: true; text: string };
-type GrokErr = { ok: false; error: string };
+import type { ChatResultMetadata } from "./ai-result-metadata.ts";
+
+export type { ChatResultMetadata } from "./ai-result-metadata.ts";
+export type GrokOk = { ok: true; text: string; meta?: ChatResultMetadata };
+export type GrokErr = { ok: false; error: string; meta?: ChatResultMetadata };
 
 import {
   isCustomModelChoice,
@@ -18,6 +21,7 @@ import {
   type ProviderOverrides,
 } from "./provider-registry.ts";
 import { PAPER } from "../paper.ts";
+import { normalizeProviderModelId } from "./provider-model-id.ts";
 
 export type EffectiveProviderChoice = EffectiveStoryModelChoice;
 export type ProviderProbe =
@@ -67,11 +71,17 @@ export type CodexConfig = {
   label: string;
 };
 
+export type XaiOauthConfig = {
+  model: string;
+  label: string;
+};
+
 /** The desk speaks to exactly one of these per call. */
 export type Provider =
   | ({ kind: "anthropic" } & AnthropicConfig)
   | ({ kind: "claude-code" } & ClaudeCodeConfig)
   | ({ kind: "codex" } & CodexConfig)
+  | ({ kind: "xai-oauth" } & XaiOauthConfig)
   | ({ kind: "openai" } & LlmConfig);
 
 type GrokChatAdapter = (
@@ -88,6 +98,17 @@ export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>
     modelId: string;
     apiKey: string | null;
   }>;
+  /** Test-only seam for the server-owned SuperGrok OAuth connection. */
+  resolveXaiOauth?: (newsroomId: number) => Promise<{ modelId: string; label?: string }>;
+  /** Test-only seam proving an explicit SuperGrok pick reaches only OAuth inference. */
+  xaiChat?: (input: {
+    newsroomId: number;
+    system?: string;
+    user: string;
+    maxTokens?: number;
+    model?: string;
+    timeoutMs?: number;
+  }) => Promise<{ text: string }>;
   /** Test seam for the server-only per-newsroom local-model resolver. */
   resolveLocal?: (newsroomId?: number) => Promise<LocalModelOverride | null>;
 };
@@ -263,6 +284,10 @@ function explicitProvider(
 
   if (entry.kind === "codex") return { kind: "codex", model, label: entry.label };
 
+  if (entry.kind === "xai-oauth") {
+    return { kind: "xai-oauth", model, label: entry.label };
+  }
+
   if (entry.kind === "openai") {
     const llm = customGateway();
     return llm ? { kind: "openai", ...llm } : null;
@@ -300,6 +325,44 @@ export function resolveProvider(
 type CustomProviderResolution =
   | { ok: true; provider: Extract<Provider, { kind: "openai" }> }
   | { ok: false; error: string };
+
+type XaiOauthProviderResolution =
+  | { ok: true; provider: Extract<Provider, { kind: "xai-oauth" }> }
+  | { ok: false; error: string };
+
+async function resolveXaiOauthProvider(
+  newsroomId: number | undefined,
+  injected?: GrokChatAdapters["resolveXaiOauth"],
+): Promise<XaiOauthProviderResolution> {
+  if (!Number.isInteger(newsroomId) || newsroomId == null) {
+    return {
+      ok: false,
+      error:
+        "The selected SuperGrok connection cannot be resolved without its newsroom. Choose another model; TownReporter will not fall back automatically.",
+    };
+  }
+  try {
+    const resolve =
+      injected ?? (await import("./xai-oauth.server.ts")).resolveXaiOauthConnection;
+    const connection = await resolve(newsroomId);
+    return {
+      ok: true,
+      provider: {
+        kind: "xai-oauth",
+        model: connection.modelId,
+        label: connection.label ?? "Grok (SuperGrok)",
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error && error.message
+          ? error.message
+          : "SuperGrok is unavailable. Connect it on Server, or choose another model. TownReporter will not fall back automatically.",
+    };
+  }
+}
 
 /**
  * Resolve a stored custom connection only at the server call boundary. The
@@ -388,7 +451,14 @@ async function probeOpenAi(
     if (!res.ok)
       return { ok: false, error: `${provider.label} readiness check failed (${res.status}).` };
     const body = (await res.json().catch(() => null)) as { data?: { id?: string }[] } | null;
-    if (Array.isArray(body?.data) && !body.data.some((entry) => entry.id === provider.model)) {
+    if (
+      Array.isArray(body?.data) &&
+      !body.data.some(
+        (entry) =>
+          typeof entry.id === "string" &&
+          normalizeProviderModelId(provider.baseUrl, entry.id) === provider.model,
+      )
+    ) {
       return {
         ok: false,
         error: `${provider.label} is running but model ${provider.model} is not loaded.`,
@@ -403,6 +473,7 @@ async function probeOpenAi(
 /** Validate a configured Anthropic key without generating or spending a completion. */
 async function probeAnthropic(
   provider: Extract<Provider, { kind: "anthropic" }>,
+  choice: EffectiveProviderChoice,
 ): Promise<ProviderProbe> {
   try {
     const res = await fetch("https://api.anthropic.com/v1/models?limit=1", {
@@ -421,7 +492,7 @@ async function probeAnthropic(
       };
     }
     if (!res.ok) return { ok: false, error: `Claude readiness check failed (${res.status}).` };
-    return { ok: true, label: provider.label, choice: "claude-frontier" };
+    return { ok: true, label: provider.label, choice };
   } catch (err) {
     return { ok: false, error: connectionError(provider.label, err) };
   }
@@ -437,13 +508,31 @@ export const AUTOMATIC_LADDER = automaticLadder();
 export async function probeProvider(
   choice?: EffectiveProviderChoice | string,
   newsroomId?: number,
-  adapters?: Pick<GrokChatAdapters, "resolveCustom" | "resolveLocal">,
+  adapters?: Pick<GrokChatAdapters, "resolveCustom" | "resolveLocal" | "resolveXaiOauth">,
 ): Promise<ProviderProbe> {
   if (choice && isCustomModelChoice(choice)) {
     const resolved = await resolveCustomProvider(choice, newsroomId, adapters?.resolveCustom);
     if (!resolved.ok) return resolved;
     const result = await probeOpenAi(resolved.provider, { allowManualModelWhenCatalogUnsupported: true });
     return result.ok ? { ...result, choice } : result;
+  }
+  if (choice === "grok-oauth") {
+    const resolved = await resolveXaiOauthProvider(newsroomId, adapters?.resolveXaiOauth);
+    if (!resolved.ok) return resolved;
+    try {
+      if (!adapters?.resolveXaiOauth) {
+        await (await import("./xai-oauth.server.ts")).refreshXaiOauthModels(newsroomId!);
+      }
+      return { ok: true, label: resolved.provider.label, choice: "grok-oauth" };
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof Error && error.message
+            ? error.message
+            : "SuperGrok could not verify its account models.",
+      };
+    }
   }
   if (choice === "auto") {
     const configured = customGateway();
@@ -493,7 +582,7 @@ export async function probeProvider(
       : result;
   }
   if (provider.kind === "anthropic") {
-    return probeAnthropic(provider);
+    return probeAnthropic(provider, storyModelChoice(choice || "claude-frontier"));
   }
   const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
   const result = await probeClaudeCode(provider.label);
@@ -516,6 +605,21 @@ async function anthropicChat(
   maxTokens: number,
   timeoutMs: number,
 ): Promise<GrokOk | GrokErr> {
+  const startedAt = Date.now();
+  const meta = (
+    usage?: { input_tokens?: number; output_tokens?: number },
+    timedOut = false,
+  ): ChatResultMetadata => {
+    const result: ChatResultMetadata = {
+      provider: "anthropic",
+      model: cfg.model,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      timedOut,
+    };
+    if (Number.isFinite(usage?.input_tokens)) result.inputTokens = usage!.input_tokens;
+    if (Number.isFinite(usage?.output_tokens)) result.outputTokens = usage!.output_tokens;
+    return result;
+  };
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({
     apiKey: cfg.apiKey,
@@ -536,7 +640,7 @@ async function anthropicChat(
 
     if (res.stop_reason === "refusal") {
       const why = res.stop_details?.category ?? "unspecified";
-      return { ok: false, error: `${cfg.label} declined this request (${why})` };
+      return { ok: false, error: `${cfg.label} declined this request (${why})`, meta: meta(res.usage) };
     }
     const text = res.content
       .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
@@ -544,25 +648,25 @@ async function anthropicChat(
       .join("")
       .trim();
     if (res.stop_reason === "max_tokens" && !text) {
-      return { ok: false, error: `${cfg.label} hit the token ceiling before answering` };
+      return { ok: false, error: `${cfg.label} hit the token ceiling before answering`, meta: meta(res.usage) };
     }
-    if (!text) return { ok: false, error: "Empty model response" };
-    return { ok: true, text };
+    if (!text) return { ok: false, error: "Empty model response", meta: meta(res.usage) };
+    return { ok: true, text, meta: meta(res.usage) };
   } catch (err) {
     const A = (await import("@anthropic-ai/sdk")).default;
     if (err instanceof A.AuthenticationError) {
-      return { ok: false, error: `${cfg.label} rejected the API key` };
+      return { ok: false, error: `${cfg.label} rejected the API key`, meta: meta() };
     }
     if (err instanceof A.RateLimitError) {
-      return { ok: false, error: `${cfg.label} rate limit — try again shortly` };
+      return { ok: false, error: `${cfg.label} rate limit — try again shortly`, meta: meta() };
     }
     if (err instanceof A.APIConnectionTimeoutError) {
-      return { ok: false, error: `${cfg.label} request timed out` };
+      return { ok: false, error: `${cfg.label} request timed out`, meta: meta(undefined, true) };
     }
     if (err instanceof A.APIError) {
-      return { ok: false, error: `${cfg.label} API error ${err.status ?? ""}`.trim() };
+      return { ok: false, error: `${cfg.label} API error ${err.status ?? ""}`.trim(), meta: meta() };
     }
-    return { ok: false, error: `${cfg.label} request failed` };
+    return { ok: false, error: `${cfg.label} request failed`, meta: meta() };
   }
 }
 
@@ -608,7 +712,15 @@ export async function grokChat(
     ? await resolveCustomProvider(opts.choice, opts.newsroomId, adapters?.resolveCustom)
     : null;
   if (custom && !custom.ok) return custom;
-  const provider = custom?.ok ? custom.provider : resolveProvider(opts?.choice, opts?.localModel);
+  const xai = opts?.choice === "grok-oauth"
+    ? await resolveXaiOauthProvider(opts.newsroomId, adapters?.resolveXaiOauth)
+    : null;
+  if (xai && !xai.ok) return xai;
+  const provider = custom?.ok
+    ? custom.provider
+    : xai?.ok
+      ? xai.provider
+      : resolveProvider(opts?.choice, opts?.localModel);
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
 
   const timeoutMs = opts?.timeoutMs ?? 45_000;
@@ -645,6 +757,24 @@ export async function grokChat(
     const { codexChat } = await import("./ai-codex.server.ts");
     return codexChat({ system, user, model, timeoutMs });
   }
+  if (provider.kind === "xai-oauth") {
+    if (!Number.isInteger(opts?.newsroomId) || opts?.newsroomId == null) {
+      return {
+        ok: false,
+        error: "SuperGrok requires an authenticated newsroom. Choose another model.",
+      };
+    }
+    const xaiChat = adapters?.xaiChat ?? (await import("./xai-oauth.server.ts")).xaiOauthChat;
+    const result = await xaiChat({
+      newsroomId: opts.newsroomId,
+      system,
+      user,
+      maxTokens,
+      model,
+      timeoutMs,
+    });
+    return { ok: true, text: result.text };
+  }
   const llm = provider;
   const url = `${llm.baseUrl}/chat/completions`;
   const payload: Record<string, unknown> = {
@@ -665,6 +795,28 @@ export async function grokChat(
     headers.Authorization = `Bearer ${llm.apiKey}`;
   }
 
+  const startedAt = Date.now();
+  const openAiMeta = (
+    body?: {
+      model?: string;
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    },
+    timedOut = false,
+  ): ChatResultMetadata => {
+    const result: ChatResultMetadata = {
+      provider: "openai-compatible",
+      model: body?.model?.trim() || model,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      timedOut,
+    };
+    const usage = body?.usage;
+    if (Number.isFinite(usage?.prompt_tokens)) result.inputTokens = usage!.prompt_tokens;
+    if (Number.isFinite(usage?.completion_tokens)) result.outputTokens = usage!.completion_tokens;
+    if (Number.isFinite(usage?.total_tokens)) result.totalTokens = usage!.total_tokens;
+    return result;
+  };
+  const isTimeout = (err: unknown) =>
+    err instanceof Error && (/timeout/i.test(err.name) || /timed?\s*out/i.test(err.message));
   const deadline = Date.now() + timeoutMs;
   const remaining = () => Math.max(1, deadline - Date.now());
   let res: Response;
@@ -676,13 +828,13 @@ export async function grokChat(
       signal: AbortSignal.timeout(remaining()),
     });
   } catch (err) {
-    return { ok: false, error: connectionError(llm.label, err) };
+    return { ok: false, error: connectionError(llm.label, err), meta: openAiMeta(undefined, isTimeout(err)) };
   }
   if (res.status === 429 || res.status >= 500) {
     if (timeoutMs < 30_000) {
-      return { ok: false, error: `${llm.label} API error ${res.status}` };
+      return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
     }
-    if (remaining() <= 1_000) return { ok: false, error: `${llm.label} API error ${res.status}` };
+    if (remaining() <= 1_000) return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
     await new Promise((r) => setTimeout(r, Math.min(800, remaining())));
     try {
       res = await fetch(url, {
@@ -692,21 +844,28 @@ export async function grokChat(
         signal: AbortSignal.timeout(remaining()),
       });
     } catch (err) {
-      return { ok: false, error: connectionError(llm.label, err) };
+      return { ok: false, error: connectionError(llm.label, err), meta: openAiMeta(undefined, isTimeout(err)) };
     }
   }
-  if (!res.ok) return { ok: false, error: `${llm.label} API error ${res.status}` };
-  const body = (await res.json()) as {
+  if (!res.ok) return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
+  let body: {
     error?: { message?: string } | string;
+    model?: string;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
   };
+  try {
+    body = await res.json() as typeof body;
+  } catch {
+    return { ok: false, error: `${llm.label} returned an unreadable response`, meta: openAiMeta() };
+  }
   if (body.error) {
     const detail = typeof body.error === "string" ? body.error : body.error.message;
     // A custom endpoint is outside TownReporter's control. Its error body may
     // reflect an Authorization header or request payload; preserve the useful
     // HTTP failure category without letting that body enter a job error or UI.
-    if (llm.label === "Custom AI") return { ok: false, error: "Custom AI API error" };
-    return { ok: false, error: `${llm.label} API error${detail ? `: ${detail}` : ""}` };
+    if (llm.label === "Custom AI") return { ok: false, error: "Custom AI API error", meta: openAiMeta(body) };
+    return { ok: false, error: `${llm.label} API error${detail ? `: ${detail}` : ""}`, meta: openAiMeta(body) };
   }
   const message = body.choices?.[0]?.message;
   const text = message?.content?.trim() ?? "";
@@ -727,11 +886,12 @@ export async function grokChat(
         ok: false,
         error:
           "The local model spent its whole answer thinking and never wrote the draft. Turn thinking off for it (LLM_REASONING_EFFORT=none) or pick a different local model.",
+        meta: openAiMeta(body),
       };
     }
-    return { ok: false, error: "Empty model response" };
+    return { ok: false, error: "Empty model response", meta: openAiMeta(body) };
   }
-  return { ok: true, text };
+  return { ok: true, text, meta: openAiMeta(body) };
 }
 
 const THINKING_MODEL_RE = /gemma-?4|qwen3(?:\.\d+)?|deepseek-r1|gpt-oss|o[134]-|reasoning|think/i;

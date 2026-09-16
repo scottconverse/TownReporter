@@ -17,6 +17,7 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 const story = await readFile(new URL("src/routes/desk.story.$leadId.tsx", root), "utf8");
 const desk = await readFile(new URL("src/lib/news/desk.ts", root), "utf8");
+const pull = await readFile(new URL("src/lib/news/pull.server.ts", root), "utf8");
 const notes = await readFile(new URL("src/lib/news/notes.ts", root), "utf8");
 const styles = await readFile(new URL("src/styles.css", root), "utf8");
 
@@ -88,11 +89,15 @@ test("the gate's claims survive a redraft until someone confirms them", () => {
 
 test("a pull that returned nothing does not strike its line", () => {
   assert.match(
-    desk,
-    /if \(typeof data\.index === "number" && notes\.todo\[data\.index\]\) \{[\s\S]{0,120}?if \(docs\.length && !notes\.todo\[data\.index\]\.done\)/,
+    pull,
+    /if \(receipt\.checkpoint\?\.documents\.length\) \{[\s\S]{0,180}?if \(!notes\.todo\[index\]!\.done\) notes = toggleTodo\(notes, index\);/,
     "only a pull that returned a document may mark the line done",
   );
-  assert.match(desk, /pull found nothing/);
+  assert.match(
+    pull,
+    /pull found nothing[\s\S]{0,260}?done: false/,
+    "an empty durable Pull must leave the reporting line open",
+  );
 });
 
 test("documents opened for the draft say which ask they answered", () => {

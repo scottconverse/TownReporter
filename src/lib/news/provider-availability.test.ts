@@ -1,11 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { computeProviderAvailability } from "./provider-availability.ts";
+import { computeProviderAvailability } from "./provider-availability.server.ts";
 import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
 
 const ENV_KEYS = [
   "TOWNREPORTER_CODEX",
   "TOWNREPORTER_CLAUDE_CODE",
+  "TOWNREPORTER_GROK_OAUTH",
   "TOWNREPORTER_LOCAL",
   "LLM_BASE_URL",
   "LLM_API_KEY",

@@ -61,18 +61,18 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
     }
   });
 
-  it("Automatic accepts Claude first without probing the fallback", async () => {
+  it("Automatic accepts Codex Sol first without probing the Claude fallback", async () => {
     const probed: string[] = [];
     const result = await checkOpinionReadiness("auto", {
       findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
       probeCandidate: async (choice) => {
         probed.push(choice);
-        return { ok: true as const, label: "Claude Opus", choice };
+        return { ok: true as const, label: "Codex Sol", choice };
       },
     });
     assert.equal(result.ready, true);
     assert.equal(result.effectiveChoice, "auto");
-    assert.deepEqual(probed, ["claude-frontier"]);
+    assert.deepEqual(probed, ["codex-frontier"]);
   });
 
   it("a provider auth failure is reported as-is and probes nothing else", async () => {

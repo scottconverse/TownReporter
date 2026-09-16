@@ -84,7 +84,7 @@ function ScanPage() {
         proposed sources. It runs only when you click — this is the expensive button, not a loop.
       </p>
       <div className="scan-bar">
-        <ModelPicker value={modelChoice} onChange={setModelChoice} disabled={scanning} compact />
+        <ModelPicker scope="scan" value={modelChoice} onChange={setModelChoice} disabled={scanning} compact />
         <InkButton disabled={scanning} onClick={() => scan.mutate()}>
           {scanning ? "Scanning sources…" : "Run scan"}
         </InkButton>

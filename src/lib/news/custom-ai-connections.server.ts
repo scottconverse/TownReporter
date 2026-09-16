@@ -1,3 +1,5 @@
+import { normalizeProviderModelId } from "./provider-model-id.ts";
+
 export type CustomAiConnectionInput = {
   name: string;
   baseUrl: string;
@@ -52,7 +54,7 @@ export function publicConnection(connection: StoredCustomAiConnection): PublicCu
   return { ...safe, hasApiKey: Boolean(encryptedApiKey) };
 }
 
-export function parseDiscoveredModels(body: unknown): string[] {
+export function parseDiscoveredModels(body: unknown, baseUrl?: string): string[] {
   const data =
     body && typeof body === "object" && "data" in body ? (body as { data?: unknown }).data : null;
   if (!Array.isArray(data)) return [];
@@ -60,7 +62,10 @@ export function parseDiscoveredModels(body: unknown): string[] {
     ...new Set(
       data.flatMap((row) => {
         if (!row || typeof row !== "object" || !("id" in row)) return [];
-        const id = String((row as { id: unknown }).id).trim();
+        const id = normalizeProviderModelId(
+          baseUrl ?? "",
+          String((row as { id: unknown }).id).trim(),
+        );
         return id ? [id] : [];
       }),
     ),
@@ -105,6 +110,21 @@ function safeError(status: number): string {
   return `The server returned HTTP ${status}.`;
 }
 
+const DUPLICATE_CONNECTION_NAME_MESSAGE =
+  "A connection with that name already exists. Choose a different name or edit the existing connection.";
+
+function isDuplicateConnectionNameError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; constraint?: unknown };
+  const message = error instanceof Error ? error.message : String(error);
+  const constraint = String(candidate.constraint ?? "");
+  return (
+    candidate.code === "23505" || /duplicate key/i.test(message)
+  ) &&
+    (/custom_ai_connections_newsroom_id_name_key/i.test(constraint) ||
+      /custom_ai_connections_newsroom_id_name_key/i.test(message));
+}
+
 export type ConnectionProbeResult = {
   ok: boolean;
   message: string;
@@ -124,7 +144,7 @@ export async function discoverConnectionModels(
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(safeError(response.status));
-  return parseDiscoveredModels(await response.json());
+  return parseDiscoveredModels(await response.json(), connection.baseUrl);
 }
 
 /** Explicitly invoked only. It sends a minimal prompt and never includes the key in its result. */
@@ -154,7 +174,7 @@ export async function testConnection(
       body: JSON.stringify({
         model: connection.modelId,
         messages: [{ role: "user", content: "Reply with TOWNREPORTER_OK." }],
-        max_tokens: 12,
+        max_tokens: 128,
       }),
     });
     if (!response.ok)
@@ -272,8 +292,16 @@ export async function saveCustomAiConnection(
     : value.apiKey
       ? encryptApiKey(value.apiKey)
       : (existing?.encrypted_api_key ?? null);
-  const rows =
-    await sql<Row>`insert into custom_ai_connections(id,newsroom_id,name,base_url,encrypted_api_key,model_id,enabled) values(${id},${me.newsroomId},${value.name},${value.baseUrl},${encrypted},${value.modelId ?? null},${existing?.enabled ?? true}) on conflict(id) do update set name=excluded.name,base_url=excluded.base_url,encrypted_api_key=excluded.encrypted_api_key,model_id=excluded.model_id,updated_at=now() returning id,newsroom_id,name,base_url,encrypted_api_key,model_id,enabled`;
+  let rows: Row[];
+  try {
+    rows =
+      await sql<Row>`insert into custom_ai_connections(id,newsroom_id,name,base_url,encrypted_api_key,model_id,enabled) values(${id},${me.newsroomId},${value.name},${value.baseUrl},${encrypted},${value.modelId ?? null},${existing?.enabled ?? true}) on conflict(id) do update set name=excluded.name,base_url=excluded.base_url,encrypted_api_key=excluded.encrypted_api_key,model_id=excluded.model_id,updated_at=now() returning id,newsroom_id,name,base_url,encrypted_api_key,model_id,enabled`;
+  } catch (error) {
+    if (isDuplicateConnectionNameError(error)) {
+      throw new Error(DUPLICATE_CONNECTION_NAME_MESSAGE);
+    }
+    throw error;
+  }
   return publicConnection(fromRow(rows[0]));
 }
 export async function setCustomAiConnectionEnabled(userId: string, id: string, enabled: boolean) {
@@ -297,7 +325,7 @@ export async function deleteCustomAiConnection(userId: string, id: string) {
 export async function resolveCustomAiChoice(
   newsroomId: number,
   id: string,
-): Promise<{ baseUrl: string; modelId: string; apiKey: string | null }> {
+): Promise<{ baseUrl: string; modelId: string; apiKey: string | null; name?: string }> {
   await ensureSchema();
   const sql = await getSql();
   const row = (
@@ -311,6 +339,7 @@ export async function resolveCustomAiChoice(
       "The selected custom AI connection is disabled, deleted, or has no model. Choose another model; TownReporter will not fall back automatically.",
     );
   return {
+    name: row.name,
     baseUrl: row.base_url,
     modelId: row.model_id,
     apiKey: decryptApiKey(row.encrypted_api_key),

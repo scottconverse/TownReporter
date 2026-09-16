@@ -1,6 +1,6 @@
 {
   "name": "app-builder-workspace",
-  "version": "0.6.48",
+  "version": "0.6.49",
   "private": true,
   "engines": {
     "node": ">=22"
@@ -36,6 +36,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
+    "@earendil-works/pi-ai": "0.82.1",
     "@electric-sql/pglite": "^0.5.8",
     "@hookform/resolvers": "^5.7.0",
     "@mozilla/readability": "^0.6.0",

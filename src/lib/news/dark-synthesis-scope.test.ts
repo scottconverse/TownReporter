@@ -5,6 +5,7 @@ import { getSql } from "../db.ts";
 import { ensureInvestigateSchema } from "./investigate.ts";
 import { buildBrief, buildDarkBriefPromptPack, buildDarkSynthesisPack, ensureDarkSchema } from "./dark.ts";
 import { ensurePaperSettingsSchema } from "./paper-settings.ts";
+import { createDarkRunBudget } from "./dark-run-budget.ts";
 it("synthesis uses only its newsroom's context and configured city", async () => {
   const sql = await getSql();
   const schema = (
@@ -113,6 +114,7 @@ it("synthesis keeps an older focus-matching capture and its stored page evidence
   const briefPack = await buildDarkBriefPromptPack(newsroomId, inv);
   assert.ok(briefPack);
   assert.ok(briefPack.length <= 22_000, `brief pack was ${briefPack.length} characters`);
+  assert.match(briefPack, /VERIFICATION STATUS: UNVERIFIED/);
   assert.match(briefPack, /TARGET_ROW: FILE-4242 Cedar annexation/);
   assert.match(briefPack, new RegExp(`capture:${capture} version:${version} hash:target-hash`));
   assert.match(briefPack, /APPLICANT_TAIL: Dana, Community Association/);
@@ -146,6 +148,7 @@ it("synthesis keeps an older focus-matching capture and its stored page evidence
     },
   );
   assert.equal(brief.ok, true);
+  if (brief.ok) assert.equal(brief.brief.evidence_status, "unverified");
   assert.match(briefPrompt, /TARGET_ROW: FILE-4242 Cedar annexation/);
   assert.match(briefPrompt, new RegExp(`capture:${capture} version:${version} hash:target-hash`));
   assert.match(briefPrompt, /APPLICANT_TAIL: Dana, Community Association/);
@@ -156,17 +159,41 @@ it("synthesis keeps an older focus-matching capture and its stored page evidence
 
 it("stores the complete parsed brief without cutting serialized JSON or citations", async () => {
   const sql = await getSql();
+  await ensureDarkSchema();
   const id = (await sql<{ id: number }>`insert into investigations(user_id,newsroom_id,title)
     values ('brief-storage',82,'Saved citation record') returning id`)[0]!.id;
+  await sql`
+    insert into dark_signals (
+      user_id, newsroom_id, investigation_id, name, posture, signal_type,
+      observation, stage, verification_status
+    ) values (
+      'brief-storage', 82, ${id}, 'Stored signal', 'VERIFY', 'record',
+      'The software protocol completed.', 'dark-signal-desk', 'verified'
+    )
+  `;
   const citations = Array.from({ length: 6 }, (_, i) =>
     `${"Captured evidence detail ".repeat(65)}[Record ${i}](https://records.example/item/${i})`);
+  const stages: string[] = [];
+  const meter = createDarkRunBudget({ elapsedMs: 60_000, modelCalls: 1, searches: 0, documentReads: 0 });
   const result = await buildBrief('brief-storage', 82, id, undefined, null,
     async () => ({ ok: true, text: JSON.stringify({
       headline: 'Saved citation record', tldr: 'The record is retained.',
       connections: citations, supports: citations,
-    }) }));
+    }), meta: { provider: 'test', model: 'brief-test', durationMs: 25, timedOut: false, inputTokens: 40, outputTokens: 20, totalTokens: 60 } }),
+    { budget: meter, onStage: async (stage) => { stages.push(stage); } });
   assert.equal(result.ok, true);
   if (!result.ok) return;
+  assert.equal(result.brief.evidence_status, "protocol-complete");
+  assert.deepEqual(stages, ["Writing editor brief"]);
+  assert.deepEqual(meter.snapshot().totals, {
+    modelCalls: 1,
+    searches: 0,
+    documentReads: 0,
+    elapsedMs: meter.snapshot().totals.elapsedMs,
+    inputTokens: 40,
+    outputTokens: 20,
+    totalTokens: 60,
+  });
   const rows = await sql<{ brief_json: string }>`select brief_json from investigation_briefs where investigation_id=${id}`;
   assert.ok(JSON.stringify(result.brief).length > 12_000);
   assert.deepEqual(JSON.parse(rows[0]!.brief_json), result.brief);

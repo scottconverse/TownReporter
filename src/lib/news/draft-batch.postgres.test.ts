@@ -76,7 +76,7 @@ it(
       items: [{ leadId: lead.id }],
       runtimeSnapshot: {
         runtime: "claude-cli",
-        modelChoice: "claude-frontier",
+        modelChoice: "claude-sonnet",
         transport: "claude-code",
         model: "selected-claude",
       },

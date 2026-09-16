@@ -215,7 +215,10 @@ describe("editor copy", () => {
     const dataSource = readFileSync(new URL("./dark.ts", import.meta.url), "utf8");
     const screenSource = readFileSync(new URL("../../routes/desk.dark.tsx", import.meta.url), "utf8");
     assert.match(dataSource, /as still_open[\s\S]*from investigations i/);
-    assert.match(screenSource, /const totalOpen = Number\(inv\?\.still_open \?\? leftover\)/);
+    assert.match(
+      screenSource,
+      /const totalOpen = Math\.max\(Number\(inv\?\.still_open \?\? 0\), leftover\)/,
+    );
     assert.match(screenSource, /limited, deduplicated subset of \{totalOpen\} open follow-up/);
     assert.doesNotMatch(screenSource, /more were mentioned but\s+not yet named/);
   });
@@ -889,7 +892,10 @@ describe("Opinion refusal recovery", () => {
   });
 
   it("continues to give reset advice for an actual quota-only failure", () => {
-    assert.match(editorDraftError("Claude Code error 429: usage limit reached, resets 11:30pm (America/Denver).")!, /resets 11:30pm/);
+    const message = editorDraftError("Claude Code error 429: usage limit reached, resets 11:30pm (America/Denver).")!;
+    assert.match(message, /resets 11:30pm/);
+    assert.match(message, /saved material is still here/i);
+    assert.doesNotMatch(message, /Opinion request/);
   });
 
   it("recognizes the older refusal wording with terminal punctuation", () => {

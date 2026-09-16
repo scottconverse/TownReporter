@@ -1,6 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { failOverAndRetry, type DraftInput, type ReportedDraftResult } from "./desk-model-run.ts";
+import {
+  failOverAndRetry,
+  failOverOperationAndRetry,
+  storyProviderFailure,
+  type DraftInput,
+  type ReportedDraftResult,
+} from "./desk-model-run.ts";
 import type { DeskJob } from "./jobs.ts";
 
 /**
@@ -14,8 +20,8 @@ import type { DeskJob } from "./jobs.ts";
  */
 
 const LIVE_401 =
-  "Claude Code error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
-const LIVE_TIMEOUT_NO_OUTPUT = "Claude Code request timed out after 150s, 0 bytes out";
+  "Codex error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
+const LIVE_TIMEOUT_NO_OUTPUT = "Codex request timed out after 150s, 0 bytes out";
 
 function job(overrides: Partial<DeskJob> = {}): DeskJob {
   return {
@@ -24,7 +30,7 @@ function job(overrides: Partial<DeskJob> = {}): DeskJob {
     user_id: "u1",
     kind: "draft",
     subject_id: 7,
-    model_choice: "claude-frontier",
+    model_choice: "codex-balanced",
     model_choice_source: "auto",
     lane: "default",
     status: "running",
@@ -73,7 +79,11 @@ describe("failOverAndRetry", () => {
         runReportCalls.push(opts.modelChoice);
         return successfulDraft;
       },
-      probe: async (choice) => ({ ok: true, label: "Codex Terra", choice: choice as "codex-balanced" }),
+      probe: async (choice) => ({
+        ok: true,
+        label: "Claude Sonnet",
+        choice: choice as "claude-sonnet",
+      }),
       setModelChoice: async (id, choice) => {
         modelChoiceCalls.push([id, choice]);
       },
@@ -86,15 +96,15 @@ describe("failOverAndRetry", () => {
     });
 
     assert.equal(result, successfulDraft);
-    assert.deepEqual(modelChoiceCalls, [[41, "codex-balanced"]]);
-    assert.deepEqual(runReportCalls, ["codex-balanced"], "the retry must run on the next rung");
+    assert.deepEqual(modelChoiceCalls, [[41, "claude-sonnet"]]);
+    assert.deepEqual(runReportCalls, ["claude-sonnet"], "the retry must run on the next rung");
     assert.ok(
-      stageMessages.some((s) => s === "Switched to Codex Terra: Claude Opus sign-in lapsed"),
+      stageMessages.some((s) => s === "Switched to Claude Sonnet: Codex Terra sign-in lapsed"),
       `expected the auth-lapse stage wording, got: ${JSON.stringify(stageMessages)}`,
     );
     assert.equal(
       noteWritten,
-      "This draft moved to Codex Terra because Claude Opus sign-in lapsed",
+      "This draft moved to Claude Sonnet because Codex Terra sign-in lapsed",
       "the durable failover_note must carry the same 'sign-in lapsed' wording as the stage",
     );
   });
@@ -113,7 +123,11 @@ describe("failOverAndRetry", () => {
         runReportCalls.push(opts.modelChoice);
         return successfulDraft;
       },
-      probe: async (choice) => ({ ok: true, label: "Codex Terra", choice: choice as "codex-balanced" }),
+      probe: async (choice) => ({
+        ok: true,
+        label: "Claude Sonnet",
+        choice: choice as "claude-sonnet",
+      }),
       setModelChoice: async (id, choice) => {
         modelChoiceCalls.push([id, choice]);
       },
@@ -126,15 +140,15 @@ describe("failOverAndRetry", () => {
     });
 
     assert.equal(result, successfulDraft);
-    assert.deepEqual(modelChoiceCalls, [[41, "codex-balanced"]]);
-    assert.deepEqual(runReportCalls, ["codex-balanced"], "the retry must run on the next rung");
+    assert.deepEqual(modelChoiceCalls, [[41, "claude-sonnet"]]);
+    assert.deepEqual(runReportCalls, ["claude-sonnet"], "the retry must run on the next rung");
     assert.ok(
-      stageMessages.some((s) => s === "Switched to Codex Terra: Claude Opus timed out"),
+      stageMessages.some((s) => s === "Switched to Claude Sonnet: Codex Terra timed out"),
       `expected the timeout stage wording, got: ${JSON.stringify(stageMessages)}`,
     );
     assert.equal(
       noteWritten,
-      "This draft moved to Codex Terra because Claude Opus timed out",
+      "This draft moved to Claude Sonnet because Codex Terra timed out",
       "the durable failover_note must carry the same 'timed out' wording as the stage",
     );
   });
@@ -165,13 +179,17 @@ describe("failOverAndRetry", () => {
       },
     });
 
-    assert.ok("error" in result && result.error === LIVE_401, "the original error must pass through unchanged");
+    assert.ok(
+      "error" in result && result.error === LIVE_401,
+      "the original error must pass through unchanged",
+    );
     assert.equal(modelChoiceSet, false);
     assert.equal(stageSet, false);
     assert.equal(noteSet, false);
   });
 
   it("explains why Automatic did not move on when the next rung was not ready", async () => {
+    let probeCalls = 0;
     const result = await failOverAndRetry({
       job: job(),
       error: LIVE_401,
@@ -179,7 +197,10 @@ describe("failOverAndRetry", () => {
       runReport: async () => {
         throw new Error("must not retry when nothing is ready");
       },
-      probe: async () => ({ ok: false, error: "Codex is not installed on this machine." }),
+      probe: async () => {
+        probeCalls += 1;
+        return { ok: false, error: "Claude is not signed in on this machine." };
+      },
       setModelChoice: async () => {
         throw new Error("nothing to switch to means nothing gets rewritten");
       },
@@ -192,7 +213,120 @@ describe("failOverAndRetry", () => {
     });
 
     assert.ok("error" in result);
-    assert.match(result.error, /Automatic tried Codex Terra next, but it was not ready/);
-    assert.match(result.error, /Codex is not installed on this machine\./);
+    assert.match(result.error, /Automatic tried Claude Sonnet next, but it was not ready/);
+    assert.match(result.error, /Claude is not signed in on this machine\./);
+    assert.equal(probeCalls, 1, "Automatic must not probe the same unavailable rung twice");
+  });
+});
+
+describe("Story provider failure and stage failover", () => {
+  it("uses Story-specific allowance copy instead of Opinion copy", () => {
+    const message = storyProviderFailure(
+      "Claude API error 429: usage limit reached; resets 11:30pm (America/Denver).",
+    );
+    assert.match(message, /Story drafting/);
+    assert.match(message, /11:30pm/);
+    assert.match(message, /saved material was preserved/);
+    assert.doesNotMatch(message, /Opinion request/);
+  });
+
+  it("keeps Automatic's unavailable-next-rung detail in Story quota copy", () => {
+    const message = storyProviderFailure(
+      "Codex error 429: usage limit reached. Automatic tried Claude Sonnet next, but it was not ready: Claude is unavailable.",
+    );
+    assert.match(message, /Automatic tried Claude Sonnet next, but it was not ready/);
+    assert.doesNotMatch(message, /Opinion request/);
+  });
+
+  it("keeps a content refusal terminal even when its explanation mentions quota", () => {
+    const refusal =
+      "The selected model declined to produce the requested story: I cannot write this. A quota reset will not change that.";
+    assert.equal(storyProviderFailure(refusal), refusal);
+  });
+
+  it("fails over a document-reading stage once and resumes it on Claude Sonnet", async () => {
+    const calls: string[] = [];
+    const stages: string[] = [];
+    const result = await failOverOperationAndRetry({
+      job: job(),
+      error: "Codex usage limit reached",
+      operation: async (choice) => {
+        calls.push(choice);
+        return "document evidence";
+      },
+      probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
+      setModelChoice: async () => undefined,
+      setStage: async (_id, stage) => {
+        stages.push(stage);
+      },
+      setFailoverNote: async () => undefined,
+    });
+    assert.deepEqual(result, { ok: true, value: "document evidence", choice: "claude-sonnet" });
+    assert.deepEqual(calls, ["claude-sonnet"]);
+    assert.deepEqual(stages, ["Switched to Claude Sonnet: Codex Terra reached its usage limit"]);
+  });
+
+  it("does not reroute an explicit document-reading model or a content refusal", async () => {
+    for (const candidate of [
+      {
+        current: "claude-frontier",
+        source: "editor",
+        error: "Claude API error 429: usage limit reached",
+      },
+      {
+        current: "claude-frontier",
+        source: "auto",
+        error:
+          "The selected model declined to produce the requested story: I cannot write this. A quota reset will not change that.",
+      },
+    ] as const) {
+      let probes = 0;
+      let operations = 0;
+      const explicitJob = {
+        ...job(),
+        model_choice: candidate.current,
+        model_choice_source: candidate.source,
+      };
+      const result = await failOverOperationAndRetry({
+        job: explicitJob,
+        error: candidate.error,
+        operation: async () => {
+          operations += 1;
+          return "must not run";
+        },
+        probe: async () => {
+          probes += 1;
+          return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+        },
+        setModelChoice: async () => undefined,
+        setStage: async () => undefined,
+        setFailoverNote: async () => undefined,
+      });
+      assert.equal(result.ok, false);
+      assert.equal(probes, 0);
+      assert.equal(operations, 0);
+    }
+  });
+
+  it("explains when document failover found the next provider unavailable", async () => {
+    let probeCalls = 0;
+    const result = await failOverOperationAndRetry({
+      job: job(),
+      error: "Codex usage limit reached",
+      operation: async () => "must not run",
+      probe: async () => {
+        probeCalls += 1;
+        return { ok: false, error: "Claude is not signed in." };
+      },
+      setModelChoice: async () => undefined,
+      setStage: async () => undefined,
+      setFailoverNote: async () => undefined,
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.match(result.error, /Automatic tried Claude Sonnet next/);
+    assert.match(result.error, /Claude is not signed in/);
+    assert.doesNotMatch(result.error, /Opinion request/);
+    assert.equal(probeCalls, 1, "Automatic must not probe the same unavailable rung twice");
   });
 });
