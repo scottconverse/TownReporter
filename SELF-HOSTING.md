@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.49**. See the [release guide](docs/releases/0.6.49.md).
+Repository documentation version: **0.6.50**. See the [release guide](docs/releases/0.6.50.md).
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
