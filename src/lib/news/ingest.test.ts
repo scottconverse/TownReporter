@@ -12,6 +12,7 @@ import {
   ingestUrl,
   mapLimit,
   parseRssItems,
+  setOcrImpl,
   withRetry,
 } from "./ingest.ts";
 import { setFetchImplForTests } from "./fetch-url.ts";
@@ -131,6 +132,30 @@ describe("extractPdfText", () => {
 });
 
 describe("extractPdfBetter", () => {
+  it("lets a mechanical caller leave a scanned PDF for OCR without invoking a model", async () => {
+    let ocrCalls = 0;
+    setOcrImpl(async () => {
+      ocrCalls += 1;
+      return { text: "A model should never read this mechanical Pull fixture.", pages: [] };
+    });
+    setFetchImplForTests(async () =>
+      new Response(new Uint8Array([0, 1, 2, 3, 4]), {
+        headers: { "content-type": "application/pdf" },
+      }),
+    );
+    try {
+      const result = await ingestDocument("https://93.184.216.34/scanned.pdf", {
+        allowModelOcr: false,
+      });
+      assert.equal(result.outcome, "needs-ocr");
+      assert.equal(result.needsOcr, true);
+      assert.equal(ocrCalls, 0);
+    } finally {
+      setFetchImplForTests(null);
+      setOcrImpl(null);
+    }
+  });
+
   it("preserves the original Uint8Array for OCR after native parsing fails", async () => {
     const input = new Uint8Array([...Buffer.from("%PDF-invalid scanned image"), 1, 2, 3]);
     const expected = Uint8Array.from(input);

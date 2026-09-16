@@ -6,6 +6,7 @@ import { getPaperConfig } from "./paper-settings.ts";
 import {
   runForcedChat,
   validateForcedRuntime,
+  type ForcedChatAdapters,
   type ForcedRuntimeSnapshot,
 } from "./forced-runtime.server.ts";
 
@@ -271,28 +272,6 @@ export async function isDailyScanJob(job: DeskJob): Promise<boolean> {
 
 type ForcedChatSnapshot = ForcedRuntimeSnapshot;
 
-type ForcedChatAdapters<T> = {
-  claude: (input: {
-    system: string;
-    user: string;
-    model: string;
-    timeoutMs: number;
-    noTools?: boolean;
-  }) => Promise<T>;
-  codex: (input: { system: string; user: string; model: string; timeoutMs: number }) => Promise<T>;
-  local: (
-    system: string,
-    user: string,
-    maxTokens: number,
-    options: {
-      timeoutMs?: number;
-      choice: "local-model";
-      localModel: { baseUrl: string; id: string };
-      noTools?: boolean;
-    },
-  ) => Promise<T>;
-};
-
 export async function runForcedDailyChat<T>(
   snapshot: ForcedChatSnapshot,
   system: string,
@@ -329,6 +308,14 @@ export async function runDailyScanWork(job: DeskJob, deps: DailyScanWorkDeps = {
             (await import("./ai-claude-code.server.ts")).claudeCodeChat(input),
           codex: async (input) => (await import("./ai-codex.server.ts")).codexChat(input),
           local: async (...input) => {
+            const { grokChat } = await import("./ai.ts");
+            return grokChat(...input);
+          },
+          custom: async (...input) => {
+            const { grokChat } = await import("./ai.ts");
+            return grokChat(...input);
+          },
+          xai: async (...input) => {
             const { grokChat } = await import("./ai.ts");
             return grokChat(...input);
           },

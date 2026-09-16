@@ -703,4 +703,17 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
     assert.equal(result.modelChoice, choice);
     assert.deepEqual(events, ["voice:locate", "custom", "file"]);
   });
+
+  it("sends an explicit SuperGrok choice only to the direct OAuth pair", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "grok-oauth" },
+      customRuntime(events, { ok: true, text: DELIVERED }),
+    );
+    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    if (!result.ok) return;
+    assert.equal(result.modelChoice, "grok-oauth");
+    assert.deepEqual(events, ["voice:locate", "custom", "file"]);
+  });
 });

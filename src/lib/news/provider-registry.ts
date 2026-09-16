@@ -42,10 +42,16 @@
  * compatible protocol; what makes it different is that it is slow and free,
  * not that it is a different wire format.
  */
-export type ProviderKind = "claude-code" | "codex" | "openai" | "anthropic" | "local";
+export type ProviderKind =
+  | "claude-code"
+  | "codex"
+  | "openai"
+  | "anthropic"
+  | "xai-oauth"
+  | "local";
 
 /** The four places this desk asks a model for something. */
-export type ProviderSurface = "story" | "scan" | "opinion" | "dark";
+export type ProviderSurface = "story" | "scan" | "opinion" | "dark" | "forced";
 
 export type ProviderBudget = {
   /** Wall clock for a whole multi-call pipeline, e.g. one draft. */
@@ -79,6 +85,7 @@ export const PICKER_PROVIDER_IDS = [
   "claude-frontier",
   "claude-sonnet",
   "claude-haiku",
+  "grok-oauth",
   "local-model",
 ] as const;
 export const INTERNAL_PROVIDER_IDS = ["configured"] as const;
@@ -184,6 +191,7 @@ export const KIND_BUDGETS: Record<ProviderKind, ProviderBudget> = {
   codex: { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 },
   anthropic: { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 },
   openai: { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 },
+  "xai-oauth": { wallMs: 420_000, callMs: 180_000, reserveMs: 180_000 },
   local: { wallMs: 600_000, callMs: 600_000, reserveMs: 60_000 },
 };
 
@@ -212,6 +220,7 @@ const EVERY_SURFACE: Record<ProviderSurface, boolean> = {
   scan: true,
   opinion: true,
   dark: true,
+  forced: true,
 };
 
 /**
@@ -295,7 +304,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     offeredFor: EVERY_SURFACE,
     // Keep Claude last and use the balanced tier rather than spending Opus
     // allowance on ordinary newsroom work.
-    ladderRank: 2,
+    ladderRank: 3,
   },
   {
     id: "claude-haiku",
@@ -355,6 +364,20 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     enabled: () => notSwitchedOff("TOWNREPORTER_CLAUDE_CODE"),
     offSwitchEnv: "TOWNREPORTER_CLAUDE_CODE",
     offeredFor: EVERY_SURFACE,
+  },
+  {
+    id: "grok-oauth",
+    label: "Grok (SuperGrok)",
+    detail: "TownReporter OAuth · selected account model",
+    kind: "xai-oauth",
+    model: "grok-4.6",
+    envOverrides: {},
+    budget: KIND_BUDGETS["xai-oauth"],
+    enabled: () => notSwitchedOff("TOWNREPORTER_GROK_OAUTH"),
+    offSwitchEnv: "TOWNREPORTER_GROK_OAUTH",
+    offeredFor: EVERY_SURFACE,
+    // The owner asked to preserve current defaults. Grok is an explicit
+    // subscription choice until a later routing policy deliberately adds it.
   },
   {
     id: "local-model",
@@ -441,7 +464,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       the ladder runs (see `probeProvider`). It is in the registry so its
       label, budget and env overrides live with everyone else's.
     */
-    offeredFor: { story: false, scan: false, opinion: false, dark: false },
+    offeredFor: { story: false, scan: false, opinion: false, dark: false, forced: false },
   },
 ];
 

@@ -387,7 +387,10 @@ A council packet with no text layer — a fax-quality scan of a paper agenda —
 cannot be read by extracting text that was never stored in the file. This
 desk extracts supported embedded JPEG/PNG images and asks the selected
 vision-capable provider to transcribe them (`src/lib/news/ocr.ts`). The Anthropic API, Codex CLI and
-Claude Code CLI provide vision paths when their prerequisites are met. This
+Claude Code CLI provide vision paths when their prerequisites are met. Grok
+(SuperGrok) is a text-only connection for this path and fails clearly when
+selected for OCR. Automatic OCR checks Anthropic API, Codex, Claude Code and
+then a discovered local vision model in that order. This
 does not guarantee that a particular scan will be readable. A **local** model can only do it if it
 was built to accept images at all — an ordinary text-only local model
 cannot, no matter how good it is at writing.

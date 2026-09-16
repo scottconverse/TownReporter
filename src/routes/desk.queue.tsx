@@ -320,6 +320,7 @@ function QueuePage() {
           </InkButton>
         </div>
         <ModelPicker
+          scope="forced"
           value={batchRuntime}
           onChange={(choice) => setBatchRuntime(choice as DraftBatchRuntime)}
           disabled={startBatch.isPending}

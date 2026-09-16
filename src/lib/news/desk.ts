@@ -1136,6 +1136,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         codex: async (input) => (await import("./ai-codex.server.ts")).codexChat(input),
         local: grokChat,
         custom: grokChat,
+        xai: grokChat,
       } satisfies NonNullable<PerformDraftWorkDeps["batchChatAdapters"]>);
     reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
       const current = await batchGuard();

@@ -187,7 +187,7 @@ export async function orchestrateEditorial(
      Explicit Claude, Codex, local, and custom choices run only themselves. */
   const runPair = async (candidate: EffectiveOpinionModelChoice): Promise<ChatResult> => {
     const candidateInput = { ...input, modelChoice: candidate };
-    if (isCustomModelChoice(candidate)) {
+    if (isCustomModelChoice(candidate) || providerEntry(candidate)?.kind === "xai-oauth") {
       return runtime.runCustomPair({ input: candidateInput, found, researchPack });
     }
     if (providerEntry(candidate)?.kind === "codex") {

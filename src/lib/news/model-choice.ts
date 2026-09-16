@@ -34,9 +34,10 @@ const AUTOMATIC: ModelChoiceOption = {
   detail: "Recommended ladder",
 };
 
-function optionsFor(surface: ProviderSurface): ModelChoiceOption[] {
+export function modelChoicesFor(surface: ProviderSurface): readonly ModelChoiceOption[] {
+  const automatic = surface === "forced" ? [] : [AUTOMATIC];
   return [
-    AUTOMATIC,
+    ...automatic,
     ...providersFor(surface).map((entry) => ({
       value: entry.id as StoryModelChoice,
       label: entry.label,
@@ -45,7 +46,7 @@ function optionsFor(surface: ProviderSurface): ModelChoiceOption[] {
   ];
 }
 
-export const STORY_MODEL_CHOICES: readonly ModelChoiceOption[] = optionsFor("story");
+export const STORY_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("story");
 
 export type CustomModelChoice = `custom:${string}`;
 export type StoryModelChoice = "auto" | PickerProviderId | CustomModelChoice;
@@ -67,9 +68,7 @@ export const OPINION_AUTOMATIC_LADDER = ["codex-frontier", "claude-sonnet"] as c
  * Astra remain explicit choices for an editor who wants them.
  */
 export const DARK_AUTOMATIC_LADDER = ["codex-balanced", "claude-sonnet"] as const;
-export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = STORY_MODEL_CHOICES.filter(
-  (choice) => choice.value === "auto" || providerEntry(choice.value)?.offeredFor.opinion,
-);
+export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("opinion");
 
 /**
  * Dark Desk's picker. 0.6.2: before this, Dark Desk called the model with no
@@ -77,12 +76,13 @@ export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = STORY_MODEL_C
  * whatever `resolveProvider()` happened to return. It is the same list Story
  * gets, because every provider that can draft can also dig.
  */
-export const DARK_MODEL_CHOICES: readonly ModelChoiceOption[] = STORY_MODEL_CHOICES.filter(
-  (choice) => choice.value === "auto" || providerEntry(choice.value)?.offeredFor.dark,
-);
+export const DARK_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("dark");
+/** Batch and scheduled runs must name one exact provider; Automatic is absent. */
+export const FORCED_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("forced");
 
 export type OpinionModelChoice = StoryModelChoice;
 export type DarkModelChoice = StoryModelChoice;
+export type ForcedModelChoice = Exclude<StoryModelChoice, "auto">;
 
 export function storyModelChoice(value: unknown): StoryModelChoice {
   if (isCustomModelChoice(value)) return value;
@@ -123,11 +123,14 @@ export function shouldHydrateDarkModel(
   );
 }
 
-export function modelChoiceLabel(value: unknown): string {
+export function modelChoiceLabel(value: unknown, scope: ProviderSurface = "story"): string {
   if (isCustomModelChoice(value)) return "Custom API connection";
   if (value === "configured") return providerEntry("configured")?.label ?? "Configured gateway";
-  const normalized = storyModelChoice(value);
-  return STORY_MODEL_CHOICES.find((choice) => choice.value === normalized)?.label ?? "Automatic";
+  for (const surface of [scope, "story", "scan", "opinion", "dark", "forced"] as const) {
+    const match = modelChoicesFor(surface).find((choice) => choice.value === value);
+    if (match) return match.label;
+  }
+  return "Automatic";
 }
 
 /**
@@ -155,16 +158,14 @@ function ladderSentence(ladder: readonly string[] = automaticLadder()): string {
 export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"): string {
   if (isCustomModelChoice(value))
     return "Uses only the selected custom API connection for this run; no fallback. Your provider's usage charges may apply.";
-  const options =
-    scope === "opinion"
-      ? OPINION_MODEL_CHOICES
-      : scope === "dark"
-        ? DARK_MODEL_CHOICES
-        : STORY_MODEL_CHOICES;
+  const options = modelChoicesFor(scope);
   const normalized = options.some((choice) => choice.value === value)
     ? (value as StoryModelChoice)
-    : "auto";
-  const selected = options.find((choice) => choice.value === normalized)!;
+    : scope === "forced"
+      ? options[0]?.value
+      : "auto";
+  const selected = options.find((choice) => choice.value === normalized) ?? options[0];
+  if (!selected) return "No model is available for this surface.";
   if (selected.value !== "auto") {
     return `Uses only ${selected.label} for this run; no fallback.`;
   }

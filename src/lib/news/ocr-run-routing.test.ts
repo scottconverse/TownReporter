@@ -26,6 +26,66 @@ function serveScan(): void {
 }
 
 describe("ordinary public-document OCR model routing", () => {
+  it("keeps Automatic OCR on its established availability order before the writing ladder", async () => {
+    const priorCodex = process.env.TOWNREPORTER_CODEX;
+    const priorClaude = process.env.TOWNREPORTER_CLAUDE_CODE;
+    const priorKey = process.env.ANTHROPIC_API_KEY;
+    const priorModel = process.env.ANTHROPIC_MODEL;
+    try {
+      delete process.env.TOWNREPORTER_CODEX;
+      delete process.env.TOWNREPORTER_CLAUDE_CODE;
+      process.env.ANTHROPIC_API_KEY = "synthetic-key";
+      process.env.ANTHROPIC_MODEL = "claude-sonnet";
+      const selected: Array<{ transport: string; model: string }> = [];
+      const result = await productionOcr(singleRenderedPdfFixture(), {
+        provider: "auto",
+        adapters: {
+          anthropic: async (_image, _timeoutMs, model) => {
+            assert.ok(model);
+            selected.push(model);
+            return OCR_TEXT;
+          },
+          codex: async () => {
+            throw new Error("Codex must not run after the first available OCR path");
+          },
+          "claude-code": async () => {
+            throw new Error("Claude Code must not run after the first available OCR path");
+          },
+        },
+      });
+      assert.match(result.text, /water contract was approved/);
+      assert.deepEqual(selected, [{ transport: "anthropic", model: "claude-sonnet" }]);
+    } finally {
+      if (priorCodex === undefined) delete process.env.TOWNREPORTER_CODEX;
+      else process.env.TOWNREPORTER_CODEX = priorCodex;
+      if (priorClaude === undefined) delete process.env.TOWNREPORTER_CLAUDE_CODE;
+      else process.env.TOWNREPORTER_CLAUDE_CODE = priorClaude;
+      if (priorKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = priorKey;
+      if (priorModel === undefined) delete process.env.ANTHROPIC_MODEL;
+      else process.env.ANTHROPIC_MODEL = priorModel;
+    }
+  });
+
+  it("fails clearly for explicit Grok OCR without invoking a fallback", async () => {
+    let grokCalls = 0;
+    const result = await productionOcr(singleRenderedPdfFixture(), {
+      provider: "grok-oauth",
+      adapters: {
+        "xai-oauth": async () => {
+          grokCalls++;
+          throw new Error("Grok OCR must not be attempted");
+        },
+      },
+    });
+    assert.equal(result.text, "");
+    assert.equal(grokCalls, 0);
+    assert.equal(
+      result.reason,
+      "Grok (SuperGrok) is a text-only connection in TownReporter and cannot read scan images. Choose Anthropic, Codex, Claude Code, or a local model marked · vision for OCR.",
+    );
+  });
+
   it("keeps every explicit Story picker choice, newsroom, and local override on the OCR read", async () => {
     const choices = [
       "codex-astra",
@@ -36,6 +96,7 @@ describe("ordinary public-document OCR model routing", () => {
       "claude-frontier",
       "claude-sonnet",
       "claude-haiku",
+      "grok-oauth",
       "custom:11111111-1111-4111-8111-111111111111",
       "local-model",
     ] as const;

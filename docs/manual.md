@@ -2,9 +2,9 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.49 · durable reporting work and automatic Story recovery · deployment is recorded separately**
+**Version 0.6.48 · persistent public-to-desk navigation · deployment is recorded separately**
 
-[Download 0.6.49](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.49) · [Release guide and verification](releases/0.6.49.md). A source release and a running production deployment are separate facts.
+[Download 0.6.48](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.48) · [Release guide and verification](releases/0.6.48.md). A source release and a running production deployment are separate facts.
 
 **Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
 
@@ -230,7 +230,8 @@ Server page. It starts disabled. The
 owner selects up to 12 accepted sources from any reporting beat, a local time
 in the paper's timezone, and one explicit model: Codex Astra, Sol, Terra, or
 Luna; Claude Fable, Opus, Sonnet, or Haiku; the selected local model; or a
-saved Custom AI connection such as an OpenAI-compatible Gemini endpoint.
+saved Custom AI connection such as an OpenAI-compatible Gemini endpoint; or
+the newsroom's direct Grok (SuperGrok) connection.
 Legacy "Claude Code subscription" settings migrate to Claude Sonnet instead of
 Opus. Scheduled scans do not switch providers. Saved Custom AI credentials are
 resolved only when the scheduled run starts and are not copied into its job
@@ -286,16 +287,19 @@ guidance, not an automatic installer or sign-in button.
 ### Draft selected leads
 
 The Queue can start one atomic batch of one to five eligible leads. Select the
-rows, choose one explicit named **Codex**, **Claude**, or **Local model**, and
+rows, choose one explicit named **Codex**, **Claude**, **Grok (SuperGrok)**, or **Local model**, and
 use **Draft selected**. The picker offers every named Codex and Claude model,
 Local model, and saved Custom AI connections such as Gemini. The batch does
 not use Automatic or fallback. It preserves each lead's stored
 research scope. A missing runtime or ineligible selected lead refuses the
 whole start, before any partial batch is created.
 
-Daily Scan uses the same exact named model choices and saved Custom AI
+Daily Scan uses the same exact named model choices, Grok (SuperGrok), and saved Custom AI
 connections, with no Automatic or fallback. OCR for a Story, Dark Desk run,
-scheduled Scan or batch remains on that run's selected model.
+scheduled Scan or batch remains on that run's selected model when that provider
+supports vision. Grok is text-only for OCR and fails clearly without switching
+providers. Automatic OCR keeps its separate availability order: Anthropic API,
+Codex, Claude Code, then a discovered local vision model.
 
 The batch area also offers an optional **Suggested focus** size of three to
 five leads. It balances existing lead scores and sections; review the evidence

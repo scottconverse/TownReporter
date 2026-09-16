@@ -1,10 +1,10 @@
 # Changelog
 
-Current release: **0.6.49**.
+Current release: **0.6.48**.
 
 ## Unreleased
 
-## 0.6.49 — 2026-09-15
+## 0.6.49 — Unreleased draft
 
 - Restores Dark Desk as a lead-development system: it follows unnamed actors, beneficiaries, organizations, money and missing records; keeps investigative and benign explanations live together; preserves thin and deferred trails; and prevents low-yield stop rules from closing high-value open work.
 - Adds selectable Dark Desk provider/model controls, bounded model/search/document/time budgets, live usage and stage reporting, checkpointed synthesis recovery, controlled frontier growth and evidence-based stopping.

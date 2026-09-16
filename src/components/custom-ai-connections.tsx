@@ -5,7 +5,11 @@ import type {
   PublicCustomAiConnection,
   ConnectionProbeResult,
 } from "@/lib/news/custom-ai-settings";
-import { capabilityStatus, managementActionsLocked } from "@/lib/news/custom-ai-settings";
+import {
+  capabilityStatus,
+  connectionSaveMessage,
+  managementActionsLocked,
+} from "@/lib/news/custom-ai-settings";
 
 type Props = {
   connections: PublicCustomAiConnection[];
@@ -56,7 +60,7 @@ export function CustomAiConnections({
       setEditingId(undefined);
       setModels([]);
       setForm({ name: "", baseUrl: "", apiKey: "", modelId: "" });
-      setResult("Connection saved. Your current model choice did not change.");
+      setResult(connectionSaveMessage());
     } catch (e) {
       setResult(e instanceof Error ? e.message : "Connection could not be saved.");
     } finally {
@@ -70,6 +74,25 @@ export function CustomAiConnections({
         Connect an OpenAI-compatible endpoint, including LiteLLM. Saving does not call a model,
         spend provider credit, or change the desk default.
       </p>
+      <div>
+        <InkButton
+          tone="ghost"
+          type="button"
+          onClick={() => {
+            setEditingId(undefined);
+            setModels([]);
+            setResult("Gemini preset loaded. Add your API key, then save the connection.");
+            setForm({
+              name: "Gemini",
+              baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+              apiKey: "",
+              modelId: "",
+            });
+          }}
+        >
+          Set up Gemini
+        </InkButton>
+      </div>
       <p className="meta">
         Using LiteLLM?{" "}
         <a href="https://docs.litellm.ai/docs/proxy/quick_start" target="_blank" rel="noopener noreferrer" className="underline">

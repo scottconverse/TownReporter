@@ -207,9 +207,10 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
   }
   const provider = opts.provider;
   if (!provider || provider === "auto") {
-    // Automatic order: Anthropic API -> Codex -> Claude Code CLI -> a
-    // vision-capable local default -> needs-ocr. Mirrors ai.ts's Automatic
-    // ladder (the operator's own signed-in providers before a local guess).
+    // Keep OCR's established availability order independent of the writing
+    // model ladder. Anthropic API is the first vision path when configured;
+    // Codex and Claude Code are checked next, then a discovered local vision
+    // model. This is selection by availability, not per-page fallback.
     const apiKey = env("ANTHROPIC_API_KEY");
     if (apiKey)
       return { kind: "anthropic", apiKey, model: env("ANTHROPIC_MODEL") || "claude-opus-5" };
@@ -283,6 +284,13 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
       needsOcr: true,
       reason:
         "the chosen local model cannot read images — pick a vision model (marked · vision in the picker).",
+    };
+  }
+  if (entry.kind === "xai-oauth") {
+    return {
+      needsOcr: true,
+      reason:
+        "Grok (SuperGrok) is a text-only connection in TownReporter and cannot read scan images. Choose Anthropic, Codex, Claude Code, or a local model marked · vision for OCR.",
     };
   }
   return { needsOcr: true, reason: `${entry.label} cannot read images.` };

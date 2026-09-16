@@ -38,8 +38,10 @@ import type { EditorialAssignment } from "./write-story.ts";
 import { checkStoryNames, replaceName, type UploadedNameEvidence } from "./name-check-work.ts";
 import { nameCheckNotes, nameCheckText, type NameCheck } from "./name-check.ts";
 import { parseDocumentClaims, type DocumentReportedClaim } from "./document-reconcile-evidence.ts";
+import { outletNamesForHost, uncreditedOutlets } from "./source-credit.ts";
 
 export { stripReporterNotebook } from "./strip-draft.ts";
+export { outletNamesForHost, uncreditedOutlets } from "./source-credit.ts";
 
 export const STORY_FORMS = ["brief", "reported", "explainer", "investigation"] as const;
 export type StoryForm = (typeof STORY_FORMS)[number];
@@ -436,19 +438,6 @@ export function preferStoryUrls(used: string[], candidates: string[], headline: 
   return sanitizePublicUrls(out);
 }
 
-export function outletNamesForHost(url: string): string[] {
-  try {
-    const host = new URL(url).hostname.replace(/^www\./i, "").toLowerCase();
-    if (host.includes("longmontleader")) return ["Longmont Leader", "the Leader"];
-    if (host.includes("timescall")) return ["Longmont Times-Call", "Times-Call"];
-    if (host.includes("dailycamera")) return ["Daily Camera"];
-    if (host.includes("longmontcolorado.gov")) return ["City of Longmont"];
-  } catch {
-    /* ignore */
-  }
-  return [];
-}
-
 /*
   "We name them" is a promise about the printed body, and nothing checked it.
 
@@ -478,32 +467,6 @@ export function outletNamesForHost(url: string): string[] {
  * withheld the warning. Padding both sides means the comparison can only
  * succeed on whole words: " the leadership " does not contain " the leader ".
  */
-function spacedWords(text: string): string {
-  return ` ${text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()} `;
-}
-
-export function uncreditedOutlets(body: string, sourceUrls: string[]): string[] {
-  const seen = new Set<string>();
-  const missing: string[] = [];
-  for (const url of sourceUrls) {
-    const names = outletNamesForHost(url);
-    if (names.length === 0) continue;
-    const primary = names[0]!;
-    if (seen.has(primary)) continue;
-    const credited = names.some((name) => spacedWords(body).includes(spacedWords(name)));
-    if (!credited) {
-      seen.add(primary);
-      missing.push(primary);
-    } else {
-      seen.add(primary);
-    }
-  }
-  return missing;
-}
-
 /** Preserve authored links; organization-name matching cannot establish attribution. */
 export function linkOutletInBody(body: string, _urls: string[]): string {
   return body;

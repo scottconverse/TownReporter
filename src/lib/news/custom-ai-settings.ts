@@ -1,11 +1,68 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "../auth/middleware.ts";
+import type {
+  CustomAiConnectionInput,
+  PublicCustomAiConnection,
+} from "./custom-ai-connections.server";
 
 export type {
   CustomAiConnectionInput,
   PublicCustomAiConnection,
   ConnectionProbeResult,
 } from "./custom-ai-connections.server";
+
+export function connectionSaveMessage(): string {
+  return "Connection saved. Your current model choice did not change.";
+}
+
+export function upsertCustomAiConnection(
+  current: PublicCustomAiConnection[] | undefined,
+  saved: PublicCustomAiConnection,
+): PublicCustomAiConnection[] {
+  return [...(current ?? []).filter((connection) => connection.id !== saved.id), saved].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+}
+
+export function updateCustomAiConnectionEnabled(
+  current: PublicCustomAiConnection[] | undefined,
+  id: string,
+  enabled: boolean,
+): PublicCustomAiConnection[] {
+  return (current ?? []).map((connection) =>
+    connection.id === id ? { ...connection, enabled } : connection,
+  );
+}
+
+export function removeCustomAiConnection(
+  current: PublicCustomAiConnection[] | undefined,
+  id: string,
+): PublicCustomAiConnection[] {
+  return (current ?? []).filter((connection) => connection.id !== id);
+}
+
+type CustomAiConnectionSave = (
+  input: CustomAiConnectionInput & { id?: string },
+) => Promise<PublicCustomAiConnection>;
+
+type CustomAiConnectionCache = {
+  setQueryData<TData>(
+    queryKey: readonly unknown[],
+    updater: (current: TData | undefined) => TData,
+  ): unknown;
+};
+
+export async function saveCustomAiConnectionAndCache(
+  input: CustomAiConnectionInput & { id?: string },
+  save: CustomAiConnectionSave,
+  queryClient: CustomAiConnectionCache,
+): Promise<void> {
+  const saved = await save(input);
+  queryClient.setQueryData<PublicCustomAiConnection[] | undefined>(
+    ["custom-ai-connections"],
+    (current) => upsertCustomAiConnection(current, saved),
+  );
+}
 
 export function capabilityStatus(value: boolean | null): "yes" | "no" | "not tested" {
   return value === null ? "not tested" : value ? "yes" : "no";

@@ -545,6 +545,42 @@ describe("grokChat", () => {
 });
 
 describe("model-picker provider readiness", () => {
+  it("preflights the explicit SuperGrok choice only through its newsroom OAuth connection", async () => {
+    const result = await probeProvider("grok-oauth", 44, {
+      resolveXaiOauth: async (newsroomId) => {
+        assert.equal(newsroomId, 44);
+        return { modelId: "grok-4.6", label: "Grok Build" };
+      },
+    });
+    assert.deepEqual(result, { ok: true, label: "Grok Build", choice: "grok-oauth" });
+  });
+
+  it("routes an explicit SuperGrok draft only through OAuth with the selected model", async () => {
+    const calls: unknown[] = [];
+    const result = await grokChat(
+      "system prompt",
+      "user prompt",
+      32,
+      { choice: "grok-oauth", newsroomId: 44, timeoutMs: 12_345 },
+      {
+        resolveXaiOauth: async () => ({ modelId: "grok-4.6", label: "Grok Build" }),
+        xaiChat: async (input) => {
+          calls.push(input);
+          return { text: "GROK_CONNECTION_OK" };
+        },
+      },
+    );
+    assert.deepEqual(result, { ok: true, text: "GROK_CONNECTION_OK" });
+    assert.deepEqual(calls, [{
+      newsroomId: 44,
+      system: "system prompt",
+      user: "user prompt",
+      maxTokens: 32,
+      model: "grok-4.6",
+      timeoutMs: 12_345,
+    }]);
+  });
+
   it("preflights the discovered newsroom local model without requiring environment variables", async () => {
     const originalFetch = globalThis.fetch;
     const calls: string[] = [];
@@ -689,6 +725,39 @@ describe("model-picker provider readiness", () => {
           const result = await probeProvider("configured");
           assert.equal(result.ok, false);
           if (!result.ok) assert.match(result.error, /not loaded/i);
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("matches a bare Gemini model against Google's prefixed catalog only", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ data: [{ id: "models/gemini-3.8-flash" }] }), { status: 200 });
+    try {
+      await withEnvAsync(
+        {
+          ...BARE,
+          LLM_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai",
+          LLM_MODEL: "gemini-3.8-flash",
+        },
+        async () => {
+          const gemini = await probeProvider("configured");
+          assert.deepEqual(gemini, {
+            ok: true,
+            label: "LLM",
+            choice: "configured",
+          });
+        },
+      );
+      await withEnvAsync(
+        { ...BARE, LLM_BASE_URL: "https://other.example/v1", LLM_MODEL: "gemini-3.8-flash" },
+        async () => {
+          const other = await probeProvider("configured");
+          assert.equal(other.ok, false);
+          if (!other.ok) assert.match(other.error, /not loaded/i);
         },
       );
     } finally {

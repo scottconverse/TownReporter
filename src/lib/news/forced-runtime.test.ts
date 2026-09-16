@@ -172,4 +172,34 @@ describe("forced runtime snapshots", () => {
       adapters: undefined,
     });
   });
+
+  it("keeps SuperGrok credentials out of the batch snapshot and resolves them at call time", async () => {
+    const snapshot = {
+      runtime: "grok-oauth",
+      modelChoice: "grok-oauth",
+      transport: "xai-oauth",
+      model: "grok-4.6",
+      newsroomId: 42,
+    } as const satisfies ForcedRuntimeSnapshot;
+    assert.deepEqual(parseForcedRuntimeSnapshot(snapshot), snapshot);
+    assert.doesNotMatch(JSON.stringify(snapshot), /access.?token|refresh.?token|secret/i);
+    let received: unknown;
+    const result = await runForcedChat(snapshot, "system", "user", 100, undefined, {
+      claude: async () => { throw new Error("wrong transport"); },
+      codex: async () => { throw new Error("wrong transport"); },
+      local: async () => { throw new Error("wrong transport"); },
+      xai: async (_system, _user, _maxTokens, options) => {
+        received = options;
+        return { ok: true as const, text: "done" };
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(received, {
+      choice: "grok-oauth",
+      newsroomId: 42,
+      model: "grok-4.6",
+    });
+    assert.equal(forcedOcrOptions(snapshot).provider, "grok-oauth");
+    assert.equal(forcedOcrOptions(snapshot).newsroomId, "42");
+  });
 });

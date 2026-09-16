@@ -4,9 +4,10 @@ import test from "node:test";
 
 const source = await readFile(new URL("../src/routes/desk.dark.tsx", import.meta.url), "utf8");
 
-test("unverified signals do not claim that adversarial checks never ran", () => {
-  assert.match(source, /has not met all verification requirements/);
-  assert.match(source, /Review their checks and missing evidence/);
+test("incomplete signals describe protocol state without blocking lead development", () => {
+  assert.match(source, /completed the research protocol/);
+  assert.match(source, /Incomplete checks remain visible in the file and travel with the lead/);
+  assert.match(source, /they do not block sending it to the working queue/);
   assert.doesNotMatch(source, /has not shown that it tried to disprove/);
 });
 

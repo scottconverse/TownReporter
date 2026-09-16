@@ -7,6 +7,7 @@ import {
   modelChoiceLabel,
   modelChoiceHelp,
   OPINION_MODEL_CHOICES,
+  FORCED_MODEL_CHOICES,
   opinionModelChoice,
   opinionProviderProblem,
   rememberedStoryModelChoice,
@@ -15,6 +16,7 @@ import {
   shouldHydrateDarkModel,
 } from "./model-choice.ts";
 import { LOCAL_MODEL_UNCONFIGURED } from "./preflight.ts";
+import { providersFor } from "./provider-registry.ts";
 
 const STORY_VALUES = [
   "auto",
@@ -26,6 +28,7 @@ const STORY_VALUES = [
   "claude-frontier",
   "claude-sonnet",
   "claude-haiku",
+  "grok-oauth",
   "local-model",
 ] as const;
 
@@ -43,6 +46,7 @@ describe("model choice contract", () => {
         "Claude Opus",
         "Claude Sonnet",
         "Claude Haiku",
+        "Grok (SuperGrok)",
         "Local model",
       ],
     );
@@ -92,7 +96,19 @@ describe("model choice contract", () => {
       OPINION_MODEL_CHOICES.map((choice) => choice.value),
       STORY_VALUES,
     );
-    assert.ok(OPINION_MODEL_CHOICES.every((choice) => STORY_MODEL_CHOICES.includes(choice)));
+    assert.deepEqual(
+      OPINION_MODEL_CHOICES.map((choice) => choice.value),
+      STORY_MODEL_CHOICES.map((choice) => choice.value),
+    );
+  });
+
+  it("derives the forced batch list directly and excludes Automatic", () => {
+    assert.deepEqual(
+      FORCED_MODEL_CHOICES.map((choice) => choice.value),
+      providersFor("forced").map((entry) => entry.id),
+    );
+    assert.ok(!FORCED_MODEL_CHOICES.some((choice) => choice.value === "auto"));
+    assert.equal(modelChoiceLabel("codex-balanced", "forced"), "Codex Terra");
   });
 
   it("round-trips every valid Story choice and defaults invalid input safely", () => {
@@ -129,6 +145,7 @@ describe("model choice contract", () => {
       "claude-frontier",
       "codex-balanced",
       "codex-frontier",
+      "grok-oauth",
       "local-model",
     ] as const) {
       assert.equal(opinionModelChoice(value), value);
@@ -179,6 +196,16 @@ describe("model choice contract", () => {
       modelChoiceHelp("local-model", "dark"),
       "Uses only Local model for this run; no fallback.",
     );
+  });
+
+  it("names SuperGrok in every picker, with no fallback when chosen explicitly", () => {
+    assert.equal(modelChoiceLabel("grok-oauth"), "Grok (SuperGrok)");
+    for (const surface of [undefined, "opinion", "dark"] as const) {
+      assert.equal(
+        modelChoiceHelp("grok-oauth", surface),
+        "Uses only Grok (SuperGrok) for this run; no fallback.",
+      );
+    }
   });
 
   it("gives Opinion setup steps for its one provider, and does not send anyone to Codex", () => {

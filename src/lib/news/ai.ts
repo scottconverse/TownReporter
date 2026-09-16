@@ -21,6 +21,7 @@ import {
   type ProviderOverrides,
 } from "./provider-registry.ts";
 import { PAPER } from "../paper.ts";
+import { normalizeProviderModelId } from "./provider-model-id.ts";
 
 export type EffectiveProviderChoice = EffectiveStoryModelChoice;
 export type ProviderProbe =
@@ -70,11 +71,17 @@ export type CodexConfig = {
   label: string;
 };
 
+export type XaiOauthConfig = {
+  model: string;
+  label: string;
+};
+
 /** The desk speaks to exactly one of these per call. */
 export type Provider =
   | ({ kind: "anthropic" } & AnthropicConfig)
   | ({ kind: "claude-code" } & ClaudeCodeConfig)
   | ({ kind: "codex" } & CodexConfig)
+  | ({ kind: "xai-oauth" } & XaiOauthConfig)
   | ({ kind: "openai" } & LlmConfig);
 
 type GrokChatAdapter = (
@@ -91,6 +98,17 @@ export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>
     modelId: string;
     apiKey: string | null;
   }>;
+  /** Test-only seam for the server-owned SuperGrok OAuth connection. */
+  resolveXaiOauth?: (newsroomId: number) => Promise<{ modelId: string; label?: string }>;
+  /** Test-only seam proving an explicit SuperGrok pick reaches only OAuth inference. */
+  xaiChat?: (input: {
+    newsroomId: number;
+    system?: string;
+    user: string;
+    maxTokens?: number;
+    model?: string;
+    timeoutMs?: number;
+  }) => Promise<{ text: string }>;
   /** Test seam for the server-only per-newsroom local-model resolver. */
   resolveLocal?: (newsroomId?: number) => Promise<LocalModelOverride | null>;
 };
@@ -266,6 +284,10 @@ function explicitProvider(
 
   if (entry.kind === "codex") return { kind: "codex", model, label: entry.label };
 
+  if (entry.kind === "xai-oauth") {
+    return { kind: "xai-oauth", model, label: entry.label };
+  }
+
   if (entry.kind === "openai") {
     const llm = customGateway();
     return llm ? { kind: "openai", ...llm } : null;
@@ -303,6 +325,44 @@ export function resolveProvider(
 type CustomProviderResolution =
   | { ok: true; provider: Extract<Provider, { kind: "openai" }> }
   | { ok: false; error: string };
+
+type XaiOauthProviderResolution =
+  | { ok: true; provider: Extract<Provider, { kind: "xai-oauth" }> }
+  | { ok: false; error: string };
+
+async function resolveXaiOauthProvider(
+  newsroomId: number | undefined,
+  injected?: GrokChatAdapters["resolveXaiOauth"],
+): Promise<XaiOauthProviderResolution> {
+  if (!Number.isInteger(newsroomId) || newsroomId == null) {
+    return {
+      ok: false,
+      error:
+        "The selected SuperGrok connection cannot be resolved without its newsroom. Choose another model; TownReporter will not fall back automatically.",
+    };
+  }
+  try {
+    const resolve =
+      injected ?? (await import("./xai-oauth.server.ts")).resolveXaiOauthConnection;
+    const connection = await resolve(newsroomId);
+    return {
+      ok: true,
+      provider: {
+        kind: "xai-oauth",
+        model: connection.modelId,
+        label: connection.label ?? "Grok (SuperGrok)",
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error && error.message
+          ? error.message
+          : "SuperGrok is unavailable. Connect it on Server, or choose another model. TownReporter will not fall back automatically.",
+    };
+  }
+}
 
 /**
  * Resolve a stored custom connection only at the server call boundary. The
@@ -391,7 +451,14 @@ async function probeOpenAi(
     if (!res.ok)
       return { ok: false, error: `${provider.label} readiness check failed (${res.status}).` };
     const body = (await res.json().catch(() => null)) as { data?: { id?: string }[] } | null;
-    if (Array.isArray(body?.data) && !body.data.some((entry) => entry.id === provider.model)) {
+    if (
+      Array.isArray(body?.data) &&
+      !body.data.some(
+        (entry) =>
+          typeof entry.id === "string" &&
+          normalizeProviderModelId(provider.baseUrl, entry.id) === provider.model,
+      )
+    ) {
       return {
         ok: false,
         error: `${provider.label} is running but model ${provider.model} is not loaded.`,
@@ -441,13 +508,31 @@ export const AUTOMATIC_LADDER = automaticLadder();
 export async function probeProvider(
   choice?: EffectiveProviderChoice | string,
   newsroomId?: number,
-  adapters?: Pick<GrokChatAdapters, "resolveCustom" | "resolveLocal">,
+  adapters?: Pick<GrokChatAdapters, "resolveCustom" | "resolveLocal" | "resolveXaiOauth">,
 ): Promise<ProviderProbe> {
   if (choice && isCustomModelChoice(choice)) {
     const resolved = await resolveCustomProvider(choice, newsroomId, adapters?.resolveCustom);
     if (!resolved.ok) return resolved;
     const result = await probeOpenAi(resolved.provider, { allowManualModelWhenCatalogUnsupported: true });
     return result.ok ? { ...result, choice } : result;
+  }
+  if (choice === "grok-oauth") {
+    const resolved = await resolveXaiOauthProvider(newsroomId, adapters?.resolveXaiOauth);
+    if (!resolved.ok) return resolved;
+    try {
+      if (!adapters?.resolveXaiOauth) {
+        await (await import("./xai-oauth.server.ts")).refreshXaiOauthModels(newsroomId!);
+      }
+      return { ok: true, label: resolved.provider.label, choice: "grok-oauth" };
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof Error && error.message
+            ? error.message
+            : "SuperGrok could not verify its account models.",
+      };
+    }
   }
   if (choice === "auto") {
     const configured = customGateway();
@@ -627,7 +712,15 @@ export async function grokChat(
     ? await resolveCustomProvider(opts.choice, opts.newsroomId, adapters?.resolveCustom)
     : null;
   if (custom && !custom.ok) return custom;
-  const provider = custom?.ok ? custom.provider : resolveProvider(opts?.choice, opts?.localModel);
+  const xai = opts?.choice === "grok-oauth"
+    ? await resolveXaiOauthProvider(opts.newsroomId, adapters?.resolveXaiOauth)
+    : null;
+  if (xai && !xai.ok) return xai;
+  const provider = custom?.ok
+    ? custom.provider
+    : xai?.ok
+      ? xai.provider
+      : resolveProvider(opts?.choice, opts?.localModel);
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
 
   const timeoutMs = opts?.timeoutMs ?? 45_000;
@@ -663,6 +756,24 @@ export async function grokChat(
   if (provider.kind === "codex") {
     const { codexChat } = await import("./ai-codex.server.ts");
     return codexChat({ system, user, model, timeoutMs });
+  }
+  if (provider.kind === "xai-oauth") {
+    if (!Number.isInteger(opts?.newsroomId) || opts?.newsroomId == null) {
+      return {
+        ok: false,
+        error: "SuperGrok requires an authenticated newsroom. Choose another model.",
+      };
+    }
+    const xaiChat = adapters?.xaiChat ?? (await import("./xai-oauth.server.ts")).xaiOauthChat;
+    const result = await xaiChat({
+      newsroomId: opts.newsroomId,
+      system,
+      user,
+      maxTokens,
+      model,
+      timeoutMs,
+    });
+    return { ok: true, text: result.text };
   }
   const llm = provider;
   const url = `${llm.baseUrl}/chat/completions`;

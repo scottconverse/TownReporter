@@ -24,6 +24,7 @@ import {
 const ENV_KEYS = [
   "TOWNREPORTER_CODEX",
   "TOWNREPORTER_CLAUDE_CODE",
+  "TOWNREPORTER_GROK_OAUTH",
   "TOWNREPORTER_LOCAL",
   "TOWNREPORTER_CODEX_TERRA_MODEL",
   "TOWNREPORTER_CODEX_SOL_MODEL",
@@ -50,7 +51,7 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   }
 }
 
-const SURFACES: ProviderSurface[] = ["story", "scan", "opinion", "dark"];
+const SURFACES: ProviderSurface[] = ["story", "scan", "opinion", "dark", "forced"];
 
 describe("the provider registry is the one description of a writing model", () => {
   it("gives every entry the fields the rest of the desk reads off it", () => {
@@ -110,6 +111,7 @@ describe("the provider registry is the one description of a writing model", () =
         "claude-frontier",
         "claude-sonnet",
         "claude-haiku",
+        "grok-oauth",
         "local-model",
       ],
     );
@@ -147,6 +149,7 @@ describe("the Automatic ladder is derived, not typed out", () => {
     // before the ladder runs at all.
     assert.ok(!automaticLadder().includes("codex-frontier"));
     assert.ok(!automaticLadder().includes("configured"));
+    assert.ok(!automaticLadder().includes("grok-oauth"));
   });
 
   it("drops a rung the machine has switched off, without changing the static ladder", () => {

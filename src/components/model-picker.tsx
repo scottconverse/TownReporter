@@ -1,5 +1,6 @@
 import {
   DARK_MODEL_CHOICES,
+  FORCED_MODEL_CHOICES,
   OPINION_MODEL_CHOICES,
   STORY_MODEL_CHOICES,
   localModelOptionLabel,
@@ -10,7 +11,12 @@ import {
   type OpinionModelChoice,
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
-import { providerAvailability, localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
+import {
+  providerAvailability,
+  localModelCatalog,
+  refreshLocalModelCatalog,
+} from "@/lib/news/provider-availability";
+import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -37,7 +43,7 @@ function localServerLabel(kind: string, baseUrl: string): string {
 
 type Props =
   | {
-      scope?: "story";
+      scope?: "story" | "scan";
       value: StoryModelChoice;
       onChange: (value: StoryModelChoice) => void;
       disabled?: boolean;
@@ -65,6 +71,14 @@ type Props =
       disabled?: boolean;
       compact?: boolean;
       excludeAutomatic?: boolean;
+    }
+  | {
+      scope: "forced";
+      value: Exclude<StoryModelChoice, "auto">;
+      onChange: (value: Exclude<StoryModelChoice, "auto">) => void;
+      disabled?: boolean;
+      compact?: boolean;
+      excludeAutomatic?: boolean;
     };
 
 /**
@@ -87,7 +101,7 @@ function notSetUpHelp(option: ModelChoiceOption): string {
  * queries (the live catalog, the newsroom's stored pick) only ever run when
  * they are needed.
  */
-function LocalModelSelect({ scope }: { scope: "story" | "opinion" | "dark" }) {
+function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "dark" | "forced" }) {
   const qc = useQueryClient();
   const selectId = useId();
   const catalog = useQuery({
@@ -188,7 +202,9 @@ export function ModelPicker(props: Props) {
       ? OPINION_MODEL_CHOICES
       : props.scope === "dark"
         ? DARK_MODEL_CHOICES
-        : STORY_MODEL_CHOICES;
+        : props.scope === "forced"
+          ? FORCED_MODEL_CHOICES
+          : STORY_MODEL_CHOICES;
   const customOptions: ModelChoiceOption[] = (connections.data ?? []).map((connection) => ({
     value: `custom:${connection.id}`,
     label: connection.name,
@@ -217,7 +233,7 @@ export function ModelPicker(props: Props) {
     from the server -- this is the one query every picker instance shares.
   */
   const availability = useQuery({
-    queryKey: ["provider-availability"],
+    queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
     queryFn: () => providerAvailability(),
     staleTime: 5 * 60 * 1000,
   });

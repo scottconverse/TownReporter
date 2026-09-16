@@ -10,7 +10,7 @@ import type { OcrOptions } from "./ingest.ts";
 
 type LegacyForcedRuntime = "local" | "claude-cli" | "codex-terra" | "codex-sol";
 export type ForcedRuntime = LegacyForcedRuntime | PickerProviderId | CustomModelChoice;
-type CloudProviderChoice = Exclude<PickerProviderId, "local-model">;
+type CliProviderChoice = Exclude<PickerProviderId, "local-model" | "grok-oauth">;
 export type ForcedRuntimeSnapshot =
   | {
       runtime: "local";
@@ -20,9 +20,16 @@ export type ForcedRuntimeSnapshot =
     }
   | {
       runtime: Exclude<ForcedRuntime, "local" | "local-model">;
-      modelChoice: CloudProviderChoice;
+      modelChoice: CliProviderChoice;
       transport: "claude-code" | "codex";
       model: string;
+    }
+  | {
+      runtime: "grok-oauth";
+      modelChoice: "grok-oauth";
+      transport: "xai-oauth";
+      model: string;
+      newsroomId: number;
     }
   | {
       runtime: CustomModelChoice;
@@ -85,6 +92,21 @@ export async function validateForcedRuntime(
       ...(connection.name ? { label: connection.name } : {}),
     };
   }
+  if (runtime === "grok-oauth") {
+    const connection = await (
+      await import("./xai-oauth.server.ts")
+    ).resolveXaiOauthConnection(newsroomId);
+    const { probeProvider } = await import("./ai.ts");
+    const ready = await probeProvider(runtime, newsroomId);
+    if (!ready.ok) throw new Error(ready.error);
+    return {
+      runtime,
+      modelChoice: runtime,
+      transport: "xai-oauth",
+      model: connection.modelId,
+      newsroomId,
+    };
+  }
   const choice = choiceFor(runtime);
   const entry = providerEntry(choice);
   if (!entry || (entry.kind !== "claude-code" && entry.kind !== "codex")) {
@@ -97,7 +119,7 @@ export async function validateForcedRuntime(
   if (!ready.ok) throw new Error(ready.error);
   return {
     runtime,
-    modelChoice: choice as CloudProviderChoice,
+    modelChoice: choice as CliProviderChoice,
     model: providerModel(entry),
     transport: entry.kind,
   };
@@ -130,6 +152,17 @@ export function parseForcedRuntimeSnapshot(value: unknown): ForcedRuntimeSnapsho
     return null;
   }
   if (typeof row.runtime === "string" && typeof row.modelChoice === "string") {
+    if (
+      row.runtime === "grok-oauth" &&
+      row.modelChoice === "grok-oauth" &&
+      row.transport === "xai-oauth" &&
+      typeof row.model === "string" &&
+      row.model.trim() &&
+      Number.isSafeInteger(row.newsroomId) &&
+      Number(row.newsroomId) > 0
+    ) {
+      return row as ForcedRuntimeSnapshot;
+    }
     if (
       isCustomModelChoice(row.runtime) &&
       row.modelChoice === row.runtime &&
@@ -165,7 +198,7 @@ export function parseForcedRuntimeSnapshot(value: unknown): ForcedRuntimeSnapsho
   return null;
 }
 
-type ForcedChatAdapters<T> = {
+export type ForcedChatAdapters<T> = {
   claude: (input: {
     system: string;
     user: string;
@@ -197,6 +230,18 @@ type ForcedChatAdapters<T> = {
       noTools?: boolean;
     },
   ) => Promise<T>;
+  xai?: (
+    system: string,
+    user: string,
+    maxTokens: number,
+    options: {
+      timeoutMs?: number;
+      choice: "grok-oauth";
+      newsroomId: number;
+      model: string;
+      noTools?: boolean;
+    },
+  ) => Promise<T>;
 };
 
 export async function runForcedChat<T>(
@@ -215,6 +260,17 @@ export async function runForcedChat<T>(
       ...options,
       choice: "local-model",
       localModel: valid.localModel,
+    });
+  }
+  if (valid.transport === "xai-oauth") {
+    if (!adapters.xai) {
+      throw new Error("The saved SuperGrok OAuth adapter is unavailable for this batch.");
+    }
+    return adapters.xai(system, user, maxTokens, {
+      ...options,
+      choice: "grok-oauth",
+      newsroomId: valid.newsroomId,
+      model: valid.model,
     });
   }
   if (valid.transport === "custom") {
@@ -247,12 +303,15 @@ export function forcedOcrOptions(
 ): OcrOptions {
   return {
     provider: snapshot.modelChoice,
-    newsroomId: snapshot.transport === "custom" ? String(snapshot.newsroomId) : undefined,
+    newsroomId:
+      snapshot.transport === "custom" || snapshot.transport === "xai-oauth"
+        ? String(snapshot.newsroomId)
+        : undefined,
     localModel: snapshot.runtime === "local" ? snapshot.localModel : undefined,
     forcedPlan:
       snapshot.runtime === "local"
         ? { kind: "local", baseUrl: snapshot.localModel.baseUrl, model: snapshot.localModel.id }
-        : snapshot.transport === "custom"
+        : snapshot.transport === "custom" || snapshot.transport === "xai-oauth"
           ? undefined
           : {
             kind: snapshot.transport,
@@ -265,6 +324,7 @@ export function forcedOcrOptions(
 
 export function forcedRuntimeLabel(snapshot: ForcedRuntimeSnapshot): string {
   if (snapshot.runtime === "local") return `Local model: ${snapshot.localModel.id}`;
+  if (snapshot.transport === "xai-oauth") return `Grok (SuperGrok): ${snapshot.model}`;
   if (snapshot.transport === "custom") {
     return `${snapshot.label ?? "Custom AI"}: ${snapshot.model}`;
   }

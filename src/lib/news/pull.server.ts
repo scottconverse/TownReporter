@@ -679,7 +679,9 @@ export async function performPullWork(job: DeskJob) {
     const final = await runPullPipeline(receipt as PullReceipt & { checkpoint: PullCheckpoint }, {
       search: (query, progress, signal) =>
         searchWithFallback(query, undefined, undefined, progress, signal),
-      ingest: (url, signal) => ingestDocument(url, undefined, signal),
+      // Pull is a mechanical public-record reader. A scanned PDF stays
+      // `needs-ocr` for the editor instead of silently spending any model.
+      ingest: (url, signal) => ingestDocument(url, { allowModelOcr: false }, signal),
       saveReceipt: (next) => saveJobReceipt(job, next),
       stopRequested: () => jobStopRequested(job),
       saveDocument: (document, next) => savePulledDocument(job, next, document),

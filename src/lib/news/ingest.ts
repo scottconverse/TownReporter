@@ -171,6 +171,8 @@ export type OcrOptions = {
 export type IngestOptions = OcrOptions & {
   /** A caller may accept bounded raw HTML without a rendered-page fallback. */
   acceptRawHtml?: (html: string) => boolean;
+  /** False for mechanical readers such as reporting-line Pull, which must never spend model tokens. */
+  allowModelOcr?: boolean;
 };
 export type OcrResult = {
   text: string;
@@ -709,7 +711,11 @@ async function ingestDocumentRaw(
     }
 
     if (ctype.includes("pdf") || path.endsWith(".pdf")) {
-      const pdf = await extractPdfBetter(buf, undefined, ocrOptions);
+      const pdf = await extractPdfBetter(
+        buf,
+        ocrOptions?.allowModelOcr === false ? null : undefined,
+        ocrOptions,
+      );
       const title = url.pathname.split("/").pop() ?? "pdf";
       if (pdf.needsOcr) {
         return empty({

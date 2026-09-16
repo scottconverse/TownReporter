@@ -54,6 +54,7 @@ export function __setAvailability(data) { current = data; }
 export const useQuery = ({ queryKey }) => ({ data: queryKey[0] === "custom-ai-connections" ? connections : current });
 export const getCustomAiConnectionsFn = async () => connections;
 export const providerAvailability = async () => current;
+export const PROVIDER_AVAILABILITY_QUERY_KEY = ["provider-availability"];
 
 /*
   0.6.19: model-picker.tsx also renders a second, per-model select (only
@@ -85,6 +86,7 @@ const { ModelPicker } = await import(
     {
       "@/lib/news/model-choice": choices,
       "@/lib/news/provider-availability": availabilityStubUrl,
+      "@/lib/news/provider-availability-key": availabilityStubUrl,
       "@/lib/news/provider-settings": availabilityStubUrl,
       "@/lib/news/custom-ai-settings": availabilityStubUrl,
       "@tanstack/react-query": availabilityStubUrl,

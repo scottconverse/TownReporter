@@ -38,7 +38,7 @@ import {
 } from "@/lib/news/desk";
 import type { PullRunView } from "@/lib/news/pull.server";
 import { FollowUpItem } from "@/components/follow-up-item";
-import { uncreditedOutlets } from "@/lib/news/report";
+import { uncreditedOutlets } from "@/lib/news/source-credit";
 import { parseUrlList } from "@/lib/paper";
 import { useEditorSections } from "@/lib/use-sections";
 import { usePaperDateFormatters } from "@/lib/paper-context";

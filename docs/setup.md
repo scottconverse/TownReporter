@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.49](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.49).** See the [release guide](releases/0.6.49.md) for changes, installation and deployment evidence. Editors should start at [the editor guide](editor.md).
+**Current release: [0.6.48](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.48).** See the [release guide](releases/0.6.48.md) for changes, installation and deployment evidence. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 
@@ -143,6 +143,15 @@ can really write. Codex works the same way, with a one-time code as well as a
 link. See [the editor's manual](editor.md#signing-in-to-a-writing-model).
 
 That is the whole setup. Your Max or Pro subscription powers the desk.
+
+#### Grok through a SuperGrok subscription
+
+Open **Server → Writing models → Grok (SuperGrok)** and choose **Sign in with
+SuperGrok**. TownReporter shows xAI's device-login URL and one-time code. The
+xAI approval page identifies the OAuth client as **Grok Build**. After approval,
+choose a discovered Grok text model and run the small connection test. This is
+a direct TownReporter connection: it does not use DSH and does not require
+`XAI_API_KEY`. See [Grok with a SuperGrok subscription](grok-oauth.md).
 
 Being signed in to claude.ai in a browser, or in the Claude desktop app, is a
 separate login and does not count — the desk uses the command-line program's
@@ -289,8 +298,8 @@ delivery -- a refusal, an assistant note, an incomplete piece --
 creates no draft. The completed request and job store the provider that
 finished.
 
-**Scanned PDFs** (a council packet with no text layer) can be transcribed by whichever
-model you picked. TownReporter first renders each actual PDF page
+**Scanned PDFs** (a council packet with no text layer) can be transcribed by a
+selected provider that supports vision. TownReporter first renders each actual PDF page
 through the local PDF renderer, including scan encodings that cannot be found
 by lifting a JPEG/PNG stream, then sends that page image to the chosen vision
 provider (`src/lib/news/ocr.ts`). Newly rendered records carry numeric PDF
@@ -302,8 +311,11 @@ one page already running. Legacy stored `ocr:` records remain extracted-image
 records: their labels continue to say that PDF page order is not established,
 so they need re-ingest or operator review before page citation. Claude Opus
 (API or CLI) and Codex provide vision paths when their prerequisites are met;
-a reachable provider is not a guarantee that a particular scan can be read. A
-local model can only do it if it is a *vision* model -- pick one marked
+a reachable provider is not a guarantee that a particular scan can be read. Grok
+(SuperGrok) is text-only for OCR and fails clearly without trying another
+provider. Automatic OCR checks its established availability order — Anthropic API,
+Codex, Claude Code, then a discovered local vision model. A local model can only
+do it if it is a *vision* model -- pick one marked
 **`· vision`** in the picker (or in the Server page's local-model table).
 A historical built-runtime renderer check was performed with mock transcription. A single
 source-path Codex/Terra run read 11 of 44 pages from a scanned council packet;

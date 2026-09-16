@@ -306,7 +306,7 @@ export function DailyScanSettings() {
             />
           </Field>
           <ModelPicker
-            scope="story"
+            scope="scan"
             value={draft.runtime}
             onChange={(runtime) => {
               if (runtime !== "auto") changeDraft({ ...draft, runtime: runtime as DailyScanRuntime });

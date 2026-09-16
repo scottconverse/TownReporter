@@ -367,4 +367,52 @@ describe("scheduled runtime transport", () => {
       assert.equal(result, `${expected[0].split(":")[0]}-result`);
     });
   }
+
+  it("calls only the saved Custom AI adapter with its newsroom and exact Gemini model", async () => {
+    const snapshot = {
+      runtime: "custom:11111111-1111-4111-8111-111111111111",
+      modelChoice: "custom:11111111-1111-4111-8111-111111111111",
+      transport: "custom",
+      model: "gemini-2.5-flash",
+      newsroomId: 501,
+      label: "Gemini",
+    } as const;
+    assert.doesNotMatch(JSON.stringify(snapshot), /api.?key|secret|base.?url/i);
+    const calls: string[] = [];
+    const result = await runForcedDailyChat(snapshot, "system", "user", 99, undefined, {
+      claude: async () => { throw new Error("wrong transport"); },
+      codex: async () => { throw new Error("wrong transport"); },
+      local: async () => { throw new Error("wrong transport"); },
+      custom: async (_system, _user, _maxTokens, options) => {
+        calls.push(`${options.choice}:${options.newsroomId}:${options.model}`);
+        return "gemini-result";
+      },
+    });
+    assert.deepEqual(calls, [
+      "custom:11111111-1111-4111-8111-111111111111:501:gemini-2.5-flash",
+    ]);
+    assert.equal(result, "gemini-result");
+  });
+
+  it("calls only the saved SuperGrok OAuth adapter with its newsroom and exact model", async () => {
+    const snapshot = {
+      runtime: "grok-oauth",
+      modelChoice: "grok-oauth",
+      transport: "xai-oauth",
+      model: "grok-4.6",
+      newsroomId: 501,
+    } as const;
+    const calls: string[] = [];
+    const result = await runForcedDailyChat(snapshot, "system", "user", 99, undefined, {
+      claude: async () => { throw new Error("wrong transport"); },
+      codex: async () => { throw new Error("wrong transport"); },
+      local: async () => { throw new Error("wrong transport"); },
+      xai: async (_system, _user, _maxTokens, options) => {
+        calls.push(`${options.choice}:${options.newsroomId}:${options.model}`);
+        return "grok-result";
+      },
+    });
+    assert.deepEqual(calls, ["grok-oauth:501:grok-4.6"]);
+    assert.equal(result, "grok-result");
+  });
 });

@@ -1,7 +1,7 @@
 # Add your own AI API
 
 TownReporter can use a saved OpenAI-compatible API connection for a specific
-Scan, Story draft, Opinion, Dark Desk or Queue batch run. The connection is an optional
+Daily Scan, Scan, Story draft, Opinion, Dark Desk or Queue batch run. The connection is an optional
 operator setting: it does not install or manage a provider, change
 **Automatic**, or change any existing default or fallback behavior.
 
@@ -25,6 +25,10 @@ Open **Server** and find **Add your own AI API**.
 5. Select **Save connection** (or **Save changes** while editing).
 
 The endpoint must support the OpenAI-compatible `/chat/completions` protocol.
+For Gemini, the **Set up Gemini** button fills the connection name and Google
+AI Studio OpenAI-compatible base URL for you. Add the key, save the connection,
+then use **Discover models** on the saved connection, choose a model, save the
+changes, and only then use **Test connection**.
 The URL is validated when saved, but saving itself does not call a model.
 
 ## Test and manage it
@@ -55,7 +59,7 @@ After the connection has an enabled model, it appears by its saved name in the
 model picker. Select that named connection explicitly for the desk operation,
 then start the operation. The selected connection is pinned to the queued job.
 
-Queue batch drafting also accepts a saved Custom AI connection. The batch pins
+Daily Scan and Queue batch drafting also accept a saved Custom AI connection. The batch pins
 the selected connection and model for every chosen lead. The API key is
 resolved on the server only when each job runs; it is never copied into the
 batch record.
@@ -94,8 +98,9 @@ Add your own AI API** form:
 | API key | The Gemini API key from Google AI Studio |
 | Model id | Use **Discover models** or enter the exact Gemini model id |
 
-Choose **Test connection**, save it, then select that named connection for a
-Story, Scan, Opinion, Dark Desk or Queue batch run. The key stays encrypted in
+Save the connection first. Then use **Discover models**, choose a model, save
+the changes, and use **Test connection**. Finally select that named connection
+for a Story, Daily Scan, Scan, Opinion, Dark Desk or Queue batch run. The key stays encrypted in
 TownReporter's database and is not written to source code, documentation or a
 batch job. See Google's [official OpenAI compatibility
 guide](https://ai.google.dev/gemini-api/docs/openai).

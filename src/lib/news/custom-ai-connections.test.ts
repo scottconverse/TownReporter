@@ -5,6 +5,7 @@ import { ensureNewsroomSchema } from "./membership.ts";
 import {
   inferCapabilities,
   decryptApiKey,
+  discoverConnectionModels,
   encryptApiKey,
   normalizeConnectionInput,
   parseDiscoveredModels,
@@ -70,6 +71,31 @@ describe("custom OpenAI-compatible connection contract", () => {
     );
   });
 
+  it("strips Google Gemini model resource prefixes only for Google's OpenAI endpoint", () => {
+    const body = { data: [{ id: "models/gemini-3.8-flash" }, { id: "models/gemini-2.5-flash" }] };
+    assert.deepEqual(
+      parseDiscoveredModels(body, "https://generativelanguage.googleapis.com/v1beta/openai"),
+      ["gemini-2.5-flash", "gemini-3.8-flash"],
+    );
+    assert.deepEqual(
+      parseDiscoveredModels(body, "https://other.example/v1"),
+      ["models/gemini-2.5-flash", "models/gemini-3.8-flash"],
+    );
+  });
+
+  it("applies the Gemini normalization to provider discovery", async () => {
+    const models = await discoverConnectionModels(
+      { baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai" },
+      null,
+      (async () =>
+        new Response(JSON.stringify({ data: [{ id: "models/gemini-3.8-flash" }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })) as typeof fetch,
+    );
+    assert.deepEqual(models, ["gemini-3.8-flash"]);
+  });
+
   it("reports only capabilities demonstrated by the explicit test response", () => {
     assert.deepEqual(
       inferCapabilities({ choices: [{ message: { content: "TOWNREPORTER_OK" } }] }),
@@ -120,6 +146,23 @@ describe("custom OpenAI-compatible connection contract", () => {
     assert.equal(answered.ok, true);
     assert.equal(answered.capabilities.chatCompletions, true);
   });
+
+  it("uses enough output budget for the explicit Gemini-compatible probe", async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    const result = await testConnection(
+      { baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", modelId: "gemini-3.8-flash" },
+      null,
+      (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({ choices: [{ message: { content: "GEMINI_CONNECTION_OK" } }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch,
+    );
+    assert.equal(result.ok, true);
+    assert.equal(requestBody?.max_tokens, 128);
+  });
 });
 
 describe("persistent custom AI connections", () => {
@@ -163,6 +206,22 @@ describe("persistent custom AI connections", () => {
     assert.deepEqual(
       (await listCustomAiConnections("custom-beta")).map((x) => x.name),
       ["Beta API"],
+    );
+  });
+
+  it("translates a duplicate connection name into editor guidance", async () => {
+    await saveCustomAiConnection("custom-alpha", {
+      name: "Duplicate name",
+      baseUrl: "https://alpha.example/v1",
+      modelId: "alpha-model",
+    });
+    await assert.rejects(
+      saveCustomAiConnection("custom-alpha", {
+        name: "Duplicate name",
+        baseUrl: "https://other.example/v1",
+        modelId: "other-model",
+      }),
+      /already exists.*different name.*edit the existing connection/i,
     );
   });
 

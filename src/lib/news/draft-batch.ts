@@ -59,7 +59,7 @@ export function cleanDraftBatchInput(
     return {
       ok: false,
       code: "invalid-input",
-      error: "Choose one named Codex, Claude, Local, or saved Custom AI model for this batch.",
+      error: "Choose one named Codex, Claude, Grok, Local, or saved Custom AI model for this batch.",
     };
   }
   if (!Array.isArray(row.items) || row.items.length < 1 || row.items.length > 5) {
