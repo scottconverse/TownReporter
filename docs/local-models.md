@@ -303,7 +303,7 @@ for using it.
 
 ---
 
-## Zero-config discovery, and picking the model (current 0.6.26)
+## Zero-config discovery, and picking the model
 
 TownReporter probes LM Studio, Ollama and llama.cpp on their default ports
 on the app server. A responsive compatible server can appear without config. Pick
@@ -338,10 +338,13 @@ expected `{"data":[{"id":...}]}` shape — a server that is not there, slow, or
 serving something unrelated (an unrelated web app on the same machine that
 happens to answer with an HTML page, say) is treated as absent, not as an
 error. LM Studio's own `/api/v0/models` and Ollama's `/api/ps` are then
-consulted to say which models are actually **loaded** right now and which
-answer with private "thinking" text before the real draft (see "Reasoning
-models break the app silently" above) — that is where each option's
-`· loaded` / `· thinking off` suffix in the picker comes from. The result is
+consulted to say which models are actually **loaded** right now. TownReporter
+also asks Ollama for each model's capabilities and context window. Models whose
+IDs end in `:cloud` run in Ollama Cloud; the Ollama service on this computer is
+their authenticated router, not the inference host. The picker labels these
+models **Ollama Cloud** and shows a reported context of at least one million
+tokens as **1M context**. Thinking, vision and load metadata produce the other
+option suffixes. The result is
 cached 20 seconds and refreshed in the background every 60 seconds, so
 picker loads do not re-probe on every render; the picker's own Refresh
 button forces an immediate re-check.
@@ -358,7 +361,7 @@ at all. A model that is not loaded still works — the server loads it on the
 first call, which the picker's help text says can take a minute or more.
 
 **Thinking off, automatically.** A reasoning model (Gemma 4, the Qwen3
-family, DeepSeek-R1, gpt-oss, …) answers with the actual draft in a separate
+family, DeepSeek-R1, DeepSeek V4, gpt-oss, …) answers with the actual draft in a separate
 `reasoning`/`reasoning_content` field and can spend its whole token budget
 there, returning an empty draft with no error. TownReporter now sends
 `reasoning_effort: "none"` to any model it recognises as this kind, unless

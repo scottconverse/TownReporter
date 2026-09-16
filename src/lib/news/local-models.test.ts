@@ -27,7 +27,11 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => Promise<voi
 }
 
 const LM_STUDIO_MODELS = {
-  data: [{ id: "halo/qwen3-coder-30b-a3b-q6k" }, { id: "google/gemma-4-12b-qat" }, { id: "text-embedding-nomic" }],
+  data: [
+    { id: "halo/qwen3-coder-30b-a3b-q6k" },
+    { id: "google/gemma-4-12b-qat" },
+    { id: "text-embedding-nomic" },
+  ],
 };
 const LM_STUDIO_NATIVE = {
   data: [
@@ -250,7 +254,8 @@ describe("local model discovery", () => {
       }
       if (url === "http://127.0.0.1:11434/api/show" && init?.method === "POST") {
         const requested = JSON.parse(init.body ?? "{}") as { name?: string };
-        const capabilities = requested.name === "gemma4:12b" ? ["completion", "vision"] : ["completion"];
+        const capabilities =
+          requested.name === "gemma4:12b" ? ["completion", "vision"] : ["completion"];
         return new Response(JSON.stringify({ capabilities }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -264,6 +269,46 @@ describe("local model discovery", () => {
     assert.equal(ollama.models.find((m) => m.id === "gemma4:12b")?.vision, true);
     assert.equal(ollama.models.find((m) => m.id === "gemma4:e4b")?.vision, false);
     assert.equal(ollama.models.find((m) => m.id === "translategemma:4b")?.vision, false);
+  });
+
+  it("identifies Ollama Cloud and reads its reported million-token context", async () => {
+    globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: string }) => {
+      const url = String(input);
+      if (url.startsWith("http://127.0.0.1:1234") || url.startsWith("http://127.0.0.1:8080")) {
+        const err = new Error("aborted");
+        err.name = "TimeoutError";
+        throw err;
+      }
+      if (url === "http://127.0.0.1:11434/v1/models") {
+        return new Response(JSON.stringify({ data: [{ id: "deepseek-v4.1-flash:cloud" }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "http://127.0.0.1:11434/api/ps") {
+        return new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "http://127.0.0.1:11434/api/show" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            capabilities: ["completion", "thinking", "tools", "vision"],
+            model_info: { "deepseek2.context_length": 1_048_576 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    const model = catalog.servers.find((server) => server.kind === "ollama")?.models[0];
+    assert.equal(model?.cloud, true);
+    assert.equal(model?.contextLength, 1_048_576);
+    assert.equal(model?.thinking, true);
+    assert.equal(model?.vision, true);
   });
 
   it("marks an unknown OpenAI-compatible server's models as not vision-capable", async () => {

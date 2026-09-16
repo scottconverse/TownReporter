@@ -2,9 +2,9 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.49 · shared model routing and durable reporting research · deployment is recorded separately**
+**Version 0.6.50 · reliable Ollama Cloud Story drafting · deployment is recorded separately**
 
-[Download 0.6.49](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.49) · [Release guide and verification](releases/0.6.49.md). A source release and a running production deployment are separate facts.
+[Download 0.6.50](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.50) · [Release guide and verification](releases/0.6.50.md). A source release and a running production deployment are separate facts.
 
 **Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
 
@@ -64,7 +64,7 @@ Protocol complete means the searches and four review questions were completed;
 it is not a factual verdict or a gate on the editor's lead handoff. The
 five-topic live acceptance exercise remains outstanding.
 
-Local models can be discovered on LM Studio, Ollama or llama.cpp and selected
+Models can be discovered through LM Studio, Ollama or llama.cpp and selected
 individually. **Captured-PDF OCR** renders scanned PDFs as actual PDF pages
 before OCR, so newly ingested rendered records keep numeric PDF page order and
 can cite those pages. It attempts at most 12 pages, caps a rendered PNG at 2

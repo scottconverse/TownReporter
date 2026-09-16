@@ -233,8 +233,14 @@ export function localModelOptionLabel(model: {
   loaded: boolean | null;
   thinking: boolean;
   vision: boolean;
+  cloud?: boolean;
+  contextLength?: number | null;
 }): string {
+  const contextMillions = model.contextLength ? model.contextLength / 1_000_000 : 0;
+  const context = contextMillions >= 1 ? `${Number(contextMillions.toFixed(1))}M context` : null;
   const suffix = [
+    model.cloud ? "Ollama Cloud" : null,
+    context,
     model.loaded ? "loaded" : null,
     model.thinking ? "thinking off" : null,
     model.vision ? "vision" : null,

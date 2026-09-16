@@ -256,4 +256,18 @@ describe("localModelOptionLabel", () => {
     assert.doesNotMatch(label, /vision/);
     assert.equal(label, "gemma4:12b · loaded · thinking off");
   });
+
+  it("labels hosted Ollama models and their large context window", () => {
+    assert.equal(
+      localModelOptionLabel({
+        id: "deepseek-v4.1-flash:cloud",
+        loaded: null,
+        thinking: true,
+        vision: true,
+        cloud: true,
+        contextLength: 1_048_576,
+      }),
+      "deepseek-v4.1-flash:cloud · Ollama Cloud · 1M context · thinking off · vision",
+    );
+  });
 });

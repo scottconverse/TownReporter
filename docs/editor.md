@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name. Reddit RSS finds candidates; when a local Redlib is running, the strongest candidates are read in full. The result panel says whether each card contains a full post or only an RSS excerpt. A Redlib failure never discards the RSS results.
 
-**Current release: [0.6.49](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.49).** See the [release guide](releases/0.6.49.md) for changes, installation and deployment evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+**Current release: [0.6.50](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.50).** See the [release guide](releases/0.6.50.md) for changes, installation and deployment evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
 **Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
 
@@ -33,7 +33,7 @@ structured Dark Signal verification. See [the doctrine and its limits](dark-desk
 The verified label is a completed software protocol, not a substitute for
 checking sources. The five-topic live acceptance exercise remains outstanding.
 
-Local models can be discovered on LM Studio, Ollama or llama.cpp and selected
+Models can be discovered through LM Studio, Ollama or llama.cpp and selected
 individually. **Captured-PDF OCR:** scanned PDF OCR renders the
 actual pages in document order, so new page-aware captures can cite the real
 PDF page number. It attempts the first 12 pages, with a 2 MiB rendered-image
@@ -333,7 +333,7 @@ content refusal stops the run. Choose a named model to force Codex Astra, Sol,
 Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or Local model.
 Explicit choices never fall back. Redraft has the same picker.
 
-Choose **Local model**, then the individual model found on LM Studio, Ollama or llama.cpp. A configured `LLM_BASE_URL` is also supported. Availability means the server can be reached, not that every model can finish your task. See [local-models.md](local-models.md).
+Choose **Local model**, then the individual model found through LM Studio, Ollama or llama.cpp. An Ollama model ending in `:cloud` runs in Ollama Cloud; the local Ollama service routes the request and the picker labels the model **Ollama Cloud** with its reported context window. A configured `LLM_BASE_URL` is also supported. Availability means the route can be reached, not that every model can finish your task. See [local-models.md](local-models.md).
 
 Stay on the page. If the click dies before the reply comes back, the workbench
 keeps looking until the draft is on the lead, then fills the form. You should
