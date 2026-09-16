@@ -62,7 +62,7 @@ if (probe.ok) {
 
 it(
   "two real PostgreSQL batch starts leave one batch and one open job",
-  { skip, timeout: 30000 },
+  { skip, timeout: 15000 },
   async () => {
     const sql = await db.getSql();
     await sql.query(
@@ -76,7 +76,7 @@ it(
       items: [{ leadId: lead.id }],
       runtimeSnapshot: {
         runtime: "claude-cli",
-        modelChoice: "claude-frontier",
+        modelChoice: "claude-sonnet",
         transport: "claude-code",
         model: "selected-claude",
       },
