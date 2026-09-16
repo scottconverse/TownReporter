@@ -215,7 +215,10 @@ describe("editor copy", () => {
     const dataSource = readFileSync(new URL("./dark.ts", import.meta.url), "utf8");
     const screenSource = readFileSync(new URL("../../routes/desk.dark.tsx", import.meta.url), "utf8");
     assert.match(dataSource, /as still_open[\s\S]*from investigations i/);
-    assert.match(screenSource, /const totalOpen = Number\(inv\?\.still_open \?\? leftover\)/);
+    assert.match(
+      screenSource,
+      /const totalOpen = Math\.max\(Number\(inv\?\.still_open \?\? 0\), leftover\)/,
+    );
     assert.match(screenSource, /limited, deduplicated subset of \{totalOpen\} open follow-up/);
     assert.doesNotMatch(screenSource, /more were mentioned but\s+not yet named/);
   });
