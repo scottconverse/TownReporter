@@ -108,6 +108,7 @@ async function thePickerIsThere() {
     "Claude Opus",
     "Claude Sonnet",
     "Claude Haiku",
+    "Grok (SuperGrok)",
     "Local model",
   ];
   if (JSON.stringify(names) !== JSON.stringify(expected)) {

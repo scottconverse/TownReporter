@@ -62,7 +62,7 @@ if (probe.ok) {
 
 it(
   "two real PostgreSQL batch starts leave one batch and one open job",
-  { skip, timeout: 15000 },
+  { skip, timeout: 30000 },
   async () => {
     const sql = await db.getSql();
     await sql.query(

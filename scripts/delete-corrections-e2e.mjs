@@ -971,6 +971,10 @@ async function main() {
   );
   const observedReplacementPoll = await replacementWasPolled;
   const leadRpcPath = new URL(observedReplacementPoll.url()).pathname;
+  const modelResearchToggle = page.getByRole("button", { name: /^Model & research/ });
+  if ((await modelResearchToggle.getAttribute("aria-expanded")) !== "true") {
+    await modelResearchToggle.click();
+  }
   await page.waitForFunction(() => {
     return [...document.querySelectorAll("label")].some((label) => {
       const scope = label.querySelector("select");
