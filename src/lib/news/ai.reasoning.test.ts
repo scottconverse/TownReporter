@@ -15,7 +15,10 @@ const ENV_KEYS = [
 // Claude Code is also switched off explicitly (TOWNREPORTER_CLAUDE_CODE="0"),
 // which the newsroom-security "no test can reach a live model unasked" gate
 // checks for by name.
-async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () => Promise<T>): Promise<T> {
+async function withEnvAsync<T>(
+  vars: Record<string, string | undefined>,
+  fn: () => Promise<T>,
+): Promise<T> {
   const prev: Record<string, string | undefined> = {};
   for (const k of ENV_KEYS) {
     prev[k] = process.env[k];
@@ -53,12 +56,37 @@ describe("reasoning_effort on the OpenAI-compatible (local/gateway) path", () =>
         });
       }) as typeof fetch,
       () =>
-        withEnvAsync(
-          { LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "gemma4:12b" },
-          () => grokChat("sys", "user", 200, { choice: "local-model" }),
+        withEnvAsync({ LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "gemma4:12b" }, () =>
+          grokChat("sys", "user", 200, { choice: "local-model" }),
         ),
     );
     assert.equal(sentBody?.reasoning_effort, "none");
+  });
+
+  it("disables DeepSeek v4 cloud reasoning by default while returning the final draft text", async () => {
+    let sentBody: Record<string, unknown> | undefined;
+    const result = await withFetch(
+      (async (_url, init) => {
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          JSON.stringify({
+            model: "deepseek-v4.1-flash:cloud",
+            choices: [
+              { message: { content: "A publishable draft.", reasoning: "internal reasoning" } },
+            ],
+          }),
+          { status: 200 },
+        );
+      }) as typeof fetch,
+      () =>
+        withEnvAsync(
+          { LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "deepseek-v4.1-flash:cloud" },
+          () => grokChat("write a draft", "story facts", 2_200, { choice: "local-model" }),
+        ),
+    );
+    assert.equal(sentBody?.reasoning_effort, "none");
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.text, "A publishable draft.");
   });
 
   it("omits reasoning_effort for an ordinary (non-thinking) model", async () => {
@@ -71,9 +99,8 @@ describe("reasoning_effort on the OpenAI-compatible (local/gateway) path", () =>
         });
       }) as typeof fetch,
       () =>
-        withEnvAsync(
-          { LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "llama3.1" },
-          () => grokChat("sys", "user", 200, { choice: "local-model" }),
+        withEnvAsync({ LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "llama3.1" }, () =>
+          grokChat("sys", "user", 200, { choice: "local-model" }),
         ),
     );
     assert.equal("reasoning_effort" in (sentBody ?? {}), false);
@@ -134,9 +161,8 @@ describe("reasoning_effort on the OpenAI-compatible (local/gateway) path", () =>
           { status: 200 },
         )) as typeof fetch,
       () =>
-        withEnvAsync(
-          { LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "gemma4:12b" },
-          () => grokChat("sys", "user", 200, { choice: "local-model" }),
+        withEnvAsync({ LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "gemma4:12b" }, () =>
+          grokChat("sys", "user", 200, { choice: "local-model" }),
         ),
     );
     assert.equal(result.ok, false);
@@ -162,11 +188,13 @@ describe("reasoning_effort on the OpenAI-compatible (local/gateway) path", () =>
 
   it("still says 'Empty model response' when there is no reasoning text either", async () => {
     const result = await withFetch(
-      (async () => new Response(JSON.stringify({ choices: [{ message: { content: "" } }] }), { status: 200 })) as typeof fetch,
+      (async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: "" } }] }), {
+          status: 200,
+        })) as typeof fetch,
       () =>
-        withEnvAsync(
-          { LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "llama3.1" },
-          () => grokChat("sys", "user", 200, { choice: "local-model" }),
+        withEnvAsync({ LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "llama3.1" }, () =>
+          grokChat("sys", "user", 200, { choice: "local-model" }),
         ),
     );
     assert.equal(result.ok, false);
@@ -187,13 +215,11 @@ describe("the local-model per-newsroom override", () => {
         });
       }) as typeof fetch,
       () =>
-        withEnvAsync(
-          { LLM_BASE_URL: "http://127.0.0.1:1234/v1", LLM_MODEL: "env-model" },
-          () =>
-            grokChat("sys", "user", 200, {
-              choice: "local-model",
-              localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "gemma4:12b" },
-            }),
+        withEnvAsync({ LLM_BASE_URL: "http://127.0.0.1:1234/v1", LLM_MODEL: "env-model" }, () =>
+          grokChat("sys", "user", 200, {
+            choice: "local-model",
+            localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "gemma4:12b" },
+          }),
         ),
     );
     assert.equal(calledUrl, "http://127.0.0.1:11434/v1/chat/completions");

@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.49](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.49) — direct SuperGrok and Gemini connections, shared model routing, bounded Dark Desk research and durable reporting Pull.** [Release guide](docs/releases/0.6.49.md) · [Changelog](CHANGELOG.md).
+**Current release: [0.6.50](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.50) — reliable Ollama Cloud Story drafting with accurate hosted-model and context labels.** [Release guide](docs/releases/0.6.50.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, installation checks and deployment evidence are recorded separately in the [release guide](docs/releases/0.6.49.md).
+Release source, installation checks and deployment evidence are recorded separately in the [release guide](docs/releases/0.6.50.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -51,7 +51,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-Download the Windows installation ZIP from [TownReporter 0.6.49](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.49) or the [latest release](https://github.com/scottconverse/TownReporter/releases/latest). Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
+Download the Windows installation ZIP from [TownReporter 0.6.50](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.50) or the [latest release](https://github.com/scottconverse/TownReporter/releases/latest). Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first editorial workflow within an hour with working internet and an available AI account or endpoint; release evidence records the measured result and its limits. Public hosting is separate from this local installation.
 
@@ -96,6 +96,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 ### Recent releases
 
+- **0.6.50** — Correctly identifies Ollama Cloud models, shows their reported context window, and prevents DeepSeek V4 reasoning from consuming the Story output budget before a draft is written.
 - **0.6.49** — Restores bounded Dark Desk lead development and durable reporting Pull, adds direct SuperGrok OAuth and newsroom-managed Gemini connections to the shared model picker, keeps Story model controls reachable, and lets Automatic recover uploaded-document work when a provider reaches its limit or becomes unavailable.
 - **0.6.48** — Connects discovered local models to Story drafting, makes evidence-check progress and results visible, verifies names from retained written records, selectively repairs missing citations, and distinguishes the writer checkpoint from the final checked draft.
 - **0.6.47** — Keeps a labeled Editor’s desk button in the public header on desktop and phones.

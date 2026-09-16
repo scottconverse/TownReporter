@@ -1,8 +1,15 @@
 # Changelog
 
-Current release: **0.6.49**.
+Current release: **0.6.50**.
 
 ## Unreleased
+
+## 0.6.50 — 2026-09-16
+
+- Recognizes Ollama models whose IDs end in `:cloud` as hosted Ollama Cloud inference routed through the local Ollama service instead of describing the model itself as locally loaded.
+- Reads and displays Ollama's reported context window and capabilities. `deepseek-v4.1-flash:cloud` now appears as **Ollama Cloud · 1M context · thinking off · vision** when those capabilities are reported by the running service.
+- Treats DeepSeek V4 as a reasoning model for Story drafting and sends `reasoning_effort: none` by default, preventing hidden reasoning from consuming the complete 2,200-token Story output budget. An explicit `LLM_REASONING_EFFORT` setting still overrides the default.
+- Verified through a live five-stage Story pipeline using `deepseek-v4.1-flash:cloud`, plus independent provider metadata and response checks, 44 focused regressions, type checking and a separate-agent review.
 
 ## 0.6.49 — 2026-09-15
 

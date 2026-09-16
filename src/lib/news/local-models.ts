@@ -47,6 +47,10 @@ export type LocalModelEntry = {
    * never a guess from the model's name.
    */
   vision: boolean;
+  /** Ollama models suffixed with :cloud are routed to hosted inference. */
+  cloud: boolean;
+  /** Ollama's reported context window, when available. */
+  contextLength: number | null;
 };
 
 export type LocalServerKind = "lmstudio" | "ollama" | "llamacpp" | "openai-compatible";
@@ -89,7 +93,8 @@ function serverRoot(baseUrl: string): string {
   return trimSlash(baseUrl).replace(/\/v1$/, "");
 }
 
-const THINKING_RE = /gemma-?4|qwen3(?:\.\d+)?|deepseek-r1|gpt-oss|o[134]-|reasoning|think/i;
+const THINKING_RE =
+  /gemma-?4|qwen3(?:\.\d+)?|deepseek-(?:r1|v4(?:\.\d+)?)(?:[:/-]|$)|gpt-oss|o[134]-|reasoning|think/i;
 
 function isThinking(id: string): boolean {
   return THINKING_RE.test(id);
@@ -120,6 +125,8 @@ function enrichLlamaCpp(ids: string[]): LocalModelEntry[] {
     kind: "chat" as const,
     thinking: isThinking(id),
     vision: LLAMACPP_VISION_RE.test(id),
+    cloud: false,
+    contextLength: null,
   }));
 }
 
@@ -174,6 +181,8 @@ async function enrichLmStudio(root: string, ids: string[]): Promise<LocalModelEn
       kind,
       thinking: isThinking(id),
       vision: meta?.type === "vlm",
+      cloud: false,
+      contextLength: null,
     });
   }
   return out;
@@ -187,7 +196,10 @@ async function enrichLmStudio(root: string, ids: string[]): Promise<LocalModelEn
  * throws: a model that does not answer, or answers with no `capabilities`
  * array, is simply not vision-capable as far as this desk can tell.
  */
-async function ollamaSupportsVision(root: string, id: string): Promise<boolean> {
+async function ollamaMetadata(
+  root: string,
+  id: string,
+): Promise<{ vision: boolean; contextLength: number | null }> {
   try {
     const res = await fetch(`${root}/api/show`, {
       method: "POST",
@@ -195,18 +207,29 @@ async function ollamaSupportsVision(root: string, id: string): Promise<boolean> 
       body: JSON.stringify({ name: id, model: id }),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
-    if (!res.ok) return false;
-    const body = (await res.json()) as { capabilities?: unknown };
-    return Array.isArray(body.capabilities) && body.capabilities.includes("vision");
+    if (!res.ok) return { vision: false, contextLength: null };
+    const body = (await res.json()) as {
+      capabilities?: unknown;
+      model_info?: Record<string, unknown>;
+    };
+    const context = Object.entries(body.model_info ?? {}).find(
+      ([key, value]) => /(?:^|\.)context_length$/i.test(key) && Number.isFinite(value),
+    )?.[1];
+    return {
+      vision: Array.isArray(body.capabilities) && body.capabilities.includes("vision"),
+      contextLength: typeof context === "number" && context > 0 ? context : null,
+    };
   } catch {
-    return false;
+    return { vision: false, contextLength: null };
   }
 }
 
 async function enrichOllama(root: string, ids: string[]): Promise<LocalModelEntry[]> {
   let running = new Set<string>();
   try {
-    const body = (await fetchJson(`${root}/api/ps`)) as { models?: { name?: string; model?: string }[] };
+    const body = (await fetchJson(`${root}/api/ps`)) as {
+      models?: { name?: string; model?: string }[];
+    };
     running = new Set(
       (body?.models ?? [])
         .map((m) => m.name ?? m.model)
@@ -215,14 +238,16 @@ async function enrichOllama(root: string, ids: string[]): Promise<LocalModelEntr
   } catch {
     // /api/ps missing or unreachable -- loaded state stays unknown, not an error.
   }
-  const vision = await Promise.all(ids.map((id) => ollamaSupportsVision(root, id)));
+  const metadata = await Promise.all(ids.map((id) => ollamaMetadata(root, id)));
   return ids.map((id, i) => ({
     id,
     label: id,
     loaded: running.size > 0 ? running.has(id) : null,
     kind: "chat" as const,
     thinking: isThinking(id),
-    vision: vision[i] ?? false,
+    vision: metadata[i]?.vision ?? false,
+    cloud: /:cloud$/i.test(id),
+    contextLength: metadata[i]?.contextLength ?? null,
   }));
 }
 
@@ -257,6 +282,8 @@ async function probeServer(
               kind: "chat" as const,
               thinking: isThinking(id),
               vision: false,
+              cloud: false,
+              contextLength: null,
             }));
   return { kind, baseUrl: base, reachable: true, models };
 }

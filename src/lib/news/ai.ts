@@ -93,7 +93,10 @@ type GrokChatAdapter = (
 export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>> & {
   probe?: (choice?: EffectiveProviderChoice | string) => Promise<ProviderProbe>;
   /** Test-only seam for the server-only custom-connection resolver. */
-  resolveCustom?: (newsroomId: number, id: string) => Promise<{
+  resolveCustom?: (
+    newsroomId: number,
+    id: string,
+  ) => Promise<{
     baseUrl: string;
     modelId: string;
     apiKey: string | null;
@@ -323,12 +326,10 @@ export function resolveProvider(
 }
 
 type CustomProviderResolution =
-  | { ok: true; provider: Extract<Provider, { kind: "openai" }> }
-  | { ok: false; error: string };
+  { ok: true; provider: Extract<Provider, { kind: "openai" }> } | { ok: false; error: string };
 
 type XaiOauthProviderResolution =
-  | { ok: true; provider: Extract<Provider, { kind: "xai-oauth" }> }
-  | { ok: false; error: string };
+  { ok: true; provider: Extract<Provider, { kind: "xai-oauth" }> } | { ok: false; error: string };
 
 async function resolveXaiOauthProvider(
   newsroomId: number | undefined,
@@ -342,8 +343,7 @@ async function resolveXaiOauthProvider(
     };
   }
   try {
-    const resolve =
-      injected ?? (await import("./xai-oauth.server.ts")).resolveXaiOauthConnection;
+    const resolve = injected ?? (await import("./xai-oauth.server.ts")).resolveXaiOauthConnection;
     const connection = await resolve(newsroomId);
     return {
       ok: true,
@@ -381,13 +381,13 @@ async function resolveCustomProvider(
   if (!Number.isInteger(newsroomId) || newsroomId == null) {
     return {
       ok: false,
-      error: "The selected custom AI connection cannot be resolved without its newsroom. Choose another model; TownReporter will not fall back automatically.",
+      error:
+        "The selected custom AI connection cannot be resolved without its newsroom. Choose another model; TownReporter will not fall back automatically.",
     };
   }
   try {
     const resolve =
-      injected ??
-      (await import("./custom-ai-connections.server.ts")).resolveCustomAiChoice;
+      injected ?? (await import("./custom-ai-connections.server.ts")).resolveCustomAiChoice;
     const connection = await resolve(newsroomId, choice.slice("custom:".length));
     return {
       ok: true,
@@ -445,7 +445,10 @@ async function probeOpenAi(
     // OpenAI-compatible providers implement chat completions but deliberately
     // omit model discovery; a 404/405 catalog must not make that manual model
     // unusable. Credentials are still tested when the endpoint supports it.
-    if (options?.allowManualModelWhenCatalogUnsupported && (res.status === 404 || res.status === 405)) {
+    if (
+      options?.allowManualModelWhenCatalogUnsupported &&
+      (res.status === 404 || res.status === 405)
+    ) {
       return { ok: true, label: provider.label, choice: "configured" };
     }
     if (!res.ok)
@@ -513,7 +516,9 @@ export async function probeProvider(
   if (choice && isCustomModelChoice(choice)) {
     const resolved = await resolveCustomProvider(choice, newsroomId, adapters?.resolveCustom);
     if (!resolved.ok) return resolved;
-    const result = await probeOpenAi(resolved.provider, { allowManualModelWhenCatalogUnsupported: true });
+    const result = await probeOpenAi(resolved.provider, {
+      allowManualModelWhenCatalogUnsupported: true,
+    });
     return result.ok ? { ...result, choice } : result;
   }
   if (choice === "grok-oauth") {
@@ -566,7 +571,8 @@ export async function probeProvider(
     let localOverride: LocalModelOverride | null = null;
     localOverride = adapters?.resolveLocal
       ? await adapters.resolveLocal(newsroomId)
-      : (await (await import("./provider-settings.ts")).resolveLocalModelChoice(newsroomId)).override;
+      : (await (await import("./provider-settings.ts")).resolveLocalModelChoice(newsroomId))
+          .override;
     provider = resolveProvider(choice, localOverride);
   }
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
@@ -640,7 +646,11 @@ async function anthropicChat(
 
     if (res.stop_reason === "refusal") {
       const why = res.stop_details?.category ?? "unspecified";
-      return { ok: false, error: `${cfg.label} declined this request (${why})`, meta: meta(res.usage) };
+      return {
+        ok: false,
+        error: `${cfg.label} declined this request (${why})`,
+        meta: meta(res.usage),
+      };
     }
     const text = res.content
       .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
@@ -648,7 +658,11 @@ async function anthropicChat(
       .join("")
       .trim();
     if (res.stop_reason === "max_tokens" && !text) {
-      return { ok: false, error: `${cfg.label} hit the token ceiling before answering`, meta: meta(res.usage) };
+      return {
+        ok: false,
+        error: `${cfg.label} hit the token ceiling before answering`,
+        meta: meta(res.usage),
+      };
     }
     if (!text) return { ok: false, error: "Empty model response", meta: meta(res.usage) };
     return { ok: true, text, meta: meta(res.usage) };
@@ -664,7 +678,11 @@ async function anthropicChat(
       return { ok: false, error: `${cfg.label} request timed out`, meta: meta(undefined, true) };
     }
     if (err instanceof A.APIError) {
-      return { ok: false, error: `${cfg.label} API error ${err.status ?? ""}`.trim(), meta: meta() };
+      return {
+        ok: false,
+        error: `${cfg.label} API error ${err.status ?? ""}`.trim(),
+        meta: meta(),
+      };
     }
     return { ok: false, error: `${cfg.label} request failed`, meta: meta() };
   }
@@ -708,13 +726,15 @@ export async function grokChat(
     if (!ready.ok) return ready;
     return grokChat(system, user, maxTokens, { ...opts, choice: ready.choice }, adapters);
   }
-  const custom = opts?.choice && isCustomModelChoice(opts.choice)
-    ? await resolveCustomProvider(opts.choice, opts.newsroomId, adapters?.resolveCustom)
-    : null;
+  const custom =
+    opts?.choice && isCustomModelChoice(opts.choice)
+      ? await resolveCustomProvider(opts.choice, opts.newsroomId, adapters?.resolveCustom)
+      : null;
   if (custom && !custom.ok) return custom;
-  const xai = opts?.choice === "grok-oauth"
-    ? await resolveXaiOauthProvider(opts.newsroomId, adapters?.resolveXaiOauth)
-    : null;
+  const xai =
+    opts?.choice === "grok-oauth"
+      ? await resolveXaiOauthProvider(opts.newsroomId, adapters?.resolveXaiOauth)
+      : null;
   if (xai && !xai.ok) return xai;
   const provider = custom?.ok
     ? custom.provider
@@ -828,13 +848,18 @@ export async function grokChat(
       signal: AbortSignal.timeout(remaining()),
     });
   } catch (err) {
-    return { ok: false, error: connectionError(llm.label, err), meta: openAiMeta(undefined, isTimeout(err)) };
+    return {
+      ok: false,
+      error: connectionError(llm.label, err),
+      meta: openAiMeta(undefined, isTimeout(err)),
+    };
   }
   if (res.status === 429 || res.status >= 500) {
     if (timeoutMs < 30_000) {
       return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
     }
-    if (remaining() <= 1_000) return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
+    if (remaining() <= 1_000)
+      return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
     await new Promise((r) => setTimeout(r, Math.min(800, remaining())));
     try {
       res = await fetch(url, {
@@ -844,10 +869,15 @@ export async function grokChat(
         signal: AbortSignal.timeout(remaining()),
       });
     } catch (err) {
-      return { ok: false, error: connectionError(llm.label, err), meta: openAiMeta(undefined, isTimeout(err)) };
+      return {
+        ok: false,
+        error: connectionError(llm.label, err),
+        meta: openAiMeta(undefined, isTimeout(err)),
+      };
     }
   }
-  if (!res.ok) return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
+  if (!res.ok)
+    return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
   let body: {
     error?: { message?: string } | string;
     model?: string;
@@ -855,7 +885,7 @@ export async function grokChat(
     choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
   };
   try {
-    body = await res.json() as typeof body;
+    body = (await res.json()) as typeof body;
   } catch {
     return { ok: false, error: `${llm.label} returned an unreadable response`, meta: openAiMeta() };
   }
@@ -864,8 +894,13 @@ export async function grokChat(
     // A custom endpoint is outside TownReporter's control. Its error body may
     // reflect an Authorization header or request payload; preserve the useful
     // HTTP failure category without letting that body enter a job error or UI.
-    if (llm.label === "Custom AI") return { ok: false, error: "Custom AI API error", meta: openAiMeta(body) };
-    return { ok: false, error: `${llm.label} API error${detail ? `: ${detail}` : ""}`, meta: openAiMeta(body) };
+    if (llm.label === "Custom AI")
+      return { ok: false, error: "Custom AI API error", meta: openAiMeta(body) };
+    return {
+      ok: false,
+      error: `${llm.label} API error${detail ? `: ${detail}` : ""}`,
+      meta: openAiMeta(body),
+    };
   }
   const message = body.choices?.[0]?.message;
   const text = message?.content?.trim() ?? "";
@@ -894,7 +929,8 @@ export async function grokChat(
   return { ok: true, text, meta: openAiMeta(body) };
 }
 
-const THINKING_MODEL_RE = /gemma-?4|qwen3(?:\.\d+)?|deepseek-r1|gpt-oss|o[134]-|reasoning|think/i;
+const THINKING_MODEL_RE =
+  /gemma-?4|qwen3(?:\.\d+)?|deepseek-(?:r1|v4(?:\.\d+)?)(?:[:/-]|$)|gpt-oss|o[134]-|reasoning|think/i;
 const REASONING_EFFORTS = new Set(["none", "low", "medium", "high"]);
 
 /**

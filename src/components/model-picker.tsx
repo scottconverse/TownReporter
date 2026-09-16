@@ -136,6 +136,9 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
   const servers = catalog.data?.servers ?? [];
   const reachable = servers.filter((s) => s.reachable);
   const selected = choice.data?.override ?? catalog.data?.defaultModel ?? null;
+  const selectedModel = selected
+    ? reachable.flatMap((server) => server.models).find((model) => model.id === selected.id)
+    : null;
   const notice = choice.data?.notice;
 
   if (catalog.isLoading) return null;
@@ -172,8 +175,9 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
             ))}
           </select>
           <span className="model-picker-help">
-            Loaded models answer fast. A model that is not loaded gets loaded on the first call,
-            which can take a minute or more.
+            {selectedModel?.cloud
+              ? `This model runs in Ollama Cloud and is routed through Ollama here${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. Reasoning is off by default for drafting so the output budget can go to the story.`
+              : "Loaded models answer fast. A model that is not loaded gets loaded on the first call, which can take a minute or more."}
           </span>
           {notice ? <span className="model-picker-help">{notice}</span> : null}
         </>
@@ -215,7 +219,11 @@ export function ModelPicker(props: Props) {
     ...customOptions,
   ];
   if (isCustomModelChoice(props.value) && !options.some((option) => option.value === props.value)) {
-    options.push({ value: props.value, label: "Custom API connection", detail: connections.isPending ? "Loading…" : "Unavailable — choose another model" });
+    options.push({
+      value: props.value,
+      label: "Custom API connection",
+      detail: connections.isPending ? "Loading…" : "Unavailable — choose another model",
+    });
   }
   const selected = options.find((option) => option.value === props.value) ?? options[0];
   const helpId = useId();
@@ -249,7 +257,9 @@ export function ModelPicker(props: Props) {
     // before spending anything either way (see commitStoryDraftForAuthenticatedEditor).
     return availability.data ? availability.data[value] !== false : true;
   }
-  const unavailable = options.filter((option) => option.value !== "auto" && !isAvailable(option.value));
+  const unavailable = options.filter(
+    (option) => option.value !== "auto" && !isAvailable(option.value),
+  );
   const selectedUnavailable = !isAvailable(props.value);
   // The one un-set-up option gets flagged even when it is not the current
   // selection, so an editor sees "not set up" before picking it rather than
@@ -259,7 +269,9 @@ export function ModelPicker(props: Props) {
     ? selectedUnavailable
       ? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model. No automatic fallback."
       : `Uses only ${selected.label} (${selected.detail}) for this run; no fallback. Your provider's usage charges may apply.`
-    : selectedUnavailable ? notSetUpHelp(selected) : modelChoiceHelp(selected.value, props.scope ?? "story");
+    : selectedUnavailable
+      ? notSetUpHelp(selected)
+      : modelChoiceHelp(selected.value, props.scope ?? "story");
   return (
     <div className={props.compact ? "model-picker compact" : "model-picker"}>
       <label htmlFor={selectId} className="model-picker-label">
@@ -293,14 +305,21 @@ export function ModelPicker(props: Props) {
       {props.value === "local-model" && !selectedUnavailable ? (
         <LocalModelSelect scope={props.scope ?? "story"} />
       ) : null}
-      {connections.isError ? <span className="model-picker-help" role="status">Could not load custom API connections. Existing model choices still work.</span> : null}
+      {connections.isError ? (
+        <span className="model-picker-help" role="status">
+          Could not load custom API connections. Existing model choices still work.
+        </span>
+      ) : null}
       <details className="min-w-0 text-sm" style={{ gridColumn: "1 / -1" }}>
         <summary className="cursor-pointer underline underline-offset-2 focus-visible:outline-2">
           Set up a writing model
         </summary>
         <div className="mt-2 space-y-2">
           <p>
-            <a className="inline-link" href="/desk/ops#custom-ai-connections">Add or manage your own AI API</a>. Saving a connection does not change Automatic or start a model request.
+            <a className="inline-link" href="/desk/ops#custom-ai-connections">
+              Add or manage your own AI API
+            </a>
+            . Saving a connection does not change Automatic or start a model request.
           </p>
           <p>
             Set up the provider on the computer running TownReporter, not just the computer viewing
