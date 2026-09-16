@@ -1,4 +1,4 @@
-import { normalizeProviderModelId } from "./provider-model-id.ts";
+import { isGeminiOpenAiEndpoint, normalizeProviderModelId } from "./provider-model-id.ts";
 
 export type CustomAiConnectionInput = {
   name: string;
@@ -37,7 +37,7 @@ export function normalizeConnectionInput(input: CustomAiConnectionInput) {
   if (url.search || url.hash) throw new Error("Base URL must not include a query or fragment.");
   const baseUrl = url.toString().replace(/\/$/, "");
   const apiKey = input.apiKey?.trim() || undefined;
-  const modelId = input.modelId?.trim() || undefined;
+  const modelId = normalizeProviderModelId(baseUrl, input.modelId?.trim() || "") || undefined;
   if (apiKey && apiKey.length > 4096) throw new Error("API key is too long.");
   if (modelId && modelId.length > 200) throw new Error("Model id is too long.");
   return {
@@ -119,10 +119,10 @@ function isDuplicateConnectionNameError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   const constraint = String(candidate.constraint ?? "");
   return (
-    candidate.code === "23505" || /duplicate key/i.test(message)
-  ) &&
+    (candidate.code === "23505" || /duplicate key/i.test(message)) &&
     (/custom_ai_connections_newsroom_id_name_key/i.test(constraint) ||
-      /custom_ai_connections_newsroom_id_name_key/i.test(message));
+      /custom_ai_connections_newsroom_id_name_key/i.test(message))
+  );
 }
 
 export type ConnectionProbeResult = {
@@ -292,6 +292,8 @@ export async function saveCustomAiConnection(
     : value.apiKey
       ? encryptApiKey(value.apiKey)
       : (existing?.encrypted_api_key ?? null);
+  if (isGeminiOpenAiEndpoint(value.baseUrl) && !encrypted)
+    throw new Error("Google Gemini requires an API key. Enter it before saving this connection.");
   let rows: Row[];
   try {
     rows =
@@ -336,7 +338,7 @@ export async function resolveCustomAiChoice(
   )[0];
   if (!row?.model_id)
     throw new Error(
-      "The selected custom AI connection is disabled, deleted, or has no model. Choose another model; TownReporter will not fall back automatically.",
+      "The selected custom AI connection is disabled, deleted, or has no model. TownReporter will try the next ready model for this unfinished call.",
     );
   return {
     name: row.name,

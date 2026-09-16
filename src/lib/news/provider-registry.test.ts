@@ -12,6 +12,9 @@ import {
   clampBudgetMs,
   effectiveBudget,
   enabledAutomaticLadder,
+  defaultModelEffort,
+  modelEffort,
+  modelEffortsFor,
   plannerModelFor,
   providerEnabled,
   providerEntry,
@@ -52,6 +55,64 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
 }
 
 const SURFACES: ProviderSurface[] = ["story", "scan", "opinion", "dark", "forced"];
+
+describe("model-specific thinking effort", () => {
+  it("offers only values accepted by each exact Codex model", () => {
+    assert.deepEqual(modelEffortsFor("codex-astra"), ["low", "medium", "high", "xhigh", "max"]);
+    for (const choice of ["codex-frontier", "codex-balanced", "codex-luna"] as const) {
+      assert.deepEqual(modelEffortsFor(choice), ["none", "low", "medium", "high", "xhigh", "max"]);
+      assert.equal(defaultModelEffort(choice), "medium");
+    }
+    for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claude-haiku"] as const) {
+      assert.deepEqual(modelEffortsFor(choice), ["low", "medium", "high", "xhigh", "max"]);
+      assert.equal(defaultModelEffort(choice), "medium");
+    }
+    assert.equal(modelEffort("codex-astra", "none"), "medium");
+    assert.equal(modelEffort("codex-astra", "max"), "max");
+    assert.deepEqual(modelEffortsFor("auto"), ["low", "medium", "high", "xhigh", "max"]);
+    assert.deepEqual(modelEffortsFor("local-model"), []);
+    assert.deepEqual(
+      modelEffortsFor("local-model", "deepseek-v4.1-flash:cloud"),
+      ["none", "low", "high", "max"],
+    );
+    assert.deepEqual(
+      modelEffortsFor("custom:11111111-1111-4111-8111-111111111111", "gemini-2.5-flash"),
+      [],
+      "the saved Gemini preset uses provider default instead of invented OpenAI values",
+    );
+    assert.deepEqual(
+      modelEffortsFor("custom:11111111-1111-4111-8111-111111111111", "unknown-model"),
+      [],
+      "an unknown OpenAI-compatible model must not advertise unverified levels",
+    );
+    assert.deepEqual(modelEffortsFor("grok-oauth"), ["low", "medium", "high"]);
+    assert.equal(defaultModelEffort("local-model"), null);
+    assert.equal(
+      defaultModelEffort("local-model", "deepseek-v4.1-flash:cloud"),
+      "none",
+      "the picker default must agree with its Off label",
+    );
+    assert.equal(
+      defaultModelEffort(
+        "custom:11111111-1111-4111-8111-111111111111",
+        "deepseek-v4.1-flash:cloud",
+      ),
+      "none",
+    );
+    assert.equal(defaultModelEffort("custom:11111111-1111-4111-8111-111111111111"), null);
+    assert.equal(defaultModelEffort("grok-oauth"), null);
+    assert.equal(modelEffort("local-model", "max", "deepseek-v4.1-flash:cloud"), "max");
+    assert.equal(
+      modelEffort("local-model", "medium", "deepseek-v4.1-flash:cloud"),
+      "none",
+      "an unsupported stale value must fall back to the model's safe Off default",
+    );
+    assert.equal(
+      modelEffort("custom:11111111-1111-4111-8111-111111111111", "high", "gemini-2.5-flash"),
+      null,
+    );
+  });
+});
 
 describe("the provider registry is the one description of a writing model", () => {
   it("gives every entry the fields the rest of the desk reads off it", () => {

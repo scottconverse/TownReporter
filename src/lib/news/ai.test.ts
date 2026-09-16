@@ -545,6 +545,108 @@ describe("grokChat", () => {
 });
 
 describe("model-picker provider readiness", () => {
+  it("sends the exact DeepSeek Off default as Ollama's explicit none disable", async () => {
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({
+        model: "deepseek-v4.1-flash:cloud",
+        choices: [{ message: { content: "ok" } }],
+      }), { status: 200 });
+    };
+    try {
+      await withEnvAsync(BARE, async () => {
+        const localModel = {
+          baseUrl: "http://127.0.0.1:11434/v1",
+          id: "deepseek-v4.1-flash:cloud",
+        };
+        assert.equal((await grokChat("S", "U", 8, {
+          choice: "local-model",
+          localModel,
+        })).ok, true);
+        assert.equal((await grokChat("S", "U", 8, {
+          choice: "local-model",
+          localModel,
+          reasoningEffort: "high",
+        })).ok, true);
+        assert.equal((await grokChat("S", "U", 8, {
+          choice: "local-model",
+          localModel,
+          reasoningEffort: "max",
+        })).ok, true);
+      });
+      assert.equal(bodies[0]!.reasoning_effort, "none", "Off must disable thinking explicitly");
+      assert.equal(bodies[1]!.reasoning_effort, "high");
+      assert.equal(bodies[2]!.reasoning_effort, "max");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("carries custom DeepSeek Off, High, and Max through the exact saved model", async () => {
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({
+        model: "deepseek-v4.1-flash:cloud",
+        choices: [{ message: { content: "ok" } }],
+      }), { status: 200 });
+    };
+    try {
+      for (const effort of ["none", "high", "max"] as const) {
+        const result = await grokChat("S", "U", 8, {
+          choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35",
+          newsroomId: 44,
+          reasoningEffort: effort,
+        }, {
+          resolveCustom: async () => ({
+            baseUrl: "http://127.0.0.1:11434/v1",
+            modelId: "deepseek-v4.1-flash:cloud",
+            apiKey: "test-key",
+          }),
+        });
+        assert.equal(result.ok, true);
+      }
+      assert.deepEqual(
+        bodies.map((body) => body.reasoning_effort),
+        ["none", "high", "max"],
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("uses provider default for the saved Gemini preset instead of sending an invented level", async () => {
+    const originalFetch = globalThis.fetch;
+    let body: Record<string, unknown> | null = null;
+    globalThis.fetch = async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        model: "gemini-2.5-flash",
+        choices: [{ message: { content: "ok" } }],
+      }), { status: 200 });
+    };
+    try {
+      const result = await grokChat("S", "U", 8, {
+        choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35",
+        newsroomId: 44,
+        reasoningEffort: "high",
+      }, {
+        resolveCustom: async () => ({
+          baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+          modelId: "gemini-2.5-flash",
+          apiKey: "test-key",
+        }),
+      });
+      assert.equal(result.ok, true);
+      assert.equal(body == null ? true : !("reasoning_effort" in body), true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("preflights the explicit SuperGrok choice only through its newsroom OAuth connection", async () => {
     const result = await probeProvider("grok-oauth", 44, {
       resolveXaiOauth: async (newsroomId) => {
@@ -555,30 +657,39 @@ describe("model-picker provider readiness", () => {
     assert.deepEqual(result, { ok: true, label: "Grok Build", choice: "grok-oauth" });
   });
 
-  it("routes an explicit SuperGrok draft only through OAuth with the selected model", async () => {
+  it("routes each supported Opinion effort through SuperGrok OAuth with the selected model", async () => {
     const calls: unknown[] = [];
-    const result = await grokChat(
-      "system prompt",
-      "user prompt",
-      32,
-      { choice: "grok-oauth", newsroomId: 44, timeoutMs: 12_345 },
-      {
-        resolveXaiOauth: async () => ({ modelId: "grok-4.6", label: "Grok Build" }),
-        xaiChat: async (input) => {
-          calls.push(input);
-          return { text: "GROK_CONNECTION_OK" };
+    for (const reasoningEffort of ["low", "medium", "high"] as const) {
+      const result = await grokChat(
+        "system prompt",
+        "user prompt",
+        32,
+        { choice: "grok-oauth", newsroomId: 44, timeoutMs: 12_345, reasoningEffort },
+        {
+          resolveXaiOauth: async () => ({ modelId: "grok-4.6", label: "Grok Build" }),
+          xaiChat: async (input) => {
+            calls.push(input);
+            return { text: "GROK_CONNECTION_OK" };
+          },
         },
-      },
+      );
+      assert.deepEqual(result, { ok: true, text: "GROK_CONNECTION_OK" });
+    }
+    assert.deepEqual(
+      calls.map((call) => (call as { reasoningEffort?: string }).reasoningEffort),
+      ["low", "medium", "high"],
     );
-    assert.deepEqual(result, { ok: true, text: "GROK_CONNECTION_OK" });
-    assert.deepEqual(calls, [{
-      newsroomId: 44,
-      system: "system prompt",
-      user: "user prompt",
-      maxTokens: 32,
-      model: "grok-4.6",
-      timeoutMs: 12_345,
-    }]);
+    for (const call of calls) {
+      assert.deepEqual(call, {
+        newsroomId: 44,
+        system: "system prompt",
+        user: "user prompt",
+        maxTokens: 32,
+        model: "grok-4.6",
+        timeoutMs: 12_345,
+        reasoningEffort: (call as { reasoningEffort: string }).reasoningEffort,
+      });
+    }
   });
 
   it("preflights the discovered newsroom local model without requiring environment variables", async () => {

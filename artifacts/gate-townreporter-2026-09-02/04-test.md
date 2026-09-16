@@ -183,9 +183,9 @@ routes are:
   `docs/nightly-proof.md`), not part of `npm test` or any `ci.yml` job, and not
   gating anything — a regression here is discovered the following morning at the
   earliest, by whoever reads `artifacts/nightly/<date>.json`, not by CI.
-- `scripts/audit-038.mjs` and `scripts/site-walkthrough.mjs` — one-off audit scratch
+- `scripts/audit-038.mjs` and the historical one-off browser walk — one-off audit scratch
   scripts from an earlier manual audit pass (hardcoded `/workspace/screenshots/...`
-  output paths and, in `site-walkthrough.mjs`, a stale hardcoded live URL
+  output paths and, in the historical one-off browser walk, a stale hardcoded live URL
   `https://townreporter-longmont.grok.me` that is not this product's real domain).
   Neither appears in `package.json` `scripts` or `ci.yml` — confirmed by grep. They
   are not maintained regression tests; they are one-time artifacts.

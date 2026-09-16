@@ -3,8 +3,8 @@ import { afterEach, describe, it } from "node:test";
 import { setFetchImplForTests } from "./fetch-url.ts";
 import { setOcrImpl, type OcrOptions } from "./ingest.ts";
 import { defaultFetch } from "./investigate.ts";
-import { productionOcr } from "./ocr.ts";
-import { singleRenderedPdfFixture } from "./pdf-test-fixture.ts";
+import { OCR_TOTAL_BUDGET_MS, productionOcr } from "./ocr.ts";
+import { singleRenderedPdfFixture, twoRenderedPdfFixture } from "./pdf-test-fixture.ts";
 import { reportAndDraft } from "./report.ts";
 import type { LeadRow } from "./types.ts";
 
@@ -26,7 +26,211 @@ function serveScan(): void {
 }
 
 describe("ordinary public-document OCR model routing", () => {
-  it("keeps Automatic OCR on its established availability order before the writing ladder", async () => {
+  it("sends only exact-model-supported effort on OpenAI-compatible OCR payloads", async () => {
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "Readable scanned packet text." } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+    const customId = "custom:11111111-1111-4111-8111-111111111111";
+    const run = (modelId: string, reasoningEffort: "none" | "high" | "max") =>
+      productionOcr(singleRenderedPdfFixture(), {
+        provider: customId,
+        newsroomId: "44",
+        reasoningEffort,
+        resolveCustom: async () => ({
+          baseUrl: "http://127.0.0.1:11434/v1",
+          apiKey: "not-needed",
+          modelId,
+        }),
+      });
+    try {
+      await run("deepseek-v4.1-flash:cloud", "none");
+      await run("deepseek-v4.1-flash:cloud", "high");
+      await run("deepseek-v4.1-flash:cloud", "max");
+      await run("unknown-vision-model", "high");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assert.equal(bodies[0]?.reasoning_effort, "none", "Off must explicitly disable thinking");
+    assert.equal(bodies[1]?.reasoning_effort, "high");
+    assert.equal(bodies[2]?.reasoning_effort, "max");
+    assert.equal("reasoning_effort" in (bodies[3] ?? {}), false);
+  });
+
+  it("does not start a fallback after the shared deadline and preserves earlier pages", async () => {
+    let clock = 0;
+    let primaryCalls = 0;
+    let fallbackCalls = 0;
+    const result = await productionOcr(twoRenderedPdfFixture(), {
+      provider: "codex-balanced",
+      forcedPlan: { kind: "codex", model: "gpt-5.6-terra" },
+      visionFallbackPlans: [{ kind: "claude-code", model: "claude-sonnet" }],
+      startedAt: 0,
+      now: () => clock,
+      adapters: {
+        codex: async () => {
+          primaryCalls += 1;
+          if (primaryCalls === 1) return "The first page was retained before the deadline.";
+          clock = OCR_TOTAL_BUDGET_MS;
+          throw new Error("Codex request timed out after 90s, 0 bytes out");
+        },
+        "claude-code": async () => {
+          fallbackCalls += 1;
+          return "This call must never start after the shared deadline.";
+        },
+      },
+    });
+    assert.equal(primaryCalls, 2);
+    assert.equal(fallbackCalls, 0);
+    assert.equal(result.modelCalls, 2);
+    assert.deepEqual(result.pages?.map((page) => page.page), [1]);
+    assert.match(result.text, /first page was retained/);
+    assert.match(result.reason ?? "", /page 2 was not read \(time limit\)/);
+  });
+
+  it("routes a forced named reader's preflight unavailability without leaving the injected transport set", async () => {
+    const switches: string[] = [];
+    const result = await productionOcr(singleRenderedPdfFixture(), {
+      provider: "codex-balanced",
+      forcedPlan: { kind: "codex", model: "gpt-5.6-terra" },
+      adapters: {
+        anthropic: async () => OCR_TEXT,
+      },
+      onProviderSwitch: async ({ transport }) => { switches.push(transport); },
+    });
+    assert.match(result.text, /water contract was approved/);
+    assert.equal(result.provider, "Claude");
+    assert.deepEqual(switches, ["anthropic"]);
+  });
+
+  it("promotes a successful fallback for later pages", async () => {
+    let primaryCalls = 0;
+    let fallbackCalls = 0;
+    let switches = 0;
+    const result = await productionOcr(twoRenderedPdfFixture(), {
+      provider: "codex-balanced",
+      forcedPlan: { kind: "codex", model: "gpt-5.6-terra" },
+      visionFallbackPlans: [{ kind: "claude-code", model: "sonnet" }],
+      onProviderSwitch: async () => { switches += 1; },
+      adapters: {
+        codex: async () => {
+          primaryCalls += 1;
+          throw new Error("Codex request timed out after 90s, 0 bytes out");
+        },
+        "claude-code": async (_image, _timeout, selected) => {
+          fallbackCalls += 1;
+          return `Page ${fallbackCalls} read by ${selected?.model}.`;
+        },
+      },
+    });
+    assert.equal(result.pagesRead, 2);
+    assert.equal(primaryCalls, 1);
+    assert.equal(fallbackCalls, 2);
+    assert.equal(switches, 1);
+  });
+
+  it("retries only a technically failed page on the next verified vision reader", async () => {
+    let primaryCalls = 0;
+    let fallbackCalls = 0;
+    const result = await productionOcr(twoRenderedPdfFixture(), {
+      provider: "codex-balanced",
+      forcedPlan: { kind: "codex", model: "gpt-5.6-terra" },
+      visionFallbackPlans: [{ kind: "claude-code", model: "sonnet" }],
+      adapters: {
+        codex: async () => {
+          primaryCalls += 1;
+          if (primaryCalls === 2) throw new Error("Codex request timed out after 90s, 0 bytes out");
+          return "First page was read once.";
+        },
+        "claude-code": async () => {
+          fallbackCalls += 1;
+          return "Second page recovered by vision fallback.";
+        },
+      },
+    });
+    assert.equal(primaryCalls, 2, "the successful first page must not be repeated");
+    assert.equal(fallbackCalls, 1, "only the failed second page moves to fallback");
+    assert.deepEqual(result.pages?.map((page) => page.page), [1, 2]);
+    assert.match(result.text, /First page was read once/);
+    assert.match(result.text, /Second page recovered/);
+    assert.equal(result.provider, "Codex → Claude");
+  });
+
+  it("keeps partial unread state when every verified vision fallback fails", async () => {
+    let fallbackCalls = 0;
+    const result = await productionOcr(twoRenderedPdfFixture(), {
+      provider: "codex-balanced",
+      forcedPlan: { kind: "codex", model: "gpt-5.6-terra" },
+      visionFallbackPlans: [{ kind: "claude-code", model: "sonnet" }],
+      adapters: {
+        codex: async () => {
+          throw new Error("Codex request timed out after 90s, 0 bytes out");
+        },
+        "claude-code": async () => {
+          fallbackCalls += 1;
+          throw new Error("Claude is unavailable");
+        },
+      },
+    });
+    assert.equal(fallbackCalls, 2);
+    assert.equal(result.text, "");
+    assert.equal(result.pagesRead, 0);
+    assert.match(result.reason ?? "", /page 1 could not be read.*page 2 could not be read/i);
+  });
+
+  it("stops the fallback chain when a vision reader refuses the page", async () => {
+    let laterReadyCalls = 0;
+    await assert.rejects(
+      productionOcr(singleRenderedPdfFixture(), {
+        provider: "codex-balanced",
+        forcedPlan: { kind: "codex", model: "gpt-5.6-terra" },
+        visionFallbackPlans: [
+          { kind: "claude-code", model: "claude-sonnet" },
+          { kind: "codex", model: "gpt-6-astra" },
+        ],
+        adapters: {
+          codex: async (_image, _timeoutMs, model) => {
+            if (model.model === "gpt-5.6-terra") {
+              throw new Error("Codex request timed out after 90s, 0 bytes out");
+            }
+            laterReadyCalls += 1;
+            return "This later provider could read the page.";
+          },
+          "claude-code": async () => "I cannot read or transcribe this page.",
+        },
+      }),
+      /cannot read or transcribe/i,
+    );
+
+    assert.equal(laterReadyCalls, 0, "a refusal must terminate the provider chain");
+  });
+
+  it("never persists a primary vision reader refusal as extracted page text", async () => {
+    let fallbackCalls = 0;
+    await assert.rejects(
+      productionOcr(singleRenderedPdfFixture(), {
+        provider: "codex-balanced",
+        forcedPlan: { kind: "codex", model: "gpt-5.6-terra" },
+        visionFallbackPlans: [{ kind: "claude-code", model: "claude-sonnet" }],
+        adapters: {
+          codex: async () => "I cannot read or transcribe this page.",
+          "claude-code": async () => {
+            fallbackCalls += 1;
+            return "This later provider could read the page.";
+          },
+        },
+      }),
+      /cannot read or transcribe/i,
+    );
+    assert.equal(fallbackCalls, 0, "a primary refusal must terminate the provider chain");
+  });
+
+  it("keeps Automatic OCR on Terra before Claude", async () => {
     const priorCodex = process.env.TOWNREPORTER_CODEX;
     const priorClaude = process.env.TOWNREPORTER_CLAUDE_CODE;
     const priorKey = process.env.ANTHROPIC_API_KEY;
@@ -40,13 +244,13 @@ describe("ordinary public-document OCR model routing", () => {
       const result = await productionOcr(singleRenderedPdfFixture(), {
         provider: "auto",
         adapters: {
-          anthropic: async (_image, _timeoutMs, model) => {
+          codex: async (_image, _timeoutMs, model) => {
             assert.ok(model);
             selected.push(model);
             return OCR_TEXT;
           },
-          codex: async () => {
-            throw new Error("Codex must not run after the first available OCR path");
+          anthropic: async () => {
+            throw new Error("Claude must not run after Terra succeeds");
           },
           "claude-code": async () => {
             throw new Error("Claude Code must not run after the first available OCR path");
@@ -54,7 +258,7 @@ describe("ordinary public-document OCR model routing", () => {
         },
       });
       assert.match(result.text, /water contract was approved/);
-      assert.deepEqual(selected, [{ transport: "anthropic", model: "claude-sonnet" }]);
+      assert.deepEqual(selected, [{ transport: "codex", model: "gpt-5.6-terra" }]);
     } finally {
       if (priorCodex === undefined) delete process.env.TOWNREPORTER_CODEX;
       else process.env.TOWNREPORTER_CODEX = priorCodex;
@@ -67,23 +271,26 @@ describe("ordinary public-document OCR model routing", () => {
     }
   });
 
-  it("fails clearly for explicit Grok OCR without invoking a fallback", async () => {
+  it("routes explicit Grok OCR to a verified vision fallback", async () => {
     let grokCalls = 0;
+    let codexCalls = 0;
     const result = await productionOcr(singleRenderedPdfFixture(), {
       provider: "grok-oauth",
+      visionFallbackPlans: [{ kind: "codex", model: "gpt-5.6-terra" }],
       adapters: {
         "xai-oauth": async () => {
           grokCalls++;
           throw new Error("Grok OCR must not be attempted");
         },
+        codex: async () => {
+          codexCalls++;
+          return OCR_TEXT;
+        },
       },
     });
-    assert.equal(result.text, "");
+    assert.match(result.text, /water contract was approved/);
     assert.equal(grokCalls, 0);
-    assert.equal(
-      result.reason,
-      "Grok (SuperGrok) is a text-only connection in TownReporter and cannot read scan images. Choose Anthropic, Codex, Claude Code, or a local model marked · vision for OCR.",
-    );
+    assert.equal(codexCalls, 1);
   });
 
   it("keeps every explicit Story picker choice, newsroom, and local override on the OCR read", async () => {

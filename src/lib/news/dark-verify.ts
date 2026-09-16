@@ -27,7 +27,7 @@ import {
   type ResearchSnapshot,
 } from "./dark-preferences.ts";
 import { grokChat, parseJsonBlock, providerBudget, type EffectiveProviderChoice } from "./ai.ts";
-import type { ProviderOverrides } from "./provider-registry.ts";
+import type { ModelEffort, ProviderOverrides } from "./provider-registry.ts";
 import { searchWithFallback } from "./search-web.ts";
 import type { WebHit, SearchAttempt } from "./search-web.ts";
 import type { DarkRunBudget, DarkRunUsageSnapshot } from "./dark-run-budget.ts";
@@ -47,7 +47,11 @@ import {
 export const VERIFY_PER_ROUND = 6;
 
 export type VerifySearchFn = (query: string) => Promise<WebHit[] | SearchAttempt>;
-export type VerifyModelFn = (system: string, pack: string) => Promise<string | null>;
+export type VerifyModelFn = (
+  system: string,
+  pack: string,
+  reasoningEffort?: ModelEffort | null,
+) => Promise<string | null>;
 
 export type VerifyDeps = {
   search?: VerifySearchFn;
@@ -92,6 +96,7 @@ export async function verifyRunSignals(opts: {
   runBudget?: DarkRunBudget;
   onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>;
   onStage?: (stage: string) => Promise<unknown>;
+  reasoningEffort?: ModelEffort | null;
 }): Promise<{
   eligible: number | null;
   deferred: number;
@@ -257,7 +262,7 @@ export async function verifyRunSignals(opts: {
     if (modelCall) await opts.onUsage?.(opts.runBudget!.snapshot());
     try {
       if (opts.deps?.model) {
-        text = await opts.deps.model(DARK_VERIFY_SYSTEM, pack);
+        text = await opts.deps.model(DARK_VERIFY_SYSTEM, pack, opts.reasoningEffort);
         modelCall?.finish({ result: text ? "ok" : "error" });
       }
       else {
@@ -269,13 +274,14 @@ export async function verifyRunSignals(opts: {
           localModel: opts.overrides?.["local-model"]?.localModel,
           // Stage 2 reads what the app already fetched. It never searches.
           noTools: true,
+          reasoningEffort: opts.reasoningEffort,
         });
-        text = ai?.ok ? ai.text : null;
-        const error = ai && !ai.ok ? ai.error : "";
+        if (!ai?.ok) throw new Error(ai && "error" in ai ? ai.error : "empty model response");
+        text = ai.text;
         modelCall?.finish({
-          result: ai?.ok ? "ok" : (/timed out|timeout/i.test(error) ? "timeout" : "error"),
+          result: "ok",
           durationMs: ai?.meta?.durationMs,
-          timedOut: ai?.meta?.timedOut ?? (!ai?.ok && /timed out|timeout/i.test(error)),
+          timedOut: ai?.meta?.timedOut ?? false,
           provider: ai?.meta?.provider,
           model: ai?.meta?.model,
           inputTokens: ai?.meta?.inputTokens,
@@ -283,9 +289,9 @@ export async function verifyRunSignals(opts: {
           totalTokens: ai?.meta?.totalTokens,
         });
       }
-    } catch {
-      text = null;
+    } catch (error) {
       modelCall?.finish({ result: "error" });
+      throw error;
     }
     if (opts.runBudget) await opts.onUsage?.(opts.runBudget.snapshot());
 

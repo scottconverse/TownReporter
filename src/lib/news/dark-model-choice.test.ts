@@ -111,8 +111,8 @@ async function makeInvestigation(userId: string): Promise<number> {
 async function darkJobs(investigationId: number) {
   await ensureJobsSchema();
   const sql = await getSql();
-  return sql<{ id: number; model_choice: string; model_choice_source: string; lane: string }>`
-    select id, model_choice, model_choice_source, lane from desk_jobs
+  return sql<{ id: number; model_choice: string; model_choice_source: string; lane: string; result_json: string }>`
+    select id, model_choice, model_choice_source, lane, result_json from desk_jobs
     where kind = 'dark' and subject_id = ${investigationId} order by id
   `;
 }
@@ -123,7 +123,7 @@ describe("Dark Desk carries the editor's model choice onto the job", { timeout: 
       const userId = `dark-choice-editor-${Date.now()}`;
       const id = await makeInvestigation(userId);
 
-      const result = await startDarkRound({ userId }, id, "claude-frontier");
+      const result = await startDarkRound({ userId }, id, "claude-frontier", "xhigh");
       assert.equal(result.ok, true);
 
       const jobs = await darkJobs(id);
@@ -135,6 +135,13 @@ describe("Dark Desk carries the editor's model choice onto the job", { timeout: 
         (see automatic-failover.ts).
       */
       assert.equal(jobs[0]!.model_choice_source, "editor");
+      assert.deepEqual(JSON.parse(jobs[0]!.result_json), {
+        requestedRuntime: "claude-frontier",
+        requestedEffort: "xhigh",
+        actualRuntime: "claude-frontier",
+        modelEffort: "xhigh",
+        preflightFailover: null,
+      });
     });
   });
 
@@ -213,18 +220,25 @@ describe("the brief is a job, on the default lane", { timeout: 60000 }, () => {
       const userId = `dark-brief-${Date.now()}`;
       const id = await makeInvestigation(userId);
 
-      const result = await startBriefJob({ userId }, id, "claude-frontier");
+      const result = await startBriefJob({ userId }, id, "claude-frontier", "high");
       assert.equal(result.ok, true);
 
       await ensureJobsSchema();
       const sql = await getSql();
-      const jobs = await sql<{ model_choice: string; model_choice_source: string; lane: string }>`
-        select model_choice, model_choice_source, lane from desk_jobs
+      const jobs = await sql<{ model_choice: string; model_choice_source: string; lane: string; result_json: string }>`
+        select model_choice, model_choice_source, lane, result_json from desk_jobs
         where kind = 'brief' and subject_id = ${id}
       `;
       assert.equal(jobs.length, 1);
       assert.equal(jobs[0]!.model_choice, "claude-frontier");
       assert.equal(jobs[0]!.model_choice_source, "editor");
+      assert.deepEqual(JSON.parse(jobs[0]!.result_json), {
+        requestedRuntime: "claude-frontier",
+        requestedEffort: "high",
+        actualRuntime: "claude-frontier",
+        modelEffort: "high",
+        preflightFailover: null,
+      });
       /*
         The default lane, not `editorial`. The editorial lane is deliberately
         one-at-a-time because an editorial is a forty-minute job; writing a

@@ -77,9 +77,21 @@ describe("custom OpenAI-compatible connection contract", () => {
       parseDiscoveredModels(body, "https://generativelanguage.googleapis.com/v1beta/openai"),
       ["gemini-2.5-flash", "gemini-3.8-flash"],
     );
-    assert.deepEqual(
-      parseDiscoveredModels(body, "https://other.example/v1"),
-      ["models/gemini-2.5-flash", "models/gemini-3.8-flash"],
+    assert.deepEqual(parseDiscoveredModels(body, "https://other.example/v1"), [
+      "models/gemini-2.5-flash",
+      "models/gemini-3.8-flash",
+    ]);
+  });
+
+  it("normalizes a manually entered Gemini resource id before it can reach the picker", () => {
+    assert.equal(
+      normalizeConnectionInput({
+        name: "Gemini",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+        apiKey: "test-gemini-key",
+        modelId: "models/gemini-2.5-flash",
+      }).modelId,
+      "gemini-2.5-flash",
     );
   });
 
@@ -150,14 +162,20 @@ describe("custom OpenAI-compatible connection contract", () => {
   it("uses enough output budget for the explicit Gemini-compatible probe", async () => {
     let requestBody: Record<string, unknown> | undefined;
     const result = await testConnection(
-      { baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", modelId: "gemini-3.8-flash" },
+      {
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+        modelId: "gemini-3.8-flash",
+      },
       null,
       (async (_url, init) => {
         requestBody = JSON.parse(String(init?.body));
-        return new Response(JSON.stringify({ choices: [{ message: { content: "GEMINI_CONNECTION_OK" } }] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: "GEMINI_CONNECTION_OK" } }] }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }) as typeof fetch,
     );
     assert.equal(result.ok, true);
@@ -225,6 +243,17 @@ describe("persistent custom AI connections", () => {
     );
   });
 
+  it("does not save a Gemini endpoint without its required server-side key", async () => {
+    await assert.rejects(
+      saveCustomAiConnection("custom-alpha", {
+        name: "Gemini",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+        modelId: "gemini-2.5-flash",
+      }),
+      /Gemini requires an API key/i,
+    );
+  });
+
   it("keeps a stored key on blank-key edit and removes it only when explicitly requested", async () => {
     const row = await saveCustomAiConnection("custom-alpha", {
       name: "API",
@@ -257,10 +286,7 @@ describe("persistent custom AI connections", () => {
       apiKey: "alpha-private-key",
       modelId: "alpha-model",
     });
-    await assert.rejects(
-      resolveCustomAiChoice(72, row.id),
-      /will not fall back automatically/i,
-    );
+    await assert.rejects(resolveCustomAiChoice(72, row.id), /try the next ready model/i);
     assert.equal((await resolveCustomAiChoice(71, row.id)).modelId, "alpha-model");
   });
 
@@ -271,7 +297,7 @@ describe("persistent custom AI connections", () => {
       modelId: "m1",
     });
     await setCustomAiConnectionEnabled("custom-alpha", row.id, false);
-    await assert.rejects(resolveCustomAiChoice(71, row.id), /will not fall back automatically/i);
+    await assert.rejects(resolveCustomAiChoice(71, row.id), /try the next ready model/i);
     await setCustomAiConnectionEnabled("custom-alpha", row.id, true);
     await saveCustomAiConnection("custom-alpha", {
       id: row.id,
@@ -279,8 +305,8 @@ describe("persistent custom AI connections", () => {
       baseUrl: "https://alpha.example/v1",
       modelId: "",
     });
-    await assert.rejects(resolveCustomAiChoice(71, row.id), /will not fall back automatically/i);
+    await assert.rejects(resolveCustomAiChoice(71, row.id), /try the next ready model/i);
     await deleteCustomAiConnection("custom-alpha", row.id);
-    await assert.rejects(resolveCustomAiChoice(71, row.id), /will not fall back automatically/i);
+    await assert.rejects(resolveCustomAiChoice(71, row.id), /try the next ready model/i);
   });
 });

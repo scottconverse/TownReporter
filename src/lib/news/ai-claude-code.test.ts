@@ -260,6 +260,40 @@ describe("claudeCodeChat promotes a long inline system prompt to a file", () => 
   });
 });
 
+describe("claudeCodeChat per-run effort", () => {
+  it("passes a supported effort to the fake CLI and rejects unsupported values", async () => {
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: FAKE_CLAUDE,
+      FAKE_CLAUDE_ECHO_EFFORT: "1",
+    });
+    resetClaudeCliCache();
+    try {
+      const result = await claudeCodeChat({
+        system: "Return JSON only.",
+        user: "draft",
+        model: "sonnet",
+        timeoutMs: 10_000,
+        reasoningEffort: "xhigh",
+      });
+      assert.equal(result.ok, true);
+      if (result.ok) assert.deepEqual(JSON.parse(result.text), { effort: "xhigh" });
+      await assert.rejects(
+        claudeCodeChat({
+          system: "Return JSON only.",
+          user: "draft",
+          model: "sonnet",
+          timeoutMs: 10_000,
+          reasoningEffort: "none",
+        }),
+        /Unsupported Claude effort none.*low, medium, high, xhigh, max/i,
+      );
+    } finally {
+      restore();
+      resetClaudeCliCache();
+    }
+  });
+});
+
 /*
  * Dark Desk F1: `--allowed-tools ""` (the pre-fix default) still describes a
  * full, live tool surface to the model — Bash, WebSearch, WebFetch, every

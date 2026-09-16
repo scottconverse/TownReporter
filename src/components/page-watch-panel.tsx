@@ -6,6 +6,7 @@ import { ModelPicker } from "./model-picker";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { useEditorSections } from "@/lib/use-sections";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
+import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import {
   listPageWatches,
   createPageWatch,
@@ -47,7 +48,8 @@ export function PageWatchPanel({
     [name, setName] = useState(""),
     [reason, setReason] = useState(""),
     [file, setFile] = useState(""),
-    [model, setModel] = useState<StoryModelChoice>("auto");
+    [model, setModel] = useState<StoryModelChoice>("auto"),
+    [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
   const [note, setNote] = useState(""),
     [error, setError] = useState(""),
     [leadId, setLeadId] = useState<number | null>(null),
@@ -88,6 +90,7 @@ export function PageWatchPanel({
           name,
           reason,
           modelChoice: model,
+          modelEffort,
           investigationId: file ? Number(file) : null,
         },
       }),
@@ -115,7 +118,7 @@ export function PageWatchPanel({
     onError: (e) => setError(e.message),
   });
   const modelSave = useMutation({
-    mutationFn: (input: { id: number; choice: string }) => setPageWatchModel({ data: input }),
+    mutationFn: (input: { id: number; choice: string; effort: ModelEffort | null }) => setPageWatchModel({ data: input }),
     onSuccess: async (r) => {
       if (r.ok) setNote("OCR model saved for future checks.");
       else setError(r.error);
@@ -268,7 +271,10 @@ export function PageWatchPanel({
             <p className="meta">
               OCR model, used only if a scanned PDF needs reading. Other pages do not need AI.
             </p>
-            <ModelPicker scope="dark" value={model} onChange={setModel} disabled={busy} />
+            <ModelPicker scope="dark" value={model} onChange={(choice) => {
+              setModel(choice);
+              setModelEffort(defaultModelEffort(choice));
+            }} effort={modelEffort} onEffortChange={setModelEffort} disabled={busy} />
             <InkButton type="submit" disabled={busy}>
               {create.isPending ? "Saving watch…" : "Save watch and capture page"}
             </InkButton>
@@ -355,14 +361,22 @@ export function PageWatchPanel({
                 </p>
               ) : null}
               {row.watch_last_error ? <p className="note err">{row.watch_last_error}</p> : null}
+              {row.watch_failover_note ? (
+                <p className="note" role="status">{row.watch_failover_note}</p>
+              ) : null}
               <p className="meta">Model for the next scanned PDF check:</p>
               <ModelPicker
                 scope="dark"
                 value={row.watch_model_choice as StoryModelChoice}
+                effort={row.watch_model_effort}
                 disabled={busy}
                 onChange={(choice) => {
                   clear();
-                  modelSave.mutate({ id: row.id, choice });
+                  modelSave.mutate({ id: row.id, choice, effort: defaultModelEffort(choice) });
+                }}
+                onEffortChange={(effort) => {
+                  clear();
+                  modelSave.mutate({ id: row.id, choice: row.watch_model_choice, effort });
                 }}
               />
               <div className="np-acts">

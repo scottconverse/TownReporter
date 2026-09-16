@@ -11,16 +11,7 @@ try {
 Start-Sleep -Seconds 4
 # Preserve this restart worker, but stop the old server's provider/browser descendants.
 $process = Get-OwnedApp
-if ($process) {
-  $inventory = @(Get-CimInstance Win32_Process)
-  function Stop-OldAppTree($parent) {
-    if ($parent.ProcessId -eq $PID) { return }
-    foreach ($child in @($inventory | Where-Object ParentProcessId -eq $parent.ProcessId)) { Stop-OldAppTree $child }
-    $current = Get-CimInstance Win32_Process -Filter "ProcessId=$($parent.ProcessId)" -ErrorAction SilentlyContinue
-    if ($current -and $current.CreationDate -eq $parent.CreationDate) { Stop-Process -Id $current.ProcessId -Force -ErrorAction Stop }
-  }
-  Stop-OldAppTree $process
-}
+if ($process) { Stop-VerifiedAppProcessTree $process @([int]$PID) }
 & "$PSScriptRoot\Start.ps1" -DataRoot $DataRoot -NoBrowser
 
 } finally { $lifecycle.ReleaseMutex(); $lifecycle.Dispose() }

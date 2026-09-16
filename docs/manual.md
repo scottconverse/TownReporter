@@ -2,9 +2,9 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.50 · reliable Ollama Cloud Story drafting · deployment is recorded separately**
+**Version 0.6.51 · deployment is recorded separately**
 
-[Download 0.6.50](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.50) · [Release guide and verification](releases/0.6.50.md). A source release and a running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.51 release guide and evidence boundaries](releases/0.6.51.md). A source release and running production deployment are separate facts.
 
 **Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
 
@@ -67,10 +67,12 @@ five-topic live acceptance exercise remains outstanding.
 Models can be discovered through LM Studio, Ollama or llama.cpp and selected
 individually. **Captured-PDF OCR** renders scanned PDFs as actual PDF pages
 before OCR, so newly ingested rendered records keep numeric PDF page order and
-can cite those pages. It attempts at most 12 pages, caps a rendered PNG at 2
-MiB, and uses one cooperative 10-minute budget across rendering and OCR; a
-page that cannot be rendered or read, or a page past a cap, is labeled
-incomplete rather than complete. A render already running cannot be forcibly
+can cite those pages. Initial capture attempts up to 12 pages. Dark Desk's
+**Read entire PDF** then checkpoints consecutive calls of up to 12 pages and
+resumes with only unread pages. Each click caps a rendered PNG at 2 MiB and
+pauses after one cooperative 10-minute budget or 48 transcription attempts;
+completed batches remain saved and exact unread pages remain visible. A page
+that cannot be rendered or read is labeled incomplete rather than complete. A render already running cannot be forcibly
 cancelled by the PDF library. Legacy embedded-image records remain unchanged:
 they identify images, not PDF pages, and retain their unordered label. This
 DEV behavior is proven in the built runtime with mock transcription, not with
@@ -233,7 +235,9 @@ Luna; Claude Fable, Opus, Sonnet, or Haiku; the selected local model; or a
 saved Custom AI connection such as an OpenAI-compatible Gemini endpoint; or
 the newsroom's direct Grok (SuperGrok) connection.
 Legacy "Claude Code subscription" settings migrate to Claude Sonnet instead of
-Opus. Scheduled scans do not switch providers. Saved Custom AI credentials are
+Opus. The selected scheduled runtime is tried first; a recognized technical
+failure can move only unfinished work, and the job records requested and actual
+model and effort. A content refusal is terminal. Saved Custom AI credentials are
 resolved only when the scheduled run starts and are not copied into its job
 snapshot. They read bounded source excerpts rather
 than claiming complete coverage of each site.
@@ -272,11 +276,12 @@ Each active row has its own Writing model picker and Draft/Redraft with AI
 button. Automatic resolves one ready provider before enqueue and the result is
 shown on that same row. If that provider reaches a usage limit, becomes
 unavailable, loses its login, or times out partway through the run, Automatic
-moves the unfinished work to the next ladder rung once, if it is ready, and
-the row and workbench show which one took over. Uploaded documents remain
-saved and are reread by the provider that takes over. A content refusal stops
-the run. A named provider never falls back, at
-enqueue or mid-run.
+moves the unfinished model call to the next ladder rung once, if it is ready,
+and the row and workbench show which one took over. Earlier calls in that active
+run are not repeated. A later restarted job retains uploaded source material but
+may read it again. A content refusal stops the run. A named provider is the
+recorded first choice and uses the same
+technical-only retry rule.
 
 **Set up a writing model** opens help beneath every Queue, workbench and
 Opinion picker, even when drafting is unavailable. Follow the installation and
@@ -290,16 +295,15 @@ The Queue can start one atomic batch of one to five eligible leads. Select the
 rows, choose one explicit named **Codex**, **Claude**, **Grok (SuperGrok)**, or **Local model**, and
 use **Draft selected**. The picker offers every named Codex and Claude model,
 Local model, and saved Custom AI connections such as Gemini. The batch does
-not use Automatic or fallback. It preserves each lead's stored
-research scope. A missing runtime or ineligible selected lead refuses the
-whole start, before any partial batch is created.
+not use Automatic. It preserves each lead's stored research scope. A recognized
+technical provider failure can move only the unfinished call; a refusal remains
+terminal. A missing runtime or ineligible selected lead refuses the whole
+start, before any partial batch is created.
 
-Daily Scan uses the same exact named model choices, Grok (SuperGrok), and saved Custom AI
-connections, with no Automatic or fallback. OCR for a Story, Dark Desk run,
-scheduled Scan or batch remains on that run's selected model when that provider
-supports vision. Grok is text-only for OCR and fails clearly without switching
-providers. Automatic OCR keeps its separate availability order: Anthropic API,
-Codex, Claude Code, then a discovered local vision model.
+Daily Scan uses the same named model choices, Grok (SuperGrok), and saved Custom
+AI connections, with no Automatic. The selected runtime is tried first;
+technical preflight and mid-call switches are recorded. OCR applies the same
+technical-only rule and considers only vision-capable destinations.
 
 The batch area also offers an optional **Suggested focus** size of three to
 five leads. It balances existing lead scores and sections; review the evidence
@@ -400,7 +404,8 @@ at the end, where a reader who dislikes the piece can check them.
 
 Opinion shows Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus,
 Sonnet and Haiku, Local model, plus saved custom connections. Codex Sol is selected by default. Automatic tries Codex Sol, then Claude Sonnet
-once if Codex is unavailable; explicit choices stay selected. Claude Code
+once if Codex is unavailable. Explicit choices remain the requested first
+runtime and use the same technical-only unfinished-call retry. Claude Code
 and Codex both read the complete configured voice through their native instruction-file options. The page
 lists every missing voice, installation, or login prerequisite and stays
 disabled while readiness is unknown.
@@ -409,9 +414,10 @@ A successful process exit is not enough to file a piece. TownReporter rejects
 provider refusals, assistant notes, implausible headlines, and incomplete
 bodies before draft storage. A provider refusal or invalid delivery reports a
 failed run without creating a draft. Automatic can move from Codex Sol to
-Claude Sonnet once; an explicit choice never switches providers. A
-failed row has no Read, Edit, or Publish action; a finished row shows the
-provider that actually delivered it.
+Claude Sonnet once; an explicit choice is tried first and can switch only for a
+recognized technical failure. A failed row has no Read, Edit, or Publish
+action; a finished row shows the requested and actual model and effort. An
+unattended ladder never selects Opus.
 
 **Edit**, on the row, opens the piece in its own workbench at
 `/desk/story/draft/:id`: headline, dek, topic and the piece itself, plus the two
@@ -587,17 +593,18 @@ the registry is the canonical picker definition; provider adapters still impleme
 
 | Feature                               | Provider                                                                                                                                                                                                                                                                 | Model                                                                                                           |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| Scan                                  | configured gateway forced for Automatic when set; otherwise first ready Codex Terra → Claude Sonnet rung, with one mid-run failover to the next rung if that login lapses (reusing the sources already fetched, not fetching them again); explicit choice never falls back | Any named Codex or Claude model, or Local model                                                                  |
-| Draft (Queue or workbench)            | configured gateway forced for Automatic when set; otherwise first ready Codex Terra → Claude Sonnet rung, with one mid-run failover after quota, unavailability, lost login, timeout, or no output; uploaded documents are reread on the provider that takes over; content refusals and explicit choices never fall back | Any named Codex or Claude model, or Local model                                                                  |
+| Scan                                  | configured gateway first for Automatic when set; otherwise first ready Codex Terra → Claude Sonnet rung; a recognized technical failure moves only the unfinished call and reuses already fetched sources; refusals are terminal | Any named Codex or Claude model, Grok, Local model, or saved custom connection |
+| Draft (Queue or workbench)            | configured gateway first for Automatic when set; otherwise first ready Codex Terra → Claude Sonnet rung; quota, unavailability, lost login, timeout, or no output can move only the unfinished call during the active run; a restarted job may reread saved source material; refusals are terminal | Any named Codex or Claude model, Grok, Local model, or saved custom connection |
 | **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Any named Codex or Claude model, or Local model                                                                  |
 | Dark Desk synthesis and brief         | the one you pick beside **Keep digging**; Automatic behaves as it does for Draft, with one mid-run failover at the round level                                                                                                                                           | the one you picked                                                                                              |
 | Dark Desk **planner**                 | the one you pick                                                                                                                                                                                                                                                         | a cheaper model from the SAME provider: Haiku on Claude, Terra on either Codex, and your own model on a gateway |
-| **Opinion (editorials)**              | Default: Codex Sol. Automatic: Codex Sol → Claude Sonnet once when needed; every explicit named model or custom choice stays selected                                                                                                                                    | The selected provider                                                                                           |
+| **Opinion (editorials)**              | Default: Codex Sol. Automatic and named choices use the same technical-only per-call retry during the active run; a restarted job may reread saved source material; refusals are terminal | The selected provider first, with a recorded technical switch when needed |
 
 **Opinion provider behavior.** An editorial uses the paper's configured voice
 and frontier research. Opinion's picker offers Automatic, all four named Codex
 models, all four named Claude models, Local model and custom connections. Automatic tries Codex Sol
-then Claude Sonnet once when needed; explicit choices stay selected. (Zen MiMo and the earlier, model-specific
+then Claude Sonnet once when needed. Explicit choices remain the requested
+first runtime and use the same technical-only unfinished-call retry. (Zen MiMo and the earlier, model-specific
 Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
 brought a generic local pick back.) Claude Code
 receives the voice through `--system-prompt-file`; Codex uses
@@ -1038,15 +1045,15 @@ erDiagram
 flowchart TB
     CALL["A model-backed desk action"] --> KIND{"Story/Scan/Dark picker?"}
     KIND -->|yes: Automatic| Q1{"LLM_* configured?"}
-    Q1 -->|yes| OAI["Use that gateway only"]
+    Q1 -->|yes| OAI["Try that gateway first"]
     Q1 -->|no| READY["First ready<br/>Codex Terra → Claude Sonnet"]
-    KIND -->|yes: named choice| ONE["Use only that provider<br/>no fallback"]
+    KIND -->|yes: named choice| ONE["Try that recorded provider first"]
     OAI --> SAVE["Persist effective provider on job"]
     READY --> SAVE
     ONE --> SAVE
     SAVE --> RUN["Selected run uses that provider"]
-    RUN -->|quota, unavailable, login lapse or timeout; Automatic only| NEXT["Next ladder rung, if ready<br/>(once per job)"]
-    RUN -->|otherwise, or a named choice| SAME["Same provider for the rest of the run"]
+    RUN -->|quota, unavailable, login lapse, timeout or no output| NEXT["Retry only the unfinished call<br/>on the next ready runtime"]
+    RUN -->|refusal or unrecognized error| SAME["Stop and show the failure"]
 
     style SAVE fill:#1c1a17,color:#fff
 ```
@@ -1095,7 +1102,7 @@ comment on each, is [`.env.example`](../.env.example).
 | `BETTER_AUTH_TRUSTED_ORIGINS`                                     | Extra origins allowed to sign in, comma-separated                                                                                     |
 | `TOWNREPORTER_VOICE_FILE`                                         | Absolute path to the Opinion voice, outside the repo                                                                                  |
 | `ANTHROPIC_API_KEY`                                               | Bill Claude to a key instead of using the CLI login                                                                                   |
-| `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL`                      | Configured provider for Scan/Dark; forced Story Automatic provider                                                                    |
+| `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL`                      | Configured first runtime for Scan/Dark and preferred first runtime for Story Automatic; technical recovery can retry only the unfinished call |
 | `TOWNREPORTER_CODEX_TERRA_MODEL` · `TOWNREPORTER_CODEX_SOL_MODEL` | Codex picker model ids; defaults `gpt-5.6-terra` / `gpt-5.6-sol`                                                                      |
 | `TOWNREPORTER_CODEX_REASONING_EFFORT`                             | Optional per-launch CLI override; unset preserves native config. `high` is the only value verified here; invalid values fail clearly. |
 | `CODEX_CLI_PATH` · `CODEX_HOME`                                   | Unusual Codex binary or OAuth-state locations; normal discovery needs neither                                                         |
@@ -1173,3 +1180,11 @@ Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original
 ## Current Opinion document and review workflow
 
 Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+
+## 0.6.51 notes
+
+0.6.51 adds model-specific Codex/Claude effort control, technical-failure recovery with an explicit runtime switch, and terminal handling for provider refusals. A named runtime or Automatic stays the recorded first choice; technical recovery retries only the unfinished call and records requested and actual model and effort. Unattended ladders put Claude Sonnet last and never select Opus. Neither a refusal nor an invalid provider response is a successful draft. Queue batches can be redrafted with another selected runtime and remain review-only.
+
+The Daily scan panel is owner-editable for schedule time, runtime, supported effort, accepted sources, and a source cap of 1–12. Its result remains leads for the Queue, never direct publication. The Server health queue now separates retained failures from current queued/running work and the latest terminal workflow result.
+
+Direct Story/Opinion document intake reads all readable PDF pages subject to the 20-million-character retained text limit. Generic captures and Dark Desk's image-PDF OCR use bounded 12-page calls; **Read entire PDF** checkpoints those calls and resumes only unread pages until the packet is complete or the current click reaches its explicit budget. The release scope, Windows lifecycle repair, detached-child limitation, and evidence boundaries are in [the 0.6.51 release guide](releases/0.6.51.md).

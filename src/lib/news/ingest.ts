@@ -135,6 +135,12 @@ export type PdfExtract = {
  */
 export type OcrOptions = {
   provider?: string;
+  reasoningEffort?: import("./provider-registry.ts").ModelEffort | null;
+  onProviderSwitch?: (receipt: {
+    transport: "anthropic" | "codex" | "claude-code" | "openai" | "local";
+    model: string;
+    reason: import("./automatic-failover.ts").AutomaticFailoverReason;
+  }) => Promise<void>;
   /** Editor-requested inclusive PDF pages. Omitted keeps the ordinary first-12 read. */
   pageRange?: { start: number; end: number };
   newsroomId?: string;
@@ -144,7 +150,18 @@ export type OcrOptions = {
   forcedPlan?:
     | { kind: "claude-code" | "codex"; model: string }
     | { kind: "local"; baseUrl: string; model: string };
+  /** Test seam containing only plans already verified as vision-capable. */
+  visionFallbackPlans?: Array<
+    | { kind: "claude-code" | "codex"; model: string }
+    | { kind: "local"; baseUrl: string; model: string }
+  >;
   beforeModelCall?: () => Promise<void>;
+  /** Internal cooperative deadline shared by a durable multi-batch OCR job. */
+  startedAt?: number;
+  /** Deterministic clock for deadline tests. Production always uses Date.now. */
+  now?: () => number;
+  /** Maximum actual transcription attempts for this OCR call, including fallbacks. */
+  maxModelCalls?: number;
   /** Test-only seam for proving newsroom-scoped custom OCR resolution. */
   resolveCustom?: (
     newsroomId: number,
@@ -181,6 +198,8 @@ export type OcrResult = {
   provider?: string;
   pagesRead?: number;
   pagesTotal?: number;
+  /** Actual page-transcription attempts, including technical fallbacks. */
+  modelCalls?: number;
   /** Set when OCR could not run at all — the honest, editor-facing reason. */
   reason?: string;
 };

@@ -12,6 +12,7 @@ import { mergeFocusSelection, nearDuplicate, openLeads, suggestFocusLeads, worki
 import { useEditorSections } from "@/lib/use-sections";
 import { usePaper } from "@/lib/paper-context";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
+import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { myDesk } from "@/lib/news/claim";
 import {
   getDraftBatch,
@@ -80,6 +81,7 @@ function QueuePage() {
   const [draftingIds, setDraftingIds] = useState<number[]>([]);
   const [selectedBatchLeadIds, setSelectedBatchLeadIds] = useState<number[]>([]);
   const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("local-model");
+  const [batchEffort, setBatchEffort] = useState<ModelEffort | null>(null);
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
   const [batchNotice, setBatchNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const leadRefreshAfterTerminalBatch = useRef<number | null>(null);
@@ -104,9 +106,9 @@ function QueuePage() {
     void qc.invalidateQueries({ queryKey: ["leads"] });
   }, [batch.data, qc]);
   const startBatch = useMutation({
-    mutationFn: (input: { leadIds: number[]; runtime: DraftBatchRuntime }) =>
+    mutationFn: (input: { leadIds: number[]; runtime: DraftBatchRuntime; modelEffort: ModelEffort | null }) =>
       startDraftBatch({
-        data: { items: input.leadIds.map((leadId) => ({ leadId })), runtime: input.runtime },
+        data: { items: input.leadIds.map((leadId) => ({ leadId })), runtime: input.runtime, modelEffort: input.modelEffort },
       }),
     onSuccess: (result) => {
       if (!result.ok) {
@@ -133,10 +135,15 @@ function QueuePage() {
     },
   });
   const queueDraft = useMutation({
-    mutationFn: (input: { leadId: number; modelChoice: StoryModelChoice }) => draftLead({ data: input }),
+    mutationFn: (input: { leadId: number; modelChoice: StoryModelChoice; modelEffort?: ModelEffort | null; fromBatch?: boolean }) =>
+      draftLead({ data: { leadId: input.leadId, modelChoice: input.modelChoice, modelEffort: input.modelEffort } }),
     onMutate: ({ leadId }) => setDraftingIds((ids) => [...ids.filter((id) => id !== leadId), leadId]),
-    onSuccess: (res, { leadId }) => {
+    onSuccess: (res, { leadId, modelChoice, fromBatch }) => {
       if (res?.ok) {
+        if (fromBatch) setBatchNotice({
+          kind: "ok",
+          text: `Redraft queued with ${modelChoiceLabel(modelChoice)}. Open the story workbench to watch it arrive; if a technical fallback is needed, the workbench records the model used.`,
+        });
         setDraftNotices((notices) => ({
           ...notices,
           [leadId]: {
@@ -145,6 +152,10 @@ function QueuePage() {
           },
         }));
       } else {
+        if (fromBatch) setBatchNotice({
+          kind: "err",
+          text: res?.error ?? "That redraft did not queue.",
+        });
         setDraftNotices((notices) => ({
           ...notices,
           [leadId]: {
@@ -157,13 +168,11 @@ function QueuePage() {
       }
       void qc.invalidateQueries({ queryKey: ["leads"] });
     },
-    onError: (error, { leadId }) => setDraftNotices((notices) => ({
-      ...notices,
-      [leadId]: {
-        kind: "err",
-        text: error instanceof Error ? error.message : "That draft did not queue.",
-      },
-    })),
+    onError: (error, { leadId, fromBatch }) => {
+      const text = error instanceof Error ? error.message : "That draft did not queue.";
+      if (fromBatch) setBatchNotice({ kind: "err", text });
+      setDraftNotices((notices) => ({ ...notices, [leadId]: { kind: "err", text } }));
+    },
     onSettled: (_data, _error, { leadId }) => setDraftingIds((ids) => ids.filter((id) => id !== leadId)),
   });
   const file = useMutation({
@@ -322,7 +331,13 @@ function QueuePage() {
         <ModelPicker
           scope="forced"
           value={batchRuntime}
-          onChange={(choice) => setBatchRuntime(choice as DraftBatchRuntime)}
+          onChange={(choice) => {
+            const runtime = choice as DraftBatchRuntime;
+            setBatchRuntime(runtime);
+            setBatchEffort(defaultModelEffort(runtime));
+          }}
+          effort={batchEffort}
+          onEffortChange={setBatchEffort}
           disabled={startBatch.isPending}
           compact
           excludeAutomatic
@@ -332,7 +347,7 @@ function QueuePage() {
           disabled={newsroomId === null || selectedBatchLeads.length === 0 || startBatch.isPending}
           onClick={() => {
             setBatchNotice(null);
-            startBatch.mutate({ leadIds: selectedBatchLeads, runtime: batchRuntime });
+            startBatch.mutate({ leadIds: selectedBatchLeads, runtime: batchRuntime, modelEffort: batchEffort });
           }}
         >
           {startBatch.isPending ? "Starting batch…" : "Draft selected"}
@@ -360,7 +375,17 @@ function QueuePage() {
             ) : null}
             {batch.data.batch.items.map((item) => {
               const lead = leads.find((candidate) => candidate.id === item.leadId);
-              return <DraftBatchResult key={item.jobId} item={item} headline={lead?.headline ?? `lead #${item.leadId}`} />;
+               return <DraftBatchResult
+                 key={item.jobId}
+                 item={item}
+                 headline={lead?.headline ?? `lead #${item.leadId}`}
+                 redraftLabel={modelChoiceLabel(batchRuntime)}
+                 redrafting={draftingIds.includes(item.leadId)}
+                 onRedraft={() => {
+                   setBatchNotice(null);
+                   queueDraft.mutate({ leadId: item.leadId, modelChoice: batchRuntime, modelEffort: batchEffort, fromBatch: true });
+                 }}
+               />;
             })}
           </div>
         ) : (
@@ -445,13 +470,13 @@ function QueuePage() {
               onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
               onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}
               onDelete={() => remove.mutate(l.id)}
-              onDraft={(modelChoice) => {
+              onDraft={(modelChoice, modelEffort) => {
                 setDraftNotices((notices) => {
                   const next = { ...notices };
                   delete next[l.id];
                   return next;
                 });
-                queueDraft.mutate({ leadId: l.id, modelChoice });
+                queueDraft.mutate({ leadId: l.id, modelChoice, modelEffort });
               }}
               drafting={draftingIds.includes(l.id)}
               draftNotice={draftNotices[l.id] ?? null}

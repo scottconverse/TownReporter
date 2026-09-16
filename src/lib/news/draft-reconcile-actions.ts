@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { deskMiddleware } from "./desk-auth.ts";
 import { isCustomModelChoice, STORY_MODEL_CHOICES, type StoryModelChoice } from "./model-choice.ts";
+import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 
 export type DraftReconcileState = "idle" | "queued" | "running" | "completed" | "failed";
 
@@ -24,7 +25,7 @@ function positiveId(raw: unknown, label: string): number {
   return id;
 }
 
-function requestInput(raw: unknown): { leadId: number; modelChoice: StoryModelChoice } {
+function requestInput(raw: unknown): { leadId: number; modelChoice: StoryModelChoice; modelEffort: ModelEffort | null } {
   if (!raw || typeof raw !== "object") throw new Error("Reconciliation request is invalid.");
   const value = raw as Record<string, unknown>;
   const modelChoice = String(value.modelChoice ?? "").trim();
@@ -32,7 +33,11 @@ function requestInput(raw: unknown): { leadId: number; modelChoice: StoryModelCh
   if (!known && !isCustomModelChoice(modelChoice)) {
     throw new Error("Choose an available model before checking the draft.");
   }
-  return { leadId: positiveId(value.leadId, "Lead"), modelChoice: modelChoice as StoryModelChoice };
+  return {
+    leadId: positiveId(value.leadId, "Lead"),
+    modelChoice: modelChoice as StoryModelChoice,
+    modelEffort: modelEffort(modelChoice, value.modelEffort),
+  };
 }
 
 function statusInput(raw: unknown): { leadId: number } {

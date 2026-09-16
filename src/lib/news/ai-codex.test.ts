@@ -197,7 +197,7 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     assert.equal(args.includes("--skip-git-repo-check"), true);
   });
 
-  it("keeps inherited reasoning when unset and opts into verified high per launch", async () => {
+  it("keeps inherited reasoning when unset and accepts a supported effort per launch", async () => {
     await withEnv({ TOWNREPORTER_CODEX_REASONING_EFFORT: undefined }, async () => {
       assert.deepEqual(buildCodexArgs({ model: "gpt-5.6-sol" }), [...EXPECTED_NATIVE_ARGS]);
     });
@@ -209,12 +209,28 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
       assert.equal(args.includes("--search"), true);
       assert.equal(args.includes("danger-full-access"), true);
     });
+    await withEnv({ TOWNREPORTER_CODEX_REASONING_EFFORT: undefined }, async () => {
+      const args = buildCodexArgs({ model: "gpt-5.6-sol", reasoningEffort: "none" });
+      assert.deepEqual(args.slice(args.indexOf("--model"), args.indexOf("--sandbox")), [
+        "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=none",
+      ]);
+    });
+    await withEnv({ TOWNREPORTER_CODEX_REASONING_EFFORT: undefined }, async () => {
+      const args = buildCodexArgs({ model: "gpt-6-astra", reasoningEffort: "max" });
+      assert.deepEqual(args.slice(args.indexOf("--model"), args.indexOf("--sandbox")), [
+        "--model", "gpt-6-astra", "-c", "model_reasoning_effort=max",
+      ]);
+    });
   });
 
   it("rejects an unverified reasoning value instead of silently ignoring it", async () => {
     await assert.rejects(
       () => withEnv({ TOWNREPORTER_CODEX_REASONING_EFFORT: "ultra" }, async () => buildCodexArgs({ model: "gpt-5.6-sol" })),
-      /Unsupported TOWNREPORTER_CODEX_REASONING_EFFORT: ultra.*only verified value is high/i,
+      /Unsupported reasoning effort ultra for gpt-5\.6-sol.*none, low, medium, high, xhigh, max/i,
+    );
+    assert.throws(
+      () => buildCodexArgs({ model: "gpt-6-astra", reasoningEffort: "none" }),
+      /Unsupported reasoning effort none for gpt-6-astra.*low, medium, high, xhigh, max/i,
     );
   });
 

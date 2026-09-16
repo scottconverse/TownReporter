@@ -15,6 +15,7 @@ import {
   formatBytes,
   formatIn,
   formatUptime,
+  jobQueueCopy,
   jobsState,
   publicState,
   watchdogState,
@@ -147,12 +148,25 @@ async function checkJobs(): Promise<HealthCheck[]> {
       select coalesce(lane, 'default') as lane, status, kind, count(*)::int as n,
              min(created_at)::text as oldest
       from desk_jobs
-      where status in ('queued', 'running', 'failed')
+      where status in ('queued', 'running')
       group by coalesce(lane, 'default'), status, kind
+    `;
+    const [failureCounts] = await sql<{ latest_failed: number; historical_failed: number }>`
+      with latest_terminal_by_kind as (
+        select distinct on (kind) kind, status
+        from desk_jobs
+        where status in ('completed', 'failed')
+        order by kind, id desc
+      )
+      select
+        (select count(*)::int from latest_terminal_by_kind where status = 'failed') as latest_failed,
+        (select count(*)::int from desk_jobs where status = 'failed') as historical_failed
     `;
     const running = rows.filter((r) => r.status === "running").reduce((a, r) => a + r.n, 0);
     const queued = rows.filter((r) => r.status === "queued").reduce((a, r) => a + r.n, 0);
-    const failed = rows.filter((r) => r.status === "failed").reduce((a, r) => a + r.n, 0);
+    const latestFailed = Number(failureCounts?.latest_failed ?? 0);
+    const historicalFailed = Number(failureCounts?.historical_failed ?? 0);
+    const queueCopy = jobQueueCopy(running, queued, latestFailed, historicalFailed);
     const runningRows = rows.filter((r) => r.status === "running");
     const oldestRunning = runningRows
       .map((r) => r.oldest)
@@ -178,11 +192,12 @@ async function checkJobs(): Promise<HealthCheck[]> {
       {
         id: "jobs",
         label: "Work queue",
-        state: jobsState(running, failed, oldestMs),
-        value: `${running} running · ${queued} queued · ${failed} failed`,
+        state: jobsState(running, latestFailed, oldestMs),
+        value: queueCopy.value,
         note: [
           running && oldestRunning ? `oldest started ${formatAgo(oldestRunning)}` : "",
           ...waitNotes,
+          queueCopy.historyNote,
         ]
           .filter(Boolean)
           .join(" · "),

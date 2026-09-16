@@ -6,6 +6,7 @@ import { audit } from "./ops";
 import { latestJob, runLooksStalled } from "./jobs";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { opinionModelChoice } from "./model-choice.ts";
+import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { checkOpinionReadiness } from "./opinion-readiness.ts";
 
 /**
@@ -157,7 +158,7 @@ export const getEditorial = createServerFn({ method: "GET" })
 export const startEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(
-    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; documentIds?: string[]; retryRequestId?: number }) =>
+    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelEffort?: ModelEffort | null; documentIds?: string[]; retryRequestId?: number }) =>
       input,
   )
   .handler(async ({ context, data }) => {
@@ -170,6 +171,7 @@ export const startEditorial = createServerFn({ method: "POST" })
       askedFor: data.askedFor,
       articleSlug: data.articleSlug,
       modelChoice,
+      modelEffort: modelEffort(modelChoice, data.modelEffort),
       documentIds: data.documentIds,
       retryRequestId: data.retryRequestId,
     });

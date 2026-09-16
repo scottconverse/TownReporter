@@ -113,6 +113,12 @@ if (argv[0] === "auth" && argv[1] === "login") {
     JSON.stringify({ is_error: false, result: JSON.stringify({ mode, promptLength }) }) + "\n",
   );
   process.exit(0);
+} else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_ECHO_EFFORT === "1") {
+  const effortIdx = argv.indexOf("--effort");
+  process.stdout.write(
+    JSON.stringify({ is_error: false, result: JSON.stringify({ effort: effortIdx === -1 ? null : argv[effortIdx + 1] }) }) + "\n",
+  );
+  process.exit(0);
 } else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_ECHO_TOOLS === "1") {
   /*
    * For tests that need to prove which tool-surface flag reached argv:

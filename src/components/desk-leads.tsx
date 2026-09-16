@@ -7,6 +7,7 @@ import type { PrintedDup } from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
 import { ModelPicker } from "@/components/model-picker";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
+import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { Notice } from "@/components/states";
 
 /**
@@ -52,7 +53,7 @@ export function LeadRowView({
    * two-click delete on a row this small is the whole safety net it needs.
    */
   onDelete?: () => void;
-  onDraft?: (modelChoice: StoryModelChoice) => void;
+  onDraft?: (modelChoice: StoryModelChoice, modelEffort: ModelEffort | null) => void;
   drafting?: boolean;
   draftNotice?: { kind: "ok" | "err"; text: string } | null;
   batchSelected?: boolean;
@@ -63,6 +64,7 @@ export function LeadRowView({
   const { formatShortDate } = usePaperDateFormatters();
   const [confirming, setConfirming] = useState(false);
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
+  const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
   const score = lead.newsworthiness ?? 0;
   return (
     <div
@@ -180,7 +182,7 @@ export function LeadRowView({
             <InkButton
               small
               disabled={drafting}
-              onClick={() => onDraft(modelChoice)}
+              onClick={() => onDraft(modelChoice, modelEffort)}
               ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${lead.headline} with ${modelChoiceLabel(modelChoice)}`}
             >
               {drafting
@@ -193,7 +195,12 @@ export function LeadRowView({
               <summary className="meta">Model: {modelChoiceLabel(modelChoice)} · change</summary>
               <ModelPicker
                 value={modelChoice}
-                onChange={setModelChoice}
+                onChange={(choice) => {
+                  setModelChoice(choice);
+                  setModelEffort(defaultModelEffort(choice));
+                }}
+                effort={modelEffort}
+                onEffortChange={setModelEffort}
                 disabled={drafting}
                 compact
               />

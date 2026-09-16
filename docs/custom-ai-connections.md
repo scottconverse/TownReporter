@@ -18,17 +18,23 @@ Open **Server** and find **Add your own AI API**.
    and stored on the server; it is not returned to the browser and is never
    shown again. TownReporter sends it as a Bearer credential when it calls the
    saved endpoint.
-4. Choose a **Model id**, or leave it blank and save first. The connection's
-   **Discover models** action reads the endpoint's `/models` response and
-   presents the returned ids. If discovery is unsupported or returns nothing,
-   enter the model id manually and save the changes.
+4. Choose a **Model id**. The connection's **Discover models** action reads
+   the endpoint's `/models` response after the initial save and presents the
+   returned ids. If discovery is unsupported or returns nothing, enter the
+   model id manually and save the changes. A saved connection without a model
+   cannot appear as an available writing-model choice.
 5. Select **Save connection** (or **Save changes** while editing).
 
 The endpoint must support the OpenAI-compatible `/chat/completions` protocol.
-For Gemini, the **Set up Gemini** button fills the connection name and Google
-AI Studio OpenAI-compatible base URL for you. Add the key, save the connection,
-then use **Discover models** on the saved connection, choose a model, save the
-changes, and only then use **Test connection**.
+For Gemini, the **Set up Gemini** button fills the connection name, Google AI
+Studio OpenAI-compatible base URL, and `gemini-2.5-flash`. Add the key and
+save the connection. It is then ready to choose in the writing-model picker;
+use **Discover models** if you want to choose another model, and use **Test
+connection** before the first real newsroom run.
+On upgrade, migration 0061 repairs the exact Google OpenAI-compatible preset
+when an existing connection has a stored encrypted key but no model: it
+preserves the key and fills `gemini-2.5-flash`. Other endpoints and existing
+model choices are unchanged.
 The URL is validated when saved, but saving itself does not call a model.
 
 ## Test and manage it
@@ -59,20 +65,23 @@ After the connection has an enabled model, it appears by its saved name in the
 model picker. Select that named connection explicitly for the desk operation,
 then start the operation. The selected connection is pinned to the queued job.
 
-Daily Scan and Queue batch drafting also accept a saved Custom AI connection. The batch pins
-the selected connection and model for every chosen lead. The API key is
+Daily Scan and Queue batch drafting also accept a saved Custom AI connection.
+The batch records the selected connection and model as the requested first
+runtime for every chosen lead. The API key is
 resolved on the server only when each job runs; it is never copied into the
 batch record.
 
-- **Scan** is queued and runs against the selected custom endpoint. An explicit
-  custom choice does not fail over to Claude, Codex, Automatic, a local model,
-  or another paid endpoint. If the connection is later disabled, deleted, or
-  has no model, the run fails closed and asks the editor to choose another
-  model.
+- **Scan** is queued with the selected custom endpoint as the requested first
+  runtime. If it is later disabled, deleted, or has no model, or a recognized
+  technical failure occurs during the call, TownReporter may retry only the
+  unfinished call on the next ready runtime and records requested and actual
+  model and effort. A content refusal remains terminal.
 - **Opinion** is queued and uses the selected custom endpoint for its one-pass
   editorial call. The configured editorial voice is read on the server and
-  sent as the request's private system message only to the explicitly selected
-  endpoint; it is not sent to Automatic or an implicit fallback. The voice file
+  sent as the request's private system message to the selected endpoint first.
+  If a recognized technical failure authorizes an unfinished-call retry, the
+  same voice accompanies that recorded destination; a content refusal does not
+  trigger a retry. The voice file
   must be outside the public repository and configured with
   `TOWNREPORTER_VOICE_FILE` as described in the [Opinion voice setup guide](setup.md#the-opinion-voice).
 - Custom Opinion is an OpenAI-compatible one-pass path. Unlike the Claude
@@ -80,10 +89,11 @@ batch record.
   research loop; it writes from the subject, pointers, and supplied newsroom
   context available to the queued request.
 
-The model picker labels an explicit custom choice as “Uses only … for this
-run; no fallback.” Provider usage charges and retention/privacy policies still
-belong to the endpoint operator, so review those policies before sending
-newsroom material.
+The model picker labels a custom choice as the preferred runtime for that run.
+TownReporter can move only an unfinished call after a recognized technical
+failure and records the destination; a provider refusal remains terminal.
+Provider usage charges and retention policies still belong to each endpoint
+operator.
 
 ## Google Gemini
 
@@ -91,15 +101,15 @@ Google's Gemini API provides an OpenAI-compatible endpoint. Create the key in
 Google AI Studio, then enter it only in TownReporter's authenticated **Server →
 Add your own AI API** form:
 
-| Field | Value |
-| --- | --- |
-| Connection name | A clear editor label such as `Gemini Flash` |
-| Base URL | `https://generativelanguage.googleapis.com/v1beta/openai` |
-| API key | The Gemini API key from Google AI Studio |
-| Model id | Use **Discover models** or enter the exact Gemini model id |
+| Field           | Value                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------- |
+| Connection name | A clear editor label such as `Gemini Flash`                                                       |
+| Base URL        | `https://generativelanguage.googleapis.com/v1beta/openai`                                         |
+| API key         | The Gemini API key from Google AI Studio                                                          |
+| Model id        | `gemini-2.5-flash` is prefilled; use **Discover models** to choose another supported Gemini model |
 
-Save the connection first. Then use **Discover models**, choose a model, save
-the changes, and use **Test connection**. Finally select that named connection
+Save the connection, then use **Test connection**. If you want another model,
+use **Discover models**, choose it, and save the change. Finally select that named connection
 for a Story, Daily Scan, Scan, Opinion, Dark Desk or Queue batch run. The key stays encrypted in
 TownReporter's database and is not written to source code, documentation or a
 batch job. See Google's [official OpenAI compatibility
@@ -114,12 +124,12 @@ OpenAI-compatible connection form.
 LiteLLM is one possible separately operated gateway; it is not required. For
 example, a gateway might expose:
 
-| Field | Example |
-| --- | --- |
-| Connection name | `Newsroom LiteLLM` |
-| Base URL | `http://127.0.0.1:4000/v1` |
-| API key | a LiteLLM virtual key, if authentication is enabled |
-| Model id | `newsroom-writer` (your configured alias) |
+| Field           | Example                                             |
+| --------------- | --------------------------------------------------- |
+| Connection name | `Newsroom LiteLLM`                                  |
+| Base URL        | `http://127.0.0.1:4000/v1`                          |
+| API key         | a LiteLLM virtual key, if authentication is enabled |
+| Model id        | `newsroom-writer` (your configured alias)           |
 
 Configure and start LiteLLM separately, then save these values in TownReporter
 and test the connection. See LiteLLM's [official proxy setup guide](https://docs.litellm.ai/docs/proxy/quick_start).

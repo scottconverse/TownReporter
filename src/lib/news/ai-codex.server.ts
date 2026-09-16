@@ -4,6 +4,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { spawnPlan } from "./cli-spawn.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
+import { modelEffortsForModel, type ModelEffort } from "./provider-registry.ts";
 
 
 /** Safe, bounded labels for opt-in native transport diagnostics. */
@@ -271,11 +272,13 @@ export function buildCodexArgs(input: {
    * a normal text draft — that path never sets this.
    */
   imagePaths?: string[];
+  reasoningEffort?: ModelEffort | null;
 }): string[] {
-  const configuredReasoning = process.env.TOWNREPORTER_CODEX_REASONING_EFFORT?.trim();
-  if (configuredReasoning && configuredReasoning !== "high") {
+  const configuredReasoning = input.reasoningEffort ?? process.env.TOWNREPORTER_CODEX_REASONING_EFFORT?.trim();
+  const supported = modelEffortsForModel(input.model);
+  if (configuredReasoning && !supported.includes(configuredReasoning as ModelEffort)) {
     throw new Error(
-      `Unsupported TOWNREPORTER_CODEX_REASONING_EFFORT: ${configuredReasoning}. The only verified value is high.`,
+      `Unsupported reasoning effort ${configuredReasoning} for ${input.model}. Supported values: ${supported.join(", ") || "provider default"}.`,
     );
   }
   return [
@@ -391,6 +394,7 @@ export async function codexChat(input: {
   systemPromptFile?: string;
   webSearch?: boolean;
   imagePaths?: string[];
+  reasoningEffort?: ModelEffort | null;
 }): Promise<ChatResult> {
   const bin = await findCodexCli();
   if (!bin) return { ok: false, error: CODEX_CLI_MISSING };
@@ -403,7 +407,7 @@ export async function codexChat(input: {
   }
   const result = await run(
     bin,
-    buildCodexArgs({ model: input.model, systemPromptFile: input.systemPromptFile, webSearch: input.webSearch, imagePaths: input.imagePaths }),
+    buildCodexArgs({ model: input.model, systemPromptFile: input.systemPromptFile, webSearch: input.webSearch, imagePaths: input.imagePaths, reasoningEffort: input.reasoningEffort }),
     buildCodexPrompt(input),
     input.timeoutMs,
     // Match Claude's standalone writing context without changing the user's

@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name. Reddit RSS finds candidates; when a local Redlib is running, the strongest candidates are read in full. The result panel says whether each card contains a full post or only an RSS excerpt. A Redlib failure never discards the RSS results.
 
-**Current release: [0.6.50](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.50).** See the [release guide](releases/0.6.50.md) for changes, installation and deployment evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+**Current release: [0.6.51](releases/0.6.51.md).** The release guide separates source changes from unverified GitHub publication, installation, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
 **Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
 
@@ -36,13 +36,17 @@ checking sources. The five-topic live acceptance exercise remains outstanding.
 Models can be discovered through LM Studio, Ollama or llama.cpp and selected
 individually. **Captured-PDF OCR:** scanned PDF OCR renders the
 actual pages in document order, so new page-aware captures can cite the real
-PDF page number. It attempts the first 12 pages, with a 2 MiB rendered-image
-limit per page and a cooperative 10-minute processing budget. A running page
-render cannot be forcibly interrupted by that budget. Omitted or failed pages
-are explicitly marked incomplete; a partial packet is not a complete read.
+PDF page number. Initial capture attempts the first 12 pages, with a 2 MiB
+rendered-image limit per page and a cooperative 10-minute batch budget. In the
+opened record, **Read entire PDF** continues through every unread page in
+durable 12-page batches and saves each batch before continuing. Each click has
+a shared 10-minute and 48-transcription-attempt ceiling; it pauses with saved
+progress when either is reached. A running page render cannot be forcibly
+interrupted by that budget. Omitted or failed pages
+are explicitly listed and can be retried; a partial packet is not a complete read.
 Older extracted-image OCR records remain labeled as unordered images and need
 re-ingestion before their image numbers can be treated as PDF page numbers.
-This bounded reader can leave pages unread; it does not establish full-packet accuracy.
+This reader can still leave individually failed pages unread; it does not establish transcript accuracy.
 The separate retained-PDF page reader has one bounded built-UI proof: an
 explicit request read real page 13 of a 44-page PDF and saved a page-numbered
 transcript without changing the 16,254,338-byte original or its hash. Direct
@@ -177,8 +181,10 @@ Local model. Automatic uses the operator's configured gateway when one is set;
 otherwise it tries Codex Terra, then Claude Sonnet. If the first one's login
 lapses partway through the run, the scan moves to the next rung once, if it
 is ready, reusing the same fetched sources rather than fetching them again.
-A named choice uses only that provider and never falls back. The choice is
-per click, not remembered between runs.
+A named choice is the recorded first provider. A recognized technical failure
+can move only the unfinished model call to the next ready runtime; the job shows
+the switch. A refusal or unrecognized error remains terminal. The choice is per
+click, not remembered between runs.
 
 If no model is ready you get a straight refusal before anything is fetched —
 nothing is spent trying. Need to connect a provider? Open **Set up a writing
@@ -209,8 +215,8 @@ with AI** (or **Redraft with AI** after a draft exists). Automatic uses the
 operator's configured gateway when one is set; otherwise it tries Codex Terra,
 then Claude Sonnet. If the first one's login lapses partway through the
 run, the draft moves to the next rung once, if it is ready, and the row shows
-which provider took over and why. A named choice uses only that provider and
-never falls back, at enqueue or mid-run. The result appears on the same
+which provider took over and why. A named choice is the first recorded provider;
+the same technical-only retry rule applies. The result appears on the same
 row and names the provider the server actually queued. **Open** takes you to
 the workbench to watch the draft land and edit it. Nothing prints from this
 list.
@@ -219,18 +225,18 @@ list.
 
 The **Draft selected leads** bar prepares up to five eligible Queue leads as
 one atomic batch. Tick the leads, then choose exactly one named **Codex**,
-**Claude**, **Grok (SuperGrok)**, **Local model**, or saved **Custom AI** connection, including
-Gemini. It deliberately does not offer Automatic or fallback. Each lead keeps its
-saved research scope. If the selected runtime is unavailable, or one selected
-lead cannot be queued, the batch does not start and the Queue explains why.
+**Claude**, **Grok (SuperGrok)**, **Local model**, or saved **Custom AI** connection,
+including Gemini. It deliberately does not offer Automatic. Each lead keeps its
+saved research scope. If the named runtime fails technically, only the unfinished
+call can move to the next ready cloud runtime; a refusal remains terminal. If no
+runtime is ready, or one selected lead cannot be queued, the batch does not start
+and the Queue explains why.
 
-Daily Scan uses the same exact named model choices, Grok (SuperGrok), and saved Custom AI
-connections. It does not offer Automatic or fallback. Document and image OCR
-performed for a Story, Dark Desk run, scheduled Scan or batch remains pinned
-to that run's selected model when that provider supports vision. Grok is
-text-only for OCR and fails clearly without switching providers. Automatic OCR
-keeps its separate availability order: Anthropic API, Codex, Claude Code, then
-a discovered local vision model.
+Daily Scan uses the same named model choices, Grok (SuperGrok), and saved Custom
+AI connections. It does not offer Automatic. The named model is tried first;
+technical preflight or mid-call switches are recorded, and refusals remain
+terminal. OCR uses the same technical-only rule and considers only
+vision-capable destinations.
 
 The bar also offers an optional **Suggested focus** size of three to five
 leads. Suggestions balance existing lead scores and sections. Review the
@@ -329,9 +335,10 @@ then Claude Sonnet, chooses the first ready one before enqueueing, and keeps it
 for every reporting and writing pass unless it reaches a usage limit, becomes
 unavailable, loses its login, or times out. Automatic moves the unfinished work
 once to the next ready provider and shows the switch in the workbench. A model
-content refusal stops the run. Choose a named model to force Codex Astra, Sol,
-Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or Local model.
-Explicit choices never fall back. Redraft has the same picker.
+content refusal stops the run. Choose a named model as the first runtime: Codex
+Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or Local model.
+The technical-only retry rule applies to named choices too. Redraft has the same
+picker.
 
 Choose **Local model**, then the individual model found through LM Studio, Ollama or llama.cpp. An Ollama model ending in `:cloud` runs in Ollama Cloud; the local Ollama service routes the request and the picker labels the model **Ollama Cloud** with its reported context window. A configured `LLM_BASE_URL` is also supported. Availability means the route can be reached, not that every model can finish your task. See [local-models.md](local-models.md).
 
@@ -480,16 +487,17 @@ Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.
 Dark Desk Automatic uses a configured gateway when present; otherwise it tries
 Codex Terra, then Claude Sonnet. Planning uses Claude Haiku or the cheaper Codex
 planning model. If synthesis times out, only synthesis moves to the next model;
-completed searches and document reads do not run again. A model you name yourself never falls back
-— choosing one model is choosing not to run the others.
+completed searches and document reads do not run again. A model you name is the
+recorded first choice. A recognized technical failure can move only the failed
+model call to the next ready runtime; a content refusal stops the run.
 
 The choice is checked before the round starts. If no model is ready, the desk
 says so and nothing is spent.
 
-A file remembers what it was last dug with, so Keep digging on a file that was
-started on Codex stays on Codex rather than quietly changing author halfway
-through an investigation. Change it whenever you like; the next round uses the
-new one. **What Dark Desk did** — the round history at the bottom of the page —
+A file remembers its requested first runtime, so Keep digging starts the next
+round with that choice even when an earlier call needed a recorded technical
+retry. Change it whenever you like; the next round uses the new first choice.
+**What Dark Desk did** — the round history at the bottom of the page —
 names the model that dug each round.
 
 While a round runs, the open file names the real stage and shows elapsed time,
@@ -580,7 +588,9 @@ Use **Add documents** or drop files into **Start with your documents**, paste so
 Choose **Automatic**, any named Codex or Claude model, or **Local model**;
 saved custom connections are offered too. Codex Sol is selected by default. Automatic tries
 Codex Sol, then Claude Sonnet once if Codex is unavailable. An explicit choice
-stays selected. Claude and Codex both read the complete configured voice through their native instruction-file options.
+remains the requested first runtime; a recognized technical failure can move
+only the unfinished call and records requested and actual model and effort.
+A content refusal is terminal. Claude and Codex both read the complete configured voice through their native instruction-file options.
 Readiness lists every missing prerequisite — voice file, installation, or
 login — before the button is enabled, and the server checks again when you
 click. If OAuth expires, open the named provider on this machine and sign in;
@@ -607,9 +617,10 @@ The desk checks that the delivery is actually an editorial before it files
 anything. A provider refusal, limitation note, neutral-summary substitute,
 implausible headline, or incomplete body makes the row **Failed** and creates no
 draft. There is then no Read, Edit, or Publish action to mistake for success.
-Automatic can move from Codex Sol to Claude Sonnet once; a named choice stays
-with that provider. A
-finished row names the provider that actually delivered the piece.
+Automatic can move from Codex Sol to Claude Sonnet once. A named choice is tried
+first and the same technical-only unfinished-call rule applies. A finished row
+names the requested and actual model and effort. Opus is never selected by an
+unattended ladder.
 
 **Edit** opens the piece in its own editor. That is where you change the
 headline, fix a line, print it, or throw it away. The fact sheet and the image
@@ -636,9 +647,10 @@ run will finish.
 Use **Edit** to change the name, URL or model; leave the key blank to retain it
 or explicitly remove it. **Disable** keeps the record but removes it from
 pickers and actions; **Enable** restores it. **Delete** is permanent. Selecting
-the saved name in a Scan, Story, Opinion or Dark Desk picker pins that endpoint
-to the queued run, with no fallback to another provider. The Opinion voice is
-private to the explicitly selected endpoint. This is a supported connection
+the saved name in a Scan, Story, Opinion or Dark Desk picker makes that endpoint
+the recorded first runtime. A recognized technical failure can move the
+unfinished call to the next ready runtime; a refusal or unrecognized failure is
+terminal. The Opinion voice accompanies that authorized retry. This is a supported connection
 workflow; see [the detailed connection guide](custom-ai-connections.md).
 
 An editorial is a **draft**. Read it, edit it in the story workbench, and
@@ -656,7 +668,10 @@ Historical 0.5.1 screen: it illustrates the older operator-managed installation,
 not the controls available in a new Windows package.
 
 For the **Windows installation package**, Server reports this installation's
-version, work queue, private database and local HTTP readiness. **Run health
+version, work queue, private database and local HTTP readiness. The work queue
+separates current queued/running counts and the latest terminal result by
+workflow from retained failure history; old failures stay visible without
+making an idle queue look currently failed. **Run health
 check** is read-only: it does not repair anything. **Restart the paper** asks for
 confirmation and restarts only this installation. Local readiness does not prove
 that a public address or tunnel works. The package installs no tunnel, watchdog,
@@ -678,8 +693,9 @@ timezone, selects as many as 12 accepted sources from any reporting beat, and
 chooses one explicit model: Codex Astra, Sol, Terra, or Luna; Claude Fable,
 Opus, Sonnet, or Haiku; the already selected local model; or a saved Custom AI
 connection such as an OpenAI-compatible Gemini endpoint. A legacy saved
-"Claude Code subscription" setting opens as Claude Sonnet. The scheduled run
-does not switch providers. Custom credentials stay encrypted in newsroom
+"Claude Code subscription" setting opens as Claude Sonnet. A technical preflight
+or model-call failure can switch only unfinished work and records the requested
+and actual model and effort. Custom credentials stay encrypted in newsroom
 settings and are resolved only when the run starts. It reads bounded excerpts from the selected
 sources; it does not claim full-site coverage.
 
@@ -957,3 +973,11 @@ In the story workspace, use **Check draft against evidence**. The check reads th
 ## Current Opinion document and review workflow
 
 Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+
+## 0.6.51: model and document boundaries
+
+The 0.6.51 model picker offers only the reasoning-effort levels supported by the selected Codex or Claude runtime. The selected runtime and effort are retained with the job. A technical failure — unavailable service, sign-in, quota, timeout, network failure, or no output — may move the unfinished call to the next ready runtime and records that move. A content refusal is terminal: it does not route around the refusal or turn into a draft.
+
+After a Queue batch completes, use **Redraft** to select a runtime and produce a new draft for review. The batch remains non-publishing. The Server page lets an owner edit daily time, runtime, effort, selected accepted sources, and a 1–12 source cap; scheduled scans still file leads only.
+
+Story and Opinion intake reads all extractable PDF pages within the 20-million-character document-text cap. Generic captures and Dark Desk scans initially use a bounded OCR batch; **Read entire PDF** checkpoints consecutive 12-page batches until every page is retained or explicitly reported unread. Page-only vision fallback handles pages without a readable text layer. The [0.6.51 release guide](releases/0.6.51.md) lists evidence boundaries.

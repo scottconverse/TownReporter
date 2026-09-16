@@ -16,8 +16,80 @@ import type {
 } from "./draft-batch.ts";
 import type { AuthenticatedEditorContext } from "./model-request-commit.server.ts";
 import { parseDraftCompletionReceipt } from "./draft-completion.ts";
+import {
+  automaticFailoverReason,
+  failoverNoteSentence,
+  failoverReasonPhrase,
+  planAutomaticFailover,
+} from "./automatic-failover.ts";
+import { automaticLadder, modelEffort, type ModelEffort } from "./provider-registry.ts";
+import { modelChoiceLabel } from "./model-choice.ts";
+import type { ForcedRuntime } from "./forced-runtime.server.ts";
 
-export const validateBatchRuntime = validateForcedRuntime;
+type BatchRuntimeReceipt = {
+  requestedRuntime: string;
+  requestedEffort: ModelEffort | null;
+  resolvedRuntime: string;
+  switchReason: string | null;
+  switchNote: string | null;
+};
+
+export function attachDraftBatchRuntimeReceipt(
+  snapshot: ForcedRuntimeSnapshot,
+  receipt: Omit<BatchRuntimeReceipt, "resolvedRuntime">,
+): ForcedRuntimeSnapshot & BatchRuntimeReceipt {
+  return {
+    ...snapshot,
+    requestedRuntime: receipt.requestedRuntime,
+    requestedEffort: receipt.requestedEffort,
+    resolvedRuntime: snapshot.runtime,
+    switchReason: receipt.switchReason,
+    switchNote: receipt.switchNote,
+  };
+}
+
+export async function validateBatchRuntime(
+  newsroomId: number,
+  runtime: ForcedRuntime,
+  effort?: ModelEffort | null,
+  validate: typeof validateForcedRuntime = validateForcedRuntime,
+): Promise<ForcedRuntimeSnapshot & BatchRuntimeReceipt> {
+  const requestedEffort = modelEffort(runtime, effort);
+  try {
+    const snapshot = await validate(newsroomId, runtime, requestedEffort);
+    return { ...snapshot, requestedRuntime: runtime, requestedEffort, resolvedRuntime: runtime, switchReason: null, switchNote: null };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (!automaticFailoverReason(detail)) throw error;
+    const snapshots = new Map<string, ForcedRuntimeSnapshot>();
+    const plan = await planAutomaticFailover({
+      source: "editor",
+      current: runtime,
+      error: detail,
+      ladder: automaticLadder(),
+      probe: async (candidate) => {
+        try {
+          const snapshot = await validate(newsroomId, candidate as ForcedRuntime, modelEffort(candidate, effort));
+          snapshots.set(candidate, snapshot);
+          return { ok: true as const, label: modelChoiceLabel(candidate), choice: snapshot.modelChoice };
+        } catch (candidateError) {
+          return { ok: false as const, error: candidateError instanceof Error ? candidateError.message : String(candidateError) };
+        }
+      },
+    });
+    const snapshot = plan ? snapshots.get(plan.next) : null;
+    if (!plan || !snapshot) throw error;
+    const previousLabel = modelChoiceLabel(runtime);
+    return {
+      ...snapshot,
+      requestedRuntime: runtime,
+      requestedEffort,
+      resolvedRuntime: snapshot.runtime,
+      switchReason: failoverReasonPhrase(previousLabel, plan.reason),
+      switchNote: failoverNoteSentence(plan.label, previousLabel, plan.reason),
+    };
+  }
+}
 
 export function parseDraftBatchCompletion(value: unknown): {
   draftId: number;
@@ -300,14 +372,18 @@ export async function commitDraftBatchForAuthenticatedEditor(
         [input.context.newsroomId, input.context.userId, JSON.stringify(runtimeSnapshot)],
       );
       for (const item of checked.items) {
+        const receipt = runtimeSnapshot as ForcedRuntimeSnapshot & Partial<BatchRuntimeReceipt>;
         await tx.query(
-          "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,draft_batch_id) values($1,$2,'draft',$3,$4,'editor',$5,'default','queued','Queued',$6)",
+          "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,failover_note,result_json,draft_batch_id) values($1,$2,'draft',$3,$4,'editor',$5,'default','queued',$6,$7,$8,$9)",
           [
             input.context.newsroomId,
             input.context.userId,
             item.leadId,
             runtimeSnapshot.modelChoice,
             item.researchScope,
+            receipt.switchReason ? `Switched to ${modelChoiceLabel(runtimeSnapshot.modelChoice)}: ${receipt.switchReason}` : "Queued",
+            receipt.switchNote ?? "",
+            JSON.stringify({ modelEffort: "modelEffort" in runtimeSnapshot ? runtimeSnapshot.modelEffort ?? null : null, preflightFailover: receipt.switchReason ? receipt : null }),
             batch.id,
           ],
         );
@@ -389,5 +465,30 @@ export async function withDraftBatchLease<T>(
     );
     if (!member) throw new Error("Draft batch permission or job lease was withdrawn.");
     return write(sql);
+  });
+}
+
+/** Promote a successful technical fallback to the immutable batch header.
+ * The current job lease fences this write; queued siblings then start on the
+ * working runtime instead of calling the known-dead provider again. */
+export async function persistDraftBatchRuntimeSwitch(
+  job: { id: number; newsroom_id: number; user_id: string; claim_token?: string | null },
+  snapshot: ForcedRuntimeSnapshot,
+  receipt: { requestedRuntime: string; requestedEffort: ModelEffort | null; switchReason: string; switchNote: string },
+): Promise<ForcedRuntimeSnapshot & BatchRuntimeReceipt> {
+  return withDraftBatchLease(job, async (sql) => {
+    const [row] = await sql<{ draft_batch_id: number }>`select draft_batch_id from desk_jobs where id=${job.id} and newsroom_id=${job.newsroom_id}`;
+    if (!row?.draft_batch_id) throw new Error("Draft batch permission or job lease was withdrawn.");
+    const stored = attachDraftBatchRuntimeReceipt(snapshot, receipt);
+    await sql`update draft_batches set runtime_snapshot=${JSON.stringify(stored)}::jsonb where id=${row.draft_batch_id} and newsroom_id=${job.newsroom_id}`;
+    const effort = "modelEffort" in snapshot ? snapshot.modelEffort ?? null : null;
+    await sql`update desk_jobs
+      set model_choice=${snapshot.modelChoice},
+          stage=${`Switched to ${modelChoiceLabel(snapshot.modelChoice)}: ${receipt.switchReason}`},
+          failover_note=${receipt.switchNote},
+          result_json=jsonb_set(coalesce(nullif(result_json,'')::jsonb,'{}'::jsonb),'{modelEffort}',coalesce(to_jsonb(${effort}::text),'null'::jsonb),true)::text,
+          updated_at=now()
+      where newsroom_id=${job.newsroom_id} and draft_batch_id=${row.draft_batch_id} and status='queued'`;
+    return stored;
   });
 }

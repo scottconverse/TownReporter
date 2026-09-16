@@ -3,14 +3,17 @@ import { grokChat, parseJsonBlock, providerBudget } from "./ai.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.ts";
 import { withClaimedLeadDraftLock } from "./draft-order.server.ts";
-import { enqueueJob, setJobStage, type DeskJob } from "./jobs.ts";
+import { enqueueJob, setJobFailoverNote, setJobModelRuntime, setJobStage, type DeskJob } from "./jobs.ts";
 import { parseClaims, parseFindings, serializeFindings, REPORT_EDIT_SYSTEM, STORY_FORMS, type ReportChat } from "./report.ts";
-import { effectiveStoryModelChoice } from "./model-choice.ts";
+import { effectiveStoryModelChoice, modelChoiceLabel } from "./model-choice.ts";
 import { storyModelChoice } from "./model-choice.ts";
 import { probeProvider } from "./ai.ts";
 import { scanPreflight } from "./preflight.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
-import type { ProviderOverrides } from "./provider-registry.ts";
+import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
+import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
+import { runPinnedCallWithFailover } from "./desk-model-run.ts";
+import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import type { DraftRow } from "./types.ts";
 import { checkStoryNames } from "./name-check-work.ts";
@@ -88,14 +91,39 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
   await (deps.stage ?? setJobStage)(job.id, "Checking the saved draft against the evidence");
   const evidence = captures.map(c => `SOURCE ${c.url}\nCAPTURE VERSION ${c.id}\nCAPTURED ${c.captured_at}\n${c.title}\n${c.full_text}`).join("\n\n") || "(No saved captured evidence matched this draft.)";
   const choice = effectiveStoryModelChoice(job.model_choice);
+  let savedEffort: ModelEffort | null = null;
+  try { savedEffort = modelEffort(choice, (JSON.parse(job.result_json || "{}") as {modelEffort?: unknown}).modelEffort); }
+  catch { savedEffort = modelEffort(choice, null); }
+  let active = { modelChoice: choice, modelEffort: savedEffort };
   const overrides: ProviderOverrides = await readProviderOverrides(job.newsroom_id).catch(() => ({}));
   const budget = providerBudget(choice, overrides);
-  const runChat: ReportChat = deps.chat ?? ((system,user,maxTokens,modelChoice,options) => grokChat(system,user,maxTokens,{choice:modelChoice,newsroomId:job.newsroom_id,timeoutMs:options?.timeoutMs,noTools:true,localModel:overrides["local-model"]?.localModel}));
+  const runChat: ReportChat = async (system,user,maxTokens,_modelChoice,options) => {
+    const attempted = await runPinnedCallWithFailover({
+      snapshot: active,
+      source: job.model_choice_source ?? "editor",
+      run: (snapshot) => {
+        const timeoutMs = Math.max(options?.timeoutMs ?? 0, providerBudget(snapshot.modelChoice, overrides).callMs);
+        return deps.chat
+          ? deps.chat(system,user,maxTokens,snapshot.modelChoice,{ timeoutMs })
+          : grokChat(system,user,maxTokens,{choice:snapshot.modelChoice,newsroomId:job.newsroom_id,timeoutMs,noTools:true,localModel:overrides["local-model"]?.localModel,reasoningEffort:snapshot.modelEffort});
+      },
+      probe: (candidate) => (deps.probe ?? probeProvider)(candidate, job.newsroom_id),
+      resolve: async (candidate) => ({ modelChoice: candidate, modelEffort: modelEffort(candidate, active.modelEffort) }),
+      onSwitch: async ({previousLabel,nextLabel,nextChoice,reason}) => {
+        const nextEffort = modelEffort(nextChoice, active.modelEffort);
+        await setJobModelRuntime(job.id,nextChoice,nextEffort);
+        await (deps.stage ?? setJobStage)(job.id,`Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel,reason)}`);
+        await setJobFailoverNote(job.id,failoverNoteSentence(nextLabel,previousLabel,reason));
+      },
+    });
+    active = attempted.snapshot;
+    return attempted.result;
+  };
   const draftToEdit = JSON.stringify({headline:draft.headline,dek:draft.dek,body:draft.body,topic:draft.topic,source_urls:json(draft.source_urls),form:draft.form,found:json(draft.found_note),unanswered:json(draft.unanswered)});
-  const documentEvidence = await prepareDocumentReconcileEvidence(documents, draftToEdit, runChat, choice, text => (deps.stage ?? setJobStage)(job.id, text), budget.callMs);
+  const documentEvidence = await prepareDocumentReconcileEvidence(documents, draftToEdit, runChat, active.modelChoice, text => (deps.stage ?? setJobStage)(job.id, text), budget.callMs);
   await (deps.stage ?? setJobStage)(job.id, "Reconciling the draft with the saved evidence");
   const prompt = `RESEARCH QUESTIONS AND UNKNOWNS ARE NOT EVIDENCE. Reconcile only against the saved captures and original document text below. Do not search, fetch, research, or rewrite from outside material. Uploaded documents are valid evidence without public URLs. Cite their filenames and the tightest page/character locator around the supporting passage; never cite an entire document range merely because a name appears somewhere inside it. Never expose private document IDs, download paths or invented URLs in the story or source_urls. A supplied segment establishes what that segment discusses, not that a different policy, benefit, event or action did not exist elsewhere; narrow negative language to the scope of the evidence unless a source affirmatively supports the negative. Remove or qualify unsupported claims and retain unresolved OCR/name uncertainty. Return document_claims for selected load-bearing claims supported by uploads as [{"fact":"claim","kind":"primary|record","documentId":"exact private document ID from the evidence label","excerpt":"exact supporting passage"}]. This is a verified passage inventory, not a claim that every sentence was exhaustively inventoried. Do not put an uploaded document in URL-based claims and do not invent a URL.\n\nDraft JSON to edit:\n${draftToEdit}\n\nSAVED URL-LABELED EVIDENCE:\n${evidence}\n\nRETAINED UPLOADED DOCUMENT EVIDENCE:\n${documentEvidence.text}`;
-  const response = await runChat(REPORT_EDIT_SYSTEM, prompt, 1800, choice, {timeoutMs:budget.callMs});
+  const response = await runChat(REPORT_EDIT_SYSTEM, prompt, 1800, active.modelChoice, {timeoutMs:budget.callMs});
   if (!response.ok) throw new Error(response.error);
   const edited = coerceDraft(response.text, {headline:draft.headline,dek:draft.dek,topic:draft.topic});
   if (!edited.body) throw new Error("Evidence reconciliation returned an unreadable draft. The saved draft was preserved.");
@@ -110,7 +138,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     searchAllowed: false, search: async () => [], open: async () => {},
     timeLeft: () => budget.wallMs - (Date.now() - nameCheckStarted),
     stage: text => (deps.stage ?? setJobStage)(job.id, text),
-    chat: (system, user, maxTokens) => runChat(system, user, maxTokens, choice, { timeoutMs: Math.min(budget.callMs, Math.max(6000, budget.wallMs - (Date.now() - nameCheckStarted) - 2000)) }),
+    chat: (system, user, maxTokens) => runChat(system, user, maxTokens, active.modelChoice, { timeoutMs: Math.min(budget.callMs, Math.max(6000, budget.wallMs - (Date.now() - nameCheckStarted) - 2000)) }),
   });
   Object.assign(edited, names.draft);
   await withClaimedLeadDraftLock(job, draft.lead_id, async tx => {
@@ -167,13 +195,13 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     const { writerCheckpoint: _completedWriterCheckpoint, ...currentResearch } = research;
     const [saved] = await tx<{id:number}>`insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json)
       values(${job.user_id},${job.newsroom_id},${draft.lead_id},${edited.headline},${edited.dek},${edited.body},${draft.topic},${sourceUrls},${integrityNotes},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(unanswered)},${JSON.stringify({...currentResearch,...(documents.length ? {documentEvidenceReview:documentEvidence.receipt,reportedDocumentClaims:{version:1,checkedText:nameCheckText(names.draft),rows:documentClaims}} : {}),nameCheck:names.check,reportedClaims:{version:1,rows:claims},evidenceReconciledAt:new Date().toISOString()})}) returning id`;
-    await tx`update desk_jobs set result_json=${JSON.stringify({originalDraftId:draft.id,newDraftId:saved.id,evidenceCheckIncomplete:false})} where id=${job.id} and claim_token=${job.claim_token}`;
+    await tx`update desk_jobs set result_json=(coalesce(nullif(result_json,'')::jsonb,'{}'::jsonb) || ${JSON.stringify({originalDraftId:draft.id,newDraftId:saved.id,evidenceCheckIncomplete:false})}::jsonb)::text where id=${job.id} and claim_token=${job.claim_token}`;
   });
 }
 
 export async function requestDraftReconciliation(
   context: { userId: string; newsroomId: number },
-  input: { leadId: number; modelChoice?: string },
+  input: { leadId: number; modelChoice?: string; modelEffort?: ModelEffort | null },
   deps: Pick<ReconcileDeps,"enqueue"|"probe"> = {},
 ): Promise<DeskJob> {
   const sql = await getSql();
@@ -181,9 +209,37 @@ export async function requestDraftReconciliation(
   if (!draft) throw new Error("No saved draft is available to reconcile in this newsroom.");
   const requested = storyModelChoice(input.modelChoice);
   if (input.modelChoice && requested === "auto" && input.modelChoice !== "auto") throw new Error("The selected model is not available for Story work.");
-  const provider = await (deps.probe ?? probeProvider)(requested, context.newsroomId);
-  const ready = scanPreflight(provider, requested);
-  if (!ready.ok) throw new Error(ready.guidance);
+  const probe = deps.probe ?? probeProvider;
+  let provider = await probe(requested, context.newsroomId);
+  let preflight: null | { stage: string; note: string; requested: string; resolved: string } = null;
+  let ready = scanPreflight(provider, requested);
+  if (!ready.ok) {
+    const firstError = provider.ok ? ready.guidance : provider.error;
+    const plan = await planAutomaticFailover({
+      source: requested === "auto" ? "auto" : "editor",
+      current: requested,
+      error: firstError,
+      probe: (candidate) => probe(candidate, context.newsroomId),
+    });
+    if (!plan) throw new Error(ready.guidance);
+    provider = await probe(plan.next, context.newsroomId);
+    ready = scanPreflight(provider, plan.next);
+    if (!ready.ok || !provider.ok) {
+      throw new Error(!ready.ok ? ready.guidance : provider.ok ? firstError : provider.error);
+    }
+    const previousLabel = modelChoiceLabel(requested);
+    preflight = {
+      requested,
+      resolved: plan.next,
+      stage: `Switched to ${plan.label}: ${failoverReasonPhrase(previousLabel, plan.reason)}`,
+      note: failoverNoteSentence(plan.label, previousLabel, plan.reason),
+    };
+  }
   const choice = provider.ok ? provider.choice : requested;
-  return (deps.enqueue ?? enqueueJob)({userId:context.userId,newsroomId:context.newsroomId,kind:"reconcile",subjectId:draft.id,modelChoice:choice,modelChoiceSource:requested === "auto" ? "auto" : "editor"});
+  const job = await (deps.enqueue ?? enqueueJob)({userId:context.userId,newsroomId:context.newsroomId,kind:"reconcile",subjectId:draft.id,modelChoice:choice,modelChoiceSource:requested === "auto" ? "auto" : "editor",resultJson:JSON.stringify(initialModelRuntimeReceipt({requestedRuntime:requested,requestedEffort:modelEffort(requested,input.modelEffort),actualRuntime:choice,actualEffort:modelEffort(choice,input.modelEffort),preflightFailover:preflight}))});
+  if (preflight) {
+    await setJobStage(job.id, preflight.stage);
+    await setJobFailoverNote(job.id, preflight.note);
+  }
+  return job;
 }

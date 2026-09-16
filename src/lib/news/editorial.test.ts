@@ -658,18 +658,22 @@ describe("Opinion runs one Local model pair when explicitly picked", () => {
     assert.deepEqual(events, []);
   });
 
-  it("reports the local pair's failure and files nothing, and does not blame Claude", async () => {
+  it("routes an explicit local technical failure to the next Opinion provider", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
+    const runtime = localRuntime(events, { ok: false, error: "LLM is unreachable." });
+    runtime.runCodexPair = async () => {
+      events.push("codex");
+      return { ok: true, text: DELIVERED };
+    };
     const result = await orchestrateEditorial(
       { ...ORCHESTRATION_INPUT, modelChoice: "local-model" },
-      localRuntime(events, { ok: false, error: "LLM is unreachable." }),
+      runtime,
     );
-    assert.equal(result.ok, false);
-    if (result.ok) assert.fail("filed on a failed pair");
-    assert.match(result.error, /LLM is unreachable/);
-    assert.doesNotMatch(result.error, /Claude/i);
-    assert.equal(events.includes("file"), false);
+    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    if (!result.ok) return;
+    assert.equal(result.modelChoice, "codex-frontier");
+    assert.deepEqual(events, ["voice:locate", "local", "codex", "file"]);
   });
 
   it("does not file a local-model refusal as an editorial", async () => {

@@ -62,7 +62,7 @@ describe("scheduled scan trust boundaries", () => {
     assert.match(server, /ai-codex\.server\.ts/);
     assert.doesNotMatch(server, /ANTHROPIC_API_KEY|configured gateway|resolveProvider/);
   });
-  it("never fails a scheduled run over to another provider", async () => {
+  it("routes a scheduled run around a technical provider failure", async () => {
     let probes = 0;
     const plan = await planAutomaticFailover({
       source: "scheduled",
@@ -73,8 +73,8 @@ describe("scheduled scan trust boundaries", () => {
         return { ok: true, choice: "codex-balanced", label: "Codex Terra" };
       },
     });
-    assert.equal(plan, null);
-    assert.equal(probes, 0);
+    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
+    assert.equal(probes, 1);
   });
 });
 
@@ -133,7 +133,7 @@ describe("daily scan policy compare-and-swap", () => {
   it("accepts sequential current revisions and rejects a stale revision", async () => {
     const sql = await getSql();
     await sql.query(
-      "create table if not exists daily_scan_policies(newsroom_id integer primary key,enabled boolean not null,paused boolean not null,pause_reason text,local_time text not null,runtime text not null,source_cap integer not null,selected_source_ids jsonb not null,revision integer not null,updated_at timestamptz,configured_by_user_id text not null)",
+      "create table if not exists daily_scan_policies(newsroom_id integer primary key,enabled boolean not null,paused boolean not null,pause_reason text,local_time text not null,runtime text not null,model_effort text,source_cap integer not null,selected_source_ids jsonb not null,revision integer not null,updated_at timestamptz,configured_by_user_id text not null)",
     );
     const newsroomId = 88001;
     await sql.query("delete from daily_scan_policies where newsroom_id=$1", [newsroomId]);
@@ -141,6 +141,7 @@ describe("daily scan policy compare-and-swap", () => {
       enabled: false,
       localTime: "06:00",
       runtime: "local-model" as const,
+      modelEffort: null,
       sourceCap: 12,
       selectedSourceIds: [7],
       expectedRevision: 0,

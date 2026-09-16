@@ -14,7 +14,7 @@ import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
 import { assertRate, audit } from "./ops";
-import { scanSystem, grokChat, parseJsonBlock, probeProvider } from "./ai";
+import { scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, type EffectiveProviderChoice } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
 import { stripReporterNotebook } from "./strip-draft";
 import {
@@ -59,25 +59,39 @@ import {
   runLooksStalled,
   setJobFailoverNote,
   setJobModelChoice,
+  setJobModelRuntime,
   setJobStage,
   type DeskJob,
 } from "./jobs";
 import { newPullReceipt, parsePullReceipt, type PullRunView } from "./pull.server.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
-import { effectiveStoryModelChoice, storyModelChoice } from "./model-choice.ts";
+import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
 import {
-  failOverAndRetry,
-  failOverOperationAndRetry,
+  runPinnedCallWithFailover,
   type PerformDraftWorkDeps,
 } from "./desk-model-run.ts";
 import { buildDraftCompletionReceipt } from "./draft-completion.ts";
 export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
+import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
+import {
+  failoverNoteSentence,
+  failoverReasonPhrase,
+} from "./automatic-failover.ts";
 import type { DraftRow, LeadRow, MemoryRow, ScanRow, SourceRow } from "./types";
 
 function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
+}
+
+function effortFromJob(job: Pick<DeskJob, "model_choice" | "result_json">): ModelEffort | null {
+  try {
+    const value = JSON.parse(job.result_json || "{}") as { modelEffort?: unknown };
+    return modelEffort(job.model_choice, value.modelEffort);
+  } catch {
+    return modelEffort(job.model_choice, null);
+  }
 }
 
 async function ensureDraftMemoColumn() {
@@ -475,7 +489,7 @@ export const listScans = createServerFn({ method: "GET" })
 
 export const runScan = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { modelChoice?: string; sectionKey?: string } | undefined) => input ?? {})
+  .validator((input: { modelChoice?: string; modelEffort?: ModelEffort | null; sectionKey?: string } | undefined) => input ?? {})
   .handler(async ({ context, data }) => {
     /*
       Check the model BEFORE spending the scan.
@@ -497,6 +511,7 @@ export const runScan = createServerFn({ method: "POST" })
     return commitScanForAuthenticatedEditor({
       context: { userId: context.userId, newsroomId: owned(context) },
       modelChoice,
+      modelEffort: modelEffort(modelChoice, data.modelEffort),
       sectionKey: data.sectionKey,
     });
   });
@@ -509,6 +524,7 @@ export type PerformScanWorkDeps = {
   probe?: typeof probeProvider;
   setJobModelChoice?: typeof setJobModelChoice;
   setJobStage?: typeof setJobStage;
+  onModelSwitch?: import("./scan-model-run.ts").RunScanChatWithFailoverInput["onSwitch"];
   ingestUrl?: typeof ingestUrl;
   scheduledGuard?: () => Promise<unknown>;
   scheduledSnapshot?: {
@@ -759,11 +775,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   });
 
   /*
-    Automatic only: the same one-shot failover Draft uses (see
+    The same one-shot technical failover Draft uses (see
     `failOverAndRetry`), except the fetched source text is never re-fetched
     -- `userMsg`/`payload` above are reused verbatim for the retry, by
-    `runScanChatWithFailover`. An editor's explicit model choice never fails
-    over. Pulled into its own module so the retry decision is unit-testable
+    `runScanChatWithFailover`. Pulled into its own module so the retry decision is unit-testable
     without desk.ts's `@/lib/db` alias import.
   */
   await deps.scheduledGuard?.();
@@ -777,6 +792,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     }),
     user: userMsg,
     maxTokens: 3500,
+    modelEffort: effortFromJob(job),
     // Same per-provider budget a Story draft uses (providerBudget().callMs),
     // floored at the old flat 90s so the configured-gateway path is never
     // made worse. See scanCallTimeoutMs's comment for the production timeout
@@ -787,6 +803,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     probe,
     setModelChoice,
     setStage,
+    setFailoverNote: setJobFailoverNote,
+    onSwitch: deps.onModelSwitch,
   });
   if (!ai.ok) {
     if (!deps.scheduledCommit)
@@ -961,13 +979,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const runReport = deps.reportAndDraft ?? reportAndDraft;
   const probe = deps.probe ?? probeProvider;
   const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
+  const setModelRuntime = deps.setJobModelRuntime ?? setJobModelRuntime;
   const setStage = deps.setJobStage ?? setJobStage;
   const setFailoverNote = deps.setJobFailoverNote ?? setJobFailoverNote;
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const leadId = job.subject_id;
   const sql = await getSql();
   const batchServer = await import("./draft-batch.server.ts");
-  const batchSnapshot = await batchServer.assertDraftBatchCanContinue(sql, job);
+  let batchSnapshot = await batchServer.assertDraftBatchCanContinue(sql, job);
   const batchGuard = async () => {
     const current = await batchServer.assertDraftBatchCanContinue(await getSql(), job);
     if (!current) throw new Error("Draft batch runtime snapshot is missing.");
@@ -1012,36 +1031,46 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const storyDocumentReader =
     deps.readStoryDocuments ?? (await import("./story-documents.server.ts")).readStoryDocuments;
   const documentAssignment = prevNotes.editorialAssignment?.text || lead.headline;
-  const readDocuments = (choice: string) =>
-    storyDocumentReader(
+  const initialDocumentChoice = effectiveStoryModelChoice(job.model_choice);
+  const documentReadingEvidence = await storyDocumentReader(
       owned(context),
       leadId,
-      choice as import("./ai.ts").EffectiveProviderChoice,
+      initialDocumentChoice,
       documentAssignment,
       (message) => setStage(job.id, message),
       prevNotes.suppliedUrls ?? [],
       context.userId,
       researchScope === "supplied",
+      undefined,
+      {
+        modelEffort: effortFromJob(job),
+        source: job.model_choice_source ?? "editor",
+        probe: (choice) => probe(choice, owned(context)),
+        chat: deps.chat,
+        onSwitch: async ({ previousLabel, nextLabel, nextChoice, nextEffort, reason }) => {
+          await setJobModelRuntime(job.id, nextChoice, nextEffort);
+          job.model_choice = nextChoice;
+          job.result_json = JSON.stringify({ modelEffort: nextEffort });
+          await setStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+          const switchNote = failoverNoteSentence(nextLabel, previousLabel, reason);
+          await setFailoverNote(job.id, switchNote);
+          if (batchSnapshot) {
+            if (nextChoice === "auto" || nextChoice === "configured") throw new Error("Draft batch fallback did not resolve to a selectable runtime.");
+            const old = batchSnapshot as typeof batchSnapshot & { requestedRuntime?: string; requestedEffort?: ModelEffort | null };
+            const { validateForcedRuntime } = await import("./forced-runtime.server.ts");
+            const validateBatchRuntime = deps.validateBatchRuntime ?? validateForcedRuntime;
+            const nextSnapshot = await validateBatchRuntime(job.newsroom_id, nextChoice, nextEffort);
+            const receipt = {
+              requestedRuntime: old.requestedRuntime ?? old.runtime,
+              requestedEffort: old.requestedEffort ?? ("modelEffort" in old ? old.modelEffort ?? null : null),
+              switchReason: failoverReasonPhrase(previousLabel, reason),
+              switchNote,
+            };
+            batchSnapshot = await batchServer.persistDraftBatchRuntimeSwitch(job, nextSnapshot, receipt);
+          }
+        },
+      },
     );
-  const initialDocumentChoice = effectiveStoryModelChoice(job.model_choice);
-  let documentReadingEvidence: string;
-  try {
-    documentReadingEvidence = await readDocuments(initialDocumentChoice);
-  } catch (documentError) {
-    const detail = documentError instanceof Error ? documentError.message : String(documentError);
-    const recovery = await failOverOperationAndRetry({
-      job,
-      error: detail,
-      operation: readDocuments,
-      probe,
-      setModelChoice,
-      setStage,
-      setFailoverNote,
-    });
-    if (!recovery.ok) throw new Error(recovery.error);
-    job.model_choice = recovery.choice;
-    documentReadingEvidence = recovery.value;
-  }
   const retainedNameDocuments = await sql<{
     id: string;
     filename: string;
@@ -1056,7 +1085,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const documentEvidence = retainedNameDocuments.length
     ? `PRIVATE DOCUMENT IDENTITIES (internal evidence labels only; never print IDs in the story):\n${retainedNameDocuments.map((doc) => `DOCUMENT ID ${doc.id} | FILENAME ${doc.filename}`).join("\n")}\n\n${documentReadingEvidence}`
     : documentReadingEvidence;
-  const draftInput = {
+  const draftInput: Parameters<typeof reportAndDraft>[0] = {
     documentEvidence,
     documentNameEvidence: retainedNameDocuments.map((doc) => ({
       evidenceKind: "uploaded-document" as const,
@@ -1076,6 +1105,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     editorialAssignment: prevNotes.editorialAssignment,
     researchScope,
     extraUrls: sourceInput.extraUrls,
+    modelEffort: effortFromJob(job),
     /*
       The paper's own time budgets (0.6.2). Read once, here, and carried in
       `draftInput` so the Automatic failover retry below is sized by the same
@@ -1127,8 +1157,71 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       checkpointDraftId = Number(saved.id);
     });
   };
+  if (!batchSnapshot) {
+    let activeReportSnapshot = {
+      modelChoice: effectiveStoryModelChoice(job.model_choice),
+      modelEffort: draftInput.modelEffort,
+    };
+    const storyChat = deps.chat ?? grokChat;
+    const persistReportSwitch = async (
+      nextChoice: EffectiveProviderChoice,
+      reason: import("./automatic-failover.ts").AutomaticFailoverReason,
+      nextLabel = modelChoiceLabel(nextChoice),
+    ) => {
+      if (nextChoice === activeReportSnapshot.modelChoice) return;
+      const previousLabel = modelChoiceLabel(activeReportSnapshot.modelChoice);
+      const nextEffort = modelEffort(nextChoice, activeReportSnapshot.modelEffort);
+      await setModelRuntime(job.id, nextChoice, nextEffort);
+      await setStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+      await setFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+      job.model_choice = nextChoice;
+      job.result_json = JSON.stringify({ modelEffort: nextEffort });
+      activeReportSnapshot = { modelChoice: nextChoice, modelEffort: nextEffort };
+    };
+    draftInput.onProviderSwitch = async ({ transport, model, reason }) => {
+      const nextChoice: EffectiveProviderChoice | null = transport === "codex"
+        ? "codex-balanced"
+        : transport === "anthropic" || transport === "claude-code"
+          ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
+          : null;
+      if (nextChoice) await persistReportSwitch(nextChoice, reason);
+    };
+    reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
+      const run = (snapshot: typeof activeReportSnapshot) => storyChat(system, user, maxTokens, {
+        timeoutMs: Math.max(
+          options?.timeoutMs ?? 0,
+          providerBudget(snapshot.modelChoice, draftInput.providerOverrides).callMs,
+        ),
+        choice: snapshot.modelChoice,
+        newsroomId: job.newsroom_id,
+        localModel: (draftInput.providerOverrides as ProviderOverrides | undefined)?.["local-model"]?.localModel,
+        reasoningEffort: snapshot.modelEffort,
+      });
+      const attempted = await runPinnedCallWithFailover({
+        snapshot: activeReportSnapshot,
+        source: job.model_choice_source ?? "editor",
+        run,
+        probe: (choice) => probe(choice, job.newsroom_id),
+        resolve: async (choice) => ({
+          modelChoice: choice,
+          modelEffort:
+            activeReportSnapshot.modelEffort == null
+              ? null
+              : modelEffort(choice, activeReportSnapshot.modelEffort),
+        }),
+        onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
+          void previousLabel;
+          await persistReportSwitch(nextChoice as EffectiveProviderChoice, reason, nextLabel);
+        },
+      });
+      activeReportSnapshot = attempted.snapshot;
+      return attempted.result;
+    };
+  }
   if (batchSnapshot) {
-    const { forcedOcrOptions, runForcedChat } = await import("./forced-runtime.server.ts");
+    const { forcedOcrOptions, runForcedChat, validateForcedRuntime } = await import("./forced-runtime.server.ts");
+    const validateBatchRuntime = deps.validateBatchRuntime ?? validateForcedRuntime;
+    let activeBatchSnapshot = batchSnapshot;
     const adapters =
       deps.batchChatAdapters ??
       ({
@@ -1139,15 +1232,57 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         xai: grokChat,
       } satisfies NonNullable<PerformDraftWorkDeps["batchChatAdapters"]>);
     reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
-      const current = await batchGuard();
-      return runForcedChat(
-        current,
+      await batchGuard();
+      const switchState: { receipt: null | {
+        requestedRuntime: string;
+        requestedEffort: ModelEffort | null;
+        switchReason: string;
+        switchNote: string;
+      } } = { receipt: null };
+      const run = (snapshot: typeof activeBatchSnapshot) => runForcedChat(
+        snapshot,
         system,
         user,
         maxTokens,
         { noTools: true, timeoutMs: options?.timeoutMs },
         adapters,
       );
+      const attempted = await runPinnedCallWithFailover({
+        snapshot: activeBatchSnapshot,
+        source: "editor",
+        run,
+        probe: (choice) => probe(choice, job.newsroom_id),
+        resolve: (choice) => validateBatchRuntime(
+          job.newsroom_id,
+          choice,
+          "modelEffort" in activeBatchSnapshot ? activeBatchSnapshot.modelEffort : null,
+        ),
+        onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
+          void nextChoice;
+          const old = activeBatchSnapshot as typeof activeBatchSnapshot & {
+            requestedRuntime?: string;
+            requestedEffort?: ModelEffort | null;
+          };
+          switchState.receipt = {
+            requestedRuntime: old.requestedRuntime ?? old.runtime,
+            requestedEffort: old.requestedEffort ?? ("modelEffort" in old ? old.modelEffort ?? null : null),
+            switchReason: failoverReasonPhrase(previousLabel, reason),
+            switchNote: failoverNoteSentence(nextLabel, previousLabel, reason),
+          };
+        },
+      });
+      activeBatchSnapshot = attempted.snapshot;
+      if (switchState.receipt) {
+        const receipt = switchState.receipt;
+        const nextEffort = "modelEffort" in activeBatchSnapshot ? activeBatchSnapshot.modelEffort ?? null : null;
+        await setModelRuntime(job.id, activeBatchSnapshot.modelChoice, nextEffort);
+        job.model_choice = activeBatchSnapshot.modelChoice;
+        job.result_json = JSON.stringify({ modelEffort: nextEffort });
+        await setStage(job.id, `Switched to ${modelChoiceLabel(activeBatchSnapshot.modelChoice)}: ${receipt.switchReason}`);
+        await setFailoverNote(job.id, receipt.switchNote);
+        activeBatchSnapshot = await batchServer.persistDraftBatchRuntimeSwitch(job, activeBatchSnapshot, receipt);
+      }
+      return attempted.result;
     };
     reportDeps.ingest = async (url) => {
       const current = await batchGuard();
@@ -1159,6 +1294,33 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             await batchGuard();
           },
           deps.batchOcrAdapters,
+          async ({ transport, model, reason }) => {
+            const nextChoice: EffectiveProviderChoice | null = transport === "codex"
+              ? "codex-balanced"
+              : transport === "anthropic" || transport === "claude-code"
+                ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
+                : null;
+            if (!nextChoice || nextChoice === activeBatchSnapshot.modelChoice) return;
+            const previousLabel = modelChoiceLabel(activeBatchSnapshot.modelChoice);
+            const nextSnapshot = await validateBatchRuntime(
+              job.newsroom_id,
+              nextChoice,
+              "modelEffort" in activeBatchSnapshot ? activeBatchSnapshot.modelEffort : null,
+            );
+            const old = activeBatchSnapshot as typeof activeBatchSnapshot & { requestedRuntime?: string; requestedEffort?: ModelEffort | null };
+            const receipt = {
+              requestedRuntime: old.requestedRuntime ?? old.runtime,
+              requestedEffort: old.requestedEffort ?? ("modelEffort" in old ? old.modelEffort ?? null : null),
+              switchReason: failoverReasonPhrase(previousLabel, reason),
+              switchNote: failoverNoteSentence(modelChoiceLabel(nextChoice), previousLabel, reason),
+            };
+            activeBatchSnapshot = nextSnapshot;
+            const nextEffort = "modelEffort" in nextSnapshot ? nextSnapshot.modelEffort ?? null : null;
+            await setModelRuntime(job.id, nextChoice, nextEffort);
+            await setStage(job.id, `Switched to ${modelChoiceLabel(nextChoice)}: ${receipt.switchReason}`);
+            await setFailoverNote(job.id, receipt.switchNote);
+            activeBatchSnapshot = await batchServer.persistDraftBatchRuntimeSwitch(job, nextSnapshot, receipt);
+          },
         ),
       );
       return {
@@ -1197,22 +1359,10 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   }
   const runReportWithCheckpoint = (input: Parameters<typeof reportAndDraft>[0]) =>
     runReport(input, reportDeps);
-  let reported = await runReportWithCheckpoint({
+  const reported = await runReportWithCheckpoint({
     ...draftInput,
     modelChoice: effectiveStoryModelChoice(job.model_choice),
   });
-  if ("error" in reported && !batchSnapshot) {
-    reported = await failOverAndRetry({
-      job,
-      error: reported.error,
-      draftInput,
-      runReport: runReportWithCheckpoint,
-      probe,
-      setModelChoice,
-      setStage,
-      setFailoverNote,
-    });
-  }
   if ("error" in reported) throw new Error(reported.error);
 
   // Discovery exclusions are not citation rules: a watched page or a root
@@ -1358,7 +1508,7 @@ export const draftLead = createServerFn({ method: "POST" })
   .validator(
     (
       input:
-        number | { leadId: number; modelChoice?: string; researchScope?: "public" | "supplied" },
+        number | { leadId: number; modelChoice?: string; modelEffort?: ModelEffort | null; researchScope?: "public" | "supplied" },
     ) => input,
   )
   .handler(async ({ context, data }) => {
@@ -1370,6 +1520,7 @@ export const draftLead = createServerFn({ method: "POST" })
       context: { userId: context.userId, newsroomId: owned(context) },
       leadId,
       modelChoice,
+      modelEffort: typeof data === "number" ? null : modelEffort(modelChoice, data.modelEffort),
       researchScope: typeof data === "number" ? undefined : data.researchScope,
     });
   });
@@ -1413,6 +1564,7 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
       text: string;
       documentIds?: string[];
       modelChoice?: string;
+      modelEffort?: ModelEffort | null;
       researchScope?: "public" | "supplied";
       sectionKey?: string;
     }) => input,
@@ -1425,6 +1577,7 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
       documentIds: data.documentIds,
       sectionKey: data.sectionKey,
       modelChoice: data.modelChoice,
+      modelEffort: data.modelEffort,
       researchScope: data.researchScope,
     });
   });

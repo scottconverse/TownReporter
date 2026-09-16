@@ -15,10 +15,13 @@ import {
   automaticLadder,
   effectiveBudget,
   plannerModelFor,
+  openAiCompatibleModelEfforts,
+  defaultModelEffort,
   providerEntry,
   providerModel,
   type ProviderBudget,
   type ProviderOverrides,
+  type ModelEffort,
 } from "./provider-registry.ts";
 import { PAPER } from "../paper.ts";
 import { normalizeProviderModelId } from "./provider-model-id.ts";
@@ -86,7 +89,7 @@ export type Provider =
 
 type GrokChatAdapter = (
   provider: Provider,
-  request: { system: string; user: string; maxTokens: number; model: string; timeoutMs: number },
+  request: { system: string; user: string; maxTokens: number; model: string; timeoutMs: number; reasoningEffort?: ModelEffort | null },
 ) => Promise<GrokOk | GrokErr>;
 
 /** Injectable runtime boundary for hermetic provider-dispatch tests. */
@@ -111,6 +114,7 @@ export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>
     maxTokens?: number;
     model?: string;
     timeoutMs?: number;
+    reasoningEffort?: ModelEffort | null;
   }) => Promise<{ text: string }>;
   /** Test seam for the server-only per-newsroom local-model resolver. */
   resolveLocal?: (newsroomId?: number) => Promise<LocalModelOverride | null>;
@@ -610,6 +614,7 @@ async function anthropicChat(
   user: string,
   maxTokens: number,
   timeoutMs: number,
+  reasoningEffort?: import("./provider-registry.ts").ModelEffort | null,
 ): Promise<GrokOk | GrokErr> {
   const startedAt = Date.now();
   const meta = (
@@ -640,7 +645,7 @@ async function anthropicChat(
       // under the ~1k-token minimum simply will not cache — no error, no cost.
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       thinking: { type: "adaptive" },
-      output_config: { effort: cfg.effort },
+      output_config: { effort: (reasoningEffort ?? cfg.effort) as typeof cfg.effort },
       messages: [{ role: "user", content: user }],
     });
 
@@ -715,6 +720,8 @@ export async function grokChat(
     localModel?: LocalModelOverride | null;
     /** Authenticated paper scope for an explicit custom:<UUID> choice. */
     newsroomId?: number;
+    /** Verified per-run reasoning setting for the selected named model. */
+    reasoningEffort?: ModelEffort | null;
   },
   adapters?: GrokChatAdapters,
 ): Promise<GrokOk | GrokErr> {
@@ -750,10 +757,10 @@ export async function grokChat(
   const model = opts?.model?.trim() || provider.model;
   const selectedAdapter = adapters?.[provider.kind];
   if (selectedAdapter) {
-    return selectedAdapter(provider, { system, user, maxTokens, model, timeoutMs });
+    return selectedAdapter(provider, { system, user, maxTokens, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
   }
   if (provider.kind === "anthropic") {
-    return anthropicChat({ ...provider, model }, system, user, maxTokens, timeoutMs);
+    return anthropicChat({ ...provider, model }, system, user, maxTokens, timeoutMs, opts?.reasoningEffort);
   }
   if (provider.kind === "claude-code") {
     // Server-only module — dynamic import keeps node:child_process out of the
@@ -771,11 +778,12 @@ export async function grokChat(
       model,
       timeoutMs,
       noTools: opts?.noTools,
+      reasoningEffort: opts?.reasoningEffort,
     });
   }
   if (provider.kind === "codex") {
     const { codexChat } = await import("./ai-codex.server.ts");
-    return codexChat({ system, user, model, timeoutMs });
+    return codexChat({ system, user, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
   }
   if (provider.kind === "xai-oauth") {
     if (!Number.isInteger(opts?.newsroomId) || opts?.newsroomId == null) {
@@ -792,6 +800,7 @@ export async function grokChat(
       maxTokens,
       model,
       timeoutMs,
+      reasoningEffort: opts?.reasoningEffort,
     });
     return { ok: true, text: result.text };
   }
@@ -806,7 +815,7 @@ export async function grokChat(
       { role: "user", content: user },
     ],
   };
-  const reasoningEffort = reasoningEffortFor(llm.baseUrl, model);
+  const reasoningEffort = reasoningEffortFor(llm.baseUrl, model, opts?.reasoningEffort);
   if (reasoningEffort) payload.reasoning_effort = reasoningEffort;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -929,9 +938,7 @@ export async function grokChat(
   return { ok: true, text, meta: openAiMeta(body) };
 }
 
-const THINKING_MODEL_RE =
-  /gemma-?4|qwen3(?:\.\d+)?|deepseek-(?:r1|v4(?:\.\d+)?)(?:[:/-]|$)|gpt-oss|o[134]-|reasoning|think/i;
-const REASONING_EFFORTS = new Set(["none", "low", "medium", "high"]);
+const REASONING_EFFORTS = new Set(["none", "off", "low", "medium", "high", "max"]);
 
 /**
  * `reasoning_effort` to send, or `undefined` to omit the field entirely.
@@ -939,17 +946,22 @@ const REASONING_EFFORTS = new Set(["none", "low", "medium", "high"]);
  * Real OpenAI's cloud API (`api.openai.com`) rejects this field on a
  * non-reasoning model with a 400 -- so it is never sent there, full stop,
  * regardless of `LLM_REASONING_EFFORT` or the model name. Every other
- * OpenAI-compatible endpoint (a local server, a gateway, xAI) either uses it
- * or silently ignores an extra field, which local-model servers do.
+ * OpenAI-compatible endpoint is handled by exact model capability. The wire
+ * protocol alone does not prove a model accepts `reasoning_effort`: some
+ * endpoints reject unknown values rather than ignoring them.
  *
- * `LLM_REASONING_EFFORT` is an explicit operator override and wins outright.
- * Absent that, a model whose id matches the same "this is a reasoning model"
- * heuristic `local-models.ts` uses for the picker's "thinking off"
- * badge gets `"none"` by default -- measured on this machine: without it,
- * `qwen3.6-35b-a3b` spent its whole 2,200-token budget on `reasoning_content`
- * and returned an empty draft.
+ * A validated per-run editor choice wins. `LLM_REASONING_EFFORT` supplies the
+ * default when the run did not choose one. Unknown models omit the field;
+ * that is the only transport-safe default. DeepSeek v4.1 Flash's UI "Off"
+ * is persisted as TownReporter's shared `none` value and sent as the Ollama
+ * OpenAI-compatible disable value `reasoning_effort: "none"`. Omitting the
+ * field would select provider default and can re-enable thinking.
  */
-function reasoningEffortFor(baseUrl: string, model: string): string | undefined {
+function reasoningEffortFor(
+  baseUrl: string,
+  model: string,
+  requested?: import("./provider-registry.ts").ModelEffort | null,
+): string | undefined {
   let hostname = "";
   try {
     hostname = new URL(baseUrl).hostname;
@@ -957,9 +969,21 @@ function reasoningEffortFor(baseUrl: string, model: string): string | undefined 
     hostname = "";
   }
   if (/(^|\.)api\.openai\.com$/i.test(hostname)) return undefined;
+  const declared = openAiCompatibleModelEfforts(model);
+  if (requested) {
+    if (!declared.includes(requested)) return undefined;
+    return requested;
+  }
   const override = env("LLM_REASONING_EFFORT")?.toLowerCase();
-  if (override && REASONING_EFFORTS.has(override)) return override;
-  return THINKING_MODEL_RE.test(model) ? "none" : undefined;
+  if (override && REASONING_EFFORTS.has(override)) {
+    const normalized = override === "off" ? "none" : override;
+    // Only exact models declaring this value receive the explicit disable;
+    // unknown OpenAI-compatible endpoints still omit invented fields.
+    if (normalized === "none") return declared.includes("none") ? "none" : undefined;
+    if (!declared.length || declared.includes(normalized as ModelEffort)) return normalized;
+  }
+  const safeDefault = defaultModelEffort("local-model", model);
+  return safeDefault && declared.includes(safeDefault) ? safeDefault : undefined;
 }
 
 export function isGrokAvailable(): boolean {

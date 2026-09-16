@@ -27,6 +27,7 @@ import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { ModelPicker } from "@/components/model-picker";
 import { DEFAULT_OPINION_MODEL, type OpinionModelChoice } from "@/lib/news/model-choice";
+import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
@@ -64,6 +65,7 @@ function OpinionPage() {
   const [documentsBusy, setDocumentsBusy] = useState(false);
   const [retryRequestId, setRetryRequestId] = useState<number | undefined>();
   const [modelChoice, setModelChoice] = useState<OpinionModelChoice>(DEFAULT_OPINION_MODEL);
+  const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort(DEFAULT_OPINION_MODEL));
   const [openId, setOpenId] = useState<number | null>(null);
   /*
     Where the opened piece is drawn, so it can be scrolled to.
@@ -170,7 +172,7 @@ function OpinionPage() {
   });
 
   const start = useMutation({
-    mutationFn: () => startEditorial({ data: { subject, askedFor, modelChoice, documentIds: documents.map((d) => d.id), retryRequestId } }),
+    mutationFn: () => startEditorial({ data: { subject, askedFor, modelChoice, modelEffort, documentIds: documents.map((d) => d.id), retryRequestId } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         const raw = res?.error ?? "That did not start.";
@@ -338,7 +340,9 @@ function OpinionPage() {
           <ModelPicker
             scope="opinion"
             value={modelChoice}
-            onChange={setModelChoice}
+            onChange={(choice) => { setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }}
+            effort={modelEffort}
+            onEffortChange={setModelEffort}
             disabled={start.isPending}
           />
           <div className="flex items-center gap-3">

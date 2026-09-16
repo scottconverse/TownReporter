@@ -10,10 +10,11 @@ import {
   connectionSaveMessage,
   managementActionsLocked,
 } from "@/lib/news/custom-ai-settings";
+import { isGeminiOpenAiEndpoint } from "@/lib/news/provider-model-id";
 
 type Props = {
   connections: PublicCustomAiConnection[];
-  onSave(input: CustomAiConnectionInput & { id?: string }): Promise<void>;
+  onSave(input: CustomAiConnectionInput & { id?: string }): Promise<PublicCustomAiConnection>;
   onDiscover(id: string): Promise<string[]>;
   onTest(id: string): Promise<ConnectionProbeResult>;
   onEnable(id: string, enabled: boolean): Promise<void>;
@@ -56,11 +57,11 @@ export function CustomAiConnections({
     setBusy(true);
     setResult(null);
     try {
-      await onSave({ ...form, id: editingId });
+      const saved = await onSave({ ...form, id: editingId });
       setEditingId(undefined);
       setModels([]);
       setForm({ name: "", baseUrl: "", apiKey: "", modelId: "" });
-      setResult(connectionSaveMessage());
+      setResult(connectionSaveMessage(saved));
     } catch (e) {
       setResult(e instanceof Error ? e.message : "Connection could not be saved.");
     } finally {
@@ -81,12 +82,14 @@ export function CustomAiConnections({
           onClick={() => {
             setEditingId(undefined);
             setModels([]);
-            setResult("Gemini preset loaded. Add your API key, then save the connection.");
+            setResult(
+              "Gemini preset loaded. Add your API key and save; it will then be ready in the writing model picker.",
+            );
             setForm({
               name: "Gemini",
               baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
               apiKey: "",
-              modelId: "",
+              modelId: "gemini-2.5-flash",
             });
           }}
         >
@@ -95,7 +98,12 @@ export function CustomAiConnections({
       </div>
       <p className="meta">
         Using LiteLLM?{" "}
-        <a href="https://docs.litellm.ai/docs/proxy/quick_start" target="_blank" rel="noopener noreferrer" className="underline">
+        <a
+          href="https://docs.litellm.ai/docs/proxy/quick_start"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline"
+        >
           Open the official setup guide (new tab)
         </a>
         . LiteLLM is optional and runs separately from TownReporter.
@@ -121,13 +129,20 @@ export function CustomAiConnections({
           />
         </Field>
         <Field
-          label="API key (optional)"
-          hint="Stored encrypted on the server. It is never shown again."
+          label={isGeminiOpenAiEndpoint(form.baseUrl) ? "Gemini API key" : "API key (optional)"}
+          hint={
+            isGeminiOpenAiEndpoint(form.baseUrl)
+              ? editingId
+                ? "Stored encrypted on the server. Leave blank to keep the existing key."
+                : "Required and stored encrypted on the server. It is never shown again."
+              : "Stored encrypted on the server. It is never shown again."
+          }
         >
           <input
             className={inputClass}
             type="password"
             autoComplete="new-password"
+            required={isGeminiOpenAiEndpoint(form.baseUrl) && !editingId}
             value={form.apiKey}
             onChange={(e) => setForm({ ...form, apiKey: e.target.value, removeApiKey: false })}
           />
@@ -148,9 +163,17 @@ export function CustomAiConnections({
             Remove the stored API key
           </label>
         )}
-        <Field label="Model id (optional)">
+        <Field
+          label={isGeminiOpenAiEndpoint(form.baseUrl) ? "Gemini model id" : "Model id (optional)"}
+          hint={
+            isGeminiOpenAiEndpoint(form.baseUrl)
+              ? "Required. Gemini Flash is prefilled; replace it if your Google account supports a different model."
+              : undefined
+          }
+        >
           <input
             className={inputClass}
+            required={isGeminiOpenAiEndpoint(form.baseUrl)}
             value={form.modelId}
             onChange={(e) => setForm({ ...form, modelId: e.target.value })}
           />

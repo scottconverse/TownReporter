@@ -22,7 +22,7 @@ test("XAI OAuth state changes invalidate the shared provider availability query"
     /invalidateQueries\(\{\s*queryKey:\s*PROVIDER_AVAILABILITY_QUERY_KEY,\s*refetchType:\s*["']all["']/,
   );
   assert.equal(
-    source.match(/onSuccess: \(next\) => update\(/g)?.length,
+    source.match(/\bupdate\(next(?:,|\))/g)?.length,
     6,
     "start, poll, cancel, refresh, select, and disconnect must share the invalidating update",
   );

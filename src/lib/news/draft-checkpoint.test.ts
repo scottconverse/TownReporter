@@ -9,6 +9,8 @@ let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;
 let ensureJobsSchema: typeof import("./jobs.ts").ensureJobsSchema;
 let performDraftWork: typeof import("./desk.ts").performDraftWork;
+let ensureStoryDocuments: typeof import("./story-documents.server.ts").ensureStoryDocuments;
+let readStoryDocuments: typeof import("./story-documents.server.ts").readStoryDocuments;
 let withClaimedLeadDraftCheckpointLock: typeof import("./draft-order.server.ts").withClaimedLeadDraftCheckpointLock;
 let withClaimedLeadDraftLock: typeof import("./draft-order.server.ts").withClaimedLeadDraftLock;
 
@@ -17,6 +19,7 @@ before(async () => {
   ({getSql}=await vite.ssrLoadModule("/src/lib/db.ts"));
   ({ensureJobsSchema}=await vite.ssrLoadModule("/src/lib/news/jobs.ts"));
   ({performDraftWork}=await vite.ssrLoadModule("/src/lib/news/desk.ts"));
+  ({ensureStoryDocuments,readStoryDocuments}=await vite.ssrLoadModule("/src/lib/news/story-documents.server.ts"));
   ({withClaimedLeadDraftCheckpointLock,withClaimedLeadDraftLock}=await vite.ssrLoadModule("/src/lib/news/draft-order.server.ts"));
 });
 after(async()=>vite?.close());
@@ -54,51 +57,113 @@ test("persists a writer checkpoint without completing the job when later reporti
   await assert.rejects(withClaimedLeadDraftCheckpointLock(job,lead.id,async()=>assert.fail("withdrawn editor entered checkpoint write")),/permission was withdrawn/i);
 });
 
-test("Automatic resumes supplied-document reading on Claude Sonnet after Codex quota", async () => {
+test("document reading retries only the failed chunk and keeps completed chunks", async () => {
   await ensureJobsSchema();
   const sql = await getSql(), room = 88404, user = "document-failover-editor";
+  await ensureStoryDocuments(sql);
   await sql.query("insert into newsrooms(id,name) values($1,'Document failover room') on conflict(id) do nothing", [room]);
-  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')", [user, room]);
   const [lead] = await sql.query<{ id: number }>(
     "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'Packet lead','Uploaded packet','council','new','[]','',1,'{}') returning id",
     [user, room],
   );
+  // Exactly two model-sized chunks: one completes on the requested provider,
+  // then only the second chunk is retried after the technical switch.
+  const text = `${"First completed section. ".repeat(850)}${"Second failed section. ".repeat(850)}`;
+  await sql.query(
+    "insert into story_documents(id,newsroom_id,user_id,lead_id,filename,mime,original) values($1,$2,$3,$4,'packet.txt','text/plain',$5)",
+    [`checkpoint-${Date.now()}`, room, user, lead.id, Buffer.from(text)],
+  );
+  const calls: Array<{ choice: string; marker: string }> = [];
+  const switches: string[] = [];
+  const evidence = await readStoryDocuments(
+    room,
+    lead.id,
+    "codex-balanced",
+    "Read the packet",
+    async () => undefined,
+    [],
+    user,
+    true,
+    undefined,
+    {
+      modelEffort: "none",
+      source: "auto",
+      probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
+      chat: async (_system, prompt, _tokens, opts) => {
+        const choice = String(opts?.choice);
+        const marker = prompt.includes("Characters 1-24000") ? "first" : "second";
+        calls.push({ choice, marker });
+        if (choice === "codex-balanced" && marker === "second") {
+          return { ok: false as const, error: "Codex request timed out after 150s, 0 bytes out" };
+        }
+        return { ok: true as const, text: `${marker} evidence from ${choice}` };
+      },
+      onSwitch: async ({ nextChoice }) => { switches.push(nextChoice); },
+    },
+  );
+  assert.deepEqual(calls, [
+    { choice: "codex-balanced", marker: "first" },
+    { choice: "codex-balanced", marker: "second" },
+    { choice: "claude-sonnet", marker: "second" },
+  ]);
+  assert.deepEqual(switches, ["claude-sonnet"]);
+  assert.match(evidence, /first evidence from codex-balanced/);
+  assert.match(evidence, /second evidence from claude-sonnet/);
+});
+test("Story retries only the failed writer call and keeps completed research", async () => {
+  await ensureJobsSchema();
+  const sql = await getSql(), room = 88405, user = "writer-call-failover-editor";
+  await sql.query("insert into newsrooms(id,name) values($1,'Writer failover room') on conflict(id) do nothing", [room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')", [user, room]);
+  const [lead] = await sql.query<{ id: number }>(
+    "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'Writer failover lead','Why','council','new','[]','',1,'{}') returning id",
+    [user, room],
+  );
   const [jobRow] = await sql.query<{ id: number }>(
-    "insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'draft',$3,'codex-balanced','auto','supplied','default','running','Reading documents','document-failover-claim') returning id",
-    [user, room, lead.id],
+    "insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token,result_json) values($1,$2,'draft',$3,'codex-balanced','editor','supplied','default','running','Writing','writer-failover-claim',$4) returning id",
+    [user, room, lead.id, JSON.stringify({ modelEffort: "none" })],
   );
   const job = {
     id: jobRow.id, user_id: user, newsroom_id: room, kind: "draft", subject_id: lead.id,
-    model_choice: "codex-balanced", model_choice_source: "auto", research_scope: "supplied",
-    lane: "default", status: "running", stage: "Reading documents", claim_token: "document-failover-claim",
+    model_choice: "codex-balanced", model_choice_source: "editor", research_scope: "supplied",
+    lane: "default", status: "running", stage: "Writing", claim_token: "writer-failover-claim",
+    result_json: JSON.stringify({ modelEffort: "none" }),
   } as DeskJob;
-  const documentChoices: string[] = [];
-  const reportChoices: string[] = [];
-  const stages: string[] = [];
+  let reportCalls = 0;
+  let upstreamResearchCalls = 0;
+  const providerCalls: Array<{ choice: unknown; effort: unknown }> = [];
+
   await performDraftWork(job, {
-    readStoryDocuments: async (_room, _lead, choice) => {
-      documentChoices.push(choice);
-      if (choice === "codex-balanced") throw new Error("Codex API error 429: usage limit reached");
-      return "EDITOR-SUPPLIED DOCUMENTS: packet evidence";
-    },
-    reportAndDraft: async (input) => {
-      reportChoices.push(input.modelChoice);
-      assert.equal(input.researchScope, "supplied");
-      assert.match(input.documentEvidence ?? "", /packet evidence/);
+    readStoryDocuments: async () => "",
+    reportAndDraft: async (_input, deps) => {
+      reportCalls += 1;
+      upstreamResearchCalls += 1;
+      const written = await deps.chat?.("writer system", "assembled research packet", 2200);
+      assert.equal(written?.ok, true);
       return {
-        headline: "Packet lead", dek: "", body: "The packet contains a documented council decision.",
+        headline: "Writer failover lead", dek: "", body: "The completed research packet was reused.",
         topic: "council", source_urls: [], integrity_notes: "", memory_entities: [], form: "news",
         provenance: [], found_note: "", findings: [], unanswered: [], claims: [], research_memo: {},
       } as ReportedDraftResult;
     },
-    probe: async (choice) => ({ ok: true, label: "Claude Sonnet", choice: choice as "claude-sonnet" }),
+    chat: async (_system, _user, _tokens, opts) => {
+      providerCalls.push({ choice: opts?.choice, effort: opts?.reasoningEffort });
+      return providerCalls.length === 1
+        ? { ok: false as const, error: "Codex request timed out after 150s, 0 bytes out" }
+        : { ok: true as const, text: "writer result" };
+    },
+    probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
+    setJobStage: async () => undefined,
     setJobModelChoice: async (_id, choice) => { job.model_choice = choice; },
-    setJobStage: async (_id, stage) => { stages.push(stage); },
     setJobFailoverNote: async () => undefined,
   });
-  assert.deepEqual(documentChoices, ["codex-balanced", "claude-sonnet"]);
-  assert.deepEqual(reportChoices, ["claude-sonnet"]);
-  assert.ok(stages.includes("Switched to Claude Sonnet: Codex Terra reached its usage limit"));
+
+  assert.equal(reportCalls, 1, "the reporting pipeline must not restart");
+  assert.equal(upstreamResearchCalls, 1, "completed ingestion/search/report gathering must be reused");
+  assert.deepEqual(providerCalls, [
+    { choice: "codex-balanced", effort: "none" },
+    { choice: "claude-sonnet", effort: "medium" },
+  ]);
 });
 
 test("a later writer checkpoint cannot supersede an intervening editor draft",async()=>{

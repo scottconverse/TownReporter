@@ -38,10 +38,13 @@ test("the chosen model is passed into runScan, and the picker is disabled while 
   assertScanDispatch(src);
   const pickerAt = src.indexOf("<ModelPicker");
   assert.ok(pickerAt >= 0, "ModelPicker must be rendered");
-  const pickerTag = src.slice(pickerAt, src.indexOf(">", pickerAt) + 1);
+  const pickerEnd = src.indexOf("/>", pickerAt);
+  assert.ok(pickerEnd > pickerAt, "ModelPicker must have a complete self-closing tag");
+  const pickerTag = src.slice(pickerAt, pickerEnd + 2);
   assert.match(pickerTag, /disabled=\{scanning\}/);
   assert.match(pickerTag, /value=\{modelChoice\}/);
-  assert.match(pickerTag, /onChange=\{setModelChoice\}/);
+  assert.match(pickerTag, /onChange=\{\(choice\) => \{ setModelChoice\(choice\); setModelEffort\(defaultModelEffort\(choice\)\); \}\}/);
+  assert.match(pickerTag, /onEffortChange=\{setModelEffort\}/);
 });
 
 test("Scan's failure states still show the Sign in button the 0.6.0 work added", () => {

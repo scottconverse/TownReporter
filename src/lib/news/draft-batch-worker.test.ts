@@ -309,37 +309,47 @@ for (const boundary of ["membership", "lease"] as const) {
   });
 }
 
-it("does not fail over when the selected subscription transport fails", async () => {
-  const { job } = await fixture(99204);
-  let calls = 0;
-  await assert.rejects(
-    performDraftWork(job, {
+it("fails over only after a technical selected-transport failure", async () => {
+  const { sql, job } = await fixture(99204);
+  const calls: string[] = [];
+  await performDraftWork(job, {
       reportAndDraft: async (_input, deps) => {
         const answer = await deps.chat?.("system", "user", 100);
         return answer?.ok ? reported : { error: answer?.error ?? "failed" };
       },
       batchChatAdapters: {
         claude: async () => {
-          calls += 1;
+          calls.push("claude");
           return { ok: false, error: "429 subscription quota" };
         },
         codex: async () => {
-          calls += 1;
-          return { ok: true, text: "must not run" };
+          calls.push("codex");
+          return { ok: true, text: "fallback answer" };
         },
         local: async () => {
-          calls += 1;
+          calls.push("local");
           return { ok: true, text: "must not run" };
         },
       },
-      probe: async () => {
-        throw new Error("must not probe");
-      },
+      probe: async (choice) =>
+        choice === "codex-balanced"
+          ? { ok: true as const, label: "Codex Terra", choice: "codex-balanced" as const }
+          : { ok: false as const, error: `${choice} unavailable` },
+      validateBatchRuntime: async (_room, choice) => ({
+        runtime: "codex-terra" as const,
+        modelChoice: choice,
+        transport: "codex" as const,
+        model: "selected-terra",
+        modelEffort: "medium" as const,
+      }),
       setJobStage: async () => undefined,
-    }),
-    /429 subscription quota/,
+    });
+  assert.deepEqual(calls, ["claude", "codex"]);
+  const [batch] = await sql.query<{ runtime_snapshot: { modelChoice: string } }>(
+    "select runtime_snapshot from draft_batches where id=$1",
+    [job.draft_batch_id],
   );
-  assert.equal(calls, 1);
+  assert.equal(batch.runtime_snapshot.modelChoice, "codex-balanced");
 });
 
 it("a corrupt persisted runtime fails closed before report work", async () => {

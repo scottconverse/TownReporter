@@ -3,19 +3,52 @@ import { siteUrl } from "../paper.ts";
 import { probeProvider } from "./ai.ts";
 import { assertHttpUrl } from "./url-guard.ts";
 import { assertRate, audit } from "./ops.ts";
-import { enqueueJob, findOpenJob, kickJobs } from "./jobs.ts";
+import { enqueueJob, findOpenJob, kickJobs, setJobFailoverNote, setJobStage } from "./jobs.ts";
 import { scanPreflight } from "./preflight.ts";
 import { checkOpinionReadiness } from "./opinion-readiness.ts";
 import {
   effectiveStoryModelChoice,
   modelChoiceLabel,
+  OPINION_AUTOMATIC_LADDER,
   storyModelChoice,
   type OpinionModelChoice,
   type StoryModelChoice,
 } from "./model-choice.ts";
 import { parseWriteStoryInput } from "./write-story.ts";
+import { modelEffort, type ModelEffort } from "./provider-registry.ts";
+import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { appendScratch, packNotes, parseNotes } from "./notes.ts";
 import { sectionScanSnapshot, ensureSectionsSchema, getSections, resolvedSectionKey } from "./sections.server.ts";
+import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
+
+async function resolveTechnicalPreflight(
+  requested: StoryModelChoice,
+  newsroomId: number,
+  probe: typeof probeProvider,
+) {
+  const first = await probe(requested, newsroomId);
+  if (first.ok) return { probe: first, switchReceipt: null };
+  const plan = await planAutomaticFailover({
+    source: requested === "auto" ? "auto" : "editor",
+    current: requested,
+    error: first.error,
+    probe: (choice) => probe(choice, newsroomId),
+  });
+  if (!plan) return { probe: first, switchReceipt: null };
+  const resolved = await probe(plan.next, newsroomId);
+  if (!resolved.ok) return { probe: first, switchReceipt: null };
+  const previousLabel = modelChoiceLabel(requested);
+  return {
+    probe: resolved,
+    switchReceipt: {
+      requested,
+      resolved: plan.next,
+      reason: plan.reason,
+      note: failoverNoteSentence(plan.label, previousLabel, plan.reason),
+      stage: `Switched to ${plan.label}: ${failoverReasonPhrase(previousLabel, plan.reason)}`,
+    },
+  };
+}
 
 export type AuthenticatedEditorContext = {
   userId: string;
@@ -39,6 +72,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
     context: AuthenticatedEditorContext;
     leadId: number;
     modelChoice: StoryModelChoice;
+    modelEffort?: ModelEffort | null;
     researchScope?: "public" | "supplied";
   },
   deps: StoryDraftCommitDeps = {},
@@ -55,7 +89,8 @@ export async function commitStoryDraftForAuthenticatedEditor(
   }
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
-  const providerProbe = await (deps.probeProvider ?? probeProvider)(input.modelChoice, input.context.newsroomId);
+  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, deps.probeProvider ?? probeProvider);
+  const providerProbe = preflight.probe;
   const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {
     return {
@@ -68,6 +103,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
   }
 
   const effectiveChoice = providerProbe.ok ? providerProbe.choice : input.modelChoice;
+  const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
   const open = await (deps.findOpenJob ?? findOpenJob)({
     newsroomId: input.context.newsroomId,
     kind: "draft",
@@ -100,7 +136,18 @@ export async function commitStoryDraftForAuthenticatedEditor(
     modelChoice: effectiveChoice,
     researchScope,
     modelChoiceSource: input.modelChoice === "auto" ? "auto" : "editor",
+    resultJson: JSON.stringify(initialModelRuntimeReceipt({
+      requestedRuntime: input.modelChoice,
+      requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
+      actualRuntime: effectiveChoice,
+      actualEffort: effectiveEffort,
+      preflightFailover: preflight.switchReceipt,
+    })),
   });
+  if (preflight.switchReceipt) {
+    await setJobStage(job.id, preflight.switchReceipt.stage);
+    await setJobFailoverNote(job.id, preflight.switchReceipt.note);
+  }
   const persistedChoice = effectiveStoryModelChoice(job.model_choice);
   if (persistedChoice !== effectiveChoice || (job.research_scope ?? "public") !== researchScope) {
     return {
@@ -139,11 +186,13 @@ export async function commitScanForAuthenticatedEditor(
   input: {
     context: AuthenticatedEditorContext;
     modelChoice: StoryModelChoice;
+    modelEffort?: ModelEffort | null;
     sectionKey?: string;
   },
   deps: ScanCommitDeps = {},
 ) {
-  const providerProbe = await (deps.probeProvider ?? probeProvider)(input.modelChoice, input.context.newsroomId);
+  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, deps.probeProvider ?? probeProvider);
+  const providerProbe = preflight.probe;
   const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {
     return {
@@ -156,6 +205,7 @@ export async function commitScanForAuthenticatedEditor(
   }
 
   const effectiveChoice = providerProbe.ok ? providerProbe.choice : input.modelChoice;
+  const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
   let sectionSnapshot;
   try {sectionSnapshot=await sectionScanSnapshot(input.context.newsroomId,input.sectionKey);}
   catch(error) {return {ok:false as const,error:error instanceof Error?error.message:"Invalid section.",detail:"Open Paper setup to review the section and its assigned sources.",retryable:true};}
@@ -201,7 +251,18 @@ export async function commitScanForAuthenticatedEditor(
     subjectId: runId,
     modelChoice: effectiveChoice,
     modelChoiceSource: input.modelChoice === "auto" ? "auto" : "editor",
+    resultJson: JSON.stringify(initialModelRuntimeReceipt({
+      requestedRuntime: input.modelChoice,
+      requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
+      actualRuntime: effectiveChoice,
+      actualEffort: effectiveEffort,
+      preflightFailover: preflight.switchReceipt,
+    })),
   });
+  if (preflight.switchReceipt) {
+    await setJobStage(job.id, preflight.switchReceipt.stage);
+    await setJobFailoverNote(job.id, preflight.switchReceipt.note);
+  }
   if (job.subject_id !== runId) {
     await sql`update scan_runs set finished_at=now(),error='Another scan was queued first. This request did not run.' where id=${runId} and newsroom_id=${input.context.newsroomId}`;
     const [existing]=await sql<{section_snapshot:string|null}>`select section_snapshot from scan_runs where id=${job.subject_id} and newsroom_id=${input.context.newsroomId}`;
@@ -254,6 +315,7 @@ export async function commitOpinionForAuthenticatedEditor(
     documentIds?: string[];
     retryRequestId?: number;
     modelChoice: OpinionModelChoice;
+    modelEffort?: ModelEffort | null;
   },
   deps: OpinionCommitDeps = {},
 ) {
@@ -272,9 +334,36 @@ export async function commitOpinionForAuthenticatedEditor(
   // The complete editor-authored material lives in source_text below.
   const subject = (sourceText.split(/\r?\n/).find((line) => line.trim())?.trim() || "Editorial from attached documents").slice(0, 400);
 
-  const readiness = await (deps.checkReadiness ?? checkOpinionReadiness)(input.modelChoice, {}, input.context.newsroomId);
-  if (!readiness.ready) return { ok: false as const, error: readiness.why };
+  const checkReadiness = deps.checkReadiness ?? checkOpinionReadiness;
+  let readiness = await checkReadiness(input.modelChoice, {}, input.context.newsroomId);
+  let opinionPreflight: null | { requested: string; resolved: string; reason: string; note: string; stage: string } = null;
+  if (!readiness.ready) {
+    const plan = await planAutomaticFailover({
+      source: input.modelChoice === "auto" ? "auto" : "editor",
+      current: input.modelChoice,
+      error: readiness.why,
+      ladder: OPINION_AUTOMATIC_LADDER,
+      probe: async (choice) => {
+        const candidate = await checkReadiness(choice as OpinionModelChoice, {}, input.context.newsroomId);
+        return candidate.ready
+          ? { ok: true as const, choice: candidate.effectiveChoice, label: modelChoiceLabel(candidate.effectiveChoice) }
+          : { ok: false as const, error: candidate.why };
+      },
+    });
+    if (!plan) return { ok: false as const, error: readiness.why };
+    readiness = await checkReadiness(plan.next as OpinionModelChoice, {}, input.context.newsroomId);
+    if (!readiness.ready) return { ok: false as const, error: readiness.why };
+    const previousLabel = modelChoiceLabel(input.modelChoice);
+    opinionPreflight = {
+      requested: input.modelChoice,
+      resolved: readiness.effectiveChoice,
+      reason: failoverReasonPhrase(previousLabel, plan.reason),
+      note: failoverNoteSentence(modelChoiceLabel(readiness.effectiveChoice), previousLabel, plan.reason),
+      stage: `Switched to ${modelChoiceLabel(readiness.effectiveChoice)}: ${failoverReasonPhrase(previousLabel, plan.reason)}`,
+    };
+  }
   const effectiveChoice = readiness.effectiveChoice;
+  const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
 
   // OAuth is checked before schema setup or a database handle is requested.
   // A signed-out provider therefore cannot mutate even database metadata, let
@@ -390,7 +479,18 @@ export async function commitOpinionForAuthenticatedEditor(
       kind: "editorial",
       subjectId: requestId,
       modelChoice: effectiveChoice,
+      resultJson: JSON.stringify(initialModelRuntimeReceipt({
+        requestedRuntime: input.modelChoice,
+        requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
+        actualRuntime: effectiveChoice,
+        actualEffort: effectiveEffort,
+        preflightFailover: opinionPreflight,
+      })),
     });
+    if (opinionPreflight) {
+      await setJobStage(job.id, opinionPreflight.stage);
+      await setJobFailoverNote(job.id, opinionPreflight.note);
+    }
   } catch (error) {
     // If enqueue committed and only its return path failed, recover the real
     // open job rather than turning live work into an orphan. Otherwise leave
@@ -460,6 +560,7 @@ export async function writeStoryForAuthenticatedEditor(
     documentIds?: string[];
     researchScope?: "public" | "supplied";
     modelChoice?: string;
+    modelEffort?: ModelEffort | null;
     sectionKey?: string;
   },
   deps: WriteStoryCommitDeps = {},
@@ -534,7 +635,7 @@ export async function writeStoryForAuthenticatedEditor(
   await linkStoryDocuments(sql,input.context.newsroomId,input.context.userId,leadId,documentIds);
   const modelChoice = storyModelChoice(input.modelChoice);
   const commit = await commitStoryDraftForAuthenticatedEditor(
-    { context: input.context, leadId, modelChoice, researchScope: input.researchScope },
+    { context: input.context, leadId, modelChoice, modelEffort: input.modelEffort, researchScope: input.researchScope },
     deps,
   );
   return { ...commit, leadId };

@@ -87,6 +87,10 @@ const statesStub = inlineModule(`
   }
 `);
 
+const providerRegistryStub = inlineModule(`
+  export function defaultModelEffort() { return null; }
+`);
+
 const { LeadRowView } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-leads.tsx", import.meta.url), "utf8"),
@@ -98,6 +102,7 @@ const { LeadRowView } = await import(
       "@/lib/paper-context": paperContextStub,
       "@/components/model-picker": modelPickerStub,
       "@/lib/news/model-choice": modelChoiceStub,
+      "@/lib/news/provider-registry": providerRegistryStub,
       "@/components/states": statesStub,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),

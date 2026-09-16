@@ -5,6 +5,8 @@ import {
   providerEntry,
   providerModel,
   type PickerProviderId,
+  modelEffort,
+  type ModelEffort,
 } from "./provider-registry.ts";
 import type { OcrOptions } from "./ingest.ts";
 
@@ -17,12 +19,14 @@ export type ForcedRuntimeSnapshot =
       modelChoice: "local-model";
       transport: "local";
       localModel: { baseUrl: string; id: string };
+      modelEffort?: ModelEffort;
     }
   | {
       runtime: Exclude<ForcedRuntime, "local" | "local-model">;
       modelChoice: CliProviderChoice;
       transport: "claude-code" | "codex";
       model: string;
+      modelEffort?: ModelEffort;
     }
   | {
       runtime: "grok-oauth";
@@ -30,6 +34,7 @@ export type ForcedRuntimeSnapshot =
       transport: "xai-oauth";
       model: string;
       newsroomId: number;
+      modelEffort?: ModelEffort;
     }
   | {
       runtime: CustomModelChoice;
@@ -38,6 +43,7 @@ export type ForcedRuntimeSnapshot =
       model: string;
       newsroomId: number;
       label?: string;
+      modelEffort?: ModelEffort;
     };
 
 const choiceFor = (
@@ -56,6 +62,7 @@ const choiceFor = (
 export async function validateForcedRuntime(
   newsroomId: number,
   runtime: ForcedRuntime,
+  effort?: ModelEffort | null,
 ): Promise<ForcedRuntimeSnapshot> {
   if (runtime === "local" || runtime === "local-model") {
     const local = await resolveLocalModelChoice(newsroomId);
@@ -69,11 +76,13 @@ export async function validateForcedRuntime(
         "Local model is unavailable. Select a model on a known local endpoint first.",
       );
     }
+    const exactEffort = modelEffort("local-model", effort, local.override.id);
     return {
       runtime: "local",
       modelChoice: "local-model",
       transport: "local",
       localModel: local.override,
+      ...(exactEffort ? { modelEffort: exactEffort } : {}),
     };
   }
   if (isCustomModelChoice(runtime)) {
@@ -83,6 +92,7 @@ export async function validateForcedRuntime(
     const { probeProvider } = await import("./ai.ts");
     const ready = await probeProvider(runtime, newsroomId);
     if (!ready.ok) throw new Error(ready.error);
+    const exactEffort = modelEffort(runtime, effort, connection.modelId);
     return {
       runtime,
       modelChoice: runtime,
@@ -90,6 +100,7 @@ export async function validateForcedRuntime(
       model: connection.modelId,
       newsroomId,
       ...(connection.name ? { label: connection.name } : {}),
+      ...(exactEffort ? { modelEffort: exactEffort } : {}),
     };
   }
   if (runtime === "grok-oauth") {
@@ -99,12 +110,14 @@ export async function validateForcedRuntime(
     const { probeProvider } = await import("./ai.ts");
     const ready = await probeProvider(runtime, newsroomId);
     if (!ready.ok) throw new Error(ready.error);
+    const exactEffort = modelEffort(runtime, effort, connection.modelId);
     return {
       runtime,
       modelChoice: runtime,
       transport: "xai-oauth",
       model: connection.modelId,
       newsroomId,
+      ...(exactEffort ? { modelEffort: exactEffort } : {}),
     };
   }
   const choice = choiceFor(runtime);
@@ -122,6 +135,7 @@ export async function validateForcedRuntime(
     modelChoice: choice as CliProviderChoice,
     model: providerModel(entry),
     transport: entry.kind,
+    ...(modelEffort(choice, effort) ? { modelEffort: modelEffort(choice, effort)! } : {}),
   };
 }
 
@@ -142,11 +156,16 @@ export function parseForcedRuntimeSnapshot(value: unknown): ForcedRuntimeSnapsho
       typeof local.id === "string" &&
       local.id.trim()
     ) {
+      const parsedEffort = row.modelEffort === undefined
+        ? null
+        : modelEffort("local-model", row.modelEffort, local.id);
+      if (row.modelEffort !== undefined && parsedEffort !== row.modelEffort) return null;
       return {
         runtime: "local",
         modelChoice: "local-model",
         transport: "local",
         localModel: { baseUrl: local.baseUrl, id: local.id },
+        ...(parsedEffort ? { modelEffort: parsedEffort } : {}),
       };
     }
     return null;
@@ -161,6 +180,10 @@ export function parseForcedRuntimeSnapshot(value: unknown): ForcedRuntimeSnapsho
       Number.isSafeInteger(row.newsroomId) &&
       Number(row.newsroomId) > 0
     ) {
+      const parsedEffort = row.modelEffort === undefined
+        ? null
+        : modelEffort("grok-oauth", row.modelEffort, row.model);
+      if (row.modelEffort !== undefined && parsedEffort !== row.modelEffort) return null;
       return row as ForcedRuntimeSnapshot;
     }
     if (
@@ -173,6 +196,10 @@ export function parseForcedRuntimeSnapshot(value: unknown): ForcedRuntimeSnapsho
       Number(row.newsroomId) > 0 &&
       (row.label === undefined || typeof row.label === "string")
     ) {
+      const parsedEffort = row.modelEffort === undefined
+        ? null
+        : modelEffort(row.runtime, row.modelEffort, row.model);
+      if (row.modelEffort !== undefined && parsedEffort !== row.modelEffort) return null;
       return row as ForcedRuntimeSnapshot;
     }
     const runtime = row.runtime as ForcedRuntime;
@@ -192,6 +219,8 @@ export function parseForcedRuntimeSnapshot(value: unknown): ForcedRuntimeSnapsho
       row.model.trim() &&
       row.transport === entry.kind
     ) {
+      const parsedEffort = row.modelEffort === undefined ? null : modelEffort(choice, row.modelEffort);
+      if (row.modelEffort !== undefined && parsedEffort !== row.modelEffort) return null;
       return row as ForcedRuntimeSnapshot;
     }
   }
@@ -205,8 +234,9 @@ export type ForcedChatAdapters<T> = {
     model: string;
     timeoutMs: number;
     noTools?: boolean;
+    reasoningEffort?: ModelEffort | null;
   }) => Promise<T>;
-  codex: (input: { system: string; user: string; model: string; timeoutMs: number }) => Promise<T>;
+  codex: (input: { system: string; user: string; model: string; timeoutMs: number; reasoningEffort?: ModelEffort | null }) => Promise<T>;
   local: (
     system: string,
     user: string,
@@ -216,6 +246,7 @@ export type ForcedChatAdapters<T> = {
       choice: "local-model";
       localModel: { baseUrl: string; id: string };
       noTools?: boolean;
+      reasoningEffort?: ModelEffort | null;
     },
   ) => Promise<T>;
   custom?: (
@@ -228,6 +259,7 @@ export type ForcedChatAdapters<T> = {
       newsroomId: number;
       model: string;
       noTools?: boolean;
+      reasoningEffort?: ModelEffort | null;
     },
   ) => Promise<T>;
   xai?: (
@@ -240,6 +272,7 @@ export type ForcedChatAdapters<T> = {
       newsroomId: number;
       model: string;
       noTools?: boolean;
+      reasoningEffort?: ModelEffort | null;
     },
   ) => Promise<T>;
 };
@@ -260,6 +293,7 @@ export async function runForcedChat<T>(
       ...options,
       choice: "local-model",
       localModel: valid.localModel,
+      ...(valid.modelEffort ? { reasoningEffort: valid.modelEffort } : {}),
     });
   }
   if (valid.transport === "xai-oauth") {
@@ -271,6 +305,7 @@ export async function runForcedChat<T>(
       choice: "grok-oauth",
       newsroomId: valid.newsroomId,
       model: valid.model,
+      ...(valid.modelEffort ? { reasoningEffort: valid.modelEffort } : {}),
     });
   }
   if (valid.transport === "custom") {
@@ -282,6 +317,7 @@ export async function runForcedChat<T>(
       choice: valid.modelChoice,
       newsroomId: valid.newsroomId,
       model: valid.model,
+      ...(valid.modelEffort ? { reasoningEffort: valid.modelEffort } : {}),
     });
   }
   if (valid.transport === "claude-code") {
@@ -291,18 +327,21 @@ export async function runForcedChat<T>(
       model: valid.model,
       timeoutMs,
       noTools: options?.noTools,
+      reasoningEffort: valid.modelEffort,
     });
   }
-  return adapters.codex({ system, user, model: valid.model, timeoutMs });
+  return adapters.codex({ system, user, model: valid.model, timeoutMs, reasoningEffort: valid.modelEffort });
 }
 
 export function forcedOcrOptions(
   snapshot: ForcedRuntimeSnapshot,
   beforeModelCall?: () => Promise<void>,
   adapters?: OcrOptions["adapters"],
+  onProviderSwitch?: OcrOptions["onProviderSwitch"],
 ): OcrOptions {
   return {
     provider: snapshot.modelChoice,
+    ...(snapshot.modelEffort ? { reasoningEffort: snapshot.modelEffort } : {}),
     newsroomId:
       snapshot.transport === "custom" || snapshot.transport === "xai-oauth"
         ? String(snapshot.newsroomId)
@@ -319,6 +358,7 @@ export function forcedOcrOptions(
           },
     beforeModelCall,
     adapters,
+    ...(onProviderSwitch ? { onProviderSwitch } : {}),
   };
 }
 

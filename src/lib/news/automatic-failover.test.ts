@@ -110,7 +110,7 @@ describe("planAutomaticFailover", () => {
     assert.deepEqual(calls, ["codex-balanced"]);
   });
 
-  it("never fails over an editor's explicit model choice, even on the same login lapse", async () => {
+  it("routes an editor's preferred model around the same login lapse", async () => {
     const calls: string[] = [];
     const plan = await planAutomaticFailover({
       source: "editor",
@@ -121,11 +121,11 @@ describe("planAutomaticFailover", () => {
         return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
       },
     });
-    assert.equal(plan, null);
-    assert.deepEqual(calls, [], "an explicit choice must never even probe another provider");
+    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "auth" });
+    assert.deepEqual(calls, ["codex-balanced"]);
   });
 
-  it("never fails over an editor's explicit model choice, even on the same timeout", async () => {
+  it("routes an editor's preferred model around the same timeout", async () => {
     const calls: string[] = [];
     const plan = await planAutomaticFailover({
       source: "editor",
@@ -136,8 +136,8 @@ describe("planAutomaticFailover", () => {
         return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
       },
     });
-    assert.equal(plan, null);
-    assert.deepEqual(calls, [], "an explicit choice must never even probe another provider");
+    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
+    assert.deepEqual(calls, ["codex-balanced"]);
   });
 
   it("returns null when Automatic's next rung is not ready either", async () => {
@@ -212,14 +212,14 @@ describe("planAutomaticFailover", () => {
     assert.equal(probes, 0);
   });
 
-  it("never fails over on an empty model response", async () => {
+  it("fails over on an empty model response", async () => {
     const plan = await planAutomaticFailover({
       source: "auto",
       current: "claude-frontier",
       error: "empty model response",
       probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
     });
-    assert.equal(plan, null);
+    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
   });
 
   it("returns null once the ladder's last rung has already failed", async () => {

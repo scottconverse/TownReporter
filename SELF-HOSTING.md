@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.50**. See the [release guide](docs/releases/0.6.50.md).
+Repository documentation version: **0.6.51**. See the [0.6.51 release guide](docs/releases/0.6.51.md); it records the source release and does not assert GitHub publication or deployment.
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -11,7 +11,7 @@ remote development machine as production. The paper is hosted at
 **https://townreporter.org** on the Halo box in Longmont, through a Cloudflare
 Tunnel. “This machine” below refers to Halo.
 
-Production was independently checked on 2026-09-13 at source `c926fc48e8e11ebce437a47bc0fd3c990671ecb8` before packaging 0.6.44. The local and public app answered, the served version matched the build, and published articles were preserved. The [current release record](docs/releases/0.6.49.md) links the release and its dated deployment evidence. A repository version, GitHub tag or release does not establish production version. Earlier machine inventories and receipts below describe their observation dates.
+Production was independently checked on 2026-09-13 at source `c926fc48e8e11ebce437a47bc0fd3c990671ecb8` before packaging 0.6.44. The local and public app answered, the served version matched the build, and published articles were preserved. The [current release record](docs/releases/0.6.51.md) identifies the current repository release and evidence boundaries; it does not rewrite the dated deployment evidence. A repository version, GitHub tag or release does not establish production version. Earlier machine inventories and receipts below describe their observation dates.
 
 Current development boundaries and queue: [handoff](HANDOFF-NEXT-AGENT.md),
 [TODO](TODO.md). Staging and promotion below require a Halo-local operator.
@@ -171,20 +171,20 @@ trusted automatically.
 
 ## The AI
 
-### The default: Claude Code, no key
+### Claude Code, no key
 
-No API key. The desk shells out to your local **Claude Code** login, so the
-subscription powers it.
-
-Model: **Claude Opus 5**. The CLI also makes a small internal Haiku call per
-request that cannot be turned off from here.
+No API key. When an editor selects a Claude model, or an unattended run reaches
+its final Claude Sonnet rung, the desk shells out to the local **Claude Code**
+login, so the subscription powers it. Automatic never selects Opus; Opus is an
+explicit editor choice. The CLI may also make a small internal Haiku call that
+cannot be turned off from here.
 
 The harness is stripped on every call — importantly `--setting-sources ""`,
 which keeps your personal `CLAUDE.md` and skills **out** of the newsroom's
 prompts. Without it your developer instructions get prepended to every story.
 
 ```
-# ANTHROPIC_MODEL=claude-opus-5     # the default
+# ANTHROPIC_MODEL=claude-sonnet-4-5 # optional configured-Claude override; Automatic never selects Opus
 # TOWNREPORTER_CLAUDE_CODE=0        # take the CLI out of the chain entirely
 ```
 
@@ -195,11 +195,11 @@ the run.
 
 | Desk work           | Provider rule                                                                                                | Recovery                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| Scan and Dark Desk  | per-run picker; Automatic uses configured gateway or Codex Terra → Claude Sonnet readiness ladder                         | repair the configured endpoint/key or sign into the provider named on the failed job                          |
-| Daily scan          | one exact named Codex or Claude model, Local model, or saved Custom AI connection; never falls back                       | repair the saved provider and resume the schedule manually                                                     |
-| Story — Automatic   | configured `LLM_*` exclusively when present; otherwise Codex Terra → Claude Sonnet readiness ladder          | repair the provider named on the failed job; a run stays pinned to one provider                               |
-| Story — explicit    | Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or Haiku; Local model; or a saved custom connection; never falls back | fix that provider, or deliberately redraft with another model                                                 |
-| Opinion             | Automatic: Codex Sol → Claude Sonnet once when needed; every named Codex or Claude model, Local model, or custom choice stays selected | repair or sign into the selected provider; the completed row records the provider that delivered             |
+| Scan and Dark Desk  | per-run picker; Automatic uses a configured gateway first or Codex Terra → Claude Sonnet; named choices are tried first   | technical recovery retries only the unfinished call and records requested/actual model and effort             |
+| Daily scan          | one named Codex or Claude model, Local model, Grok, or saved Custom AI connection is tried first; technical switches are recorded | repair provider credentials when no ready fallback exists and resume the schedule |
+| Story — Automatic   | configured `LLM_*` first when present; otherwise Codex Terra → Claude Sonnet readiness ladder | recognized technical failures retry only the unfinished call and record requested/actual model and effort; refusals stop |
+| Story — named       | Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or Haiku; Local model; Grok; or a saved custom connection is tried first | the job records requested/actual model and effort, any technical switch, and preserved checkpoints |
+| Opinion             | Automatic starts Codex Sol → Claude Sonnet; named choices are tried first; technical retry is per unfinished call | the completed row records the provider that delivered; refusals stop |
 
 For ordinary Story calls, Codex reuses the signed-in user's native configuration and full available
 Windows access. TownReporter does not disable search, shell/files,

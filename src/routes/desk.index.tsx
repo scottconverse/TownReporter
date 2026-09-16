@@ -48,6 +48,7 @@ import {
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { ModelPicker } from "@/components/model-picker";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
+import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 
@@ -194,6 +195,9 @@ function DeskHome() {
   const [storyScope, setStoryScope] = useState<"public" | "supplied">("public");
   const [storySection, setStorySection] = useState("");
   const [storyModel, setStoryModel] = useState<StoryModelChoice>("auto");
+  const [storyModelEffort, setStoryModelEffort] = useState<ModelEffort | null>(
+    defaultModelEffort("auto"),
+  );
   const [storyNotice, setStoryNotice] = useState<{
     text: string;
     kind: "error" | "info";
@@ -207,6 +211,7 @@ function DeskHome() {
           text: storyInput,
           documentIds: storyDocuments.map((d) => d.id),
           modelChoice: storyModel,
+          modelEffort: storyModelEffort,
           researchScope: storyScope,
           sectionKey: storySection || undefined,
         },
@@ -537,7 +542,12 @@ function DeskHome() {
             <ModelPicker
               scope="story"
               value={storyModel}
-              onChange={setStoryModel}
+              onChange={(choice) => {
+                setStoryModel(choice);
+                setStoryModelEffort(defaultModelEffort(choice));
+              }}
+              effort={storyModelEffort}
+              onEffortChange={setStoryModelEffort}
               disabled={writeStory.isPending}
             />
             <div className="composer-submit">

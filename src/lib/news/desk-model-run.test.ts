@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   failOverAndRetry,
   failOverOperationAndRetry,
+  runPinnedCallWithFailover,
   storyProviderFailure,
   type DraftInput,
   type ReportedDraftResult,
@@ -63,6 +64,68 @@ const successfulDraft: ReportedDraftResult = {
   research_memo: {} as ReportedDraftResult extends { research_memo: infer R } ? R : never,
   claims: [],
 } as ReportedDraftResult;
+
+describe("runPinnedCallWithFailover", () => {
+  it("retries only the failed pinned Queue call on a ready technical fallback", async () => {
+    const calls: string[] = [];
+    const switches: string[] = [];
+    const initial = { modelChoice: "codex-balanced", researchCheckpoint: "complete" };
+    const fallback = { modelChoice: "claude-sonnet", researchCheckpoint: "complete" };
+
+    const result = await runPinnedCallWithFailover({
+      snapshot: initial,
+      source: "editor",
+      run: async (snapshot) => {
+        calls.push(snapshot.modelChoice);
+        return snapshot === initial
+          ? { ok: false as const, error: LIVE_TIMEOUT_NO_OUTPUT }
+          : { ok: true as const, text: "draft" };
+      },
+      probe: async (choice) => ({ ok: true, label: "Claude Sonnet", choice }),
+      resolve: async (choice) => {
+        assert.equal(choice, "claude-sonnet");
+        return fallback;
+      },
+      onSwitch: async ({ nextChoice }) => {
+        switches.push(nextChoice);
+      },
+    });
+
+    assert.deepEqual(calls, ["codex-balanced", "claude-sonnet"]);
+    assert.equal(result.snapshot, fallback);
+    assert.equal(result.result.ok, true);
+    assert.deepEqual(switches, ["claude-sonnet"]);
+    assert.equal(result.snapshot.researchCheckpoint, "complete");
+  });
+
+  it("keeps a pinned Queue refusal terminal", async () => {
+    let calls = 0;
+    const snapshot = { modelChoice: "codex-balanced" };
+    const refusal = "The selected model declined to produce the requested story.";
+
+    const result = await runPinnedCallWithFailover({
+      snapshot,
+      source: "editor",
+      run: async () => {
+        calls += 1;
+        return { ok: false as const, error: refusal };
+      },
+      probe: async () => {
+        throw new Error("refusal must not probe a fallback");
+      },
+      resolve: async () => {
+        throw new Error("refusal must not resolve a fallback");
+      },
+      onSwitch: async () => {
+        throw new Error("refusal must not switch models");
+      },
+    });
+
+    assert.equal(calls, 1);
+    assert.equal(result.snapshot, snapshot);
+    assert.deepEqual(result.result, { ok: false, error: refusal });
+  });
+});
 
 describe("failOverAndRetry", () => {
   it("fails over on an auth-lapse error: picks the next rung and words the switch as 'sign-in lapsed'", async () => {
@@ -153,21 +216,21 @@ describe("failOverAndRetry", () => {
     );
   });
 
-  it("never fails over an editor's explicit model choice", async () => {
+  it("routes an editor's preferred model around a technical failure and records the switch", async () => {
     let modelChoiceSet = false;
     let stageSet = false;
     let noteSet = false;
+    let retryEffort: unknown;
 
     const result = await failOverAndRetry({
       job: job({ model_choice_source: "editor" }),
       error: LIVE_401,
-      draftInput,
-      runReport: async () => {
-        throw new Error("must not retry when the editor pinned the model");
+      draftInput: { ...draftInput, modelEffort: "none" },
+      runReport: async (input) => {
+        retryEffort = input.modelEffort;
+        return successfulDraft;
       },
-      probe: async () => {
-        throw new Error("must not even probe for an explicit choice");
-      },
+      probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
       setModelChoice: async () => {
         modelChoiceSet = true;
       },
@@ -179,13 +242,11 @@ describe("failOverAndRetry", () => {
       },
     });
 
-    assert.ok(
-      "error" in result && result.error === LIVE_401,
-      "the original error must pass through unchanged",
-    );
-    assert.equal(modelChoiceSet, false);
-    assert.equal(stageSet, false);
-    assert.equal(noteSet, false);
+    assert.equal(result, successfulDraft);
+    assert.equal(modelChoiceSet, true);
+    assert.equal(stageSet, true);
+    assert.equal(noteSet, true);
+    assert.equal(retryEffort, "medium", "Claude must not receive Codex-only none effort");
   });
 
   it("explains why Automatic did not move on when the next rung was not ready", async () => {
@@ -266,7 +327,7 @@ describe("Story provider failure and stage failover", () => {
     assert.deepEqual(stages, ["Switched to Claude Sonnet: Codex Terra reached its usage limit"]);
   });
 
-  it("does not reroute an explicit document-reading model or a content refusal", async () => {
+  it("reroutes an explicit document model on technical failure but keeps refusal terminal", async () => {
     for (const candidate of [
       {
         current: "claude-frontier",
@@ -302,9 +363,15 @@ describe("Story provider failure and stage failover", () => {
         setStage: async () => undefined,
         setFailoverNote: async () => undefined,
       });
-      assert.equal(result.ok, false);
-      assert.equal(probes, 0);
-      assert.equal(operations, 0);
+      if (candidate.source === "editor") {
+        assert.deepEqual(result, { ok: true, value: "must not run", choice: "codex-balanced" });
+        assert.equal(probes, 1);
+        assert.equal(operations, 1);
+      } else {
+        assert.equal(result.ok, false);
+        assert.equal(probes, 0);
+        assert.equal(operations, 0);
+      }
     }
   });
 

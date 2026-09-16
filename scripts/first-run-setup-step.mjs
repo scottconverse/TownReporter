@@ -22,7 +22,8 @@ export async function completeFirstRunSetup(page, base, opts = {}) {
   ];
   // Vite dev mode never goes network-idle under HMR churn, so wait only for
   // the DOM and then for the element that actually proves the page is live.
-  await page.goto(`${base}/desk/setup`, { waitUntil: "domcontentloaded" });
+  const navigate = opts.navigate ?? ((target, options) => page.goto(target, options));
+  await navigate(`${base}/desk/setup`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Paper name", { exact: true }).waitFor({ timeout: 45_000 });
 
   for (let round = 0; round < 12; round++) {

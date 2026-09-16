@@ -269,8 +269,18 @@ async function patchLoginProgress(newsroomId: number, patch: Record<string, unkn
 type LoginOperation = { controller: AbortController; promise: Promise<void> };
 const operations = new Map<number, LoginOperation>();
 
-function loginError(error: unknown): string {
+export function xaiOauthLoginError(error: unknown): string {
   if (error instanceof Error && error.name === "AbortError") return "Login cancelled.";
+  if (error instanceof Error) {
+    const detail = error.message.trim().replace(/\s+/g, " ").slice(0, 300);
+    if (
+      /^(?:xAI OAuth|xAI device authorization|Invalid xAI OAuth response field|Untrusted verification URI|Login cancelled|fetch failed)/i.test(
+        detail,
+      )
+    ) {
+      return `Grok Build sign-in failed: ${detail}`;
+    }
+  }
   return "Grok Build sign-in failed. Try again.";
 }
 
@@ -312,8 +322,8 @@ async function runLogin(newsroomId: number, operation: LoginOperation): Promise<
     if (!operation.controller.signal.aborted) await patchState(newsroomId, {
       login_state: loginFailureState(retained), login_url: null, login_code: null,
       login_detail: retained
-        ? `${loginError(error)} The previous Grok Build session remains connected.`
-        : loginError(error),
+        ? `${xaiOauthLoginError(error)} The previous Grok Build session remains connected.`
+        : xaiOauthLoginError(error),
     });
   }
 }
@@ -461,6 +471,7 @@ export async function xaiOauthChat(input: {
   maxTokens?: number;
   model?: string;
   timeoutMs?: number;
+  reasoningEffort?: import("./provider-registry.ts").ModelEffort | null;
 }, deps: XaiOauthChatDeps = {}): Promise<{ text: string; modelId: string; label: typeof PUBLIC_IDENTITY }> {
   const connection = await (deps.resolveConnection ?? resolveXaiOauthConnection)(input.newsroomId);
   const modelId = input.model?.trim() || connection.modelId;
@@ -488,6 +499,9 @@ export async function xaiOauthChat(input: {
     maxTokens: input.maxTokens ?? 1400,
     timeoutMs: input.timeoutMs,
     apiKey: auth.auth.apiKey,
+    ...(input.reasoningEffort && input.reasoningEffort !== "none"
+      ? { reasoning: input.reasoningEffort }
+      : {}),
   });
   const text = result.content.filter((part): part is { type: "text"; text: string } => part.type === "text")
     .map((part) => part.text).join("").trim();

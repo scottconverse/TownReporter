@@ -9,9 +9,55 @@ import {
   type ForcedChatAdapters,
   type ForcedRuntimeSnapshot,
 } from "./forced-runtime.server.ts";
+import {
+  PICKER_PROVIDER_IDS,
+  automaticLadder,
+  modelEffort,
+  type ModelEffort,
+  type PickerProviderId,
+} from "./provider-registry.ts";
+import { automaticFailoverReason, failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
+import { modelChoiceLabel } from "./model-choice.ts";
 
-export async function validateDailyRuntime(newsroomId: number, runtime: DailyScanRuntime) {
-  return validateForcedRuntime(newsroomId, runtime);
+export async function validateDailyRuntime(
+  newsroomId: number,
+  runtime: DailyScanRuntime,
+  effort?: ModelEffort | null,
+  validate: typeof validateForcedRuntime = validateForcedRuntime,
+) {
+  try {
+    const snapshot = await validate(newsroomId, runtime, modelEffort(runtime, effort));
+    return { ...snapshot, requestedRuntime: runtime, requestedEffort: modelEffort(runtime, effort), resolvedRuntime: runtime, switchReason: null, switchNote: null };
+  } catch (firstError) {
+    const detail = firstError instanceof Error ? firstError.message : String(firstError);
+    const reason = automaticFailoverReason(detail);
+    if (!reason) throw firstError;
+    const ladder = automaticLadder();
+    const at = ladder.indexOf(runtime as any);
+    const forward = at >= 0 ? ladder.slice(at + 1) : ladder;
+    const candidates = (forward.length ? forward : ladder).filter(
+      (choice): choice is PickerProviderId =>
+        choice !== runtime && PICKER_PROVIDER_IDS.includes(choice as PickerProviderId),
+    );
+    for (const choice of candidates) {
+      try {
+        const snapshot = await validate(newsroomId, choice, modelEffort(choice, effort));
+        const previousLabel = modelChoiceLabel(runtime);
+        const nextLabel = modelChoiceLabel(choice);
+        return {
+          ...snapshot,
+          requestedRuntime: runtime,
+          requestedEffort: modelEffort(runtime, effort),
+          resolvedRuntime: choice,
+          switchReason: failoverReasonPhrase(previousLabel, reason),
+          switchNote: failoverNoteSentence(nextLabel, previousLabel, reason),
+        };
+      } catch {
+        // Keep probing the scheduled fallback ladder.
+      }
+    }
+    throw firstError;
+  }
 }
 function localParts(date: Date, timezone: string) {
   const p = new Intl.DateTimeFormat("en-CA", {
@@ -77,6 +123,7 @@ export async function tickDailyScans(
       model = await (deps.runtimeSnapshot ?? validateDailyRuntime)(
         p.newsroom_id,
         dailyScanRuntime(p.runtime as StoredDailyScanRuntime),
+        modelEffort(dailyScanRuntime(p.runtime as StoredDailyScanRuntime), p.model_effort),
       );
     } catch (e) {
       await sql.query(
@@ -141,8 +188,16 @@ export async function tickDailyScans(
           ],
         );
         const [job] = await tx.query<{ id: number }>(
-          "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,lane,status,stage) values($1,$2,'scan',$3,$4,'scheduled','default','queued','Scheduled daily scan queued') returning id",
-          [p.newsroom_id, owner.user_id, run.id, model.modelChoice],
+          "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,lane,status,stage,failover_note,result_json) values($1,$2,'scan',$3,$4,'scheduled','default','queued',$5,$6,$7) returning id",
+          [
+            p.newsroom_id,
+            owner.user_id,
+            run.id,
+            model.modelChoice,
+            model.switchReason ? `Switched to ${modelChoiceLabel(model.modelChoice)}: ${model.switchReason}` : "Scheduled daily scan queued",
+            model.switchNote ?? "",
+            JSON.stringify({ modelEffort: model.modelEffort ?? null, preflightFailover: model.switchReason ? model : null }),
+          ],
         );
         await tx.query(
           "update daily_scan_reservations set scan_run_id=$1,desk_job_id=$2 where id=$3",
@@ -272,6 +327,107 @@ export async function isDailyScanJob(job: DeskJob): Promise<boolean> {
 
 type ForcedChatSnapshot = ForcedRuntimeSnapshot;
 
+export type DailyRuntimeReceipt = {
+  requestedRuntime: string;
+  requestedEffort: ModelEffort | null;
+  resolvedRuntime: string;
+  switchReason: string;
+  switchNote: string;
+};
+
+export function attachDailyRuntimeReceipt(
+  current: (ForcedChatSnapshot & Partial<DailyRuntimeReceipt>) | null,
+  next: ForcedChatSnapshot,
+  receipt: Pick<DailyRuntimeReceipt, "switchReason" | "switchNote"> & {
+    previousRuntime: string;
+    previousEffort: ModelEffort | null;
+  },
+): ForcedChatSnapshot & DailyRuntimeReceipt {
+  return {
+    ...next,
+    requestedRuntime: current?.requestedRuntime ?? current?.runtime ?? receipt.previousRuntime,
+    requestedEffort:
+      current && Object.prototype.hasOwnProperty.call(current, "requestedEffort")
+        ? current.requestedEffort ?? null
+        : current && "modelEffort" in current
+          ? current.modelEffort ?? null
+          : receipt.previousEffort,
+    resolvedRuntime: next.runtime,
+    switchReason: receipt.switchReason,
+    switchNote: receipt.switchNote,
+  };
+}
+
+/** Promote a scheduled run's actual runtime under the same lease, policy and
+ * revision fence that guards its final commit. The reservation drives the
+ * owner UI; scan_runs is the immutable execution receipt. */
+export async function persistDailyRuntimeSwitch(
+  job: DeskJob,
+  next: ForcedChatSnapshot,
+  receipt: Pick<DailyRuntimeReceipt, "switchReason" | "switchNote"> & {
+    previousRuntime: string;
+    previousEffort: ModelEffort | null;
+  },
+): Promise<ForcedChatSnapshot & DailyRuntimeReceipt> {
+  return withTransaction(async (sql) => {
+    const [current] = await sql.query<{
+      id: number;
+      model_snapshot: ForcedChatSnapshot & Partial<DailyRuntimeReceipt>;
+    }>(
+      `select r.id,r.model_snapshot
+         from daily_scan_reservations r
+         join daily_scan_policies p on p.newsroom_id=r.newsroom_id
+         join desk_jobs j on j.id=r.desk_job_id
+        where r.desk_job_id=$1 and r.scan_run_id=$2 and r.newsroom_id=$3
+          and r.status in ('queued','running')
+          and j.status='running' and j.claim_token=$4
+          and p.enabled=true and p.paused=false and p.revision=r.policy_revision
+        for update of r,p,j`,
+      [job.id, job.subject_id, job.newsroom_id, job.claim_token],
+    );
+    if (!current) {
+      throw new Error("Scheduled scan permission was withdrawn before its model switch could be saved.");
+    }
+    const stored = attachDailyRuntimeReceipt(current.model_snapshot, next, receipt);
+    const nextEffort = "modelEffort" in next ? next.modelEffort ?? null : null;
+    const jobRows = await sql.query(
+      `update desk_jobs
+          set model_choice=$2,
+              result_json=jsonb_set(coalesce(nullif(result_json,'')::jsonb,'{}'::jsonb),'{modelEffort}',coalesce(to_jsonb($3::text),'null'::jsonb),true)::text,
+              failover_note=$4,
+              stage=$5,
+              updated_at=now()
+        where id=$1 and newsroom_id=$6 and status='running' and claim_token=$7
+        returning id`,
+      [
+        job.id,
+        next.modelChoice,
+        nextEffort,
+        receipt.switchNote,
+        `Switched to ${modelChoiceLabel(next.modelChoice)}: ${receipt.switchReason}`,
+        job.newsroom_id,
+        job.claim_token,
+      ],
+    );
+    const reservationRows = await sql.query(
+      `update daily_scan_reservations set model_snapshot=$2::jsonb
+        where id=$1 and desk_job_id=$3 and scan_run_id=$4 and newsroom_id=$5
+        returning id`,
+      [current.id, JSON.stringify(stored), job.id, job.subject_id, job.newsroom_id],
+    );
+    const runRows = await sql.query(
+      `update scan_runs set model_snapshot=$2::jsonb
+        where id=$1 and newsroom_id=$3 and daily_reservation_id=$4
+        returning id`,
+      [job.subject_id, JSON.stringify(stored), job.newsroom_id, current.id],
+    );
+    if (!jobRows[0] || !reservationRows[0] || !runRows[0]) {
+      throw new Error("Scheduled scan runtime receipt could not be saved.");
+    }
+    return stored;
+  });
+}
+
 export async function runForcedDailyChat<T>(
   snapshot: ForcedChatSnapshot,
   system: string,
@@ -288,17 +444,23 @@ type DailyScanWorkDeps = {
   chatAdapters?: ForcedChatAdapters<any>;
   scanDeps?: Record<string, unknown>;
   beforeScheduledCommit?: () => Promise<void>;
+  validateRuntime?: typeof validateForcedRuntime;
+  persistRuntimeSwitch?: typeof persistDailyRuntimeSwitch;
 };
 
 export async function runDailyScanWork(job: DeskJob, deps: DailyScanWorkDeps = {}) {
   try {
     const state = await assertDailyScanCanContinue(job);
-    const model = state.model_snapshot as ForcedChatSnapshot;
+    let model = state.model_snapshot as ForcedChatSnapshot & Partial<DailyRuntimeReceipt>;
     const forcedChat = async (
       system: string,
       user: string,
       maxTokens: number,
-      opts?: { timeoutMs?: number },
+      opts?: {
+        timeoutMs?: number;
+        choice?: string;
+        reasoningEffort?: ModelEffort | null;
+      },
     ) => {
       await assertDailyScanCanContinue(job);
       const adapters =
@@ -320,6 +482,15 @@ export async function runDailyScanWork(job: DeskJob, deps: DailyScanWorkDeps = {
             return grokChat(...input);
           },
         } satisfies ForcedChatAdapters<any>);
+      const requested = opts?.choice;
+      if (requested && requested !== model.modelChoice) {
+        const next = await validateForcedRuntime(
+          job.newsroom_id,
+          requested as DailyScanRuntime,
+          opts?.reasoningEffort ?? null,
+        );
+        return runForcedDailyChat(next, system, user, maxTokens, opts, adapters);
+      }
       return runForcedDailyChat(model, system, user, maxTokens, opts, adapters);
     };
     const performScan =
@@ -333,6 +504,23 @@ export async function runDailyScanWork(job: DeskJob, deps: DailyScanWorkDeps = {
       grokChat: forcedChat as any,
       scheduledGuard: () => assertDailyScanCanContinue(job),
       scheduledSnapshot: { model, sources: state.source_snapshot },
+      onModelSwitch: async (receipt: {
+        previousChoice: string;
+        nextChoice: string;
+        nextEffort: ModelEffort | null;
+        switchReason: string;
+        switchNote: string;
+      }) => {
+        const validate = deps.validateRuntime ?? validateForcedRuntime;
+        const next = await validate(job.newsroom_id, receipt.nextChoice as DailyScanRuntime, receipt.nextEffort);
+        const persist = deps.persistRuntimeSwitch ?? persistDailyRuntimeSwitch;
+        model = await persist(job, next, {
+          previousRuntime: model.runtime ?? receipt.previousChoice,
+          previousEffort: "modelEffort" in model ? model.modelEffort ?? null : null,
+          switchReason: receipt.switchReason,
+          switchNote: receipt.switchNote,
+        });
+      },
       beforeScheduledCommit: deps.beforeScheduledCommit,
       scheduledCommit: (write: (sql: Sql) => Promise<unknown>) =>
         commitDailyScanResults(job, write),

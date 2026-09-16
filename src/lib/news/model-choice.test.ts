@@ -69,7 +69,7 @@ describe("model choice contract", () => {
       assert.equal(normalize(choice), choice);
     }
     assert.match(modelChoiceLabel(choice), /custom api/i);
-    assert.match(modelChoiceHelp(choice), /no fallback/i);
+    assert.match(modelChoiceHelp(choice), /technical failure/i);
     assert.doesNotMatch(modelChoiceHelp(choice), /tries Claude/);
     assert.deepEqual(
       STORY_MODEL_CHOICES.map((option) => option.value),
@@ -163,14 +163,14 @@ describe("model choice contract", () => {
     assert.equal(modelChoiceLabel(undefined), "Automatic");
   });
 
-  it("explains each automatic order and makes explicit choices no-fallback", () => {
+  it("explains each automatic order and technical fallback for explicit choices", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries Codex Terra, then Claude Sonnet. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the draft moves to the next. A content refusal stops the run, and an explicit pick never falls back.",
+      "Uses your configured gateway when set; otherwise tries Codex Terra, then Claude Sonnet. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
-      "Tries Codex Sol, then Claude Sonnet. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.",
+      "Tries Codex Sol, then Claude Sonnet. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run.",
     );
     assert.equal(
       modelChoiceHelp("auto", "dark"),
@@ -178,32 +178,32 @@ describe("model choice contract", () => {
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),
-      "Uses only Codex Sol for this run; no fallback.",
+      "Prefers Codex Sol for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
     );
   });
 
-  it("names the local model in every picker, with no fallback when chosen explicitly", () => {
+  it("names the local model in every picker with technical fallback", () => {
     assert.equal(modelChoiceLabel("local-model"), "Local model");
     assert.equal(
       modelChoiceHelp("local-model"),
-      "Uses only Local model for this run; no fallback.",
+      "Prefers Local model for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
     );
     assert.equal(
       modelChoiceHelp("local-model", "opinion"),
-      "Uses only Local model for this run; no fallback.",
+      "Prefers Local model for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
     );
     assert.equal(
       modelChoiceHelp("local-model", "dark"),
-      "Uses only Local model for this run; no fallback.",
+      "Prefers Local model for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
     );
   });
 
-  it("names SuperGrok in every picker, with no fallback when chosen explicitly", () => {
+  it("names SuperGrok in every picker with technical fallback", () => {
     assert.equal(modelChoiceLabel("grok-oauth"), "Grok (SuperGrok)");
     for (const surface of [undefined, "opinion", "dark"] as const) {
       assert.equal(
         modelChoiceHelp("grok-oauth", surface),
-        "Uses only Grok (SuperGrok) for this run; no fallback.",
+        "Prefers Grok (SuperGrok) for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
       );
     }
   });

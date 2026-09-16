@@ -46,6 +46,7 @@ import {
 import { ProviderTimeField } from "@/components/provider-time-field";
 import { editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
 import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
+import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { DailyScanSettings } from "@/components/daily-scan-settings";
 import { RoutineNoticePermissions } from "@/components/routine-notice-permissions";
 import { CustomAiConnections } from "@/components/custom-ai-connections";
@@ -393,9 +394,7 @@ function CustomAiSettings() {
     queryFn: () => getCustomAiConnectionsFn(),
   });
   function refresh() {
-    void qc
-      .invalidateQueries({ queryKey: ["custom-ai-connections"] })
-      .catch(() => undefined);
+    void qc.invalidateQueries({ queryKey: ["custom-ai-connections"] }).catch(() => undefined);
   }
   return (
     <div id="custom-ai-connections" className="mt-12 min-w-0 border-t border-rule pt-8">
@@ -412,12 +411,19 @@ function CustomAiSettings() {
         <CustomAiConnections
           connections={connections.data ?? []}
           onSave={async (data) => {
-            await saveCustomAiConnectionAndCache(
+            const saved = await saveCustomAiConnectionAndCache(
               data,
               (input) => saveCustomAiConnectionFn({ data: input }),
               qc,
             );
-            refresh();
+            await Promise.all([
+              qc.invalidateQueries({ queryKey: ["custom-ai-connections"] }),
+              qc.invalidateQueries({
+                queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
+                refetchType: "all",
+              }),
+            ]);
+            return saved;
           }}
           onEnable={async (id, enabled) => {
             await enableCustomAiConnectionFn({ data: { id, enabled } });
@@ -426,6 +432,10 @@ function CustomAiSettings() {
               (current) => updateCustomAiConnectionEnabled(current, id, enabled),
             );
             refresh();
+            void qc.invalidateQueries({
+              queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
+              refetchType: "all",
+            });
           }}
           onDelete={async (id) => {
             await deleteCustomAiConnectionFn({ data: { id } });
@@ -434,6 +444,10 @@ function CustomAiSettings() {
               (current) => removeCustomAiConnection(current, id),
             );
             refresh();
+            void qc.invalidateQueries({
+              queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
+              refetchType: "all",
+            });
           }}
           onDiscover={(id) => discoverCustomAiModelsFn({ data: { id } })}
           onTest={(id) => testCustomAiConnectionFn({ data: { id } })}

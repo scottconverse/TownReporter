@@ -58,8 +58,7 @@ export function isCustomModelChoice(value: unknown): value is CustomModelChoice 
 export type EffectiveStoryModelChoice = StoryModelChoice | "configured";
 
 /* Opinion uses the same native subscription providers as Story. Automatic
-   starts on Codex Sol and keeps Claude Sonnet as its limited fallback; an
-   explicit pick never falls through. */
+   starts on Codex Sol and keeps Claude Sonnet as its limited fallback. */
 export const DEFAULT_OPINION_MODEL = "codex-frontier" as const;
 export const OPINION_AUTOMATIC_LADDER = ["codex-frontier", "claude-sonnet"] as const;
 /**
@@ -157,7 +156,7 @@ function ladderSentence(ladder: readonly string[] = automaticLadder()): string {
  */
 export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"): string {
   if (isCustomModelChoice(value))
-    return "Uses only the selected custom API connection for this run; no fallback. Your provider's usage charges may apply.";
+    return "Prefers this custom API connection. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.";
   const options = modelChoicesFor(scope);
   const normalized = options.some((choice) => choice.value === value)
     ? (value as StoryModelChoice)
@@ -167,15 +166,15 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
   const selected = options.find((choice) => choice.value === normalized) ?? options[0];
   if (!selected) return "No model is available for this surface.";
   if (selected.value !== "auto") {
-    return `Uses only ${selected.label} for this run; no fallback.`;
+    return `Prefers ${selected.label} for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.`;
   }
   if (scope === "opinion") {
-    return `Tries ${ladderSentence(OPINION_AUTOMATIC_LADDER)}. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run, and an explicit pick never falls back.`;
+    return `Tries ${ladderSentence(OPINION_AUTOMATIC_LADDER)}. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run.`;
   }
   if (scope === "dark") {
     return `Uses your configured gateway when set; otherwise tries ${ladderSentence(DARK_AUTOMATIC_LADDER)}. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.`;
   }
-  return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the draft moves to the next. A content refusal stops the run, and an explicit pick never falls back.`;
+  return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.`;
 }
 
 /**

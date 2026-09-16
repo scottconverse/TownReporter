@@ -1,5 +1,5 @@
 /**
- * Automatic fails over to the next rung of the ladder when the first
+ * A run fails over to the next ready rung of the ladder when the preferred
  * provider's login lapsed mid-run, OR when it timed out / produced no
  * output.
  *
@@ -24,15 +24,11 @@
  * reported back via `reason` so the caller can word the switch
  * accurately.
  *
- * This is still deliberately narrow. A content refusal, an empty (but non-
- * zero-byte) response, or an error this desk does not recognise must never
- * fail over -- those are not "the login is gone" or "nothing came back", and
- * silently swapping providers on them would hide a real problem behind a
- * different provider's answer. An editor's explicit model choice never falls
- * back either: choosing one model IS choosing not to run the others (see
- * `modelChoiceHelp` in ./model-choice.ts). And a hop only ever goes one rung
- * -- the single retry in desk.ts's `failOverAndRetry` is the whole loop,
- * never more.
+ * This stays deliberately narrow. A content refusal or an error this desk
+ * does not recognise remains terminal. An explicit or scheduled choice is a
+ * preferred model, and a technical failure may move the unfinished call to a
+ * ready rung. The caller records that switch for the editor. A hop only ever
+ * goes one rung -- each caller owns a single retry.
  */
 
 import { AUTOMATIC_LADDER, type ProviderProbe } from "./ai.ts";
@@ -40,7 +36,7 @@ import { looksLikeProviderAuthFailure, looksLikeTimeoutText } from "./preflight.
 import { modelChoiceLabel, storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
 
 export type AutomaticFailoverInput = {
-  /** Whether the editor left this job on Automatic, or chose a model explicitly. */
+  /** How the preferred model was chosen. All sources share technical fallback. */
   source: "editor" | "auto" | "scheduled";
   /** The concrete choice the job is currently running (or just failed) on. */
   current: string;
@@ -72,7 +68,7 @@ export type AutomaticFailoverPlan = {
  * It earns its keep the day some adapter reports a zero-output failure
  * without the word "timeout" in it.
  */
-const NO_OUTPUT_RE = /0 bytes out/i;
+const NO_OUTPUT_RE = /0 bytes out|empty (?:model )?response|(?:returned|produced) no (?:model )?output|no (?:model )?output returned/i;
 
 /** True for a timeout or a response that came back empty of actual output. */
 export function looksLikeTimeoutOrNoOutput(detail: string | null | undefined): boolean {
@@ -80,8 +76,7 @@ export function looksLikeTimeoutOrNoOutput(detail: string | null | undefined): b
 }
 
 /** A provider can be configured and signed in yet refuse work because its
- * allowance is exhausted. Treat that as a technical provider failure for
- * Automatic, while leaving explicit picks pinned to the editor's choice. */
+ * allowance is exhausted. Treat that as a technical provider failure. */
 export function looksLikeProviderQuota(detail: string | null | undefined): boolean {
   return (
     Boolean(detail) &&
@@ -97,16 +92,16 @@ export function looksLikeProviderQuota(detail: string | null | undefined): boole
 export function looksLikeProviderUnavailable(detail: string | null | undefined): boolean {
   return (
     Boolean(detail) &&
-    /\bunavailable\b|unreachable|connection refused|failed to connect|failed to fetch|network error|cli not found|(?:api|http|status|error)[^\r\n]{0,20}\b5\d\d\b|\(5\d\d\)|service unavailable/i.test(
+    /\bunavailable\b|unreachable|connection refused|failed to connect|failed to fetch|network error|cli not found|connection is disabled|connection is (?:disabled, )?deleted|has no model|(?:api|http|status|error)[^\r\n]{0,20}\b5\d\d\b|\(5\d\d\)|service unavailable/i.test(
       detail!,
     )
   );
 }
 
-function looksLikeContentRefusal(detail: string | null | undefined): boolean {
+export function looksLikeContentRefusal(detail: string | null | undefined): boolean {
   return (
     Boolean(detail) &&
-    /\b(?:declined|refused) (?:this request|to (?:write|produce|draft|create|deliver))\b|\b(?:i|we) (?:cannot|can't|won't|will not|am unable to|are unable to) (?:write|produce|draft|create|deliver)\b|EDITORIAL_REFUSAL\s*:/i.test(
+    /\b(?:declined|refused) (?:this request|to (?:write|produce|draft|create|deliver|read|analy[sz]e|transcribe|process))\b|\b(?:i|we) (?:cannot|can't|won't|will not|am unable to|are unable to) (?:write|produce|draft|create|deliver|read|analy[sz]e|transcribe|process)\b|EDITORIAL_REFUSAL\s*:/i.test(
       detail!,
     )
   );
@@ -124,10 +119,10 @@ export function automaticFailoverReason(
 }
 
 /**
- * Decide whether Automatic should move to the next rung, and which one.
+ * Decide whether a run should move from its preferred model, and which one.
  *
- * Returns null unless ALL of: the job was on Automatic; the error reads as
- * either a provider login failure, quota, unavailability, or timeout/no-output; AUTOMATIC_LADDER
+ * Returns null unless the error reads as a provider login failure, quota,
+ * unavailability, or timeout/no-output; AUTOMATIC_LADDER
  * has a rung after `current`; and that rung's probe reports ready. Only
  * rungs strictly AFTER `current` are ever tried, in ladder order, and
  * probing stops at the first one that is ready -- a single hop, never a
@@ -141,16 +136,16 @@ export function automaticFailoverReason(
 export async function planAutomaticFailover(
   input: AutomaticFailoverInput,
 ): Promise<AutomaticFailoverPlan | null> {
-  if (input.source !== "auto") return null;
   const reason = automaticFailoverReason(input.error);
   if (!reason) return null;
 
   const ladder = input.ladder ?? AUTOMATIC_LADDER;
   const currentIndex = ladder.indexOf(input.current);
-  if (currentIndex === -1) return null;
+  const forward = currentIndex >= 0 ? ladder.slice(currentIndex + 1) : ladder;
+  const candidates = (input.source === "auto" ? forward : forward.length ? forward : ladder)
+    .filter((rung) => rung !== input.current);
 
-  for (let i = currentIndex + 1; i < ladder.length; i++) {
-    const rung = ladder[i];
+  for (const rung of candidates) {
     const probed = await input.probe(rung);
     if (probed.ok) {
       return {

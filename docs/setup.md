@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.50](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.50).** See the [release guide](releases/0.6.50.md) for changes, installation and deployment evidence. Editors should start at [the editor guide](editor.md).
+**Current release: [0.6.51](releases/0.6.51.md).** See the release guide for changes, operating boundaries, and unverified GitHub-publication, deployment, and provider-run evidence. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 
@@ -48,7 +48,7 @@ on an editor's action:
 
 | What               | Triggered by                                      | Where it goes                                                                                                                                                                                                                                                                                    |
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Each desk uses its per-run choice. Dark Automatic uses configured `LLM_*` when present; otherwise Terra with one Sonnet retry. Story and Opinion retain their documented Automatic ladders. Explicit named or custom choices never switch.              |
+| **Model calls**    | Scan, Draft, Dark Desk, Opinion                   | Each desk records its per-run choice first. A recognized technical failure can retry only the unfinished call on the next ready runtime and records requested/actual model and effort; a content refusal is terminal. Unattended ladders use Codex first and Claude Sonnet last, never Opus. |
 | **Source fetches** | Watched pages, packets, PDFs, YouTube transcripts | The sites that host them. Normal web requests, guarded at connect time against private addresses (the SSRF guard).                                                                                                                                                                               |
 | **Searches**       | Public-source research, PULL, and Dark Desk hops  | A third-party search chain, tried in order: Exa's hosted endpoint (`https://mcp.exa.ai/mcp`), then DuckDuckGo, Bing, Brave and Wikipedia (`src/lib/news/search-web.ts`). None needs an API key. Drafting scope **Use only supplied material** skips discovery/search for that draft, but still opens URLs you supply. PULL and Dark Desk remain separate external-research actions. |
 
@@ -122,9 +122,9 @@ The following is the low-level configured-provider resolution. Story, Scan and D
 
 | #   | Set this                                      | What runs                                                                   |
 | --- | --------------------------------------------- | --------------------------------------------------------------------------- |
-| 1   | `LLM_BASE_URL` or `LLM_API_KEY` + `LLM_MODEL` | any OpenAI-compatible endpoint; also forces Story Automatic to this gateway |
-| 2   | `ANTHROPIC_API_KEY`                           | Claude, billed to that key                                                  |
-| 3   | _nothing_                                     | **Claude, through your local Claude Code login**                            |
+| 1   | `LLM_BASE_URL` or `LLM_API_KEY` + `LLM_MODEL` | any OpenAI-compatible endpoint; Story Automatic tries this gateway first    |
+| 2   | `ANTHROPIC_API_KEY`                           | credentials for selected Claude models or the final Sonnet retry            |
+| 3   | _nothing_                                     | signed-in Codex first; local Claude Code Sonnet is the last unattended rung |
 | 4   | `XAI_API_KEY`                                 | Grok                                                                        |
 
 #### Claude Code — configured-provider default, no key
@@ -147,7 +147,9 @@ That is the whole setup. Your Max or Pro subscription powers the desk.
 #### Grok through a SuperGrok subscription
 
 Open **Server → Writing models → Grok (SuperGrok)** and choose **Sign in with
-SuperGrok**. TownReporter shows xAI's device-login URL and one-time code. The
+SuperGrok**. The click opens an authorization popup immediately; TownReporter
+redirects it when xAI returns the device-login URL and one-time code. If the
+browser blocks or closes the popup, use the visible authorization link. The
 xAI approval page identifies the OAuth client as **Grok Build**. After approval,
 choose a discovered Grok text model and run the small connection test. This is
 a direct TownReporter connection: it does not use DSH and does not require
@@ -165,7 +167,7 @@ codex login     # for Codex
 ```
 
 ```
-# ANTHROPIC_MODEL=claude-opus-5   # the default
+# ANTHROPIC_MODEL=claude-sonnet-4-5 # optional configured-Claude override; Automatic never selects Opus
 # CLAUDE_CLI_PATH=...             # only if the binary is somewhere unusual
 # TOWNREPORTER_CLAUDE_CODE=0      # take the CLI out of the chain entirely
 # TOWNREPORTER_CODEX=0            # same switch for the Codex CLI
@@ -180,7 +182,7 @@ Two things worth knowing:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
-# ANTHROPIC_MODEL=claude-opus-5
+# ANTHROPIC_MODEL=claude-sonnet-4-5 # optional configured-Claude override; Automatic never selects Opus
 # ANTHROPIC_EFFORT=high           # low | medium | high | xhigh | max
 ```
 
@@ -200,9 +202,9 @@ XAI_API_KEY=xai-...
 
 TownReporter POSTs to `{LLM_BASE_URL}/chat/completions` with `Authorization:
 Bearer {LLM_API_KEY}`. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
-pair is set, that wins for Scan and Dark Desk and becomes Story Automatic's
-exclusive provider. An explicit Story picker choice still means exactly that
-named provider and never falls back.
+pair is set, that is the first runtime for Scan and Dark Desk and becomes Story
+Automatic's first runtime. A recognized technical failure can move only the
+unfinished model call to the next ready cloud runtime; a refusal is terminal.
 
 ```
 LLM_BASE_URL=http://127.0.0.1:4000/v1
@@ -233,8 +235,9 @@ URL, an optional key (stored server-side), and a model discovered from `/models`
 or entered manually. **Test connection** checks the saved chat-completions
 path and reports capability information; it does not change Automatic. The
 same panel supports **Edit**, **Disable/Enable**, and irreversible **Delete**.
-An explicitly selected connection is pinned to that run and never falls back;
-review what leaves the machine with the endpoint operator. The full operator
+An explicitly selected connection is the recorded first runtime. A recognized
+technical failure can move only the unfinished call and records the destination;
+review what leaves the machine with each endpoint operator. The full operator
 walkthrough, including the optional LiteLLM example, is in
 [custom-ai-connections.md](custom-ai-connections.md).
 
@@ -252,10 +255,11 @@ tries Codex Terra, then Claude Sonnet, and stores the first ready provider on
 the job before it is enqueued. Every pass in that Story run uses the same
 effective provider unless it reaches a usage limit, becomes unavailable,
 loses its login, or times out mid-run. Automatic then moves the unfinished
-work to the next ladder rung once, if it is ready. Uploaded documents remain
-saved and are reread by the provider that takes over. A content refusal stops
-the run. A named choice forces only that provider; explicit choices never fall
-back, at enqueue or mid-run.
+model call to the next ladder rung once, if it is ready. Earlier calls in that
+active run are not repeated. A later restarted job retains uploaded source
+material but may read it again. A content refusal stops the run. A named choice
+is the first recorded provider and uses the same technical-only per-call retry
+rule.
 
 Zen MiMo and Local Qwen were removed from the picker (2026-09-02). 0.6.10
 brought a local model back as a named pick, "Local model": generic this
@@ -293,7 +297,9 @@ and its task remains the scope of the requested run.
 
 Opinion displays Automatic, all named Codex and Claude models, Local model,
 plus saved custom connections. Codex Sol is selected by default. Automatic tries Codex Sol, then Claude Sonnet
-once if Codex is unavailable; explicit choices stay selected. An invalid
+once if Codex is unavailable. Explicit choices remain the requested first
+runtime and can move only an unfinished call after a recognized technical
+failure. An invalid
 delivery -- a refusal, an assistant note, an incomplete piece --
 creates no draft. The completed request and job store the provider that
 finished.
@@ -303,10 +309,13 @@ selected provider that supports vision. TownReporter first renders each actual P
 through the local PDF renderer, including scan encodings that cannot be found
 by lifting a JPEG/PNG stream, then sends that page image to the chosen vision
 provider (`src/lib/news/ocr.ts`). Newly rendered records carry numeric PDF
-page order for citations. The bounded pass attempts only the first 12 PDF
-pages, rejects rendered PNGs over 2 MiB, and shares a cooperative 10-minute
-budget across render and transcription. A failed, skipped, oversized, or
-over-cap page is explicitly incomplete; the renderer cannot forcibly interrupt
+page order for citations. Initial capture attempts the first 12 PDF pages.
+In Dark Desk, **Read entire PDF** plans every missing page as durable groups of
+up to 12 and saves a group before the next provider call. Each group rejects
+rendered PNGs over 2 MiB. One complete-read job shares a cooperative 10-minute
+and 48-transcription-attempt budget across its groups, then pauses with saved
+progress. A failed, skipped or oversized page is explicitly incomplete and can
+be retried without repeating saved pages; the renderer cannot forcibly interrupt
 one page already running. Legacy stored `ocr:` records remain extracted-image
 records: their labels continue to say that PDF page order is not established,
 so they need re-ingest or operator review before page citation. Claude Opus
@@ -325,9 +334,14 @@ full-packet or packet-quality acceptance. See
 [local-models.md](local-models.md#scanned-pdfs-and-why-they-need-a-vision-model)
 for the full picture.
 
-This first-12-pages limit applies to captured-source OCR, not the shared large-document uploader. The **Read selected PDF pages** action lets an editor open a retained PDF in
-Dark Desk, choose an explicit model, and request any 1-based inclusive range
-of up to 12 pages, including later pages such as page 13. The result is
+The 12-page value is the captured-source OCR batch size, not a total packet
+limit and not the shared large-document uploader's limit. **Read entire PDF**
+opens the retained original, counts its pages, checkpoints every batch and
+resumes from page-numbered evidence already saved. A packet larger than one
+run's time/call budget can therefore finish over several resume clicks without
+re-reading successful pages. **Read selected pages** can
+still request any 1-based inclusive range of up to 12 pages, including later
+pages such as page 13. The result is
 page-numbered additional evidence alongside the unchanged original and does
 not refetch a missing PDF. See [pdf-page-reading.md](pdf-page-reading.md).
 A bounded built-UI proof read real page 13 of a 44-page PDF and preserved the
@@ -534,7 +548,9 @@ Also note there is normally no Codex or Claude Code CLI on a serverless host —
 set `ANTHROPIC_API_KEY` or the `LLM_*` trio for Scan, Dark Desk, and Story
 instead. Opinion Automatic requires a ready Codex Sol or signed-in Claude
 Sonnet fallback and the configured voice file. Every explicit named Claude or
-Codex model, Local model, or custom choice stays selected. Explicit Local
+Codex model, Local model, or custom choice is tried first; a recognized
+technical failure can move only the unfinished call and records requested and
+actual model and effort. Explicit Local
 model has no separate research pass. These provider options do not remove
 serverless job-lifetime limits.
 
@@ -644,3 +660,11 @@ TownReporter/
 ## Current Opinion document and review workflow
 
 Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+
+## 0.6.51 operator notes
+
+0.6.51 keeps model effort as a run setting, not an environment-wide guess: Codex and Claude present only their supported values. Exact selection records the first runtime; technical unavailability may advance to a ready runtime with the switch retained in job history, while a content refusal is final.
+
+In **Server → Daily scan**, the owner sets the local time, named runtime, supported effort, selected accepted sources, and a source cap from 1 through 12. The scheduler files leads only. A Gemini/OpenAI-compatible connection requires its encrypted key and a model ID; the Gemini form supplies its normal default. The SuperGrok device button opens an authorization popup during the click and provides a visible link when a popup is blocked. It still requires the editor to approve authorization at xAI.
+
+The Windows lifecycle repair prevents shutdown from terminating protected system descendants by validating process identities and killing only through a verified handle. It cannot safely clean provider/browser descendants after the root process has already crashed; use the remaining process record and warning as an investigation signal, not proof of a clean stop. A fresh Windows packaged-install result is not recorded by this release guide.

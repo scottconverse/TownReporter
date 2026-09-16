@@ -145,7 +145,9 @@ commitment, the promises list stays empty.
 
 The shared picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus,
 Sonnet and Haiku; Local model; Automatic; and saved custom connections. An
-explicit choice stays on that model. Dark Desk Automatic uses a configured
+explicit choice remains the requested first runtime. A recognized technical
+failure can move only the unfinished model call, with requested and actual
+model and effort retained; a content refusal is terminal. Dark Desk Automatic uses a configured
 gateway when present; otherwise it starts synthesis on Codex Terra and can
 retry an unfinished synthesis stage on Claude Sonnet. It does not choose Opus or
 Astra automatically. Claude planning uses Haiku; Codex Astra and Luna planning

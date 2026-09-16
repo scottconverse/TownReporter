@@ -7,6 +7,7 @@ import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import { storyModelChoice } from "./model-choice.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
 import type { IngestDocument } from "./ingest.ts";
+import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 /** Compare complete lines, including short numbers. Excerpts are bounded and labelled. */
 export function watchChangeText(previous: string, current: string): string {
   if (previous === current) return "No text change.";
@@ -87,6 +88,9 @@ alter table source_monitors add column if not exists watch_lease text;
 alter table source_monitors add column if not exists watch_check_started_at timestamptz;
 alter table source_monitors add column if not exists watch_last_readable_version_id integer;
 alter table source_monitors add column if not exists watch_model_choice text not null default 'auto';
+alter table source_monitors add column if not exists watch_model_effort text;
+alter table source_monitors add column if not exists watch_model_requested text;
+alter table source_monitors add column if not exists watch_failover_note text not null default '';
 alter table source_monitors add column if not exists watch_last_error text;
 create table if not exists manual_watch_checks (
  id serial primary key, newsroom_id integer not null, monitor_id integer not null,
@@ -108,6 +112,7 @@ export type WatchInput = {
   reason: string;
   investigationId?: number | null;
   modelChoice?: string;
+  modelEffort?: ModelEffort | null;
 };
 export type WatchRow = {
   id: number;
@@ -116,6 +121,9 @@ export type WatchRow = {
   watch_reason: string;
   watch_state: string;
   watch_model_choice: string;
+  watch_model_effort: ModelEffort | null;
+  watch_model_requested: string | null;
+  watch_failover_note: string;
   watch_check_started_at: string | null;
   watch_last_error: string | null;
   last_check_at: string | null;
@@ -138,7 +146,7 @@ export async function ensurePageWatchSchema() {
   // Do not claim readiness if a schema statement was rejected by an older DB.
   try {
     await sql.query(
-      "select manual_watch,watch_reason,watch_state,watch_lease,watch_check_started_at,watch_last_readable_version_id,watch_model_choice,watch_last_error from source_monitors limit 0",
+      "select manual_watch,watch_reason,watch_state,watch_lease,watch_check_started_at,watch_last_readable_version_id,watch_model_choice,watch_model_effort,watch_model_requested,watch_failover_note,watch_last_error from source_monitors limit 0",
     );
     await sql.query(
       "select id,newsroom_id,monitor_id,capture_event_id,previous_version_id,state,note,created_at from manual_watch_checks limit 0",
@@ -203,10 +211,10 @@ export async function createPageWatchFor(who: WatchIdentity, input: WatchInput) 
   if (existing[0]?.manual_watch)
     return { ok: true as const, id: existing[0].id, alreadyExists: true };
   const rows = await sql<{ id: number }>`
- insert into source_monitors(user_id,newsroom_id,url,title,manual_watch,watch_reason,watch_state,watch_model_choice,investigation_id,enabled,cadence_hours,next_check_at)
- values(${who.userId},${who.newsroomId},${url},${input.name.trim().slice(0, 200)},true,${input.reason.trim().slice(0, 2000)},'active',${storyModelChoice(input.modelChoice)},${input.investigationId ?? null},true,24,now())
+ insert into source_monitors(user_id,newsroom_id,url,title,manual_watch,watch_reason,watch_state,watch_model_choice,watch_model_effort,watch_model_requested,investigation_id,enabled,cadence_hours,next_check_at)
+ values(${who.userId},${who.newsroomId},${url},${input.name.trim().slice(0, 200)},true,${input.reason.trim().slice(0, 2000)},'active',${storyModelChoice(input.modelChoice)},${modelEffort(storyModelChoice(input.modelChoice),input.modelEffort)},${storyModelChoice(input.modelChoice)},${input.investigationId ?? null},true,24,now())
  on conflict(newsroom_id,url) do update set manual_watch=true,watch_reason=excluded.watch_reason,title=excluded.title,
- watch_model_choice=excluded.watch_model_choice,investigation_id=coalesce(source_monitors.investigation_id,excluded.investigation_id),
+ watch_model_choice=excluded.watch_model_choice,watch_model_effort=excluded.watch_model_effort,watch_model_requested=excluded.watch_model_requested,watch_failover_note='',investigation_id=coalesce(source_monitors.investigation_id,excluded.investigation_id),
  enabled=true,watch_state='active',cadence_hours=24,next_check_at=now()
  where source_monitors.manual_watch=false returning id`;
   if (!rows[0]) {
@@ -220,7 +228,7 @@ export async function createPageWatchFor(who: WatchIdentity, input: WatchInput) 
 export async function listPageWatchesFor(who: WatchIdentity) {
   await ensurePageWatchSchema();
   const sql = await getSql();
-  return sql<WatchRow>`select id,url,title,watch_reason,watch_state,watch_model_choice,watch_check_started_at,watch_last_error,last_check_at,last_outcome,next_check_at,investigation_id,watch_last_readable_version_id from source_monitors where newsroom_id=${who.newsroomId} and manual_watch=true order by id desc`;
+  return sql<WatchRow>`select id,url,title,watch_reason,watch_state,watch_model_choice,watch_model_effort,watch_model_requested,watch_failover_note,watch_check_started_at,watch_last_error,last_check_at,last_outcome,next_check_at,investigation_id,watch_last_readable_version_id from source_monitors where newsroom_id=${who.newsroomId} and manual_watch=true order by id desc`;
 }
 export async function setPageWatchStateFor(who: WatchIdentity, id: number, state: string) {
   if (!["active", "paused", "stopped"].includes(state))
@@ -249,7 +257,7 @@ export async function checkPageWatchFor(
     await sql<WatchRow>`update source_monitors set watch_lease=${token},watch_check_started_at=${now.toISOString()}::timestamptz,watch_last_error=null
  where id=${id} and newsroom_id=${who.newsroomId} and manual_watch=true and watch_state='active'
  and (watch_lease is null or watch_check_started_at < ${new Date(now.getTime() - 30 * 60000).toISOString()}::timestamptz)
- returning id,url,title,watch_reason,watch_state,watch_model_choice,watch_check_started_at,watch_last_error,last_check_at,last_outcome,next_check_at,investigation_id,watch_last_readable_version_id`;
+ returning id,url,title,watch_reason,watch_state,watch_model_choice,watch_model_effort,watch_model_requested,watch_failover_note,watch_check_started_at,watch_last_error,last_check_at,last_outcome,next_check_at,investigation_id,watch_last_readable_version_id`;
   if (!claimed[0]) {
     const found = await sql<{
       watch_state: string;
@@ -278,6 +286,29 @@ export async function checkPageWatchFor(
     try {
       got = await (opts.fetch ?? ingestDocument)(m.url, {
         provider: m.watch_model_choice,
+        reasoningEffort: modelEffort(m.watch_model_choice, m.watch_model_effort),
+        onProviderSwitch: async ({ transport, model, reason }) => {
+          const expectedChoice = m.watch_model_choice;
+          const expectedEffort = m.watch_model_effort;
+          const nextChoice = transport === "codex"
+            ? "codex-balanced"
+            : transport === "anthropic" || transport === "claude-code"
+              ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
+              : m.watch_model_choice;
+          const nextEffort = modelEffort(nextChoice, m.watch_model_effort);
+          const previousLabel = m.watch_model_choice;
+          const note = `OCR switched from ${previousLabel} to ${nextChoice} because the selected reader was ${reason}.`;
+          const updated = await sql<{ id: number }>`update source_monitors
+            set watch_model_choice=${nextChoice},watch_model_effort=${nextEffort},watch_failover_note=${note}
+            where id=${m.id} and newsroom_id=${who.newsroomId} and watch_lease=${token}
+              and watch_model_choice=${expectedChoice}
+              and watch_model_effort is not distinct from ${expectedEffort}
+            returning id`;
+          if (!updated[0]) throw new Error("This watch changed while the check was running. The newer model choice was preserved.");
+          m.watch_model_choice = nextChoice;
+          m.watch_model_effort = nextEffort;
+          m.watch_failover_note = note;
+        },
         newsroomId: String(who.newsroomId),
         jobLabel: `Watched page ${m.title}`,
         localModel: overrides?.["local-model"]?.localModel,
@@ -557,11 +588,11 @@ export async function tickManualPageWatches(
   return { checked };
 }
 
-export async function setPageWatchModelFor(who: WatchIdentity, id: number, choice: string) {
+export async function setPageWatchModelFor(who: WatchIdentity, id: number, choice: string, effort?: ModelEffort | null) {
   await ensurePageWatchSchema();
   const sql = await getSql();
   const rows =
-    await sql`update source_monitors set watch_model_choice=${storyModelChoice(choice)} where id=${id} and newsroom_id=${who.newsroomId} and manual_watch=true returning id`;
+    await sql`update source_monitors set watch_model_choice=${storyModelChoice(choice)},watch_model_effort=${modelEffort(storyModelChoice(choice),effort)},watch_model_requested=${storyModelChoice(choice)},watch_failover_note='' where id=${id} and newsroom_id=${who.newsroomId} and manual_watch=true returning id`;
   return rows.length ? { ok: true as const } : { ok: false as const, error: "Watch not found." };
 }
 export async function readPageWatchCaptureFor(

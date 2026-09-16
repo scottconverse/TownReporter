@@ -154,6 +154,105 @@ function Get-OwnedApp {
   if ($process.CreationDate.ToUniversalTime() -ne ([datetime]$state.Created).ToUniversalTime() -or $process.ExecutablePath -ne $config.NodeExe -or !$process.CommandLine.Contains($entry)) { throw 'Application PID is not owned by this installation; no action taken.' }
   return $process
 }
+function Test-ProcessCreationIdentity([datetime]$Expected, [datetime]$Observed) {
+  # CIM_DATETIME is precise to one microsecond; Process.StartTime exposes the
+  # same underlying FILETIME at 100 ns. Compare at the shared precision.
+  $expectedTicks = $Expected.ToUniversalTime().Ticks
+  $observedTicks = $Observed.ToUniversalTime().Ticks
+  $observedTicks -= ($observedTicks % 10)
+  return $expectedTicks -eq $observedTicks
+}
+function Get-VerifiedAppProcessTree([object]$Root, [object[]]$Inventory, [int[]]$PreserveProcessIds = @()) {
+  # ParentProcessId is only meaningful together with process creation time. If
+  # a PID was reused after its original parent exited, the current parent must
+  # have started after its supposed child, so reject that edge.
+  $ordered = [Collections.Generic.List[object]]::new()
+  $visited = [Collections.Generic.HashSet[int]]::new()
+  $protectedNames = @('csrss.exe', 'smss.exe', 'wininit.exe', 'winlogon.exe', 'services.exe', 'lsass.exe', 'system', 'registry')
+  function Add-VerifiedProcess([object]$Parent) {
+    $parentId = [int]$Parent.ProcessId
+    foreach ($child in $Inventory) {
+      $childId = [int]$child.ProcessId
+      if ([int]$child.ParentProcessId -ne $parentId -or $childId -le 4 -or $PreserveProcessIds -contains $childId) { continue }
+      if ([string]$child.Name -and $protectedNames -contains ([string]$child.Name).ToLowerInvariant()) { continue }
+      if (!$child.CreationDate -or !$Parent.CreationDate) { continue }
+      if (([datetime]$child.CreationDate).ToUniversalTime() -le ([datetime]$Parent.CreationDate).ToUniversalTime()) { continue }
+      if (!$visited.Add($childId)) { continue }
+      Add-VerifiedProcess $child
+    }
+    $ordered.Add($Parent)
+  }
+  if (!$Root -or [int]$Root.ProcessId -le 4 -or !$Root.CreationDate) { return @() }
+  $rootRows = @($Inventory | Where-Object {
+    [int]$_.ProcessId -eq [int]$Root.ProcessId -and
+      (Test-ProcessCreationIdentity ([datetime]$Root.CreationDate) ([datetime]$_.CreationDate))
+  })
+  if ($rootRows.Count -ne 1) { return @() }
+  [void]$visited.Add([int]$Root.ProcessId)
+  Add-VerifiedProcess $Root
+  return @($ordered.ToArray())
+}
+function Stop-VerifiedProcessIdentity([object]$Identity) {
+  $processId = [int]$Identity.ProcessId
+  if ($processId -le 4 -or ([string]$Identity.Name -and @('csrss.exe','smss.exe','wininit.exe','winlogon.exe','services.exe','lsass.exe','system','registry') -contains ([string]$Identity.Name).ToLowerInvariant())) { return $false }
+  $expectedCreated = ([datetime]$Identity.CreationDate).ToUniversalTime()
+  $current = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+  if (!$current -or !(Test-ProcessCreationIdentity $expectedCreated ([datetime]$current.CreationDate))) { return $false }
+  $process = $null
+  try {
+    # Open a handle, verify its creation time, and terminate through that same
+    # handle. Stop-Process -Id would reopen by PID and could hit a reused PID.
+    $process = [Diagnostics.Process]::GetProcessById($processId)
+    if (!(Test-ProcessCreationIdentity $expectedCreated $process.StartTime)) { return $false }
+    if (!$process.HasExited) {
+      $process.Kill()
+      if (!$process.WaitForExit(5000)) { throw "Owned process $processId did not stop within five seconds." }
+    }
+    return $true
+  } catch [InvalidOperationException] {
+    # The verified process exited between the inventory and handle checks.
+    return $true
+  } catch [ArgumentException] {
+    # GetProcessById reports an already-exited PID as an argument failure.
+    return $true
+  } finally {
+    if ($process) { $process.Dispose() }
+  }
+}
+function Stop-VerifiedAppProcessTree([object]$Root, [int[]]$PreserveProcessIds = @()) {
+  $inventory = @(Get-CimInstance Win32_Process)
+  $tree = Get-VerifiedAppProcessTree $Root $inventory $PreserveProcessIds
+  $rootStopped = $false
+  foreach ($identity in $tree) {
+    $stopped = Stop-VerifiedProcessIdentity $identity
+    if ([int]$identity.ProcessId -eq [int]$Root.ProcessId -and
+      (Test-ProcessCreationIdentity ([datetime]$Root.CreationDate) ([datetime]$identity.CreationDate))) {
+      $rootStopped = [bool]$stopped
+    }
+  }
+  return $rootStopped
+}
+function Clear-AppProcessStateAfterStop([string]$StateFile, [bool]$RootStopped) {
+  if (!$RootStopped) {
+    if (Test-Path -LiteralPath $StateFile) {
+      $state = Get-Content -LiteralPath $StateFile -Raw | ConvertFrom-Json
+      Write-Warning "TownReporter app PID $($state.ProcessId) is already gone or could not be verified. The process record was retained; detached child processes were not targeted because their ownership cannot be proven safely."
+    }
+    return $false
+  }
+  if (Test-Path -LiteralPath $StateFile) { Remove-Item -LiteralPath $StateFile }
+  return $true
+}
+function Archive-StaleAppProcessState([string]$StateFile) {
+  if (!(Test-Path -LiteralPath $StateFile)) { return $null }
+  $state = Get-Content -LiteralPath $StateFile -Raw | ConvertFrom-Json
+  if ([string]$state.ProcessId -notmatch '^\d+$' -or !$state.Created) { throw 'Cannot archive an invalid application PID record.' }
+  $stamp = ([datetime]$state.Created).ToUniversalTime().ToString('yyyyMMddTHHmmssfffffffZ')
+  $archive = Join-Path (Split-Path -Parent $StateFile) "app-process-stale-$($state.ProcessId)-$stamp.json"
+  if (Test-Path -LiteralPath $archive) { $archive = Join-Path (Split-Path -Parent $StateFile) "app-process-stale-$($state.ProcessId)-$stamp-$([guid]::NewGuid().ToString('N')).json" }
+  Move-Item -LiteralPath $StateFile -Destination $archive
+  return $archive
+}
 function Set-AppEnvironment {
   # Clear inherited database/provider/ops options. The explicit provider file is the only override.
   foreach ($item in @(Get-ChildItem Env:)) {

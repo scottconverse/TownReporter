@@ -192,7 +192,7 @@ describe("authenticated Codex commit boundary", () => {
     await sql`delete from story_documents where user_id=${userId}`;
   });
 
-  it("refuses expired OAuth before Story or Opinion writes, then enqueues exactly once after refresh", async () => {
+  it("tries the technical fallback ladder for expired OAuth, then enqueues exactly once after refresh", async () => {
     const sql = await getSql();
     await ensureNewsroomSchema();
     await sql`delete from newsroom_members`;
@@ -275,6 +275,7 @@ describe("authenticated Codex commit boundary", () => {
     assert.deepEqual(before, { jobs: 0, requests: 0, drafts: 0, rate: 0, audit: 0 });
 
     let storyProbeCalls = 0;
+    const storyProbeChoices: string[] = [];
     let storyEnqueueCalls = 0;
     const storyExpired = await commitStoryDraftForAuthenticatedEditor(
       {
@@ -285,7 +286,7 @@ describe("authenticated Codex commit boundary", () => {
       {
         probeProvider: async (choice) => {
           storyProbeCalls += 1;
-          assert.equal(choice, "codex-frontier");
+          storyProbeChoices.push(String(choice));
           return { ok: false as const, error: EXPIRED };
         },
         enqueueJob: async (opts) => {
@@ -299,7 +300,8 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(storyExpired.kind, "provider-auth");
     assert.match(storyExpired.error, /Codex needs you to sign in again/i);
     assert.equal(storyExpired.detail, EXPIRED);
-    assert.equal(storyProbeCalls, 1);
+    assert.equal(storyProbeCalls, 3);
+    assert.deepEqual(storyProbeChoices, ["codex-frontier", "codex-balanced", "claude-sonnet"]);
     assert.equal(storyEnqueueCalls, 0);
     assert.deepEqual(await countsFor(userId), before);
 
@@ -326,8 +328,8 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(storyReady.ok, true);
     assert.equal(storyReady.modelChoice, "codex-frontier");
     assert.equal(storyEnqueueCalls, 1);
-    // An editor's explicit "codex-frontier" pick is never Automatic's doing --
-    // the row must remember 'editor', so a mid-run 401 never fails over it.
+    // A refreshed explicit pick remains editor-owned. Technical failures may
+    // route its unfinished call, but the source still records who requested it.
     assert.deepEqual(storyEnqueueSources, ["editor"]);
     assert.deepEqual(await countsFor(userId), {
       jobs: 1,
@@ -411,7 +413,7 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(opinionExpired.ok, false);
     if (opinionExpired.ok) assert.fail("expired Opinion OAuth must refuse");
     assert.match(opinionExpired.error, /Claude Code needs you to sign in again/i);
-    assert.deepEqual(opinionCandidates, ["claude-frontier"]);
+    assert.deepEqual(opinionCandidates, ["claude-frontier", "codex-frontier", "claude-sonnet"]);
     assert.equal(opinionSchemaCalls, 0);
     assert.equal(opinionSqlCalls, 0);
     assert.equal(opinionEnqueueCalls, 0);

@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.50](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.50) — reliable Ollama Cloud Story drafting with accurate hosted-model and context labels.** [Release guide](docs/releases/0.6.50.md) · [Changelog](CHANGELOG.md).
+**Current release: [0.6.51](docs/releases/0.6.51.md).** Its release record distinguishes implemented behavior from unverified GitHub publication, packaged-install, production-deployment, and live-model results. [0.6.50 release guide](docs/releases/0.6.50.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, installation checks and deployment evidence are recorded separately in the [release guide](docs/releases/0.6.50.md).
+Release source, installation checks and deployment evidence are recorded separately in the [release guide](docs/releases/0.6.51.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -51,7 +51,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-Download the Windows installation ZIP from [TownReporter 0.6.50](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.50) or the [latest release](https://github.com/scottconverse/TownReporter/releases/latest). Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks.
+Download the Windows installation ZIP from the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest). Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks. The 0.6.51 source repair prevents the prior system-child shutdown failure; this record does not assert a 0.6.51 ZIP, GitHub publication, or fresh Windows packaged-install result.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first editorial workflow within an hour with working internet and an available AI account or endpoint; release evidence records the measured result and its limits. Public hosting is separate from this local installation.
 
@@ -95,6 +95,8 @@ Same six moves the paper itself describes at `/how-we-report`:
 Corrections are public (`/corrections`). We would rather look careful than look first.
 
 ### Recent releases
+
+- **0.6.51** — Adds per-runtime effort controls; named/Automatic first-choice routing that retries only a technically failed unfinished call and records requested/actual model and effort; terminal content refusals; Codex-first unattended order with Claude Sonnet last and no automatic Opus; migration of blank-model saved Gemini connections without replacing their key; Grok connection repair; editable daily-scan time/model/effort/source settings; Queue batch Redraft; and clearer retained-job health history. Direct Story/Opinion documents can retain and read all extracted PDF pages within their 20-million-character text limit. Generic capture and Dark Desk image-PDF OCR now offer **Read entire PDF**, which checkpoints bounded 12-page calls and resumes with only unread pages after interruption or a budget pause. The source repair prevents the prior Windows installer shutdown path from trying to kill a system child such as `csrss`; a root that has already crashed can still leave detached children because their ownership cannot be proved safely. See [the release guide](docs/releases/0.6.51.md) for evidence boundaries; it does not assert GitHub publication, production deployment, or live-model proof.
 
 - **0.6.50** — Correctly identifies Ollama Cloud models, shows their reported context window, and prevents DeepSeek V4 reasoning from consuming the Story output budget before a draft is written.
 - **0.6.49** — Restores bounded Dark Desk lead development and durable reporting Pull, adds direct SuperGrok OAuth and newsroom-managed Gemini connections to the shared model picker, keeps Story model controls reachable, and lets Automatic recover uploaded-document work when a provider reaches its limit or becomes unavailable.
@@ -202,13 +204,13 @@ Full detail, including the newsletter and rate-limiter fixes, is in [CHANGELOG.m
 - **Jobs wake up.** Scan / Draft / Keep digging persist, then finish in this process or on the monitors ping (`CRON_SECRET`).
 - **Historical OCR behavior (0.4.x).** Image-only PDFs were unread. Since 0.6.23, supported embedded JPEG/PNG scan images can be transcribed by a vision-capable provider; unsupported formats and partial reads remain explicit.
 
-> **Captured-PDF OCR.** New scanned-PDF ingestion renders ordered PDF pages before OCR (up to 12 pages, 2 MiB rendered-image cap, and a cooperative 10-minute render-and-OCR budget). New records can retain numeric page citations; legacy extracted-image records remain explicitly unordered. Built-runtime rendering is proven with mock transcription, and one source-path Codex/Terra ingestion run read 11 of 44 pages from a scanned council packet (pages 1 and 3 visually checked). Page 10 failed and pages 13–44 were capped; that ingestion run did not prove full-packet or packet-quality acceptance.
+> **Captured-PDF OCR.** Initial scanned-PDF ingestion renders up to 12 ordered PDF pages, with a 2 MiB rendered-image cap and a cooperative 10-minute render-and-OCR budget. New records can retain numeric page citations; legacy extracted-image records remain explicitly unordered. In Dark Desk, **Read entire PDF** continues through bounded 12-page calls, saves every completed batch, and resumes with only unread pages after interruption. One click pauses after 10 minutes or 48 transcription attempts, preserves its checkpoints, and names the unread pages for the next click. Built-runtime rendering is proven with mock transcription. The earlier source-path Codex/Terra ingestion run read 11 of 44 pages from a scanned council packet; that historical run did not prove the new whole-packet workflow or packet-quality acceptance.
 
-That ingestion cap is separate from the retained-PDF page reader: an editor can open a captured PDF in Dark Desk, choose
-an explicit model and request any 1-based inclusive range of up to 12 pages,
-including pages beyond page 12. The reader adds page-numbered evidence beside
+The retained-PDF reader lets an editor open a captured PDF in Dark Desk, choose
+an explicit model, read the complete retained file in resumable batches, or
+request any 1-based inclusive range of up to 12 pages. The reader adds page-numbered evidence beside
 the unchanged original; it does not refetch a missing PDF. See
-[Read selected PDF pages](docs/pdf-page-reading.md). A bounded built-UI proof
+[Read retained PDF pages](docs/pdf-page-reading.md). A bounded built-UI proof
 read real page 13 of a 44-page PDF and preserved the 16,254,338-byte original
 and its hash. The main table rows and key dates matched, but color-only RAG
 status was omitted and a minor verb differed; this is not full-packet or
@@ -251,34 +253,38 @@ prerequisite. The desk does not install software or sign you in automatically.
 Every active Queue row has its own **Writing model** picker beside **Draft with
 AI**; the story workbench has the same control beside Draft or Redraft. The
 default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
-pair names a gateway, Automatic uses that gateway and no other provider.
+pair names a gateway, Automatic records that gateway as the preferred first runtime.
 Otherwise it tries Codex Terra, then Claude Sonnet, chooses the first ready
-provider before enqueueing, and stores that effective choice on the job. Every
-reporting and writing pass in that run uses the same provider, unless it reaches
-a usage limit, becomes unavailable, loses its login, or times out mid-run.
-Automatic then moves the unfinished work to the next ladder rung once, if it is
-ready. Uploaded documents remain saved and are reread by the provider that
-takes over. A content refusal stops the run.
+provider before enqueueing, and stores that effective choice on the job. A
+named model is also the recorded first choice. If that model reaches a usage
+limit, becomes unavailable, loses its login, times out, or returns no output,
+TownReporter can move only the unfinished model call to the next ready runtime
+and records the requested and actual model and effort. Earlier calls in that
+active run are not repeated. A later restarted job retains uploaded source
+material but may read it again. A content refusal stops the run. Unattended
+ladders put Claude last and use Sonnet; Opus is available
+only when an editor selects it.
 
 The Queue also offers **Draft selected** for one editor-chosen batch of up to
-five eligible leads. That batch requires one explicit named Codex, Claude,
-Grok (SuperGrok), Local model, or saved Custom AI connection, including a configured Gemini
-endpoint. It never uses Automatic or fallback. It retains each lead's saved
-research scope, shows each lead's durable result and workbench link, and never
-publishes a story.
+five eligible leads. That batch requires one named Codex, Claude, Grok
+(SuperGrok), Local model, or saved Custom AI connection, including a configured
+Gemini endpoint. It never uses Automatic. It retains each lead's saved research
+scope, shows each lead's durable result and workbench link, and never publishes
+a story. Technical provider failures can move the unfinished call to the next
+ready cloud runtime; a provider refusal remains terminal.
 
-Daily Scan uses the same explicit choices, including Grok (SuperGrok) and saved Custom AI
-connections. It stores the selected model with the schedule and never falls
-back to a different provider. When a selected workflow reads a scanned PDF or
-image, OCR stays on that workflow's selected model when that provider supports
-vision; explicit Grok is text-only and stops with a clear OCR error instead of
-falling back. Automatic OCR retains its established availability order:
-Anthropic API, Codex, Claude Code, then a discovered local vision model.
+Daily Scan uses the same named choices, including Grok (SuperGrok) and saved
+Custom AI connections. It stores the requested model with the schedule and the
+runtime actually used on each job. Technical preflight or mid-call failures can
+move unfinished work to the next ready cloud runtime and are recorded; a
+provider refusal stops the run. For image OCR, the same technical-only rule
+applies and only vision-capable candidates are considered.
 
 Pick Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku;
 **Grok (SuperGrok)** through the newsroom's direct OAuth connection; or
-**Local model** to force that provider for one run. Explicit choices never fall
-back, at enqueue or mid-run. The endpoint/model compatibility overrides are
+**Local model** as the preferred provider for one run. A named choice remains
+the first choice; only a recognized technical failure can move the unfinished
+call. The endpoint/model compatibility overrides are
 listed in [docs/setup.md](docs/setup.md#per-run-picker).
 
 Local model supports individual models discovered on LM Studio, Ollama and
@@ -302,13 +308,13 @@ Claude Code remains the separate CLI path: its own `CLAUDE.md`, skills and
 plugins are not loaded into news prompts because that adapter passes
 `--setting-sources ""`.
 
-For **Automatic**, a configured gateway wins; named choices in Story, Scan and Dark Desk override the low-level configured-provider chain below:
+For **Automatic**, a configured gateway is tried first; named choices in Story, Scan and Dark Desk become the recorded first runtime instead of this low-level configured-provider chain:
 
 | Set this                                        | What runs                                                                   |
 | ----------------------------------------------- | --------------------------------------------------------------------------- |
-| `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; also forces Story Automatic to this gateway |
-| `ANTHROPIC_API_KEY`                             | Claude, billed to that key                                                  |
-| _nothing_                                       | **Claude, through your Claude Code login**                                  |
+| `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; Story Automatic tries this gateway first    |
+| `ANTHROPIC_API_KEY`                             | credentials for selected Claude models or the final Sonnet retry            |
+| _nothing_                                       | signed-in Codex first; signed-in Claude Sonnet is the last unattended rung  |
 | `XAI_API_KEY`                                   | Grok                                                                        |
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
@@ -317,7 +323,8 @@ The CLI is slower than an API — it reloads a fixed preamble per call, so a dra
 Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus, Sonnet and
 Haiku, Local model, and saved custom connections. Codex Sol is selected by
 default. Automatic tries Codex Sol first and moves to Claude Sonnet once if
-Codex is unavailable; an explicit choice stays selected. The writer
+Codex is unavailable. An explicit choice remains the recorded first choice;
+a recognized technical failure can move only the unfinished call. The writer
 reads the configured private voice file, and a provider refusal or invalid
 delivery leaves the request failed without a draft.
 
@@ -343,7 +350,8 @@ LLM_MODEL=claude-sonnet-4-5
 
 If `LLM_BASE_URL` is set — or `LLM_API_KEY` and `LLM_MODEL` are both set —
 that configured gateway wins over Grok for configured-provider features and is
-the exclusive Story Automatic provider.
+Story Automatic's preferred first runtime. Recognized technical failure can
+move only the unfinished call; a content refusal remains terminal.
 
 For a per-run, editor-selected endpoint instead of changing the configured
 provider, use **Server → Add your own AI API**. Save a name, base URL, optional
@@ -416,7 +424,7 @@ top of this file, not there.
 
 ## Owner-only legal removal
 
-Published stories have a separate [legal-removal workflow](docs/editor.md#legal-removal-owner-workflow): review connected and historical copies, choose 12-calendar-month owner-only retention or an explicit no-retention destruction policy, and follow the result to an audited case. Known shared captured copies block destruction. Backup cleanup remains an operator task with attributed attestations; retained copies have owner access controls, not encryption. Ordinary Delete remains 30-day trash. Candidate and deployment status are tracked in [TODO.md](TODO.md).
+Published stories have a separate [legal-removal workflow](docs/editor.md#legal-removal-owner-workflow): review connected and historical copies, choose 12-calendar-month owner-only retention or an explicit no-retention destruction policy, and follow the result to an audited case. Known shared captured copies block destruction. Backup cleanup remains an operator task with attributed attestations; retained copies have owner access controls, not encryption. Ordinary Delete remains 30-day trash. Release and deployment status are tracked in [TODO.md](TODO.md).
 
 ## Frequently asked questions
 
@@ -433,8 +441,9 @@ Yes. The first owner completes **Set up the paper**, and can revise the same dat
 No. Story drafting can use a signed-in Codex/Claude CLI, or a configured
 `LLM_BASE_URL` gateway to a model on your own hardware. Set `ANTHROPIC_API_KEY` if you would rather bill a
 Claude key, or point `LLM_BASE_URL` at an OpenAI-compatible endpoint. That
-configured gateway becomes the forced Story Automatic provider and remains the
-configured provider for Scan and Dark Desk. `XAI_API_KEY` still runs Grok for
+configured gateway becomes Story Automatic's preferred first runtime and remains
+the configured first runtime for Scan and Dark Desk. Recognized technical
+failures can move only the unfinished call; refusals stop. `XAI_API_KEY` still runs Grok for
 configured-provider features.
 
 **Are YouTube captions the official record?**

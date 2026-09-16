@@ -155,7 +155,7 @@ So if `myDesk()` has not resolved within 1200 ms of first paint, an editor who *
 
 `src/routes/login.tsx:314` also renders the literal string `"Opening the desk…"`. It is not currently an `<h1>`, so the timer does not fire on it — but nothing in the codebase records that this is load-bearing.
 
-Nothing tests this behaviour. `grep` for either string across `*.test.*` and the e2e scripts finds only `scripts/site-walkthrough.mjs:140`, which *asserts on* the string rather than exercising the redirect.
+Nothing tests this behaviour. The historical browser-walkthrough check only asserted on the string rather than exercising the redirect.
 
 **Why this matters**
 

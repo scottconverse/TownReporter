@@ -46,7 +46,7 @@ function withFetch<T>(handler: typeof fetch, fn: () => Promise<T>): Promise<T> {
 }
 
 describe("reasoning_effort on the OpenAI-compatible (local/gateway) path", () => {
-  it("sends reasoning_effort: none by default for a model flagged thinking", async () => {
+  it("omits an invented reasoning effort for a thinking model without declared capabilities", async () => {
     let sentBody: Record<string, unknown> | undefined;
     await withFetch(
       (async (_url, init) => {
@@ -60,10 +60,10 @@ describe("reasoning_effort on the OpenAI-compatible (local/gateway) path", () =>
           grokChat("sys", "user", 200, { choice: "local-model" }),
         ),
     );
-    assert.equal(sentBody?.reasoning_effort, "none");
+    assert.equal("reasoning_effort" in (sentBody ?? {}), false);
   });
 
-  it("disables DeepSeek v4 cloud reasoning by default while returning the final draft text", async () => {
+  it("maps DeepSeek Off to Ollama's explicit none disable while returning the final draft text", async () => {
     let sentBody: Record<string, unknown> | undefined;
     const result = await withFetch(
       (async (_url, init) => {

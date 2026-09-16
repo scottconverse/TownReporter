@@ -11,16 +11,18 @@ export type {
   ConnectionProbeResult,
 } from "./custom-ai-connections.server";
 
-export function connectionSaveMessage(): string {
-  return "Connection saved. Your current model choice did not change.";
+export function connectionSaveMessage(saved: PublicCustomAiConnection): string {
+  return saved.modelId
+    ? `${saved.name} saved with ${saved.modelId}. It is ready to choose in the writing model picker.`
+    : `${saved.name} saved. Choose a model in Server settings before it can be selected for a run.`;
 }
 
 export function upsertCustomAiConnection(
   current: PublicCustomAiConnection[] | undefined,
   saved: PublicCustomAiConnection,
 ): PublicCustomAiConnection[] {
-  return [...(current ?? []).filter((connection) => connection.id !== saved.id), saved].sort((a, b) =>
-    a.name.localeCompare(b.name),
+  return [...(current ?? []).filter((connection) => connection.id !== saved.id), saved].sort(
+    (a, b) => a.name.localeCompare(b.name),
   );
 }
 
@@ -56,12 +58,13 @@ export async function saveCustomAiConnectionAndCache(
   input: CustomAiConnectionInput & { id?: string },
   save: CustomAiConnectionSave,
   queryClient: CustomAiConnectionCache,
-): Promise<void> {
+): Promise<PublicCustomAiConnection> {
   const saved = await save(input);
   queryClient.setQueryData<PublicCustomAiConnection[] | undefined>(
     ["custom-ai-connections"],
     (current) => upsertCustomAiConnection(current, saved),
   );
+  return saved;
 }
 
 export function capabilityStatus(value: boolean | null): "yes" | "no" | "not tested" {
