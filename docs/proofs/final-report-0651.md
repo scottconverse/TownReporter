@@ -1,6 +1,6 @@
 # TownReporter finishing directive — implementation report
 
-**Branch:** `fix/finish-townreporter-20260916` (52 commits ahead of `origin/main`)
+**Branch:** `fix/finish-townreporter-20260916` (local and unpushed; `git rev-list --count origin/main..HEAD` is the authoritative current distance)
 **Base:** `c43273702d159b63a405b0053679d22b6b236149` (v0.6.51)
 **Scope:** the eleven requirements in the finishing directive. Nothing below is a claim beyond the evidence named in its row.
 
