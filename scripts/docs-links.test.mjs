@@ -61,3 +61,58 @@ test("every relative documentation link resolves", () => {
   console.log(`docs links: ${files.length} files, ${checked} relative links, ${missing.length} missing`);
   assert.deepEqual(missing, [], `broken documentation links:\n${missing.join("\n")}`);
 });
+
+/**
+ * GitHub's heading anchor: lower-case, drop everything that is not a letter,
+ * digit, underscore, hyphen or space, then turn EACH space into a hyphen.
+ *
+ * Getting this wrong is easy and expensive: a checker that collapsed runs of
+ * spaces reported eleven "broken" anchors across the docs, every one of them a
+ * false positive caused by an em dash (two spaces -> two hyphens) or a path in
+ * the heading ("Server (/desk/ops)" loses its slash). The docs were correct.
+ */
+function headingSlug(heading) {
+  return heading
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+    .replace(/\s/g, "-");
+}
+
+test("every documentation anchor link points at a real heading", () => {
+  const seeds = ["docs", "README.md", "SELF-HOSTING.md", "TODO.md"]
+    .map((name) => join(root, name))
+    .filter((path) => existsSync(path));
+  const files = seeds.flatMap((seed) => markdownFiles(seed)).filter((path) => !SKIP.test(path));
+
+  const slugs = new Map();
+  const slugsFor = (file) => {
+    if (!slugs.has(file)) {
+      const set = new Set();
+      for (const m of readFileSync(file, "utf8").matchAll(/^#{1,6} +(.+)$/gm)) {
+        set.add(headingSlug(m[1].trim()));
+      }
+      slugs.set(file, set);
+    }
+    return slugs.get(file);
+  };
+
+  const broken = [];
+  let checked = 0;
+  for (const file of files) {
+    for (const match of readFileSync(file, "utf8").matchAll(/\]\(([^)\s]*#[^)\s]+)\)/g)) {
+      const raw = match[1];
+      if (/^https?:/.test(raw)) continue;
+      const [pathPart, fragment] = raw.split("#");
+      const target = pathPart ? resolve(dirname(file), pathPart) : file;
+      if (!existsSync(target) || !target.endsWith(".md")) continue;
+      checked += 1;
+      if (!slugsFor(target).has(fragment.toLowerCase())) {
+        broken.push(`${file.replace(root + "\\", "")} -> ${raw}`);
+      }
+    }
+  }
+
+  console.log(`docs anchors: ${checked} anchor links, ${broken.length} broken`);
+  assert.ok(checked >= 20, `checked the anchor set (${checked})`);
+  assert.deepEqual(broken, [], `anchor links with no matching heading:\n${broken.join("\n")}`);
+});
