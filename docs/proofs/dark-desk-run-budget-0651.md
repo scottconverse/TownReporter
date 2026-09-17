@@ -66,3 +66,53 @@ Option 1 is the smaller change and the one the registry's own comment implies wa
 - The runs used live public web search and captures against the isolated database; captured source URLs were not independently re-verified by hand for every signal.
 - Signals 1 and 2 remain unverified by design and must not be treated as findings.
 - No full test suite, production service, credential, commit, merge, tag, or release operation was touched by these runs.
+
+## Follow-up: option 1 applied, and what run 4 showed
+
+Option 1 above was implemented and committed as `7da28c8` ("Reserve Dark Desk clock for the signal desk"):
+
+- `src/lib/news/investigate.ts` gained `researchReserveMs?: number` on `ResearchLoopOptions` and a hop-loop guard that stops research while that much clock is still on the meter.
+- `src/lib/news/dark.ts` computes `providerBudget(choice ?? undefined, overrides).reserveMs` at both run entry points and passes it into both `researchLoop({...})` hand-offs.
+- Breaking at the reserve deliberately does **not** set a stop reason, so the existing `paused -> hop-limit` mapping reports "paused by design" rather than claiming the clock was exhausted.
+
+Focused evidence (`src/lib/news/dark-research-reserve.test.ts`): RED before the guard was `AssertionError: research must not start a hop inside the reserve` (actual 5 hops, expected 0); GREEN 2/2 after. Neighbouring suites 10/10 (`dark-preferences-flow`, `dark-run-budget`, `dark-place`) and 18/18 (`investigate.dedup`, `dark-round-failover`); `npm run typecheck` clean; `npm run build` clean.
+
+### Run 4 (isolated, `codex-luna` / `gpt-5.6-luna`, effort low, dig 4/10, nerve 5/10, city scope)
+
+Subject: "Longmont downtown development authority spending and tax increment financing since 2023".
+
+| Field | Value |
+|---|---|
+| Stop reason | `elapsed-time-limit` |
+| Elapsed | 431,225 ms (started 20:57:28, finished 21:04:39) |
+| Usage | 8 model calls, 13 searches, 12 document reads |
+| Verification | eligible 6, attempted 6, verified 0, unverified 6, failed 1, deferred 0 |
+| Signals written | 6 |
+
+Stage ledger, in order, with provider durations:
+
+```text
+planning hop 1        43,225 ms  ok
+selecting documents   38,512 ms  ok
+planning hop 2        70,017 ms  ok
+selecting documents   41,827 ms  ok
+planning hop 3        88,949 ms  ok
+selecting documents   46,420 ms  ok
+synthesis             60,355 ms  ok
+verification signal 1 14,160 ms  ok (provider "injected")
+```
+
+**The reserve behaved as intended.** Research stopped after three hops - it no longer ran to the wall - and the writing stages that produced nothing at all in runs 1 and 2 actually executed: synthesis completed in 60 s and the adversarial review began. Six signals were written, all labelled `unverified`:
+
+1. Large budget-to-actual gap in DDA capital projects - 0.45
+2. TIF debt activity lacks an identified debt instrument - 0.48
+3. DDA fund fragmentation obscures the complete spending path - 0.44
+4. 5.000-mill levy cannot yet be reconciled to collections - 0.42
+5. DDA and urban-renewal structures may overlap without a visible legal map - 0.31
+6. Capital-projects debt and fund balance may reflect an unfinished project cycle - 0.27
+
+### What run 4 leaves open
+
+The run still ends `elapsed-time-limit`, so the finding is narrowed, not closed. The 170 s reserve buys one synthesis call plus roughly one verification call; the configured `verificationLimit` is 6, and verifying six signals at this provider's latency cannot fit inside it. The next question is therefore whether the reserve should scale with `verificationLimit`, whether a round should verify fewer signals and defer the rest explicitly, or whether the whole-run wall clock should be editor-visible rather than only per-call seconds.
+
+Recorded limits for run 4: same isolated newsroom and single model as runs 1-3; the six signals are unverified and must not be treated as findings; one verification attempt failed and is counted as failed rather than dropped; no production service, credential, commit beyond `7da28c8`, merge, tag, or release was touched by the run.
