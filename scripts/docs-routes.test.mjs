@@ -6,9 +6,10 @@
   (src/routes/desk.dark.tsx), and `git grep page-watches` finds only a query
   key. A publisher following the manual would have hit a 404.
 
-  Dated archive and operations history are excluded - those record what
-  happened and are not rewritten. Measured 2026-09-16: 28 route files, 27
-  documented paths, 0 unresolved.
+  Dated archive, operations history and proofs are excluded - those record what
+  happened, may quote a URL precisely because it was broken, and are not
+  rewritten. Measured 2026-09-16: 28 route files, 27 documented paths, 0
+  unresolved.
 */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -17,7 +18,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const SKIP = /[\\/](archive|operations)[\\/]/;
+/*
+  Dated records are excluded, not just the archive: proofs under docs/proofs
+  quote broken things on purpose to document them (the report from this very
+  change names /desk/page-watches because that URL was the defect).
+*/
+const SKIP = /[\\/](archive|operations|proofs)[\\/]/;
 /** Served by the server rather than a file route, or a path *prefix* only. */
 const NOT_A_FILE_ROUTE = /^\/(feed|sitemap\.xml|robots\.txt)$/;
 
