@@ -48,7 +48,7 @@ restart.
 
 ---
 
-## Six scheduled tasks
+## Seven scheduled tasks
 
 | Task                          | When        | Does                                                                                                                                |
 | ----------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -57,6 +57,7 @@ restart.
 | `TownReporter Monitors`       | every 5 min | rechecks watched sources, drains desk jobs                                                                                          |
 | `TownReporter Watchdog`       | every 5 min | checks the app, the tunnel and the public URL; restarts what is down; appends to `logs/watchdog.log` when there is something to say |
 | `TownReporter Restart`        | on demand   | stops and starts the paper                                                                                                          |
+| `TownReporter Nightly Proof`  | daily 03:30 | runs a real Scan and Draft against `townreporter_dev`; never publishes ([nightly proof](docs/nightly-proof.md))                      |
 | `TownReporter Tunnel Restart` | on demand   | stops and starts the tunnel                                                                                                         |
 | (Postgres)                    | —           | started by the first task, not separately registered                                                                                |
 
@@ -68,6 +69,10 @@ powershell -ExecutionPolicy Bypass -File ops\install-tasks.ps1
 
 Idempotent — safe to run again after a path change or a rename. Add `-WhatIf`
 to see what it would do first.
+
+`ops\install-tasks.ps1` registers the six app and operations tasks above.
+**TownReporter Nightly Proof** is registered separately by
+`ops\nightly-proof.ps1`; see [the nightly proof guide](docs/nightly-proof.md).
 
 It refuses if the tasks already point at a different checkout, because this
 machine has both a production install and a development one and running it

@@ -31,7 +31,11 @@ Historical screenshots illustrate workflows, not the current layout.
 Dark Desk now separates speculative Black Desk signals (confidence ≤0.5) from
 structured Dark Signal verification. See [the doctrine and its limits](dark-desk.md).
 The verified label is a completed software protocol, not a substitute for
-checking sources. The five-topic live acceptance exercise remains outstanding.
+checking sources. The travel-local five-topic exercise was executed in the
+isolated 0.6.51+ candidate: eight bounded runs, including the September 3-8
+replay. The records and limits are in
+[the run-budget proof](proofs/dark-desk-run-budget-0651.md). This does not
+close a Halo-local or production acceptance exercise.
 
 Models can be discovered through LM Studio, Ollama or llama.cpp and selected
 individually. **Captured-PDF OCR:** scanned PDF OCR renders the

@@ -62,7 +62,10 @@ Dark Desk separates speculative Black Desk signals (confidence ≤0.5) from a
 structured adversarial review record. See [the doctrine and its limits](dark-desk.md).
 Protocol complete means the searches and four review questions were completed;
 it is not a factual verdict or a gate on the editor's lead handoff. The
-five-topic live acceptance exercise remains outstanding.
+travel-local five-topic exercise was executed in the isolated 0.6.51+ candidate:
+eight bounded runs, including the September 3–8 replay. The records and limits
+are in [the run-budget proof](proofs/dark-desk-run-budget-0651.md). This does
+not close a Halo-local or production acceptance exercise.
 
 Models can be discovered through LM Studio, Ollama or llama.cpp and selected
 individually. **Captured-PDF OCR** renders scanned PDFs as actual PDF pages

@@ -245,7 +245,7 @@ When a site redirects only to add or remove a trailing slash on the same address
 
 ## Five live investigations — acceptance exercise
 
-**Owner-authorized travel-local execution, still pending.** This plan is not a report that the runs happened. Run five investigations in an isolated travel-machine environment, without Halo data or services, and separately replay the September 3–8 historical interval. Halo real-data staging and promotion remain a distinct local-operator exercise. Do not publish automatically or manufacture a queue item to make a run appear successful.
+**Owner-authorized travel-local execution completed 2026-09-16.** This section remains the plan and evidence checklist; it is not a claim of Halo-local or production acceptance. Five topic runs and the September 3–8 replay were executed in an isolated travel-machine environment, without Halo data or services. The records are in [the run-budget proof](proofs/dark-desk-run-budget-0651.md): eight bounded runs, including the replay. Halo real-data staging and promotion remain a distinct local-operator exercise. Do not publish automatically or manufacture a queue item to make a run appear successful.
 
 The first two topics are the owner's wording and hypotheses, not established
 facts:
