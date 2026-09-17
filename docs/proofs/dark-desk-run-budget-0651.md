@@ -116,3 +116,42 @@ verification signal 1 14,160 ms  ok (provider "injected")
 The run still ends `elapsed-time-limit`, so the finding is narrowed, not closed. The 170 s reserve buys one synthesis call plus roughly one verification call; the configured `verificationLimit` is 6, and verifying six signals at this provider's latency cannot fit inside it. The next question is therefore whether the reserve should scale with `verificationLimit`, whether a round should verify fewer signals and defer the rest explicitly, or whether the whole-run wall clock should be editor-visible rather than only per-call seconds.
 
 Recorded limits for run 4: same isolated newsroom and single model as runs 1-3; the six signals are unverified and must not be treated as findings; one verification attempt failed and is counted as failed rather than dropped; no production service, credential, commit beyond `7da28c8`, merge, tag, or release was touched by the run.
+
+## Follow-up 2: the deferred accounting fix, run 5, and a summary-truncation defect
+
+Two more repairs landed after run 4.
+
+**`2d36449` - a budget stop is not a verification failure.** `verifyRunSignals` had two budget-stop branches (search cap, model-call cap) doing `failed += 1`. A budget stop is what `deferred` already means here - "not attempted, keep it for later". Both branches now add the untouched remainder to `deferred`; the third `failed` site (attempted, but no usable verdict or unsaved trail) is untouched. New `src/lib/news/dark-verify-budget.test.ts` pins it (RED before the change: `actual 1, expected 0` on both branches; GREEN 2/2). Neighbours `dark-verify` + `dark-preferences-flow` 19/19; `dark-verify` + `dark-preferences-flow` + `dark-output-grounding` 28/28 with the later commit.
+
+**Run 5, same isolated newsroom, `codex-luna` / `gpt-5.6-luna`, effort low, dig 4/10: "Longmont Housing Authority and affordable housing fund allocations since 2023".**
+
+| Field | Value |
+|---|---|
+| Stop reason | `elapsed-time-limit` |
+| Elapsed | 423,991 ms |
+| Usage | 10 model calls, 21 searches, 12 document reads |
+| Verification | eligible 3, attempted 3, verified 1, unverified 2, **failed 0**, **deferred 0** |
+| Signals written | 3 |
+
+```text
+planning hop 1        35,438 ms  ok
+selecting documents   36,812 ms  ok
+planning hop 2        78,510 ms  ok
+selecting documents   28,065 ms  ok
+planning hop 3        72,792 ms  ok
+selecting documents   57,757 ms  ok
+synthesis             34,345 ms  ok
+verification signal 1 12,806 ms  ok
+verification signal 2 14,796 ms  ok
+verification signal 3 13,530 ms  ok
+```
+
+Signals: "Affordable Housing Fund award ledger remains unresolved" 0.42 unverified; "Multi-year Brothers Redevelopment carry-forward trail" 0.38 unverified; "Housing Authority revenue offsets do not yet map to housing outcomes" 0.33 **verified**.
+
+**What run 5 settles.** `failed: 0` confirms the mislabelling is gone live. `attempted: 3 === eligible: 3` with `deferred: 0` confirms the review was not budget-stopped: every configured verification ran and completed, none timed out. The reserve also worked again - research stopped after hop 3 and synthesis plus all three verifications executed.
+
+**What run 5 leaves open, narrowed.** The round still ends on the clock, in the `dark-signal-desk` stage, with the ledger showing no timed-out call. Two things follow from the arithmetic: research consumed 309 s of the 420 s wall (three hops at ~103 s each) because the reserve is a *hop-boundary gate*, not an allocation - hop 3 began with 241 s left, above the 170 s reserve, and then spent 130 s. The desk stages then needed 75 s, leaving ~35 s, which is not enough for the remaining model call (the editor brief) or the final write. A refused `startModelCall` records no ledger entry, so the ledger cannot show which call lost; the leading explanation is the brief. Because a round's summary ends with a `Brief:` line only when that stage reported, the confirming line for this is the one the next defect was hiding.
+
+**`b626498` - the summary was truncating from the wrong end.** Both run paths stored their header with `slice(0, 2500)`. Run 5's narrative was long enough that the slice cut the tail, so the stored summary ends mid-word at "Hops" - losing the hop count, the saved dials, the synthesis outcome and any `Brief:` line. An editor opening that file would see a narrative that stops mid-sentence and no statement that the brief never ran. `tailSafeDarkSummary()` now keeps the trailing lines whole and clips the narrative instead; both store sites use it. `src/lib/news/dark-summary-tail.test.ts` asserts the kept lines and also asserts that the replaced front-slice *would* have dropped them, so the defect cannot silently return.
+
+**Next.** Re-run one round on this build and read the summary tail: it should now state hops, dials, synthesis and brief outcome explicitly - which both confirms the truncation fix and tells us whether the brief is in fact the call that loses the clock. If it is, the honest options remain the earlier three: scale the reserve with `verificationLimit`, verify fewer signals per round and defer the rest, or make the whole-run wall clock editor-visible.
