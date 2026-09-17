@@ -155,3 +155,36 @@ Signals: "Affordable Housing Fund award ledger remains unresolved" 0.42 unverifi
 **`b626498` - the summary was truncating from the wrong end.** Both run paths stored their header with `slice(0, 2500)`. Run 5's narrative was long enough that the slice cut the tail, so the stored summary ends mid-word at "Hops" - losing the hop count, the saved dials, the synthesis outcome and any `Brief:` line. An editor opening that file would see a narrative that stops mid-sentence and no statement that the brief never ran. `tailSafeDarkSummary()` now keeps the trailing lines whole and clips the narrative instead; both store sites use it. `src/lib/news/dark-summary-tail.test.ts` asserts the kept lines and also asserts that the replaced front-slice *would* have dropped them, so the defect cannot silently return.
 
 **Next.** Re-run one round on this build and read the summary tail: it should now state hops, dials, synthesis and brief outcome explicitly - which both confirms the truncation fix and tells us whether the brief is in fact the call that loses the clock. If it is, the honest options remain the earlier three: scale the reserve with `verificationLimit`, verify fewer signals per round and defer the rest, or make the whole-run wall clock editor-visible.
+
+## Run 6: the September 3-8 replay, and confirmation of the summary fix
+
+Replay window persisted through the editor dials (`dark_settings.research_preferences` = `{"mode":"range","lookbackDays":90,"startDate":"2026-09-03","endDate":"2026-09-08","verificationLimit":6,"executionMode":"batch","actionLimit":6}`), then run on the `b626498` build.
+
+Subject: "Longmont City Council decisions, contracts and public records from September 3-8, 2026". Model `codex-luna` / `gpt-5.6-luna`, effort low, dig 4/10, nerve 5/10, city scope.
+
+| Field | Value |
+|---|---|
+| Stop reason | **`hop-limit`** - the design stop, not clock exhaustion |
+| Elapsed | 408,148 ms (inside the 420 s wall) |
+| Usage | 12 model calls, 25 searches, 12 document reads |
+| Verification | eligible 4, attempted 4, verified 0, unverified 4, failed 0, deferred 0 |
+| Signals written | 4 |
+
+Signals, all labelled unverified: "September 8 council record remains materially incomplete" 0.42; "Southeast Longmont urban-renewal modification has an unresolved money-and-control trail" 0.36; "O-2026-53 has a subject-matter and fiscal-description mismatch" 0.34; "Urban-renewal plan embeds continuing authority and obligations beyond the stated modification date" 0.29.
+
+**The replay window is proven in the run record, not just in the settings:** the stored summary reads `Window: 2026-09-03 through 2026-09-08 (search preference; verify dates in each source)` and `Search date preference: 2026-09-03 through 2026-09-08 (inclusive).`
+
+**The summary-truncation fix is confirmed live.** The stored summary now ends with its status lines intact:
+
+```text
+Hops 3 of 5. Artifacts 13. Open frontier 192.
+Setting: dig 4/10, nerve 5/10 (Standard), scope city.
+```
+
+The narrative above them is clipped at the front (`This hop tar...`), which is the intended trade: the editor keeps the run's own account of what it did and how far it got, and loses prose instead. No `Brief:` line appears this round, so the brief stage raised no error - it was run 4's failed brief that produced that line, and run 5's summary had been truncated before reaching it.
+
+**This closes the "runs by design rather than by clock" question.** Run 6 is the first round that terminated on its own hop budget with every configured verification attempted (4 of 4), nothing failed and nothing deferred. Runs 1-2 stopped on the clock with nothing written; run 3 stopped by design at a reduced dig; runs 4-5 stopped on the clock with the desk stages starving; run 6 stopped by design at the shipped dig with the desk stages complete.
+
+**Assessment of the six runs against the directive's questions.** Did each produce a usable lead or a plainly useful "nothing found"? Runs 3-6 produced 3, 6, 3 and 4 signals respectively with explicit gaps and next steps; runs 1-2 produced nothing and are recorded as budget failures, not as findings. Did they preserve sources and separate facts from hypotheses? Signals carry confidence and a `verification_status`, and every signal in runs 3-6 is labelled `unverified` except one in run 3 and one in run 5. Did they stop under a bounded budget? Yes - every run recorded its stop reason and usage totals. Did they avoid repeating completed work? The frontier carries across runs on one investigation; each replay subject was a distinct investigation. Did they give concrete follow-up items? Yes; every run's summary names the next records to retrieve. Did they avoid overclaiming? The unverified labelling and the "dates are search hints, not proof" line are present in every stored summary.
+
+**Limits.** Six runs, one newsroom, one model, no cross-model comparison. Signals are leads, not conclusions. Run 6's window is a search preference applied to queries; it does not certify that every captured source falls inside September 3-8, and the run itself says so.
