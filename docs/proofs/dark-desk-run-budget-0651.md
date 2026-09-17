@@ -223,3 +223,24 @@ writing editor brief  19,896 ms  ok
 Signals, all unverified: "Large late-2026 appropriations lack transaction-level explanation" 0.42; "Revenue-gap communication may change the fiscal context" 0.32; "Carryover and fund-balance classifications require reconciliation" 0.45. The summary tail is intact (`Hops 3 of 5. Artifacts 13. Open frontier 169.` / `Setting: dig 4/10, nerve 5/10 (Standard), scope city.`).
 
 **Limits.** One round on one newsroom with one model; a single observation that the brief now fits, not a distribution. The reserve is still a check rather than a hard pre-emption: a model call already in flight can cross it, so research can end slightly under the reserve - it simply cannot start another call there. Skipping the selector means hop 3's read candidates come from the ordinary queue; that trade is deliberate and is now stated in `docs/dark-desk.md`.
+
+
+## Follow-up 4: the run record stopped calling live calls "injected", and the reserve's real ceiling
+
+**`5ff51b0` - verification calls now name their provider.** `verifyRunSignals` labelled a call `provider: "injected", model: "injected"` whenever `deps.model` was set, on the assumption that an injected model means a test double. Production also passes a callback there - `synthesizeSignals` builds a failover-wrapped `verifyModel` - so every live verification in runs 4, 5 and 7 was recorded as if a test had run it. The label now names the editor's choice; an unknown transport still falls back to "injected". RED with the old labels restored: "a live provider call must not be logged as a test double". Neighbours 36/36, typecheck clean.
+
+**Run 8, same newsroom, `codex-luna`, dig 4/10, lookback window.** Stop reason `elapsed-time-limit`, 420,024 ms, 12 model calls, 25 searches, 12 document reads, `{"eligible":4,"attempted":4,"verified":1,"unverified":3,"failed":0,"deferred":0}`, 4 signals.
+
+The label fix is visible in the run's own record:
+
+```text
+"stage":"verification signal 1","provider":"codex-luna","model":"gpt-5.6-luna","durationMs":14637,"result":"ok"
+"stage":"verification signal 2","provider":"codex-luna","model":"gpt-5.6-luna","durationMs":14769,"result":"ok"
+"stage":"verification signal 3","provider":"codex-luna","model":"gpt-5.6-luna","durationMs":16588,"result":"ok"
+"stage":"verification signal 4","provider":"codex-luna","model":"gpt-5.6-luna","durationMs":15422,"result":"ok"
+"stage":"writing editor brief","provider":"codex","model":"gpt-5.6-luna","durationMs":596,"result":"timeout","timedOut":true
+```
+
+**What run 8 teaches about the reserve.** Hop 3's post-search selector began with 190.8 s left - above the 170 s reserve, so the guard allowed it - and then ran for 42.4 s, finishing at 148.4 s remaining. The reserve is a check *before* a call, not a cap *on* it, so a call that starts just above the line can cross it. The overshoot is now bounded by one call's duration instead of a whole hop, which is why run 7 kept enough room for the brief; run 8 gave the desk stages only ~102 s across synthesis and four verifications, and the brief started with 596 ms and timed out.
+
+**The arithmetic this exposes.** At dig 4/10 with `verificationLimit` 6, the configured work is two model calls per hop plus synthesis, up to six verification calls and the brief. At this provider's observed 10-90 s per call that is more than the 420 s wall can hold. The reserve can triage between stages; it cannot make the configured work fit. The honest resolutions remain the three recorded earlier - size the wall clock to the configured work, verify fewer signals and defer the rest, or make the wall clock editor-visible - and run 8 shows a round can still end on the clock in the meantime, with the brief attempted and timing out rather than silently skipped.
