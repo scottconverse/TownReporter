@@ -78,7 +78,19 @@ it("retains multipart bytes exactly and rejects cross-newsroom, skipped and repe
   const { storeStoryDocumentPart, linkStoryDocuments } =
     await import("./story-documents.server.ts");
   const pg = await getPglite();
-  await pg.exec("create table if not exists leads(id integer primary key)");
+  await pg.exec(`create table if not exists leads(
+  id serial primary key,
+  user_id text not null default '',
+  newsroom_id integer,
+  headline text not null default '',
+  why text not null default '',
+  topic text not null default 'council',
+  status text not null default 'new',
+  source_urls text not null default '[]',
+  evidence text not null default '',
+  newsworthiness integer,
+  notes_json text not null default '{}'
+)`);
   const sql = await getSql();
   const first = Buffer.alloc(4 * 1024 * 1024, 65),
     last = Buffer.from("FINAL BYTES 642198");
@@ -156,4 +168,83 @@ it("retains multipart bytes exactly and rejects cross-newsroom, skipped and repe
       ),
     /interrupted/,
   );
+});
+
+it("checkpoints PDF pages and resumes a retry without rereading completed pages", async () => {
+  const { getSql } = await import("../db.ts");
+  const { ensureStoryDocuments, readStoryDocuments } = await import("./story-documents.server.ts");
+  const sql = await getSql();
+  await ensureStoryDocuments(sql);
+  const room = 88407;
+  const user = "document-page-checkpoint-editor";
+  const [lead] = await sql.query<{ id: number }>(
+    "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'Page checkpoint lead','Uploaded packet','council','new','[]','',1,'{}') returning id",
+    [user, room],
+  );
+  const bytes = readFileSync(
+    new URL("./fixtures/story-documents/packet.pdf", import.meta.url),
+  );
+  await sql.query(
+    "insert into story_documents(id,newsroom_id,user_id,lead_id,filename,mime,original) values($1,$2,$3,$4,'packet.pdf','application/pdf',$5)",
+    [`page-checkpoint-${Date.now()}`, room, user, lead.id, bytes],
+  );
+  const stages: string[] = [];
+  const routing = {
+    modelEffort: "none" as const,
+    source: "auto" as const,
+    probe: async () => ({ ok: true as const, label: "Fake", choice: "codex-balanced" as const }),
+    chat: async () => ({ ok: true as const, text: "fake document evidence" }),
+  };
+  const onStage = async (message: string) => {
+    stages.push(message);
+  };
+
+  await assert.rejects(
+    () => readStoryDocuments(room, lead.id, "codex-balanced", "Check packet", onStage, [], user, true, undefined, routing),
+    /Read 12 of 15 pages; completed pages retained\. Retry to continue\./i,
+  );
+
+  const [afterFirst] = await sql.query<{
+    status: string;
+    full_text: string | null;
+    pages: number | null;
+    detail: string;
+  }>(
+    "select status,full_text,pages,detail from story_documents where newsroom_id=$1 and lead_id=$2",
+    [room, lead.id],
+  );
+  assert.equal(afterFirst.status, "failed");
+  assert.match(afterFirst.full_text ?? "", /\[packet\.pdf, page 1, native text extraction\]/);
+  assert.doesNotMatch(afterFirst.full_text ?? "", /FINAL PAGE DECISION/);
+  assert.equal(afterFirst.pages, 12);
+  assert.match(afterFirst.detail, /Read 12 of 15 pages; completed pages retained\. Retry to continue\./i);
+  const firstStages = stages.length;
+  const pageStages = (messages: string[]) =>
+    messages
+      .map((message) => /page (\d+) of 15/.exec(message)?.[1])
+      .filter((page): page is string => Boolean(page))
+      .map(Number);
+  assert.deepEqual(pageStages(stages), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+
+  const evidence = await readStoryDocuments(
+    room,
+    lead.id,
+    "codex-balanced",
+    "Check packet",
+    onStage,
+    [],
+    user,
+    true,
+    undefined,
+    routing,
+  );
+
+  assert.deepEqual(pageStages(stages.slice(firstStages)), [13, 14, 15]);
+  const [afterSecond] = await sql.query<{ status: string; full_text: string | null }>(
+    "select status,full_text from story_documents where newsroom_id=$1 and lead_id=$2",
+    [room, lead.id],
+  );
+  assert.equal(afterSecond.status, "read");
+  assert.match(afterSecond.full_text ?? "", /FINAL PAGE DECISION: approve 731250 dollars/);
+  assert.match(evidence, /fake document evidence/);
 });
