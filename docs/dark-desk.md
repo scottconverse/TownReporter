@@ -165,6 +165,7 @@ steps rather than mid-call, so one unusually long hop can still spend more
 than its share of the run. When the meter is what ended a round, the summary
 states the hops completed, the saved settings and the outcome of each later
 stage instead of leaving them out.
+Research also yields mid-hop: if the hop's post-search read selection would reach into that reserve, it is skipped, its candidates fall back to the ordinary read queue, and they can be planned again on the next hop.
 
 The open file shows the current stage and the live counts. The run record keeps
 each model call's stage, provider, model, duration, result and timeout status;

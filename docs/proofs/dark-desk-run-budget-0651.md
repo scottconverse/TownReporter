@@ -188,3 +188,38 @@ The narrative above them is clipped at the front (`This hop tar...`), which is t
 **Assessment of the six runs against the directive's questions.** Did each produce a usable lead or a plainly useful "nothing found"? Runs 3-6 produced 3, 6, 3 and 4 signals respectively with explicit gaps and next steps; runs 1-2 produced nothing and are recorded as budget failures, not as findings. Did they preserve sources and separate facts from hypotheses? Signals carry confidence and a `verification_status`, and every signal in runs 3-6 is labelled `unverified` except one in run 3 and one in run 5. Did they stop under a bounded budget? Yes - every run recorded its stop reason and usage totals. Did they avoid repeating completed work? The frontier carries across runs on one investigation; each replay subject was a distinct investigation. Did they give concrete follow-up items? Yes; every run's summary names the next records to retrieve. Did they avoid overclaiming? The unverified labelling and the "dates are search hints, not proof" line are present in every stored summary.
 
 **Limits.** Six runs, one newsroom, one model, no cross-model comparison. Signals are leads, not conclusions. Run 6's window is a search preference applied to queries; it does not certify that every captured source falls inside September 3-8, and the run itself says so.
+
+
+## Follow-up 3: the reserve now covers the hop's second call
+
+**`b5b71e4` - the post-search selector honours the reserve.** The hop-boundary check alone was not enough, because a hop costs two model calls: the planner, then the post-search read selector. A hop that began with headroom could still finish below the reserve. Run 5 is the measurement - hop 3 started with 241 s left, ran planning for 73 s and selecting for 58 s, and ended at 309 s elapsed, 2 s under the 170 s the writing stages need. The selector is now skipped while the reserve is on the meter; its candidates are re-planned on the next hop and reads already fall back to the ordinary queue. New cases in `src/lib/news/dark-research-reserve.test.ts`: the selector must not run inside the reserve (RED without the guard: "the selector must not run inside the reserve"), and with real headroom it still runs. 4/4, neighbours 18/18, typecheck clean.
+
+**Run 7 - same newsroom, same model, same dig 4/10, window back to the 90-day lookback.**
+
+| Field | Value |
+|---|---|
+| Stop reason | **`hop-limit`** - by design |
+| Elapsed | 412,957 ms |
+| Usage | 10 model calls, 21 searches, 12 document reads |
+| Verification | eligible 3, attempted 3, verified 0, unverified 3, failed 0, deferred 0 |
+| Signals written | 3 |
+
+```text
+planning hop 1        36,862 ms  ok
+selecting documents   31,041 ms  ok
+planning hop 2        83,351 ms  ok
+selecting documents   38,739 ms  ok
+planning hop 3        82,988 ms  ok
+   (hop 3's post-search selector skipped: the reserve was held)
+synthesis             36,550 ms  ok
+verification signal 1 16,352 ms  ok
+verification signal 2 16,842 ms  ok
+verification signal 3 14,113 ms  ok
+writing editor brief  19,896 ms  ok
+```
+
+**This is the first round in the series where the editor brief ran.** Run 5 - same newsroom, same model, same dig - produced no brief at all, because the clock had been spent. Run 7 traded one hop-3 read plan for it and finished every stage. That is the whole point of the reserve, and it is now observable in the run record rather than asserted.
+
+Signals, all unverified: "Large late-2026 appropriations lack transaction-level explanation" 0.42; "Revenue-gap communication may change the fiscal context" 0.32; "Carryover and fund-balance classifications require reconciliation" 0.45. The summary tail is intact (`Hops 3 of 5. Artifacts 13. Open frontier 169.` / `Setting: dig 4/10, nerve 5/10 (Standard), scope city.`).
+
+**Limits.** One round on one newsroom with one model; a single observation that the brief now fits, not a distribution. The reserve is still a check rather than a hard pre-emption: a model call already in flight can cross it, so research can end slightly under the reserve - it simply cannot start another call there. Skipping the selector means hop 3's read candidates come from the ordinary queue; that trade is deliberate and is now stated in `docs/dark-desk.md`.
