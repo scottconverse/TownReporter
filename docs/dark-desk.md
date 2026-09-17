@@ -157,6 +157,15 @@ A round checkpoints research before synthesis. If synthesis times out, the
 completed searches and document reads stay complete and only synthesis is
 retried. One run meter caps elapsed time, model calls, searches and document
 reads across research, synthesis, signal verification and the editor brief.
+
+Research stops while the clock reserved for synthesis, verification and the
+brief is still on the meter, so a round can end at **hop-limit** by design
+with every finished hop kept and its leads intact. That check happens between
+steps rather than mid-call, so one unusually long hop can still spend more
+than its share of the run. When the meter is what ended a round, the summary
+states the hops completed, the saved settings and the outcome of each later
+stage instead of leaving them out.
+
 The open file shows the current stage and the live counts. The run record keeps
 each model call's stage, provider, model, duration, result and timeout status;
 provider-reported token counts are stored when available and remain unknown
@@ -287,4 +296,4 @@ evidence. Mocked local tests cannot replace these records.
 
 **How hard to dig → Change** keeps search dates and the verification count independent of dig, nerve and map. Presets change only the original dials. Save applies the whole visible configuration; validation errors leave it unsaved, and an unconfirmed response tells the editor to reload rather than promising which write reached the server. A failed settings read shows a retry state and never substitutes defaults for a saved configuration.
 
-Migration0048 stores per-newsroom preferences and a snapshot on each round. The snapshot is recorded before research begins and is reused through planning, synthesis, verification and automatic model failover. Editing settings during a round changes later rounds only. Search dates express a preference, not a factual date filter or completeness claim. Verification counts are saved on the round; failed searches, invalid model replies and failed signal-result writes stay unverified.
+Migration0048 stores per-newsroom preferences and a snapshot on each round. The snapshot is recorded before research begins and is reused through planning, synthesis, verification and automatic model failover. Editing settings during a round changes later rounds only. Search dates express a preference, not a factual date filter or completeness claim. Verification counts are saved on the round and separate eligible, attempted, verified, unverified, failed and deferred. Signals the run meter stopped before reaching are counted as **deferred** - saved for a later round - rather than as failures. An attempted signal with no usable verdict, or one whose search trail or result could not be saved, is counted as failed and stays unverified.
