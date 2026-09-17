@@ -2632,7 +2632,17 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
 
     if (stopReason) break hopLoop;
 
-    if (readSelector && currentSearchHits.size > 0) {
+    /*
+      The hop-boundary check alone is not enough: a hop costs two model
+      calls, so one that starts with headroom can still finish below the
+      reserve. Run 5 of 2026-09-16 began hop 3 with 241 s left and ended it
+      with 168 s - 2 s under the 170 s the writing stages need. Skipping the
+      selector keeps that reserve intact; its candidates are re-planned on
+      the next hop, and reads already fall back to the ordinary queue.
+    */
+    const reserveHeld =
+      opts.runBudget !== undefined && opts.runBudget.remainingMs() <= (opts.researchReserveMs ?? 0);
+    if (readSelector && currentSearchHits.size > 0 && !reserveHeld) {
       const hitContext = [...currentSearchHits].slice(0, 6).map((url) => `SEARCH RESULT URL: ${url}`).join("\n");
       try {
         postSearchPlan = await readSelector([

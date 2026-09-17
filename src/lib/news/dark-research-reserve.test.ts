@@ -94,3 +94,95 @@ test("without a reserve the loop spends the clock down as before", async () => {
   assert.equal(plannerCalls, 1, "with no reserve the hop still runs on the last second");
   assert.equal(out.stopReason, null);
 });
+
+/*
+  The second research call is the one that overshot.
+
+  The hop gate alone lets a hop start while barely above the reserve, and a hop
+  costs two model calls. Run 5 of 2026-09-16 began hop 3 with 241 s left,
+  finished it at 309 s, and left the writing stages only ~111 s of the 170 s
+  they were supposed to keep. These two cases pin the post-search selector to
+  the same reserve.
+*/
+function selectorFixture(advanceMs: number) {
+  const now = { at: 1_000 };
+  const budget = createDarkRunBudget(
+    { elapsedMs: 10_000, modelCalls: 10, searches: 10, documentReads: 10 },
+    { now: () => now.at },
+  );
+  let selectorCalls = 0;
+  let advanced = false;
+  return {
+    budget,
+    // Spend the hop's time exactly once, the way one planning call plus its
+    // searches would, so the selector is judged against a known remainder.
+    tick: () => {
+      if (advanced) return;
+      advanced = true;
+      now.at += advanceMs;
+    },
+    calls: () => selectorCalls,
+    bump: () => { selectorCalls += 1; },
+  };
+}
+
+test("research does not spend the reserve on the post-search selector", async () => {
+  const userId = "reserve-selector-held";
+  const investigationId = await seed(userId, 97);
+  const fixture = selectorFixture(8_500);
+  const budget = fixture.budget;
+
+  await researchLoop({
+    userId,
+    newsroomId: 97,
+    investigationId,
+    hops: 1,
+    researchReserveMs: 2_000,
+    runBudget: budget,
+    planner: async () => ({ ...emptyPlan(), searches: ["longmont records"] }),
+    search: async () => {
+      // The hop's planning call and searches consume most of the clock, as a
+      // long hop does in production: 1.5 s left against a 2 s reserve.
+      fixture.tick();
+      return [{ url: "https://example.gov/record", title: "Record", snippet: "text" }];
+    },
+    readSelector: async () => {
+      fixture.bump();
+      return { ...emptyPlan() };
+    },
+    fetch: async () => ({ ok: false, status: 404, text: "", title: "", extras: [] }),
+    archives: async () => [],
+  });
+
+  assert.equal(fixture.calls(), 0, "the selector must not run inside the reserve");
+  assert.equal(budget.remainingMs(), 1_500, "the writing stages keep their reserve");
+});
+
+test("with headroom the selector still runs", async () => {
+  const userId = "reserve-selector-runs";
+  const investigationId = await seed(userId, 98);
+  const fixture = selectorFixture(1_000);
+  const budget = fixture.budget;
+
+  await researchLoop({
+    userId,
+    newsroomId: 98,
+    investigationId,
+    hops: 1,
+    researchReserveMs: 2_000,
+    runBudget: budget,
+    planner: async () => ({ ...emptyPlan(), searches: ["longmont records"] }),
+    search: async () => {
+      fixture.tick();
+      return [{ url: "https://example.gov/record", title: "Record", snippet: "text" }];
+    },
+    readSelector: async () => {
+      fixture.bump();
+      return { ...emptyPlan() };
+    },
+    fetch: async () => ({ ok: false, status: 404, text: "", title: "", extras: [] }),
+    archives: async () => [],
+  });
+
+  assert.equal(fixture.calls(), 1, "a hop with real headroom still selects its reads");
+});
