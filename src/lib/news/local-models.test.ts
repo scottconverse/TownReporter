@@ -357,3 +357,27 @@ describe("local model discovery", () => {
     assert.equal(gemma.thinking, true);
   });
 });
+
+it("labels every Ollama cloud naming shape as cloud, not on-device", async () => {
+  const ids = [
+    "deepseek-v4.1-flash:cloud", // tag shape the production newsroom uses
+    "model-name-cloud", // hosted-catalog hyphen shape
+    "model-name-1.2-cloud", // version followed by -cloud
+    "gemma4:12b", // plain on-device tag stays on-device
+  ];
+  globalThis.fetch = fakeFetch({
+    "http://127.0.0.1:1234/v1/models": "timeout",
+    "http://127.0.0.1:11434/v1/models": { data: ids.map((id) => ({ id })) },
+    "http://127.0.0.1:8080/v1/models": "timeout",
+    "http://127.0.0.1:11434/api/ps": { models: [] },
+  }) as typeof fetch;
+
+  const catalog = await withEnv({}, () => discoverLocalModels(true));
+  const ollama = catalog.servers.find((s) => s.kind === "ollama");
+  assert.ok(ollama?.reachable);
+  const byId = new Map(ollama!.models.map((m) => [m.id, m]));
+  assert.equal(byId.get("deepseek-v4.1-flash:cloud")!.cloud, true);
+  assert.equal(byId.get("model-name-cloud")!.cloud, true);
+  assert.equal(byId.get("model-name-1.2-cloud")!.cloud, true);
+  assert.equal(byId.get("gemma4:12b")!.cloud, false);
+});

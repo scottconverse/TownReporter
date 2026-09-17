@@ -277,6 +277,41 @@ export async function getProviderLogin(
   return rows[0] ? shape(rows[0]) : null;
 }
 
+
+
+
+
+/**
+ * The latest login record, as the desk should show it right now.
+ *
+ * A failed record that predates a successful signed-in probe is history, not
+ * the provider's current verdict. Production hit this exact shape after the
+ * 2026-09-17 Codex catalog repair: the CLI signed in and its live test
+ * answered, but the Server page kept printing the stale configuration error
+ * because the newest row was still the failure. Rather than deleting or
+ * rewriting that row, the failure stays in the table for review, and the
+ * desk surfaces it only until the provider actually signs in again.
+ */
+export async function supersedeResolvedLogin(
+  provider: ProviderId,
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
+): Promise<ProviderLogin | null> {
+  await ensureProviderLoginsSchema();
+  const sql = await getSql();
+  const rows = await sql.query<Row>(
+    `select ${COLUMNS} from provider_logins
+     where newsroom_id = $1 and provider = $2 order by id desc limit 1`,
+    [newsroomId, provider],
+  );
+  const latest = rows[0] ? shape(rows[0]) : null;
+  if (!latest || latest.status !== "failed") return latest;
+  if (await probeProviderLogin(provider)) {
+    await patch(latest.id, { status: "done", detail: "" }, true);
+    return getProviderLogin(latest.id, newsroomId);
+  }
+  return latest;
+}
+
 export async function latestProviderLogin(
   provider: ProviderId,
   newsroomId: number = DEFAULT_NEWSROOM_ID,
@@ -723,7 +758,17 @@ export async function providerStatuses(
       detail,
       lastChecked: at,
       lastTest: lastTests.get(provider) ?? null,
-      login: off ? null : await latestProviderLogin(provider, newsroomId),
+      /*
+        A failed login is history once the provider is signed in again. The
+        desk shows the resolved state, not the stale failure: a successful
+        signed-in probe supersedes the older failed record, which stays in
+        the table for review but is no longer the verdict on this provider.
+      */
+      login: off
+        ? null
+        : signedIn
+          ? await supersedeResolvedLogin(provider, newsroomId)
+          : await latestProviderLogin(provider, newsroomId),
     });
   }
   return out;

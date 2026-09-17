@@ -21,6 +21,7 @@ import {
   resetProviderLoginStartupSweepForTest,
   startProviderLogin,
   stripAnsi,
+  providerStatuses,
 } from "./provider-login.server.ts";
 import { assertOwner } from "./provider-login.ts";
 import { ForbiddenError } from "./membership.ts";
@@ -369,6 +370,43 @@ describe("the sign-in state machine, driven by a fake CLI", () => {
     }
   });
 
+  it("a successful signed-in probe supersedes an older failed-login record", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tr-supersede-'));
+    const sql = await getSql();
+    await ensureProviderLoginsSchema();
+    const inserted = await sql.query<{ id: number }>(
+      "insert into provider_logins (newsroom_id, provider, status, detail, finished_at) values ($1, $2, 'failed', 'Error loading configuration: failed to parse model_catalog_json', now()) returning id",
+      [NEWSROOM, "claude"],
+    );
+    const failedId = inserted[0]!.id;
+
+    // The fake CLI reports signed in, so the status read supersedes the failure.
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: FAKE_CLAUDE,
+      FAKE_CLAUDE_SIGNED_IN: "1",
+    });
+    const { resetClaudeCliCache, probeClaudeCode } = await import("./ai-claude-code.server.ts");
+    resetClaudeCliCache();
+    try {
+      assert.equal((await probeClaudeCode()).ok, true);
+      const statuses = await providerStatuses(NEWSROOM);
+      const claude = statuses.find((s) => s.provider === "claude");
+      assert.ok(claude?.signedIn, "the probe says signed in");
+
+      // A resolved failure is history: the row stays reviewable, never deleted.
+      const row = await getProviderLogin(failedId, NEWSROOM);
+      assert.equal(row?.status, "done");
+      assert.equal(row?.detail, "");
+      const rows = await sql.query<{ id: number }>(
+        "select id from provider_logins where id = $1",
+        [failedId],
+      );
+      assert.equal(rows.length, 1);
+    } finally {
+      restore();
+      resetClaudeCliCache();
+    }
+  });
   it("only knows two providers", () => {
     assert.equal(isProviderId("claude"), true);
     assert.equal(isProviderId("codex"), true);
