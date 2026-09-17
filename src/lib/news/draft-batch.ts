@@ -26,7 +26,12 @@ export type DraftBatchItem = {
 export type DraftBatchView = {
   id: number;
   createdAt: string;
-  runtime: { runtime: DraftBatchStoredRuntime; label: string };
+  runtime: {
+    runtime: DraftBatchStoredRuntime;
+    modelChoice: DraftBatchRuntime;
+    modelEffort: ModelEffort | null;
+    label: string;
+  };
   items: DraftBatchItem[];
 };
 export type DraftBatchFailure = {
