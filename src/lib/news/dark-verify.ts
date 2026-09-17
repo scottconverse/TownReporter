@@ -140,7 +140,7 @@ export async function verifyRunSignals(opts: {
   let failed = 0;
   const limit = opts.preferences?.verificationLimit ?? VERIFY_PER_ROUND;
   const selected = rows.slice(0, limit);
-  const deferred = rows.length - selected.length;
+  let deferred = rows.length - selected.length;
 
   signalLoop: for (let signalIndex = 0; signalIndex < selected.length; signalIndex++) {
     const sig = selected[signalIndex]!;
@@ -155,7 +155,7 @@ export async function verifyRunSignals(opts: {
     let trailSaved = true;
     for (const q of plan) {
       if (opts.runBudget && !opts.runBudget.consumeSearch()) {
-        failed += 1;
+        deferred += selected.length - signalIndex;
         unverified += selected.length - signalIndex;
         break signalLoop;
       }
@@ -255,7 +255,7 @@ export async function verifyRunSignals(opts: {
       model: opts.deps?.model ? "injected" : (opts.choice ?? "provider-default"),
     });
     if (opts.runBudget && !modelCall) {
-      failed += 1;
+      deferred += selected.length - signalIndex;
       unverified += selected.length - signalIndex;
       break;
     }
