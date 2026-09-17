@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
 | **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
-| **A model**                 | Every writing picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.     |
+| **A model**                 | Every writing picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku; Grok (SuperGrok); Local model; and saved custom connections.     |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 
@@ -30,7 +30,7 @@ network (`0.0.0.0:8080`) for phone/LAN testing.
 The **built** server (`npm start`, `.output/server/index.mjs`) is the one that
 honours `PORT` (default `3000`) and `HOST` (default every interface — set
 `HOST=127.0.0.1` when a tunnel or reverse proxy fronts it).
-The legacy operator scripts identify the paper by its IPv4 listener. The Windows
+The legacy operator scripts identify the paper by its owned IPv4 listener and verify the server command line before stopping it. The Windows
 package also refuses occupied ports and checks that Windows permits an exclusive
 loopback bind before starting.
 
@@ -88,7 +88,7 @@ Then:
 npm run dev
 ```
 
-Open the paper. Top right: **Create editor**. Email + password. That account is stored in **your** database, becomes the newsroom **owner**, and the button disappears. First person in owns the desk. There is no setup token — it was removed in 0.5.1, because a one-person newsroom that could not re-issue the token had a lock with no locksmith. Sign-in allows ten attempts every five minutes from any one address, so a desk on the open internet is not a desk open to guessing.
+Open the paper. Top right: **Create editor**. Email + password. That account is stored in **your** database, becomes the newsroom **owner**, and the button disappears. First person in owns the desk. There is no setup token — it was removed in 0.5.1, because a one-person newsroom that could not re-issue the token had a lock with no locksmith. Sign-in has two limits: ten attempts every five minutes from any one address (`src/lib/auth/server.ts`), and an account lockout of ten failed attempts in fifteen minutes (`src/lib/auth/account-lockout.server.ts`). The lockout applies to the real owner too, not only an attacker - deliberately, because this desk has no password reset - and a correct sign-in clears it immediately. Keep the owner password somewhere you can find it.
 
 The next screen is **Set up the paper**. Enter:
 
@@ -100,7 +100,7 @@ The next screen is **Set up the paper**. Enter:
 
 Save once and the desk opens. Before that moment, the public site shows a
 neutral “Not yet set up” page and no articles. The same form remains under
-**Server → Paper setup**, so a typo or a changed source never requires a code
+**Server → Paper identity** (**Paper setup** panel), so a typo or a changed source never requires a code
 edit or rebuild.
 
 To hand the newsroom to someone else, use **Give up the desk** at the bottom of the Server page; it asks you to type your email address, because it cannot be undone.
@@ -574,7 +574,7 @@ Nearly every CI browser walk builds the app and drives it through `npm start` (`
 ## Point it at another city
 
 The city setup is database-backed and owner-operated. Use **Set up the paper**
-on first run, or **Server → Paper setup** later.
+on first run, or **Server → Paper identity** (**Paper setup** panel) later.
 
 ### 1. Masthead, locality and contact
 
@@ -617,7 +617,7 @@ If the city uses Legistar, Granicus, CivicClerk, BoardDocs, or Municode instead,
 
 ### 5. Newspaper sections
 
-After saving Paper setup, open **Server → Newspaper sections**. The owner can add, rename, reorder, hide and retire sections, assign accepted sources, and write reporting briefs and scan instructions. Review the unsaved old and new values before confirming; source assignments show names and URLs. Retirement requires a replacement and explicit impact confirmation. See [the editor guide](editor.md#newspaper-sections) for the full workflow.
+After saving Paper setup, open **Server → Sections** (**Newspaper sections** panel). The owner can add, rename, reorder, hide and retire sections, assign accepted sources, and write reporting briefs and scan instructions. Review the unsaved old and new values before confirming; source assignments show names and URLs. Retirement requires a replacement and explicit impact confirmation. See [the editor guide](editor.md#newspaper-sections) for the full workflow.
 
 Migration 0045 preserves existing topic keys and seeds their labels. It does not rename or delete stories. Runtime filing resolves retired keys so queued work cannot restore a retired section. Existing keys are stable URLs; display names can change. Source assignments and section configuration belong to one newsroom.
 

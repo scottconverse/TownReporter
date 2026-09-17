@@ -330,6 +330,32 @@ describe("draft batch transaction and read", () => {
     }
   });
 
+  it("reload returns the exact stored runtime choice and effort", async () => {
+    const leadId = await addLead();
+    const created = await commitDraftBatchForAuthenticatedEditor(
+      {
+        context,
+        items: [{ leadId }],
+        runtimeSnapshot: {
+          runtime: "codex-terra",
+          modelChoice: "codex-balanced",
+          transport: "codex",
+          model: "selected-terra",
+          modelEffort: "medium",
+        },
+      },
+      { accountRate: false, kick: false },
+    );
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const reloaded = await readDraftBatchForAuthenticatedEditor(context, created.batch.id);
+    assert.equal(reloaded.ok, true);
+    if (!reloaded.ok || !reloaded.batch) return;
+    assert.equal(reloaded.batch.runtime.runtime, "codex-terra");
+    assert.equal(reloaded.batch.runtime.modelChoice, "codex-balanced");
+    assert.equal(reloaded.batch.runtime.modelEffort, "medium");
+  });
+
   it("returns the latest batch after reload and denies a foreign explicit id", async () => {
     const leadId = await addLead();
     const created = await commitDraftBatchForAuthenticatedEditor(

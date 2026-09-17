@@ -130,7 +130,7 @@ Sections and manual investigative watches are implemented together; resolve the 
 
 Current Command Center and Dark Desk screenshots use disposable local fixtures. Older public-paper and other tour screenshots remain attributed historical examples. The first-owner concurrency defect found during0.6.24 verification was corrected in PR#8; no timeout or assertion was weakened.
 
-Legal removal and investigative settings are the next in-progress units. Legal inventory includes ambiguous historical editorial drafts and beat-memory/audit copies: no fuzzy auto-deletion or universal-erasure claim is permitted. Explicitly review shared references; owner-only retained payloads expire after12 calendar months, while destruction must never store removed text. External backup attestations cannot prove cleanup by themselves. Settings must snapshot once per round and show deferred signals in the denominator. All five patched-application investigations completed without a handoff or publication. The Nelson run exposed an evidence-pack defect: the applicable official record was captured but omitted by newest-12 and first-1,600-character truncation, leaving the brief with titles only. The 0.6.34 source selects relevant records across the captured inventory before shared selection builds separately bounded inputs for stage-one signal synthesis and the final brief; [the 0.6.34 release receipt](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.34) records exact-source checks and applicable runtime proof. The September 3–8 historical replay was not executed. They must not touch Halo data or services. Halo staging and promotion remain external operator work.
+Legal removal and investigative settings are the next in-progress units. Legal inventory includes ambiguous historical editorial drafts and beat-memory/audit copies: no fuzzy auto-deletion or universal-erasure claim is permitted. Explicitly review shared references; owner-only retained payloads expire after12 calendar months, while destruction must never store removed text. External backup attestations cannot prove cleanup by themselves. Settings must snapshot once per round and show deferred signals in the denominator. All five patched-application investigations completed without a handoff or publication. The Nelson run exposed an evidence-pack defect: the applicable official record was captured but omitted by newest-12 and first-1,600-character truncation, leaving the brief with titles only. The 0.6.34 source selects relevant records across the captured inventory before shared selection builds separately bounded inputs for stage-one signal synthesis and the final brief; [the 0.6.34 release receipt](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.34) records exact-source checks and applicable runtime proof. The September 3–8 historical replay was not executed in the Halo-local 0.6.34 exercise; the isolated 0.6.51+ replay is recorded in the 2026-09-16 addendum below. They must not touch Halo data or services. Halo staging and promotion remain external operator work.
 
 ## 0.6.26 implementation checkpoint
 
@@ -142,4 +142,23 @@ Investigative preferences live in How hard to dig. Defaults are 90 inclusive UTC
 
 Migration 0047 supplies removal metadata and guards; 0048 supplies investigative snapshots/counts. The source release requires the applicable full suite, typecheck/lint/build, independent review, built UI and real-Postgres checks on its exact candidate. Resolve [the 0.6.26 release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.26) for the published SHA and final gate results rather than copying older counts. Historical design documents now carry explicit status notices; their superseded sections/retention proposals are not alternate instructions.
 
-The local implementation queue is complete; source publication is established only by the release evidence above. All five patched-application investigations completed without a handoff or publication. The Nelson run exposed the evidence-pack selection defect described above; [the 0.6.34 release receipt](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.34) records exact-source checks and applicable runtime proof. The September 3–8 historical replay was not executed; preserve the dated receipts without forcing findings or future success claims. Real-data staging/promotion and production historical-record cleanup remain Halo-local. Do not invent completed investigations or restart a redesign to fill that gap.
+The local implementation queue is complete; source publication is established only by the release evidence above. All five patched-application investigations completed without a handoff or publication. The Nelson run exposed the evidence-pack selection defect described above; [the 0.6.34 release receipt](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.34) records exact-source checks and applicable runtime proof. The September 3–8 historical replay was not executed in the Halo-local 0.6.34 exercise; the isolated 0.6.51+ replay is recorded in the 2026-09-16 addendum below. Preserve the dated receipts without forcing findings or future success claims. Real-data staging/promotion and production historical-record cleanup remain Halo-local. Do not invent completed investigations or restart a redesign to fill that gap.
+
+## Update 2026-09-16 — the September 3-8 replay has since been executed
+
+The statement above that the September 3-8 historical replay "was not executed"
+was true of the Halo-local 0.6.34 acceptance exercise it describes. A replay has
+since been run as part of the current 0.6.51+ candidate work, in a different
+environment: the isolated database `townreporter_dark_live_20260916`, through
+the editor's own saved range preference (`2026-09-03` -> `2026-09-08`), on this
+branch.
+
+Result: the round stopped at **`hop-limit` by design** rather than on the clock,
+with 4 of 4 eligible signals attempted, 0 failed and 0 deferred, and it wrote 4
+leads, all labelled unverified. It is one of eight bounded live Dark Desk runs
+recorded for this candidate.
+
+This does not close the Halo-local acceptance exercise described above, is not
+the same environment, and is not a Halo or production action. Records:
+`docs/proofs/dark-desk-run-budget-0651.md`; candidate notes:
+`docs/releases/next.md`.

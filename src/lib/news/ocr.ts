@@ -26,7 +26,13 @@
 import type { OcrImpl, OcrOptions, PdfPage } from "./ingest.ts";
 import { isSelfReferential } from "./claim-hygiene.ts";
 import { isCustomModelChoice } from "./model-choice.ts";
-import { modelEffort, providerEntry, providerModel, type ProviderKind } from "./provider-registry.ts";
+import {
+  automaticLadder,
+  modelEffort,
+  providerEntry,
+  providerModel,
+  type ProviderKind,
+} from "./provider-registry.ts";
 import { automaticFailoverReason, looksLikeContentRefusal } from "./automatic-failover.ts";
 import { OCR_BATCH_PAGE_LIMIT } from "./ocr-batches.ts";
 
@@ -191,6 +197,64 @@ async function resolveVisionLocal(
 const NO_VISION_AVAILABLE =
   "No vision-capable model is available to read this scan: no ANTHROPIC_API_KEY, no Codex CLI, no signed-in Claude Code CLI, and no local model marked vision (· vision in the picker) was found.";
 
+function injectedAutomaticPlans(opts: OcrOptions): Plan[] {
+  const adapters = opts.adapters as OcrAdapters | undefined;
+  if (!adapters) return [];
+  const plans: Plan[] = [];
+  for (const id of automaticLadder()) {
+    const entry = providerEntry(id);
+    if (!entry) continue;
+    if (entry.kind === "codex" && adapters.codex) {
+      plans.push({ kind: "codex", model: providerModel(entry) });
+      continue;
+    }
+    if (entry.kind === "claude-code") {
+      if (adapters.anthropic) {
+        plans.push({ kind: "anthropic", apiKey: "test-adapter", model: providerModel(entry) });
+      } else if (adapters["claude-code"]) {
+        plans.push({ kind: "claude-code", model: providerModel(entry) });
+      }
+    }
+  }
+  if (adapters.local && opts.localModel) {
+    plans.push({
+      kind: "local",
+      baseUrl: opts.localModel.baseUrl,
+      model: opts.localModel.id,
+      apiKey: "test-adapter",
+    });
+  }
+  return plans;
+}
+
+async function productionAutomaticPlans(opts: OcrOptions, firstOnly = false): Promise<Plan[]> {
+  const plans: Plan[] = [];
+  for (const id of automaticLadder()) {
+    const entry = providerEntry(id);
+    if (!entry) continue;
+    if (entry.kind === "codex") {
+      const { probeCodex } = await import("./ai-codex.server.ts");
+      const codex = await probeCodex();
+      if (codex.ok) plans.push({ kind: "codex", model: providerModel(entry) });
+    } else if (entry.kind === "claude-code") {
+      const apiKey = env("ANTHROPIC_API_KEY");
+      if (apiKey) {
+        plans.push({ kind: "anthropic", apiKey, model: providerModel(entry) });
+      } else {
+        const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
+        const claude = await probeClaudeCode();
+        if (claude.ok) plans.push({ kind: "claude-code", model: providerModel(entry) });
+      }
+    }
+    if (firstOnly && plans.length) break;
+  }
+  if (!firstOnly || plans.length === 0) {
+    const local = await resolveVisionLocal(opts.localModel);
+    if (local) plans.push(local);
+  }
+  return plans;
+}
+
 /**
  * Tests inject complete transports, not partial spies over the live machine.
  * Resolve only from that closed set so a cached readiness probe or developer
@@ -219,28 +283,7 @@ function resolveInjectedPlan(opts: OcrOptions): Plan | PlanFailure | null {
 
   const provider = opts.provider;
   if (!provider || provider === "auto") {
-    if (adapters.codex) {
-      return { kind: "codex", model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra" };
-    }
-    if (adapters.anthropic) {
-      return {
-        kind: "anthropic",
-        apiKey: "test-adapter",
-        model: env("ANTHROPIC_MODEL") || "claude-sonnet-4-5",
-      };
-    }
-    if (adapters["claude-code"]) {
-      return { kind: "claude-code", model: env("ANTHROPIC_MODEL") || "claude-haiku-4-5" };
-    }
-    if (adapters.local && opts.localModel) {
-      return {
-        kind: "local",
-        baseUrl: opts.localModel.baseUrl,
-        model: opts.localModel.id,
-        apiKey: "test-adapter",
-      };
-    }
-    return { needsOcr: true, reason: NO_VISION_AVAILABLE };
+    return injectedAutomaticPlans(opts)[0] ?? { needsOcr: true, reason: NO_VISION_AVAILABLE };
   }
 
   // Custom connections still need their injected resolver to supply the
@@ -293,22 +336,12 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
   }
   const provider = opts.provider;
   if (!provider || provider === "auto") {
-    // Keep Automatic OCR on the current unattended order: Codex first,
-    // Anthropic and Claude Code later, then a discovered local vision model.
-    // This is selection by availability, not per-page fallback.
-    const { probeCodex } = await import("./ai-codex.server.ts");
-    const codex = await probeCodex();
-    if (codex.ok)
-      return { kind: "codex", model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra" };
-    const apiKey = env("ANTHROPIC_API_KEY");
-    if (apiKey)
-      return { kind: "anthropic", apiKey, model: env("ANTHROPIC_MODEL") || "claude-sonnet-4-5" };
-    const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
-    const claude = await probeClaudeCode();
-    if (claude.ok) return { kind: "claude-code", model: env("ANTHROPIC_MODEL") || "claude-haiku-4-5" };
-    const local = await resolveVisionLocal(opts.localModel);
-    if (local) return local;
-    return { needsOcr: true, reason: NO_VISION_AVAILABLE };
+    // Automatic follows provider-registry.ts's documented ladder. Local OCR
+    // remains an OCR-specific final capability when no cloud rung is ready.
+    return (await productionAutomaticPlans(opts, true))[0] ?? {
+      needsOcr: true,
+      reason: NO_VISION_AVAILABLE,
+    };
   }
 
   if (isCustomModelChoice(provider)) {
@@ -403,30 +436,9 @@ async function resolveVisionFallbackPlans(opts: OcrOptions, primary?: Plan): Pro
     } else candidates.push(forced);
   }
   if (!opts.visionFallbackPlans) {
-    if (adapters) {
-      if (adapters.codex) candidates.push({ kind: "codex", model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra" });
-      if (adapters.anthropic) candidates.push({ kind: "anthropic", apiKey: "test-adapter", model: env("ANTHROPIC_MODEL") || "claude-sonnet-4-5" });
-      if (adapters["claude-code"]) candidates.push({ kind: "claude-code", model: env("ANTHROPIC_MODEL") || "claude-haiku-4-5" });
-      if (adapters.local && opts.localModel) {
-        candidates.push({
-          kind: "local",
-          baseUrl: opts.localModel.baseUrl,
-          model: opts.localModel.id,
-          apiKey: "test-adapter",
-        });
-      }
-    } else {
-      const { probeCodex } = await import("./ai-codex.server.ts");
-      const codex = await probeCodex();
-      if (codex.ok) candidates.push({ kind: "codex", model: env("TOWNREPORTER_CODEX_TERRA_MODEL") || "gpt-5.6-terra" });
-      const apiKey = env("ANTHROPIC_API_KEY");
-      if (apiKey) candidates.push({ kind: "anthropic", apiKey, model: env("ANTHROPIC_MODEL") || "claude-sonnet-4-5" });
-      const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
-      const claude = await probeClaudeCode();
-      if (claude.ok) candidates.push({ kind: "claude-code", model: env("ANTHROPIC_MODEL") || "claude-haiku-4-5" });
-      const local = await resolveVisionLocal(opts.localModel);
-      if (local) candidates.push(local);
-    }
+    candidates.push(
+      ...(adapters ? injectedAutomaticPlans(opts) : await productionAutomaticPlans(opts)),
+    );
   }
   return candidates.filter(
     (candidate, index) =>

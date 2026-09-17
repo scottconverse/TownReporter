@@ -62,7 +62,10 @@ Dark Desk separates speculative Black Desk signals (confidence ≤0.5) from a
 structured adversarial review record. See [the doctrine and its limits](dark-desk.md).
 Protocol complete means the searches and four review questions were completed;
 it is not a factual verdict or a gate on the editor's lead handoff. The
-five-topic live acceptance exercise remains outstanding.
+travel-local five-topic exercise was executed in the isolated 0.6.51+ candidate:
+eight bounded runs, including the September 3–8 replay. The records and limits
+are in [the run-budget proof](proofs/dark-desk-run-budget-0651.md). This does
+not close a Halo-local or production acceptance exercise.
 
 Models can be discovered through LM Studio, Ollama or llama.cpp and selected
 individually. **Captured-PDF OCR** renders scanned PDFs as actual PDF pages
@@ -88,7 +91,7 @@ Manual investigative page watching is available in Dark Desk. The owner-only leg
 
 ## Newspaper sections
 
-The owner manages sections in **Server → Newspaper sections**, below Paper setup. Add a name and permanent key, rename a display label, move sections up or down, or hide them from the newspaper's section navigation. Keys cannot change after saving: existing story and section links stay valid. Hiding does not delete stories or prevent filing.
+The owner manages sections in **Server → Sections** (**Newspaper sections** panel), below Paper setup. Add a name and permanent key, rename a display label, move sections up or down, or hide them from the newspaper's section navigation. Keys cannot change after saving: existing story and section links stay valid. Hiding does not delete stories or prevent filing.
 
 For reporting sections, enter a reporting brief and scan instructions, then select accepted Sources. **Scan → Scan scope** offers General or a section. A section run uses only its assigned accepted sources and saves the guidance and source IDs with the queued run. Later configuration edits do not change that run; a source dropped before execution is excluded. A section without accepted sources cannot start. General retains all accepted sources.
 
@@ -205,7 +208,7 @@ city videos.
 Saving the form writes those choices to the database, rewrites the welcome
 article for the configured city, and opens the desk. Until it is saved, the
 public site says “Not yet set up” and publishes no stories. The owner can change
-every choice later under **Server → Paper setup**; no code edit or rebuild is
+every choice later under **Server → Paper identity** (**Paper setup** panel); no code edit or rebuild is
 required.
 
 ## The desk
@@ -595,14 +598,14 @@ the registry is the canonical picker definition; provider adapters still impleme
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
 | Scan                                  | configured gateway first for Automatic when set; otherwise first ready Codex Terra → Claude Sonnet rung; a recognized technical failure moves only the unfinished call and reuses already fetched sources; refusals are terminal | Any named Codex or Claude model, Grok, Local model, or saved custom connection |
 | Draft (Queue or workbench)            | configured gateway first for Automatic when set; otherwise first ready Codex Terra → Claude Sonnet rung; quota, unavailability, lost login, timeout, or no output can move only the unfinished call during the active run; a restarted job may reread saved source material; refusals are terminal | Any named Codex or Claude model, Grok, Local model, or saved custom connection |
-| **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Any named Codex or Claude model, or Local model                                                                  |
+| **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Any named Codex or Claude model, Grok, Local model, or saved custom connection                                  |
 | Dark Desk synthesis and brief         | the one you pick beside **Keep digging**; Automatic behaves as it does for Draft, with one mid-run failover at the round level                                                                                                                                           | the one you picked                                                                                              |
 | Dark Desk **planner**                 | the one you pick                                                                                                                                                                                                                                                         | a cheaper model from the SAME provider: Haiku on Claude, Terra on either Codex, and your own model on a gateway |
 | **Opinion (editorials)**              | Default: Codex Sol. Automatic and named choices use the same technical-only per-call retry during the active run; a restarted job may reread saved source material; refusals are terminal | The selected provider first, with a recorded technical switch when needed |
 
 **Opinion provider behavior.** An editorial uses the paper's configured voice
 and frontier research. Opinion's picker offers Automatic, all four named Codex
-models, all four named Claude models, Local model and custom connections. Automatic tries Codex Sol
+models, all four named Claude models, Grok, Local model and custom connections. Automatic tries Codex Sol
 then Claude Sonnet once when needed. Explicit choices remain the requested
 first runtime and use the same technical-only unfinished-call retry. (Zen MiMo and the earlier, model-specific
 Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
@@ -759,7 +762,9 @@ the owner under **Server → Invite an editor**.
 ## Jobs
 
 Anything that can take minutes is a row in `desk_jobs`, not a held-open request.
-Five kinds: `scan`, `draft`, `dark`, `editorial`, `brief`. The brief job refreshes
+Nine kinds: `scan`, `draft`, `reconcile`, `dark`, `editorial`, `brief`,
+`routine-notice`, `artifact-ocr` and `pull` - listed in [Job kinds](#job-kinds).
+The brief job refreshes
 an investigation's read-me-first summary without holding open the request.
 
 A job is claimed with a token and heartbeats while it runs. This is not
@@ -1083,8 +1088,7 @@ flowchart TB
 | `/desk/story/:id`                            | The workbench, opened by lead                                                              |
 | `/desk/story/draft/:id`                      | The editorial workbench, opened by draft — an editorial has no lead                        |
 | `/desk/published`                            | Live stories and corrections                                                               |
-| `/desk/dark`                                 | Dark Desk. Investigates, never prints.                                                     |
-| `/desk/page-watches`                         | Manual investigative page watches and capture history                                      |
+| `/desk/dark`                                 | Dark Desk. Investigates, never prints. Manual page watches and capture history are on this page. |
 | `/desk/legal-removals`                       | Owner-only legal-removal cases, retained copies and backup attestations                    |
 | `/desk/follow-ups`                           | Reporting requests and due dates                                                           |
 | `/desk/stats`                                | Newsroom activity and coverage                                                             |
@@ -1121,6 +1125,10 @@ comment on each, is [`.env.example`](../.env.example).
 | `dark`      | Dark Desk — start, or Keep digging | minutes per round                                                    |
 | `brief`     | Refresh the investigation brief    | a model call to update the file's read-me-first summary              |
 | `editorial` | Opinion desk                       | Historical runs: 10–40 minutes; up to 45 minutes per pass by default |
+| `reconcile` | Story workspace — **Check draft against evidence** | a model call, or a few |
+| `pull`      | Reporting item — **Pull**          | mechanical web search and document extraction; no writing model |
+| `artifact-ocr` | Dark Desk — reading a retained PDF | page batches; a vision model call per batch |
+| `routine-notice` | Scheduler tick on a saved routine policy | deterministic; no model |
 
 ## Commands
 

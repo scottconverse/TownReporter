@@ -31,7 +31,11 @@ Historical screenshots illustrate workflows, not the current layout.
 Dark Desk now separates speculative Black Desk signals (confidence ≤0.5) from
 structured Dark Signal verification. See [the doctrine and its limits](dark-desk.md).
 The verified label is a completed software protocol, not a substitute for
-checking sources. The five-topic live acceptance exercise remains outstanding.
+checking sources. The travel-local five-topic exercise was executed in the
+isolated 0.6.51+ candidate: eight bounded runs, including the September 3-8
+replay. The records and limits are in
+[the run-budget proof](proofs/dark-desk-run-budget-0651.md). This does not
+close a Halo-local or production acceptance exercise.
 
 Models can be discovered through LM Studio, Ollama or llama.cpp and selected
 individually. **Captured-PDF OCR:** scanned PDF OCR renders the
@@ -60,7 +64,7 @@ Manual investigative page watching is available in Dark Desk; see the workflow b
 
 ## Newspaper sections
 
-The owner manages sections in **Server → Newspaper sections**, below Paper setup. Add a name and permanent key, rename a display label, move sections up or down, or hide them from the newspaper's section navigation. Keys cannot change after saving: existing story and section links stay valid. Hiding does not delete stories or prevent filing.
+The owner manages sections in **Server → Sections** (**Newspaper sections** panel), below Paper setup. Add a name and permanent key, rename a display label, move sections up or down, or hide them from the newspaper's section navigation. Keys cannot change after saving: existing story and section links stay valid. Hiding does not delete stories or prevent filing.
 
 For reporting sections, enter a reporting brief and scan instructions, then select accepted Sources. **Scan → Scan scope** offers General or a section. A section run uses only its assigned accepted sources and saves the guidance and source IDs with the queued run. Later configuration edits do not change that run; a source dropped before execution is excluded. A section without accepted sources cannot start. General retains all accepted sources.
 
@@ -927,7 +931,7 @@ How we report, in public: `/how-we-report`.
 | Draft is a rewrite of the Leader                  | The pass never opened the company page                                                  | Pull the still-to-pull line for their press release, then redraft.                                                                                     |
 | Meeting has no transcript                         | Livestream hasn’t ended, or Playwright missing                                          | Wait for the 6-hour recheck, or operator installs Chromium                                                                                             |
 | Names in a draft are wrong                        | Auto-captions                                                                           | Check the packet. Fix the draft. Do not publish the caption.                                                                                           |
-| Dates look a day ahead                            | Paper timezone is wrong or missing                                                      | Owner: open Server → Paper setup and save the correct IANA timezone.                                                                                   |
+| Dates look a day ahead                            | Paper timezone is wrong or missing                                                      | Owner: open Server → Paper identity (Paper setup panel) and save the correct IANA timezone.                                                                                   |
 | Two nearly identical headlines on the paper       | Same news, two drafts published                                                         | The paper collapses overlapping headlines and keeps the longer body.                                                                                   |
 | Second person gets 403                            | They signed up without a valid invite, or used the wrong email                          | Owner: create a fresh link under Server → Invite an editor and have them use the exact invited address.                                                |
 | Editorial says Failed with a timeout              | The piece ran past the writer's limit                                                   | Ask again. If it repeats, the operator can raise `EDITORIAL_TIMEOUT_MS`. Nothing is lost but the run.                                                  |

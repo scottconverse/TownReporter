@@ -79,6 +79,12 @@ test("a failed local batch item can redraft with the exact selected cloud runtim
   );
 });
 
+test("queue hydrates a restored batch runtime once so redraft is not stranded", () => {
+  assert.match(queueSource, /hydratedBatchId\.current === current\.id/);
+  assert.match(queueSource, /setBatchRuntime\(current\.runtime\.modelChoice\)/);
+  assert.match(queueSource, /setBatchEffort\(current\.runtime\.modelEffort\)/);
+});
+
 test("an in-flight batch item does not expose Redraft", () => {
   const tree = DraftBatchResult({
     headline: "Running story",

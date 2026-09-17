@@ -270,7 +270,12 @@ async function batchView(
         batch.created_at instanceof Date
           ? batch.created_at.toISOString()
           : new Date(batch.created_at).toISOString(),
-      runtime: { runtime: snapshot.runtime, label: forcedRuntimeLabel(snapshot) },
+      runtime: {
+        runtime: snapshot.runtime,
+        modelChoice: snapshot.modelChoice,
+        modelEffort: snapshot.modelEffort ?? null,
+        label: forcedRuntimeLabel(snapshot),
+      },
       items: jobs.map((job) => {
         const completion = parsed.get(job.id);
         const draftId = completion && validDrafts.get(completion.draftId) === Number(job.subject_id)

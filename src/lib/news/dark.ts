@@ -118,6 +118,33 @@ function darkRunBudget(
   });
 }
 
+/**
+ * Store a dark-run summary without losing the run's own status lines.
+ *
+ * Both run paths assemble one header and used to store it with
+ * `slice(0, 2500)`. When the model's narrative was long that slice cut the
+ * tail - the hop count, the saved dials, and "Brief: run stopped: ..." - so a
+ * round whose brief never ran looked like an ordinary run that simply stopped
+ * mid-word. Evidence: run 5 of 2026-09-16 stored a summary ending at "Hops".
+ *
+ * The trailing lines are kept whole and the narrative is what gets clipped.
+ */
+export function tailSafeDarkSummary(text: string, cap = 2_500): string {
+  if (text.length <= cap) return text;
+  const lines = text.split("\n");
+  const tail: string[] = [];
+  let used = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const cost = lines[i]!.length + 1;
+    if (used + cost > cap) break;
+    tail.unshift(lines[i]!);
+    used += cost;
+  }
+  if (!tail.length) return text.slice(0, cap);
+  const head = text.slice(0, Math.max(0, cap - used - 2));
+  return `${head}\u2026\n${tail.join("\n")}`;
+}
+
 type DarkArtifactEvidence = {
   id: number;
   title: string;
@@ -1840,6 +1867,13 @@ async function executeDarkRun(
     const dials = snapshot.dials;
     const budget = budgetFor(dials);
     const runBudget = darkRunBudget(dials, choice!, overrides, snapshot.preferences.verificationLimit ?? 6);
+    /*
+      Synthesis, the four-question review and the editor brief all draw on the
+      same meter as research, so the hop loop stops while the provider's own
+      reserve is still on it. Without this the run ends elapsed-time-limit
+      with zero eligible signals, which is honest but useless to an editor.
+    */
+    const researchReserveMs = providerBudget(choice ?? undefined, overrides).reserveMs;
     const saveUsage = (usage: DarkRunUsageSnapshot) =>
       persistDarkRunUsage(runId, newsroomId, usage, runBudget.stopReason);
     await saveUsage(runBudget.snapshot());
@@ -1866,6 +1900,7 @@ async function executeDarkRun(
           executionMode: snapshot.preferences.executionMode ?? "batch",
           actionLimit: snapshot.preferences.actionLimit ?? 6,
           runBudget,
+          researchReserveMs,
           onUsage: saveUsage,
           reasoningEffort: effortForChoice(remembered, opts.modelEffort ?? null),
         }),
@@ -1956,7 +1991,7 @@ async function executeDarkRun(
 
     await sql`
       update dark_runs
-      set finished_at = now(), summary = ${header.slice(0, 2500)}, error = ${synth.error ?? null},
+      set finished_at = now(), summary = ${tailSafeDarkSummary(header)}, error = ${synth.error ?? null},
           stop_reason = ${stopReason}
       where id = ${runId}
     `;
@@ -2583,6 +2618,13 @@ export async function performDarkRound(job: DeskJob) {
     const dials = snapshot.dials;
     const budget = budgetFor(dials);
     const runBudget = darkRunBudget(dials, choice, overrides, snapshot.preferences.verificationLimit ?? 6);
+    /*
+      Synthesis, the four-question review and the editor brief all draw on the
+      same meter as research, so the hop loop stops while the provider's own
+      reserve is still on it. Without this the run ends elapsed-time-limit
+      with zero eligible signals, which is honest but useless to an editor.
+    */
+    const researchReserveMs = providerBudget(choice ?? undefined, overrides).reserveMs;
     const saveUsage = (usage: DarkRunUsageSnapshot) =>
       persistDarkRunUsage(runId, owned(context), usage, runBudget.stopReason);
     await saveUsage(runBudget.snapshot());
@@ -2604,6 +2646,7 @@ export async function performDarkRound(job: DeskJob) {
           executionMode: snapshot.preferences.executionMode ?? "batch",
           actionLimit: snapshot.preferences.actionLimit ?? 6,
           runBudget,
+          researchReserveMs,
           onUsage: saveUsage,
           onStage: (stage) => setJobStage(job.id, stage),
           reasoningEffort: effortForChoice(rememberedChoice, modelEffort),
@@ -2713,7 +2756,7 @@ export async function performDarkRound(job: DeskJob) {
     const finishedSummary = briefError ? `${header}\nBrief: ${briefError}` : header;
     await sql`
       update dark_runs
-      set finished_at = now(), summary = ${finishedSummary.slice(0, 2500)}, error = ${synth.error ?? null},
+      set finished_at = now(), summary = ${tailSafeDarkSummary(finishedSummary)}, error = ${synth.error ?? null},
           model_choice = ${choice}, stop_reason = ${stopReason}
       where id = ${runId} and newsroom_id = ${owned(context)}
     `;

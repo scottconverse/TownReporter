@@ -47,7 +47,7 @@ export type LocalModelEntry = {
    * never a guess from the model's name.
    */
   vision: boolean;
-  /** Ollama models suffixed with :cloud are routed to hosted inference. */
+  /** Ollama models whose id ends in the cloud marker (:cloud, or a hosted-catalog -cloud / x.y-cloud suffix) are routed to hosted inference, not run on this computer. */
   cloud: boolean;
   /** Ollama's reported context window, when available. */
   contextLength: number | null;
@@ -246,7 +246,14 @@ async function enrichOllama(root: string, ids: string[]): Promise<LocalModelEntr
     kind: "chat" as const,
     thinking: isThinking(id),
     vision: metadata[i]?.vision ?? false,
-    cloud: /:cloud$/i.test(id),
+    /*
+      Cloud-routed Ollama models are named `name:cloud`, and the hosted
+      catalog also ships versioned shapes like `model-1.2-cloud` (hyphen,
+      not the `:cloud` tag). Any id that ends in the cloud marker -- with a
+      colon or a hyphen before it -- runs on Ollama's hosted service, never
+      on this computer.
+    */
+    cloud: /[:.-]cloud$/i.test(id),
     contextLength: metadata[i]?.contextLength ?? null,
   }));
 }

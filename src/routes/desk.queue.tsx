@@ -85,6 +85,7 @@ function QueuePage() {
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
   const [batchNotice, setBatchNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const leadRefreshAfterTerminalBatch = useRef<number | null>(null);
+  const hydratedBatchId = useRef<number | null>(null);
   const batch = useQuery({
     queryKey: ["draft-batch", newsroomId, activeBatchId ?? "latest"],
     queryFn: () => getDraftBatch({ data: activeBatchId ? { batchId: activeBatchId } : {} }),
@@ -97,6 +98,13 @@ function QueuePage() {
         : false;
     },
   });
+  useEffect(() => {
+    const current = batch.data?.ok ? batch.data.batch : null;
+    if (!current || hydratedBatchId.current === current.id) return;
+    hydratedBatchId.current = current.id;
+    setBatchRuntime(current.runtime.modelChoice);
+    setBatchEffort(current.runtime.modelEffort);
+  }, [batch.data]);
   useEffect(() => {
     const current = batch.data?.ok ? batch.data.batch : null;
     if (!current) return;
