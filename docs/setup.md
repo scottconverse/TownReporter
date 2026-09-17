@@ -88,7 +88,7 @@ Then:
 npm run dev
 ```
 
-Open the paper. Top right: **Create editor**. Email + password. That account is stored in **your** database, becomes the newsroom **owner**, and the button disappears. First person in owns the desk. There is no setup token — it was removed in 0.5.1, because a one-person newsroom that could not re-issue the token had a lock with no locksmith. Sign-in allows ten attempts every five minutes from any one address, so a desk on the open internet is not a desk open to guessing.
+Open the paper. Top right: **Create editor**. Email + password. That account is stored in **your** database, becomes the newsroom **owner**, and the button disappears. First person in owns the desk. There is no setup token — it was removed in 0.5.1, because a one-person newsroom that could not re-issue the token had a lock with no locksmith. Sign-in has two limits: ten attempts every five minutes from any one address (`src/lib/auth/server.ts`), and an account lockout of ten failed attempts in fifteen minutes (`src/lib/auth/account-lockout.server.ts`). The lockout applies to the real owner too, not only an attacker - deliberately, because this desk has no password reset - and a correct sign-in clears it immediately. Keep the owner password somewhere you can find it.
 
 The next screen is **Set up the paper**. Enter:
 
