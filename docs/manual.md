@@ -91,7 +91,7 @@ Manual investigative page watching is available in Dark Desk. The owner-only leg
 
 ## Newspaper sections
 
-The owner manages sections in **Server → Newspaper sections**, below Paper setup. Add a name and permanent key, rename a display label, move sections up or down, or hide them from the newspaper's section navigation. Keys cannot change after saving: existing story and section links stay valid. Hiding does not delete stories or prevent filing.
+The owner manages sections in **Server → Sections** (**Newspaper sections** panel), below Paper setup. Add a name and permanent key, rename a display label, move sections up or down, or hide them from the newspaper's section navigation. Keys cannot change after saving: existing story and section links stay valid. Hiding does not delete stories or prevent filing.
 
 For reporting sections, enter a reporting brief and scan instructions, then select accepted Sources. **Scan → Scan scope** offers General or a section. A section run uses only its assigned accepted sources and saves the guidance and source IDs with the queued run. Later configuration edits do not change that run; a source dropped before execution is excluded. A section without accepted sources cannot start. General retains all accepted sources.
 
@@ -208,7 +208,7 @@ city videos.
 Saving the form writes those choices to the database, rewrites the welcome
 article for the configured city, and opens the desk. Until it is saved, the
 public site says “Not yet set up” and publishes no stories. The owner can change
-every choice later under **Server → Paper setup**; no code edit or rebuild is
+every choice later under **Server → Paper identity** (**Paper setup** panel); no code edit or rebuild is
 required.
 
 ## The desk

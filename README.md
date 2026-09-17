@@ -75,7 +75,7 @@ npm run dev                       # http://localhost:8080
 
 Open [http://localhost:8080/login](http://localhost:8080/login) and **create an editor account** (email + password). The first account becomes the newsroom owner — there is no setup token. TownReporter then opens **Set up the paper**: enter the paper name, city, state, timezone, contact details, starting watch list, meeting-video channels and meeting-title keywords. Nothing is published before that setup is saved. The account and paper settings live in your database, and sign-in is limited to ten attempts every five minutes per address.
 
-The public paper is `/`. The desk is `/desk`; first-run setup is `/desk/setup`, and the owner can revise it later under **Server → Paper setup**.
+The public paper is `/`. The desk is `/desk`; first-run setup is `/desk/setup`, and the owner can revise it later under **Server → Paper identity** (**Paper setup** panel).
 
 Full operator notes — Postgres, Vercel, other models, pointing it at another city — are in [docs/setup.md](docs/setup.md). How to run the desk is in [docs/editor.md](docs/editor.md).
 
@@ -235,7 +235,7 @@ No code edit or rebuild is required. The owner fills out **Set up the paper** af
 2. A starting watch list: city site, council, agenda portal, school district, utility and other reporting sources.
 3. Optional YouTube meeting channels, one URL per line, plus the title phrases that identify meetings on those channels.
 
-The same form stays available under **Server → Paper setup**. Saving it changes the public masthead, city copy, local clock, contact links, watch list and meeting-video discovery. A blank optional field means none; it never borrows another town's value. Before setup, the public site shows a neutral “not yet set up” page and no articles.
+The same form stays available under **Server → Paper identity** (**Paper setup** panel). Saving it changes the public masthead, city copy, local clock, contact links, watch list and meeting-video discovery. A blank optional field means none; it never borrows another town's value. Before setup, the public site shows a neutral “not yet set up” page and no articles.
 
 If the city uses PrimeGov, put its public portal URL in the watch list. The ingest already speaks that API.
 

@@ -100,7 +100,7 @@ The next screen is **Set up the paper**. Enter:
 
 Save once and the desk opens. Before that moment, the public site shows a
 neutral “Not yet set up” page and no articles. The same form remains under
-**Server → Paper setup**, so a typo or a changed source never requires a code
+**Server → Paper identity** (**Paper setup** panel), so a typo or a changed source never requires a code
 edit or rebuild.
 
 To hand the newsroom to someone else, use **Give up the desk** at the bottom of the Server page; it asks you to type your email address, because it cannot be undone.
@@ -574,7 +574,7 @@ Nearly every CI browser walk builds the app and drives it through `npm start` (`
 ## Point it at another city
 
 The city setup is database-backed and owner-operated. Use **Set up the paper**
-on first run, or **Server → Paper setup** later.
+on first run, or **Server → Paper identity** (**Paper setup** panel) later.
 
 ### 1. Masthead, locality and contact
 
@@ -617,7 +617,7 @@ If the city uses Legistar, Granicus, CivicClerk, BoardDocs, or Municode instead,
 
 ### 5. Newspaper sections
 
-After saving Paper setup, open **Server → Newspaper sections**. The owner can add, rename, reorder, hide and retire sections, assign accepted sources, and write reporting briefs and scan instructions. Review the unsaved old and new values before confirming; source assignments show names and URLs. Retirement requires a replacement and explicit impact confirmation. See [the editor guide](editor.md#newspaper-sections) for the full workflow.
+After saving Paper setup, open **Server → Sections** (**Newspaper sections** panel). The owner can add, rename, reorder, hide and retire sections, assign accepted sources, and write reporting briefs and scan instructions. Review the unsaved old and new values before confirming; source assignments show names and URLs. Retirement requires a replacement and explicit impact confirmation. See [the editor guide](editor.md#newspaper-sections) for the full workflow.
 
 Migration 0045 preserves existing topic keys and seeds their labels. It does not rename or delete stories. Runtime filing resolves retired keys so queued work cannot restore a retired section. Existing keys are stable URLs; display names can change. Source assignments and section configuration belong to one newsroom.
 
