@@ -126,7 +126,7 @@ Several real defects were found and fixed. `docs/manual.md` listed a page-watche
 in its route table that no route serves - the panel is mounted inside the Dark
 Desk page. The same file described five job kinds
 where `JobKind` defines nine; the missing four are now listed. Operator guides now match the live Server panel labels and include Grok/custom-connection entries in the picker lists. Two guards were
-added: `scripts/docs-links.test.mjs` (48 files, 220 relative links, 0 missing)
+added: `scripts/docs-links.test.mjs` (50 files, 229 relative links, 0 missing)
 and `scripts/docs-routes.test.mjs` (28 routes, 27 documented paths, 0
 unresolved).
 
