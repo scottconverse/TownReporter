@@ -143,3 +143,22 @@ Investigative preferences live in How hard to dig. Defaults are 90 inclusive UTC
 Migration 0047 supplies removal metadata and guards; 0048 supplies investigative snapshots/counts. The source release requires the applicable full suite, typecheck/lint/build, independent review, built UI and real-Postgres checks on its exact candidate. Resolve [the 0.6.26 release](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.26) for the published SHA and final gate results rather than copying older counts. Historical design documents now carry explicit status notices; their superseded sections/retention proposals are not alternate instructions.
 
 The local implementation queue is complete; source publication is established only by the release evidence above. All five patched-application investigations completed without a handoff or publication. The Nelson run exposed the evidence-pack selection defect described above; [the 0.6.34 release receipt](https://github.com/scottconverse/TownReporter/releases/tag/v0.6.34) records exact-source checks and applicable runtime proof. The September 3–8 historical replay was not executed; preserve the dated receipts without forcing findings or future success claims. Real-data staging/promotion and production historical-record cleanup remain Halo-local. Do not invent completed investigations or restart a redesign to fill that gap.
+
+## Update 2026-09-16 — the September 3-8 replay has since been executed
+
+The statement above that the September 3-8 historical replay "was not executed"
+was true of the Halo-local 0.6.34 acceptance exercise it describes. A replay has
+since been run as part of the current 0.6.51+ candidate work, in a different
+environment: the isolated database `townreporter_dark_live_20260916`, through
+the editor's own saved range preference (`2026-09-03` -> `2026-09-08`), on this
+branch.
+
+Result: the round stopped at **`hop-limit` by design** rather than on the clock,
+with 4 of 4 eligible signals attempted, 0 failed and 0 deferred, and it wrote 4
+leads, all labelled unverified. It is one of eight bounded live Dark Desk runs
+recorded for this candidate.
+
+This does not close the Halo-local acceptance exercise described above, is not
+the same environment, and is not a Halo or production action. Records:
+`docs/proofs/dark-desk-run-budget-0651.md`; candidate notes:
+`docs/releases/next.md`.

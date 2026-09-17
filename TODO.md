@@ -139,3 +139,22 @@ The local test newsroom on this travel machine is authorized to use its own pers
 ## Operating gotchas
 
 Use `DATABASE_URL=""` for local test/build (PGLite). Never build into a served `.output`. Do not access Halo ports, DBs, backup files or production checkout from this travel session. Preserve CRLF/LF conventions. Check lockfile consistency when versioning; `npm version` previously removed Nitro's transitive `lru-cache`. Exact-commit CI and a GitHub release do not imply production deployment.
+
+## Update 2026-09-16 — the September 3-8 replay has since been executed
+
+The statement above that the September 3-8 historical replay "was not executed"
+was true of the Halo-local 0.6.34 acceptance exercise it describes. A replay has
+since been run as part of the current 0.6.51+ candidate work, in a different
+environment: the isolated database `townreporter_dark_live_20260916`, through
+the editor's own saved range preference (`2026-09-03` -> `2026-09-08`), on this
+branch.
+
+Result: the round stopped at **`hop-limit` by design** rather than on the clock,
+with 4 of 4 eligible signals attempted, 0 failed and 0 deferred, and it wrote 4
+leads, all labelled unverified. It is one of eight bounded live Dark Desk runs
+recorded for this candidate.
+
+This does not close the Halo-local acceptance exercise described above, is not
+the same environment, and is not a Halo or production action. Records:
+`docs/proofs/dark-desk-run-budget-0651.md`; candidate notes:
+`docs/releases/next.md`.
