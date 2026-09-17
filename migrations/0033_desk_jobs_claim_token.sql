@@ -1,0 +1,16 @@
+-- desk_jobs.claim_token existed only in the runtime ensure list
+-- (src/lib/news/jobs.ts) and had no migration -- a database built from
+-- migrations/ alone (a fresh Postgres restore, or the migrations-only path)
+-- was missing it (GauntletGate ENG-03).
+--
+-- The column is load-bearing: it stops a reclaimed job's original executor
+-- from clobbering the new one's result. `claimJob` writes a fresh token when
+-- it takes a job; the write-back at job completion only applies if the
+-- caller's token still matches the row's current token, so a stale executor
+-- that wakes up after a reclaim loses the race instead of overwriting the
+-- winner (jobs.ts, around the heartbeat/reclaim window).
+--
+-- Mirrored by the existing `alter table desk_jobs add column if not exists
+-- claim_token text` in jobs.ts, which stays so the PGLite and unit-test
+-- paths keep working without depending on the migration glob.
+alter table desk_jobs add column if not exists claim_token text;

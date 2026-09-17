@@ -1,0 +1,261 @@
+import { sanitizePublicUrls } from "./schema.ts";
+
+export type ProvenanceItem = {
+  title: string;
+  organization: string;
+  document_date: string;
+  url: string;
+  captured_at: string | null;
+  version_id: number | null;
+  version_count: number | null;
+  capture_event_id?: number | null;
+  disappeared: boolean;
+  role: string;
+};
+
+export type StoryFinding = {
+  text: string;
+  source_urls: string[];
+  capture_event_ids: number[];
+  artifact_version_ids: number[];
+  locators: string[];
+  excerpt?: string;
+};
+
+export function describeSourceUrl(url: string): { title: string; organization: string } {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./i, "");
+    const parts = u.pathname.split("/").filter(Boolean);
+    const last = decodeURIComponent(parts[parts.length - 1] ?? "");
+    const cleaned = last
+      .replace(/\.[a-z0-9]{2,4}$/i, "")
+      .replace(/[-_]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const title =
+      cleaned && !/^(index|home|default)$/i.test(cleaned)
+        ? cleaned.replace(/\b\w/g, (c) => c.toUpperCase())
+        : host;
+    return { title, organization: host };
+  } catch {
+    return { title: url, organization: "" };
+  }
+}
+
+function nonempty(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+function isWeakTitle(title: string, url: string): boolean {
+  const t = title.trim().toLowerCase();
+  if (!t) return true;
+  const desc = describeSourceUrl(url);
+  return t === desc.organization.toLowerCase() || t === url.toLowerCase();
+}
+
+function isWeakOrg(org: string, url: string): boolean {
+  const o = org.trim().toLowerCase();
+  if (!o) return true;
+  return o === describeSourceUrl(url).organization.toLowerCase();
+}
+
+function pickReporting(
+  current: string,
+  incoming: string | undefined,
+  weak: (value: string) => boolean,
+): string {
+  const inc = nonempty(incoming);
+  const cur = nonempty(current);
+  if (!inc) return cur;
+  if (!cur || weak(cur)) {
+    if (!weak(inc) || !cur) return inc;
+  }
+  return cur;
+}
+
+export function mergeProvenanceItem(
+  base: ProvenanceItem,
+  extra: Partial<ProvenanceItem>,
+): ProvenanceItem {
+  const url = extra.url || base.url;
+  return {
+    url,
+    title: pickReporting(base.title, extra.title, (v) => isWeakTitle(v, url)),
+    organization: pickReporting(base.organization, extra.organization, (v) => isWeakOrg(v, url)),
+    document_date: pickReporting(base.document_date, extra.document_date, (v) => !v),
+    role: pickReporting(base.role, extra.role, (v) => !v || v === "source") || "source",
+    captured_at:
+      extra.captured_at !== undefined && extra.captured_at !== null && extra.captured_at !== ""
+        ? extra.captured_at
+        : base.captured_at,
+    version_id: extra.version_id != null ? extra.version_id : base.version_id,
+    version_count: extra.version_count != null ? extra.version_count : base.version_count,
+    capture_event_id:
+      extra.capture_event_id != null ? extra.capture_event_id : base.capture_event_id ?? null,
+    disappeared: extra.disappeared !== undefined ? Boolean(extra.disappeared) : base.disappeared,
+  };
+}
+
+function blankProvenance(url: string): ProvenanceItem {
+  return {
+    title: "",
+    organization: "",
+    document_date: "",
+    url,
+    captured_at: null,
+    version_id: null,
+    version_count: null,
+    capture_event_id: null,
+    disappeared: false,
+    role: "",
+  };
+}
+
+/**
+ * A title that is only the page's own hostname carries nothing the URL beneath
+ * it does not already say. The provenance panel then shows a row reading
+ * "www.longmontleader.com · followed" above the words "longmontleader.com",
+ * sitting between two rows that name a real headline and a real newsroom — it
+ * reads as a rendering fault rather than a source.
+ *
+ * When a fetch returns that, fall back to the title derived from the path,
+ * which is usually the article slug and usually the headline.
+ */
+function titleIsJustTheHost(title: string, url: string): boolean {
+  const t = title.trim().toLowerCase().replace(/^www\./, "");
+  if (!t) return true;
+  try {
+    return t === new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return false;
+  }
+}
+
+function finalizeProvenance(item: ProvenanceItem): ProvenanceItem {
+  const desc = describeSourceUrl(item.url);
+  const title = titleIsJustTheHost(item.title, item.url) ? desc.title : item.title;
+  return {
+    ...item,
+    title: title || desc.title,
+    organization: item.organization || desc.organization,
+    role: item.role || "source",
+  };
+}
+
+export function provenanceFromUrls(
+  urls: string[],
+  extras: Partial<ProvenanceItem>[] = [],
+): ProvenanceItem[] {
+  const byUrl = new Map<string, ProvenanceItem>();
+  for (const url of urls) {
+    if (!url) continue;
+    byUrl.set(url, blankProvenance(url));
+  }
+  for (const extra of extras) {
+    if (!extra.url) continue;
+    const cur = byUrl.get(extra.url);
+    if (!cur) continue;
+    byUrl.set(extra.url, mergeProvenanceItem(cur, extra));
+  }
+  return [...byUrl.values()].map(finalizeProvenance);
+}
+
+function asIntList(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x) => Number(x))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .slice(0, 16);
+}
+
+export function parseFindings(raw: unknown): StoryFinding[] {
+  if (raw == null || raw === "") return [];
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    try {
+      value = JSON.parse(trimmed) as unknown;
+    } catch {
+      return [
+        {
+          text: trimmed.slice(0, 1200),
+          source_urls: [],
+          capture_event_ids: [],
+          artifact_version_ids: [],
+          locators: [],
+        },
+      ];
+    }
+  }
+  const rows = Array.isArray(value) ? value : [value];
+  const out: StoryFinding[] = [];
+  for (const row of rows) {
+    if (typeof row === "string" && row.trim()) {
+      out.push({
+        text: row.trim().slice(0, 1200),
+        source_urls: [],
+        capture_event_ids: [],
+        artifact_version_ids: [],
+        locators: [],
+      });
+      continue;
+    }
+    if (!row || typeof row !== "object") continue;
+    const o = row as Record<string, unknown>;
+    const text = String(o.text ?? o.found ?? "").trim();
+    if (!text) continue;
+    out.push({
+      text: text.slice(0, 1200),
+      source_urls: sanitizePublicUrls(o.source_urls),
+      capture_event_ids: asIntList(o.capture_event_ids),
+      artifact_version_ids: asIntList(o.artifact_version_ids ?? o.version_ids),
+      locators: Array.isArray(o.locators) ? o.locators.map(String).slice(0, 12) : [],
+      excerpt: typeof o.excerpt === "string" ? o.excerpt.slice(0, 800) : undefined,
+    });
+  }
+  return out.slice(0, 6);
+}
+
+export function serializeFindings(findings: StoryFinding[]): string {
+  if (!findings.length) return "";
+  return JSON.stringify(findings);
+}
+
+export function resolvePublicFindings(
+  findings: StoryFinding[],
+  provenance: ProvenanceItem[],
+): StoryFinding[] {
+  return findings
+    .flatMap((f) => {
+      if (!f.text.trim()) return [];
+      const matched = provenance.filter((p) =>
+        f.source_urls.includes(p.url) &&
+        ((p.version_id != null && f.artifact_version_ids.includes(p.version_id)) ||
+          (p.capture_event_id != null && f.capture_event_ids.includes(p.capture_event_id))),
+      );
+      if (!matched.length) return [];
+      return [{
+        ...f,
+        source_urls: [...new Set(matched.map(p => p.url))],
+        artifact_version_ids: [...new Set(matched.map(p => p.version_id).filter((id): id is number => id != null && f.artifact_version_ids.includes(id)))],
+        capture_event_ids: [...new Set(matched.map(p => p.capture_event_id).filter((id): id is number => id != null && f.capture_event_ids.includes(id)))],
+      }];
+    })
+    /*
+      A locator is a note to ourselves, not to a reader.
+
+      The LURA story printed `char:14000-16000 — plan amendment adds two
+      parcels...` on the public page. That is a character offset into a
+      captured transcript: it is how the desk points at the passage it read,
+      and it means nothing to somebody reading a newspaper. This function
+      decided WHICH findings print and never looked inside one, so locators
+      went straight through.
+
+      Dropped here rather than in the component, so they never reach the
+      browser at all. The reader gets the "Captured record" link, which is the
+      real way into the same passage.
+    */
+    .map((f) => ({ ...f, locators: [] }));
+}

@@ -1,0 +1,446 @@
+/**
+ * Reading a subreddit as a tip line.
+ *
+ * A local subreddit is the closest thing a town has to a scanner feed: people
+ * post the road closure, the water bill, the notice taped to the door, days
+ * before any of it reaches a public record. It is a source of *questions*, not
+ * of facts — nothing here is ever a citation, only a reason to go look.
+ *
+ * Access is the awkward part. Reddit blocks almost every automated path: search
+ * engines carry little of it, reader proxies are blocked, and the `.json` API
+ * refuses anonymous clients. The `.rss` feeds still answer a browser-like
+ * request, and that is the whole technique. It survives only if it is used
+ * gently — see `reddit.server.ts` for the pacing.
+ *
+ * This module is the pure half: URLs, parsing, and deciding what is civic.
+ */
+
+export type RedditPost = {
+  title: string;
+  url: string;
+  /** ISO timestamp from the feed, or "" when the feed omitted it. */
+  updated: string;
+  author: string;
+  /** Feed excerpt with markup removed. Reddit truncates these to ~400 chars. */
+  excerpt: string;
+  /** Complete original-post text recovered from a validated local Redlib page. */
+  fullText?: string;
+  sourceAdapter?: "reddit-rss" | "redlib-html";
+  redditScore?: number | null;
+  upvoteRatio?: number | null;
+  reportedCommentCount?: number | null;
+  retrievedCommentCount?: number;
+  coverage?: "complete" | "partial" | "unknown";
+  enrichmentWarnings?: string[];
+};
+
+export const REDDIT_AUTO_FILE_DAYS = 30;
+
+/** Only dated posts from the explicit rolling window may be filed automatically. */
+export function redditPostIsAutoFileEligible(post: Pick<RedditPost, "updated">, now = Date.now()): boolean {
+  if (!post.updated) return false;
+  const at = Date.parse(post.updated);
+  if (!Number.isFinite(at)) return false;
+  const age = now - at;
+  return age >= 0 && age <= REDDIT_AUTO_FILE_DAYS * 24 * 60 * 60 * 1000;
+}
+
+/**
+ * True for reddit.com (any subdomain) and the redd.it short-link host.
+ *
+ * Dark Desk F5: the generic fetch/ingest path (ingest.ts) used to have no
+ * reddit handling at all, so a reddit URL the dig proposed via fetch_urls
+ * got the same tracked-fetch-then-strip-tags treatment as any other page --
+ * which for reddit.com means the JS app shell, not content. This is the
+ * detector that routes such a URL to the `.rss`/browser-UA technique
+ * instead (see reddit.server.ts's fetchRedditDocument).
+ */
+export function isRedditUrl(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  return host === "redd.it" || host === "reddit.com" || host.endsWith(".reddit.com");
+}
+
+/** `/r/<sub>/comments/<id>/<slug>` (with or without a trailing comment id) — a thread permalink, not a listing/user/search page. */
+export function isRedditThreadUrl(url: URL): boolean {
+  return isRedditUrl(url) && /^\/r\/[^/]+\/comments\/[^/]+/i.test(url.pathname);
+}
+
+/** `https://www.reddit.com/r/longmont/new/.rss` */
+export function subredditNewFeed(sub: string): string {
+  return `https://www.reddit.com/r/${encodeURIComponent(sub)}/new/.rss`;
+}
+
+/** Search within one subreddit, newest first. */
+export function subredditSearchFeed(sub: string, query: string, sort: "new" | "relevance" = "new"): string {
+  const q = encodeURIComponent(query);
+  return (
+    `https://www.reddit.com/r/${encodeURIComponent(sub)}/search.rss` +
+    `?q=${q}&restrict_sr=on&sort=${sort}`
+  );
+}
+
+/**
+ * Which of a rotating set of query groups to run this check.
+ *
+ * Reddit's rate limit buys this desk a handful of requests per check, not
+ * one per angle on community life — so instead of running every search every
+ * time (too slow, too much of the budget) or picking the same three forever
+ * (the other five angles never get read), the groups rotate by hour: a
+ * window of `perCheck` consecutive groups, advancing by `perCheck` each hour
+ * and wrapping around. With 8 groups and 3 per check that means three
+ * consecutive checks — three different hours — cover all 8 exactly once,
+ * with no repeats inside a single check.
+ */
+export function selectRotatingQueryGroups<T>(groups: readonly T[], hourIndex: number, perCheck = 3): T[] {
+  const n = groups.length;
+  if (n === 0 || perCheck <= 0) return [];
+  const take = Math.min(perCheck, n);
+  const start = (((hourIndex * perCheck) % n) + n) % n;
+  const out: T[] = [];
+  for (let i = 0; i < take; i++) out.push(groups[(start + i) % n]!);
+  return out;
+}
+
+/** The comments of one thread, as a feed. The substance is usually here. */
+export function threadFeed(permalink: string): string {
+  const url = new URL(permalink);
+  url.search = "";
+  url.hash = "";
+  const path = url.pathname.replace(/\/+$/, "");
+  url.pathname = path.endsWith("/.rss") ? path : `${path}/.rss`;
+  return url.toString();
+}
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    // Ampersand last, so a single pass cannot resurrect an entity.
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Decode first, then strip.
+ *
+ * Reddit escapes the HTML inside `<content>`, so the markup arrives as
+ * `&lt;div&gt;` rather than `<div>`. Stripping before decoding therefore finds
+ * no tags at all, and the decode step then turns the escaped ones back into
+ * real angle brackets — the excerpt reached the desk with `<div>` still in it.
+ */
+function stripTags(s: string): string {
+  return decodeEntities(s)
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tagText(block: string, tag: string): string {
+  const m = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i").exec(block);
+  if (!m) return "";
+  const inner = m[1]!.replace(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/, "$1");
+  return stripTags(inner);
+}
+
+/**
+ * Parse Reddit's Atom feed.
+ *
+ * Hand-written rather than run through an XML parser on purpose: Reddit puts
+ * unescaped HTML inside `<content>`, which strict parsers either reject or
+ * hand back as an element rather than a string. This only has to find five
+ * fields, and it degrades to skipping an entry rather than failing the feed.
+ */
+export function parseRedditFeed(xml: string): RedditPost[] {
+  const out: RedditPost[] = [];
+  const seen = new Set<string>();
+  for (const m of String(xml).matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)) {
+    const block = m[1]!;
+    const href = /<link[^>]*\bhref="([^"]+)"/i.exec(block)?.[1] ?? "";
+    const url = decodeEntities(href).trim();
+    if (!/^https?:\/\/(www\.|old\.)?reddit\.com\//i.test(url)) continue;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push({
+      title: tagText(block, "title"),
+      url,
+      updated: (/<updated>([^<]+)<\/updated>/i.exec(block)?.[1] ?? "").trim(),
+      author: tagText(block, "name"),
+      excerpt: tagText(block, "content").slice(0, 600),
+    });
+    if (out.length >= 40) break;
+  }
+  return out;
+}
+
+/**
+ * What marks a post as a matter of public record rather than conversation.
+ *
+ * Patterns, not plain words, because word endings are where this went wrong
+ * the first time: the list held "closure" and the real post said "will close",
+ * so a road-closure story this paper had already published scored 3 out of 20
+ * and would have been filtered out by its own threshold. Calibrated against a
+ * real day of the subreddit (2026-08-28), kept as a fixture beside the tests.
+ *
+ * Community-life extension, 2026-09-06: that calibration day was entirely
+ * government and infrastructure, so the list only ever learned that
+ * vocabulary — a bakery closing after 14 years, a landlord selling a building,
+ * a school district redrawing a boundary, a pantry losing its funding all
+ * scored 0-2 and never surfaced, not because they aren't news but because
+ * nothing here recognised the shape of them. The entries below the original
+ * civic list are that: a change with a record behind it, just not a
+ * government record — a business opening or closing, a layoff, a sale, an
+ * eviction, a school or hospital or nonprofit changing what it does. See
+ * `CHANGE_SIGNAL` below for how this stops "the pizza place is closing" from
+ * being penalised the same way "best pizza?" is.
+ */
+const STRONG: RegExp[] = [
+  /\b(city )?council\b/,
+  /\bplanning commission\b/,
+  /\bre?zon(e|ed|ing)\b/,
+  /\bvariance\b/,
+  /\bordinance\b/,
+  /\bresolution\b/,
+  /\bballot\b|\belection\b|\bvote[ds]?\b/,
+  /\bbudget\b|\blevy\b|\bbond\b|\bmill levy\b/,
+  /\btax(es|ed|ation)?\b|\bfee\b|\bsurcharge\b/,
+  /\bpermit(s|ted|ting)?\b/,
+  /\bcode enforcement\b|\bviolation\b|\bcitation\b|\bfine[ds]?\b/,
+  /\bevict(ion|ed)\b|\blandlord\b|\brent (went up|increase|hike)\b/,
+  /\bannex(ation|ed)\b/,
+  /\bpublic hearing\b|\bagenda\b|\bminutes\b/,
+  /\bopen records\b|\bcora\b|\bfoia\b/,
+  /\blawsuit\b|\bsettlement\b|\baudit\b|\bsubpoena\b/,
+  /\bcontract\b|\brfp\b|\bbid\b|\bprocurement\b/,
+  /\bcity manager\b|\bmayor\b|\bcity attorney\b/,
+  /\bpolice report\b|\barrest(ed)?\b|\bcharged with\b/,
+  /\butility\b|\bwater rate\b|\belectric rate\b|\bnextlight\b/,
+  /\brtd\b|\bcdot\b|\bschool board\b|\bsvvsd\b/,
+  /\bhousing authority\b|\burban renewal\b|\bmoratorium\b/,
+  /\bboil order\b|\boutage\b|\bspill\b|\brecall\b/,
+  // Roads: the closure vocabulary in every tense, plus highway designations.
+  /\bclos(e|es|ed|ing|ure|ures)\b/,
+  /\bdetour(s|ed)?\b/,
+  /\bconstruct(ion|ing)\b/,
+  /\b(co|us|sh)[ -]?\d{1,3}\b/,
+  /\bleft turns?\b|\blane closure\b|\broad work\b/,
+
+  // --- Community-life extension, 2026-09-06 (see comment above). ---
+  /\bopen(?:ing|ed|s)?\b(?:\W+\w+){0,4}\W+\b(?:shop|store|restaurant|business|location|bakery|cafe|salon|gym|clinic|branch)\b/,
+  /\b(?:closing (?:its|their|the) doors|shutting down|going out of business|for good|after \d+ years)\b/,
+  /\blaid off\b|\blayoffs?\b|\blay-offs?\b|\bhiring freeze\b/,
+  /\b(?:sold|sale pending)\b(?:\W+\w+){0,6}\W+\b(?:building|business|store|shop|property|block)\b/,
+  /\bnotice to vacate\b/,
+  /\brent increase\b/,
+  /\bboundary (?:change|proposal)\b|\bredistrict(?:ing)?\b|\bschool closure\b|\bprogram cut\b/,
+  /\bprincipal\b|\bsuperintendent\b/,
+  /\b(?:hospital|clinic|urgent care)\b(?:\W+\w+){0,4}\W+\b(?:closing|clos(?:e|ed)|wait time|cuts?|cutting)\b/,
+  /\b(?:scam|fraud|phishing)\b(?:\W+\w+){0,4}\W+\bseniors?\b/,
+  /\bflood(?:ing)?\b|\bsewer backup\b/,
+  /\bcancell?ed\b(?:\W+\w+){0,3}\W+\b(?:season|festival)\b/,
+  /\bpermit denied\b|\bvariance denied\b/,
+  /\bhoa\b(?:\W+\w+){0,3}\W+\b(?:fine|assessment)\b/,
+  /\b(?:nonprofit|pantry|shelter)\b(?:\W+\w+){0,4}\W+\b(?:closing|clos(?:e|ed)|funding|cuts?)\b/,
+  /\bstrike\b|\bunion\b/,
+];
+
+/**
+ * The subset of `STRONG` that marks a *change*, as opposed to a topic
+ * (council, budget, RTD are civic topics; closing, laid off, sold are
+ * changes). Used only to decide whether `CHATTER` should count for a post —
+ * see `civicScore`.
+ */
+const CHANGE_SIGNAL: RegExp[] = [
+  /\bclos(?:e|es|ed|ing|ure|ures)\b/,
+  /\bopen(?:ing|ed|s)?\b(?:\W+\w+){0,4}\W+\b(?:shop|store|restaurant|business|location|bakery|cafe|salon|gym|clinic|branch)\b/,
+  /\b(?:closing (?:its|their|the) doors|shutting down|going out of business|for good|after \d+ years)\b/,
+  /\blaid off\b|\blayoffs?\b|\blay-offs?\b|\bhiring freeze\b/,
+  /\b(?:sold|sale pending)\b(?:\W+\w+){0,6}\W+\b(?:building|business|store|shop|property|block)\b/,
+  /\bevict(?:ion|ed)\b|\bnotice to vacate\b/,
+  /\brent increase\b|\brent (?:went up|hike)\b/,
+  /\bboundary (?:change|proposal)\b|\bredistrict(?:ing)?\b|\bschool closure\b|\bprogram cut\b/,
+];
+
+/**
+ * A named place: a capitalised street name, or "on <Street>". Checked against
+ * the original-case text, before `civicScore` lowercases everything else — a
+ * post that names a place is more likely to be a specific, checkable claim
+ * than one that only names a category of thing.
+ */
+const NAMED_PLACE = /\b(?:[A-Z][a-zA-Z]+\s){1,2}(?:Street|St\.?|Ave\.?|Avenue|Main|Blvd\.?|Boulevard)\b|\bon\s+[A-Z][a-zA-Z]+\b/;
+
+const WEAK: RegExp[] = [
+  /\blongmont\b/, /\bboulder county\b/, /\bcity\b/, /\bcounty\b/, /\bstate\b/,
+  /\bpublic\b/, /\bmeeting\b/, /\broad\b/, /\bstreet\b/, /\btraffic\b/,
+  /\bwater\b/, /\bsewer\b/, /\bpower\b/, /\bschool\b/, /\blibrary\b/,
+  /\bpark\b/, /\btransit\b/, /\bbus\b/, /\brent\b/, /\bneighborhood\b/,
+  /\bfire\b/, /\bpolice\b/, /\bnotice\b/,
+];
+
+/**
+ * Conversation, not record.
+ *
+ * Penalised rather than excluded: "my rent went up $300 and the notice says
+ * it's a utility recovery fee" is somebody asking for advice AND a housing
+ * story, and a hard exclusion would lose it.
+ */
+const CHATTER: RegExp[] = [
+  /\brecommendation(s)?\b|\brecommend\b/,
+  /\bbest place\b|\bbest .{0,20}\b(in|around) longmont\b/,
+  /\bwhere can i\b|\banyone know a good\b|\blooking for a\b/,
+  /\bmoving to\b|\bapartment advice\b/,
+  /\brestaurant\b|\bcoffee\b|\bpizza\b|\bappetizer\b|\bbrunch\b/,
+  /\bdentist\b|\bhaircut\b|\bgym\b|\bplumber\b|\bmechanic\b/,
+  /\bdog park\b|\bhiking\b|\bweather\b|\beclipse\b|\bmoon\b/,
+  /\blost (cat|dog)\b|\bfor sale\b|\bshoutout\b/,
+  /\bopen discussion\b|\brant,? and rave\b|\bweekly .{0,12}thread\b/,
+];
+
+function countMatches(hay: string, patterns: RegExp[]): number {
+  let n = 0;
+  for (const re of patterns) if (re.test(hay)) n += 1;
+  return n;
+}
+
+/**
+ * How much this post looks like something with a record behind it.
+ *
+ * Returns 0–20. On a real day of r/longmont the civic posts land at 7+ and the
+ * small talk at 0–2, which is where the threshold sits. The number is carried
+ * through to the editor rather than collapsed into a boolean, so a thin result
+ * is explainable instead of mysterious.
+ *
+ * Community-life extension, 2026-09-06: chatter is only counted when the post
+ * has no `CHANGE_SIGNAL` match. "Best pizza in town?" is chatter and nothing
+ * else. "The pizza place on Main Street is closing after 20 years" mentions
+ * pizza too, but it is news — penalising it the same way would put the
+ * scorer right back to punishing a shop for closing, the bug this whole
+ * extension exists to fix. A named place (a capitalised street, or "on
+ * <Street>") adds a small +2: it is the shape of a specific, checkable claim
+ * rather than a general one, checked against the original case before the
+ * rest of the scorer lowercases everything.
+ */
+export function civicScore(post: Pick<RedditPost, "title" | "excerpt" | "fullText">): number {
+  const raw = `${post.title} ${post.fullText || post.excerpt}`;
+  const hay = raw.toLowerCase();
+  if (!hay.trim()) return 0;
+  const strong = countMatches(hay, STRONG);
+  const weak = countMatches(hay, WEAK);
+  const hasChangeSignal = countMatches(hay, CHANGE_SIGNAL) > 0;
+  const chatter = hasChangeSignal ? 0 : countMatches(hay, CHATTER);
+  // A date, a dollar figure or a file number is the shape of a record.
+  const specifics =
+    (/\$\s?[\d,]{3,}/.test(hay) ? 2 : 0) +
+    (/\b(ordinance|resolution|case|permit|file|measure)\s*(no\.?|#)?\s*[\w-]*\d/.test(hay) ? 3 : 0) +
+    (/\b\d{1,2}-\d{1,2}\b/.test(hay) ? 1 : 0) +
+    (NAMED_PLACE.test(raw) ? 2 : 0);
+  const score = strong * 3 + weak + specifics - chatter * 3;
+  return Math.max(0, Math.min(20, score));
+}
+
+export type RedditPostState = "filed" | "already-known" | "below-line";
+
+export type ScoredRedditPost = {
+  title: string;
+  score: number;
+  url: string;
+  excerpt: string;
+  updated: string;
+  author: string;
+  autoFileEligible: boolean;
+  state: RedditPostState;
+  sourceAdapter?: "reddit-rss" | "redlib-html";
+  redditScore?: number | null;
+  upvoteRatio?: number | null;
+  reportedCommentCount?: number | null;
+  retrievedCommentCount?: number;
+  coverage?: "complete" | "partial" | "unknown";
+};
+
+/**
+ * Score every post a sweep read — not only the ones that cleared the civic
+ * threshold — so a near miss stays visible to the editor instead of vanishing
+ * along with the rest of the sweep.
+ *
+ * `filedUrls` and `alreadyKnownUrls` classify what happened to a post that
+ * did clear the threshold: filed this run, or already sitting on the desk
+ * from an earlier read. Anything under the threshold is "below-line"
+ * regardless of the two sets — a post can only be filed or already-known
+ * once it was picked in the first place.
+ */
+export function classifyRedditPosts(
+  posts: RedditPost[],
+  alreadyKnownUrls: ReadonlySet<string> | readonly string[],
+  filedUrls: ReadonlySet<string> | readonly string[],
+  minScore = 6,
+): ScoredRedditPost[] {
+  const known = alreadyKnownUrls instanceof Set ? alreadyKnownUrls : new Set(alreadyKnownUrls);
+  const filed = filedUrls instanceof Set ? filedUrls : new Set(filedUrls);
+  return posts
+    .map((p) => {
+      const score = civicScore(p);
+      const state: RedditPostState =
+        score < minScore ? "below-line" : filed.has(p.url) ? "filed" : known.has(p.url) ? "already-known" : "below-line";
+      return {
+        title: p.title,
+        score,
+        url: p.url,
+        excerpt: p.fullText || p.excerpt,
+        updated: p.updated,
+        author: p.author,
+        autoFileEligible: redditPostIsAutoFileEligible(p),
+        state,
+        sourceAdapter: p.sourceAdapter,
+        redditScore: p.redditScore,
+        upvoteRatio: p.upvoteRatio,
+        reportedCommentCount: p.reportedCommentCount,
+        retrievedCommentCount: p.retrievedCommentCount,
+        coverage: p.coverage,
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+/** Posts worth an editor's attention, best first. */
+export function pickCivicPosts(posts: RedditPost[], minScore = 6, limit = 12): RedditPost[] {
+  return posts
+    .map((p) => ({ p, s: civicScore(p) }))
+    .filter((x) => x.s >= minScore)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, limit)
+    .map((x) => x.p);
+}
+
+export type RedditAnomaly = {
+  kind: string;
+  summary: string;
+  url: string;
+  details: string;
+};
+
+/**
+ * A post, written up the way the desk stores everything else it noticed.
+ *
+ * The wording matters more than it looks. Anything filed here becomes a card
+ * an editor may act on, so it has to read as a claim someone made on the
+ * internet — never as something the paper knows.
+ */
+export function redditAnomaly(post: RedditPost, sub: string): RedditAnomaly {
+  const when = post.updated ? post.updated.slice(0, 10) : "undated";
+  return {
+    kind: "reddit-tip",
+    summary: `r/${sub}: ${post.title}`.slice(0, 300),
+    url: post.url,
+    details: [
+      `Posted ${when}${post.author ? ` by ${post.author}` : ""} on r/${sub}.`,
+      "UNVERIFIED — a resident's account, not a record. Find the document before writing anything.",
+      post.sourceAdapter === "redlib-html" ? "Full original post read through local Redlib." : "RSS excerpt read.",
+      (post.fullText || post.excerpt) ? `They wrote: ${post.fullText || post.excerpt}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n")
+      .slice(0, 2000),
+  };
+}

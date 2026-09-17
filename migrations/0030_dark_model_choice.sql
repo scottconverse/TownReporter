@@ -1,0 +1,33 @@
+-- Dark Desk gets a writing-model picker (0.6.2).
+--
+-- Until now Dark Desk was the one place an AI did something here with no
+-- choice at all: `synthesizeSignals`, `grokPlanner` and `buildBrief` each
+-- called grokChat with no `choice`, so the round ran on whatever
+-- `resolveProvider()` happened to prefer on the machine -- while the desk's
+-- own documentation told the editor the picker decides which model writes.
+-- The operator's rule for this release is the plain one: "anywhere an AI does
+-- something, the editor must be able to pick the model."
+--
+-- Two columns:
+--
+--   investigations.last_model_choice -- what this file was last dug with, so
+--     "Keep digging" defaults to it. An investigation is continuing work and
+--     changing author halfway is a decision, not a default. Null means the
+--     file predates the picker; the page falls back to Automatic.
+--
+--   dark_runs.model_choice -- which model actually did this round, shown in
+--     the round history ("Claude Opus / 6 hops"). A round that dug badly and
+--     a round that dug on a different model are different facts about the
+--     same file, and the history could not tell them apart.
+--
+-- The round itself is pinned through `desk_jobs.model_choice` /
+-- `model_choice_source`, the columns Story and Scan already use
+-- (migrations/0025_model_choice.sql, 0026_model_choice_source.sql), so the
+-- one-shot Automatic failover works the same way here as it does there.
+--
+-- Mirrored for the PGLite preview and unit-test paths by the corresponding
+-- `alter table ... add column if not exists` entries in
+-- INVESTIGATE_SCHEMA_STATEMENTS (src/lib/news/investigate.ts) and
+-- DARK_SCHEMA_STATEMENTS (src/lib/news/dark.ts).
+alter table investigations add column if not exists last_model_choice text;
+alter table dark_runs add column if not exists model_choice text;

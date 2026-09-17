@@ -1,0 +1,229 @@
+#!/usr/bin/env node
+/**
+ * Run a command with `.grok/app-env.json` merged into its environment.
+ *
+ * `dev`, `build` and `preview` all route through this wrapper, so the dev
+ * server, the built bundle and the preview server can never disagree about
+ * `VITE_AUTH_ENABLED` — a divergence that only shows up as a built-output
+ * mismatch long after the fact. Anything that starts Vite directly bypasses it.
+ *
+ * Only `VITE_`-prefixed keys are honored: the file is a build flag carrier, not
+ * a secret store, and only `VITE_` vars reach the browser anyway. A real
+ * `process.env` entry always wins, so an explicit override still works.
+ *
+ * That precedence also means the file governs this workspace only. A deployed
+ * build runs with the provider's project env, where the deployer sets
+ * `VITE_AUTH_ENABLED` itself (today unconditionally `"true"`), so the deployed
+ * flag is the platform's, not this file's.
+ *
+ * Vite picks the values up because `loadEnv` prefix-matches entries already in
+ * `process.env`, which is why the merge has to happen before Vite starts.
+ */
+import { spawn } from "node:child_process";
+import { readFileSync, realpathSync } from "node:fs";
+import { constants as osConstants } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { safeTestEnvironment } from "./test-environment.mjs";
+
+export const APP_ENV_REL_PATH = ".grok/app-env.json";
+
+const VITE_PREFIX = "VITE_";
+
+/**
+ * Parse an app-env document, keeping only `VITE_`-prefixed string entries.
+ * Anything unparseable is an empty environment — a workspace without the file
+ * must behave exactly like today (auth on, no overrides).
+ */
+export function parseDotEnv(text) {
+  const env = {};
+  for (const raw of text.split(/\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const i = line.indexOf("=");
+    if (i < 1) continue;
+    const key = line.slice(0, i).trim();
+    let value = line.slice(i + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    env[key] = value;
+  }
+  return env;
+}
+
+export function readDotEnv(root) {
+  try {
+    return parseDotEnv(readFileSync(join(root, ".env"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+export function parseAppEnv(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return {};
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const env = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!key.startsWith(VITE_PREFIX)) continue;
+    if (typeof value !== "string") continue;
+    env[key] = value;
+  }
+  return env;
+}
+
+/** The app env recorded under `root`, or `{}` when the file is absent. */
+export function readAppEnv(root) {
+  try {
+    return parseAppEnv(readFileSync(join(root, APP_ENV_REL_PATH), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+/** File values under the process environment: an explicit override wins. */
+export function mergeAppEnv(appEnv, processEnv) {
+  return { ...appEnv, ...processEnv };
+}
+
+/**
+ * Translate a child's `exit` `(code, signal)` into this process's exit status.
+ *
+ * Do not re-raise the signal with `process.kill(process.pid, signal)`: under
+ * qemu-user (amd64 image builds on an arm host) a self-directed signal is
+ * routinely delivered as SIGSEGV to the wrong process, which takes down the
+ * test worker and fails the image build. `128 + signo` is what a shell reports
+ * for a signal-killed command, so a cancelled `vite build` is still a failure.
+ */
+export function exitStatusFromChild(code, signal) {
+  if (signal) {
+    const signo = osConstants.signals[signal];
+    return 128 + (typeof signo === "number" ? signo : 1);
+  }
+  return code ?? 1;
+}
+
+/** The workspace root (this file lives in `<root>/scripts/`). */
+export function projectRoot() {
+  return dirname(dirname(fileURLToPath(import.meta.url)));
+}
+
+/**
+ * Whether `moduleUrl` is the script node was asked to run.
+ *
+ * Both sides are resolved through symlinks: node realpaths `import.meta.url`
+ * but leaves `process.argv[1]` as typed, so comparing them raw makes a CLI
+ * launched through a symlinked path (`/tmp` on macOS) a silent no-op.
+ */
+export function isMainModule(moduleUrl) {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === fileURLToPath(moduleUrl);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether `command` has to go through a shell to be executable.
+ *
+ * On Windows npm installs bin entries as `vite.cmd` / `vite.ps1` shims. Bare
+ * `spawn("vite")` cannot execute either — it fails with ENOENT, which took
+ * down `npm run dev` and `npm run build` on every Windows box. Node also
+ * refuses to spawn a `.cmd` without a shell (CVE-2024-27980), so the shell is
+ * the only route to a shim.
+ *
+ * Scope it to bare command NAMES: an absolute path is spawnable as-is, and
+ * routing one through the shell would re-split it on spaces — which is exactly
+ * how `C:\Program Files\nodejs\node.exe` breaks. POSIX never needs the shell.
+ */
+export function needsShell(command) {
+  if (process.platform !== "win32") return false;
+  return !/[\\/]/.test(command);
+}
+
+export function isDirectNodeTestInvocation(command, args) {
+  const normalized = command.replace(/\\/g, "/").split("/").at(-1)?.toLowerCase();
+  if (normalized !== "node" && normalized !== "node.exe") return false;
+  return args.some((arg) => arg === "--test" || arg.startsWith("--test="));
+}
+
+function main(argv) {
+  const [command, ...args] = argv;
+  if (!command) {
+    console.error("usage: node scripts/with-app-env.mjs <command> [args…]");
+    process.exit(2);
+  }
+  const inheritedEnv = mergeAppEnv(readAppEnv(projectRoot()), {
+    ...readDotEnv(projectRoot()),
+    ...process.env,
+  });
+  const directNodeTest = isDirectNodeTestInvocation(command, args);
+  // `test:live-model` is an explicit paid-provider entry point. Keep that
+  // opt-in, while still preventing a checkout or parent database from
+  // reaching its test process. Ordinary Node tests get the same fail-closed
+  // environment and preload guard as `npm test`.
+  const liveModelTest = directNodeTest && process.env.RUN_LIVE_MODEL_TESTS === "1";
+  const env = directNodeTest ? safeTestEnvironment(inheritedEnv) : inheritedEnv;
+  if (liveModelTest) env.RUN_LIVE_MODEL_TESTS = "1";
+  /*
+    Say which database this run resolved to, out loud.
+
+    .env is merged in whole, so a run that does not explicitly override
+    DATABASE_URL silently inherits the dev database from the file -- which is
+    how a release audit briefly pointed its "isolated" server at the real dev
+    Postgres before catching itself. One line at startup makes that mistake
+    visible on the first screen instead of discoverable from suspicious data.
+    Credentials are not printed; only where it points.
+
+    stdout, NOT stderr. The production start script pipes this command with
+    2>&1 under $ErrorActionPreference = "Stop", where one byte of native
+    stderr is a terminating error -- the stderr version of this line stopped
+    the start script after migrate and took the live paper down to a 502.
+  */
+  if (env.DATABASE_URL) {
+    try {
+      const u = new URL(env.DATABASE_URL);
+      const from = process.env.DATABASE_URL !== undefined ? "environment" : ".env";
+      console.log(`[with-app-env] DATABASE_URL -> ${u.hostname}:${u.port || "5432"}${u.pathname} (from ${from})`);
+    } catch {
+      console.log("[with-app-env] DATABASE_URL is set but unparseable");
+    }
+  } else {
+    console.log("[with-app-env] DATABASE_URL unset -- PGLite in-memory");
+  }
+  // `node` is this very runtime — use its real path rather than a PATH lookup.
+  // Avoids the shell entirely (and its DEP0190 warning on every run).
+  const resolved = command === "node" ? process.execPath : command;
+  const guard = new URL("./test-environment-guard.mjs", import.meta.url).href;
+  const childArgs = directNodeTest && !liveModelTest ? ["--import", guard, ...args] : args;
+  const child = spawn(resolved, childArgs, {
+    stdio: "inherit",
+    env,
+    shell: needsShell(resolved),
+  });
+  // The dev server is long-running and is stopped by signalling this wrapper.
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.on(signal, () => child.kill(signal));
+  }
+  child.on("error", (err) => {
+    console.error(`[with-app-env] failed to run ${command}:`, err?.message || err);
+    process.exit(127);
+  });
+  child.on("exit", (code, signal) => {
+    process.exit(exitStatusFromChild(code, signal));
+  });
+}
+
+if (isMainModule(import.meta.url)) {
+  main(process.argv.slice(2));
+}

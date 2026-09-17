@@ -1,0 +1,383 @@
+import { describe, it, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
+import {
+  discoverLocalModels,
+  resetLocalCatalogCacheForTests,
+  type LocalCatalog,
+} from "./local-models.ts";
+import { resetLocalDiscoveryReachableForTests } from "./provider-registry.ts";
+
+const ENV_KEYS = ["LLM_BASE_URL", "LLM_MODEL", "TOWNREPORTER_LOCAL_DISCOVERY"];
+
+function withEnv(vars: Record<string, string | undefined>, fn: () => Promise<void>) {
+  const prev: Record<string, string | undefined> = {};
+  for (const k of ENV_KEYS) {
+    prev[k] = process.env[k];
+    delete process.env[k];
+  }
+  for (const [k, v] of Object.entries(vars)) {
+    if (v !== undefined) process.env[k] = v;
+  }
+  return fn().finally(() => {
+    for (const k of ENV_KEYS) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
+  });
+}
+
+const LM_STUDIO_MODELS = {
+  data: [
+    { id: "halo/qwen3-coder-30b-a3b-q6k" },
+    { id: "google/gemma-4-12b-qat" },
+    { id: "text-embedding-nomic" },
+  ],
+};
+const LM_STUDIO_NATIVE = {
+  data: [
+    { id: "halo/qwen3-coder-30b-a3b-q6k", state: "not-loaded", type: "llm" },
+    { id: "google/gemma-4-12b-qat", state: "loaded", type: "llm" },
+    { id: "text-embedding-nomic", state: "loaded", type: "embeddings" },
+  ],
+};
+const OLLAMA_MODELS = {
+  data: [{ id: "gemma4:12b" }, { id: "gemma4:e4b" }, { id: "translategemma:4b" }],
+};
+const OLLAMA_PS = { models: [{ name: "gemma4:12b" }] };
+
+function fakeFetch(handlers: Record<string, unknown | (() => unknown) | "html" | "timeout">) {
+  return async (input: unknown, init?: { signal?: AbortSignal }) => {
+    const url = String(input);
+    const match = Object.keys(handlers).find((k) => url.startsWith(k));
+    if (!match) throw new Error(`unexpected fetch: ${url}`);
+    const value = handlers[match];
+    if (value === "timeout") {
+      // Simulate the real AbortSignal.timeout() firing.
+      const err = new Error("The operation was aborted");
+      err.name = "TimeoutError";
+      if (init?.signal?.aborted) throw err;
+      throw err;
+    }
+    if (value === "html") {
+      return new Response("<html>not json</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    }
+    const body = typeof value === "function" ? value() : value;
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+}
+
+describe("local model discovery", () => {
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    resetLocalCatalogCacheForTests();
+    resetLocalDiscoveryReachableForTests();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    resetLocalCatalogCacheForTests();
+    resetLocalDiscoveryReachableForTests();
+  });
+
+  it("parses LM Studio's list plus native state/type, and drops embeddings", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": LM_STUDIO_MODELS,
+      "http://127.0.0.1:1234/api/v0/models": LM_STUDIO_NATIVE,
+      "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "timeout",
+    }) as typeof fetch;
+
+    const catalog: LocalCatalog = await withEnv({}, () => discoverLocalModels(true));
+    const lmstudio = catalog.servers.find((s) => s.kind === "lmstudio");
+    assert.ok(lmstudio?.reachable);
+    const ids = lmstudio!.models.map((m) => m.id);
+    assert.deepEqual(ids.sort(), ["google/gemma-4-12b-qat", "halo/qwen3-coder-30b-a3b-q6k"].sort());
+    const gemma = lmstudio!.models.find((m) => m.id === "google/gemma-4-12b-qat")!;
+    assert.equal(gemma.loaded, true);
+    assert.equal(gemma.thinking, true);
+    const qwen = lmstudio!.models.find((m) => m.id === "halo/qwen3-coder-30b-a3b-q6k")!;
+    assert.equal(qwen.loaded, false);
+    // Ollama did not answer -- omitted entirely, not reported unreachable.
+    assert.ok(!catalog.servers.some((s) => s.kind === "ollama"));
+  });
+
+  it("parses Ollama's list plus /api/ps loaded state", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": "timeout",
+      "http://127.0.0.1:11434/v1/models": OLLAMA_MODELS,
+      "http://127.0.0.1:8080/v1/models": "timeout",
+      "http://127.0.0.1:11434/api/ps": OLLAMA_PS,
+    }) as typeof fetch;
+
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    const ollama = catalog.servers.find((s) => s.kind === "ollama");
+    assert.ok(ollama?.reachable);
+    assert.equal(ollama!.models.length, 3);
+    const loaded = ollama!.models.find((m) => m.id === "gemma4:12b")!;
+    assert.equal(loaded.loaded, true);
+    const notLoaded = ollama!.models.find((m) => m.id === "translategemma:4b")!;
+    assert.equal(notLoaded.loaded, false);
+  });
+
+  it("drops a non-JSON 200 (an unrelated web app on the same port)", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": "timeout",
+      "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "timeout",
+      "http://localhost:8080/v1/models": "html",
+    }) as typeof fetch;
+
+    const catalog = await withEnv({ LLM_BASE_URL: "http://localhost:8080/v1" }, () =>
+      discoverLocalModels(true),
+    );
+    // Configured explicitly, so it stays in the list -- but unreachable,
+    // because its body did not parse as the expected shape.
+    const configured = catalog.servers.find((s) => s.baseUrl === "http://localhost:8080/v1");
+    assert.ok(configured);
+    assert.equal(configured!.reachable, false);
+  });
+
+  it("omits a probed default port that does not answer, rather than reporting it down", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": "timeout",
+      "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "timeout",
+    }) as typeof fetch;
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    assert.deepEqual(catalog.servers, []);
+    assert.equal(catalog.defaultModel, null);
+  });
+
+  it("respects TOWNREPORTER_LOCAL_DISCOVERY=0 by never probing the default ports", async () => {
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      throw new Error("should not be called");
+    }) as typeof fetch;
+    const catalog = await withEnv({ TOWNREPORTER_LOCAL_DISCOVERY: "0" }, () =>
+      discoverLocalModels(true),
+    );
+    assert.equal(called, false);
+    assert.deepEqual(catalog.servers, []);
+  });
+
+  it("picks the default: first loaded chat model, LM Studio before Ollama", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": LM_STUDIO_MODELS,
+      "http://127.0.0.1:1234/api/v0/models": LM_STUDIO_NATIVE,
+      "http://127.0.0.1:11434/v1/models": OLLAMA_MODELS,
+      "http://127.0.0.1:8080/v1/models": "timeout",
+      "http://127.0.0.1:11434/api/ps": OLLAMA_PS,
+    }) as typeof fetch;
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    assert.deepEqual(catalog.defaultModel, {
+      baseUrl: "http://127.0.0.1:1234/v1",
+      id: "google/gemma-4-12b-qat",
+    });
+  });
+
+  it("falls back to LLM_MODEL when nothing is loaded, else the first chat model", async () => {
+    const unloadedLmStudioNative = {
+      data: [
+        { id: "halo/qwen3-coder-30b-a3b-q6k", state: "not-loaded", type: "llm" },
+        { id: "google/gemma-4-12b-qat", state: "not-loaded", type: "llm" },
+        { id: "text-embedding-nomic", state: "loaded", type: "embeddings" },
+      ],
+    };
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": LM_STUDIO_MODELS,
+      "http://127.0.0.1:1234/api/v0/models": unloadedLmStudioNative,
+      "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "timeout",
+    }) as typeof fetch;
+
+    const byModel = await withEnv({ LLM_MODEL: "google/gemma-4-12b-qat" }, () =>
+      discoverLocalModels(true),
+    );
+    assert.deepEqual(byModel.defaultModel, {
+      baseUrl: "http://127.0.0.1:1234/v1",
+      id: "google/gemma-4-12b-qat",
+    });
+
+    const byFirst = await withEnv({}, () => discoverLocalModels(true));
+    assert.equal(byFirst.defaultModel?.id, "halo/qwen3-coder-30b-a3b-q6k");
+  });
+
+  it("flags an LM Studio vlm as vision, and a plain llm as not", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": {
+        data: [{ id: "google/gemma-4-12b-qat" }, { id: "qwen2.5vl-7b" }],
+      },
+      "http://127.0.0.1:1234/api/v0/models": {
+        data: [
+          { id: "google/gemma-4-12b-qat", state: "loaded", type: "llm" },
+          { id: "qwen2.5vl-7b", state: "not-loaded", type: "vlm" },
+        ],
+      },
+      "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "timeout",
+    }) as typeof fetch;
+
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    const lmstudio = catalog.servers.find((s) => s.kind === "lmstudio")!;
+    assert.equal(lmstudio.models.find((m) => m.id === "google/gemma-4-12b-qat")?.vision, false);
+    assert.equal(lmstudio.models.find((m) => m.id === "qwen2.5vl-7b")?.vision, true);
+  });
+
+  it("reads Ollama vision capability from one /api/show call per model", async () => {
+    globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: string }) => {
+      const url = String(input);
+      if (url.startsWith("http://127.0.0.1:1234")) {
+        const err = new Error("aborted");
+        err.name = "TimeoutError";
+        throw err;
+      }
+      if (url === "http://127.0.0.1:11434/v1/models") {
+        return new Response(JSON.stringify(OLLAMA_MODELS), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "http://127.0.0.1:11434/api/ps") {
+        return new Response(JSON.stringify(OLLAMA_PS), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "http://127.0.0.1:11434/api/show" && init?.method === "POST") {
+        const requested = JSON.parse(init.body ?? "{}") as { name?: string };
+        const capabilities =
+          requested.name === "gemma4:12b" ? ["completion", "vision"] : ["completion"];
+        return new Response(JSON.stringify({ capabilities }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    const ollama = catalog.servers.find((s) => s.kind === "ollama")!;
+    assert.equal(ollama.models.find((m) => m.id === "gemma4:12b")?.vision, true);
+    assert.equal(ollama.models.find((m) => m.id === "gemma4:e4b")?.vision, false);
+    assert.equal(ollama.models.find((m) => m.id === "translategemma:4b")?.vision, false);
+  });
+
+  it("identifies Ollama Cloud and reads its reported million-token context", async () => {
+    globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: string }) => {
+      const url = String(input);
+      if (url.startsWith("http://127.0.0.1:1234") || url.startsWith("http://127.0.0.1:8080")) {
+        const err = new Error("aborted");
+        err.name = "TimeoutError";
+        throw err;
+      }
+      if (url === "http://127.0.0.1:11434/v1/models") {
+        return new Response(JSON.stringify({ data: [{ id: "deepseek-v4.1-flash:cloud" }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "http://127.0.0.1:11434/api/ps") {
+        return new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "http://127.0.0.1:11434/api/show" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            capabilities: ["completion", "thinking", "tools", "vision"],
+            model_info: { "deepseek2.context_length": 1_048_576 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    const model = catalog.servers.find((server) => server.kind === "ollama")?.models[0];
+    assert.equal(model?.cloud, true);
+    assert.equal(model?.contextLength, 1_048_576);
+    assert.equal(model?.thinking, true);
+    assert.equal(model?.vision, true);
+  });
+
+  it("marks an unknown OpenAI-compatible server's models as not vision-capable", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": "timeout",
+      "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "timeout",
+      "http://localhost:9999/v1/models": { data: [{ id: "some-model" }] },
+    }) as typeof fetch;
+    const catalog = await withEnv({ LLM_BASE_URL: "http://localhost:9999/v1" }, () =>
+      discoverLocalModels(true),
+    );
+    const server = catalog.servers.find((s) => s.baseUrl === "http://localhost:9999/v1");
+    assert.equal(server?.models[0]?.vision, false);
+  });
+
+  it("drops llama.cpp's port when it answers 200 with HTML (this machine's real port-8080 web app)", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": "timeout",
+      "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": "html",
+    }) as typeof fetch;
+
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    assert.ok(!catalog.servers.some((s) => s.kind === "llamacpp"));
+  });
+
+  it("discovers a real llama-server on :8080 and marks vision by id heuristic", async () => {
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": "timeout",
+      "http://127.0.0.1:11434/v1/models": "timeout",
+      "http://127.0.0.1:8080/v1/models": {
+        data: [{ id: "qwen2.5-coder-7b-instruct.gguf" }, { id: "gemma-4-12b-it.gguf" }],
+      },
+    }) as typeof fetch;
+
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    const llamacpp = catalog.servers.find((s) => s.kind === "llamacpp");
+    assert.ok(llamacpp?.reachable);
+    assert.equal(llamacpp!.baseUrl, "http://127.0.0.1:8080/v1");
+    const coder = llamacpp!.models.find((m) => m.id === "qwen2.5-coder-7b-instruct.gguf")!;
+    assert.equal(coder.loaded, null);
+    assert.equal(coder.vision, false);
+    const gemma = llamacpp!.models.find((m) => m.id === "gemma-4-12b-it.gguf")!;
+    assert.equal(gemma.vision, true);
+    assert.equal(gemma.thinking, true);
+  });
+});
+
+it("labels every Ollama cloud naming shape as cloud, not on-device", async () => {
+  const ids = [
+    "deepseek-v4.1-flash:cloud", // tag shape the production newsroom uses
+    "model-name-cloud", // hosted-catalog hyphen shape
+    "model-name-1.2-cloud", // version followed by -cloud
+    "gemma4:12b", // plain on-device tag stays on-device
+  ];
+  globalThis.fetch = fakeFetch({
+    "http://127.0.0.1:1234/v1/models": "timeout",
+    "http://127.0.0.1:11434/v1/models": { data: ids.map((id) => ({ id })) },
+    "http://127.0.0.1:8080/v1/models": "timeout",
+    "http://127.0.0.1:11434/api/ps": { models: [] },
+  }) as typeof fetch;
+
+  const catalog = await withEnv({}, () => discoverLocalModels(true));
+  const ollama = catalog.servers.find((s) => s.kind === "ollama");
+  assert.ok(ollama?.reachable);
+  const byId = new Map(ollama!.models.map((m) => [m.id, m]));
+  assert.equal(byId.get("deepseek-v4.1-flash:cloud")!.cloud, true);
+  assert.equal(byId.get("model-name-cloud")!.cloud, true);
+  assert.equal(byId.get("model-name-1.2-cloud")!.cloud, true);
+  assert.equal(byId.get("gemma4:12b")!.cloud, false);
+});

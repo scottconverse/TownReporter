@@ -1,0 +1,12 @@
+-- CITY-SETUP release-walkthrough Critical fix.
+--
+-- The editor contact address shown on /about and /corrections came only from
+-- EDITOR_EMAIL, a BUILD-time constant (VITE_TOWNREPORTER_EDITOR_EMAIL) --
+-- so a paper configured at runtime for a different city still handed its
+-- readers whatever address the operator baked into the build, which for the
+-- shipped build contains "longmont". This column makes the address part of
+-- the same runtime paper configuration as everything else in paper_settings
+-- (nullable, same as every other column here): null keeps reading the
+-- build-time EDITOR_EMAIL exactly as before, so the current install is
+-- unaffected.
+alter table paper_settings add column if not exists editor_email text;

@@ -1,0 +1,254 @@
+import { useState } from "react";
+import { Link } from "@tanstack/react-router";
+import { Chip, InkButton, Score, leadOrigin } from "@/components/desk-chrome";
+import { formatAge } from "@/lib/paper";
+import { usePaperDateFormatters } from "@/lib/paper-context";
+import type { PrintedDup } from "@/lib/news/desk-copy";
+import type { LeadRow } from "@/lib/news/types";
+import { ModelPicker } from "@/components/model-picker";
+import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
+import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
+import { Notice } from "@/components/states";
+
+/**
+ * Live screenshot, 0.6.1 (2026-09-02): the "seen again ×N" stamp rendered in
+ * the muted meta line next to the age and origin text, and the editor
+ * scrolled right past it -- it read as bookkeeping, not as something that
+ * changed what the lead meant. It is exactly that: the scanner found this
+ * story again after a kill, and it did NOT get refiled as a new lead
+ * because of it (see findMatchingLead in lib/news/lead-match.ts). That is
+ * worth a real badge in the KILLED/PRINTED family on the right side of the
+ * row, and a one-line explanation the first time the Killed tab shows one
+ * (wired in desk.queue.tsx using this same copy).
+ */
+export const SEEN_AGAIN_EXPLAINER =
+  "Seen again: the scanner found this story again after you killed it. It was not refiled. Back returns it to New.";
+
+export function LeadRowView({
+  lead,
+  dup,
+  onHold,
+  onBack,
+  onKill,
+  onDelete,
+  onDraft,
+  drafting = false,
+  draftNotice = null,
+  batchSelected = false,
+  batchDisabled = false,
+  onBatchSelect,
+  roomy = false,
+}: {
+  lead: LeadRow;
+  dup?: PrintedDup | null;
+  onHold?: () => void;
+  onBack?: () => void;
+  onKill?: () => void;
+  /**
+   * Remove the lead entirely.
+   *
+   * Kill is not delete. A killed lead stays under Killed, which is right for
+   * "not this one" and wrong for a lead filed against the wrong person or a
+   * scan that swept up something private. Confirmed in place, because a
+   * two-click delete on a row this small is the whole safety net it needs.
+   */
+  onDelete?: () => void;
+  onDraft?: (modelChoice: StoryModelChoice, modelEffort: ModelEffort | null) => void;
+  drafting?: boolean;
+  draftNotice?: { kind: "ok" | "err"; text: string } | null;
+  batchSelected?: boolean;
+  batchDisabled?: boolean;
+  onBatchSelect?: (selected: boolean) => void;
+  roomy?: boolean;
+}) {
+  const { formatShortDate } = usePaperDateFormatters();
+  const [confirming, setConfirming] = useState(false);
+  const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
+  const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+  const score = lead.newsworthiness ?? 0;
+  return (
+    <div
+      className={"lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")}
+    >
+      <Score v={score} />
+      <div className="lead-main">
+        <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="hl-link">
+          {lead.headline}
+        </Link>
+        <p className="lead-why">{lead.why}</p>
+        <p className="meta">
+          {lead.topic} · {formatAge(lead.created_at)} · {leadOrigin(lead)}
+        </p>
+        {onBatchSelect ? (
+          <label className="meta">
+            <input
+              type="checkbox"
+              checked={batchSelected}
+              disabled={batchDisabled}
+              aria-label={`Include ${lead.headline} in the batch draft`}
+              onChange={(event) => onBatchSelect(event.target.checked)}
+            />{" "}
+            Include in batch draft
+          </label>
+        ) : null}
+        {lead.possible_duplicate_of ? (
+          <p className="meta dup-context">
+            {lead.status === "held" ? "Held for review — " : ""}
+            {lead.possible_duplicate ? (
+              <>
+                possible duplicate of{" "}
+                <Link
+                  to="/desk/story/$leadId"
+                  params={{ leadId: String(lead.possible_duplicate.id) }}
+                  className="inline-link"
+                >
+                  {lead.possible_duplicate.headline}
+                </Link>{" "}
+                · {lead.possible_duplicate.status}
+              </>
+            ) : "the earlier lead is unavailable; compare it only if it is restored."}
+          </p>
+        ) : null}
+        <div className="lead-actions row-acts">
+          <Link
+            to="/desk/story/$leadId"
+            params={{ leadId: String(lead.id) }}
+            className="btn quiet small"
+          >
+            Open
+          </Link>
+          {dup ? (
+            <Link to="/articles/$slug" params={{ slug: dup.slug }} className="btn quiet small">
+              The piece
+            </Link>
+          ) : null}
+          {lead.status !== "held" &&
+          lead.status !== "published" &&
+          lead.status !== "killed" &&
+          onHold ? (
+            <InkButton tone="quiet" small onClick={onHold}>
+              Hold
+            </InkButton>
+          ) : null}
+          {lead.status === "held" && onBack ? (
+            <InkButton tone="quiet" small onClick={onBack}>
+              Back
+            </InkButton>
+          ) : null}
+          {lead.status === "killed" && onBack ? (
+            <InkButton tone="quiet" small onClick={onBack}>
+              Back
+            </InkButton>
+          ) : null}
+          {lead.status !== "killed" && lead.status !== "published" && onKill ? (
+            <InkButton tone="quiet-danger" small onClick={onKill}>
+              Kill
+            </InkButton>
+          ) : null}
+          {onDelete ? (
+            confirming ? (
+              <>
+                <InkButton
+                  tone="danger"
+                  small
+                  onClick={() => {
+                    setConfirming(false);
+                    onDelete();
+                  }}
+                >
+                  Yes, delete
+                </InkButton>
+                <InkButton tone="quiet" small onClick={() => setConfirming(false)}>
+                  Keep
+                </InkButton>
+              </>
+            ) : (
+              <InkButton tone="quiet" small onClick={() => setConfirming(true)}>
+                Delete
+              </InkButton>
+            )
+          ) : null}
+        </div>
+        {confirming ? (
+          <p className="del-warn">
+            Deletes this lead and any draft on it.
+            {lead.status === "published"
+              ? " The printed story stays on the paper — remove that under Published."
+              : ""}
+          </p>
+        ) : null}
+        {lead.status !== "killed" && lead.status !== "published" && onDraft ? (
+          <div className="queue-draft-controls">
+            <InkButton
+              small
+              disabled={drafting}
+              onClick={() => onDraft(modelChoice, modelEffort)}
+              ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${lead.headline} with ${modelChoiceLabel(modelChoice)}`}
+            >
+              {drafting
+                ? "Queuing…"
+                : lead.status === "drafted"
+                  ? "Redraft with AI"
+                  : "Draft with AI"}
+            </InkButton>
+            <details>
+              <summary className="meta">Model: {modelChoiceLabel(modelChoice)} · change</summary>
+              <ModelPicker
+                value={modelChoice}
+                onChange={(choice) => {
+                  setModelChoice(choice);
+                  setModelEffort(defaultModelEffort(choice));
+                }}
+                effort={modelEffort}
+                onEffortChange={setModelEffort}
+                disabled={drafting}
+                compact
+              />
+            </details>
+          </div>
+        ) : null}
+        {draftNotice ? <Notice kind={draftNotice.kind}>{draftNotice.text}</Notice> : null}
+        {dup ? (
+          <p className="meta dup-match">
+            matches:{" "}
+            <Link to="/articles/$slug" params={{ slug: dup.slug }} className="inline-link">
+              {dup.headline}
+            </Link>{" "}
+            · published {formatShortDate(dup.publishedAt)}
+          </p>
+        ) : null}
+      </div>
+      <div className="lead-flags">
+        <Chip s={lead.status} />
+        {dup ? (
+          <span
+            className="chip dup"
+            title={`Covers ground published ${formatShortDate(dup.publishedAt)}: ${dup.headline}`}
+          >
+            ≈ printed
+          </span>
+        ) : null}
+        {lead.resurfaced_count && lead.resurfaced_count > 0 ? (
+          <span className="chip seen-again">
+            seen again ×{lead.resurfaced_count}
+            {lead.last_resurfaced_at ? ` · ${formatShortDate(lead.last_resurfaced_at)}` : ""}
+          </span>
+        ) : null}
+        {lead.possible_duplicate ? (
+          <Link
+            to="/desk/story/$leadId"
+            params={{ leadId: String(lead.possible_duplicate.id) }}
+            className="chip maybe-same"
+            title={`Possible duplicate of ${lead.possible_duplicate.headline} (${lead.possible_duplicate.status}). Open it to compare.`}
+          >
+            Possible duplicate · compare
+          </Link>
+        ) : lead.possible_duplicate_of ? (
+          <span className="chip maybe-same" title="The earlier lead is unavailable.">
+            Possible duplicate · unavailable
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}

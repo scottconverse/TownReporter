@@ -1,0 +1,53 @@
+# Read retained PDF pages
+
+Included in [TownReporter 0.6.44](releases/0.6.44.md). This guide describes the controls and their limits; completed processing does not establish reporting accuracy.
+
+## Use it from Dark Desk
+
+Open a captured PDF artifact in **Dark Desk**. The original captured PDF remains
+unchanged. Choose an explicit model for the page-reading action; **Automatic**
+is not accepted for this action. Then choose **Read entire PDF** or enter a
+1-based, inclusive page range:
+
+- **First page** and **last page** must be whole-number page numbers.
+- The range can contain no more than 12 pages.
+- The first page cannot be after the last page.
+
+Select the action to queue the read. The artifact shows the queued/running
+status while the worker processes it. When it finishes, the returned transcript
+is labeled with the page numbers that were requested. Review the transcript
+against the original PDF before relying on it.
+
+**Read entire PDF** counts the retained original, divides every unread page
+into consecutive batches of at most 12, and saves each batch before starting
+the next one. Progress names the current batch, page range and saved-page
+count. If the server stops, the next complete read skips pages already retained
+and resumes with the missing pages. Failed, empty or oversized pages remain
+listed as unread; running the complete read again retries only those gaps.
+
+The transcript is stored as additional evidence alongside the original PDF and
+its existing `full_text`. It does not overwrite, replace, or silently revise
+the original capture. If the original PDF is missing or cannot be reopened,
+the reader does not refetch it; the action fails rather than substituting a new
+document.
+
+## Provider and cost boundary
+
+The selected model controls where the pages are sent. If the picker visibly
+shows a cloud provider, the selected pages leave the TownReporter machine and
+that provider's normal usage charges, retention, and privacy terms may apply.
+Review the provider choice before queuing a read. A local model keeps the page
+request on the configured local runtime, subject to that runtime's own
+configuration.
+
+The 12-page value is a per-provider-call safety boundary, not a packet-size
+limit. Each rendered page still has a 2 MiB image limit. One complete-read job
+has a shared cooperative 10-minute and 48-transcription-attempt budget,
+including technical fallback attempts. When either budget is reached, saved
+pages remain retained and the job pauses with an unread-page list. An unread
+page remains explicit rather than being treated as a complete packet.
+
+Page reading is an evidence aid, not an automatic fact check or publication
+decision. Keep the original PDF available, compare important names, numbers,
+dates, and quotations to the page image, and use the existing editor review and
+publication gates.

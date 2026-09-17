@@ -1,0 +1,578 @@
+/**
+ * Claude via the local Claude Code CLI — **server-only** (`.server.ts` suffix).
+ *
+ * Uses the operator's existing Claude Code login instead of an API key, so a
+ * Max/Pro subscription powers the desk. The CLI owns token refresh; this module
+ * never reads or handles credentials.
+ *
+ * MUST keep the `.server` suffix and be reached by dynamic import only: it uses
+ * `node:child_process`, which must never reach the browser bundle.
+ *
+ * ## Why the flags
+ *
+ * A bare `claude -p` loads the whole coding-agent harness — every built-in tool
+ * definition, the operator's own CLAUDE.md, and the skills index. Measured on
+ * this machine that was ~44.6k tokens of preamble per call, and it would have
+ * prefixed every news prompt with unrelated developer instructions. The flags
+ * below cut it to ~29.6k and, more importantly, keep the operator's personal
+ * config out of the newsroom's prompts entirely.
+ *
+ * `--setting-sources ""` is the load-bearing one: without it the desk inherits
+ * whatever is in the operator's CLAUDE.md.
+ *
+ * ## Cost shape
+ *
+ * The preamble is identical on every call, so the server-side prompt cache
+ * absorbs it after the first request — measured ~25.5k cache-read + ~4k write
+ * per call, roughly a fifth of the uncached cost, and it survives across
+ * separate CLI processes. Latency floor is ~2.5s per call.
+ */
+import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { assertNotAnArgument } from "./voice.server.ts";
+import { spawnPlan } from "./cli-spawn.server.ts";
+import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
+import { CLAUDE_CLI_EFFORTS, type ModelEffort } from "./provider-registry.ts";
+
+/**
+ * Mirrors the limit in `assertNotAnArgument` (voice.server.ts): the point
+ * past which a string stops being a safe command-line argument. Kept as its
+ * own constant here rather than imported so this module never has to reach
+ * back into voice.server.ts for a number — only for the assertion itself.
+ */
+const SAFE_SYSTEM_ARG_CHARS = 8000;
+
+export type ClaudeCodeResult = ChatResult;
+
+/** Shape of `--output-format json`. Only the fields this module reads. */
+type CliEnvelope = {
+  is_error?: boolean;
+  result?: unknown;
+  subtype?: string;
+  api_error_status?: unknown;
+  duration_ms?: unknown;
+  model?: unknown;
+  modelUsage?: unknown;
+  usage?: unknown;
+};
+
+type CliResultContext = Omit<ChatResultMetadata, "durationMs"> & { durationMs: number };
+
+function reportedCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function cliMetadata(envelope: CliEnvelope, fallback: CliResultContext): ChatResultMetadata {
+  const usage = envelope.usage && typeof envelope.usage === "object"
+    ? envelope.usage as Record<string, unknown>
+    : undefined;
+  const reportedModel = typeof envelope.model === "string" && envelope.model.trim()
+    ? envelope.model
+    : envelope.modelUsage && typeof envelope.modelUsage === "object"
+      ? Object.keys(envelope.modelUsage as Record<string, unknown>).find(Boolean)
+      : undefined;
+  return {
+    ...fallback,
+    model: reportedModel ?? fallback.model,
+    durationMs: reportedCount(envelope.duration_ms) ?? fallback.durationMs,
+    ...(reportedCount(usage?.input_tokens) !== undefined ? { inputTokens: reportedCount(usage?.input_tokens) } : {}),
+    ...(reportedCount(usage?.output_tokens) !== undefined ? { outputTokens: reportedCount(usage?.output_tokens) } : {}),
+    ...(reportedCount(usage?.total_tokens) !== undefined ? { totalTokens: reportedCount(usage?.total_tokens) } : {}),
+  };
+}
+
+/**
+ * Where the CLI lives. `claude` on PATH is a shim (`claude.cmd` on Windows,
+ * a shell script elsewhere) that Node cannot spawn without a shell, and going
+ * through a shell breaks empty-string arguments like `--setting-sources ""`.
+ * The npm install also ships a real binary — prefer it, and let the operator
+ * override when the layout differs.
+ */
+export function claudeCliCandidates(): string[] {
+  const explicit = process.env.CLAUDE_CLI_PATH?.trim();
+  if (explicit) return [explicit];
+  const appData = process.env.APPDATA;
+  const home = process.env.HOME || process.env.USERPROFILE;
+  const out: string[] = [];
+  if (appData) {
+    out.push(`${appData}\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`);
+  }
+  if (home) {
+    out.push(`${home}/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude`);
+    out.push(`${home}/.local/bin/claude`);
+  }
+  out.push("/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude");
+  out.push("/usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude");
+  return out;
+}
+
+let resolvedBin: string | null | undefined;
+
+/** First candidate that exists on disk, or null. Memoized. */
+export async function findClaudeCli(): Promise<string | null> {
+  if (resolvedBin !== undefined) return resolvedBin;
+  const { access } = await import("node:fs/promises");
+  for (const candidate of claudeCliCandidates()) {
+    try {
+      await access(candidate);
+      resolvedBin = candidate;
+      return resolvedBin;
+    } catch {
+      /* try the next one */
+    }
+  }
+  resolvedBin = null;
+  return null;
+}
+
+/** Reset the memoized lookup. Tests only. */
+export function resetClaudeCliCache() {
+  resolvedBin = undefined;
+}
+
+export const CLAUDE_CLI_MISSING =
+  "Claude Code CLI not found. Install it (npm i -g @anthropic-ai/claude-code) and sign in with `claude`, set CLAUDE_CLI_PATH to its binary, or set ANTHROPIC_API_KEY instead.";
+
+export async function probeClaudeCode(label = "Claude"): Promise<
+  { ok: true; label: string } | { ok: false; error: string }
+> {
+  const bin = await findClaudeCli();
+  if (!bin) return { ok: false, error: CLAUDE_CLI_MISSING };
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      const plan = spawnPlan(bin, ["auth", "status", "--json"]);
+      child = spawn(plan.command, plan.args, {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      resolve({ ok: false, error: CLAUDE_CLI_MISSING });
+      return;
+    }
+    let stdout = "";
+    let settled = false;
+    const finish = (result: { ok: true; label: string } | { ok: false; error: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      finish({ ok: false, error: "Claude login check timed out." });
+      killTree(child);
+    }, 10_000);
+    timer.unref?.();
+    child.stdout?.on("data", (chunk) => (stdout += String(chunk)));
+    child.on("error", () => finish({ ok: false, error: CLAUDE_CLI_MISSING }));
+    child.on("close", (code) => {
+      try {
+        const status = JSON.parse(stdout) as { loggedIn?: boolean };
+        if (code === 0 && status.loggedIn) return finish({ ok: true, label });
+      } catch {
+        /* use the actionable signed-out message below */
+      }
+      finish({
+        ok: false,
+        error: "Claude is signed out. Open Claude Code, sign in, then try again.",
+      });
+    });
+  });
+}
+
+/**
+ * End a spawned CLI and everything it started.
+ *
+ * The spawned `claude.exe` runs a child of its own. Measured on this machine, a
+ * bare `child.kill()` did leave zero surviving `claude.exe` — so this is not a
+ * fix for an observed orphan, and should not be described as one. It is the
+ * stronger guarantee for the case the measurement did not cover: a helper the
+ * CLI started that does not exit with it. `taskkill /T` takes the tree.
+ */
+function killTree(child: { pid?: number; kill: (sig?: NodeJS.Signals) => boolean }) {
+  const pid = child.pid;
+  if (pid && process.platform === "win32") {
+    try {
+      const killer = spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { windowsHide: true });
+      killer.on("error", () => child.kill());
+      killer.on("close", (code) => {
+        if (code !== 0) child.kill();
+      });
+      const fallback = setTimeout(() => child.kill(), 500);
+      fallback.unref?.();
+      return;
+    } catch {
+      /* fall through to the plain kill */
+    }
+  }
+  try {
+    child.kill();
+  } catch {
+    /* already gone */
+  }
+}
+
+/**
+ * One prompt, one answer. The user text goes over stdin, never argv: the desk
+ * sends packs up to ~28k characters and Windows caps a command line at ~32k.
+ */
+export async function claudeCodeChat(opts: {
+  /** Inline system prompt. Ignored when `systemPromptFile` is given. */
+  system: string;
+  user: string;
+  model: string;
+  timeoutMs: number;
+  /**
+   * Read the system prompt from this file instead of passing it inline.
+   *
+   * For the editorial voice this is not an optimisation, it is the mechanism
+   * that keeps it private: only the PATH reaches the command line, and command
+   * lines are readable by every process on this machine. It also sidesteps
+   * Windows' 32,767-character argument limit, which a 98KB voice file exceeds
+   * three times over.
+   */
+  systemPromptFile?: string;
+  /**
+   * Tools the call may use. Empty by default — most desk calls are text in,
+   * text out. The editorial writer needs WebSearch and WebFetch because its
+   * whole posture is receipts, and without them it is instructed to drop its
+   * own claims appendix.
+   */
+  allowedTools?: string[];
+  /**
+   * Hide the tool surface entirely, via the CLI's `--tools ""` (ENG-121 /
+   * Dark Desk F1).
+   *
+   * `--allowed-tools ""` (the default below when `allowedTools` is omitted)
+   * still hands the model a full, described tool surface — Bash, WebSearch,
+   * WebFetch, every MCP tool, Agent, Edit, Write, everything the interactive
+   * harness ships — with every one of them pre-denied. The model can see
+   * them, and a planner told to "go find sources" will try one, get "This
+   * command requires approval" back, and narrate the refusal into whatever
+   * JSON field it is mid-writing. Measured on this machine: an
+   * `--allowed-tools ""` call sends ~24.6k cached tokens describing 13 tools
+   * the model then lists back when asked; a `--tools ""` call on the same
+   * prompt sends ~0 tool-description tokens and the model reports it has
+   * none.
+   *
+   * `--tools ""` removes the tool definitions from the request instead of
+   * just denying them, so there is nothing live to try and nothing to be
+   * denied doing. Use this for a call that is meant to be pure JSON-in/
+   * JSON-out — the Dark Desk planner, synthesis and brief passes — never for
+   * a call that legitimately needs `allowedTools`.
+   */
+  noTools?: boolean;
+  /** Per-run Claude CLI effort. Only values advertised by this installed CLI are accepted. */
+  reasoningEffort?: ModelEffort | null;
+}): Promise<ClaudeCodeResult> {
+  // Research capability is selected by the caller, including editorial writing.
+  /*
+    A long prompt must never become an argument, no matter which caller
+    forgot to plan for it.
+
+    Every desk call used to have to remember to pass `systemPromptFile`
+    itself, and grokChat's claude-code branch never did — it always inlined
+    `system` as `--system-prompt`, which is fine for the one-line prompts
+    most callers send and a live crash the day one doesn't (dark_jobs id 49:
+    an 11,961-character Dark Desk system prompt tripped `assertNotAnArgument`
+    below). Rather than push that discipline onto every caller, this is now
+    the one choke point: a caller-supplied `systemPromptFile` is always
+    honoured as-is, and an inline `system` over the safe argv length is
+    silently promoted to a private temp file instead of being thrown at the
+    command line. Only a system prompt that is both inline AND short ever
+    reaches argv.
+  */
+  let systemPromptFile = opts.systemPromptFile;
+  let ownedTempDir: string | undefined;
+  if (!systemPromptFile && opts.system.length > SAFE_SYSTEM_ARG_CHARS) {
+    ownedTempDir = await mkdtemp(join(tmpdir(), "trd-sysprompt-"));
+    systemPromptFile = join(ownedTempDir, "system-prompt.txt");
+    await writeFile(systemPromptFile, opts.system, "utf8");
+  }
+  const usingFile = Boolean(systemPromptFile);
+
+  const cleanupTempDir = () => {
+    if (!ownedTempDir) return;
+    const dir = ownedTempDir;
+    ownedTempDir = undefined;
+    void rm(dir, { recursive: true, force: true }).catch(() => {
+      /* best-effort; a leftover temp file is not worth failing the call over */
+    });
+  };
+
+  // The editor authorizes research with the editorial voice loaded. A prompt
+  // file is a transport mechanism, not a reason to remove requested web tools.
+  // Fetched pages remain untrusted evidence, never instructions.
+
+  if (opts.noTools && (opts.allowedTools?.length ?? 0) > 0) {
+    cleanupTempDir();
+    throw new Error(
+      "Refusing to combine noTools with any allowedTools in one Claude Code call: " +
+        "noTools asks the CLI to hide the tool surface entirely (--tools \"\"), which " +
+        "would silently win over an allow-list the caller actually wanted honoured. " +
+        "Pass one or the other.",
+    );
+  }
+  if (opts.reasoningEffort && !CLAUDE_CLI_EFFORTS.includes(opts.reasoningEffort)) {
+    cleanupTempDir();
+    throw new Error(
+      `Unsupported Claude effort ${opts.reasoningEffort}. Supported values: ${CLAUDE_CLI_EFFORTS.join(", ")}.`,
+    );
+  }
+
+  const bin = await findClaudeCli();
+  if (!bin) {
+    cleanupTempDir();
+    return { ok: false, error: CLAUDE_CLI_MISSING };
+  }
+
+  /*
+    Arguments are visible to any process that can list processes, and Windows
+    caps them at 32,767 characters anyway. `assertNotAnArgument` makes an
+    over-length inline prompt a refusal rather than a habit — it should never
+    actually fire now that the block above promotes long prompts to a file
+    first, but it stays as the backstop for the one path left: a caller-passed
+    `systemPromptFile` was not used, and the prompt is still too long, which
+    only happens if `SAFE_SYSTEM_ARG_CHARS` and `assertNotAnArgument`'s own
+    limit ever drift apart.
+  */
+  if (!usingFile) assertNotAnArgument(opts.system, "system prompt");
+
+  const args = [
+    "-p",
+    ...(usingFile
+      ? ["--system-prompt-file", systemPromptFile!]
+      : ["--system-prompt", opts.system]),
+    // Drop the harness preamble the newsroom has no use for.
+    "--exclude-dynamic-system-prompt-sections",
+    // Do NOT inherit the operator's CLAUDE.md, skills, or plugins.
+    "--setting-sources",
+    "",
+    // No file access and no bash, ever. Web tools only when the caller asks:
+    // the editorial writer needs them, the planner and synthesis do not.
+    //
+    // `noTools` hides the surface (`--tools ""`) instead of denying an empty
+    // allow-list (`--allowed-tools ""`) — see the `noTools` doc comment
+    // above for why the difference matters (Dark Desk F1). Every other
+    // caller keeps the old `--allowed-tools` behaviour unchanged.
+    ...(opts.noTools ? ["--tools", ""] : ["--allowed-tools", (opts.allowedTools ?? []).join(",")]),
+    "--model",
+    opts.model,
+    ...(opts.reasoningEffort ? ["--effort", opts.reasoningEffort] : []),
+    "--output-format",
+    "json",
+  ];
+
+  return new Promise<ClaudeCodeResult>((resolve) => {
+    const startedAt = Date.now();
+    const baseMeta = (timedOut: boolean): CliResultContext => ({
+      provider: "claude-code",
+      model: opts.model,
+      durationMs: Date.now() - startedAt,
+      timedOut,
+    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      const plan = spawnPlan(bin, args);
+      child = spawn(plan.command, plan.args, {
+        stdio: ["pipe", "pipe", "pipe"],
+        // Run detached from any project so no stray CLAUDE.md is discovered.
+        cwd: process.env.TMPDIR || process.env.TEMP || process.cwd(),
+        windowsHide: true,
+      });
+    } catch {
+      cleanupTempDir();
+      resolve({ ok: false, error: CLAUDE_CLI_MISSING, meta: baseMeta(false) });
+      return;
+    }
+
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (r: ClaudeCodeResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cleanupTempDir();
+      resolve(r);
+    };
+
+    const timer = setTimeout(() => {
+      /*
+        Kill the tree, not the shim.
+
+        `claude` on Windows is a Node process that owns the real session. A bare
+        kill() takes the parent and leaves the session running, still spending,
+        with nothing left to read its answer.
+      */
+      killTree(child);
+      /*
+        Say what was happening when the clock ran out.
+
+        The first timeout on the Opinion desk reported four words and threw away
+        both streams, so a thirty-minute failure produced no evidence at all.
+        A run that has written nothing to either stream is a different fault
+        from one that was mid-answer.
+      */
+      const tail = stderr.trim().split("\n").pop()?.slice(0, 200) ?? "";
+      const seen = `${Math.round(opts.timeoutMs / 1000)}s, ${stdout.length} bytes out`;
+      finish({
+        ok: false,
+        error: `Claude Code request timed out after ${seen}${tail ? ` — ${tail}` : ""}`,
+        meta: baseMeta(true),
+      });
+    }, opts.timeoutMs);
+
+    child.stdout?.on("data", (d) => {
+      stdout += String(d);
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += String(d);
+    });
+    child.on("error", () => finish({ ok: false, error: CLAUDE_CLI_MISSING, meta: baseMeta(false) }));
+    child.on("close", (code) => {
+      if (code !== 0 && !stdout.trim()) {
+        const detail = stderr.trim().split("\n").pop()?.slice(0, 200) || `exit ${code}`;
+        finish({ ok: false, error: `Claude Code failed: ${detail}`, meta: baseMeta(false) });
+        return;
+      }
+      finish(parseCliEnvelope(stdout, baseMeta(false)));
+    });
+
+    child.stdin?.on("error", () => {
+      /* the child died before reading; `close` reports the real reason */
+    });
+    child.stdin?.end(opts.user);
+  });
+}
+
+/**
+ * One prompt naming exactly one file, answered with the CLI's `Read` tool
+ * and nothing else — `--tools "Read"` rather than `claudeCodeChat`'s
+ * `--allowed-tools`/`--tools ""` pair, because this is the one call in the
+ * desk that WANTS a live tool: OCR for a scanned PDF page (ocr.ts). The
+ * model cannot see the page's bytes any other way here, so it is told to
+ * read the one temp file this call wrote and nothing else — the prompt
+ * names that single path inside a per-run temp directory the caller owns
+ * and deletes afterward (see ocr.ts's `claudeCodeTranscribePage`).
+ *
+ * This is intentionally a separate, narrower function rather than a new
+ * flag on `claudeCodeChat`: that function's whole contract is "no live
+ * tool, ever, except the editorial writer's explicit `allowedTools`", and
+ * page transcription has a different input contract. This call never takes a `systemPromptFile` and
+ * never takes `allowedTools` — it has exactly one tool, exposed on
+ * purpose, for exactly one file.
+ */
+export async function claudeCodeReadChat(opts: {
+  /** Instructions plus the exact file path to read, in one user message. */
+  prompt: string;
+  filePath: string;
+  model: string;
+  timeoutMs: number;
+  reasoningEffort?: ModelEffort | null;
+}): Promise<ClaudeCodeResult> {
+  const bin = await findClaudeCli();
+  if (!bin) return { ok: false, error: CLAUDE_CLI_MISSING };
+
+  const args = [
+    "-p",
+    "--tools",
+    "Read",
+    "--setting-sources",
+    "",
+    "--model",
+    opts.model,
+    ...(opts.reasoningEffort ? ["--effort", opts.reasoningEffort] : []),
+    "--output-format",
+    "json",
+  ];
+  const userMessage = `${opts.prompt}\n\nRead the file at exactly this path and use only its contents: ${opts.filePath}`;
+
+  return new Promise<ClaudeCodeResult>((resolve) => {
+    const startedAt = Date.now();
+    const baseMeta = (timedOut: boolean): CliResultContext => ({
+      provider: "claude-code",
+      model: opts.model,
+      durationMs: Date.now() - startedAt,
+      timedOut,
+    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      const plan = spawnPlan(bin, args);
+      child = spawn(plan.command, plan.args, {
+        stdio: ["pipe", "pipe", "pipe"],
+        cwd: process.env.TMPDIR || process.env.TEMP || process.cwd(),
+        windowsHide: true,
+      });
+    } catch {
+      resolve({ ok: false, error: CLAUDE_CLI_MISSING, meta: baseMeta(false) });
+      return;
+    }
+
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (r: ClaudeCodeResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const timer = setTimeout(() => {
+      killTree(child);
+      const tail = stderr.trim().split("\n").pop()?.slice(0, 200) ?? "";
+      const seen = `${Math.round(opts.timeoutMs / 1000)}s, ${stdout.length} bytes out`;
+      finish({
+        ok: false,
+        error: `Claude Code request timed out after ${seen}${tail ? ` — ${tail}` : ""}`,
+        meta: baseMeta(true),
+      });
+    }, opts.timeoutMs);
+
+    child.stdout?.on("data", (d) => {
+      stdout += String(d);
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += String(d);
+    });
+    child.on("error", () => finish({ ok: false, error: CLAUDE_CLI_MISSING, meta: baseMeta(false) }));
+    child.on("close", (code) => {
+      if (code !== 0 && !stdout.trim()) {
+        const detail = stderr.trim().split("\n").pop()?.slice(0, 200) || `exit ${code}`;
+        finish({ ok: false, error: `Claude Code failed: ${detail}`, meta: baseMeta(false) });
+        return;
+      }
+      finish(parseCliEnvelope(stdout, baseMeta(false)));
+    });
+    child.stdin?.on("error", () => {
+      /* close/error reports the process result */
+    });
+    child.stdin?.end(userMessage);
+  });
+}
+
+/** Pull the answer out of `--output-format json`. Exported for tests. */
+export function parseCliEnvelope(stdout: string, context?: CliResultContext): ClaudeCodeResult {
+  const raw = stdout.trim();
+  if (!raw) return { ok: false, error: "Claude Code returned nothing", ...(context ? { meta: context } : {}) };
+  let parsed: CliEnvelope;
+  try {
+    parsed = JSON.parse(raw) as CliEnvelope;
+  } catch {
+    return { ok: false, error: "Claude Code returned unreadable output", ...(context ? { meta: context } : {}) };
+  }
+  const meta = context ? cliMetadata(parsed, context) : undefined;
+  if (parsed.is_error) {
+    const detail =
+      typeof parsed.api_error_status === "string" || typeof parsed.api_error_status === "number"
+        ? ` (${parsed.api_error_status})`
+        : "";
+    const text = typeof parsed.result === "string" ? parsed.result.slice(0, 200) : "";
+    return { ok: false, error: `Claude Code error${detail}${text ? `: ${text}` : ""}`, ...(meta ? { meta } : {}) };
+  }
+  const text = typeof parsed.result === "string" ? parsed.result.trim() : "";
+  if (!text) return { ok: false, error: "Empty model response", ...(meta ? { meta } : {}) };
+  return { ok: true, text, ...(meta ? { meta } : {}) };
+}

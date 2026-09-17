@@ -1,0 +1,1198 @@
+# TownReporter — the manual
+
+Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
+
+**Version 0.6.51 · deployment is recorded separately**
+
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.51 release guide and evidence boundaries](releases/0.6.51.md). A source release and running production deployment are separate facts.
+
+**Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
+
+TownReporter is a civic newsroom you run yourself. A public paper on the front,
+a signed-in editor's desk behind it. It watches a city's meetings, packets,
+minutes, money and contracts, notices when something changes or fails to appear,
+and hands an editor a lead. Ordinary reporting reaches the paper after a person
+reviews and publishes it; approved sources can produce automatic routine-notice
+roundups through fixed templates.
+
+The working edition covers Longmont, Colorado, at
+[townreporter.org](https://townreporter.org). The code is MIT licensed. Point it
+at your own city.
+
+---
+
+## Contents
+
+**Installing on Windows?** Start with the [Windows installation guide](windows-install.md): download, provider setup, persistent database, start/stop and your first editorial workflow. The source setup remains available for Windows, macOS and Linux.
+
+- [Part 1 — What it is](#part-1--what-it-is)
+- [Part 2 — The desk, screen by screen](#part-2--the-desk-screen-by-screen)
+- [Part 3 — Running it](#part-3--running-it)
+- [Part 4 — How it is built](#part-4--how-it-is-built)
+- [Part 5 — Architecture](#part-5--architecture)
+- [Part 6 — Reference](#part-6--reference)
+
+---
+
+# Part 1 — What it is
+
+## Public newspaper
+
+The [reader guide](reader.md) covers the front page, full archive search, section filters, saved stories, reading preferences, evidence, sharing and correction email. The publication footer links to the editor desk; the desk logo and Public news page control return to the newspaper.
+
+## Current capabilities and remaining work
+
+**Responsive investigation.** In Dark Desk, open **How hard to
+dig → Change → Research method**. Batch preserves the existing workflow.
+Responsive lets the selected model search, read, follow a link, or finish,
+using the previous result to choose its next action. Set **Maximum research
+decisions per round** (1–24, initially 6), then **Save**. This is separate from
+the final brief and signal-verification calls. It does not publish anything
+or change your model choice. Captures remain the evidence; search results and
+the model's choice of a source do not establish a fact. Live acceptance of
+this new method is still pending.
+
+The Astra desk uses persistent navigation, recent drafts and shared document
+intake. The story workspace places the writing surface beside Checks, Sources
+and Reporting tabs and adapts to narrow screens. Follow-ups record who was
+asked, what is due and when; replies can be added to story reporting notes.
+Historical screenshots illustrate workflows, not the current layout.
+
+Dark Desk separates speculative Black Desk signals (confidence ≤0.5) from a
+structured adversarial review record. See [the doctrine and its limits](dark-desk.md).
+Protocol complete means the searches and four review questions were completed;
+it is not a factual verdict or a gate on the editor's lead handoff. The
+travel-local five-topic exercise was executed in the isolated 0.6.51+ candidate:
+eight bounded runs, including the September 3–8 replay. The records and limits
+are in [the run-budget proof](proofs/dark-desk-run-budget-0651.md). This does
+not close a Halo-local or production acceptance exercise.
+
+Models can be discovered through LM Studio, Ollama or llama.cpp and selected
+individually. **Captured-PDF OCR** renders scanned PDFs as actual PDF pages
+before OCR, so newly ingested rendered records keep numeric PDF page order and
+can cite those pages. Initial capture attempts up to 12 pages. Dark Desk's
+**Read entire PDF** then checkpoints consecutive calls of up to 12 pages and
+resumes with only unread pages. Each click caps a rendered PNG at 2 MiB and
+pauses after one cooperative 10-minute budget or 48 transcription attempts;
+completed batches remain saved and exact unread pages remain visible. A page
+that cannot be rendered or read is labeled incomplete rather than complete. A render already running cannot be forcibly
+cancelled by the PDF library. Legacy embedded-image records remain unchanged:
+they identify images, not PDF pages, and retain their unordered label. This
+DEV behavior is proven in the built runtime with mock transcription, not with
+a full packet-quality acceptance run. Separately, one bounded built-UI
+retained-PDF read completed for real page 13 of a 44-page PDF and preserved the
+16,254,338-byte original and its hash. The main table rows and key dates
+matched, but color-only RAG status was omitted and one verb differed. Full
+packet and table-perfect quality remain unproven; compare the transcript with
+the original. See [Read selected PDF pages](pdf-page-reading.md).
+
+Configurable sections are available in Paper setup (see Newspaper sections below).
+Manual investigative page watching is available in Dark Desk. The owner-only legal-removal workflow is separate from normal Delete; see its section below. [The canonical queue](../TODO.md) records current work.
+
+## Newspaper sections
+
+The owner manages sections in **Server → Sections** (**Newspaper sections** panel), below Paper setup. Add a name and permanent key, rename a display label, move sections up or down, or hide them from the newspaper's section navigation. Keys cannot change after saving: existing story and section links stay valid. Hiding does not delete stories or prevent filing.
+
+For reporting sections, enter a reporting brief and scan instructions, then select accepted Sources. **Scan → Scan scope** offers General or a section. A section run uses only its assigned accepted sources and saves the guidance and source IDs with the queued run. Later configuration edits do not change that run; a source dropped before execution is excluded. A section without accepted sources cannot start. General retains all accepted sources.
+
+Choose **Review changes** before saving, or **Preview changes** when retiring a section. The unsaved review shows every changed section's name, section order, visibility, replacement, reporting brief, scan instructions, and accepted sources with both names and URLs. **Back to editing** preserves the draft, and **Cancel changes** discards it. Only **Confirm and apply** or **Confirm retirement and apply** writes the reviewed configuration. A failed or stale save keeps the draft available for correction; **Reload saved configuration** explicitly replaces it with the saved version.
+
+Retire a section only into an active reporting section. Review the count of affected leads, drafts and articles, then use **Confirm retirement and apply**. Their section changes; their identities, article URLs and text remain. Old section links follow the replacement, including later retirements. Opinion and About remain reserved page routes: they cannot retire and do not run section scans. Their section-list labels and visibility do not remove the permanent page links.
+
+Editors can use configured sections when filing and scanning; only the owner changes their configuration. Existing legacy topic keys are preserved during migration. These changes require a normal release and local-operator promotion; this repository does not establish the deployed version.
+
+## Two rooms
+
+|                        | What it is                                                                               | Who sees it       |
+| ---------------------- | ---------------------------------------------------------------------------------------- | ----------------- |
+| **The paper** (`/`)    | Stories and editorials, plus eligible owner-approved routine notices, with sources shown | Anyone            |
+| **The desk** (`/desk`) | Watch list, scan, queue, drafts, Dark Desk, Opinion, Server                              | Signed-in editors |
+
+There is no automated path to the masthead for ordinary reporting. A machine can
+find a lead, fetch the document, write a draft and tell you what it thinks; approved
+routine sources use a separate fixed-template notice-roundup path.
+
+![The front page](images/01-front-page.png)
+
+## The six moves
+
+The paper describes its own method at `/how-we-report`. This is that method, in
+the same order the software performs it.
+
+1. **Watch.** A list of civic sources — city site, council, planning, the agenda
+   portal, the school district, the county, the municipal utility, the city's
+   YouTube channel, public-access television. The list is a starting point, not
+   a fence; newly discovered public records are fair game.
+2. **Detect.** A scan fetches those pages, hashes each against the last
+   snapshot, and flags three things: what changed, what disappeared, and what
+   failed to appear when it usually does. The third is the one nobody else
+   watches.
+3. **Follow.** Before a story is drafted, the desk asks what the announcing
+   source leaves unexplained, then follows attachments, names, companies,
+   contracts, parcels and prior meetings.
+4. **Preserve.** Significant captures are stored. If a record later vanishes,
+   the captured version remains and the article says so.
+5. **Investigate.** Dark Desk is the recursive lane — competing hypotheses,
+   unresolved identities, trails left open until new evidence reopens them. **It
+   never prints.**
+6. **Write, then gate.** Drafts are reported stories, not recaps. Hold, kill or
+   publish is a person for ordinary reporting; approved routine formats use fixed
+   templates and approved sources. Every material claim should be checkable against
+   a document the paper shows you.
+
+Corrections are public. Editorial policy is to correct a published story openly; a correction
+runs as a dated note above it.
+
+**Ordinary Delete works before or after printing** — a lead filed against
+the wrong person, a scan that swept up something private, a story that should
+never have run. Kill is not delete: a killed lead stays on the desk under
+Killed. Delete removes the thing. Each one confirms in place and says what it
+costs; taking a story off the paper says plainly that its URL becomes a 404 and
+that a correction is what the paper normally does instead.
+
+**Ordinary Delete keeps a recoverable copy for 30 days** under _Recently
+deleted_ on the Server page, and an **Undo** appears where the delete happened.
+Restoring puts the row back with its original id, so an article's corrections
+and an editorial's fact sheet come back attached rather than orphaned.
+
+The separate [owner legal-removal workflow](#legal-removal-owner-workflow) follows
+its selected retention or destruction policy and has no Undo.
+
+![A published story](images/02-article.png)
+
+## What it will not do
+
+- It will not fact-check for you. Models invent facts, misattribute quotes and
+  mangle names — especially names taken from auto-captions.
+- It will not treat captions as minutes. Captions are a map of the tape. The
+  packet and the minutes are the record.
+- It will not print anything from Dark Desk. That desk has no publish button by
+  design.
+- It will not tell you it is finished when it has stopped early. A dark file
+  that stops mid-trail says so, and says how much is left unread.
+
+You are responsible for everything that appears on the paper.
+
+## What the reader gets
+
+- Fonts are self-hosted and no third-party script runs on the page. A cold load
+  of the paper makes **zero requests to any outside host**, proven rather than
+  asserted: `npm run smoke` loads the front page in a real browser and fails the
+  build if any request leaves the machine.
+- Every story has its own title, description, canonical URL, published time and
+  social card.
+- An RSS feed at `/feed`, a `sitemap.xml`, and a `robots.txt` that points at it.
+- The sources under every story, as links, including captured copies when the
+  original has moved.
+
+---
+
+# Part 2 — The desk, screen by screen
+
+The full editor's guide, with what to click and what each screen is for, is
+[docs/editor.md](editor.md). This is the tour.
+
+## Set up the paper
+
+`/desk/setup` — the first screen after the owner creates a fresh desk.
+
+![Set up the paper](images/13-paper-setup.png)
+
+The owner names the paper and its city, chooses the IANA timezone, adds an
+optional council-votes link and editor contact, then supplies the first watch
+list. Two new boxes control meeting discovery: **Meeting video channels**
+accepts one YouTube channel URL per line, and **Meeting title keywords** accepts
+the phrases that distinguish council, board and commission tapes from ordinary
+city videos.
+
+Saving the form writes those choices to the database, rewrites the welcome
+article for the configured city, and opens the desk. Until it is saved, the
+public site says “Not yet set up” and publishes no stories. The owner can change
+every choice later under **Server → Paper identity** (**Paper setup** panel); no code edit or rebuild is
+required.
+
+## The desk
+
+`/desk` — what needs you, and everything in flight.
+
+![The desk](images/04-desk.png)
+
+The current development image shows the queue in the main column and Dark Desk, Follow-ups and wire in the rail. When present, **Needs you** links flag outstanding actions such as drafts and proposed sources. Review the queue and Follow-ups even when no alert is shown.
+As of 0.6.21 the desk is one main column (composer, then the queue) with a right rail: Dark Desk, Follow-ups, The wire.
+
+## Scan
+
+`/desk/scan` — the expensive button.
+
+![Scan](images/05-scan.png)
+
+One press reads every watched source, hashes it against the last snapshot, and
+files what changed as leads. It is a button, not a loop: it runs when you ask.
+Previous scans are listed underneath with what each one found.
+
+The owner can also configure a daily ordinary scan on the
+Server page. It starts disabled. The
+owner selects up to 12 accepted sources from any reporting beat, a local time
+in the paper's timezone, and one explicit model: Codex Astra, Sol, Terra, or
+Luna; Claude Fable, Opus, Sonnet, or Haiku; the selected local model; or a
+saved Custom AI connection such as an OpenAI-compatible Gemini endpoint; or
+the newsroom's direct Grok (SuperGrok) connection.
+Legacy "Claude Code subscription" settings migrate to Claude Sonnet instead of
+Opus. The selected scheduled runtime is tried first; a recognized technical
+failure can move only unfinished work, and the job records requested and actual
+model and effort. A content refusal is terminal. Saved Custom AI credentials are
+resolved only when the scheduled run starts and are not copied into its job
+snapshot. They read bounded source excerpts rather
+than claiming complete coverage of each site.
+
+Only one daily reservation is made for a local calendar day and only one may
+remain queued or working. When the app was off at the scheduled time, its next
+tick that same day catches up once; missed days are not replayed. The owner can
+pause or resume the schedule. Disabling it, changing its revision, removing the
+owner's role or losing the job lease prevents older work from making further
+external calls or saving final results. A subscription quota error pauses the
+schedule for manual resume without promising a reset time. Server links to the
+scan history and queue, where the owner reviews filed leads. This path does not
+draft, publish or send digests.
+
+Server lets the owner manually check all six supported structured formats. Save
+the selected source context in Automatic routine editions while it remains
+paused before checking; missing context produces a visible refusal. A check
+stores bounded captured data and reports structurally parsed candidates,
+refusals and same-observation conflicts. Parsed fields remain unverified: the check does not
+establish the issuer, facts, eligibility, completeness or authority.
+These checks create no monitor, lead, draft, article or publication. Only the
+owner can open the exact captured HTML bound to a check; changed, removed or
+repointed evidence is refused.
+
+## The queue
+
+`/desk/queue` — everything that might be news, scored and sorted.
+
+![The queue](images/06-queue.png)
+
+The scanner files here, Dark Desk files here, and so do you. The number on the
+left is the score. `NEW`, `DRAFTED`, `HELD`, `KILLED` are the states. Nothing
+prints until you open a lead and publish it.
+
+Each active row has its own Writing model picker and Draft/Redraft with AI
+button. Automatic resolves one ready provider before enqueue and the result is
+shown on that same row. If that provider reaches a usage limit, becomes
+unavailable, loses its login, or times out partway through the run, Automatic
+moves the unfinished model call to the next ladder rung once, if it is ready,
+and the row and workbench show which one took over. Earlier calls in that active
+run are not repeated. A later restarted job retains uploaded source material but
+may read it again. A content refusal stops the run. A named provider is the
+recorded first choice and uses the same
+technical-only retry rule.
+
+**Set up a writing model** opens help beneath every Queue, workbench and
+Opinion picker, even when drafting is unavailable. Follow the installation and
+sign-in steps on the computer/account running TownReporter, then reload and
+retry. Opinion's help also covers the required editorial voice file. This is
+guidance, not an automatic installer or sign-in button.
+
+### Draft selected leads
+
+The Queue can start one atomic batch of one to five eligible leads. Select the
+rows, choose one explicit named **Codex**, **Claude**, **Grok (SuperGrok)**, or **Local model**, and
+use **Draft selected**. The picker offers every named Codex and Claude model,
+Local model, and saved Custom AI connections such as Gemini. The batch does
+not use Automatic. It preserves each lead's stored research scope. A recognized
+technical provider failure can move only the unfinished call; a refusal remains
+terminal. A missing runtime or ineligible selected lead refuses the whole
+start, before any partial batch is created.
+
+Daily Scan uses the same named model choices, Grok (SuperGrok), and saved Custom
+AI connections, with no Automatic. The selected runtime is tried first;
+technical preflight and mid-call switches are recorded. OCR applies the same
+technical-only rule and considers only vision-capable destinations.
+
+The batch area also offers an optional **Suggested focus** size of three to
+five leads. It balances existing lead scores and sections; review the evidence
+before drafting. It operates on the currently loaded Queue and does not claim
+an actual coverage gap. Adding it preserves any leads you selected manually,
+and the full Queue stays visible and unchanged.
+
+The Queue retains the latest batch after a reload, including its selected
+runtime and each lead's queued, running, completed, or failed status with a
+workbench link. These outcomes are separate per lead after a batch is safely
+queued. Drafts still require editor review and a manual Publish action.
+
+## The story workbench
+
+`/desk/story/:id` — where a lead becomes a story.
+
+![The story workbench](images/07-story-editor.png)
+
+The lead and the reporting notes are on the left and never print. The draft is
+on the right: headline, dek, topic, body. **Redraft** rewrites the story from
+the notes with the provider selected beside it. A failed job's message remains
+after reload and includes safe provider detail when available. **PULL** next to
+an unfinished to-do goes and fetches that specific
+document. **Publish to the paper** is the gate — after that, the story is only
+ever corrected, never silently edited.
+
+Public-source reporting can also turn a captured recurring record—such as an agenda, meeting page, report, packet or RFP—into an automatic background watch for later changes or disappearance. It does not draft or publish. These automatic watches are distinct from watches an editor explicitly creates in **Dark Desk → Watch a page / view watches**; the manual-watch panel does not currently manage the automatic set.
+
+**Check draft against evidence** runs a separate review of the exact saved draft against its already captured evidence. Save dirty edits first, choose the model in the workbench picker, then start the check; it does not restart discovery or initial writing. A full-width progress card names the selected model and current stage while the work is queued or running. A completed check creates a new draft version and keeps the original, then opens a side-by-side comparison with unresolved verification findings and controls to keep the checked version or restore the previous one. An incomplete result means the available captures could not support a complete pass and still requires editor review; neither outcome publishes or approves the story.
+
+If the editor types while the check or its reload is in progress, the workbench keeps that unsaved text instead of silently replacing it. **Reload checked draft** is the explicit choice to replace the local buffer with the new saved version. A checked version still needs editorial review.
+
+## Dark Desk
+
+`/desk/dark` — investigates, never prints.
+
+![Dark Desk](images/08-dark-desk.png)
+
+Three piles: **To look at** is new, **On the desk** is started, **Set aside** is
+parked. Nothing is deleted. Paste a URL, a person, an LLC, a contract number, a
+rumour or a paragraph of text and it opens a file: it searches, fetches, keeps
+copies, follows names, and writes down what it thinks connects — labelled, and
+always with what would kill the theory.
+
+For each material anomaly it keeps two explanations live: a concrete
+investigative theory about what may be happening underneath, and the strongest
+ordinary or benign explanation. Missing organization names, beneficiaries,
+money recipients, filings and permits become follow-up work. They are not
+grounds for deleting the lead. Lower-priority trails remain visible as deferred
+work and return to the active set on the next **Keep digging** run after the
+current higher-priority set drains.
+
+The desk keeps narrow evidence narrow: **not found in the material opened so
+far** does not become **does not exist**, and it does not invent a date range.
+Its promises list contains only explicit, sourced commitments. For events and
+fundraisers, the follow-up trail can include the legal entity, organizers,
+beneficiaries, gross and net proceeds, retained fees, cash handling, transfer
+evidence, permits, sponsors and relationships among the people involved.
+
+A file that stops mid-trail is normal. It says how many pages it has not opened
+yet and waits for **Keep digging**.
+
+### The two dials
+
+![The Dark Desk dials](images/09-dark-dials.png)
+
+- **Dig — how far it chases.** Hops, searches, whether it leaves the watch list,
+  how far it follows a name into a company, a parcel, a contract.
+- **Nerve — how speculative it may be.** How sure it has to be before it writes
+  a signal down, and whether it may propose a theory or only ask a question.
+
+The sentence above the sliders is computed from the same functions the run uses,
+so what the panel promises and what the run does cannot drift apart.
+
+Three floors never move, at any setting: no invented claims of paid influence,
+every signal is labelled with how mature the evidence is, and every theory
+carries what would kill it.
+
+### Development preview: choosing sources after search
+
+Dark Desk can ask the selected research model which
+returned sources to read after a successful search. This uses the same
+four-read-per-round limit and retains the ordinary source captures. It adds
+at most one model call per round with useful search results, so such rounds
+can take longer. If source selection fails, the ordinary read queue continues
+and the run reports the fallback. This is an editor research action; it does not publish to the paper.
+
+## Opinion
+
+`/desk/opinion` — the paper's own position.
+
+![Opinion](images/10-opinion.png)
+
+Uploaded documents, pasted source text, a subject or URLs can become an unsigned editorial. Opinion uses the same document intake and section-by-section reader as Write a story. `OPINION` goes in
+the headline and there is no byline, because an unsigned editorial is the
+paper's position rather than one writer's. Claims and sources run in an appendix
+at the end, where a reader who dislikes the piece can check them.
+
+Opinion shows Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus,
+Sonnet and Haiku, Local model, plus saved custom connections. Codex Sol is selected by default. Automatic tries Codex Sol, then Claude Sonnet
+once if Codex is unavailable. Explicit choices remain the requested first
+runtime and use the same technical-only unfinished-call retry. Claude Code
+and Codex both read the complete configured voice through their native instruction-file options. The page
+lists every missing voice, installation, or login prerequisite and stays
+disabled while readiness is unknown.
+
+A successful process exit is not enough to file a piece. TownReporter rejects
+provider refusals, assistant notes, implausible headlines, and incomplete
+bodies before draft storage. A provider refusal or invalid delivery reports a
+failed run without creating a draft. Automatic can move from Codex Sol to
+Claude Sonnet once; an explicit choice is tried first and can switch only for a
+recognized technical failure. A failed row has no Read, Edit, or Publish
+action; a finished row shows the requested and actual model and effort. An
+unattended ladder never selects Opus.
+
+**Edit**, on the row, opens the piece in its own workbench at
+`/desk/story/draft/:id`: headline, dek, topic and the piece itself, plus the two
+boxes that never print. Save, publish, or delete it from there.
+
+It fetches records before it writes. Historical runs took **ten to forty
+minutes** — two finished at 9m53s and 24m06s, and one was still going at 30.
+Those are observations, not a deadline: `EDITORIAL_TIMEOUT_MS` now applies to
+each research or writing pass, with a default of 45 minutes per pass. A pair
+can take about 90 minutes, excluding document intake. Automatic can try a Claude Sonnet pair after Codex fails, so its total can be longer.
+Explicit Local model performs one writing call using the supplied material;
+it does not run the frontier research pass. The page shows a
+running clock and checks every twenty seconds. Editorials remain drafts until
+you publish one.
+
+It is also the most expensive thing the newsroom does. Those same two finished
+runs cost **$2.66 and $23.76**; the second decided to dispatch research agents
+of its own. Budget for a piece, not for a paragraph.
+
+## The Server page
+
+For the supported Longmont fall-leaf collection bulletin, use the bulletin's
+own public URL as attribution. Other waste calendars still require a separate
+public attribution address. Saving settings does not by itself activate editions.
+
+The owner can manage **Routine notice permissions** and the separate **Automatic routine editions** control here. Automation starts paused. It accepts at most 12 exact approved structured sources across library, parks/recreation, community/arts, application deadlines, designated waste or deadline calendars, and public-meeting logistics. Each active selection requires an owner-entered issuer, locality, and public attribution URL; waste also requires a non-residential collection area, and library structured hours require a branch. Permission-only Event and non-calendar application-deadline checks can run without this automation context. The exact private fetch address and captured source remain private.
+
+After explicit activation, the daily scheduler creates deterministic logistics-only ordinary articles: Today in town on the newsroom-local date, This weekend on Friday for Friday through Sunday, and Deadlines approaching only for new or changed deadlines in the next seven days; it is not a continuous source watch. An approved source change can correct an automation-owned edition on a same-day rerun. A run uses at most five useful items and emits no empty edition. Conflicts, cancellation, unsupported recurrence, risky language, stale permissions or evidence, and edited or unpublished target articles stay for review. Recent runs show their result counts and published-article links. Disable automation or pause routine permissions to stop later reservations. Manual checks remain available and never publish by themselves.
+
+Routine edition event times are displayed in the configured newsroom timezone;
+date-only deadlines remain date-only. Captured source values are retained
+separately from the reader-facing date and title formatting.
+
+`/desk/ops` — everything this machine is doing to keep the paper online.
+
+![Server](images/11-server.png)
+
+Historical 0.5.1 screen: the status row pictured here no longer exists under
+that name. A browser smoke test checks the same thing now.
+
+The Windows installation package reports version, work queue, private database
+and local HTTP readiness. Run health check is read-only; Restart the paper asks for
+confirmation and restarts only this installation. It installs no tunnel,
+watchdog or scheduled tasks, and does not promise automatic repair. Local
+readiness does not prove public access. Unavailable maintenance actions stay
+disabled; its Start/Stop launchers remain available when the desk cannot open.
+
+Separately configured legacy installations can also report their public URL,
+tunnel and watchdog task. Those checks run from the server, not from a reader's
+computer. See [the editor guide](editor.md#server-deskops) and
+[legacy ownership requirements](../SELF-HOSTING.md) before using those controls.
+
+The owner also sees **Paper setup**, with the same fields used on first run, and
+**Invite an editor**, which creates a one-time, email-bound link that expires
+after seven days. Editors can work the whole desk but cannot change owner-only
+settings or invite another editor.
+
+## Stats
+
+`/desk/stats` — editor-only, right after Server in the nav.
+
+Anonymous page loads, not unique people or completed reads: no cookies, no
+fingerprinting, no IP or user-agent stored, just a daily count. The site total
+covers the home page and published story pages, not every public route. It shows
+all time, the last 7 calendar dates including today, and the last 30 calendar
+dates including today. Published stories are ranked by all-time story-page loads.
+
+Counting is decoupled from page render on purpose: a client beacon fires
+after a public page has already loaded and pings a lightweight endpoint that
+validates the target, swallows its own errors, and always answers fast. A
+stats failure can never slow or break the public page — this page simply has
+nothing new to show until it recovers. Scoped to your newsroom. See
+`src/lib/news/views.ts` and `migrations/0037_page_views.sql`.
+
+The development Stats workflow also offers **Save latest reports** and lets
+you **Read report** for completed calendar periods. Reports are generated on
+disk by the hourly check after startup; they use
+`TOWNREPORTER_DATA_ROOT/reports/stats/newsroom-ID` (or the local data-root
+fallback), so back up that directory with the newsroom data. These reports
+describe anonymous page-load counts, not unique readers or completed reads;
+refreshed views count, while opening a report from the desk does not. Only
+the last completed periods are generated; the system does not promise to fill
+all historical downtime. These reports are included in the release.
+
+## Published
+
+`/desk/published` — what is live, and its corrections.
+
+![Published](images/12-published.png)
+
+---
+
+# Part 3 — Running it
+
+## Run from source on your own machine
+
+You need **Node 22+**. API keys are optional: Story can use an
+existing Codex/Claude login. Signed-in Codex and
+[Claude Code](https://code.claude.com) CLIs supply the frontier Story and
+Opinion choices.
+
+```bash
+git clone https://github.com/scottconverse/TownReporter.git
+cd TownReporter
+npm install
+npx playwright install chromium
+cp .env.example .env
+npm run dev
+```
+
+Open `http://localhost:8080/login` and create an editor account. The first
+account becomes the newsroom owner. There is no setup token: it was removed in
+0.5.1, because a one-person newsroom that could not re-issue the token had a
+lock with no locksmith. Sign-in is limited to ten attempts every five minutes
+from any one address, which is what keeps an open desk from being a guessable
+one.
+
+After account creation, complete **Set up the paper**. The public paper remains
+neutral and empty until that form is saved.
+
+The public paper is `/`. The desk is `/desk`.
+
+## Database
+
+Unset `DATABASE_URL` and it runs on embedded PGLite. **Data dies when the
+process stops** — fine for a look, not for a newsroom.
+
+```
+DATABASE_URL=postgres://user:pass@host:5432/townreporter
+```
+
+Migrations run on `npm run build`, and can be run alone with `npm run
+db:migrate`.
+
+## The model
+
+Low-level configured-provider precedence is below. Per-run explicit choices on Story, Scan and Dark Desk override this chain; Automatic uses the configured gateway when present, otherwise the readiness ladder.
+
+| Set this                                        | What runs                                                              |
+| ----------------------------------------------- | ---------------------------------------------------------------------- |
+| `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; also forces Story/Scan Automatic to it |
+| `ANTHROPIC_API_KEY`                             | Claude, billed to that key                                             |
+| _nothing_                                       | **Claude, through your Claude Code login**                             |
+| `XAI_API_KEY`                                   | Grok                                                                   |
+
+### Drafting scope and evidence review
+
+**Write a story** and the story workbench offer **Research public sources** or **Use only supplied material**. The latter opens only explicitly supplied URLs and reads the supplied text; it skips discovery and external searches. Its queued scope survives retries and provider selection, and every Story model can use it. If Automatic changes providers after an eligible technical failure, the provider that takes over rereads the retained upload. Instructions pasted inside source material do not replace this control.
+
+After a body edit, drafts with reporting evidence require an explicit evidence review before publishing. Keep the evidence only after checking it against the revised text, or remove the old public evidence. Removal preserves the original private draft archive and does not remove body links. An evidence-review decision is refused if its saved draft has changed, and these actions remain scoped to the editor's newsroom. See [the workbench instructions](editor.md#draft).
+
+Recorded findings have a separate private review list in the workbench. It shows only findings recorded with the draft, their cited passage and locator, and mechanical capture facts: availability, passage match in the cited version, and a newer-capture notice. None of these mechanical facts is a truth judgment. An editor can record **Supports**, **Does not support**, **Contradicts**, or **Needs reporting**; contradiction requires a reason and a readable cited captured version from that finding. The judgment save binds to the exact draft and cited evidence, so a changed draft, captured record, or concurrent save requires a reload. This is not a claim-coverage inventory and does not authorize publication. Captured-text buttons open a private workbench pane. Saving story edits refreshes the review without a page reload; queued or running replacements and pending draft-wide evidence decisions temporarily disable judgment controls. Failed reloads retain unsaved judgment inputs; explicit successful reloads discard them. Malformed historical structured findings are disclosed as unreadable and cannot receive judgments; no historical content is guessed or repaired.
+
+The same pane separately lists **Claims returned by this draft pass**. It preserves only the structured claims returned when that draft was created; it does not parse later human edits or claim complete coverage of the body. Each private row is bound to the exact provenance URL and named captured version or capture event from that draft. Missing, foreign, repointed, arbitrary same-URL, and newer captures remain unavailable for that row rather than replacing its evidence. These use the same human judgment controls and never create an automatic verdict or publication permission.
+
+Editors can also add a private **Claims added by an editor** row for a body fact the draft pass did not return. The editor selects one to six already captured newsroom records, marks each as corroborating, contrary, or context, and can open only those exact saved versions. The panel never fetches a URL or silently substitutes a later capture. Record count and host names do not establish independence, truth, or support. A manual claim text or record change reopens its judgment; **Supports** needs a readable record the editor explicitly marked corroborating, while **Contradicts** needs a reason and a readable record explicitly marked contrary. These private rows do not change the article, public evidence, or publication permission.
+
+Reporting uses the originating newsroom's paper identity and captured evidence. Public capture pages, histories and comparisons stay within the public edition: publishing a source URL does not expose another newsroom's copy. Capture references pointing into another newsroom or to a different source URL are excluded; historical rows are not reassigned or rewritten.
+
+### Which feature uses which provider
+
+Every feature that calls a model has an editor-facing, per-run picker. Dark
+Desk was the last one without: until 0.6.2 it used the configured-provider
+chain, so a round ran on whatever the machine happened to prefer and the
+editor could not say otherwise. Scan picked up its picker in 0.6.1, for the
+same reason.
+
+All four pickers are generated from one registry,
+`src/lib/news/provider-registry.ts`. An entry there carries the label, the
+model identifier, the environment variable that overrides it, the off switch,
+the time budgets, and which pickers offer it. Adding a provider is one entry;
+the registry is the canonical picker definition; provider adapters still implement their transports.
+
+| Feature                               | Provider                                                                                                                                                                                                                                                                 | Model                                                                                                           |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| Scan                                  | configured gateway first for Automatic when set; otherwise first ready Codex Terra → Claude Sonnet rung; a recognized technical failure moves only the unfinished call and reuses already fetched sources; refusals are terminal | Any named Codex or Claude model, Grok, Local model, or saved custom connection |
+| Draft (Queue or workbench)            | configured gateway first for Automatic when set; otherwise first ready Codex Terra → Claude Sonnet rung; quota, unavailability, lost login, timeout, or no output can move only the unfinished call during the active run; a restarted job may reread saved source material; refusals are terminal | Any named Codex or Claude model, Grok, Local model, or saved custom connection |
+| **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Any named Codex or Claude model, Grok, Local model, or saved custom connection                                  |
+| Dark Desk synthesis and brief         | the one you pick beside **Keep digging**; Automatic behaves as it does for Draft, with one mid-run failover at the round level                                                                                                                                           | the one you picked                                                                                              |
+| Dark Desk **planner**                 | the one you pick                                                                                                                                                                                                                                                         | a cheaper model from the SAME provider: Haiku on Claude, Terra on either Codex, and your own model on a gateway |
+| **Opinion (editorials)**              | Default: Codex Sol. Automatic and named choices use the same technical-only per-call retry during the active run; a restarted job may reread saved source material; refusals are terminal | The selected provider first, with a recorded technical switch when needed |
+
+**Opinion provider behavior.** An editorial uses the paper's configured voice
+and frontier research. Opinion's picker offers Automatic, all four named Codex
+models, all four named Claude models, Grok, Local model and custom connections. Automatic tries Codex Sol
+then Claude Sonnet once when needed. Explicit choices remain the requested
+first runtime and use the same technical-only unfinished-call retry. (Zen MiMo and the earlier, model-specific
+Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
+brought a generic local pick back.) Claude Code
+receives the voice through `--system-prompt-file`; Codex uses
+`model_instructions_file`. Both writing passes load the complete voice file
+and can research sources while writing. The editorial assignment is sent separately.
+Every op-ed requires a claims-and-sources appendix. An incomplete draft is retained
+and flagged for completion before publication. The
+explicit Local model path sends validated voice text as a system message to
+the selected model server. It uses supplied material without a separate
+research pass; the writing pack records that no gathering pass ran.
+
+**The planner split.** Planning on Haiku costs about a quarter of planning on
+Opus for the same output, so the desk substitutes it — but only within the
+same provider. Claude plans on Haiku; either Codex plans on Terra; a
+configured gateway is left alone. Pointing `LLM_BASE_URL` at LM Studio does
+not make the desk ask a local endpoint for a Claude model; it uses yours. As
+of 0.6.2 the substitution follows the model you picked for that round, not
+whatever the machine's own precedence would have chosen.
+
+### Time budgets
+
+Each provider ships with a per-call ceiling: 150 seconds on the Claude Code
+and Codex CLIs (they spawn a process and reload a large preamble every call),
+180 on Automatic and a configured gateway, and 600 for the local model entry.
+
+The owner can change the per-call number for any provider on the **Server**
+page, under Writing models: **Time per call**, in seconds, with the shipped
+default shown beside it and a **Reset**. Between 10 seconds and 60 minutes.
+The answer is stored per paper in `provider_settings`
+(`migrations/0029_provider_settings.sql`); Reset clears the row's number
+rather than writing today's default into it, so a paper that never made a
+decision keeps inheriting improvements to the defaults.
+
+This exists for local models. A 30B answering a 20,000-character pack on the
+same machine takes minutes, and the 150-second ceiling would report that as a
+failure every time.
+
+Pointing `LLM_BASE_URL` at a local model sends Scan, Dark Desk, and Story
+Automatic to that gateway. An explicit Story choice still forces its named
+provider. Every picker offers Codex Astra, Sol, Terra and Luna and Claude Fable,
+Opus, Sonnet and Haiku, plus Local model and saved custom connections.
+What that actually costs in quality was measured on this machine:
+[docs/local-models.md](local-models.md).
+
+Signed-in CLI paths use the operator's subscription/quota; API-key paths can incur API charges. It is slower than an HTTP API because
+it reloads a fixed preamble on every call, so a draft takes minutes rather than
+seconds; the time budgets adjust on their own.
+
+Your own `CLAUDE.md`, skills and plugins are **not** loaded into news prompts.
+Claude strips settings with `--setting-sources ""`. Codex is deliberately the
+opposite: it retains the user's native configuration, rules, skills and plugins,
+keeps search and local tools available, and
+runs with `danger-full-access` rather than a TownReporter-imposed read-only
+sandbox. It has the same available access to `C:\` as the signed-in account.
+The Opinion writer runs from the temporary directory, as Claude does, so the
+application checkout's repository instructions are not part of its writing context.
+Its voice file supplies the native model instructions. Other Codex calls retain
+their existing working directory and prompt handling.
+
+## The Opinion voice
+
+The Opinion desk writes in a voice held in a file on disk, named by path:
+
+```
+TOWNREPORTER_VOICE_FILE=C:/Users/you/.townreporter/voice/your-voice.md
+```
+
+The file is deliberately outside the repository, and the app refuses a path
+inside it. On Claude and Codex, only the **path** reaches the CLI's arguments;
+the CLI opens the complete file. For explicit Local
+model, TownReporter reads the validated file and sends its text as a system
+message to the selected model server. The voice is not a command-line argument.
+Without the file, the Opinion desk says so and spends nothing.
+
+## Serving it publicly
+
+The following describes the **legacy Halo installation**, not the Windows
+installation package. Its local operator must first establish the
+[legacy ownership configuration](../SELF-HOSTING.md). The package does not
+install these tasks or a tunnel and refuses these legacy operations.
+The `ops/` directory holds that installation's scripts:
+
+| Script                         | What it does                                                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `ops/watchdog.ps1`             | Every five minutes: check the app, the tunnel and the public URL; restart what is down; write what it did           |
+| `ops/run-tunnel.ps1`           | Start `cloudflared` for this hostname                                                                               |
+| `ops/restart-app.ps1`          | Stop and start the paper                                                                                            |
+| `ops/restart-tunnel.ps1`       | Stop and start the tunnel                                                                                           |
+| `ops/rotate-logs.ps1`          | Keep `logs/` from growing without bound                                                                             |
+| `ops/status.ps1`               | Is it up? Read-only, and it answers when the paper is down and `/desk/ops` cannot                                   |
+| `ops/TownReporter Control.cmd` | The same, for someone who does not want a terminal. Double-click, pick a number.                                    |
+| `ops/run-hidden.vbs`           | Runs the five-minute tasks with no console window                                                                   |
+| `ops/install-tasks.ps1`        | Registers all six scheduled tasks. Idempotent, `-WhatIf` supported, and refuses to repoint another install's tasks. |
+
+In that legacy installation, restart and tunnel-restart run as Windows scheduled tasks rather than as child
+processes of the app — a restart cannot be performed by the process being
+restarted, and a tunnel restart cannot report its result over the tunnel it just
+killed.
+
+Deployment notes for other hosts, and the remaining limits of a city setup, are in
+[docs/setup.md](setup.md).
+
+For this machine's release procedure, use
+[Updating this installation](../SELF-HOSTING.md#updating-this-installation).
+Never rebuild a checkout while a server is serving its `.output`.
+
+## Point it at another city
+
+Use the owner-only **Paper setup** form. On a fresh install it opens
+automatically; later it lives on the Server page.
+
+1. Set the paper name, tagline, city, state, timezone, contact and optional
+   council-votes link.
+2. Add the official pages worth watching.
+3. Add meeting-video channel URLs and the title phrases used by that city.
+4. If the city uses PrimeGov, add its public portal to the watch list.
+
+The masthead, city copy, local dates, public links, source list and YouTube
+meeting discovery all change from the saved database settings. Blank optional
+fields remain blank; they do not inherit Longmont's values.
+
+---
+
+# Part 4 — How it is built
+
+## The stack
+
+| Layer     | What                                                           | Why                                                                                                            |
+| --------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Framework | [TanStack Start](https://tanstack.com/start) on Vite, React 19 | File-based routes, typed server functions, SSR without a separate API                                          |
+| Server    | Nitro, `node-server` preset                                    | A long-lived process: Chromium stays warm and background jobs are not chopped into request-sized pieces        |
+| Database  | PostgreSQL (PGLite for a throwaway look)                       | Plain SQL through `pg`; migrations are numbered `.sql` files                                                   |
+| Auth      | [better-auth](https://better-auth.com)                         | Email/password, with a bearer path for partitioned-cookie previews                                             |
+| Styling   | Tailwind 4                                                     |                                                                                                                |
+| Fetching  | `undici`, with a connect-time SSRF guard                       | The address approved is the address connected to                                                               |
+| Rendering | Playwright Chromium                                            | JS-heavy civic portals and YouTube "Show transcript"                                                           |
+| PDFs      | `unpdf`                                                        | Text extraction plus bounded vision OCR for supported scan images; unsupported or failed reads remain explicit |
+| Model     | Codex/Claude CLIs, Anthropic SDK, or any OpenAI-compatible URL | Provider is resolved before enqueue and stored on each Story job                                               |
+
+## Server functions and the desk boundary
+
+Every desk action is a `createServerFn` with `deskMiddleware`, which:
+
+1. asserts the request is same-site,
+2. resolves the user from the session (never from anything the client sends),
+3. requires that user to be an owner or editor of this newsroom.
+
+The user id is never taken from the client. Open signup closes after the owner
+claims the desk. A second person joins only through the one-time link created by
+the owner under **Server → Invite an editor**.
+
+## Jobs
+
+Anything that can take minutes is a row in `desk_jobs`, not a held-open request.
+Nine kinds: `scan`, `draft`, `reconcile`, `dark`, `editorial`, `brief`,
+`routine-notice`, `artifact-ocr` and `pull` - listed in [Job kinds](#job-kinds).
+The brief job refreshes
+an investigation's read-me-first summary without holding open the request.
+
+A job is claimed with a token and heartbeats while it runs. This is not
+decoration: jobs used to run **twice**, because nothing refreshed the liveness
+stamp mid-run and any job past the two-minute stale line was re-claimed and run
+alongside the original.
+
+## Evidence maturity
+
+Extracted claims carry evidence-maturity labels, and each label caps the
+confidence **in code** — not by asking a prompt nicely:
+
+| Label       | Ceiling |
+| ----------- | ------- |
+| FACT        | 1.0     |
+| OBSERVATION | 0.9     |
+| INFERENCE   | 0.7     |
+| ALLEGATION  | 0.6     |
+| HYPOTHESIS  | 0.5     |
+| UNKNOWN     | 0.3     |
+
+The separate Stage 1 signal confidence is always capped at 0.5, regardless of the claim-label table above. A claim labelled FACT with no citation is downgraded rather than trusted. Claims
+about the desk's own digging — "twelve hops found no contract" — are dropped
+instead of filed as findings about the world.
+
+## Model routing
+
+Planning and synthesis are separate calls and can use different models.
+Measured over five runs each, planning on Haiku produced the same output quality
+as Opus at about a quarter of the cost. On the **Claude Dark Desk path**, Haiku
+plans and the editor-selected Claude model synthesises. Codex Terra plans Sol
+and Terra runs; Codex Luna plans Astra and Luna runs. Dark Automatic uses a
+configured gateway when present, otherwise Terra with a one-time Sonnet retry.
+Completed research is checkpointed, so a synthesis retry does not rerun searches
+or document reads. The run stops on its total time, call, search, or read limit,
+or when evidence is sufficient or yields are repeating or diminishing.
+
+## Tests
+
+```bash
+npm test
+```
+
+The default run is offline and free — no provider is contacted and nothing is
+billed. It runs one test file at a time, which is slower but steady on a small
+machine. The tests cover meeting ingest, retrieval,
+draft stripping, timezone handling, the SSRF guard, the job lifecycle, the Dark
+Desk loop, the dials, claim hygiene, the editorial parser, and the ops action
+allowlist.
+
+Two rules the suite enforces that are easy to lose:
+
+- **The dials may never tighten.** A test fails if any notch of Dig or Nerve
+  becomes more conservative than it was.
+- **The version is locked** across `package.json`, `src/lib/version.ts` and the
+  paper's own masthead.
+
+`npm run smoke` is a separate, browser-driven check: it loads the front page in
+a real browser, counts every request the page makes, and fails the build if any
+of them leaves this machine. CI runs it against both the built server and the
+dev server on every push.
+
+---
+
+# Part 5 — Architecture
+
+## System context
+
+This diagram shows the legacy Halo topology; the Windows package has no tunnel or watchdog, and Reddit checks use the configured accepted subreddit rather than a fixed town.
+
+```mermaid
+flowchart TB
+    subgraph outside["The city, on the public web"]
+        CITY["City site · council · planning"]
+        PORTAL["Agenda portal<br/>(PrimeGov JSON API)"]
+        TAPE["YouTube · public-access TV"]
+        COUNTY["County · schools · utility"]
+        REDDIT["r/longmont"]
+    end
+
+    subgraph machine["One machine you own"]
+        APP["TownReporter<br/>Nitro node-server"]
+        DB[("PostgreSQL")]
+        PW["Playwright Chromium"]
+        WD["Watchdog<br/>every 5 min"]
+    end
+
+    subgraph models["Whichever model you point it at"]
+        CC["Claude Code CLI<br/>(no API key)"]
+        CX["Codex CLI<br/>(OAuth, native full access)"]
+        API["Anthropic API"]
+        OAI["Any OpenAI-compatible URL<br/>incl. a local model"]
+    end
+
+    READER(["Reader"])
+    EDITOR(["Editor"])
+
+    outside --> APP
+    APP <--> DB
+    APP --> PW
+    PW --> outside
+    APP --> models
+    WD -.watches, restarts.-> APP
+    APP --> TUNNEL["Cloudflare Tunnel"]
+    TUNNEL --> READER
+    TUNNEL --> EDITOR
+```
+
+## The pipeline: source to printed page
+
+```mermaid
+flowchart LR
+    S["Watch list<br/>sources"] --> SC["Scan<br/>fetch + hash"]
+    SC --> D{"Compared to<br/>last snapshot"}
+    D -->|changed| L["Lead"]
+    D -->|disappeared| L
+    D -->|failed to appear| L
+    D -->|same| X["Nothing"]
+    L --> Q["Queue<br/>scored"]
+    Q --> DR["Draft<br/>+ reporting notes"]
+    DR --> W["Workbench<br/>redraft · PULL · edit"]
+    W --> G{"Editor"}
+    G -->|publish| P["The paper"]
+    G -->|hold| Q
+    G -->|kill| X
+    P --> C["Corrections<br/>dated, above the story"]
+
+    style G fill:#7a2d2d,color:#fff
+    style P fill:#1c1a17,color:#fff
+```
+
+The red box is the only way to the paper. Everything upstream of it is
+assistance; everything downstream of it is a correction, never a silent edit.
+
+## A job, end to end
+
+```mermaid
+sequenceDiagram
+    participant E as Editor
+    participant F as Server function
+    participant J as desk_jobs
+    participant W as Worker
+    participant M as Model
+    participant DB as Database
+
+    E->>F: Run scan / Draft / Keep digging / Write an editorial
+    F->>J: insert (kind, subject, queued)
+    F-->>E: returns at once — nothing waits on the model
+    W->>J: claim with a token
+    loop while running
+        W->>J: heartbeat
+    end
+    W->>M: call (budget from the provider)
+    M-->>W: result
+    W->>DB: file leads / draft / signals / editorial
+    W->>J: finished
+    E->>F: page polls
+    F-->>E: the work, when it lands
+```
+
+## Dark Desk, one round
+
+The model names in this diagram illustrate the Claude path; other selected providers use their own planner and writer models as described above.
+
+```mermaid
+flowchart TB
+    OPEN["Open a file<br/>URL · person · LLC · rumour"] --> PLAN
+    DIALS[/"Dig · Nerve · Map"/] -.sets hops, floor, scope.-> PLAN
+    PLAN["Plan the hop<br/>(Haiku)"] --> SEARCH["Search + fetch"]
+    SEARCH --> CAP["Capture a copy"]
+    CAP --> EXTRACT["Entities · relationships<br/>signals · dead ends"]
+    EXTRACT --> HYG{"Claim hygiene"}
+    HYG -->|operational model narration| DROP["Filtered from signals"]
+    HYG -->|FACT with no citation| DOWN["Downgraded"]
+    HYG -->|lead| CLAMP["Confidence capped<br/>by label"]
+    CLAMP --> SYN["Synthesise<br/>(Opus)"]
+    SYN --> BRIEF["Brief:<br/>connections · hypothesis · strength<br/>supports · benign · what kills it"]
+    BRIEF --> STOP{"Budget spent?"}
+    STOP -->|no| PLAN
+    STOP -->|yes| PARK["Stop, say what is unread"]
+    PARK --> KEEP["Keep digging"] --> PLAN
+    BRIEF --> SPEC["Black Desk signal<br/>confidence at most 0.5"]
+    SPEC --> ADV["App adversarial searches<br/>four kinds, three source tiers"]
+    ADV --> VER["Dark Signal gate answers<br/>disproof, independence, context, self-reference"]
+    VER --> STATE["Record protocol state,<br/>missing context and opposing account"]
+    STATE --> WATCH["Keep investigating or watch"]
+    STATE --> QUEUE["Editor sends lead to queue"]
+    WATCH --> QUEUE
+
+    style DROP fill:#3a2a2a,color:#fff
+    style QUEUE fill:#7a2d2d,color:#fff
+```
+
+Note what is missing from that diagram: any edge to the paper. The only way out
+of Dark Desk is **Send to the queue**, which files a lead a human then has to
+work.
+
+## The Opinion desk and its voice handoff
+
+```mermaid
+flowchart LR
+    subgraph repo["This repository — public"]
+        UI["/desk/opinion"]
+        PACK["Pack builder<br/>subject · pointers · our story"]
+        PARSE["Parser<br/>headline · body · appendix<br/>fact sheet · image prompt"]
+        DRAFTS[("drafts +<br/>editorial_extras")]
+    end
+
+    subgraph private["Outside the repository"]
+        VOICE["The voice file<br/>~/.townreporter/voice/*.md"]
+    end
+
+    CLI["Claude or Codex CLI<br/>native voice file, web-enabled writing"]
+
+    UI --> PACK
+    PACK -->|"over stdin"| CLI
+    VOICE -.->|"path only"| CLI
+    CLI --> PARSE --> DRAFTS --> UI
+
+    style private fill:#2a2320,color:#fff
+    style VOICE fill:#7a2d2d,color:#fff
+```
+
+The diagram shows both subscription writers. Claude and Codex receive the complete voice through their native instruction-file options. The writing pass retains research tools.
+The explicit Local model alternative reads the validated voice into a system
+message for the selected model server and uses the supplied material without
+a separate research pass. None of these paths places the voice text in argv. A relative path, or any path inside the public
+repository, is rejected.
+
+## Keeping it online
+
+This diagram describes the separately configured legacy watchdog, not the
+Windows installation package, which has no automatic repair task.
+
+```mermaid
+flowchart TB
+    T["Scheduled task<br/>every 5 minutes"] --> WD["watchdog.ps1"]
+    WD --> C1{"App answering<br/>on PORT from .env?"}
+    C1 -->|no| R1["Start the app"]
+    C1 -->|yes| C2{"cloudflared<br/>running?"}
+    R1 --> C2
+    C2 -->|no| R2["Start the tunnel"]
+    C2 -->|yes| C3{"Public URL<br/>answers 200?"}
+    R2 --> C3
+    C3 -->|no| R3["Restart the tunnel"]
+    C3 -->|yes| OK["Write the check and stop"]
+    R3 --> OK
+
+    OPS["/desk/ops"] -.reads.-> LOG[("logs/watchdog.log")]
+    WD --> LOG
+```
+
+## Data model, the shape of it
+
+```mermaid
+erDiagram
+    NEWSROOMS ||--o{ SOURCES : watches
+    NEWSROOMS ||--o{ LEADS : holds
+    NEWSROOMS ||--o{ ARTICLES : prints
+    SOURCES ||--o{ SNAPSHOTS : "hashed each scan"
+    SOURCES ||--o{ SOURCE_MONITORS : "expected cadence"
+    SNAPSHOTS ||--o{ ANOMALIES : "changed · gone · missing"
+    ANOMALIES ||--o{ LEADS : becomes
+    LEADS ||--o{ DRAFTS : "drafted into"
+    DRAFTS ||--o| ARTICLES : "published as"
+    ARTICLES ||--o{ CORRECTIONS : "dated, above"
+    INVESTIGATIONS ||--o{ FRONTIER_ITEMS : "still unopened"
+    INVESTIGATIONS ||--o{ ARTIFACTS : captured
+    INVESTIGATIONS ||--o{ ENTITIES : found
+    INVESTIGATIONS ||--o{ CLAIMS : "labelled + capped"
+    INVESTIGATIONS ||--o{ HYPOTHESES : "with what kills it"
+    INVESTIGATIONS ||--o{ DEAD_ENDS : "kept, reopenable"
+    INVESTIGATIONS ||--o{ INVESTIGATION_BRIEFS : "read this first"
+    EDITORIAL_REQUESTS ||--o| DRAFTS : "written into"
+    DRAFTS ||--o| EDITORIAL_EXTRAS : "fact sheet, not printed"
+    DESK_JOBS }o--|| NEWSROOMS : "scan draft dark editorial"
+    DELETED_ITEMS }o--|| NEWSROOMS : "a copy, for 30 days"
+```
+
+## Choosing a provider, at call time
+
+```mermaid
+flowchart TB
+    CALL["A model-backed desk action"] --> KIND{"Story/Scan/Dark picker?"}
+    KIND -->|yes: Automatic| Q1{"LLM_* configured?"}
+    Q1 -->|yes| OAI["Try that gateway first"]
+    Q1 -->|no| READY["First ready<br/>Codex Terra → Claude Sonnet"]
+    KIND -->|yes: named choice| ONE["Try that recorded provider first"]
+    OAI --> SAVE["Persist effective provider on job"]
+    READY --> SAVE
+    ONE --> SAVE
+    SAVE --> RUN["Selected run uses that provider"]
+    RUN -->|quota, unavailable, login lapse, timeout or no output| NEXT["Retry only the unfinished call<br/>on the next ready runtime"]
+    RUN -->|refusal or unrecognized error| SAME["Stop and show the failure"]
+
+    style SAVE fill:#1c1a17,color:#fff
+```
+
+---
+
+# Part 6 — Reference
+
+## Routes
+
+| Path                                         | What                                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `/`                                          | The paper                                                                                  |
+| `/?topic=opinion`                            | Editorials — the Opinion link in the masthead. Same route as the paper, filtered by topic. |
+| `/articles/:slug`                            | A story                                                                                    |
+| `/about` · `/how-we-report` · `/corrections` | Masthead pages                                                                             |
+| `/feed` · `/sitemap.xml` · `/robots.txt`     | Machines                                                                                   |
+| `/evidence/:versionId`                       | The captured copy of a source a printed story cited                                        |
+| `/evidence/compare`                          | Two captures of the same URL, side by side                                                 |
+| `/get-the-code` · `/TownReporter.zip`        | Download this newsroom's own source                                                        |
+| `/login`                                     | Create an editor account, or sign in                                                       |
+| `/desk/setup`                                | First-run paper setup; redirects away after setup is complete                              |
+| `/desk`                                      | The desk — what needs you                                                                  |
+| `/desk/sources`                              | Watch list, and bulk paste                                                                 |
+| `/desk/scan`                                 | Fetch and file leads. The expensive button.                                                |
+| `/desk/queue`                                | Leads: draft, hold, kill                                                                   |
+| `/desk/story/:id`                            | The workbench, opened by lead                                                              |
+| `/desk/story/draft/:id`                      | The editorial workbench, opened by draft — an editorial has no lead                        |
+| `/desk/published`                            | Live stories and corrections                                                               |
+| `/desk/dark`                                 | Dark Desk. Investigates, never prints. Manual page watches and capture history are on this page. |
+| `/desk/legal-removals`                       | Owner-only legal-removal cases, retained copies and backup attestations                    |
+| `/desk/follow-ups`                           | Reporting requests and due dates                                                           |
+| `/desk/stats`                                | Newsroom activity and coverage                                                             |
+| `/desk/opinion`                              | Opinion. Unsigned editorials.                                                              |
+| `/desk/ops`                                  | Server. Health, Paper setup, editor invites and the few operational buttons worth having.  |
+
+## Environment
+
+The variables an operator most often touches. The complete inventory, with a
+comment on each, is [`.env.example`](../.env.example).
+
+| Variable                                                          | Effect                                                                                                                                |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                    | Postgres. Unset means throwaway PGLite.                                                                                               |
+| `BETTER_AUTH_TRUSTED_ORIGINS`                                     | Extra origins allowed to sign in, comma-separated                                                                                     |
+| `TOWNREPORTER_VOICE_FILE`                                         | Absolute path to the Opinion voice, outside the repo                                                                                  |
+| `ANTHROPIC_API_KEY`                                               | Bill Claude to a key instead of using the CLI login                                                                                   |
+| `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL`                      | Configured first runtime for Scan/Dark and preferred first runtime for Story Automatic; technical recovery can retry only the unfinished call |
+| `TOWNREPORTER_CODEX_TERRA_MODEL` · `TOWNREPORTER_CODEX_SOL_MODEL` | Codex picker model ids; defaults `gpt-5.6-terra` / `gpt-5.6-sol`                                                                      |
+| `TOWNREPORTER_CODEX_REASONING_EFFORT`                             | Optional per-launch CLI override; unset preserves native config. `high` is the only value verified here; invalid values fail clearly. |
+| `CODEX_CLI_PATH` · `CODEX_HOME`                                   | Unusual Codex binary or OAuth-state locations; normal discovery needs neither                                                         |
+| `CLAUDE_CLI_PATH`                                                 | Unusual Claude Code binary location                                                                                                   |
+| `XAI_API_KEY`                                                     | Grok                                                                                                                                  |
+| `CRON_SECRET`                                                     | Lets an external monitor ping the job runner                                                                                          |
+| `HOST`                                                            | What the server binds to. Unset means every interface, LAN included. Set `127.0.0.1` when a tunnel or proxy fronts it.                |
+| `VITE_AUTH_ENABLED=false`                                         | No login at all. Local only. Never on a public host.                                                                                  |
+
+## Job kinds
+
+| Kind        | Started by                         | Typical length                                                       |
+| ----------- | ---------------------------------- | -------------------------------------------------------------------- |
+| `scan`      | Scan page                          | minutes                                                              |
+| `draft`     | Queue or workbench                 | minutes                                                              |
+| `dark`      | Dark Desk — start, or Keep digging | minutes per round                                                    |
+| `brief`     | Refresh the investigation brief    | a model call to update the file's read-me-first summary              |
+| `editorial` | Opinion desk                       | Historical runs: 10–40 minutes; up to 45 minutes per pass by default |
+| `reconcile` | Story workspace — **Check draft against evidence** | a model call, or a few |
+| `pull`      | Reporting item — **Pull**          | mechanical web search and document extraction; no writing model |
+| `artifact-ocr` | Dark Desk — reading a retained PDF | page batches; a vision model call per batch |
+| `routine-notice` | Scheduler tick on a saved routine policy | deterministic; no model |
+
+## Commands
+
+```bash
+npm run dev          # http://localhost:8080
+npm run build        # build, then migrate
+npm start            # run the built server
+npm test             # deterministic, offline, free
+npm run test:live-model  # opt-in live evaluation (RUN_LIVE_MODEL_TESTS=1)
+npm run typecheck
+npm run db:migrate
+npx playwright install chromium
+```
+
+## Manual investigative page watches
+
+Dark Desk's **Watched pages** panel records a named public URL and the editor's reason for watching it. It uses the existing source-monitor scheduler, guarded capture engine and dated capture versions, independently of accepted-source scanning. See [the editor workflow](editor.md#watch-a-specific-page-in-dark-desk) for first captures, readable differences, failed checks, OCR selection, explicit lead/record actions and pause/stop behavior.
+
+Migration 0046 adds watch state, a per-check lease and action history to the existing monitor/capture system. A transaction locks and verifies the lease before capture, history, baseline and optional file attachment writes. Failed checks keep the last readable baseline. Scheduler and manual checks share this path; an expired worker cannot overwrite a newer lease's result. The editor chooses an active configured reporting section when explicitly creating a lead. Stored captures and action targets remain newsroom scoped. Capture history and complete stored-text downloads preserve evidence; they are not legal-removal or backup-management features.
+
+## Legal removal: owner workflow
+
+Open **Published → Legal removal** beside a story, or **Published → Legal removal cases** to revisit a case. Editors cannot use this process. Ordinary Delete still uses 30-day trash; legal removal has no Undo.
+
+1. Select the affected stories and **Review connected copies**. All stories sharing a lead must be selected before its reporting records can be removed. Review the counts and historical candidates. Old drafts, memory, audit labels and trash do not always carry article IDs; select only the records in scope. Selected entries remain visible and can be unchecked. Mixed trash requires explicit whole-snapshot selection. Changed records require a fresh preview.
+2. Review independent evidence. Known same-paper URL copies and references in captures, chunks, original blobs, source snapshots, search results, associated frontier records, source/monitor descriptors and watch history are listed but **not automatically deleted**. These known copies block court destruction even with the evidence checkbox checked. Retained application removal may proceed with review explicitly pending. A local operator must resolve unsupported captured-copy cleanup; a checkbox does not establish erasure.
+3. Choose the policy. **Keep an owner-only copy for 12 calendar months** uses the calendar anniversary, with February 29 clamped to February 28 in a non-leap year. This is owner access control, not encryption. The existing scheduled tick and case-list reads purge expired copies. Expired text cannot be opened even if cleanup has failed. **Explicit court destruction** never inserts removed text into the retained-copy table and requires the historical/evidence scope to be resolved first.
+4. Enter a case identifier without story text, type **REMOVE**, and confirm. The transaction removes selected application copies, scrubs exact linked editorial source descriptors and blocks stale filing/restoration. Independent editorial drafts remain for review; interrupted writing must be restarted with reviewed sources. Foreign-newsroom relationships refuse removal rather than cascading into another paper. Matching automatic watches are paused and ordinary sources are excluded from scans, preserving their evidence for review. Stop remains available; resuming a removed article's watch is refused.
+5. The result opens its case. **Open owner-only retained text (audited)** is available until expiry under the retention policy. There is no restore button. Record affected backup identifiers and operator cleanup attestations here. An attestation records what an operator reports; it is not independently verified erasure.
+
+Fresh public article/feed/sitemap reads stop returning removed stories. Existing browser caches, downloads, external search caches, provider history, database logs and backups are outside the application's erasure proof. An older database restore can reintroduce removed content; the local operator must reconcile removal cases before serving restored data. Exact known URL checks include query/fragment/trailing-slash and percent-encoded slug aliases. Unlinked prose, malformed historical records, old deployment origins and unknown external copies still need owner/operator review. Do not treat this workflow as proof that no copy exists anywhere.
+
+---
+
+## Documents
+
+| Audience                                            | Document                                        |
+| --------------------------------------------------- | ----------------------------------------------- |
+| Editors, with screenshots and no code               | [docs/editor.md](editor.md)                     |
+| Operators — clone, env, Postgres, models, city swap | [docs/setup.md](setup.md)                       |
+| Dark Desk UI contract                               | [docs/dark-desk-editor.md](dark-desk-editor.md) |
+| Local models — what was measured, and why mostly no | [docs/local-models.md](local-models.md)         |
+| Self-hosting this exact deployment                  | [SELF-HOSTING.md](../SELF-HOSTING.md)           |
+| What changed, release by release                    | [CHANGELOG.md](../CHANGELOG.md)                 |
+
+---
+
+MIT licensed. Copyright (c) 2026 Scott Converse.
+
+
+### Import a transcript or document packet
+
+Open **Desk → Write a story**. Use **Add documents** to select one or several Markdown/text, Word (.doc/.docx), PDF, PNG/JPEG/WebP, CSV/TSV or subtitle (.srt/.vtt) files. Add the story assignment in **What story do you want?**, select the writing model, and click **Write draft**. Website, PDF and YouTube video URLs go in **Links or source text**; accessible video captions are retained as a transcript.
+
+Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original remains private in the story; the reader extracts PDF pages, uses OCR for scanned pages/images, and processes long text in sections. The story lists reading progress and downloads of the original and full extracted text. Extracted text is limited to 20 million characters per document; larger text must be split into volumes. Reading errors are shown and originals are kept. Review OCR, names and quotations before publishing.
+
+## Current Opinion document and review workflow
+
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+
+## 0.6.51 notes
+
+0.6.51 adds model-specific Codex/Claude effort control, technical-failure recovery with an explicit runtime switch, and terminal handling for provider refusals. A named runtime or Automatic stays the recorded first choice; technical recovery retries only the unfinished call and records requested and actual model and effort. Unattended ladders put Claude Sonnet last and never select Opus. Neither a refusal nor an invalid provider response is a successful draft. Queue batches can be redrafted with another selected runtime and remain review-only.
+
+The Daily scan panel is owner-editable for schedule time, runtime, supported effort, accepted sources, and a source cap of 1–12. Its result remains leads for the Queue, never direct publication. The Server health queue now separates retained failures from current queued/running work and the latest terminal workflow result.
+
+Direct Story/Opinion document intake reads all readable PDF pages subject to the 20-million-character retained text limit. Generic captures and Dark Desk's image-PDF OCR use bounded 12-page calls; **Read entire PDF** checkpoints those calls and resumes only unread pages until the packet is complete or the current click reaches its explicit budget. The release scope, Windows lifecycle repair, detached-child limitation, and evidence boundaries are in [the 0.6.51 release guide](releases/0.6.51.md).

@@ -1,0 +1,1108 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import {
+  plannerModel,
+  GROK_UNAVAILABLE,
+  grokChat,
+  isGrokAvailable,
+  parseJsonBlock,
+  probeProvider,
+  providerBudget,
+  resolveAnthropic,
+  resolveLlm,
+  resolveProvider,
+} from "./ai.ts";
+
+function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
+  const prev: Record<string, string | undefined> = {};
+  const keys = [
+    "XAI_API_KEY",
+    "GROK_API_KEY",
+    "LLM_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_MODEL",
+    "OPENAI_API_KEY",
+    "XAI_MODEL",
+    "XAI_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_EFFORT",
+    "TOWNREPORTER_CLAUDE_CODE",
+    "TOWNREPORTER_CODEX",
+    "TOWNREPORTER_LOCAL",
+    "CLAUDE_CLI_PATH",
+  ];
+  for (const k of keys) prev[k] = process.env[k];
+  for (const k of keys) delete process.env[k];
+  for (const [k, v] of Object.entries(vars)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try {
+    fn();
+  } finally {
+    for (const k of keys) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
+  }
+}
+
+async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () => Promise<T>) {
+  const prev: Record<string, string | undefined> = {};
+  const keys = [
+    "XAI_API_KEY",
+    "GROK_API_KEY",
+    "LLM_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_MODEL",
+    "OPENAI_API_KEY",
+    "XAI_MODEL",
+    "XAI_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_EFFORT",
+    "TOWNREPORTER_CLAUDE_CODE",
+    "TOWNREPORTER_CODEX",
+    "TOWNREPORTER_LOCAL",
+    "CLAUDE_CLI_PATH",
+  ];
+  for (const k of keys) prev[k] = process.env[k];
+  for (const k of keys) delete process.env[k];
+  for (const [k, v] of Object.entries(vars)) {
+    if (v !== undefined) process.env[k] = v;
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const k of keys) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
+  }
+}
+
+/** No keys AND no local CLI — the genuinely unconfigured desk. */
+const BARE = { TOWNREPORTER_CLAUDE_CODE: "0" };
+
+describe("isGrokAvailable", () => {
+  it("is false with no key and the local CLI ruled out", () => {
+    withEnv(BARE, () => assert.equal(isGrokAvailable(), false));
+  });
+
+  it("is true when XAI_API_KEY is set", () => {
+    withEnv({ ...BARE, XAI_API_KEY: "test-key-not-used" }, () =>
+      assert.equal(isGrokAvailable(), true),
+    );
+  });
+
+  it("is true on a bare server, because Claude Code is the default", () => {
+    withEnv({}, () => assert.equal(isGrokAvailable(), true));
+  });
+});
+
+describe("resolveLlm", () => {
+  it("defaults to Grok when only XAI_API_KEY is set", () => {
+    withEnv({ XAI_API_KEY: "xai-test" }, () => {
+      const llm = resolveLlm();
+      assert.equal(llm?.label, "xAI");
+      assert.equal(llm?.baseUrl, "https://api.x.ai/v1");
+      assert.equal(llm?.model, "grok-4.5");
+    });
+  });
+
+  it("lets a gateway win over Grok", () => {
+    withEnv(
+      {
+        XAI_API_KEY: "xai-test",
+        LLM_BASE_URL: "http://127.0.0.1:4000/v1",
+        LLM_API_KEY: "sk-test",
+        LLM_MODEL: "claude-sonnet-4-5",
+      },
+      () => {
+        const llm = resolveLlm();
+        assert.equal(llm?.label, "LLM");
+        assert.equal(llm?.baseUrl, "http://127.0.0.1:4000/v1");
+        assert.equal(llm?.model, "claude-sonnet-4-5");
+      },
+    );
+  });
+});
+
+describe("resolveAnthropic", () => {
+  it("is null without a key", () => {
+    withEnv({}, () => assert.equal(resolveAnthropic(), null));
+  });
+
+  it("defaults to Opus 5 at high effort", () => {
+    withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () => {
+      const c = resolveAnthropic();
+      assert.equal(c?.model, "claude-opus-5");
+      assert.equal(c?.effort, "high");
+      assert.equal(c?.label, "Claude");
+    });
+  });
+
+  it("takes an effort override and ignores a bogus one", () => {
+    withEnv({ ANTHROPIC_API_KEY: "sk-ant-test", ANTHROPIC_EFFORT: "low" }, () => {
+      assert.equal(resolveAnthropic()?.effort, "low");
+    });
+    withEnv({ ANTHROPIC_API_KEY: "sk-ant-test", ANTHROPIC_EFFORT: "turbo" }, () => {
+      assert.equal(resolveAnthropic()?.effort, "high");
+    });
+  });
+});
+
+describe("resolveProvider", () => {
+  it("routes each named subscription choice to its own model", async () => {
+    await withEnv({ ANTHROPIC_API_KEY: undefined, TOWNREPORTER_CLAUDE_CODE: undefined, TOWNREPORTER_CODEX: undefined }, () => {
+      for (const [choice, model] of [
+        ["codex-astra", "gpt-6-astra"],
+        ["codex-frontier", "gpt-5.6-sol"],
+        ["codex-balanced", "gpt-5.6-terra"],
+        ["codex-luna", "gpt-5.6-luna"],
+        ["claude-fable", "fable"],
+        ["claude-frontier", "claude-opus-5"],
+        ["claude-sonnet", "sonnet"],
+        ["claude-haiku", "haiku"],
+      ] as const) {
+        const provider = resolveProvider(choice);
+        assert.equal(provider?.model, model, choice);
+      }
+    });
+  });
+  it("honours deployment overrides for every picker-backed provider", () => {
+    withEnv(
+      {
+        TOWNREPORTER_CODEX_TERRA_MODEL: "balanced-model",
+        TOWNREPORTER_CODEX_SOL_MODEL: "frontier-model",
+      },
+      () => {
+        const overrideKeys = ["TOWNREPORTER_CODEX_TERRA_MODEL", "TOWNREPORTER_CODEX_SOL_MODEL"];
+        try {
+          const choose = resolveProvider as unknown as (
+            choice: string,
+          ) => ReturnType<typeof resolveProvider>;
+          assert.equal(choose("codex-balanced")?.model, "balanced-model");
+          assert.equal(choose("codex-frontier")?.model, "frontier-model");
+        } finally {
+          for (const key of overrideKeys) delete process.env[key];
+        }
+      },
+    );
+  });
+
+  it("resolves the editor's explicit free and frontier choices independently of env precedence", () => {
+    withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () => {
+      const choose = resolveProvider as unknown as (
+        choice: string,
+      ) => ReturnType<typeof resolveProvider>;
+      assert.equal(choose("codex-balanced")?.model, "gpt-5.6-terra");
+      assert.equal(choose("codex-frontier")?.model, "gpt-5.6-sol");
+      assert.equal(choose("claude-frontier")?.model, "claude-opus-5");
+    });
+  });
+
+  it("gives Codex and CLI work enough wall clock", () => {
+    const budget = providerBudget as unknown as (
+      choice: string,
+    ) => ReturnType<typeof providerBudget>;
+    assert.ok(budget("codex-frontier").wallMs >= 420_000);
+  });
+
+  it("keeps Automatic's configured gateway on the conservative pipeline budget", () => {
+    withEnv(
+      {
+        LLM_BASE_URL: "http://127.0.0.1:1234/v1",
+        LLM_MODEL: "local-capable-model",
+      },
+      () => {
+        assert.deepEqual(providerBudget("configured"), {
+          wallMs: 660_000,
+          callMs: 180_000,
+          reserveMs: 180_000,
+        });
+      },
+    );
+  });
+
+  it("is null when nothing is configured and the CLI is ruled out", () => {
+    withEnv(BARE, () => assert.equal(resolveProvider(), null));
+  });
+
+  it("defaults to the local Claude Code login — no API key needed", () => {
+    withEnv({}, () => {
+      const p = resolveProvider();
+      assert.equal(p?.kind, "claude-code");
+      assert.equal(p?.label, "Claude Code");
+      assert.equal(p?.model, "claude-opus-5");
+    });
+  });
+
+  it("prefers an API key over the CLI when one is set", () => {
+    withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () => {
+      const p = resolveProvider();
+      assert.equal(p?.kind, "anthropic");
+      assert.equal(p?.label, "Claude");
+    });
+  });
+
+  it("prefers Claude over Grok", () => {
+    withEnv({ ANTHROPIC_API_KEY: "sk-ant-test", XAI_API_KEY: "xai-test" }, () => {
+      const p = resolveProvider();
+      assert.equal(p?.kind, "anthropic");
+      assert.equal(p?.label, "Claude");
+    });
+  });
+
+  it("puts the CLI ahead of Grok too", () => {
+    withEnv({ XAI_API_KEY: "xai-test" }, () => {
+      assert.equal(resolveProvider()?.kind, "claude-code");
+    });
+  });
+
+  it("lets an explicit gateway beat everything, so a local model can take over", () => {
+    withEnv({ ANTHROPIC_API_KEY: "sk-ant-test", LLM_BASE_URL: "http://127.0.0.1:1234/v1" }, () => {
+      const p = resolveProvider();
+      assert.equal(p?.kind, "openai");
+      assert.equal(p?.label, "LLM");
+    });
+  });
+
+  it("falls back to Grok when the CLI is switched off", () => {
+    withEnv({ ...BARE, XAI_API_KEY: "xai-test" }, () => {
+      const p = resolveProvider();
+      assert.equal(p?.kind, "openai");
+      assert.equal(p?.label, "xAI");
+    });
+  });
+
+  it("honours ANTHROPIC_MODEL on the CLI path", () => {
+    withEnv({ ANTHROPIC_MODEL: "claude-sonnet-5" }, () =>
+      assert.equal(resolveProvider()?.model, "claude-sonnet-5"),
+    );
+  });
+
+  it("resolves the explicit 'local-model' pick to the OpenAI-compatible transport, built from envOverrides", () => {
+    /*
+      0.6.10: kind "local" is a NAME an editor can pick, not a new transport,
+      and the local-model registry entry's envOverrides name exactly
+      LLM_BASE_URL / LLM_MODEL / LLM_API_KEY -- the same variables
+      docs/local-models.md already tells an operator to set. When all three
+      are set, this still resolves through the same shape "openai" does.
+      0.6.13: `explicitProvider()`'s "local" branch now calls a dedicated
+      `localGateway()` rather than sharing `customGateway()` with "openai" --
+      see the "refuses ... no local base URL" test below for why (audit
+      finding "a 'local' pick can hit the real paid OpenAI cloud").
+    */
+    withEnv(
+      {
+        ...BARE,
+        LLM_BASE_URL: "http://127.0.0.1:1234/v1",
+        LLM_MODEL: "qwen/qwen3.6-35b-a3b",
+        LLM_API_KEY: "sk-local-test",
+      },
+      () => {
+        const p = resolveProvider("local-model");
+        assert.equal(p?.kind, "openai");
+        if (p?.kind === "openai") {
+          assert.equal(p.baseUrl, "http://127.0.0.1:1234/v1");
+          assert.equal(p.model, "qwen/qwen3.6-35b-a3b");
+          assert.equal(p.apiKey, "sk-local-test");
+        }
+      },
+    );
+  });
+
+  it("is unavailable when no local base URL is configured, and honours its own off switch", () => {
+    withEnv(BARE, () => assert.equal(resolveProvider("local-model"), null));
+    withEnv({ ...BARE, LLM_BASE_URL: "http://127.0.0.1:1234/v1", TOWNREPORTER_LOCAL: "0" }, () =>
+      assert.equal(resolveProvider("local-model"), null),
+    );
+  });
+
+  /*
+    Audit finding "a 'local' pick can hit the real paid OpenAI cloud":
+    LLM_API_KEY + LLM_MODEL alone (no LLM_BASE_URL) used to be enough for
+    `customGateway()` to build a config, and `explicitProvider`'s "local"
+    branch called `customGateway()` directly -- so a "Local model" pick with
+    only a key and a model name silently fell back to baseUrl
+    "https://api.openai.com/v1" and sent the editor's content to OpenAI's
+    paid cloud. A local pick must refuse instead: no local endpoint, no
+    provider, never a silent cloud fallback.
+  */
+  it("refuses an explicit local-model pick that has a key and a model but no local base URL, rather than falling back to OpenAI's cloud", () => {
+    withEnv({ ...BARE, LLM_API_KEY: "sk-looks-real", LLM_MODEL: "gpt-4o-mini" }, () => {
+      const p = resolveProvider("local-model");
+      assert.equal(
+        p,
+        null,
+        "a local-model pick with no LLM_BASE_URL must be refused, not routed to a default gateway",
+      );
+    });
+    withEnv(
+      { ...BARE, OPENAI_API_KEY: "sk-looks-real-too", LLM_MODEL: "gpt-4o-mini" },
+      () => {
+        const p = resolveProvider("local-model");
+        assert.equal(p, null);
+      },
+    );
+  });
+});
+
+describe("grokChat", () => {
+  it("returns the desk-facing unavailable error when the key is missing", async () => {
+    const prev: Record<string, string | undefined> = {};
+    for (const k of [
+      "XAI_API_KEY",
+      "LLM_API_KEY",
+      "LLM_BASE_URL",
+      "GROK_API_KEY",
+      "OPENAI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "TOWNREPORTER_CLAUDE_CODE",
+    ]) {
+      prev[k] = process.env[k];
+      delete process.env[k];
+    }
+    // Captured above so the restore below puts it back. Without this the test
+    // spawns the real CLI and makes a live billed call.
+    process.env.TOWNREPORTER_CLAUDE_CODE = "0";
+    try {
+      const res = await grokChat("sys", "user", 8);
+      assert.equal(res.ok, false);
+      if (!res.ok) {
+        assert.equal(res.error, GROK_UNAVAILABLE);
+        assert.match(res.error, /not available/i);
+      }
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it("uses only the explicitly selected Story picker adapter", async () => {
+    const cases = [
+      { choice: "codex-balanced", kind: "codex", label: "Codex Terra", vars: BARE },
+      { choice: "codex-frontier", kind: "codex", label: "Codex Sol", vars: BARE },
+      {
+        choice: "claude-frontier",
+        kind: "anthropic",
+        label: "Claude Opus",
+        vars: { ...BARE, ANTHROPIC_API_KEY: "sk-ant-test" },
+      },
+      { choice: "claude-frontier", kind: "claude-code", label: "Claude Opus", vars: {} },
+      {
+        choice: "local-model",
+        kind: "openai",
+        label: "LLM",
+        vars: { ...BARE, LLM_BASE_URL: "http://127.0.0.1:1234/v1", LLM_MODEL: "local-test" },
+      },
+    ] as const;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("an explicit picker choice must not probe or call another provider");
+    };
+    try {
+      for (const selected of cases) {
+        await withEnvAsync(selected.vars, async () => {
+          const calls: string[] = [];
+          const sentinel = {
+            ok: false as const,
+            error: `sentinel:${selected.kind}:${selected.label}`,
+          };
+          const adapter = (kind: string) => async (provider: { kind: string; label: string }) => {
+            calls.push(`${kind}:${provider.kind}:${provider.label}`);
+            return kind === selected.kind
+              ? sentinel
+              : { ok: false as const, error: `wrong-adapter:${kind}` };
+          };
+          const result = await grokChat(
+            "system",
+            "user",
+            8,
+            { choice: selected.choice },
+            {
+              probe: async () => {
+                calls.push("probe");
+                return { ok: false as const, error: "unexpected-probe" };
+              },
+              openai: adapter("openai"),
+              codex: adapter("codex"),
+              anthropic: adapter("anthropic"),
+              "claude-code": adapter("claude-code"),
+            },
+          );
+
+          assert.equal(result, sentinel);
+          assert.deepEqual(calls, [`${selected.kind}:${selected.kind}:${selected.label}`]);
+        });
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("uses the OpenAI-compatible call budget for an explicit custom connection", () => {
+    const budget = providerBudget("custom:9ce9a944-f444-4a69-8927-7c7705c07a35");
+    assert.deepEqual(budget, {
+      wallMs: 38_000,
+      callMs: 20_000,
+      reserveMs: 12_000,
+    });
+  });
+
+  it("routes an explicit custom connection through only its resolved OpenAI-compatible transport", async () => {
+    const calls: string[] = [];
+    const result = await grokChat(
+      "system",
+      "user",
+      8,
+      { choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35", newsroomId: 44 },
+      {
+        resolveCustom: async (newsroomId: number, id: string) => {
+          calls.push(`resolve:${newsroomId}:${id}`);
+          return { baseUrl: "https://custom.example/v1", modelId: "custom-model", apiKey: "test-secret" };
+        },
+        openai: async (provider) => {
+          calls.push(`openai:${provider.baseUrl}:${provider.model}:${provider.label}`);
+          return { ok: true as const, text: "custom answer" };
+        },
+        codex: async () => {
+          calls.push("wrong:codex");
+          return { ok: false as const, error: "wrong provider" };
+        },
+      } as any,
+    );
+    assert.deepEqual(result, { ok: true, text: "custom answer" });
+    assert.deepEqual(calls, [
+      "resolve:44:9ce9a944-f444-4a69-8927-7c7705c07a35",
+      "openai:https://custom.example/v1:custom-model:Custom AI",
+    ]);
+  });
+
+  it("fails an explicit unavailable custom connection without falling back to another provider", async () => {
+    const calls: string[] = [];
+    const result = await grokChat(
+      "system",
+      "user",
+      8,
+      { choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35", newsroomId: 44 },
+      {
+        resolveCustom: async () => {
+          calls.push("resolve");
+          throw new Error("The selected custom AI connection is disabled, deleted, or has no model. Choose another model; TownReporter will not fall back automatically.");
+        },
+        openai: async () => {
+          calls.push("wrong:openai");
+          return { ok: false as const, error: "wrong provider" };
+        },
+        codex: async () => {
+          calls.push("wrong:codex");
+          return { ok: false as const, error: "wrong provider" };
+        },
+      } as any,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /disabled, deleted, or has no model/i);
+    assert.deepEqual(calls, ["resolve"]);
+  });
+
+  it("does not reflect a custom provider error body into the returned job error", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ error: { message: "bad credential test-only-key" } }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    try {
+      const result = await grokChat(
+        "system",
+        "user",
+        8,
+        { choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35", newsroomId: 44 },
+        {
+          resolveCustom: async () => ({
+            baseUrl: "https://custom.example/v1",
+            modelId: "manual-model",
+            apiKey: "test-only-key",
+          }),
+        },
+      );
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.equal(result.error, "Custom AI API error 400");
+        assert.equal(result.meta?.provider, "openai-compatible");
+        assert.equal(result.meta?.model, "manual-model");
+      }
+      assert.doesNotMatch(JSON.stringify(result), /test-only-key/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("model-picker provider readiness", () => {
+  it("sends the exact DeepSeek Off default as Ollama's explicit none disable", async () => {
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({
+        model: "deepseek-v4.1-flash:cloud",
+        choices: [{ message: { content: "ok" } }],
+      }), { status: 200 });
+    };
+    try {
+      await withEnvAsync(BARE, async () => {
+        const localModel = {
+          baseUrl: "http://127.0.0.1:11434/v1",
+          id: "deepseek-v4.1-flash:cloud",
+        };
+        assert.equal((await grokChat("S", "U", 8, {
+          choice: "local-model",
+          localModel,
+        })).ok, true);
+        assert.equal((await grokChat("S", "U", 8, {
+          choice: "local-model",
+          localModel,
+          reasoningEffort: "high",
+        })).ok, true);
+        assert.equal((await grokChat("S", "U", 8, {
+          choice: "local-model",
+          localModel,
+          reasoningEffort: "max",
+        })).ok, true);
+      });
+      assert.equal(bodies[0]!.reasoning_effort, "none", "Off must disable thinking explicitly");
+      assert.equal(bodies[1]!.reasoning_effort, "high");
+      assert.equal(bodies[2]!.reasoning_effort, "max");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("carries custom DeepSeek Off, High, and Max through the exact saved model", async () => {
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({
+        model: "deepseek-v4.1-flash:cloud",
+        choices: [{ message: { content: "ok" } }],
+      }), { status: 200 });
+    };
+    try {
+      for (const effort of ["none", "high", "max"] as const) {
+        const result = await grokChat("S", "U", 8, {
+          choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35",
+          newsroomId: 44,
+          reasoningEffort: effort,
+        }, {
+          resolveCustom: async () => ({
+            baseUrl: "http://127.0.0.1:11434/v1",
+            modelId: "deepseek-v4.1-flash:cloud",
+            apiKey: "test-key",
+          }),
+        });
+        assert.equal(result.ok, true);
+      }
+      assert.deepEqual(
+        bodies.map((body) => body.reasoning_effort),
+        ["none", "high", "max"],
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("uses provider default for the saved Gemini preset instead of sending an invented level", async () => {
+    const originalFetch = globalThis.fetch;
+    let body: Record<string, unknown> | null = null;
+    globalThis.fetch = async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        model: "gemini-2.5-flash",
+        choices: [{ message: { content: "ok" } }],
+      }), { status: 200 });
+    };
+    try {
+      const result = await grokChat("S", "U", 8, {
+        choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35",
+        newsroomId: 44,
+        reasoningEffort: "high",
+      }, {
+        resolveCustom: async () => ({
+          baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+          modelId: "gemini-2.5-flash",
+          apiKey: "test-key",
+        }),
+      });
+      assert.equal(result.ok, true);
+      assert.equal(body == null ? true : !("reasoning_effort" in body), true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("preflights the explicit SuperGrok choice only through its newsroom OAuth connection", async () => {
+    const result = await probeProvider("grok-oauth", 44, {
+      resolveXaiOauth: async (newsroomId) => {
+        assert.equal(newsroomId, 44);
+        return { modelId: "grok-4.6", label: "Grok Build" };
+      },
+    });
+    assert.deepEqual(result, { ok: true, label: "Grok Build", choice: "grok-oauth" });
+  });
+
+  it("routes each supported Opinion effort through SuperGrok OAuth with the selected model", async () => {
+    const calls: unknown[] = [];
+    for (const reasoningEffort of ["low", "medium", "high"] as const) {
+      const result = await grokChat(
+        "system prompt",
+        "user prompt",
+        32,
+        { choice: "grok-oauth", newsroomId: 44, timeoutMs: 12_345, reasoningEffort },
+        {
+          resolveXaiOauth: async () => ({ modelId: "grok-4.6", label: "Grok Build" }),
+          xaiChat: async (input) => {
+            calls.push(input);
+            return { text: "GROK_CONNECTION_OK" };
+          },
+        },
+      );
+      assert.deepEqual(result, { ok: true, text: "GROK_CONNECTION_OK" });
+    }
+    assert.deepEqual(
+      calls.map((call) => (call as { reasoningEffort?: string }).reasoningEffort),
+      ["low", "medium", "high"],
+    );
+    for (const call of calls) {
+      assert.deepEqual(call, {
+        newsroomId: 44,
+        system: "system prompt",
+        user: "user prompt",
+        maxTokens: 32,
+        model: "grok-4.6",
+        timeoutMs: 12_345,
+        reasoningEffort: (call as { reasoningEffort: string }).reasoningEffort,
+      });
+    }
+  });
+
+  it("preflights the discovered newsroom local model without requiring environment variables", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = async (input) => {
+      calls.push(String(input));
+      return new Response(JSON.stringify({ data: [{ id: "halo-brain-35b" }] }), { status: 200 });
+    };
+    try {
+      await withEnvAsync(BARE, async () => {
+        const result = await probeProvider("local-model", 44, {
+          resolveLocal: async () => ({
+            baseUrl: "http://127.0.0.1:1234/v1",
+            id: "halo-brain-35b",
+          }),
+        });
+        assert.deepEqual(result, { ok: true, label: "LLM", choice: "local-model" });
+      });
+      assert.deepEqual(calls, ["http://127.0.0.1:1234/v1/models"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("accepts a saved custom manual model when its endpoint does not implement /models", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: { url: string; authorization: string | null }[] = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({
+        url: String(input),
+        authorization: new Headers(init?.headers).get("Authorization"),
+      });
+      return new Response(null, { status: 404 });
+    };
+    try {
+      const result = await probeProvider(
+        "custom:9ce9a944-f444-4a69-8927-7c7705c07a35",
+        44,
+        {
+          resolveCustom: async () => ({
+            baseUrl: "https://custom.example/v1",
+            modelId: "manual-model",
+            apiKey: "test-only-key",
+          }),
+        },
+      );
+      assert.deepEqual(result, { ok: true, label: "Custom AI", choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35" });
+      assert.deepEqual(calls, [
+        { url: "https://custom.example/v1/models", authorization: "Bearer test-only-key" },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("still reports rejected custom credentials rather than accepting an unavailable manual model", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(null, { status: 401 });
+    try {
+      const result = await probeProvider(
+        "custom:9ce9a944-f444-4a69-8927-7c7705c07a35",
+        44,
+        {
+          resolveCustom: async () => ({
+            baseUrl: "https://custom.example/v1",
+            modelId: "manual-model",
+            apiKey: "test-only-key",
+          }),
+        },
+      );
+      assert.deepEqual(result, {
+        ok: false,
+        error: "Custom AI rejected its credentials. Sign in or update its key.",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("validates an Anthropic key before a Claude job can be enqueued", async () => {
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = async (input) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ error: { message: "invalid x-api-key" } }), {
+        status: 401,
+      });
+    };
+    try {
+      await withEnvAsync({ ...BARE, ANTHROPIC_API_KEY: "invalid-test-key" }, async () => {
+        const result = await probeProvider("claude-frontier");
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.match(result.error, /Claude.*credential|ANTHROPIC_API_KEY/i);
+      });
+      assert.deepEqual(urls, ["https://api.anthropic.com/v1/models?limit=1"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps the editor's named Claude model after API-key preflight", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: [] }), { status: 200 });
+    try {
+      await withEnvAsync({ ...BARE, ANTHROPIC_API_KEY: "test-key" }, async () => {
+        for (const choice of ["claude-fable", "claude-sonnet", "claude-haiku"] as const) {
+          const result = await probeProvider(choice);
+          assert.equal(result.ok, true);
+          if (result.ok) assert.equal(result.choice, choice);
+        }
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("proves the selected configured gateway model is actually loaded", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ data: [{ id: "desk-model" }] }), { status: 200 });
+    try {
+      await withEnvAsync(
+        { ...BARE, LLM_BASE_URL: "http://gateway.test/v1", LLM_MODEL: "desk-model" },
+        async () => {
+          const result = await probeProvider("configured");
+          assert.equal(result.ok, true);
+          if (result.ok) assert.equal(result.choice, "configured");
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("refuses a running configured gateway when the named model is not loaded", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ data: [{ id: "some-other-model" }] }), { status: 200 });
+    try {
+      await withEnvAsync(
+        { ...BARE, LLM_BASE_URL: "http://gateway.test/v1", LLM_MODEL: "desk-model" },
+        async () => {
+          const result = await probeProvider("configured");
+          assert.equal(result.ok, false);
+          if (!result.ok) assert.match(result.error, /not loaded/i);
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("matches a bare Gemini model against Google's prefixed catalog only", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ data: [{ id: "models/gemini-3.8-flash" }] }), { status: 200 });
+    try {
+      await withEnvAsync(
+        {
+          ...BARE,
+          LLM_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai",
+          LLM_MODEL: "gemini-3.8-flash",
+        },
+        async () => {
+          const gemini = await probeProvider("configured");
+          assert.deepEqual(gemini, {
+            ok: true,
+            label: "LLM",
+            choice: "configured",
+          });
+        },
+      );
+      await withEnvAsync(
+        { ...BARE, LLM_BASE_URL: "https://other.example/v1", LLM_MODEL: "gemini-3.8-flash" },
+        async () => {
+          const other = await probeProvider("configured");
+          assert.equal(other.ok, false);
+          if (!other.ok) assert.match(other.error, /not loaded/i);
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("preflights the explicit local-model pick against its own /models, and drafts through /chat/completions", async () => {
+    // 0.6.10: the local entry is a NAME an editor picks, resolved to the same
+    // OpenAI-compatible transport the configured gateway already uses -- so
+    // preflight and a real draft round-trip work with no ai.ts change.
+    const originalFetch = globalThis.fetch;
+    const calls: { url: string; body?: unknown }[] = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.endsWith("/models")) {
+        return new Response(JSON.stringify({ data: [{ id: "local-test-model" }] }), {
+          status: 200,
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          model: "local-test-model",
+          usage: { prompt_tokens: 41, completion_tokens: 9, total_tokens: 50 },
+          choices: [{ message: { content: "drafted locally" } }],
+        }),
+        { status: 200 },
+      );
+    };
+    try {
+      await withEnvAsync(
+        {
+          ...BARE,
+          LLM_BASE_URL: "http://127.0.0.1:1234/v1",
+          LLM_MODEL: "local-test-model",
+        },
+        async () => {
+          const preflight = await probeProvider("local-model");
+          assert.equal(preflight.ok, true);
+          if (preflight.ok) assert.equal(preflight.choice, "local-model");
+
+          const draft = await grokChat("system prompt", "user prompt", 32, {
+            choice: "local-model",
+          });
+          assert.equal(draft.ok, true);
+          if (draft.ok) {
+            assert.equal(draft.text, "drafted locally");
+            assert.equal(draft.meta?.provider, "openai-compatible");
+            assert.equal(draft.meta?.model, "local-test-model");
+            assert.equal(draft.meta?.inputTokens, 41);
+            assert.equal(draft.meta?.outputTokens, 9);
+            assert.equal(draft.meta?.totalTokens, 50);
+          }
+        },
+      );
+      assert.equal(calls[0]!.url, "http://127.0.0.1:1234/v1/models");
+      assert.equal(calls[1]!.url, "http://127.0.0.1:1234/v1/chat/completions");
+      assert.equal((calls[1]!.body as { model?: string })?.model, "local-test-model");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("treats an explicit configured gateway as Automatic's forced provider", async () => {
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = async (input) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ data: [{ id: "desk-model" }] }), { status: 200 });
+    };
+    try {
+      await withEnvAsync(
+        { ...BARE, LLM_BASE_URL: "http://gateway.test/v1", LLM_MODEL: "desk-model" },
+        async () => {
+          const result = await probeProvider("auto");
+          assert.equal(result.ok, true);
+          if (result.ok) assert.equal(result.choice, "configured");
+        },
+      );
+      assert.deepEqual(urls, ["http://gateway.test/v1/models"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("TOWNREPORTER_CODEX=0 takes both Codex choices out of the chain", () => {
+    withEnv({ ...BARE, TOWNREPORTER_CODEX: "0" }, () => {
+      assert.equal(resolveProvider("codex-balanced"), null);
+      assert.equal(resolveProvider("codex-frontier"), null);
+    });
+    withEnv(BARE, () => {
+      assert.equal(resolveProvider("codex-balanced")?.kind, "codex");
+    });
+  });
+
+  it("Automatic falls through to Claude Sonnet when Codex is switched off", async () => {
+        const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = async (input) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+    try {
+      await withEnvAsync({ ANTHROPIC_API_KEY: "sk-ant-test", TOWNREPORTER_CODEX: "0" }, async () => {
+        const result = await probeProvider("auto");
+        assert.equal(result.ok, true);
+        if (result.ok) assert.equal(result.choice, "claude-sonnet");
+      });
+      // Codex was skipped by its off switch, so the first network probe is the
+      // lower-cost Claude fallback.
+      assert.deepEqual(urls, ["https://api.anthropic.com/v1/models?limit=1"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("Automatic reports failure once the operator's own providers are all out", async () => {
+    // Claude off (BARE) and Codex off: nothing is left in the ladder. Zen and
+    // Local Qwen were removed from Automatic 2026-09-02 ("Claude/Codex only
+    // for now"), so there is no free-cloud rung left to fall through to.
+    await withEnvAsync({ ...BARE, TOWNREPORTER_CODEX: "0" }, async () => {
+      const result = await probeProvider("auto");
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.match(result.error, /No model in the Automatic ladder is ready/);
+    });
+  });
+
+  it("distinguishes an unreachable provider from a timeout", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new TypeError("connection refused");
+    };
+    try {
+      await withEnvAsync({ LLM_BASE_URL: "http://gateway.test/v1", LLM_MODEL: "desk-model" }, async () => {
+        const result = await probeProvider("configured");
+        assert.equal(result.ok, false);
+        if (!result.ok) {
+          assert.match(result.error, /unreachable/i);
+          assert.doesNotMatch(result.error, /timed out/i);
+        }
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("parseJsonBlock", () => {
+  it("parses a fenced object", () => {
+    const raw = '```json\n{"headline":"Hi"}\n```';
+    assert.deepEqual(parseJsonBlock<{ headline: string }>(raw), { headline: "Hi" });
+  });
+});
+
+/**
+ * A Claude model id must not be handed to a provider that has never heard of it.
+ *
+ * `plannerModel()` returned "claude-haiku-4-5-20251001" unconditionally. That
+ * is right on the Claude paths, where the Haiku/Opus split saves about
+ * three-quarters of the planning cost. It is wrong everywhere else: point
+ * LLM_BASE_URL at LM Studio, Ollama or any gateway and every Dark Desk hop
+ * asks for a model that endpoint does not serve. The call fails, and the
+ * planner falls back to keyword matching without a word — the exact silent
+ * failure that once left the whole database with zero entities, claims and
+ * hypotheses.
+ *
+ * An outside audit filed this as part of TW-001: the docs promise the selected
+ * provider controls everything, and Dark planning substituted a Claude
+ * identifier regardless.
+ */
+describe("the planner model respects the provider", () => {
+  const KEYS = [
+    "TOWNREPORTER_PLANNER_MODEL",
+    "TOWNREPORTER_CLAUDE_CODE",
+    "ANTHROPIC_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_API_KEY",
+    "LLM_MODEL",
+    "XAI_API_KEY",
+  ];
+  function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
+    const prev: Record<string, string | undefined> = {};
+    for (const k of KEYS) {
+      prev[k] = process.env[k];
+      delete process.env[k];
+    }
+    try {
+      for (const [k, v] of Object.entries(vars)) if (v !== undefined) process.env[k] = v;
+      fn();
+    } finally {
+      for (const k of KEYS) {
+        if (prev[k] === undefined) delete process.env[k];
+        else process.env[k] = prev[k];
+      }
+    }
+  }
+
+  it("splits to Haiku on an Anthropic key", () => {
+    withEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }, () => {
+      assert.match(plannerModel(), /haiku/i);
+    });
+  });
+
+  it("names no model at all on an OpenAI-compatible endpoint", () => {
+    withEnv({ LLM_BASE_URL: "http://127.0.0.1:1234/v1", LLM_MODEL: "local-thing" }, () => {
+      assert.equal(
+        plannerModel(),
+        "",
+        "an empty string means grokChat keeps the provider's own model",
+      );
+    });
+  });
+
+  /*
+    Grok only wins once the CLI is out of the chain. The precedence is
+    LLM_BASE_URL > ANTHROPIC_API_KEY > Claude Code CLI > XAI_API_KEY, and this
+    machine has the CLI installed — my first version of this test set
+    XAI_API_KEY alone and failed, because the CLI legitimately outranked it.
+    The test was wrong, not the code.
+  */
+  it("names no model on Grok either", () => {
+    withEnv({ XAI_API_KEY: "xai-test", TOWNREPORTER_CLAUDE_CODE: "0" }, () => {
+      assert.equal(plannerModel(), "");
+    });
+  });
+
+  /** An explicit override is the operator's business, whatever the provider. */
+  it("always honours an explicit override", () => {
+    withEnv(
+      { LLM_BASE_URL: "http://127.0.0.1:1234/v1", TOWNREPORTER_PLANNER_MODEL: "qwen3.6-35b" },
+      () => {
+        assert.equal(plannerModel(), "qwen3.6-35b");
+      },
+    );
+  });
+});

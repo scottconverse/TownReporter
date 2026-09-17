@@ -1,0 +1,465 @@
+import {
+  DARK_MODEL_CHOICES,
+  FORCED_MODEL_CHOICES,
+  OPINION_MODEL_CHOICES,
+  STORY_MODEL_CHOICES,
+  localModelOptionLabel,
+  isCustomModelChoice,
+  modelChoiceHelp,
+  type DarkModelChoice,
+  type ModelChoiceOption,
+  type OpinionModelChoice,
+  type StoryModelChoice,
+} from "@/lib/news/model-choice";
+import {
+  defaultModelEffort,
+  modelEffortLabel,
+  modelEffortsFor,
+  type ModelEffort,
+} from "@/lib/news/provider-registry";
+import {
+  providerAvailability,
+  localModelCatalog,
+  refreshLocalModelCatalog,
+} from "@/lib/news/provider-availability";
+import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
+import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
+import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useId } from "react";
+
+/** Speaks through DeskShell's always-mounted `#desk-announcer` region. */
+function announceToDesk(text: string): void {
+  if (typeof document === "undefined") return;
+  const el = document.getElementById("desk-announcer");
+  if (el) el.textContent = text;
+}
+
+const LOCAL_SERVER_LABELS: Record<string, string> = {
+  lmstudio: "LM Studio",
+  ollama: "Ollama",
+  llamacpp: "llama.cpp",
+  "openai-compatible": "Configured server",
+};
+
+function localServerLabel(kind: string, baseUrl: string): string {
+  const host = baseUrl.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, "");
+  return `${LOCAL_SERVER_LABELS[kind] ?? "Server"} · ${host}`;
+}
+
+type Props =
+  | {
+      scope?: "story" | "scan";
+      value: StoryModelChoice;
+      onChange: (value: StoryModelChoice) => void;
+      disabled?: boolean;
+      compact?: boolean;
+      excludeAutomatic?: boolean;
+      effort?: ModelEffort | null;
+      onEffortChange?: (value: ModelEffort | null) => void;
+    }
+  | {
+      scope: "opinion";
+      value: OpinionModelChoice;
+      onChange: (value: OpinionModelChoice) => void;
+      disabled?: boolean;
+      compact?: boolean;
+      excludeAutomatic?: boolean;
+      effort?: ModelEffort | null;
+      onEffortChange?: (value: ModelEffort | null) => void;
+    }
+  | {
+      /**
+       * Dark Desk (0.6.2). The same component, because "which model does
+       * this" should look and behave identically wherever the desk spends --
+       * and because a fourth hand-written picker is a fourth place to forget
+       * a provider.
+       */
+      scope: "dark";
+      value: DarkModelChoice;
+      onChange: (value: DarkModelChoice) => void;
+      disabled?: boolean;
+      compact?: boolean;
+      excludeAutomatic?: boolean;
+      effort?: ModelEffort | null;
+      onEffortChange?: (value: ModelEffort | null) => void;
+    }
+  | {
+      scope: "forced";
+      value: Exclude<StoryModelChoice, "auto">;
+      onChange: (value: Exclude<StoryModelChoice, "auto">) => void;
+      disabled?: boolean;
+      compact?: boolean;
+      excludeAutomatic?: boolean;
+      effort?: ModelEffort | null;
+      onEffortChange?: (value: ModelEffort | null) => void;
+    };
+
+/**
+ * What the desk shows when the option the editor has selected -- or the one
+ * un-set-up option sitting in the list -- has no server behind it. Same
+ * single sentence `preflight.ts`'s `LOCAL_MODEL_UNCONFIGURED` gives a run
+ * that gets all the way to spending before refusing, so an editor sees the
+ * identical wording whether the picker catches it first or the run does.
+ */
+function notSetUpHelp(option: ModelChoiceOption): string {
+  if (option.value === "local-model") {
+    return "TownReporter cannot reach a local model. Start LM Studio's local server or Ollama, then click Refresh. See docs/local-models.md.";
+  }
+  return `${option.label} is not set up on this server. See docs/setup.md.`;
+}
+
+/**
+ * The second, model-level select that appears under the picker only when
+ * "Local model" is the chosen provider. Its own component so its two
+ * queries (the live catalog, the newsroom's stored pick) only ever run when
+ * they are needed.
+ */
+function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "dark" | "forced" }) {
+  const qc = useQueryClient();
+  const selectId = useId();
+  const catalog = useQuery({
+    queryKey: ["local-model-catalog"],
+    queryFn: () => localModelCatalog(),
+    staleTime: 15_000,
+  });
+  const choice = useQuery({
+    queryKey: ["local-model-choice", scope],
+    queryFn: () => getLocalModelChoice(),
+    staleTime: 15_000,
+  });
+  const save = useMutation({
+    mutationFn: (picked: { baseUrl: string; id: string }) => saveLocalModelFn({ data: picked }),
+    onSuccess: (_result, picked) => {
+      qc.invalidateQueries({ queryKey: ["local-model-choice"] });
+      announceToDesk(`Local model set to ${picked.id}.`);
+    },
+  });
+  const refresh = useMutation({
+    mutationFn: () => refreshLocalModelCatalog(),
+    onSuccess: (data) => {
+      qc.setQueryData(["local-model-catalog"], data);
+      announceToDesk(
+        data.servers.some((s) => s.reachable)
+          ? "Local server list refreshed."
+          : "No local server found on this machine.",
+      );
+    },
+  });
+
+  const servers = catalog.data?.servers ?? [];
+  const reachable = servers.filter((s) => s.reachable);
+  const selected = choice.data?.override ?? catalog.data?.defaultModel ?? null;
+  const selectedModel = selected
+    ? reachable.flatMap((server) => server.models).find((model) => model.id === selected.id)
+    : null;
+  const notice = choice.data?.notice;
+
+  if (catalog.isLoading) return null;
+
+  return (
+    <div className="model-picker local-model-picker" style={{ gridColumn: "1 / -1" }}>
+      <label htmlFor={selectId} className="model-picker-label">
+        {selectedModel?.cloud ? "Ollama Cloud model" : "On-device model"}
+      </label>
+      {reachable.length === 0 ? (
+        <span className="model-picker-help">
+          No local server found on this machine. Start LM Studio&apos;s server or Ollama, or set
+          LLM_BASE_URL. See docs/local-models.md.
+        </span>
+      ) : (
+        <>
+          <select
+            id={selectId}
+            value={selected ? `${selected.baseUrl} ${selected.id}` : ""}
+            onChange={(event) => {
+              const [baseUrl, id] = event.target.value.split(" ");
+              if (baseUrl && id) save.mutate({ baseUrl, id });
+            }}
+          >
+            {!selected ? <option value="">Choose a model…</option> : null}
+            {reachable.map((server) => (
+              <optgroup key={server.baseUrl} label={localServerLabel(server.kind, server.baseUrl)}>
+                {server.models.map((model) => (
+                  <option key={model.id} value={`${server.baseUrl} ${model.id}`}>
+                    {localModelOptionLabel(model)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <span className="model-picker-help">
+            {selectedModel?.cloud
+              ? `This model runs on Ollama's hosted service, not on this computer${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. Reasoning is off by default for drafting so the output budget can go to the story.${selectedModel.vision ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it." : ""}`
+              : `This model runs on the computer hosting TownReporter. Loaded models answer faster; the first call can take a minute or more.${selectedModel?.vision ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it." : ""}`}
+          </span>
+          {notice ? <span className="model-picker-help">{notice}</span> : null}
+        </>
+      )}
+      <button
+        type="button"
+        className="model-picker-refresh"
+        style={{ minHeight: 44, minWidth: 44 }}
+        disabled={refresh.isPending}
+        onClick={() => refresh.mutate()}
+      >
+        {refresh.isPending ? "Checking…" : "Refresh"}
+      </button>
+    </div>
+  );
+}
+
+export function ModelPicker(props: Props) {
+  const connections = useQuery({
+    queryKey: ["custom-ai-connections"],
+    queryFn: () => getCustomAiConnectionsFn(),
+    staleTime: 15_000,
+  });
+  const localScope = props.scope ?? "story";
+  const selectedLocalChoice = useQuery({
+    queryKey: ["local-model-choice", localScope],
+    queryFn: () => getLocalModelChoice(),
+    staleTime: 15_000,
+    enabled: props.value === "local-model",
+  });
+  const selectedLocalCatalog = useQuery({
+    queryKey: ["local-model-catalog"],
+    queryFn: () => localModelCatalog(),
+    staleTime: 15_000,
+    enabled: props.value === "local-model",
+  });
+  const builtInOptions =
+    props.scope === "opinion"
+      ? OPINION_MODEL_CHOICES
+      : props.scope === "dark"
+        ? DARK_MODEL_CHOICES
+        : props.scope === "forced"
+          ? FORCED_MODEL_CHOICES
+          : STORY_MODEL_CHOICES;
+  const customOptions: ModelChoiceOption[] = (connections.data ?? []).map((connection) => ({
+    value: `custom:${connection.id}`,
+    label: connection.name,
+    detail: connection.modelId ?? "Choose a model in Server settings",
+  }));
+  const options = [
+    ...builtInOptions.filter((option) => !props.excludeAutomatic || option.value !== "auto"),
+    ...customOptions,
+  ];
+  if (isCustomModelChoice(props.value) && !options.some((option) => option.value === props.value)) {
+    options.push({
+      value: props.value,
+      label: "Custom API connection",
+      detail: connections.isPending ? "Loading…" : "Unavailable — choose another model",
+    });
+  }
+  const selected = options.find((option) => option.value === props.value) ?? options[0];
+  const helpId = useId();
+  const effortId = useId();
+  const flagId = useId();
+  const selectId = useId();
+  /*
+    Which providers are actually usable ON THIS SERVER, not just offered for
+    this surface. `providersFor()` (provider-registry.ts) only filters by
+    `offeredFor[surface]` -- it never asked `entry.enabled()` -- so before
+    this query existed the picker rendered "Local model" as a plain
+    selectable option even with LLM_BASE_URL unset, and a draft picked that
+    way could only fail after spending nothing but the editor's time (owner
+    report 2026-09-05). `enabled()` reads `process.env`, which does not exist
+    in the browser bundle this component ships in, so the answer has to come
+    from the server -- this is the one query every picker instance shares.
+  */
+  const availability = useQuery({
+    queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
+    queryFn: () => providerAvailability(),
+    staleTime: 5 * 60 * 1000,
+  });
+  function isAvailable(value: string): boolean {
+    if (value === "auto") return true;
+    if (isCustomModelChoice(value)) {
+      const connection = connections.data?.find((row) => `custom:${row.id}` === value);
+      return Boolean(connection?.enabled && connection.modelId);
+    }
+    // Undecided (still loading, or the query failed) defaults to available
+    // so the picker never locks up over a slow network call -- the
+    // preflight check on the actual run is the backstop that refuses
+    // before spending anything either way (see commitStoryDraftForAuthenticatedEditor).
+    return availability.data ? availability.data[value] !== false : true;
+  }
+  const unavailable = options.filter(
+    (option) => option.value !== "auto" && !isAvailable(option.value),
+  );
+  const selectedUnavailable = !isAvailable(props.value);
+  // The one un-set-up option gets flagged even when it is not the current
+  // selection, so an editor sees "not set up" before picking it rather than
+  // after a failed draft.
+  const flagged = !selectedUnavailable && unavailable.length === 1 ? unavailable[0] : null;
+  const help = isCustomModelChoice(props.value)
+    ? selectedUnavailable
+      ? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model."
+      : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
+    : selectedUnavailable
+      ? notSetUpHelp(selected)
+      : modelChoiceHelp(selected.value, props.scope ?? "story");
+  const customConnection = isCustomModelChoice(props.value)
+    ? connections.data?.find((row) => `custom:${row.id}` === props.value)
+    : null;
+  const exactModel = props.value === "local-model"
+    ? selectedLocalChoice.data?.override?.id ?? selectedLocalCatalog.data?.defaultModel?.id ?? null
+    : customConnection?.modelId ?? null;
+  const effortOptions = modelEffortsFor(props.value, exactModel);
+  const selectedEffort =
+    props.effort && effortOptions.includes(props.effort)
+      ? props.effort
+      : defaultModelEffort(props.value, exactModel);
+  return (
+    <div className={props.compact ? "model-picker compact" : "model-picker"}>
+      <label htmlFor={selectId} className="model-picker-label">
+        {props.scope === "dark" ? "Digging model" : "Writing model"}
+      </label>
+      <select
+        id={selectId}
+        value={props.value}
+        disabled={props.disabled}
+        aria-describedby={flagged ? `${helpId} ${flagId}` : helpId}
+        onChange={(event) => props.onChange(event.target.value as never)}
+      >
+        {options.map((option) => {
+          const available = isAvailable(option.value);
+          return (
+            <option key={option.value} value={option.value} disabled={!available}>
+              {option.label} — {option.detail}
+              {available ? "" : " — not set up"}
+            </option>
+          );
+        })}
+      </select>
+      <span id={helpId} className="model-picker-help">
+        {help}
+      </span>
+      {props.onEffortChange ? (
+        <div className="model-picker" style={{ gridColumn: "1 / -1" }}>
+          <label htmlFor={effortId} className="model-picker-label">Thinking effort</label>
+          <select
+            id={effortId}
+            value={selectedEffort ?? ""}
+            disabled={props.disabled || effortOptions.length === 0}
+            onChange={(event) => props.onEffortChange?.(event.target.value ? event.target.value as ModelEffort : null)}
+          >
+            {selectedEffort == null ? <option value="">Provider default</option> : null}
+            {effortOptions.map((effort) => (
+              <option key={effort} value={effort}>{modelEffortLabel(effort, exactModel)}</option>
+            ))}
+          </select>
+          <span className="model-picker-help">
+            {effortOptions.length
+              ? "Changes how much this exact model reasons for this run. The model name stays the same; higher effort can take longer."
+              : "This exact model does not declare safe per-run effort levels through its configured transport, so TownReporter uses the provider default."}
+          </span>
+        </div>
+      ) : null}
+      {flagged ? (
+        <span id={flagId} className="model-picker-help">
+          {notSetUpHelp(flagged)}
+        </span>
+      ) : null}
+      {props.value === "local-model" && !selectedUnavailable ? (
+        <LocalModelSelect scope={props.scope ?? "story"} />
+      ) : null}
+      {connections.isError ? (
+        <span className="model-picker-help" role="status">
+          Could not load custom API connections. Existing model choices still work.
+        </span>
+      ) : null}
+      <details className="min-w-0 text-sm" style={{ gridColumn: "1 / -1" }}>
+        <summary className="cursor-pointer underline underline-offset-2 focus-visible:outline-2">
+          Set up a writing model
+        </summary>
+        <div className="mt-2 space-y-2">
+          <p>
+            <a className="inline-link" href="/desk/ops#custom-ai-connections">
+              Add or manage your own AI API
+            </a>
+            . Saving a connection does not change Automatic or start a model request.
+          </p>
+          <p>
+            Set up the provider on the computer running TownReporter, not just the computer viewing
+            this page.
+          </p>
+          <ol className="list-decimal space-y-2 pl-5">
+            <li>
+              For Codex, follow the{" "}
+              <a
+                className="inline-link"
+                href="https://developers.openai.com/codex/cli/"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Codex CLI installation guide
+              </a>
+              . For Claude, follow the{" "}
+              <a
+                className="inline-link"
+                href="https://code.claude.com/docs/en/setup"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Claude Code installation guide
+              </a>
+              . For an on-device model, start llama.cpp, LM Studio, or Ollama on that computer.
+              Ollama Cloud models are hosted and appear separately after Ollama is connected. TownReporter discovers default local addresses automatically. Use{" "}
+              <code>LLM_BASE_URL</code>, <code>LLM_MODEL</code> and <code>LLM_API_KEY</code> only
+              for a different address, model or authenticated server -- see{" "}
+              <a
+                className="inline-link"
+                href="https://github.com/scottconverse/TownReporter/blob/main/docs/local-models.md"
+                target="_blank"
+                rel="noreferrer"
+              >
+                the local models guide
+              </a>
+              .
+            </li>
+            <li>
+              Open that provider and sign in under the same account that runs TownReporter. If a
+              login expires, sign in again there.
+            </li>
+            {props.scope === "opinion" ? (
+              <li>
+                Opinion also needs your editorial voice: save the voice file outside the repository,
+                set <code>TOWNREPORTER_VOICE_FILE</code> in the server&apos;s <code>.env</code> to
+                its full path, and have the server operator use the approved restart procedure to
+                load that setting. The{" "}
+                <a
+                  className="inline-link"
+                  href="https://github.com/scottconverse/TownReporter/blob/main/docs/setup.md#the-opinion-voice"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Opinion voice guide
+                </a>{" "}
+                explains the file and configuration.
+              </li>
+            ) : null}
+            <li>
+              Return here, reload this page to check readiness again, choose the model, then start
+              your draft. TownReporter starts with that model and records any technical switch to
+              another ready provider; a content refusal still stops the work.
+            </li>
+          </ol>
+          <p>
+            <a
+              className="inline-link"
+              href="https://github.com/scottconverse/TownReporter/blob/main/docs/setup.md#per-run-picker"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open the operator setup guide
+            </a>{" "}
+            for paths, endpoints and troubleshooting. TownReporter does not install software or sign
+            you in from this page.
+          </p>
+        </div>
+      </details>
+    </div>
+  );
+}

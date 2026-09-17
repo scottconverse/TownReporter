@@ -1,0 +1,11 @@
+-- dark_signals.investigation_id existed only in the runtime ensure list
+-- (DARK_SCHEMA_STATEMENTS, src/lib/news/dark.ts) and had no migration -- a
+-- database built from migrations/ alone was missing it (GauntletGate
+-- ENG-03). dark.ts links a signal back to the investigation it was raised
+-- in through this column; without it a migrations-only build cannot run
+-- those queries.
+--
+-- Mirrored by the existing `alter table dark_signals add column if not
+-- exists investigation_id integer` in dark.ts, which stays so the PGLite
+-- and unit-test paths keep working without depending on the migration glob.
+alter table dark_signals add column if not exists investigation_id integer;

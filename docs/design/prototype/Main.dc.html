@@ -1,0 +1,870 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #7a1f10; } a:hover { color: #9b2915; }
+  </style>
+</helmet>
+<div style="width: 1440px; min-height: 1720px; background: {{t.bg}}; color: {{t.fg}}; font-family: 'Source Serif 4', Georgia, serif; position: relative; box-sizing: border-box;">
+
+  <!-- masthead -->
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 18px 60px; border-bottom: 1px solid {{t.fg}}; box-sizing: border-box;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <div style="font-family: 'Fraunces', serif; font-weight: 700; font-size: 24px; letter-spacing: -0.01em; color: {{t.fg}};">TownReporter</div>
+      <div style="font-size: {{ts.body}}; color: {{t.mut}};">Editor's desk — Longmont</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 22px;">
+      <div style="font-size: {{ts.body}}; color: {{t.mut}};">Tue, Sep 2</div>
+      <a href="#" onClick="{{onNoop}}" style="font-size: {{ts.body}}; text-decoration: none;">View paper</a>
+      <div style="display: flex; border: 1px solid {{t.fg}};">
+        <div onClick="{{setThemeLight}}" style="min-height: 44px; display: flex; align-items: center; padding: 12px 14px; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box; background: {{lightBtn.bg}}; color: {{lightBtn.fg}};">Light</div>
+        <div onClick="{{setThemeDark}}" style="min-height: 44px; display: flex; align-items: center; padding: 12px 14px; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box; background: {{darkBtn.bg}}; color: {{darkBtn.fg}};">Dark</div>
+      </div>
+      <div style="display: flex; border: 1px solid {{t.fg}};">
+        <div onClick="{{setSizeNormal}}" style="min-height: 44px; display: flex; align-items: center; padding: 12px 14px; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box; background: {{normalBtn.bg}}; color: {{normalBtn.fg}};">Normal</div>
+        <div onClick="{{setSizeLarge}}" style="min-height: 44px; display: flex; align-items: center; padding: 12px 14px; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box; background: {{largeBtn.bg}}; color: {{largeBtn.fg}};">Large</div>
+      </div>
+      <div style="width: 32px; height: 32px; border-radius: 50%; border: 1px solid {{t.fg}}; background: {{t.line}}; flex: none;"></div>
+    </div>
+  </div>
+
+  <!-- nav -->
+  <div style="display: flex; align-items: stretch; border-bottom: 1px solid {{t.line}};">
+    <div style="display: flex; gap: 28px; padding: 0 60px; flex: 1; align-items: stretch;">
+      <sc-for list="{{navTabs}}" as="navtab" hint-placeholder-count="8">
+        <div onClick="{{navtab.go}}" style="padding: 14px 0; font-size: {{ts.body}}; font-family: 'Fraunces', serif; font-weight: 600; cursor: pointer; box-sizing: border-box; border-bottom: 2px solid {{navtab.underline}}; color: {{navtab.color}}; display: flex; align-items: center;">{{navtab.label}}</div>
+      </sc-for>
+    </div>
+    <div onClick="{{goDarkDesk}}" style="display: flex; align-items: center; padding: 0 22px; background: #000000; color: #ffffff; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box; border-bottom: 2px solid {{darkTabUnderline}};">Dark Desk</div>
+  </div>
+
+  <!-- needs-you ticker -->
+  <div style="display: flex; align-items: center; gap: 18px; padding: 14px 60px; background: {{t.bg2}}; border-bottom: 1px solid {{t.line}}; font-size: {{ts.body}}; box-sizing: border-box; flex-wrap: wrap;">
+    <div style="font-size: {{ts.body}}; font-weight: 600; text-transform: uppercase; letter-spacing: .14em; color: {{t.a}}; white-space: nowrap;">Needs you</div>
+    <sc-if value="{{hasNeeds}}" hint-placeholder-val="{{true}}">
+      <sc-for list="{{needs}}" as="need" hint-placeholder-count="4">
+        <div onClick="{{need.go}}" style="min-height: 44px; display: flex; align-items: center; color: {{t.fg}}; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; padding: 6px 0; box-sizing: border-box;">{{need.text}}</div>
+        <sc-if value="{{need.showDot}}" hint-placeholder-val="{{true}}">
+          <div style="color: {{t.line}};">·</div>
+        </sc-if>
+      </sc-for>
+    </sc-if>
+    <sc-if value="{{noNeeds}}" hint-placeholder-val="{{false}}">
+      <div style="color: {{t.mut}};">Nothing needs you right now.</div>
+    </sc-if>
+  </div>
+
+  <!-- page header -->
+  <div style="padding: 28px 60px 0; box-sizing: border-box;">
+    <div style="font-size: {{ts.label}}; font-weight: 600; text-transform: uppercase; letter-spacing: .16em; color: {{t.a}};">{{pageKicker}}</div>
+    <h1 style="font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.h1}}; line-height: 1.05; letter-spacing: -0.015em; margin: 6px 0 0; color: {{t.fg}};">{{pageTitle}}</h1>
+  </div>
+
+  <!-- ============ DESK TAB ============ -->
+  <sc-if value="{{showDesk}}" hint-placeholder-val="{{true}}">
+    <div style="display: flex; gap: 40px; padding: 24px 60px 60px; align-items: flex-start; box-sizing: border-box;">
+
+      <!-- MAIN COLUMN -->
+      <div style="width: 860px; display: flex; flex-direction: column; gap: 28px;">
+
+        <!-- ===== composer + queue (no story open) ===== -->
+        <sc-if value="{{showComposer}}" hint-placeholder-val="{{true}}">
+          <div style="border: 1px solid {{t.fg}}; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;">
+            <div style="font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px; color: {{t.fg}};">Write a story</div>
+            <textarea value="{{compose}}" onInput="{{onCompose}}" placeholder="Paste a link, a chunk of text, or just the idea…" style="border: 1px solid {{t.line}}; padding: 10px 12px; font-size: {{ts.body}}; color: {{t.fg}}; background: {{t.bg}}; font-family: 'Source Serif 4', Georgia, serif; min-height: 64px; resize: vertical; box-sizing: border-box; width: 100%;"></textarea>
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .12em; color: {{t.mut}};">Writing model</div>
+                <select value="{{writingModel}}" onChange="{{onModelChange}}" style="border: 1px solid {{t.fg}}; padding: 10px 10px; font-size: {{ts.body}}; background: {{t.bg}}; color: {{t.fg}}; font-family: 'Source Serif 4', Georgia, serif; box-sizing: border-box;">
+                  <option value="auto">Automatic — Recommended ladder</option>
+                  <option value="terra">Codex Terra — More depth</option>
+                  <option value="sol">Codex Sol — Frontier</option>
+                  <option value="opus">Claude Opus — Frontier</option>
+                  <option value="local">Local model</option>
+                </select>
+              </div>
+              <button onClick="{{onWrite}}" disabled="{{writeDisabled}}" style="min-height: 44px; border: 1px solid {{t.fg}}; background: {{t.fg}}; color: {{t.bg}}; padding: 12px 18px; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box; opacity: {{writeOpacity}};">Write</button>
+            </div>
+          </div>
+
+          <!-- the queue -->
+          <div>
+            <div style="display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid {{t.fg}}; padding-bottom: 6px;">
+              <div style="font-size: {{ts.label}}; font-weight: 600; text-transform: uppercase; letter-spacing: .16em; color: {{t.a}};">The queue</div>
+              <a href="#" onClick="{{goQueue}}" style="font-size: {{ts.body}};">Full queue</a>
+            </div>
+
+            <sc-for list="{{leads}}" as="lead" hint-placeholder-count="4">
+              <div style="display: flex; gap: 16px; padding: 20px 0; border-bottom: 1px solid {{t.line}}; box-sizing: border-box; opacity: {{lead.rowOpacity}};">
+                <div style="width: 26px; height: 26px; flex: none; border: 1px solid {{lead.badgeBorder}}; background: {{lead.badgeBg}}; color: {{lead.badgeColor}}; display: flex; align-items: center; justify-content: center; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.body}}; font-variant-numeric: tabular-nums;">{{lead.score}}</div>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .12em; border: 1px solid {{lead.chipColor}}; color: {{lead.chipColor}}; padding: 3px 7px;">{{lead.chipLabel}}</div>
+                    <sc-if value="{{lead.isMatched}}" hint-placeholder-val="{{false}}">
+                      <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .1em; border: 1px dashed {{t.mut}}; color: {{t.mut}}; padding: 3px 7px;">≈ Printed</div>
+                    </sc-if>
+                  </div>
+                  <a href="#" onClick="{{lead.open}}" style="font-family: 'Fraunces', serif; font-weight: 600; font-size: {{lead.hlSize}}; line-height: 1.15; text-decoration: {{lead.strike}}; color: {{t.fg}};">{{lead.headline}}</a>
+                  <div style="font-size: {{ts.body}}; color: {{t.fg2}};">{{lead.why}}</div>
+                  <div style="font-size: {{ts.body}}; color: {{t.mut}};">{{lead.meta}}</div>
+                  <sc-if value="{{lead.isMatched}}" hint-placeholder-val="{{false}}">
+                    <div style="font-size: {{ts.body}}; color: {{t.mut}}; font-style: italic;">{{lead.matches}}</div>
+                  </sc-if>
+                  <div style="display: flex; gap: 16px; margin-top: 4px; flex-wrap: wrap;">
+                    <div onClick="{{lead.open}}" style="min-height: 44px; display: flex; align-items: center; border: 1px solid {{t.fg}}; padding: 12px 14px; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box; color: {{t.fg}};">Open</div>
+                    <div onClick="{{lead.hold}}" style="min-height: 44px; display: flex; align-items: center; padding: 12px 14px; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.body}}; color: {{t.adeep}}; cursor: pointer; box-sizing: border-box;">{{lead.holdLabel}}</div>
+                    <sc-if value="{{lead.showKill}}" hint-placeholder-val="{{true}}">
+                      <div onClick="{{lead.kill}}" style="min-height: 44px; display: flex; align-items: center; padding: 12px 14px; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.body}}; color: {{t.adeep}}; cursor: pointer; box-sizing: border-box;">Kill</div>
+                    </sc-if>
+                  </div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- ===== story panel (open lead) ===== -->
+        <sc-if value="{{showStory}}" hint-placeholder-val="{{false}}">
+          <div style="display: flex; flex-direction: column; gap: 18px;">
+            <a href="#" onClick="{{closeStory}}" style="font-size: {{ts.body}};">← Queue</a>
+
+            <div style="display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 32px; align-items: start;">
+
+              <!-- LEFT ASIDE -->
+              <div style="display: flex; flex-direction: column; gap: 14px; min-width: 0;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .12em; border: 1px solid {{openLead.chipColor}}; color: {{openLead.chipColor}}; padding: 3px 7px;">{{openLead.chipLabel}}</div>
+                </div>
+                <div style="font-size: {{ts.label}}; font-weight: 600; text-transform: uppercase; letter-spacing: .18em; color: {{t.a}};">The lead</div>
+                <h2 style="font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.topHl}}; line-height: 1.2; margin: 0; color: {{t.fg}};">{{openLead.headline}}</h2>
+                <div style="font-size: {{ts.body}}; color: {{t.fg2}};">{{openLead.why}}</div>
+                <div style="font-size: {{ts.body}}; color: {{t.mut}};">{{openLead.storyMeta}}</div>
+
+                <div style="border-top: 1px solid {{t.line}}; padding-top: 14px; display: flex; flex-direction: column; gap: 6px;">
+                  <div style="font-size: {{ts.label}}; font-weight: 600; text-transform: uppercase; letter-spacing: .16em; color: {{t.mut}};">Sources on the lead</div>
+                  <a href="#" onClick="{{onNoop}}" style="font-size: {{ts.body}};">longmontcolorado.gov/agendas/council-2026-09</a>
+                  <a href="#" onClick="{{onNoop}}" style="font-size: {{ts.body}};">timescall.com/tag/longmont-council</a>
+                </div>
+
+                <div style="border-top: 1px solid {{t.line}}; padding-top: 14px; display: flex; flex-direction: column; gap: 14px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                    <div style="font-size: {{ts.label}}; font-weight: 600; text-transform: uppercase; letter-spacing: .16em; color: {{t.mut}};">Reporting notes</div>
+                    <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .1em; border: 1px solid {{t.warn}}; color: {{t.warn}}; padding: 3px 7px; white-space: nowrap;">Does not print</div>
+                  </div>
+
+                  <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .1em; color: {{t.mut}};">The news</div>
+                    <div style="font-size: {{ts.body}}; color: {{t.fg2}};">{{openLead.why}}</div>
+                  </div>
+
+                  <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .1em; color: {{t.mut}};">Why it matters</div>
+                    <div style="font-size: {{ts.body}}; color: {{t.fg2}};">{{openLead.whyMatters}}</div>
+                  </div>
+
+                  <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .1em; color: {{t.mut}};">Angle</div>
+                    <div style="font-size: {{ts.body}}; color: {{t.fg2}};">{{openLead.angle}}</div>
+                  </div>
+
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .1em; color: {{t.mut}};">Still to pull</div>
+                    <sc-for list="{{openLead.pullItems}}" as="pull" hint-placeholder-count="3">
+                      <div style="min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 10px; box-sizing: border-box;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                          <input type="checkbox" checked="{{pull.checked}}" onChange="{{pull.toggle}}" style="width: 18px; height: 18px; flex: none;">
+                          <div style="font-size: {{ts.body}}; color: {{t.fg2}};">{{pull.name}}</div>
+                        </div>
+                        <div onClick="{{pull.pull}}" style="min-height: 44px; display: flex; align-items: center; padding: 10px 12px; font-size: {{ts.label}}; color: {{t.mut}}; cursor: pointer; box-sizing: border-box;">Pull</div>
+                      </div>
+                    </sc-for>
+                  </div>
+
+                  <!-- verify before print: before drafted -->
+                  <sc-if value="{{openLead.showVerifyBefore}}" hint-placeholder-val="{{true}}">
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .1em; color: {{t.mut}};">Verify before print</div>
+                      <div style="font-size: {{ts.body}}; color: {{t.mut}}; font-style: italic;">Draft with AI fills this. You can add a line.</div>
+                      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <input value="{{openLead.addNoteText}}" onInput="{{openLead.onAddNoteInput}}" placeholder="Add a note…" style="flex: 1; min-width: 140px; border: 1px solid {{t.line}}; padding: 10px 10px; font-size: {{ts.body}}; color: {{t.fg}}; background: {{t.bg}}; font-family: 'Source Serif 4', Georgia, serif; box-sizing: border-box;">
+                        <button onClick="{{openLead.addNote}}" style="min-height: 44px; border: 1px solid {{t.fg}}; background: transparent; color: {{t.fg}}; padding: 10px 14px; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.label}}; cursor: pointer; box-sizing: border-box;">Add</button>
+                      </div>
+                      <sc-for list="{{openLead.notesBefore}}" as="note" hint-placeholder-count="1">
+                        <div style="font-size: {{ts.body}}; color: {{t.fg2}};">{{note.text}}</div>
+                      </sc-for>
+                    </div>
+                  </sc-if>
+
+                  <!-- verify before print: after drafted -->
+                  <sc-if value="{{openLead.showVerifyAfter}}" hint-placeholder-val="{{false}}">
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                      <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .1em; color: {{t.mut}};">Verify before print</div>
+                      <div style="border: 1px solid {{t.line}}; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box;">
+                        <div style="font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; color: {{t.fg}};">Claims of absence</div>
+                        <div style="font-size: {{ts.body}}; color: {{t.fg2}};">The story says no city survey page was found.</div>
+                        <div style="font-size: {{ts.body}}; color: {{t.mut}};">TownReporter searched longmontcolorado.gov and found nothing.</div>
+                        <label style="min-height: 44px; display: flex; align-items: center; gap: 10px; cursor: pointer; box-sizing: border-box;">
+                          <input type="checkbox" checked="{{openLead.verifyConfirmed}}" onChange="{{openLead.toggleVerify}}" style="width: 18px; height: 18px; flex: none;">
+                          <div style="font-size: {{ts.body}}; color: {{t.fg2}};">I opened the city site and confirmed this.</div>
+                        </label>
+                      </div>
+                    </div>
+                  </sc-if>
+
+                  <!-- documents opened: after drafted -->
+                  <sc-if value="{{openLead.showDocsOpened}}" hint-placeholder-val="{{false}}">
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .1em; color: {{t.mut}};">Documents opened for this draft</div>
+                      <sc-for list="{{openLead.docsOpened}}" as="doc" hint-placeholder-count="3">
+                        <div style="display: flex; flex-direction: column;">
+                          <div style="font-size: {{ts.body}}; color: {{t.fg2}};">{{doc.title}}</div>
+                          <div style="font-size: {{ts.body}}; color: {{t.mut}};">{{doc.ask}}</div>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </sc-if>
+                </div>
+              </div>
+
+              <!-- RIGHT WORK AREA -->
+              <div style="display: flex; flex-direction: column; gap: 16px; min-width: 0;">
+                <sc-if value="{{openLead.showWorkBar}}" hint-placeholder-val="{{true}}">
+                  <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .12em; color: {{t.mut}};">Writing model</div>
+                      <select value="{{writingModel}}" onChange="{{onModelChange}}" style="border: 1px solid {{t.fg}}; padding: 10px 10px; font-size: {{ts.body}}; background: {{t.bg}}; color: {{t.fg}}; font-family: 'Source Serif 4', Georgia, serif; box-sizing: border-box;">
+                        <option value="auto">Automatic — Recommended ladder</option>
+                        <option value="terra">Codex Terra — More depth</option>
+                        <option value="sol">Codex Sol — Frontier</option>
+                        <option value="opus">Claude Opus — Frontier</option>
+                        <option value="local">Local model</option>
+                      </select>
+                    </div>
+                    <button onClick="{{openLead.workBarClick}}" disabled="{{openLead.isDrafting}}" style="min-height: 44px; border: 1px solid {{t.fg}}; background: {{t.fg}}; color: {{t.bg}}; padding: 12px 18px; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box;">{{openLead.workBarLabel}}</button>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{recoveringFalse}}" hint-placeholder-val="{{false}}">
+                  <div style="font-size: {{ts.body}}; color: {{t.mut}}; font-style: italic;">Recovering…</div>
+                </sc-if>
+
+                <sc-if value="{{openLead.isDrafting}}" hint-placeholder-val="{{false}}">
+                  <div style="font-size: {{ts.body}}; color: {{t.mut}}; font-style: italic;">Drafting…</div>
+                </sc-if>
+
+                <sc-if value="{{openLead.isReady}}" hint-placeholder-val="{{false}}">
+                  <div style="border-top: 1px solid {{t.line}}; padding-top: 16px; display: flex; flex-direction: column; gap: 12px;">
+                    <div style="font-size: {{ts.body}}; color: {{t.a}};">Draft ready — Publish to the paper</div>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                      <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .12em; color: {{t.mut}};">Headline</div>
+                      <input value="{{openLead.headline}}" onInput="{{openLead.onHeadlineInput}}" style="border: 1px solid {{t.line}}; padding: 10px 10px; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.hl}}; color: {{t.fg}}; background: {{t.bg}}; box-sizing: border-box;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                      <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .12em; color: {{t.mut}};">Dek</div>
+                      <input value="{{openLead.dek}}" onInput="{{openLead.onDekInput}}" style="border: 1px solid {{t.line}}; padding: 10px 10px; font-style: italic; font-size: {{ts.body}}; color: {{t.fg2}}; background: {{t.bg}}; box-sizing: border-box;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                      <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .12em; color: {{t.mut}};">Body</div>
+                      <textarea value="{{openLead.body}}" onInput="{{openLead.onBodyInput}}" style="border: 1px solid {{t.line}}; padding: 10px 12px; font-size: {{ts.body}}; color: {{t.fg2}}; background: {{t.bg}}; font-family: 'Source Serif 4', Georgia, serif; line-height: 1.5; min-height: 140px; resize: vertical; box-sizing: border-box;"></textarea>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                      <div style="display: flex; align-items: center; gap: 8px;">
+                        <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .12em; color: {{t.mut}};">Pulled notes</div>
+                        <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .1em; border: 1px solid {{t.warn}}; color: {{t.warn}}; padding: 3px 7px;">Does not print</div>
+                      </div>
+                      <textarea value="{{openLead.pulledNotesText}}" onInput="{{openLead.onPulledNotesInput}}" placeholder="Notes pulled while reporting — never printed…" style="border: 1px solid {{t.line}}; padding: 10px 12px; font-size: {{ts.body}}; color: {{t.fg2}}; background: {{t.bg}}; font-family: 'Source Serif 4', Georgia, serif; min-height: 72px; resize: vertical; box-sizing: border-box;"></textarea>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                      <button onClick="{{onNoop}}" style="min-height: 44px; border: 1px solid {{t.fg}}; background: transparent; color: {{t.fg}}; padding: 12px 18px; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box;">Save edits</button>
+                      <button onClick="{{openLead.publish}}" disabled="{{openLead.publishDisabled}}" style="min-height: 44px; border: 1px solid {{t.a}}; background: {{t.a}}; color: {{t.bg}}; padding: 12px 18px; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box; opacity: {{openLead.publishOpacity}};">Publish to the paper</button>
+                    </div>
+                    <sc-if value="{{openLead.publishDisabled}}" hint-placeholder-val="{{false}}">
+                      <div style="font-size: {{ts.body}}; color: {{t.warn}};">Confirm the claims of absence first</div>
+                    </sc-if>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{openLead.isPublished}}" hint-placeholder-val="{{false}}">
+                  <div style="font-size: {{ts.body}}; color: {{t.a}};">Published to the paper.</div>
+                </sc-if>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- RIGHT RAIL -->
+      <div style="width: 420px; display: flex; flex-direction: column; gap: 28px;">
+
+        <!-- dark desk -->
+        <div style="background: #000000; color: #ffffff; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;">
+          <div>
+            <div style="font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px;">Dark Desk</div>
+            <div style="font-size: 14px; color: #e0e0e0; font-style: italic;">Investigates. Never prints.</div>
+          </div>
+          <div style="border-top: 1px solid #444444; padding-top: 10px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="font-size: 14px;">{{darkToLookAtLabel}}</div>
+            <sc-if value="{{darkHasToLookAt}}" hint-placeholder-val="{{true}}">
+              <div onClick="{{startDigging}}" style="min-height: 44px; display: flex; align-items: center; border: 1px solid #d2764f; color: #d2764f; padding: 10px 12px; font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; cursor: pointer; box-sizing: border-box;">Start digging</div>
+            </sc-if>
+          </div>
+          <div style="border-top: 1px solid #444444; padding-top: 10px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="font-size: 14px;">{{darkOnDeskLabel}}</div>
+            <div onClick="{{goDarkDesk}}" style="min-height: 44px; display: flex; align-items: center; border: 1px solid #d2764f; color: #d2764f; padding: 10px 12px; font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; cursor: pointer; box-sizing: border-box;">Open file</div>
+          </div>
+          <div style="border-top: 1px solid #444444; padding-top: 10px; font-size: 14px; color: #e0e0e0;">{{darkSetAsideLabel}}</div>
+        </div>
+
+        <!-- the wire -->
+        <div style="border: 1px solid {{t.line}}; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div style="font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px; color: {{t.fg}};">The wire</div>
+            <div onClick="{{runScan}}" style="min-height: 44px; display: flex; align-items: center; border: 1px solid {{t.fg}}; padding: 10px 14px; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box; color: {{t.fg}};">Run scan</div>
+          </div>
+          <div style="font-size: {{ts.body}}; color: {{t.mut}};">{{scanStatusText}}</div>
+
+          <div style="border-top: 1px solid {{t.line}}; padding-top: 10px;">
+            <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .12em; color: {{t.mut}};">Source health</div>
+            <div style="font-size: {{ts.body}}; margin-top: 4px; color: {{t.fg}};">2 failing · 5 flaky</div>
+          </div>
+
+          <div style="border-top: 1px solid {{t.line}}; padding-top: 10px;">
+            <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .12em; color: {{t.mut}};">{{proposedHeader}}</div>
+            <sc-if value="{{hasProposed}}" hint-placeholder-val="{{true}}">
+              <sc-for list="{{proposedSources}}" as="src" hint-placeholder-count="1">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 6px;">
+                  <div style="font-size: {{ts.body}}; color: {{t.fg}};">{{src.name}}</div>
+                  <div style="display: flex; gap: 10px;">
+                    <div onClick="{{src.accept}}" style="min-height: 44px; display: flex; align-items: center; color: {{t.adeep}}; font-size: {{ts.body}}; cursor: pointer; padding: 6px 4px; box-sizing: border-box;">Accept</div>
+                    <div onClick="{{src.drop}}" style="min-height: 44px; display: flex; align-items: center; color: {{t.mut}}; font-size: {{ts.body}}; cursor: pointer; padding: 6px 4px; box-sizing: border-box;">Drop</div>
+                  </div>
+                </div>
+              </sc-for>
+            </sc-if>
+          </div>
+
+          <div style="border-top: 1px solid {{t.line}}; padding-top: 10px;">
+            <div style="font-size: {{ts.label}}; text-transform: uppercase; letter-spacing: .12em; color: {{t.mut}};">On the paper</div>
+            <div style="font-size: {{ts.body}}; margin-top: 4px; color: {{t.fg}};">Council minutes lapse continues into August</div>
+            <div style="font-size: {{ts.body}}; margin-top: 4px; color: {{t.fg}};">Water rate hearing set for October</div>
+            <div style="font-size: {{ts.body}}; margin-top: 4px; color: {{t.fg}};">Fire district adds a second engine</div>
+          </div>
+
+          <div style="border-top: 1px solid {{t.line}}; padding-top: 10px;">
+            <a href="#" onClick="{{onNoop}}" style="font-size: {{ts.body}};">Beat memory</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ OTHER TABS ============ -->
+  <sc-if value="{{showOther}}" hint-placeholder-val="{{false}}">
+    <div style="padding: 24px 60px 60px; box-sizing: border-box; max-width: 860px;">
+      <div style="font-size: {{ts.body}}; color: {{t.fg2}};">{{otherSentence}}</div>
+      <div style="margin-top: 20px;">
+        <div onClick="{{goDesk}}" style="min-height: 44px; display: inline-flex; align-items: center; padding: 12px 16px; border: 1px solid {{t.line}}; color: {{t.mut}}; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box;">← Back to the desk</div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":1440,"height":1720},"theme":{"editor":"enum","options":["light","dark"],"default":"dark"},"textSize":{"editor":"enum","options":["normal","large"],"default":"normal"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.timers = {};
+    this.state = {
+      theme: props.theme || "dark",
+      textSize: props.textSize || "normal",
+      tab: "desk",
+      open: null,
+      compose: "",
+      writingModel: "auto",
+      scanState: "idle",
+      needsRemoved: {},
+      proposedCount: 25,
+      proposedSources: [{ id: "s1", name: "Longmont Times-Call RSS" }],
+      leads: [
+        {
+          id: 1, score: 12, isTop: true,
+          headline: "Longmont's unposted-minutes streak now reaches the September council meeting",
+          why: "Three boards in a row have gone silent on public minutes — this one is the county's own council.",
+          whyMatters: "Residents can't check what elected officials decided or verify votes without the minutes.",
+          angle: "Track the pattern across all four boards and ask each clerk directly why minutes are late.",
+          topic: "council", age: "2d", filedDate: "Aug 31", origin: "from the scanner",
+          status: "new", isMatched: true,
+          matches: 'matches: "Council minutes lapse continues into August" · published Sep 4, 2026',
+          aiState: "idle", dek: "", body: "", pulledNotesText: "",
+          pullItems: [
+            { id: "p1", name: "City survey landing page", checked: false },
+            { id: "p2", name: "Council agenda for Sept. 1", checked: false },
+            { id: "p3", name: "2027 proposed budget transmittal letter", checked: false }
+          ],
+          verifyConfirmed: false, addNoteText: "", notesBefore: []
+        },
+        {
+          id: 2, score: 11, isTop: false,
+          headline: "Development Services counter now closed to the public every Wednesday morning",
+          why: "Staffing shortfall is trimming the one walk-in window residents rely on.",
+          whyMatters: "The one walk-in window most residents rely on for permits and questions is now half as available.",
+          angle: "Confirm the staffing shortfall claim with HR and ask how long the closure has been in effect.",
+          topic: "planning", age: "2d", filedDate: "Aug 31", origin: "from the scanner",
+          status: "new", isMatched: false, matches: "",
+          aiState: "idle", dek: "", body: "", pulledNotesText: "",
+          pullItems: [
+            { id: "p1", name: "City survey landing page", checked: false },
+            { id: "p2", name: "Council agenda for Sept. 1", checked: false },
+            { id: "p3", name: "2027 proposed budget transmittal letter", checked: false }
+          ],
+          verifyConfirmed: false, addNoteText: "", notesBefore: []
+        },
+        {
+          id: 3, score: 10, isTop: false,
+          headline: "Three weeks after a Longmont natural gas explosion, no public cause finding has surfaced",
+          why: "Utility and fire officials have both gone quiet on what triggered it.",
+          whyMatters: "Neighbors don't know whether the same failure could happen again without a public cause finding.",
+          angle: "File a records request with the utility and fire marshal for the incident report.",
+          topic: "utilities", age: "2d", filedDate: "Aug 30", origin: "from the scanner",
+          status: "new", isMatched: false, matches: "",
+          aiState: "idle", dek: "", body: "", pulledNotesText: "",
+          pullItems: [
+            { id: "p1", name: "City survey landing page", checked: false },
+            { id: "p2", name: "Council agenda for Sept. 1", checked: false },
+            { id: "p3", name: "2027 proposed budget transmittal letter", checked: false }
+          ],
+          verifyConfirmed: false, addNoteText: "", notesBefore: []
+        },
+        {
+          id: 4, score: 10, isTop: false,
+          headline: "Four Longmont boards cancelled or postponed meetings in the last two weeks",
+          why: "A pattern across unrelated boards is starting to look coordinated.",
+          whyMatters: "Cancelled meetings delay decisions residents are waiting on and may signal a bigger problem.",
+          angle: "Map which boards cancelled, when, and whether the same members sit on more than one.",
+          topic: "council", age: "3d", filedDate: "Aug 30", origin: "from the scanner",
+          status: "drafted", isMatched: false, matches: "",
+          aiState: "ready",
+          dek: "Draft dek — edit before print.",
+          body: "Draft body would appear here. Edit, then publish.",
+          pulledNotesText: "",
+          pullItems: [
+            { id: "p1", name: "City survey landing page", checked: false },
+            { id: "p2", name: "Council agenda for Sept. 1", checked: false },
+            { id: "p3", name: "2027 proposed budget transmittal letter", checked: false }
+          ],
+          verifyConfirmed: false, addNoteText: "", notesBefore: []
+        }
+      ],
+      darkToLookAt: [
+        { id: "d1", title: "Council PAC donor overlap" },
+        { id: "d2", title: "Utility billing complaints spike" },
+        { id: "d3", title: "Sheriff overtime records request stalled" }
+      ],
+      darkOnDesk: [
+        { id: "d4", title: "Water rights transfer paperwork" },
+        { id: "d5", title: "School board closed-session pattern" }
+      ],
+      darkSetAsideCount: 12,
+      nextLeadId: 5
+    };
+  }
+
+  componentWillUnmount() {
+    Object.keys(this.timers).forEach((k) => clearTimeout(this.timers[k]));
+  }
+
+  onNoop(e) { if (e && e.preventDefault) e.preventDefault(); }
+
+  setThemeLight() { this.setState({ theme: "light" }); }
+  setThemeDark() { this.setState({ theme: "dark" }); }
+  setSizeNormal() { this.setState({ textSize: "normal" }); }
+  setSizeLarge() { this.setState({ textSize: "large" }); }
+
+  goTab(tab) { this.setState({ tab: tab, open: null }); }
+  goDesk() { this.setState({ tab: "desk" }); }
+  goQueue() { this.setState({ tab: "queue", open: null }); }
+  goDarkDesk() { this.setState({ tab: "darkdesk" }); }
+
+  onCompose(e) { this.setState({ compose: e.target.value }); }
+  onModelChange(e) { this.setState({ writingModel: e.target.value }); }
+
+  removeNeed(id) {
+    const removed = Object.assign({}, this.state.needsRemoved);
+    removed[id] = true;
+    this.setState({ needsRemoved: removed });
+  }
+
+  openDraftedLead() {
+    const lead = this.state.leads.find((l) => l.status === "drafted");
+    if (lead) this.setState({ tab: "desk", open: lead.id });
+  }
+
+  goSourcesNeed() { this.setState({ tab: "sources" }); }
+
+  runScan() {
+    if (this.state.scanState === "scanning") return;
+    this.setState({ scanState: "scanning" });
+    this.timers.scan = setTimeout(() => {
+      this.setState({ scanState: "done" });
+      this.removeNeed("scan");
+    }, 1500);
+  }
+
+  openDarkDeskNeed() { this.setState({ tab: "darkdesk" }); }
+
+  onWrite() {
+    const text = this.state.compose || "";
+    if (text.trim().length < 3) return;
+    const id = this.state.nextLeadId;
+    const headline = text.slice(0, 90);
+    const lead = {
+      id: id, score: 0, isTop: false,
+      headline: headline,
+      why: "Filed from the composer · not scored yet",
+      topic: "you", age: "now", origin: "from you",
+      status: "new", isMatched: false, matches: "",
+      aiState: "drafting", dek: "", body: ""
+    };
+    const leads = [lead].concat(this.state.leads);
+    this.setState({ leads: leads, compose: "", open: id, nextLeadId: id + 1 });
+    this.timers["draft-" + id] = setTimeout(() => {
+      this.finishDraft(id);
+    }, 1500);
+  }
+
+  holdLead(id) {
+    const leads = this.state.leads.map((l) => {
+      if (l.id !== id) return l;
+      const nextStatus = (l.status === "held" || l.status === "killed") ? "new" : "held";
+      return Object.assign({}, l, { status: nextStatus });
+    });
+    this.setState({ leads: leads });
+  }
+
+  killLead(id) {
+    const leads = this.state.leads.map((l) => (l.id === id ? Object.assign({}, l, { status: "killed" }) : l));
+    this.setState({ leads: leads });
+  }
+
+  openLeadPanel(id) { this.setState({ open: id }); }
+  closeStory() { this.setState({ open: null }); }
+
+  startDraft(id) {
+    const leads = this.state.leads.map((l) => (l.id === id ? Object.assign({}, l, { aiState: "drafting" }) : l));
+    this.setState({ leads: leads });
+    this.timers["draft-" + id] = setTimeout(() => {
+      this.finishDraft(id);
+    }, 1500);
+  }
+
+  finishDraft(id) {
+    const leads = this.state.leads.map((l) => {
+      if (l.id !== id) return l;
+      return Object.assign({}, l, {
+        aiState: "ready",
+        status: l.status === "new" ? "drafted" : l.status,
+        dek: "Draft dek — edit before print.",
+        body: "Draft body would appear here. Edit, then publish."
+      });
+    });
+    this.setState({ leads: leads });
+  }
+
+  publishLead(id) {
+    const leads = this.state.leads.map((l) => (l.id === id ? Object.assign({}, l, { aiState: "published", status: "published" }) : l));
+    this.setState({ leads: leads, open: null });
+  }
+
+  updateLead(id, patch) {
+    const leads = this.state.leads.map((l) => (l.id === id ? Object.assign({}, l, patch) : l));
+    this.setState({ leads: leads });
+  }
+
+  togglePullItem(id, itemId) {
+    const lead = this.state.leads.find((l) => l.id === id);
+    if (!lead) return;
+    const pullItems = lead.pullItems.map((p) => (p.id === itemId ? Object.assign({}, p, { checked: !p.checked }) : p));
+    this.updateLead(id, { pullItems: pullItems });
+  }
+
+  pullItem(id, itemId) {
+    const lead = this.state.leads.find((l) => l.id === id);
+    if (!lead) return;
+    const pullItems = lead.pullItems.map((p) => (p.id === itemId ? Object.assign({}, p, { checked: true }) : p));
+    this.updateLead(id, { pullItems: pullItems });
+  }
+
+  onAddNoteInput(id, e) { this.updateLead(id, { addNoteText: e.target.value }); }
+
+  addNote(id) {
+    const lead = this.state.leads.find((l) => l.id === id);
+    if (!lead) return;
+    const text = (lead.addNoteText || "").trim();
+    if (!text) return;
+    this.updateLead(id, { notesBefore: lead.notesBefore.concat([{ text: text }]), addNoteText: "" });
+  }
+
+  toggleVerify(id) {
+    const lead = this.state.leads.find((l) => l.id === id);
+    if (!lead) return;
+    this.updateLead(id, { verifyConfirmed: !lead.verifyConfirmed });
+  }
+
+  onHeadlineInput(id, e) { this.updateLead(id, { headline: e.target.value }); }
+  onDekInput(id, e) { this.updateLead(id, { dek: e.target.value }); }
+  onBodyInput(id, e) { this.updateLead(id, { body: e.target.value }); }
+  onPulledNotesInput(id, e) { this.updateLead(id, { pulledNotesText: e.target.value }); }
+
+  startDigging() {
+    const list = this.state.darkToLookAt;
+    if (list.length === 0) return;
+    const item = list[0];
+    this.setState({
+      darkToLookAt: list.slice(1),
+      darkOnDesk: this.state.darkOnDesk.concat([item])
+    });
+  }
+
+  acceptSource(id) {
+    const sources = this.state.proposedSources.filter((s) => s.id !== id);
+    this.setState({ proposedSources: sources, proposedCount: Math.max(0, this.state.proposedCount - 1) });
+  }
+  dropSource(id) {
+    const sources = this.state.proposedSources.filter((s) => s.id !== id);
+    this.setState({ proposedSources: sources, proposedCount: Math.max(0, this.state.proposedCount - 1) });
+  }
+
+  scaleFont(px, large) {
+    const v = large ? Math.round(px * 1.125 * 100) / 100 : px;
+    return v + "px";
+  }
+
+  renderVals() {
+    const theme = this.props.theme || this.state.theme;
+    const textSize = this.props.textSize || this.state.textSize;
+    const large = textSize === "large";
+
+    const THEMES = {
+      light: { bg: "#f6f1e7", bg2: "#efe6d6", fg: "#1c1410", fg2: "#3a3129", mut: "#6b5e52", line: "#cfc2ac", a: "#9b2915", adeep: "#7a1f10", warn: "#8b1e12" },
+      dark: { bg: "#000000", bg2: "#141414", fg: "#ffffff", fg2: "#e0e0e0", mut: "#e0e0e0", line: "#444444", a: "#d2764f", adeep: "#d2764f", warn: "#e8b4a8" }
+    };
+    const t = THEMES[theme];
+
+    const ts = {
+      body: this.scaleFont(14, large),
+      label: this.scaleFont(14, large),
+      hl: this.scaleFont(15.5, large),
+      topHl: this.scaleFont(22, large),
+      h1: this.scaleFont(30, large)
+    };
+
+    const seg = (active) => ({ bg: active ? t.fg : "transparent", fg: active ? t.bg : t.mut });
+    const lightBtn = seg(theme === "light");
+    const darkBtn = seg(theme === "dark");
+    const normalBtn = seg(textSize === "normal");
+    const largeBtn = seg(textSize === "large");
+
+    const TAB_LABELS = [
+      ["desk", "Desk"], ["sources", "Sources"], ["scan", "Scan"], ["queue", "Queue"],
+      ["published", "Published"], ["opinion", "Opinion"], ["server", "Server"], ["stats", "Stats"]
+    ];
+    const navTabs = TAB_LABELS.map(([key, label]) => {
+      const active = this.state.tab === key;
+      return {
+        key: key, label: label,
+        underline: active ? t.a : "transparent",
+        color: active ? t.adeep : t.fg2,
+        go: () => this.goTab(key)
+      };
+    });
+    const darkTabUnderline = this.state.tab === "darkdesk" ? "#d2764f" : "transparent";
+
+    const TAB_INFO = {
+      sources: { title: "Sources", sentence: "Watch list: On watch · Proposed · Rejected." },
+      scan: { title: "Scan", sentence: "Reporter pass and previous scans." },
+      queue: { title: "Queue", sentence: "Every open lead, with filters." },
+      published: { title: "Published", sentence: "The record, plus beat memory." },
+      opinion: { title: "Opinion", sentence: "Write one, file one you wrote, editorials." },
+      server: { title: "Server", sentence: "Writing models, health, actions, logs, paper setup." },
+      stats: { title: "Stats", sentence: "Anonymous view counts, site and per story." },
+      darkdesk: {
+        title: "Dark Desk",
+        sentence: "Investigates. Never prints. To look at · " + this.state.darkToLookAt.length +
+          " · On the desk · " + this.state.darkOnDesk.length +
+          " · Set aside · " + this.state.darkSetAsideCount
+      }
+    };
+
+    const showDesk = this.state.tab === "desk";
+    const showOther = !showDesk;
+    const pageKicker = showDesk ? "Command center" : this.state.tab.toUpperCase();
+    const pageTitle = showDesk ? "The desk" : (TAB_INFO[this.state.tab] ? TAB_INFO[this.state.tab].title : "");
+    const otherSentence = TAB_INFO[this.state.tab] ? TAB_INFO[this.state.tab].sentence : "";
+
+    const showStory = showDesk && this.state.open !== null;
+    const showComposer = showDesk && this.state.open === null;
+
+    const CHIP_COLOR = { new: t.fg, held: t.mut, killed: t.warn, drafted: t.adeep, published: t.a };
+    const chipInfo = (status) => ({ label: status.toUpperCase(), color: CHIP_COLOR[status] || t.fg });
+
+    const DOCS_OPENED = [
+      { title: "City survey landing page", ask: "for: the city's own survey landing page" },
+      { title: "Council agenda for Sept. 1", ask: "for: the Sept. 1 council agenda" },
+      { title: "2027 proposed budget transmittal letter", ask: "for: the 2027 budget transmittal letter" }
+    ];
+
+    const leads = this.state.leads.map((l) => {
+      const hot = l.score >= 14;
+      const warm = l.score >= 10;
+      const chip = chipInfo(l.status);
+      const killed = l.status === "killed";
+      const held = l.status === "held";
+      const isDrafting = l.aiState === "drafting";
+      const isReady = l.aiState === "ready";
+      const isPublished = l.aiState === "published";
+      const publishDisabled = isReady && !l.verifyConfirmed;
+      return Object.assign({}, l, {
+        rowOpacity: killed ? "0.55" : held ? "0.7" : "1",
+        strike: killed ? "line-through" : "none",
+        hlSize: l.isTop ? ts.topHl : ts.hl,
+        meta: l.topic + " · " + l.age + " · " + l.origin,
+        storyMeta: l.topic + " · filed " + l.filedDate + " · scored " + l.score + "/20 · " + l.origin,
+        badgeBorder: t.fg,
+        badgeBg: hot ? t.a : "transparent",
+        badgeColor: hot ? t.bg : t.fg,
+        chipLabel: chip.label,
+        chipColor: chip.color,
+        holdLabel: (held || killed) ? "Back" : "Hold",
+        showKill: !killed,
+        showDraftButton: l.aiState === "idle",
+        isDrafting: isDrafting,
+        isReady: isReady,
+        isPublished: isPublished,
+        showWorkBar: !isPublished,
+        workBarLabel: isDrafting ? "Drafting…" : isReady ? "Redraft" : "Draft with AI",
+        workBarClick: () => this.startDraft(l.id),
+        pullItems: l.pullItems.map((p) => Object.assign({}, p, {
+          toggle: () => this.togglePullItem(l.id, p.id),
+          pull: () => this.pullItem(l.id, p.id)
+        })),
+        showVerifyBefore: l.aiState === "idle" || isDrafting,
+        showVerifyAfter: isReady || isPublished,
+        showDocsOpened: isReady || isPublished,
+        docsOpened: DOCS_OPENED,
+        addNoteText: l.addNoteText,
+        notesBefore: l.notesBefore,
+        onAddNoteInput: (e) => this.onAddNoteInput(l.id, e),
+        addNote: () => this.addNote(l.id),
+        verifyConfirmed: l.verifyConfirmed,
+        toggleVerify: () => this.toggleVerify(l.id),
+        onHeadlineInput: (e) => this.onHeadlineInput(l.id, e),
+        onDekInput: (e) => this.onDekInput(l.id, e),
+        onBodyInput: (e) => this.onBodyInput(l.id, e),
+        onPulledNotesInput: (e) => this.onPulledNotesInput(l.id, e),
+        publishDisabled: publishDisabled,
+        publishOpacity: publishDisabled ? "0.45" : "1",
+        open: () => this.openLeadPanel(l.id),
+        hold: () => this.holdLead(l.id),
+        kill: () => this.killLead(l.id),
+        draft: () => this.startDraft(l.id),
+        publish: () => this.publishLead(l.id)
+      });
+    });
+
+    let openLead = leads.find((l) => l.id === this.state.open);
+    if (!openLead) {
+      openLead = {
+        headline: "", why: "", meta: "", storyMeta: "", chipLabel: "", chipColor: t.fg,
+        whyMatters: "", angle: "",
+        showDraftButton: false, isDrafting: false, isReady: false, isPublished: false,
+        showWorkBar: false, workBarLabel: "", workBarClick: () => {},
+        pullItems: [], showVerifyBefore: false, showVerifyAfter: false, showDocsOpened: false,
+        docsOpened: [], addNoteText: "", notesBefore: [], onAddNoteInput: () => {}, addNote: () => {},
+        verifyConfirmed: false, toggleVerify: () => {},
+        onHeadlineInput: () => {}, onDekInput: () => {}, onBodyInput: () => {}, onPulledNotesInput: () => {},
+        publishDisabled: false, publishOpacity: "1",
+        dek: "", body: "", pulledNotesText: "", draft: () => {}, publish: () => {}
+      };
+    }
+
+    const draftedLead = this.state.leads.find((l) => l.status === "drafted");
+    const NEEDS_ALL = [
+      { id: "draft", text: (draftedLead ? "1 draft ready to publish" : ""), go: () => this.openDraftedLead(), show: !!draftedLead },
+      { id: "sources", text: this.state.proposedCount + " proposed sources await review", go: () => this.goSourcesNeed(), show: this.state.proposedCount > 0 },
+      { id: "scan", text: "No scan in the last day", go: () => this.runScan(), show: this.state.scanState === "idle" && !this.state.needsRemoved.scan },
+      { id: "darkdesk", text: "4 Dark Desk files ready for another round", go: () => this.openDarkDeskNeed(), show: true }
+    ].filter((n) => n.show && !this.state.needsRemoved[n.id]);
+
+    const needs = NEEDS_ALL.map((n, i) => Object.assign({}, n, { showDot: i < NEEDS_ALL.length - 1 }));
+
+    const scanStatusText = this.state.scanState === "scanning"
+      ? "Scanning 41 sources…"
+      : this.state.scanState === "done"
+        ? "Last scan: just now · 2 new leads"
+        : "Last scan: no scan in the last day";
+
+    const writeDisabled = (this.state.compose || "").trim().length < 3;
+
+    return {
+      t: t, ts: ts,
+      lightBtn: lightBtn, darkBtn: darkBtn, normalBtn: normalBtn, largeBtn: largeBtn,
+      setThemeLight: () => this.setThemeLight(),
+      setThemeDark: () => this.setThemeDark(),
+      setSizeNormal: () => this.setSizeNormal(),
+      setSizeLarge: () => this.setSizeLarge(),
+      onNoop: (e) => this.onNoop(e),
+      navTabs: navTabs,
+      darkTabUnderline: darkTabUnderline,
+      goDarkDesk: () => this.goDarkDesk(),
+      goDesk: () => this.goDesk(),
+      goQueue: () => this.goQueue(),
+      hasNeeds: needs.length > 0,
+      noNeeds: needs.length === 0,
+      needs: needs,
+      pageKicker: pageKicker,
+      pageTitle: pageTitle,
+      otherSentence: otherSentence,
+      showDesk: showDesk,
+      showOther: showOther,
+      showStory: showStory,
+      showComposer: showComposer,
+      compose: this.state.compose,
+      onCompose: (e) => this.onCompose(e),
+      writingModel: this.state.writingModel,
+      onModelChange: (e) => this.onModelChange(e),
+      onWrite: () => this.onWrite(),
+      writeDisabled: writeDisabled,
+      writeOpacity: writeDisabled ? "0.45" : "1",
+      leads: leads,
+      openLead: openLead,
+      closeStory: () => this.closeStory(),
+      recoveringFalse: false,
+      darkToLookAt: this.state.darkToLookAt,
+      darkHasToLookAt: this.state.darkToLookAt.length > 0,
+      darkToLookAtLabel: "To look at · " + this.state.darkToLookAt.length,
+      darkOnDeskLabel: "On the desk · " + this.state.darkOnDesk.length,
+      darkSetAsideLabel: "Set aside · " + this.state.darkSetAsideCount,
+      startDigging: () => this.startDigging(),
+      runScan: () => this.runScan(),
+      scanStatusText: scanStatusText,
+      proposedHeader: "Proposed sources · " + this.state.proposedCount,
+      hasProposed: this.state.proposedSources.length > 0,
+      proposedSources: this.state.proposedSources.map((s) => ({
+        id: s.id, name: s.name,
+        accept: () => this.acceptSource(s.id),
+        drop: () => this.dropSource(s.id)
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

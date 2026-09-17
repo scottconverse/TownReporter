@@ -1,0 +1,658 @@
+import assert from "node:assert/strict";
+import { after, before, describe, it } from "node:test";
+import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { createServer } from "vite";
+import type { IngestDocument } from "./ingest.ts";
+
+let vite: Awaited<ReturnType<typeof createServer>>;
+let getSql: typeof import("../db.ts").getSql;
+let checks: typeof import("./routine-notice-checks.server.ts");
+let automation: typeof import("./routine-notice-automation.ts");
+let ingestModule: typeof import("./ingest.ts");
+let setFetchImplForTests: typeof import("./fetch-url.ts").setFetchImplForTests;
+let roomSequence = 98000;
+
+before(async () => {
+  vite = await createServer({ server: { middlewareMode: true }, appType: "custom" });
+  // Use the same Vite-transformed database module as the server under test.
+  // A direct Node import has no import.meta.glob migration transform and can
+  // create a separate, unmigrated PGLite instance on this runtime.
+  const db = await vite.ssrLoadModule("/src/lib/db.ts");
+  assert.equal(
+    db.getDbSource(),
+    "pglite",
+    "Ordinary routine checks must not use an operator PostgreSQL database",
+  );
+  ({ getSql } = db);
+  checks = await vite.ssrLoadModule("/src/lib/news/routine-notice-checks.server.ts");
+  automation = await vite.ssrLoadModule("/src/lib/news/routine-notice-automation.ts");
+  ingestModule = await vite.ssrLoadModule("/src/lib/news/ingest.ts");
+  ({ setFetchImplForTests } = await vite.ssrLoadModule("/src/lib/news/fetch-url.ts"));
+});
+
+after(async () => {
+  setFetchImplForTests?.(null);
+  await vite?.close();
+});
+
+function htmlDocument(html: string): IngestDocument {
+  return {
+    ok: false,
+    status: 200,
+    outcome: "parse-failed",
+    text: "",
+    title: "Structured calendar",
+    extras: [],
+    contentType: "text/html; charset=utf-8",
+    needsOcr: false,
+    redirectChain: [],
+    extractionMethod: "readability",
+    pages: [],
+    notices: [],
+    rawBytes: new TextEncoder().encode(html),
+  };
+}
+
+function event(overrides: Record<string, unknown> = {}) {
+  return {
+    "@type": "Event",
+    "@id": "event-1",
+    name: "Library craft hour",
+    startDate: "2026-09-12T10:00:00-06:00",
+    organizer: { name: "Town Library" },
+    location: { name: "Main Library" },
+    ...overrides,
+  };
+}
+
+function page(...events: Array<Record<string, unknown>>) {
+  return `<html><head><script type="application/ld+json">${JSON.stringify(
+    events.length === 1 ? events[0] : { "@graph": events },
+  )}</script></head><body></body></html>`;
+}
+
+async function fixture(formatKey = "library-notice", sourceUrl?: string) {
+  const sql = await getSql();
+  const room = ++roomSequence;
+  const owner = `routine-check-owner-${room}`;
+  const editor = `routine-check-editor-${room}`;
+  const url = sourceUrl ?? `https://example.test/routine/${room}`;
+  await checks.ensureRoutineNoticeCheckSchema();
+  await sql.query("insert into newsrooms(id,name) values($1,'Routine checks')", [room]);
+  await sql.query(
+    "insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'owner'),($3,$2,'editor')",
+    [owner, room, editor],
+  );
+  const [source] = await sql.query<{ id: number }>(
+    "insert into sources(user_id,newsroom_id,url,title,status) values($1,$2,$3,'Library','accepted') returning id",
+    [owner, room, url],
+  );
+  await sql.query(
+    "insert into routine_notice_policies(newsroom_id,revision,paused,updated_by) values($1,1,false,$2)",
+    [room, owner],
+  );
+  await sql.query(
+    "insert into routine_notice_approvals(newsroom_id,source_id,source_url,format_key) values($1,$2,$3,$4)",
+    [room, source!.id, url, formatKey],
+  );
+  await automation.ensureRoutineNoticeAutomationSchema();
+  await sql.query(
+    "insert into routine_notice_automations(newsroom_id,enabled,revision,timezone,local_time,today_section,weekend_section,deadlines_section) values($1,false,1,'America/Denver','06:15','news','events','deadlines')",
+    [room],
+  );
+  await sql.query(
+    "insert into routine_notice_automation_sources(newsroom_id,source_id,format_key,source_url,public_source_url,issuer,locality,collection_area) values($1,$2,$3,$4,$4,'Town Library','Longmont','Main Library')",
+    [room, source!.id, formatKey, url],
+  );
+  return {
+    room,
+    owner,
+    editor,
+    sourceId: source!.id,
+    url,
+    input: {
+      requestId: randomUUID(),
+      sourceId: source!.id,
+      sourceUrl: url,
+      formatKey,
+      expectedPolicyRevision: 1,
+    },
+  };
+}
+
+describe("routine notice manual checks", () => {
+  it("retains recognized structured-only raw HTML without rendered fallback", async () => {
+    const raw = page(event());
+    setFetchImplForTests(
+      async () => new Response(raw, { headers: { "content-type": "text/html; charset=utf-8" } }),
+    );
+    const result = await ingestModule.ingestDocument("https://1.1.1.1/routine", {
+      acceptRawHtml: (body) => body.includes('"@type":"Event"'),
+    });
+    assert.equal(new TextDecoder().decode(result.rawBytes), raw);
+    assert.equal(result.extractionMethod, "heuristic");
+    setFetchImplForTests(null);
+  });
+
+  it("keeps permission-only Schema.org Event checks compatible without automation context", async () => {
+    const f = await fixture("community-arts-event-logistics");
+    const sql = await getSql();
+    await sql.query("delete from routine_notice_automations where newsroom_id=$1", [f.room]);
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(page(event())) },
+    );
+    assert.equal(result.check.state, "parsed");
+    assert.equal(result.check.counts.parsed, 1);
+  });
+
+  it("captures and reparses structured-only HTML without creating editorial work or monitors", async () => {
+    const f = await fixture();
+    const raw = page(event());
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(raw) },
+    );
+    assert.equal(result.check.state, "parsed");
+    assert.equal(result.check.candidates.length, 1);
+    assert.equal(result.check.source.sourceHref, "/desk/sources");
+    const captured = await checks.readRoutineNoticeCapturedTextForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      { checkId: result.check.checkId },
+    );
+    assert.equal(captured.fullText, raw);
+
+    const sql = await getSql();
+    for (const table of ["source_monitors", "leads", "drafts", "articles", "desk_jobs"]) {
+      const [count] = await sql.query<{ n: number }>(
+        `select count(*)::int n from ${table} where newsroom_id=$1`,
+        [f.room],
+      );
+      assert.equal(count?.n, 0, `${table} must remain untouched`);
+    }
+    await checks.assertRoutineNoticeCheckStillBound(
+      sql,
+      { userId: f.owner, newsroomId: f.room },
+      result.check,
+    );
+    await sql.query("update artifact_versions set full_text='changed after check' where id=$1", [
+      result.check.capture!.artifactVersionId,
+    ]);
+    await assert.rejects(
+      checks.assertRoutineNoticeCheckStillBound(
+        sql,
+        { userId: f.owner, newsroomId: f.room },
+        result.check,
+      ),
+      /evidence changed/i,
+    );
+  });
+
+  it("uses saved exact-source issuer context for a City Library event without organizer", async () => {
+    const f = await fixture();
+    const cityEvent = event({
+      "@id": "https://longmontcolorado.gov/event/yoga-storytime/2026-09-10/#event",
+      name: "Yoga Storytime",
+      startDate: "2026-09-10T10:00:00-06:00",
+      endDate: "2026-09-10T10:30:00-06:00",
+      eventStatus: "https://schema.org/EventScheduled",
+      organizer: undefined,
+      location: { name: "Longmont Public Library" },
+    });
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(page(cityEvent)) },
+    );
+    assert.equal(result.check.state, "parsed");
+    assert.deepEqual(result.check.candidates[0]?.fields.issuer, {
+      value: "Town Library",
+      locator: "OWNER_ISSUER",
+    });
+  });
+
+  it("checks the retained full City Library category against visible card times", async () => {
+    const url = "https://longmontcolorado.gov/events/category/library/";
+    const f = await fixture("library-notice", url);
+    const sql = await getSql();
+    await sql.query(
+      "update routine_notice_automation_sources set issuer='City of Longmont',collection_area='Longmont Public Library' where newsroom_id=$1 and source_id=$2",
+      [f.room, f.sourceId],
+    );
+    const raw = await readFile(new URL("./__fixtures__/city-library-category.html", import.meta.url));
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(new TextDecoder().decode(raw)) },
+    );
+    assert.equal(result.check.state, "parsed");
+    assert.deepEqual(result.check.counts, { parsed: 19, refused: 1, conflicts: 0 });
+    assert.equal(result.check.candidates.length, 19);
+    const [stored] = await sql.query<{ raw_blob_sha256: string }>(
+      "select raw_blob_sha256 from routine_notice_checks where id=$1",
+      [result.check.checkId],
+    );
+    assert.equal(stored?.raw_blob_sha256, createHash("sha256").update(raw).digest("hex"));
+    assert.ok(
+      result.check.candidates.some(
+        (candidate) => candidate.fields.program?.value === "Yoga Storytime",
+      ),
+    );
+  });
+
+  it("reads the City category's dotted a.m. and p.m. notation inside nested spans", async () => {
+    const f = await fixture("library-notice", "https://longmontcolorado.gov/events/category/library/");
+    const sql = await getSql();
+    await sql.query(
+      "update routine_notice_automation_sources set issuer='City of Longmont',collection_area='Longmont Public Library' where newsroom_id=$1 and source_id=$2",
+      [f.room, f.sourceId],
+    );
+    const source = await readFile(new URL("./__fixtures__/city-library-category.html", import.meta.url), "utf8");
+    // Derived from the retained fixture using the notation seen in live blob 628.
+    const dotted = source.replace(/(\b\d{1,2}(?::\d{2})?\s+)([ap])m(?=<\/span>)/g, (_match, clock, period) =>
+      `${clock}<span class="notranslate">${period}.m.</span>`,
+    );
+    assert.notEqual(dotted, source);
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room }, f.input,
+      { ingest: async () => htmlDocument(dotted) },
+    );
+    assert.deepEqual(result.check.counts, { parsed: 19, refused: 1, conflicts: 0 });
+  });
+
+  it("refuses an occurrence when the City category visible time disagrees with JSON-LD", async () => {
+    const url = "https://longmontcolorado.gov/events/category/library/";
+    const f = await fixture("library-notice", url);
+    const sql = await getSql();
+    await sql.query(
+      "update routine_notice_automation_sources set issuer='City of Longmont',collection_area='Longmont Public Library' where newsroom_id=$1 and source_id=$2",
+      [f.room, f.sourceId],
+    );
+    const source = await readFile(
+      new URL("./__fixtures__/city-library-category.html", import.meta.url),
+      "utf8",
+    );
+    const changed = source.replace(
+      '<span class="tribe-event-date-start">Thursday, Sep. 10 · 10 am</span>',
+      '<span class="tribe-event-date-start">Thursday, Sep. 10 · 11 am</span>',
+    );
+    assert.notEqual(changed, source, "fixture mutation must alter the real visible Yoga time");
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(changed) },
+    );
+    assert.deepEqual(result.check.counts, { parsed: 18, refused: 2, conflicts: 0 });
+    assert.equal(
+      result.check.candidates.some(
+        (candidate) => candidate.fields.program?.value === "Yoga Storytime",
+      ),
+      false,
+      "the mismatched occurrence must not silently survive",
+    );
+    assert.ok(
+      result.check.refusals
+        .filter((refusal) => refusal.code === "structurally-invalid")
+        .reduce((count, refusal) => count + refusal.count, 0) >= 2,
+    );
+  });
+
+  it("treats a later source revision as a new observation rather than a permanent conflict", async () => {
+    const f = await fixture("community-arts-event-logistics");
+    const run = (title: string) =>
+      checks.checkRoutineNoticeSourceForOwner(
+        { userId: f.owner, newsroomId: f.room },
+        { ...f.input, requestId: randomUUID() },
+        { ingest: async () => htmlDocument(page(event({ name: title }))) },
+      );
+    const first = await run("Concert at six");
+    const changed = await run("Concert at seven");
+    assert.equal(first.check.state, "parsed");
+    assert.equal(changed.check.state, "parsed");
+    assert.equal(changed.check.candidates[0]?.conflict, false);
+    assert.notEqual(
+      first.check.candidates[0]?.fields.title?.value,
+      changed.check.candidates[0]?.fields.title?.value,
+    );
+  });
+
+  it("captures and parses an owner-designated RFC5545 waste area without exposing a personalized feed URL", async () => {
+    const f = await fixture(
+      "waste-recycling-schedule",
+      "https://calendar.example/private/token-123.ics",
+    );
+    const sql = await getSql();
+    await sql.query(
+      "update routine_notice_automations set enabled=true,activated_by=$2 where newsroom_id=$1",
+      [f.room, f.owner],
+    );
+    await sql.query(
+      "update routine_notice_automation_sources set public_source_url='https://city.example/waste',issuer='City sanitation',collection_area='North collection area' where newsroom_id=$1 and source_id=$2 and format_key='waste-recycling-schedule' and source_url=$3",
+      [f.room, f.sourceId, f.url],
+    );
+    const raw =
+      "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:pickup-1\r\nDTSTART;VALUE=DATE:20260908\r\nSUMMARY:Recycling pickup\r\nEND:VEVENT\r\nEND:VCALENDAR";
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(raw) },
+    );
+    assert.equal(result.check.state, "parsed");
+    assert.equal(result.check.candidates[0]?.fields.area?.value, "North collection area");
+    assert.equal(JSON.stringify(result.check.candidates).includes("token-123"), false);
+  });
+
+  it("retains and reloads collection bulletin ranges through the saved source workflow", async () => {
+    const url = "https://longmontcolorado.gov/waste-services-trash-recycling-composting/special-services-events/fall-leaf-collection/";
+    const f = await fixture("waste-recycling-schedule", url);
+    const sql = await getSql();
+    await sql.query("update routine_notice_automation_sources set issuer='City of Longmont' where newsroom_id=$1", [f.room]);
+    // Constructed source-shape fixture, not a live capture.
+    const raw = `<div class="content_area"><h2>2026 Collection Schedule</h2><ul><li>Leaves will be collected at residences located North of 9th Avenue Oct. 26 – Oct. 30</li></ul><h2>Guidelines</h2><ul><li>All bags must be out before 7 a.m. on the MONDAY of your scheduled collection week and should be left out the entire week until collected.</li></ul></div>`;
+    const actor = { userId: f.owner, newsroomId: f.room };
+    const result = await checks.checkRoutineNoticeSourceForOwner(actor, f.input, {
+      ingest: async () => htmlDocument(raw),
+    });
+    assert.equal(result.check.state, "parsed");
+    assert.equal(result.check.candidates[0]?.fields.endDate?.value, "2026-10-30");
+    const reloaded = await checks.listRoutineNoticeChecksForOwner(actor, { sourceId: f.sourceId });
+    assert.deepEqual(reloaded[0]?.candidates, result.check.candidates);
+    const captured = await checks.readRoutineNoticeCapturedTextForOwner(actor, { checkId: result.check.checkId });
+    assert.equal(captured.fullText, raw);
+  });
+
+  it("keeps the exact approved fetch URL while binding canonical capture identities", async () => {
+    const exactUrl = `https://www.example.test/routine/${roomSequence + 1}/?utm_source=desk#events`;
+    const f = await fixture("library-notice", exactUrl);
+    let fetchedUrl = "";
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      {
+        ingest: async (url) => {
+          fetchedUrl = url;
+          return htmlDocument(page(event()));
+        },
+      },
+    );
+    assert.equal(fetchedUrl, exactUrl);
+    assert.equal(result.check.source.url, exactUrl);
+    assert.equal(result.check.capture?.textAvailable, true);
+    const captured = await checks.readRoutineNoticeCapturedTextForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      { checkId: result.check.checkId },
+    );
+    assert.match(captured.fullText, /Library craft hour/);
+
+    const sql = await getSql();
+    const changedExactUrl = exactUrl.replace("utm_source=desk", "utm_source=changed");
+    await sql.query("update sources set url=$2 where id=$1", [f.sourceId, changedExactUrl]);
+    await sql.query(
+      "update routine_notice_approvals set source_url=$3 where newsroom_id=$1 and source_id=$2",
+      [f.room, f.sourceId, changedExactUrl],
+    );
+    await sql.query("update routine_notice_policies set revision=2 where newsroom_id=$1", [f.room]);
+    await assert.rejects(
+      checks.checkRoutineNoticeSourceForOwner(
+        { userId: f.owner, newsroomId: f.room },
+        { ...f.input, sourceUrl: changedExactUrl, expectedPolicyRevision: 2 },
+        { ingest: async () => htmlDocument(page(event())) },
+      ),
+      /another check/i,
+    );
+    const groups = await checks.listRoutineNoticeChecksForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      {},
+    );
+    assert.equal(groups[0]?.state, "evidence-unavailable");
+    assert.equal(groups[0]?.candidates.length, 0);
+    assert.equal(groups[0]?.capture?.textAvailable, false);
+    await assert.rejects(
+      checks.readRoutineNoticeCapturedTextForOwner(
+        { userId: f.owner, newsroomId: f.room },
+        { checkId: result.check.checkId },
+      ),
+      /changed or is unavailable/i,
+    );
+  });
+
+  it("returns a valid replay before fetching again and refuses a mismatched replay", async () => {
+    const f = await fixture();
+    let calls = 0;
+    const ingest = async () => {
+      calls += 1;
+      return htmlDocument(page(event()));
+    };
+    const actor = { userId: f.owner, newsroomId: f.room };
+    const first = await checks.checkRoutineNoticeSourceForOwner(actor, f.input, { ingest });
+    const replay = await checks.checkRoutineNoticeSourceForOwner(actor, f.input, {
+      ingest: async () => {
+        throw new Error("a successful replay must not fetch");
+      },
+    });
+    assert.equal(replay.check.checkId, first.check.checkId);
+    assert.equal(calls, 1);
+    const sql = await getSql();
+    await sql.query(
+      "insert into routine_notice_approvals(newsroom_id,source_id,source_url,format_key) select newsroom_id,source_id,source_url,'community-arts-event-logistics' from routine_notice_approvals where newsroom_id=$1 and source_id=$2 limit 1",
+      [f.room, f.sourceId],
+    );
+    await assert.rejects(
+      checks.checkRoutineNoticeSourceForOwner(
+        actor,
+        { ...f.input, formatKey: "community-arts-event-logistics" },
+        { ingest },
+      ),
+      /another check/i,
+    );
+    await sql.query("update routine_notice_policies set revision=2 where newsroom_id=$1", [f.room]);
+    await assert.rejects(
+      checks.checkRoutineNoticeSourceForOwner(
+        actor,
+        { ...f.input, expectedPolicyRevision: 2 },
+        { ingest },
+      ),
+      /another check/i,
+    );
+    const changedUrl = `${f.url}/replacement`;
+    await sql.query("update sources set url=$2 where id=$1", [f.sourceId, changedUrl]);
+    await sql.query(
+      "update routine_notice_approvals set source_url=$3 where newsroom_id=$1 and source_id=$2",
+      [f.room, f.sourceId, changedUrl],
+    );
+    await sql.query("update routine_notice_policies set revision=3 where newsroom_id=$1", [f.room]);
+    await assert.rejects(
+      checks.checkRoutineNoticeSourceForOwner(
+        actor,
+        { ...f.input, sourceUrl: changedUrl, expectedPolicyRevision: 3 },
+        { ingest },
+      ),
+      /another check/i,
+    );
+    assert.equal(calls, 1);
+  });
+
+  it("refuses authorization, unapproved formats, and final policy races before writes", async () => {
+    const f = await fixture();
+    let calls = 0;
+    const ingest = async () => {
+      calls += 1;
+      return htmlDocument(page(event()));
+    };
+    await assert.rejects(
+      checks.checkRoutineNoticeSourceForOwner({ userId: f.editor, newsroomId: f.room }, f.input, {
+        ingest,
+      }),
+      /only.*owner/i,
+    );
+    await assert.rejects(
+      checks.checkRoutineNoticeSourceForOwner(
+        { userId: f.owner, newsroomId: f.room },
+        { ...f.input, requestId: randomUUID(), formatKey: "registration-deadline" },
+        { ingest },
+      ),
+      /not approved/i,
+    );
+    assert.equal(calls, 0);
+
+    const sql = await getSql();
+    await assert.rejects(
+      checks.checkRoutineNoticeSourceForOwner(
+        { userId: f.owner, newsroomId: f.room },
+        { ...f.input, requestId: randomUUID() },
+        {
+          ingest,
+          beforeCommit: async () => {
+            await sql.query(
+              "update routine_notice_policies set paused=true,revision=revision+1 where newsroom_id=$1",
+              [f.room],
+            );
+          },
+        },
+      ),
+      /paused|changed/i,
+    );
+    const [counts] = await sql.query<{ checks: number; captures: number }>(
+      `select (select count(*)::int from routine_notice_checks where newsroom_id=$1) checks,
+              (select count(*)::int from capture_events where newsroom_id=$1) captures`,
+      [f.room],
+    );
+    assert.deepEqual(counts, { checks: 0, captures: 0 });
+  });
+
+  it("keeps content-free capture failure history", async () => {
+    const f = await fixture();
+    const failed = htmlDocument("");
+    failed.status = 503;
+    failed.outcome = "error";
+    failed.contentType = "text/plain";
+    failed.rawBytes = undefined;
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => failed },
+    );
+    assert.equal(result.check.state, "capture-failed");
+    assert.equal(result.check.refusals[0]?.code, "capture-failed");
+    assert.equal(result.check.capture?.textAvailable, false);
+  });
+
+  it("collapses identical candidates and flags every conflicting version", async () => {
+    const duplicate = await fixture();
+    const same = event();
+    const duplicateResult = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: duplicate.owner, newsroomId: duplicate.room },
+      duplicate.input,
+      { ingest: async () => htmlDocument(page(same, same)) },
+    );
+    assert.equal(duplicateResult.check.candidates.length, 1);
+    assert.equal(duplicateResult.check.state, "parsed");
+
+    const conflict = await fixture();
+    const conflictResult = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: conflict.owner, newsroomId: conflict.room },
+      conflict.input,
+      { ingest: async () => htmlDocument(page(event(), event({ name: "Moved craft hour" }))) },
+    );
+    assert.equal(conflictResult.check.state, "parsed-with-conflicts");
+    assert.deepEqual(
+      conflictResult.check.candidates.map((item) => item.conflict),
+      [true, true],
+    );
+  });
+
+  it("degrades a malformed candidate receipt to evidence unavailable", async () => {
+    const f = await fixture();
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(page(event())) },
+    );
+    const sql = await getSql();
+    await sql.query("update routine_notice_candidate_refs set ordinal=99 where check_id=$1", [
+      result.check.checkId,
+    ]);
+    const groups = await checks.listRoutineNoticeChecksForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      {},
+    );
+    assert.equal(groups[0]?.state, "evidence-unavailable");
+    assert.deepEqual(groups[0]?.candidates, []);
+  });
+
+  it("never returns raw capture text across rooms or after its evidence binding changes", async () => {
+    const f = await fixture();
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(page(event())) },
+    );
+    const foreign = await fixture();
+    await assert.rejects(
+      checks.readRoutineNoticeCapturedTextForOwner(
+        { userId: foreign.owner, newsroomId: foreign.room },
+        { checkId: result.check.checkId },
+      ),
+      /not found/i,
+    );
+    const sql = await getSql();
+    await sql.query("update capture_events set version_id=null where id=$1", [
+      result.check.capture!.captureEventId,
+    ]);
+    await assert.rejects(
+      checks.readRoutineNoticeCapturedTextForOwner(
+        { userId: f.owner, newsroomId: f.room },
+        { checkId: result.check.checkId },
+      ),
+      /changed|unavailable/i,
+    );
+  });
+
+  it("rolls capture, receipt, candidates, and audit back together", async () => {
+    const f = await fixture();
+    const sql = await getSql();
+    await sql.query(
+      `create function fail_routine_check_audit() returns trigger language plpgsql as $$
+       begin if NEW.newsroom_id=${f.room} and NEW.action='routine-notice-check' then
+         raise exception 'forced audit failure'; end if; return NEW; end $$`,
+    );
+    await sql.query(
+      "create trigger fail_routine_check_audit before insert on audit_events for each row execute function fail_routine_check_audit()",
+    );
+    await assert.rejects(
+      checks.checkRoutineNoticeSourceForOwner({ userId: f.owner, newsroomId: f.room }, f.input, {
+        ingest: async () => htmlDocument(page(event())),
+      }),
+      /forced audit failure/i,
+    );
+    await sql.query("drop trigger fail_routine_check_audit on audit_events");
+    await sql.query("drop function fail_routine_check_audit() ");
+    const [counts] = await sql.query<{ checks: number; captures: number; versions: number }>(
+      `select (select count(*)::int from routine_notice_checks where newsroom_id=$1) checks,
+              (select count(*)::int from capture_events where newsroom_id=$1) captures,
+              (select count(*)::int from artifact_versions where newsroom_id=$1) versions`,
+      [f.room],
+    );
+    assert.deepEqual(counts, { checks: 0, captures: 0, versions: 0 });
+  });
+
+  it("source deletion irreversibly removes the bound check and candidates", async () => {
+    const f = await fixture();
+    const result = await checks.checkRoutineNoticeSourceForOwner(
+      { userId: f.owner, newsroomId: f.room },
+      f.input,
+      { ingest: async () => htmlDocument(page(event())) },
+    );
+    const sql = await getSql();
+    await sql.query("delete from sources where id=$1 and newsroom_id=$2", [f.sourceId, f.room]);
+    const [counts] = await sql.query<{ checks: number; refs: number }>(
+      `select (select count(*)::int from routine_notice_checks where id=$1) checks,
+              (select count(*)::int from routine_notice_candidate_refs where check_id=$1) refs`,
+      [result.check.checkId],
+    );
+    assert.deepEqual(counts, { checks: 0, refs: 0 });
+  });
+});

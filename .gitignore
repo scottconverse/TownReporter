@@ -1,0 +1,63 @@
+node_modules/
+.project_id
+.github_repo
+.env
+.env.*
+!.env.example
+logs/
+.output/
+
+# ops/stage.ps1 run state -- machine-local, never the deliverable.
+ops/.stage.pid
+ops/.stage.json
+ops/stage.out.log
+ops/stage.err.log
+.vercel/
+.tanstack/
+.node_modules.lock
+attachments/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.local
+
+# Native model/browser research scratch. Preserve gate evidence outside the
+# checkout; never let a broad `git add` publish downloaded records or Chromium
+# diagnostics as source.
+.tmp-editorial-*/
+debug.log
+
+# Transient capture and build output. An audit found 150 screenshots (11 MB)
+# and 25 browser captures plus five duplicate source archives (3.9 MB) tracked
+# here (ENG-010). Clones pay for those forever, and a committed source archive
+# can be mistaken for canonical code.
+#
+# docs/images/ stays tracked on purpose: curated manual screenshots that
+# the documentation links to. That is the deliberate exception.
+screenshots/
+artifacts/browsed_files/
+artifacts/imagine_images/
+artifacts/*.zip
+artifacts/*.tar.gz
+artifacts/*.bin
+artifacts/*.html
+artifacts/RENAME-TO-ZIP.txt
+
+# Audit evidence: the written reports are the deliverable and stay tracked;
+# the screenshots and capture data behind them are reproducible output.
+# Per-prefix rules (artifacts/audit-*/...) rotted -- gate-* and gauntlet-*
+# evidence slipped past them (ENG-010). This is prefix-proof: ignore every
+# file under artifacts/, then re-include only the Markdown reports.
+artifacts/**
+!artifacts/**/
+!artifacts/**/*.md
+
+# Claude Code session worktrees and local settings are never part of the paper
+.claude/
+
+# Per-install pointer (persistent secrets/data live outside the source tree).
+.townreporter-install.json
+
+# Development-only fallback for generated aggregate Stats reports.
+/.townreporter-data/
