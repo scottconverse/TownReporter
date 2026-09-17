@@ -601,11 +601,33 @@ export async function readStoryDocuments(
         },
       );
       let extracted = await extract();
-      while (retryingFailedExtraction && !extracted.complete) {
-        if (extracted.pagesRead < 1)
-          throw new Error("Document extraction stopped without retaining a completed page.");
+      /*
+        One request reads at most one 12-page extraction batch. A retry of a
+        failed extraction is not a license to finish the whole packet: before
+        this guard, the loop kept calling extract() while the result was
+        incomplete, so a large-packet retry could consume every remaining
+        batch — hours of provider calls — inside a single request. The
+        incomplete result below persists the durable checkpoint and asks for
+        another retry instead.
+      */
+      if (retryingFailedExtraction && !extracted.complete && extracted.pagesRead < 1)
+        throw new Error("Document extraction stopped without retaining a completed page.");
+      /*
+        When one batch leaves only a small remainder (< one batch), retry once
+        more so the editor does not need another click for the last few pages.
+        The worst case is still bounded well under two full batches.
+      */
+      const pagesTotalNow = extracted.pagesTotal ?? observedPagesTotal ?? null;
+      const remainingAfterBatch =
+        pagesTotalNow === null ? null : pagesTotalNow - checkpointedPages.length;
+      if (
+        retryingFailedExtraction &&
+        !extracted.complete &&
+        remainingAfterBatch !== null &&
+        remainingAfterBatch > 0 &&
+        remainingAfterBatch < OCR_BATCH_PAGE_LIMIT
+      )
         extracted = await extract();
-      }
       if (!extracted.complete || extracted.text === null) {
         const pagesTotal =
           extracted.pagesTotal ?? observedPagesTotal ?? extracted.pages ?? checkpointedPages.length;
