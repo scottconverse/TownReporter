@@ -33,9 +33,9 @@ installer source rather than assumed - `config.json`, `providers.json`,
 `migrate.log`, `app.out.log` and `app.err.log` are each created by
 `installer/Install.ps1` or `installer/Start.ps1`.
 
-This is documentation and automated-check evidence. **No fresh-machine human
-This is documentation and automated-check evidence. A Windows Sandbox attempt on 2026-09-17 reached the real installer but failed during dependency download with `Invoke-WebRequest` "Unable to connect to the remote server"; no result was produced. See [the sandbox attempt](../proofs/windows-sandbox-attempt-0651.md). **No fresh-machine human acceptance was performed.**
+A clean-data-root packaged install on 2026-09-17 extracted the exact candidate ZIP, provisioned Node.js 22.23.2 and PostgreSQL 17.11 on isolated ports 4388/15432, installed dependencies and Chromium, completed the production build and database setup, answered `/` with HTTP 200 and version 0.6.51 and `/desk` with HTTP 200, then stopped cleanly with persistent data retained. See [the clean-data-root proof](../proofs/windows-host-install-0651.md).
 
+A separate Windows Sandbox attempt reached the real installer but failed during dependency download with `Invoke-WebRequest` "Unable to connect to the remote server"; no result was produced. See [the sandbox attempt](../proofs/windows-sandbox-attempt-0651.md). **No fresh-machine human acceptance was performed.**
 ## Dark Desk run meter
 
 Three problems were reproduced and repaired against the run meter, using the
