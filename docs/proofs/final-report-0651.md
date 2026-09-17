@@ -1,5 +1,7 @@
 # TownReporter finishing directive — implementation report
 
+> **Provenance note:** Fine-grained history was consolidated into a single squash commit before publication; commit hashes cited below refer to the pre-squash local history.
+
 **Branch:** `fix/finish-townreporter-20260916` (local and unpushed; `git rev-list --count origin/main..HEAD` is the authoritative current distance)
 **Base:** `c43273702d159b63a405b0053679d22b6b236149` (v0.6.51)
 **Scope:** the eleven requirements in the finishing directive. Nothing below is a claim beyond the evidence named in its row.
