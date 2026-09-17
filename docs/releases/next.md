@@ -118,9 +118,9 @@ the 420-second wall at this provider's observed 10-90 seconds per call.
 
 ## Documentation corrections
 
-Two real defects were found and fixed. `docs/manual.md` listed
-`/desk/page-watches` in its route table; no such route exists - the page-watch
-panel is mounted inside `/desk/dark`. The same file described five job kinds
+Two real defects were found and fixed. `docs/manual.md` listed a page-watches URL
+in its route table that no route serves - the panel is mounted inside the Dark
+Desk page. The same file described five job kinds
 where `JobKind` defines nine; the missing four are now listed. Two guards were
 added: `scripts/docs-links.test.mjs` (43 files, 209 relative links, 0 missing)
 and `scripts/docs-routes.test.mjs` (28 routes, 27 documented paths, 0
