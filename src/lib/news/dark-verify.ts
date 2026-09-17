@@ -26,7 +26,7 @@ import {
   queryWithResearchWindow,
   type ResearchSnapshot,
 } from "./dark-preferences.ts";
-import { grokChat, parseJsonBlock, providerBudget, type EffectiveProviderChoice } from "./ai.ts";
+import { grokChat, parseJsonBlock, plannerModel, providerBudget, type EffectiveProviderChoice } from "./ai.ts";
 import type { ModelEffort, ProviderOverrides } from "./provider-registry.ts";
 import { searchWithFallback } from "./search-web.ts";
 import type { WebHit, SearchAttempt } from "./search-web.ts";
@@ -251,8 +251,15 @@ export async function verifyRunSignals(opts: {
     let text: string | null = null;
     const modelCall = opts.runBudget?.startModelCall({
       stage: `verification signal ${signalIndex + 1}`,
-      provider: opts.deps?.model ? "injected" : (opts.choice ?? "automatic"),
-      model: opts.deps?.model ? "injected" : (opts.choice ?? "provider-default"),
+      /*
+        Production verification runs through a failover callback, so testing
+        `deps.model` and calling every such call "injected" recorded live
+        provider work as a test double - runs 5 and 7 of 2026-09-16 both show
+        it. Name the editor's actual choice; only an unknown transport falls
+        back to "injected".
+      */
+      provider: opts.choice ?? "injected",
+      model: opts.choice ? plannerModel(opts.choice) || opts.choice : "injected",
     });
     if (opts.runBudget && !modelCall) {
       deferred += selected.length - signalIndex;

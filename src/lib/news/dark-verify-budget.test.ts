@@ -103,3 +103,35 @@ test("a search budget stop defers the untouched signals instead of failing them"
   assert.equal(out.unverified, 3);
   assert.equal(runBudget.stopReason, "search-limit");
 });
+
+test("a live-shaped verification names its provider instead of calling itself injected", async () => {
+  const userId = "verify-provider-label";
+  const newsroomId = 99;
+  const { investigationId, runId } = await seedSignals(userId, newsroomId, 1);
+
+  const runBudget = createDarkRunBudget({
+    elapsedMs: 600_000,
+    modelCalls: 10,
+    searches: 100,
+    documentReads: 100,
+  });
+
+  await verifyRunSignals({
+    userId,
+    newsroomId,
+    runId,
+    investigationId,
+    place: { city: "Longmont", state: "Colorado" },
+    preferences,
+    choice: "codex-luna",
+    runBudget,
+    // Production passes a failover-wrapped callback here, exactly like this.
+    deps: { search: async () => [], model: async () => null },
+  });
+
+  const call = runBudget.snapshot().calls[0];
+  assert.ok(call, "the verification call was recorded");
+  assert.notEqual(call!.provider, "injected", "a live provider call must not be logged as a test double");
+  assert.notEqual(call!.model, "injected", "a live provider call must name its model");
+  assert.equal(call!.provider, "codex-luna", "the recorded provider is the editor's choice");
+});
