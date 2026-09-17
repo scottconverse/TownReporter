@@ -259,7 +259,7 @@ if ($PSCmdlet.ShouldProcess("the app on port $port", "stop")) {
   foreach ($owner in $owners) {
     $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue
     if (-not $proc) { continue }
-    if ($proc.Name -ne 'node.exe' -or $proc.CommandLine -notlike '*.output/server/index.mjs*') {
+    if ($proc.Name -ne 'node.exe' -or -not (Test-TownReporterServerProcess -Process $proc -App $app)) {
       Die "Port $port is held by PID $owner ($($proc.Name)), which is not this app. Not touching it."
     }
     Say "stopping the app, PID $owner"

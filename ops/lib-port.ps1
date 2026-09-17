@@ -80,4 +80,22 @@ function Test-TownReporterPort {
   (Get-TownReporterPortOwner -Port $Port).Count -gt 0
 }
 
+<#
+  A process is this install's server only when it is node.exe and its command
+  line contains this exact checkout's built-server path. Normalize slashes
+  first because Windows reports the path with backslashes, while the old
+  promotion guard looked only for forward slashes.
+#>
+function Test-TownReporterServerProcess {
+  param(
+    [Parameter(Mandatory = $true)]$Process,
+    [Parameter(Mandatory = $true)][string]$App
+  )
+  if ($null -eq $Process -or $Process.Name -ne 'node.exe') { return $false }
+  $commandLine = [string]$Process.CommandLine
+  if (-not $commandLine) { return $false }
+  $normalized = $commandLine -replace '/', '\'
+  $expected = [IO.Path]::GetFullPath((Join-Path $App '.output\server\index.mjs'))
+  return $normalized.IndexOf($expected, [StringComparison]::OrdinalIgnoreCase) -ge 0
+}
 $port = Get-TownReporterPort

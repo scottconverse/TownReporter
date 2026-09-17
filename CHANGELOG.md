@@ -2,6 +2,10 @@
 
 Current release: **0.6.51**.
 
+## Unreleased
+
+- Fixes the Windows promotion guard so it recognizes this checkout's actual backslash `.output\server\index.mjs` command line while still refusing an unrelated Node process. The focused regression executes both cases. This fixes a defect observed during the v0.6.51 promotion; it does not assert a production promotion of this candidate.
+
 ## 0.6.51 — 2026-09-16
 
 This section records the source release. It does not assert a GitHub publication, production deployment, fresh packaged-install result, or live-model result.
