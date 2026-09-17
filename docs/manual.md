@@ -759,7 +759,9 @@ the owner under **Server → Invite an editor**.
 ## Jobs
 
 Anything that can take minutes is a row in `desk_jobs`, not a held-open request.
-Five kinds: `scan`, `draft`, `dark`, `editorial`, `brief`. The brief job refreshes
+Nine kinds: `scan`, `draft`, `reconcile`, `dark`, `editorial`, `brief`,
+`routine-notice`, `artifact-ocr` and `pull` - listed in [Job kinds](#job-kinds).
+The brief job refreshes
 an investigation's read-me-first summary without holding open the request.
 
 A job is claimed with a token and heartbeats while it runs. This is not
@@ -1120,6 +1122,10 @@ comment on each, is [`.env.example`](../.env.example).
 | `dark`      | Dark Desk — start, or Keep digging | minutes per round                                                    |
 | `brief`     | Refresh the investigation brief    | a model call to update the file's read-me-first summary              |
 | `editorial` | Opinion desk                       | Historical runs: 10–40 minutes; up to 45 minutes per pass by default |
+| `reconcile` | Story workspace — **Check draft against evidence** | a model call, or a few |
+| `pull`      | Reporting item — **Pull**          | mechanical web search and document extraction; no writing model |
+| `artifact-ocr` | Dark Desk — reading a retained PDF | page batches; a vision model call per batch |
+| `routine-notice` | Scheduler tick on a saved routine policy | deterministic; no model |
 
 ## Commands
 
