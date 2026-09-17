@@ -1840,6 +1840,13 @@ async function executeDarkRun(
     const dials = snapshot.dials;
     const budget = budgetFor(dials);
     const runBudget = darkRunBudget(dials, choice!, overrides, snapshot.preferences.verificationLimit ?? 6);
+    /*
+      Synthesis, the four-question review and the editor brief all draw on the
+      same meter as research, so the hop loop stops while the provider's own
+      reserve is still on it. Without this the run ends elapsed-time-limit
+      with zero eligible signals, which is honest but useless to an editor.
+    */
+    const researchReserveMs = providerBudget(choice ?? undefined, overrides).reserveMs;
     const saveUsage = (usage: DarkRunUsageSnapshot) =>
       persistDarkRunUsage(runId, newsroomId, usage, runBudget.stopReason);
     await saveUsage(runBudget.snapshot());
@@ -1866,6 +1873,7 @@ async function executeDarkRun(
           executionMode: snapshot.preferences.executionMode ?? "batch",
           actionLimit: snapshot.preferences.actionLimit ?? 6,
           runBudget,
+          researchReserveMs,
           onUsage: saveUsage,
           reasoningEffort: effortForChoice(remembered, opts.modelEffort ?? null),
         }),
@@ -2583,6 +2591,13 @@ export async function performDarkRound(job: DeskJob) {
     const dials = snapshot.dials;
     const budget = budgetFor(dials);
     const runBudget = darkRunBudget(dials, choice, overrides, snapshot.preferences.verificationLimit ?? 6);
+    /*
+      Synthesis, the four-question review and the editor brief all draw on the
+      same meter as research, so the hop loop stops while the provider's own
+      reserve is still on it. Without this the run ends elapsed-time-limit
+      with zero eligible signals, which is honest but useless to an editor.
+    */
+    const researchReserveMs = providerBudget(choice ?? undefined, overrides).reserveMs;
     const saveUsage = (usage: DarkRunUsageSnapshot) =>
       persistDarkRunUsage(runId, owned(context), usage, runBudget.stopReason);
     await saveUsage(runBudget.snapshot());
@@ -2604,6 +2619,7 @@ export async function performDarkRound(job: DeskJob) {
           executionMode: snapshot.preferences.executionMode ?? "batch",
           actionLimit: snapshot.preferences.actionLimit ?? 6,
           runBudget,
+          researchReserveMs,
           onUsage: saveUsage,
           onStage: (stage) => setJobStage(job.id, stage),
           reasoningEffort: effortForChoice(rememberedChoice, modelEffort),

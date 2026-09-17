@@ -283,6 +283,13 @@ export type ResearchLoopOptions = {
   actionChooser?: ResearchActionChooser;
   /** One whole-run meter shared by research, synthesis, verification, and brief writing. */
   runBudget?: DarkRunBudget;
+  /**
+   * Clock held back so synthesis, verification and the brief always get to run.
+   * Research stops while this much is still on the meter instead of spending
+   * the last seconds searching and reporting elapsed-time-limit with nothing
+   * written. Callers pass the provider reserveMs; see darkRunBudget().
+   */
+  researchReserveMs?: number;
   onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>;
   /** Existing desk-job stage bridge; failures here must not fail research. */
   onStage?: (stage: string) => Promise<unknown>;
@@ -2306,6 +2313,15 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   hopLoop: for (let hop = 0; hop < hopsBudget; hop++) {
     if (opts.runBudget?.remainingMs() === 0) {
       stopReason = opts.runBudget.stopReason ?? "elapsed-time-limit";
+      break;
+    }
+    /*
+      Leave the reserve to the stages that write something. Without this the
+      research loop eats the whole clock, the run ends "elapsed-time-limit",
+      and no signal is ever written - honest, but useless to an editor.
+      Breaking here keeps every finished hop and reports hop-limit instead.
+    */
+    if (opts.runBudget && opts.runBudget.remainingMs() <= (opts.researchReserveMs ?? 0)) {
       break;
     }
     await setStage(`Researching hop ${hop + 1}/${hopsBudget}`);
