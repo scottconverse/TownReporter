@@ -34,7 +34,7 @@ installer source rather than assumed - `config.json`, `providers.json`,
 `installer/Install.ps1` or `installer/Start.ps1`.
 
 This is documentation and automated-check evidence. **No fresh-machine human
-acceptance was performed.**
+This is documentation and automated-check evidence. A Windows Sandbox attempt on 2026-09-17 reached the real installer but failed during dependency download with `Invoke-WebRequest` "Unable to connect to the remote server"; no result was produced. See [the sandbox attempt](../proofs/windows-sandbox-attempt-0651.md). **No fresh-machine human acceptance was performed.**
 
 ## Dark Desk run meter
 
@@ -110,6 +110,10 @@ the 420-second wall at this provider's observed 10-90 seconds per call.
   reattached after a full reload, **Stop** made the checkpoint continuable,
   **Continue** lost no progress, and the run finished with four documents saved
   whose URL survived a second reload.
+- **Story evidence-check.** The isolated Story workspace uploaded a 100-byte meeting record, drafted with `codex-luna`, and ran **Check draft against evidence**. The check completed, validated the uploaded passage, loaded a checked version with one proposed change, and kept Keep/Restore/Publish as separate editor decisions. See [the proof](../proofs/story-evidence-check-live-0651.md). Limits: one small text document and one provider.
+- **Image-only PDF OCR.** A one-page image-only PDF was uploaded through the isolated Desk composer and recorded as **read · 1/1 parts read**, with 208 extracted characters retained. See [the proof](../proofs/image-pdf-ocr-live-0651.md). Limits: one synthetic page; it does not prove scanned-packet quality or that every OCR fact reaches the draft.
+- **Live provider recovery.** One explicit Claude Sonnet draft completed on the isolated build. A separate supplied-material draft requested an intentionally unreachable Custom API connection and completed on **Codex Terra**, with the workspace recording that the draft moved because the Custom API connection was unavailable. See [the second-provider proof](../proofs/live-second-provider-0651.md) and [the failover proof](../proofs/live-failover-0651.md). Limits: one forced connection-unavailable failure, not every mid-call failure class or provider pair.
+
 - **Corrections.** The live public corrections page was read without
   submitting: the form renders, its prepared link is
   `mailto:townreporter@gmail.com`, and the page states it has not sent
@@ -118,17 +122,17 @@ the 420-second wall at this provider's observed 10-90 seconds per call.
 
 ## Documentation corrections
 
-Two real defects were found and fixed. `docs/manual.md` listed a page-watches URL
+Several real defects were found and fixed. `docs/manual.md` listed a page-watches URL
 in its route table that no route serves - the panel is mounted inside the Dark
 Desk page. The same file described five job kinds
-where `JobKind` defines nine; the missing four are now listed. Two guards were
-added: `scripts/docs-links.test.mjs` (43 files, 209 relative links, 0 missing)
+where `JobKind` defines nine; the missing four are now listed. Operator guides now match the live Server panel labels and include Grok/custom-connection entries in the picker lists. Two guards were
+added: `scripts/docs-links.test.mjs` (48 files, 220 relative links, 0 missing)
 and `scripts/docs-routes.test.mjs` (28 routes, 27 documented paths, 0
 unresolved).
 
 ## Not asserted by this document
 
 No release, tag, GitHub publication, production deployment, promoted candidate,
-fresh-machine Windows acceptance, live cross-provider failover, live image-PDF
-OCR, live Story evidence-check, or email delivery is asserted here. Every claim
-above names the command or record behind it, and each carries its limit.
+completed fresh-machine Windows install, or email delivery is asserted here. The
+fresh-machine attempt is recorded as inconclusive. Every live result above names
+the record behind it, and each carries its limit.
