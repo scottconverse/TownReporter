@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
 | **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
-| **A model**                 | Every writing picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.     |
+| **A model**                 | Every writing picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku; Grok (SuperGrok); Local model; and saved custom connections.     |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 
@@ -30,7 +30,7 @@ network (`0.0.0.0:8080`) for phone/LAN testing.
 The **built** server (`npm start`, `.output/server/index.mjs`) is the one that
 honours `PORT` (default `3000`) and `HOST` (default every interface — set
 `HOST=127.0.0.1` when a tunnel or reverse proxy fronts it).
-The legacy operator scripts identify the paper by its IPv4 listener. The Windows
+The legacy operator scripts identify the paper by its owned IPv4 listener and verify the server command line before stopping it. The Windows
 package also refuses occupied ports and checks that Windows permits an exclusive
 loopback bind before starting.
 
