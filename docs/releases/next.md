@@ -16,3 +16,119 @@ Targeted evidence:
 - `node --test scripts/ops-scripts.test.mjs` passed 24/24.
 
 These checks prove the focused process classifier behavior. They do not prove that a new candidate has been promoted to production.
+
+## Windows installation
+
+The Windows guide now names the installer asset to download
+(`TownReporter-<version>-windows-x64.zip`) and tells the reader to stop if that
+asset is missing rather than using the source ZIP. It adds the first-run
+boundary (the first account owns the newsroom, there is no shared password and
+no reset flow), what the app needs before it can write, the public and desk
+addresses, and where data, logs and backups live.
+
+Targeted evidence: `node --test scripts/windows-installer.test.mjs` passed 6/6.
+The data-folder inventory the guide names was then checked against the packaged
+installer source rather than assumed - `config.json`, `providers.json`,
+`pgdata`, `initialize.log`, `postgres.log`, `dependencies.log`, `build.log`,
+`migrate.log`, `app.out.log` and `app.err.log` are each created by
+`installer/Install.ps1` or `installer/Start.ps1`.
+
+This is documentation and automated-check evidence. **No fresh-machine human
+acceptance was performed.**
+
+## Dark Desk run meter
+
+Three problems were reproduced and repaired against the run meter, using the
+same isolated newsroom throughout.
+
+1. Research consumed the whole wall clock. `darkRunBudget()` sized the run from
+   the provider's wall clock and the meter was checked only at hop boundaries,
+   so a five-hop round finished research at the wall and the signal desk never
+   ran - two runs stopped `elapsed-time-limit` with zero eligible signals.
+   Research now stops while the clock reserved for synthesis, verification and
+   the brief is still on the meter.
+2. A budget stop was counted as a verification failure. The adversarial review
+   added `failed += 1` when the meter, not the signal, stopped it. Those
+   signals are now counted as **deferred**; only an attempted signal with no
+   usable verdict, or one whose trail could not be saved, counts as failed.
+3. The hop's second model call could cross the reserve. A hop costs a planner
+   call and a read-selection call, so a hop that began with headroom could
+   finish below the reserve. The selector now yields the reserve and its
+   candidates fall back to the ordinary read queue.
+
+A fourth, separate defect was found in the run record itself: verification calls
+were logged `provider: "injected", model: "injected"` on live runs, because
+production passes a failover callback where the code assumed a test double. The
+record now names the editor's actual choice.
+
+Targeted evidence:
+
+- `src/lib/news/dark-research-reserve.test.ts` 4/4, including the RED cases
+  "research must not start a hop inside the reserve" (5 hops ran where 0 were
+  allowed) and "the selector must not run inside the reserve".
+- `src/lib/news/dark-verify-budget.test.ts` 3/3, including the RED case "a
+  live provider call must not be logged as a test double".
+- Neighbouring research and review suites 18/18 and 36/36; `npm run typecheck`
+  and `npm run build` passed.
+- Eight bounded live runs on an isolated database with `codex-luna`, including
+  the September 3-8 replay. Run 7 - the same newsroom, model and dig as run 5 -
+  finished **every** stage including the editor brief, which run 5 never
+  reached. Run 6 (the replay) stopped at `hop-limit` by design with 4/4
+  verifications attempted, 0 failed, 0 deferred. Records:
+  `docs/proofs/dark-desk-run-budget-0651.md`.
+
+**Limits.** One newsroom and one model, so no cross-model claim. Signals are
+leads, not findings. The reserve is a check *before* a call rather than a cap
+*on* it, so a call that starts just above the line can still cross it; run 8
+showed a round can still end on the clock with the brief attempted and timing
+out. At dig 4/10 with a verification limit of 6 the configured work can exceed
+the 420-second wall at this provider's observed 10-90 seconds per call.
+**Resizing the whole-run clock is a product decision and is not made here.**
+
+## Editorial and intake
+
+- **Queue redraft.** A completed or failed batch now returns its exact persisted
+  `modelChoice` and `modelEffort` and rehydrates the picker once, so changing
+  from a local pick to a cloud one cannot strand **Redraft**.
+  `draft-batch.test.ts` 24/24 (RED first: the stored choice returned
+  undefined), `draft-batch-result-render.test.mjs` 4/4.
+- **OCR Automatic.** Automatic document transcription derived a bespoke Haiku
+  default instead of the shared ladder's Claude Sonnet rung. It now reads the
+  registry. OCR routing and suite 34/34, model pickers 16/16, model-choice and
+  registry 50/50.
+- **Long PDF packets.** Completed pages were discarded when a later page
+  failed, so a 15-page scan could never finish: every retry restarted at page
+  one. Pages are now checkpointed individually (`extraction_pages`, migration
+  0063) and a retry resumes at the first unread page.
+  `story-documents.test.ts` 6/6, including a 15-page packet that resumes at
+  page 13 without rereading. Failed or oversized pages stay explicitly unread.
+
+## Verification of existing paths
+
+- **Pull.** The repository's browser walk ran against a fresh in-memory
+  database: the mechanical-stage notice appeared, counters were live, the job
+  reattached after a full reload, **Stop** made the checkpoint continuable,
+  **Continue** lost no progress, and the run finished with four documents saved
+  whose URL survived a second reload.
+- **Corrections.** The live public corrections page was read without
+  submitting: the form renders, its prepared link is
+  `mailto:townreporter@gmail.com`, and the page states it has not sent
+  anything. **Delivery is not proved** - a `mailto:` hands off to the reader's
+  own mail client.
+
+## Documentation corrections
+
+Two real defects were found and fixed. `docs/manual.md` listed
+`/desk/page-watches` in its route table; no such route exists - the page-watch
+panel is mounted inside `/desk/dark`. The same file described five job kinds
+where `JobKind` defines nine; the missing four are now listed. Two guards were
+added: `scripts/docs-links.test.mjs` (43 files, 209 relative links, 0 missing)
+and `scripts/docs-routes.test.mjs` (28 routes, 27 documented paths, 0
+unresolved).
+
+## Not asserted by this document
+
+No release, tag, GitHub publication, production deployment, promoted candidate,
+fresh-machine Windows acceptance, live cross-provider failover, live image-PDF
+OCR, live Story evidence-check, or email delivery is asserted here. Every claim
+above names the command or record behind it, and each carries its limit.
