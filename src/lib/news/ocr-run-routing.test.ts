@@ -271,6 +271,55 @@ describe("ordinary public-document OCR model routing", () => {
     }
   });
 
+  it("uses the shared Automatic ladder's Claude Sonnet rung for OCR fallback", async () => {
+    const priorCodex = process.env.TOWNREPORTER_CODEX;
+    const priorClaude = process.env.TOWNREPORTER_CLAUDE_CODE;
+    const priorKey = process.env.ANTHROPIC_API_KEY;
+    const priorModel = process.env.ANTHROPIC_MODEL;
+    const priorTerraModel = process.env.TOWNREPORTER_CODEX_TERRA_MODEL;
+    try {
+      delete process.env.TOWNREPORTER_CODEX;
+      delete process.env.TOWNREPORTER_CLAUDE_CODE;
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.ANTHROPIC_MODEL;
+      delete process.env.TOWNREPORTER_CODEX_TERRA_MODEL;
+
+      const selected: Array<{ transport: string; model: string }> = [];
+      const result = await productionOcr(singleRenderedPdfFixture(), {
+        provider: "auto",
+        adapters: {
+          codex: async (_image, _timeoutMs, selectedChoice) => {
+            assert.ok(selectedChoice);
+            selected.push({ transport: "codex", model: selectedChoice.model });
+            throw new Error("Codex request timed out after 90s, 0 bytes out");
+          },
+          "claude-code": async (_image, _timeoutMs, selectedChoice) => {
+            assert.ok(selectedChoice);
+            selected.push({ transport: "claude-code", model: selectedChoice.model });
+            return OCR_TEXT;
+          },
+        },
+      });
+
+      assert.match(result.text, /water contract was approved/);
+      assert.deepEqual(selected, [
+        { transport: "codex", model: "gpt-5.6-terra" },
+        { transport: "claude-code", model: "sonnet" },
+      ]);
+    } finally {
+      if (priorCodex === undefined) delete process.env.TOWNREPORTER_CODEX;
+      else process.env.TOWNREPORTER_CODEX = priorCodex;
+      if (priorClaude === undefined) delete process.env.TOWNREPORTER_CLAUDE_CODE;
+      else process.env.TOWNREPORTER_CLAUDE_CODE = priorClaude;
+      if (priorKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = priorKey;
+      if (priorModel === undefined) delete process.env.ANTHROPIC_MODEL;
+      else process.env.ANTHROPIC_MODEL = priorModel;
+      if (priorTerraModel === undefined) delete process.env.TOWNREPORTER_CODEX_TERRA_MODEL;
+      else process.env.TOWNREPORTER_CODEX_TERRA_MODEL = priorTerraModel;
+    }
+  });
+
   it("routes explicit Grok OCR to a verified vision fallback", async () => {
     let grokCalls = 0;
     let codexCalls = 0;
