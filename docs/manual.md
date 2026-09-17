@@ -1083,8 +1083,7 @@ flowchart TB
 | `/desk/story/:id`                            | The workbench, opened by lead                                                              |
 | `/desk/story/draft/:id`                      | The editorial workbench, opened by draft — an editorial has no lead                        |
 | `/desk/published`                            | Live stories and corrections                                                               |
-| `/desk/dark`                                 | Dark Desk. Investigates, never prints.                                                     |
-| `/desk/page-watches`                         | Manual investigative page watches and capture history                                      |
+| `/desk/dark`                                 | Dark Desk. Investigates, never prints. Manual page watches and capture history are on this page. |
 | `/desk/legal-removals`                       | Owner-only legal-removal cases, retained copies and backup attestations                    |
 | `/desk/follow-ups`                           | Reporting requests and due dates                                                           |
 | `/desk/stats`                                | Newsroom activity and coverage                                                             |
