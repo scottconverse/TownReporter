@@ -225,9 +225,15 @@ export function PaperShell({
                 <Link to="/about">About us</Link>
                 <Link to="/how-we-report">How we report</Link>
                 <Link to="/corrections">Corrections</Link>
-                <Link to="/desk">
+                {/*
+                  Boundary entry: leave the reader app with a document
+                  navigation. An in-app route transition can leave a public
+                  surface mounted under /desk; a fresh load lets the desk gate
+                  decide from the server-rendered route.
+                */}
+                <a href="/desk">
                   Editor’s desk <ArrowRight aria-hidden />
-                </Link>
+                </a>
                 <AuthSlot />
               </div>
             </div>
@@ -282,9 +288,14 @@ function AuthSlot() {
   if (user) {
     return (
       <span className="flex items-center gap-2 normal-case tracking-normal">
-        <Link to="/desk" className="btn small">
+        {/*
+          The signed-in masthead is still a reader boundary. Use a document
+          navigation so /desk is decided by a fresh server-rendered route
+          rather than an in-app transition that can retain public content.
+        */}
+        <a href="/desk" className="btn small">
           Desk
-        </Link>
+        </a>
         <SignedIn>
           <UserButton />
         </SignedIn>

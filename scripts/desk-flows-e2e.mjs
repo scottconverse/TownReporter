@@ -77,6 +77,19 @@ async function assertDeskRoute(label) {
   if (problems.length) throw new Error(`${label}: ${problems.join("; ")}`);
 }
 
+/*
+  Boundary links must leave the current document. An in-app Link can change
+  the URL while the previous public or error surface remains mounted; these
+  checks require the desk landmark to arrive through a fresh navigation.
+*/
+async function assertBoundaryDeskLink(label, locator) {
+  const before = page.url();
+  await locator.click();
+  await page.waitForURL(`${base}/desk`, { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await assertDeskRoute(label);
+  if (before === page.url()) throw new Error(`${label}: URL did not change`);
+}
+
 let page;
 const done = [];
 
@@ -205,6 +218,27 @@ async function main() {
   await page.waitForURL(`${base}/desk`, { timeout: 20_000 });
   await assertDeskRoute("Editor's desk click from the public home");
   step("Editor's desk click from the public home renders the editor desk");
+
+  await page.goto(`${base}/`, { waitUntil: "networkidle" });
+  await assertBoundaryDeskLink(
+    "public footer Editor's desk link",
+    page.getByRole("link", { name: /Editor[’']s desk/i }).last(),
+  );
+  step("public footer Editor's desk link performs a fresh document navigation");
+
+  await page.goto(`${base}/`, { waitUntil: "networkidle" });
+  await assertBoundaryDeskLink(
+    "signed-in masthead Desk link",
+    page.getByRole("link", { name: "Desk", exact: true }),
+  );
+  step("signed-in masthead Desk link performs a fresh document navigation");
+
+  await page.goto(`${base}/definitely-not-a-real-route-${stamp}`, { waitUntil: "networkidle" });
+  await assertBoundaryDeskLink(
+    "error-page Editor desk link",
+    page.getByRole("link", { name: "Editor desk", exact: true }),
+  );
+  step("error-page Editor desk link performs a fresh document navigation");
 
   // ── Desk landing page: Write a story files a lead from a link + an idea ────
   const writeStoryHeadline = `The planning board moved the Kimbark hearing to Oct. 2 ${stamp}`;
