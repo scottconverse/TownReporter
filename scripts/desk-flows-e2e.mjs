@@ -127,15 +127,20 @@ async function main() {
     puzzle rather than a diagnosis.
   */
   const consoleErrors = [];
-  const note = (text) => {
-    // The boundary test deliberately visits a nonexistent route; the 404 it
-    // produces is the error surface under test, not an application failure.
-    if (/Failed to load resource.*404/i.test(text)) return;
+  const deliberateErrorRoute = `${base}/definitely-not-a-real-route-${stamp}`;
+  const note = (text, resourceUrl = "") => {
+    // Only the deliberate nonexistent-route navigation may produce a 404.
+    // Every other missing resource remains an application failure, including
+    // a JS chunk, API route, stylesheet, or image anywhere else in the walk.
+    if (resourceUrl.startsWith(deliberateErrorRoute)) return;
     consoleErrors.push(`[after: ${done[done.length - 1] ?? "start"} | ${page.url()}] ${text}`);
   };
-  page.on("pageerror", (e) => note(String(e.message ?? e).slice(0, 200)));
+  page.on("pageerror", (e) => note(String(e.message ?? e).slice(0, 200), page.url()));
   page.on("console", (m) => {
-    if (m.type() === "error") note(m.text().slice(0, 200));
+    if (m.type() === "error") {
+      const resourceUrl = m.location()?.url ?? "";
+      note(m.text().slice(0, 200), resourceUrl);
+    }
   });
 
   console.log(`desk flows: ${base}`);

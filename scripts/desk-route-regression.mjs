@@ -40,7 +40,6 @@ page.on("requestfailed", (r) =>
   errors.push(`reqfail: ${r.url().slice(0, 160)} :: ${r.failure()?.errorText ?? ""}`),
 );
 
-const PUBLIC_HERO = "Independent. Local. Accountable.";
 const DESK_HOME = "A clear desk. A good story.";
 
 async function assertDeskRendered(label) {
