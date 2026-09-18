@@ -215,7 +215,14 @@ describe("owner-only", () => {
 
 describe("the migration and the PGLite ensure agree", () => {
   it("declares the same columns in both places", () => {
-    const migration = readFileSync(join(ROOT, "migrations/0027_provider_logins.sql"), "utf8");
+    const migration = [
+      readFileSync(join(ROOT, "migrations/0027_provider_logins.sql"), "utf8"),
+      readFileSync(join(ROOT, "migrations/0064_provider_login_supersession.sql"), "utf8"),
+    ].join("\n");
+    const supersessionMigration = readFileSync(
+      join(ROOT, "migrations/0064_provider_login_supersession.sql"),
+      "utf8",
+    );
     const runtime = readFileSync(join(ROOT, "src/lib/news/provider-login.server.ts"), "utf8");
     for (const column of [
       "newsroom_id",
@@ -228,12 +235,19 @@ describe("the migration and the PGLite ensure agree", () => {
       "started_at",
       "updated_at",
       "finished_at",
+      "supersedes_login_id",
     ]) {
       assert.match(migration, new RegExp(`\\b${column}\\b`), `migration lacks ${column}`);
       assert.match(runtime, new RegExp(`\\b${column}\\b`), `ensure lacks ${column}`);
     }
     assert.match(migration, /provider_logins_open_idx/);
     assert.match(runtime, /provider_logins_open_idx/);
+    assert.match(
+      supersessionMigration,
+      /supersedes_login_id integer references provider_logins\(id\)/,
+    );
+    assert.match(supersessionMigration, /provider_logins_supersedes_login_id_key/);
+    assert.match(runtime, /provider_logins_supersedes_login_id_key/);
   });
 });
 
@@ -371,16 +385,17 @@ describe("the sign-in state machine, driven by a fake CLI", () => {
   });
 
   it("a successful signed-in probe supersedes an older failed-login record", async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'tr-supersede-'));
     const sql = await getSql();
     await ensureProviderLoginsSchema();
+    const originalDetail =
+      "Error loading configuration: failed to parse model_catalog_json";
     const inserted = await sql.query<{ id: number }>(
-      "insert into provider_logins (newsroom_id, provider, status, detail, finished_at) values ($1, $2, 'failed', 'Error loading configuration: failed to parse model_catalog_json', now()) returning id",
-      [NEWSROOM, "claude"],
+      "insert into provider_logins (newsroom_id, provider, status, detail, finished_at) values ($1, $2, 'failed', $3, now()) returning id",
+      [NEWSROOM, "claude", originalDetail],
     );
     const failedId = inserted[0]!.id;
 
-    // The fake CLI reports signed in, so the status read supersedes the failure.
+    // The fake CLI reports signed in, so the status read resolves the failure.
     const restore = withEnv({
       CLAUDE_CLI_PATH: FAKE_CLAUDE,
       FAKE_CLAUDE_SIGNED_IN: "1",
@@ -389,19 +404,51 @@ describe("the sign-in state machine, driven by a fake CLI", () => {
     resetClaudeCliCache();
     try {
       assert.equal((await probeClaudeCode()).ok, true);
+
       const statuses = await providerStatuses(NEWSROOM);
       const claude = statuses.find((s) => s.provider === "claude");
       assert.ok(claude?.signedIn, "the probe says signed in");
+      const firstResolution = claude.login;
+      assert.ok(firstResolution, "providerStatuses returns a login row");
+      assert.notEqual(firstResolution.id, failedId);
+      assert.equal(firstResolution.status, "done");
+      assert.equal(firstResolution.supersedes_login_id, failedId);
+      assert.match(
+        firstResolution.detail,
+        /^Signed in successfully; supersedes failed attempt #\d+\.$/,
+      );
 
-      // A resolved failure is history: the row stays reviewable, never deleted.
-      const row = await getProviderLogin(failedId, NEWSROOM);
-      assert.equal(row?.status, "done");
-      assert.equal(row?.detail, "");
-      const rows = await sql.query<{ id: number }>(
-        "select id from provider_logins where id = $1",
+      // The failed attempt remains byte-for-byte intact as reviewable history.
+      const original = await getProviderLogin(failedId, NEWSROOM);
+      assert.equal(original?.status, "failed");
+      assert.equal(original?.detail, originalDetail);
+      assert.equal(original?.supersedes_login_id, null);
+
+      const resolutions = await sql.query<{
+        id: number;
+        status: string;
+        detail: string;
+        supersedes_login_id: number | null;
+      }>(
+        "select id, status, detail, supersedes_login_id from provider_logins where supersedes_login_id = $1",
         [failedId],
       );
-      assert.equal(rows.length, 1);
+      assert.equal(resolutions.length, 1, "one failed row has at most one resolution");
+      const resolution = resolutions[0]!;
+      assert.equal(resolution.id, firstResolution.id);
+      assert.equal(resolution.status, "done");
+      assert.equal(resolution.supersedes_login_id, failedId);
+      assert.ok(resolution.detail.trim().length > 0, "resolution detail is meaningful");
+
+      const secondStatuses = await providerStatuses(NEWSROOM);
+      const secondResolution = secondStatuses.find((s) => s.provider === "claude")?.login;
+      assert.equal(secondResolution?.id, firstResolution.id);
+
+      const count = await sql.query<{ count: number }>(
+        "select count(*)::int as count from provider_logins where supersedes_login_id = $1",
+        [failedId],
+      );
+      assert.equal(count[0]!.count, 1, "a second status read inserts no resolution");
     } finally {
       restore();
       resetClaudeCliCache();

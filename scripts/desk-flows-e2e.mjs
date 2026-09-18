@@ -58,6 +58,25 @@ async function assertSharedModelPicker(picker, expectedValue, surface) {
   }
 }
 
+async function assertDeskRoute(label) {
+  // The editor desk is server-rendered behind an auth/query gate. Wait for the
+  // landmark to exist before reading the whole page, so a legitimately slow
+  // route transition is not misreported as the public home still being mounted.
+  await page.getByRole("heading", { name: "A clear desk. A good story.", exact: true }).waitFor({ timeout: 20_000 });
+  const visible = (await page.locator("body").innerText()).replace(/\s+/g, " ");
+  const problems = [];
+  if (page.url().replace(/\/$/, "") !== `${base}/desk`) {
+    problems.push(`URL is ${page.url()}, expected ${base}/desk`);
+  }
+  if (!visible.includes("A clear desk. A good story.")) {
+    problems.push("editor desk home landmark missing");
+  }
+  if (/Independent\.\s*Local\.\s*Accountable\./.test(visible)) {
+    problems.push("public homepage hero rendered under /desk");
+  }
+  if (problems.length) throw new Error(`${label}: ${problems.join("; ")}`);
+}
+
 let page;
 const done = [];
 
@@ -175,6 +194,17 @@ async function main() {
   } else {
     step("Opinion refused up front, so nothing was submitted");
   }
+
+  // ── /desk routing: hard load and public-home click both reach the editor ──
+  await page.goto(`${base}/desk`, { waitUntil: "networkidle" });
+  await assertDeskRoute("hard load of /desk");
+  step("hard load of /desk renders the editor desk, not the public hero");
+
+  await page.goto(`${base}/`, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: /Editor[’']s desk/i }).first().click();
+  await page.waitForURL(`${base}/desk`, { timeout: 20_000 });
+  await assertDeskRoute("Editor's desk click from the public home");
+  step("Editor's desk click from the public home renders the editor desk");
 
   // ── Desk landing page: Write a story files a lead from a link + an idea ────
   const writeStoryHeadline = `The planning board moved the Kimbark hearing to Oct. 2 ${stamp}`;

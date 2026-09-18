@@ -32,7 +32,7 @@
  * MUST keep the `.server` suffix and be reached by dynamic import only.
  */
 import { spawn } from "node:child_process";
-import { getSql } from "../db.ts";
+import { getSql, withTransaction, type Sql } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { spawnPlan } from "./cli-spawn.server.ts";
 
@@ -61,6 +61,8 @@ export type ProviderLogin = {
   started_at: string;
   updated_at: string;
   finished_at: string | null;
+  /** The failed attempt this row resolves, if any. */
+  supersedes_login_id: number | null;
   /** Seconds left before this attempt is abandoned. Computed, not stored. */
   expiresInSeconds: number;
 };
@@ -193,8 +195,18 @@ export async function ensureProviderLoginsSchema() {
       pid integer,
       started_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
-      finished_at timestamptz
+      finished_at timestamptz,
+      supersedes_login_id integer references provider_logins(id)
     )
+  `);
+  await sql.query(`
+    alter table provider_logins
+      add column if not exists supersedes_login_id integer references provider_logins(id)
+  `);
+  await sql.query(`
+    create unique index if not exists provider_logins_supersedes_login_id_key
+      on provider_logins (supersedes_login_id)
+      where supersedes_login_id is not null
   `);
   await sql.query(`
     create index if not exists provider_logins_open_idx
@@ -262,7 +274,7 @@ function shape(row: Row): ProviderLogin {
 }
 
 const COLUMNS = `id, newsroom_id, provider, status, url, code, detail, pid,
-  started_at, updated_at, finished_at`;
+  started_at, updated_at, finished_at, supersedes_login_id`;
 
 export async function getProviderLogin(
   id: number,
@@ -281,6 +293,72 @@ export async function getProviderLogin(
 
 
 
+async function readLatest(
+  sql: Sql,
+  provider: ProviderId,
+  newsroomId: number,
+): Promise<ProviderLogin | null> {
+  const rows = await sql.query<Row>(
+    `select ${COLUMNS} from provider_logins
+     where newsroom_id = $1 and provider = $2 order by id desc limit 1`,
+    [newsroomId, provider],
+  );
+  return rows[0] ? shape(rows[0]) : null;
+}
+
+async function readResolution(sql: Sql, failedId: number): Promise<ProviderLogin | null> {
+  const rows = await sql.query<Row>(
+    `select ${COLUMNS} from provider_logins
+     where supersedes_login_id = $1 order by id desc limit 1`,
+    [failedId],
+  );
+  return rows[0] ? shape(rows[0]) : null;
+}
+
+/**
+ * Record a distinct resolution for a failed row without changing that row.
+ *
+ * The failed row is locked while the decision is made so two requests cannot
+ * both turn the same failure into history. The partial unique index is the
+ * final guard if a write still races; in that case the existing resolution is
+ * read back and returned rather than creating a duplicate.
+ */
+async function resolveFailedLogin(
+  failedId: number,
+  provider: ProviderId,
+  newsroomId: number,
+): Promise<ProviderLogin | null> {
+  return withTransaction(async (sql) => {
+    const failed = await sql.query<Row>(
+      `select ${COLUMNS} from provider_logins
+       where id = $1 and newsroom_id = $2 and provider = $3 and status = 'failed'
+       for update`,
+      [failedId, newsroomId, provider],
+    );
+    if (!failed[0]) {
+      return (await readResolution(sql, failedId)) ?? (await readLatest(sql, provider, newsroomId));
+    }
+
+    const existing = await readResolution(sql, failedId);
+    if (existing) return existing;
+
+    const detail = `Signed in successfully; supersedes failed attempt #${failedId}.`;
+    const inserted = await sql.query<Row>(
+      `insert into provider_logins
+         (newsroom_id, provider, status, detail, supersedes_login_id, finished_at)
+       values ($1, $2, 'done', $3, $4, now())
+       on conflict do nothing
+       returning ${COLUMNS}`,
+      [newsroomId, provider, detail, failedId],
+    );
+    if (inserted[0]) return shape(inserted[0]);
+
+    const raced = await readResolution(sql, failedId);
+    if (raced) return raced;
+    throw new Error(`Could not create resolution for provider login #${failedId}.`);
+  });
+}
+
 /**
  * The latest login record, as the desk should show it right now.
  *
@@ -289,27 +367,24 @@ export async function getProviderLogin(
  * 2026-09-17 Codex catalog repair: the CLI signed in and its live test
  * answered, but the Server page kept printing the stale configuration error
  * because the newest row was still the failure. Rather than deleting or
- * rewriting that row, the failure stays in the table for review, and the
- * desk surfaces it only until the provider actually signs in again.
+ * rewriting that row, the failure stays in the table for review and a
+ * distinct resolution row becomes the provider's current verdict.
  */
 export async function supersedeResolvedLogin(
   provider: ProviderId,
+  newsroomId: number,
+  signedIn: boolean,
+): Promise<ProviderLogin | null>;
+export async function supersedeResolvedLogin(
+  provider: ProviderId,
   newsroomId: number = DEFAULT_NEWSROOM_ID,
+  signedIn = false,
 ): Promise<ProviderLogin | null> {
   await ensureProviderLoginsSchema();
   const sql = await getSql();
-  const rows = await sql.query<Row>(
-    `select ${COLUMNS} from provider_logins
-     where newsroom_id = $1 and provider = $2 order by id desc limit 1`,
-    [newsroomId, provider],
-  );
-  const latest = rows[0] ? shape(rows[0]) : null;
-  if (!latest || latest.status !== "failed") return latest;
-  if (await probeProviderLogin(provider)) {
-    await patch(latest.id, { status: "done", detail: "" }, true);
-    return getProviderLogin(latest.id, newsroomId);
-  }
-  return latest;
+  const latest = await readLatest(sql, provider, newsroomId);
+  if (!latest || latest.status !== "failed" || !signedIn) return latest;
+  return resolveFailedLogin(latest.id, provider, newsroomId);
 }
 
 export async function latestProviderLogin(
@@ -318,12 +393,7 @@ export async function latestProviderLogin(
 ): Promise<ProviderLogin | null> {
   await ensureProviderLoginsSchema();
   const sql = await getSql();
-  const rows = await sql.query<Row>(
-    `select ${COLUMNS} from provider_logins
-     where newsroom_id = $1 and provider = $2 order by id desc limit 1`,
-    [newsroomId, provider],
-  );
-  return rows[0] ? shape(rows[0]) : null;
+  return readLatest(sql, provider, newsroomId);
 }
 
 async function patch(id: number, fields: Record<string, unknown>, finished = false) {
@@ -539,11 +609,17 @@ export async function startProviderLogin(
     void (async () => {
       // The CLI exiting is not the answer; being signed in afterwards is.
       const signedIn = await probeProviderLogin(provider);
+      const current = await getProviderLogin(id, newsroomId);
       if (signedIn) {
-        await patch(id, { status: "done", detail: "" }, true);
+        if (current?.status === "failed") {
+          await resolveFailedLogin(current.id, provider, newsroomId);
+          return;
+        }
+        if (current && OPEN.includes(current.status)) {
+          await patch(id, { status: "done", detail: "" }, true);
+        }
         return;
       }
-      const current = await getProviderLogin(id, newsroomId);
       // Cancel and expiry already wrote their own verdict; do not overwrite it.
       if (current && !OPEN.includes(current.status)) return;
       const said = lastLine(stderr) || lastLine(stdout);
@@ -767,7 +843,7 @@ export async function providerStatuses(
       login: off
         ? null
         : signedIn
-          ? await supersedeResolvedLogin(provider, newsroomId)
+          ? await supersedeResolvedLogin(provider, newsroomId, signedIn)
           : await latestProviderLogin(provider, newsroomId),
     });
   }

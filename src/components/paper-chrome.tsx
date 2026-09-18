@@ -109,9 +109,16 @@ export function Masthead() {
             <Link to="/about" className="textlink about-newsroom">
               About the newsroom <ArrowRight aria-hidden />
             </Link>
-            <Link to="/desk" className="btn desk-entry">
+            {/*
+              The public-home desk entry deliberately performs a document
+              navigation. An in-app transition can change the URL to /desk
+              while the public home remains mounted, which is the reported
+              regression this path must prevent. A fresh document load lets
+              the /desk route gate decide from the server-rendered route.
+            */}
+            <a href="/desk" className="btn desk-entry">
               Editor’s desk <ArrowRight aria-hidden />
-            </Link>
+            </a>
           </div>
         </div>
       </div>
