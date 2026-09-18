@@ -63,6 +63,13 @@ if (probe.ok) {
   });
 }
 
+/*
+  This proves the revision-conflict behavior. It cannot deterministically
+  force the old session-lock implementation onto different pooled
+  connections; that timing luck was the gap. The implementation now uses a
+  transaction-scoped lock on the same transaction handle as the DDL, which
+  cannot leak across pool turnover by construction.
+*/
 test(
   "real PostgreSQL serializes same-revision creation to one commit and one explicit conflict",
   { skip, timeout: 20_000 },

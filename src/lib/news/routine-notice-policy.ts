@@ -96,19 +96,24 @@ const DDL = [
   `create index if not exists routine_notice_policy_changes_room_idx on routine_notice_policy_changes(newsroom_id,id desc)`,
 ];
 export async function ensureRoutineNoticePolicySchema() {
-  const sql = await getSql();
   /*
     Serialize this bootstrap on PostgreSQL. Two first saves can otherwise run
     the same CREATE TABLE statements concurrently; PostgreSQL's pg_type
     catalog can then raise a duplicate-key error before either save reaches
     the revision conflict it is meant to test.
+
+    Use a TRANSACTION-scoped advisory lock, and run the DDL on the same
+    transaction handle. getSql() is a pool: separate session-lock and DDL
+    calls can land on different connections, and an unlock on the wrong
+    pooled connection leaves the session lock held by an idle connection.
+    pg_advisory_xact_lock is bound to this transaction's one connection and
+    releases automatically at COMMIT or ROLLBACK, so pool turnover cannot
+    leak it.
   */
-  await sql.query("select pg_advisory_lock(952052)");
-  try {
-    await ensureSchemaOnce(sql, "routine-notice-policy-0052", DDL);
-  } finally {
-    await sql.query("select pg_advisory_unlock(952052)");
-  }
+  await withTransaction(async (tx) => {
+    await tx.query("select pg_advisory_xact_lock(952052)");
+    await ensureSchemaOnce(tx, "routine-notice-policy-0052", DDL);
+  });
 }
 
 function clean(raw: unknown): SaveRoutineNoticePolicyInput {
