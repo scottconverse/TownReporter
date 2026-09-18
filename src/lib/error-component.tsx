@@ -42,9 +42,14 @@ export function AppNotFound() {
           <Link to="/" className={inkSolid}>
             Open the paper
           </Link>
-          <Link to="/desk" className={inkGhost}>
+          {/*
+            The error surface is a boundary: use a document navigation so
+            /desk starts from a fresh server-rendered route instead of an
+            in-app transition after the error state.
+          */}
+          <a href="/desk" className={inkGhost}>
             Editor desk
-          </Link>
+          </a>
         </div>
       </div>
     </main>
