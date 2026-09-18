@@ -29,7 +29,7 @@ const code = (rel) => read(rel).replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
 test("the clock is static, relative, and driven by the right two functions", () => {
   const src = read("src/lib/news/unattended-scheduler.ts");
   assert.match(src, /^import \{ tickAllDueMonitors \} from "\.\/monitors-cron\.ts";/m);
-  assert.match(src, /^import \{ drainQueuedJobs \} from "\.\/jobs\.ts";/m);
+  assert.match(src, /^import \{ drainQueuedJobs, reattachDurableJobsOnStartup \} from "\.\/jobs\.ts";/m);
   // No dynamic imports and no "@/" alias -- each produced a broken build.
   assert.doesNotMatch(code("src/lib/news/unattended-scheduler.ts"), /import\(/);
   assert.doesNotMatch(code("src/lib/news/unattended-scheduler.ts"), /"@\//);
