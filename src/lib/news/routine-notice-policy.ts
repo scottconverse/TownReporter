@@ -97,7 +97,18 @@ const DDL = [
 ];
 export async function ensureRoutineNoticePolicySchema() {
   const sql = await getSql();
-  await ensureSchemaOnce(sql, "routine-notice-policy-0052", DDL);
+  /*
+    Serialize this bootstrap on PostgreSQL. Two first saves can otherwise run
+    the same CREATE TABLE statements concurrently; PostgreSQL's pg_type
+    catalog can then raise a duplicate-key error before either save reaches
+    the revision conflict it is meant to test.
+  */
+  await sql.query("select pg_advisory_lock(952052)");
+  try {
+    await ensureSchemaOnce(sql, "routine-notice-policy-0052", DDL);
+  } finally {
+    await sql.query("select pg_advisory_unlock(952052)");
+  }
 }
 
 function clean(raw: unknown): SaveRoutineNoticePolicyInput {
