@@ -90,7 +90,7 @@ function DeskHome() {
     queryKey: ["scans"],
     queryFn: () => listScans(),
     refetchInterval: (q) => {
-      const row = q.state.data?.[0];
+      const row = q.state.data?.rows?.[0];
       if (row && !row.finished_at && !row.error) return 2000;
       return false;
     },
@@ -260,7 +260,7 @@ function DeskHome() {
   const proposed = src.filter((s) => s.status === "proposed");
   const officialFail = accepted.filter((s) => s.last_error && sourceErrorKind(s) === "official");
   const flakyFail = accepted.filter((s) => s.last_error && sourceErrorKind(s) === "flaky");
-  const last = scans.data?.[0];
+  const last = scans.data?.rows?.[0];
   const scanning = scan.isPending || Boolean(last && !last.finished_at && !last.error);
   const invs = investigations.data ?? [];
   const onDesk = invs.filter((r) => pileForStatus(r.status) === "desk");

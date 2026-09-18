@@ -5,6 +5,7 @@ import {
 } from "./source-seeds.server.ts";
 import { selectedScanSources } from "./section-types.ts";
 import { scanSourceExcerpt } from "./scan-source-excerpt.ts";
+import { buildScanBatches, mergeScanBatchResults } from "./scan-batches.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
@@ -460,15 +461,24 @@ export const grokStatus = createServerFn({ method: "GET" })
 
 export const listScans = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
+  .validator((input: { limit?: number; offset?: number } | undefined) => {
+    const limit = Math.min(Math.max(Math.trunc(Number(input?.limit ?? 12)) || 12, 1), 50);
+    const offset = Math.max(Math.trunc(Number(input?.offset ?? 0)) || 0, 0);
+    return { limit, offset };
+  })
+  .handler(async ({ context, data }) => {
     kickJobs();
     const sql = await getSql();
+    const { limit, offset } = data;
     const rows = await sql<ScanRow>`
-      select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed, summary, error, execution_origin
+      select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed, sources_selected, sources_attempted, sources_failed, sources_analyzed, model_batches_used, model_batches_failed, failed_sources, summary, error, execution_origin
       from scan_runs
       where newsroom_id = ${owned(context)}
       order by started_at desc
-      limit 12
+      limit ${limit} offset ${offset}
+    `;
+    const [count] = await sql<{ total: number }>`
+      select count(*)::int as total from scan_runs where newsroom_id = ${owned(context)}
     `;
     /*
       Only the most recent row can be the one a screen is watching, and it is
@@ -484,7 +494,9 @@ export const listScans = createServerFn({ method: "GET" })
       });
       newest.stalled = runLooksStalled({ runOpen: true, job });
     }
-    return rows;
+    // P0-4: rows and the true total in one response, so the panel can say
+    // "showing latest N of M" and page older runs without re-running a scan.
+    return { rows, total: count?.total ?? rows.length };
   });
 
 export const runScan = createServerFn({ method: "POST" })
@@ -601,6 +613,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     );
 
   const fetched: {
+    id: number;
     title: string;
     url: string;
     text: string;
@@ -610,6 +623,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
   const pendingSourceTouches: { id: number; error: string | null }[] = [];
   const pendingDisappeared: { title: string; url: string; error: string }[] = [];
+  // P0-3: which sources failed and why, so the editor sees the set, not a count.
+  const failedSources: { id: number; title: string; url: string; error: string }[] = [];
   let fetchedCount = 0;
   const SCAN_WATCH_CAP = 200;
   const watchSlice = sources.slice(0, SCAN_WATCH_CAP);
@@ -666,6 +681,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       pendingHashes.push({ id: src.id, hash, text, changed });
       fetchedCount += 1;
       fetched.push({
+        id: src.id,
         title: src.tier === "C" ? `[discovery] ${src.title}` : src.title,
         url: src.url,
         text: bundle.text.slice(0, 4500),
@@ -681,6 +697,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         update sources set last_error = ${msg}, last_fetched_at = now()
         where id = ${src.id} and newsroom_id = ${owned(context)}
       `;
+      failedSources.push({ id: src.id, title: src.title, url: src.url, error: msg });
       if (src.last_hash && /404|410|not found|had almost no/i.test(msg)) {
         if (deps.scheduledCommit)
           pendingDisappeared.push({ title: src.title, url: src.url, error: msg });
@@ -739,10 +756,15 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     };
   });
 
+  /*
+    P0-5: bounded batches, not one truncated pass. The old code built a single
+    payload against a 48,000-character budget and `break`-ed the moment the
+    next source overflowed, so a 100-source scan silently reached the model
+    with a fraction of its sources. Each batch now gets its own model call; a
+    failed batch does not discard the others. See `scan-batches.ts`.
+  */
   const ranked = [...fetched].sort((a, b) => Number(b.changed) - Number(a.changed));
-  const PAYLOAD_BUDGET = 48000;
-  let payload = "";
-  for (const f of ranked) {
+  const batchSources = ranked.map((f) => {
     const excerpt = scanSourceExcerpt(
       f.text,
       f.extras,
@@ -757,77 +779,103 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         : f.changed
           ? "yes"
           : "no (still include if newly newsworthy)";
-    const block = `SOURCE: ${f.title}\nURL: ${f.url}\nCHANGED: ${changedLine}\nTEXT:\n${excerpt}`;
-    const next = payload ? `${payload}\n\n---\n\n${block}` : block;
-    if (next.length > PAYLOAD_BUDGET) break;
-    payload = next;
-  }
-
-  const userMsg = buildScanUserMessage({
-    topics: allowedTopics,
-    section: sectionSnapshot,
-    city: paperConfig.city,
-    state: paperConfig.state,
-    reread,
-    memory,
-    published: publishedContext,
-    payload,
+    return {
+      id: f.id,
+      title: f.title,
+      url: f.url,
+      block: `SOURCE: ${f.title}\nURL: ${f.url}\nCHANGED: ${changedLine}\nTEXT:\n${excerpt}`,
+    };
   });
+  const batches = buildScanBatches({ sources: batchSources });
 
-  /*
-    The same one-shot technical failover Draft uses (see
-    `failOverAndRetry`), except the fetched source text is never re-fetched
-    -- `userMsg`/`payload` above are reused verbatim for the retry, by
-    `runScanChatWithFailover`. Pulled into its own module so the retry decision is unit-testable
-    without desk.ts's `@/lib/db` alias import.
-  */
-  await deps.scheduledGuard?.();
-  const ai = await runScanChatWithFailover({
-    job,
-    newsroomId: job.newsroom_id,
-    system: scanSystem({
-      name: paperConfig.name,
+  const batchTimeoutMs = scanCallTimeoutFor(
+    await readProviderOverrides(job.newsroom_id).catch(() => ({})),
+  );
+  const batchResults: import("./schema.ts").ParsedScanResult[] = [];
+  let batchesFailed = 0;
+  let lastBatchError: string | null = null;
+  for (const batch of batches) {
+    await deps.scheduledGuard?.();
+    const userMsg = buildScanUserMessage({
+      topics: allowedTopics,
+      section: sectionSnapshot,
       city: paperConfig.city,
       state: paperConfig.state,
-    }),
-    user: userMsg,
-    maxTokens: 3500,
-    modelEffort: effortFromJob(job),
-    // Same per-provider budget a Story draft uses (providerBudget().callMs),
-    // floored at the old flat 90s so the configured-gateway path is never
-    // made worse. See scanCallTimeoutMs's comment for the production timeout
-    // this fixes: a clean 31-source fetch whose single AI read then died at
-    // a flat 90s ceiling the CLI providers routinely need more of.
-    timeoutMs: scanCallTimeoutFor(await readProviderOverrides(job.newsroom_id).catch(() => ({}))),
-    grokChat: runChat,
-    probe,
-    setModelChoice,
-    setStage,
-    setFailoverNote: setJobFailoverNote,
-    onSwitch: deps.onModelSwitch,
-  });
-  if (!ai.ok) {
-    if (!deps.scheduledCommit)
-      await sql`
-        update scan_runs
-        set finished_at = now(), sources_fetched = ${fetchedCount}, error = ${ai.error}
-        where id = ${runId} and newsroom_id = ${owned(context)}
-      `;
-    throw new Error(ai.error);
+      reread,
+      memory,
+      published: publishedContext,
+      payload: batch.payload,
+    });
+    /*
+      The same one-shot technical failover Draft uses (see `failOverAndRetry`),
+      except the fetched source text is never re-fetched -- this batch's
+      payload is reused verbatim for the retry by `runScanChatWithFailover`.
+    */
+    const ai = await runScanChatWithFailover({
+      job,
+      newsroomId: job.newsroom_id,
+      system: scanSystem({
+        name: paperConfig.name,
+        city: paperConfig.city,
+        state: paperConfig.state,
+      }),
+      user: userMsg,
+      maxTokens: 3500,
+      modelEffort: effortFromJob(job),
+      timeoutMs: batchTimeoutMs,
+      grokChat: runChat,
+      probe,
+      setModelChoice,
+      setStage,
+      setFailoverNote: setJobFailoverNote,
+      onSwitch: deps.onModelSwitch,
+    });
+    if (!ai.ok) {
+      batchesFailed += 1;
+      lastBatchError = ai.error;
+      continue;
+    }
+    const parsed = parseScanResult(parseJsonBlock<unknown>(ai.text), allowedTopics);
+    if (parsed.parseError) {
+      batchesFailed += 1;
+      lastBatchError = parsed.parseError;
+      continue;
+    }
+    batchResults.push(parsed);
   }
-  await deps.scheduledGuard?.();
 
-  const raw = parseJsonBlock<unknown>(ai.text);
-  const data = parseScanResult(raw, allowedTopics);
-  if (!shouldCommitFetchHashes({ aiOk: true, parseError: data.parseError })) {
+  if (!batchResults.length) {
+    const error = lastBatchError ?? "Writing pass returned no usable JSON.";
     if (!deps.scheduledCommit)
       await sql`
         update scan_runs
-        set finished_at = now(), sources_fetched = ${fetchedCount}, error = ${data.parseError}
+        set finished_at = now(), sources_fetched = ${fetchedCount},
+            sources_selected = ${sources.length}, sources_attempted = ${watchSlice.length},
+            sources_failed = ${failedSources.length},
+            model_batches_used = ${batches.length}, model_batches_failed = ${batchesFailed},
+            failed_sources = ${JSON.stringify(failedSources).slice(0, 32000)},
+            error = ${error}
         where id = ${runId} and newsroom_id = ${owned(context)}
       `;
-    throw new Error(data.parseError ?? "Writing pass returned no usable JSON.");
+    throw new Error(error);
   }
+
+  const merged = mergeScanBatchResults(batchResults);
+  const data: import("./schema.ts").ParsedScanResult = {
+    editor_summary: merged.editor_summary
+      ? batchesFailed > 0
+        ? `${merged.editor_summary} ${batchesFailed} of ${batches.length} analysis batches failed; the rest were kept.`.slice(0, 2000)
+        : merged.editor_summary
+      : batchesFailed > 0
+        ? `${batchesFailed} of ${batches.length} analysis batches failed; the rest were kept.`
+        : "",
+    leads: merged.leads,
+    proposed_sources: merged.proposed_sources,
+    parseError: null,
+  };
+  const analyzedSourceCount = batches
+    .slice(0, batches.length - batchesFailed)
+    .reduce((n, b) => n + b.sources.length, 0);
 
   const commitResults = async (writeSql: Sql) => {
     for (const touch of pendingSourceTouches) {
@@ -927,6 +975,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           sources_fetched = ${fetchedCount},
           leads_created = ${leadsCreated},
           sources_proposed = ${proposed},
+          sources_selected = ${sources.length},
+          sources_attempted = ${watchSlice.length},
+          sources_failed = ${failedSources.length},
+          sources_analyzed = ${analyzedSourceCount},
+          model_batches_used = ${batches.length},
+          model_batches_failed = ${batchesFailed},
+          failed_sources = ${JSON.stringify(failedSources).slice(0, 32000)},
           summary = ${summary}
       where id = ${runId} and newsroom_id = ${owned(context)}
     `;

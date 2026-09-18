@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { listScans, listSources, runScan } from "@/lib/news/desk";
-import { editorScanError, scanCountsLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
+import { editorScanError, scanCountsLine, scanCoverageLine, parseFailedSources, failedSourcesLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { ModelPicker } from "@/components/model-picker";
@@ -19,11 +19,15 @@ function ScanPage() {
   const [sectionKey,setSectionKey]=useState("");
   const { formatDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
+  // P0-4: bounded pages with a true total. `pages` grows as the editor clicks
+  // Show more; each page is a normal listScans call and never runs a scan.
+  const [pages, setPages] = useState(1);
+  const pageSize = 12;
   const scans = useQuery({
-    queryKey: ["scans"],
-    queryFn: () => listScans(),
+    queryKey: ["scans", pages],
+    queryFn: () => listScans({ data: { limit: pageSize * pages, offset: 0 } }),
     refetchInterval: (q) => {
-      const row = q.state.data?.[0];
+      const row = q.state.data?.rows?.[0];
       if (row && !row.finished_at && !row.error) return 2000;
       return false;
     },
@@ -65,7 +69,9 @@ function ScanPage() {
     },
   });
 
-  const history = scans.data ?? [];
+  const history = scans.data?.rows ?? [];
+  const totalScans = scans.data?.total ?? history.length;
+  const exhausted = history.length >= totalScans;
   const watch = (sources.data ?? []).filter((s) => s.status === "accepted").length;
   const last = history[0];
   // A row can look open (no finished_at, no error) forever if the process
@@ -102,12 +108,17 @@ function ScanPage() {
       {!scanning && !stalled && last && !last.error && last.leads_created > 0 ? (
         <div className="scan-result">
           <p className="wire-line">
-            <b>Done.</b> {scanCountsLine({
-              sources_fetched: last.sources_fetched,
-              leads_created: last.leads_created,
-              sources_proposed: last.sources_proposed,
-            })}
+            <b>Done.</b>{" "}
+            {scanCoverageLine(last) ??
+              scanCountsLine({
+                sources_fetched: last.sources_fetched,
+                leads_created: last.leads_created,
+                sources_proposed: last.sources_proposed,
+              })}
           </p>
+          {failedSourcesLine(parseFailedSources(last.failed_sources)) ? (
+            <p className="wire-warn">{failedSourcesLine(parseFailedSources(last.failed_sources))}</p>
+          ) : null}
           {last.summary ? <p className="wire-sum">{last.summary}</p> : null}
           <Link to="/desk/queue">
             <InkButton small>Open the queue</InkButton>
@@ -117,8 +128,16 @@ function ScanPage() {
       {!scanning && !stalled && last && !last.error && last.leads_created === 0 ? (
         <div className="scan-result zero">
           <p className="wire-line">
-            <b>Fetched {last.sources_fetched}. Filed nothing.</b>
+            <b>
+              {scanCoverageLine(last)?.startsWith("Partial")
+                ? "Scan finished with partial coverage."
+                : `Fetched ${last.sources_fetched}. Filed nothing.`}
+            </b>
           </p>
+          {scanCoverageLine(last) ? <p className="wire-sum">{scanCoverageLine(last)}</p> : null}
+          {failedSourcesLine(parseFailedSources(last.failed_sources)) ? (
+            <p className="wire-warn">{failedSourcesLine(parseFailedSources(last.failed_sources))}</p>
+          ) : null}
           <p className="wire-sum">{scanZeroWhy(last)}</p>
           <InkButton tone="ghost" small disabled={scanning} onClick={() => scan.mutate()}>
             Run again
@@ -156,7 +175,11 @@ function ScanPage() {
         <Notice kind="err">{scan.error instanceof Error ? scan.error.message : "Scan failed"}</Notice>
       ) : null}
 
-      <SecHead title="Previous scans" count={history.length} />
+      <SecHead
+        title="Previous scans"
+        count={totalScans}
+        sub={`Showing latest ${history.length} of ${totalScans}`}
+      />
       {scans.isError && history.length === 0 ? (
         <ScreenError
           message={scans.error instanceof Error ? scans.error.message : "Could not load previous scans."}
@@ -176,12 +199,16 @@ function ScanPage() {
                 {s.execution_origin === "scheduled" ? "Scheduled daily scan" : "Manual scan"}
               </p>
               <p className="scan-line">
-                {scanCountsLine({
-                  sources_fetched: s.sources_fetched,
-                  leads_created: s.leads_created,
-                  sources_proposed: s.sources_proposed,
-                })}
+                {scanCoverageLine(s) ??
+                  scanCountsLine({
+                    sources_fetched: s.sources_fetched,
+                    leads_created: s.leads_created,
+                    sources_proposed: s.sources_proposed,
+                  })}
               </p>
+              {failedSourcesLine(parseFailedSources(s.failed_sources)) ? (
+                <p className="wire-warn">{failedSourcesLine(parseFailedSources(s.failed_sources))}</p>
+              ) : null}
               {s.leads_created > 0 && s.summary ? <p className="wire-sum">{s.summary}</p> : null}
               {s.stalled ? (
                 <p className="wire-warn">{stalledRunCopy("scan")}</p>
@@ -192,6 +219,18 @@ function ScanPage() {
               ) : null}
             </div>
           ))}
+          {!exhausted ? (
+            <div className="mt-4">
+              <InkButton
+                tone="ghost"
+                small
+                disabled={scans.isFetching}
+                onClick={() => setPages((n) => n + 1)}
+              >
+                {scans.isFetching ? "Loading older scans…" : `Show more (${totalScans - history.length} older)`}
+              </InkButton>
+            </div>
+          ) : null}
         </div>
       )}
     </DeskShell>

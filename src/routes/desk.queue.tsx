@@ -212,7 +212,7 @@ function QueuePage() {
   const suggestedFocus = suggestFocusLeads(batchEligible, sections, focusTarget);
   const focusAddable = suggestedFocus.filter((lead) => !selectedBatchLeads.includes(lead.id));
   const publishedCount = leads.filter((l) => l.status === "published").length;
-  const last = scans.data?.[0];
+  const last = scans.data?.rows?.[0];
   const counts = {
     all: working.length,
     new: leads.filter((l) => l.status === "new").length,

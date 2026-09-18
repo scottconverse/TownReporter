@@ -843,6 +843,95 @@ export function scanCountsLine(s: {
   return `${s.sources_fetched} fetched · filed nothing`;
 }
 
+/**
+ * Coverage line for one scan run (P0-3).
+ *
+ * Before migration 0065 a run recorded only sources_fetched, so a clean
+ * zero-lead pass and a provider failure rendered the same way. This builds one
+ * honest sentence from the full path -- selected, attempted, fetched,
+ * failed, analyzed, batches -- and returns null for pre-migration rows, where
+ * the counts were never measured and any line would be a fabrication.
+ */
+export function scanCoverageLine(s: {
+  sources_selected?: number | null;
+  sources_attempted?: number | null;
+  sources_fetched: number;
+  sources_failed?: number | null;
+  sources_analyzed?: number | null;
+  model_batches_used?: number | null;
+  model_batches_failed?: number | null;
+  leads_created: number;
+  error?: string | null;
+}): string | null {
+  const selected = s.sources_selected ?? 0;
+  const attempted = s.sources_attempted ?? 0;
+  const failed = s.sources_failed ?? 0;
+  const analyzed = s.sources_analyzed ?? 0;
+  const batchesUsed = s.model_batches_used ?? 0;
+  const batchesFailed = s.model_batches_failed ?? 0;
+  // A row with no coverage accounting at all: none of the new counters were
+  // ever written. Do not claim measured numbers for it.
+  const accounted =
+    selected > 0 || attempted > 0 || analyzed > 0 || batchesUsed > 0 || failed > 0;
+  if (!accounted) return null;
+
+  const fetched = s.sources_fetched;
+  const leadBit = `${s.leads_created} lead${s.leads_created === 1 ? "" : "s"}`;
+  const errorBit = s.error?.trim();
+  const partial = failed > 0 || batchesFailed > 0 || (attempted > 0 && analyzed < attempted);
+  const parts: string[] = [];
+  parts.push(
+    `${selected} selected · ${fetched} fetched${failed ? ` · ${failed} failed` : ""} · ${analyzed} analyzed · ${leadBit}`,
+  );
+  if (batchesUsed > 0) {
+    parts.push(`${batchesUsed} batch${batchesUsed === 1 ? "" : "es"}${batchesFailed ? `, ${batchesFailed} failed` : ""}`);
+  }
+  if (errorBit && analyzed === 0) {
+    return `Provider failure after ${fetched} fetched — nothing was analyzed. ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
+  }
+  if (partial) {
+    return `Partial coverage: ${parts.join(" · ")}.`;
+  }
+  return parts.join(" · ") + ".";
+}
+
+export type FailedScanSource = { id?: number; title?: string; url?: string; error?: string };
+
+/** Parse the failed_sources JSON column. Never throws on malformed legacy data. */
+export function parseFailedSources(raw: string | null | undefined): FailedScanSource[] {
+  if (!raw?.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((row) => row && typeof row === "object")
+      .map((row) => {
+        const r = row as Record<string, unknown>;
+        return {
+          id: typeof r.id === "number" ? r.id : undefined,
+          title: typeof r.title === "string" ? r.title : undefined,
+          url: typeof r.url === "string" ? r.url : undefined,
+          error: typeof r.error === "string" ? r.error : undefined,
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Name the sources that failed, so the editor can act on the set rather than
+ * only a count. Returns null when there is nothing to name.
+ */
+export function failedSourcesLine(failures: FailedScanSource[]): string | null {
+  if (!failures.length) return null;
+  const named = failures
+    .slice(0, 6)
+    .map((f) => f.title || f.url || (f.id != null ? `Source #${f.id}` : "A source"))
+    .join("; ");
+  const more = failures.length > 6 ? ` and ${failures.length - 6} more` : "";
+  return `Failed: ${named}${more}.`;
+}
 export function scanZeroWhy(input: {
   leads_created: number;
   sources_fetched: number;

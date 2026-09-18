@@ -87,6 +87,19 @@ export type ScanRow = {
   sources_fetched: number;
   leads_created: number;
   sources_proposed: number;
+  /**
+   * Coverage accounting (migration 0065). Every run records the full path from
+   * selection to filing so a zero-lead success, a provider failure, and a
+   * partially-analyzed run are distinguishable in the UI. Absent on rows
+   * written before this migration -- read them with `?? 0`, never assume.
+   */
+  sources_selected?: number;
+  sources_attempted?: number;
+  sources_failed?: number;
+  sources_analyzed?: number;
+  model_batches_used?: number;
+  model_batches_failed?: number;
+  failed_sources?: string | null;
   summary: string | null;
   error: string | null;
   execution_origin?: "manual" | "scheduled";
