@@ -566,6 +566,26 @@ export async function drainQueuedJobs(): Promise<{ ran: number }> {
   return { ran: editorial.ran + rest.ran };
 }
 
+/**
+ * Startup reattachment for durable jobs.
+ *
+ * The normal drainer is intentionally invoked by enqueue kicks and the
+ * unattended clock, but a restarted process must not wait for the next clock
+ * tick before reclaiming work that was already durable. This sweep does not
+ * invent a new state: it calls the same drainer, whose conditional claim on
+ * queued rows or stale running rows is the existing idempotency guard. Two
+ * concurrent starts therefore race through the same claim-token update; only
+ * one can take a row. A fresh running row owned by another live process is
+ * left alone because its heartbeat keeps updated_at inside the stale window.
+ *
+ * No PID is read or signalled here. ENG-06's ownership rule applies: a pid
+ * persisted on a running row is not proof this process owns the child, so the
+ * sweep adopts work only through the database claim, never through taskkill.
+ */
+export async function reattachDurableJobsOnStartup(): Promise<{ ran: number }> {
+  return drainQueuedJobs();
+}
+
 export async function executeJob(job: DeskJob): Promise<boolean> {
   const sql = await getSql();
   const token = mintClaimToken();

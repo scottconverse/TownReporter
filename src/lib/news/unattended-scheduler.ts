@@ -1,5 +1,5 @@
 import { tickAllDueMonitors } from "./monitors-cron.ts";
-import { drainQueuedJobs } from "./jobs.ts";
+import { drainQueuedJobs, reattachDurableJobsOnStartup } from "./jobs.ts";
 import { tickDailyScans } from "./daily-scan.server.ts";
 import { tickRoutineNoticeEditions } from "./routine-notice-worker.server.ts";
 import { tickStatsReports } from "./stats-reports.server.ts";
@@ -79,6 +79,20 @@ export function startUnattendedScheduler(): void {
       statsTicking = false;
     }
   };
+
+  /*
+    Reattach durable work immediately at process start. The ordinary job
+    clock below still handles later kicks and stale reclaim; this first sweep
+    is what prevents a restarted server from leaving already-durable
+    queued/running work stranded until a human click or the 8-second tick.
+
+    It is idempotent and safe under concurrent starts: reattachment goes
+    through the existing claim-token conditional update, so only one process
+    can claim any row. It never signals a persisted PID (ENG-06).
+  */
+  void reattachDurableJobsOnStartup().catch((err) => {
+    console.error("[townreporter] startup job reattachment failed:", err);
+  });
 
   const intervalMs = 5 * 60 * 1000;
   // unref: a background clock must never hold the process open on its own
