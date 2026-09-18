@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name. Reddit RSS finds candidates; when a local Redlib is running, the strongest candidates are read in full. The result panel says whether each card contains a full post or only an RSS excerpt. A Redlib failure never discards the RSS results.
 
-**Current release: [0.6.51](releases/0.6.51.md).** The release guide separates source changes from unverified GitHub publication, installation, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+**Current release: [0.6.52](releases/0.6.52.md).** The release guide separates source changes from unverified GitHub publication, installation, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
 **Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
 
@@ -32,7 +32,7 @@ Dark Desk now separates speculative Black Desk signals (confidence ≤0.5) from
 structured Dark Signal verification. See [the doctrine and its limits](dark-desk.md).
 The verified label is a completed software protocol, not a substitute for
 checking sources. The travel-local five-topic exercise was executed in the
-isolated 0.6.51+ candidate: eight bounded runs, including the September 3-8
+isolated 0.6.52+ candidate: eight bounded runs, including the September 3-8
 replay. The records and limits are in
 [the run-budget proof](proofs/dark-desk-run-budget-0651.md). This does not
 close a Halo-local or production acceptance exercise.
@@ -978,10 +978,10 @@ In the story workspace, use **Check draft against evidence**. The check reads th
 
 Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
-## 0.6.51: model and document boundaries
+## 0.6.52: model and document boundaries
 
-The 0.6.51 model picker offers only the reasoning-effort levels supported by the selected Codex or Claude runtime. The selected runtime and effort are retained with the job. A technical failure — unavailable service, sign-in, quota, timeout, network failure, or no output — may move the unfinished call to the next ready runtime and records that move. A content refusal is terminal: it does not route around the refusal or turn into a draft.
+The 0.6.52 model picker offers only the reasoning-effort levels supported by the selected Codex or Claude runtime. The selected runtime and effort are retained with the job. A technical failure — unavailable service, sign-in, quota, timeout, network failure, or no output — may move the unfinished call to the next ready runtime and records that move. A content refusal is terminal: it does not route around the refusal or turn into a draft.
 
 After a Queue batch completes, use **Redraft** to select a runtime and produce a new draft for review. The batch remains non-publishing. The Server page lets an owner edit daily time, runtime, effort, selected accepted sources, and a 1–12 source cap; scheduled scans still file leads only.
 
-Story and Opinion intake reads all extractable PDF pages within the 20-million-character document-text cap. Generic captures and Dark Desk scans initially use a bounded OCR batch; **Read entire PDF** checkpoints consecutive 12-page batches until every page is retained or explicitly reported unread. Page-only vision fallback handles pages without a readable text layer. The [0.6.51 release guide](releases/0.6.51.md) lists evidence boundaries.
+Story and Opinion intake reads all extractable PDF pages within the 20-million-character document-text cap. Generic captures and Dark Desk scans initially use a bounded OCR batch; **Read entire PDF** checkpoints consecutive 12-page batches until every page is retained or explicitly reported unread. Page-only vision fallback handles pages without a readable text layer. The [0.6.52 release guide](releases/0.6.52.md) lists evidence boundaries.
