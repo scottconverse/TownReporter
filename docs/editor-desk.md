@@ -1,6 +1,6 @@
 # Editor desk: current workflow
 
-For [TownReporter 0.6.51](releases/0.6.51.md). The sidebar contains Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats. New story opens document intake. Dark Desk opens investigations; the TownReporter logo, breadcrumb and Public news page control return to the public newspaper. The public header’s labeled Editor’s desk button opens this workspace on desktop and phones. On narrow desk screens, open the navigation menu.
+For [TownReporter 0.6.52](releases/0.6.52.md). The sidebar contains Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats. New story opens document intake. Dark Desk opens investigations; the TownReporter logo, breadcrumb and Public news page control return to the public newspaper. The public header’s labeled Editor’s desk button opens this workspace on desktop and phones. On narrow desk screens, open the navigation menu.
 
 ## Start with evidence
 
@@ -28,10 +28,10 @@ Opinion must contain **Claims and sources**. Missing or unusable appendix materi
 
 See the [complete editor guide](editor.md) for Sources, Scan, investigations, settings, routine notices and Stats.
 
-## 0.6.51 behavior
+## 0.6.52 behavior
 
 The model row includes the model-specific effort values that the selected Codex or Claude runtime accepts. A named choice or Automatic is recorded as the first runtime. A technical failure can be retried on a ready runtime and records the requested and actual model and effort; a provider refusal is final and creates no replacement draft.
 
 In Queue, a completed batch offers **Redraft**. Choose a runtime again and create a new reviewable draft; it does not publish. In Server, the owner may edit Daily scan time, model, allowed effort, selected accepted sources and a limit from 1 through 12. Daily scans file leads only.
 
-For uploaded Story and Opinion packets, all readable PDF pages are retained through the 20-million-character document-text limit. Generic captures and Dark Desk scanned-image OCR start with a bounded batch; **Read entire PDF** saves consecutive batches of up to 12 pages and resumes from retained page chunks after interruption. Failed or oversized pages remain explicitly unread. See [the release guide](releases/0.6.51.md) for current limits and evidence boundaries.
+For uploaded Story and Opinion packets, all readable PDF pages are retained through the 20-million-character document-text limit. Generic captures and Dark Desk scanned-image OCR start with a bounded batch; **Read entire PDF** saves consecutive batches of up to 12 pages and resumes from retained page chunks after interruption. Failed or oversized pages remain explicitly unread. See [the release guide](releases/0.6.52.md) for current limits and evidence boundaries.

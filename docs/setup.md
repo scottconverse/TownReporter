@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.51](releases/0.6.51.md).** See the release guide for changes, operating boundaries, and unverified GitHub-publication, deployment, and provider-run evidence. Editors should start at [the editor guide](editor.md).
+**Current release: [0.6.52](releases/0.6.52.md).** See the release guide for changes, operating boundaries, and unverified GitHub-publication, deployment, and provider-run evidence. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 
@@ -661,9 +661,9 @@ TownReporter/
 
 Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
-## 0.6.51 operator notes
+## 0.6.52 operator notes
 
-0.6.51 keeps model effort as a run setting, not an environment-wide guess: Codex and Claude present only their supported values. Exact selection records the first runtime; technical unavailability may advance to a ready runtime with the switch retained in job history, while a content refusal is final.
+0.6.52 keeps model effort as a run setting, not an environment-wide guess: Codex and Claude present only their supported values. Exact selection records the first runtime; technical unavailability may advance to a ready runtime with the switch retained in job history, while a content refusal is final.
 
 In **Server → Daily scan**, the owner sets the local time, named runtime, supported effort, selected accepted sources, and a source cap from 1 through 12. The scheduler files leads only. A Gemini/OpenAI-compatible connection requires its encrypted key and a model ID; the Gemini form supplies its normal default. The SuperGrok device button opens an authorization popup during the click and provides a visible link when a popup is blocked. It still requires the editor to approve authorization at xAI.
 

@@ -2,9 +2,9 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.51 · deployment is recorded separately**
+**Version 0.6.52 · deployment is recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.51 release guide and evidence boundaries](releases/0.6.51.md). A source release and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.52 release guide and evidence boundaries](releases/0.6.52.md). A source release and running production deployment are separate facts.
 
 **Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
 
@@ -62,7 +62,7 @@ Dark Desk separates speculative Black Desk signals (confidence ≤0.5) from a
 structured adversarial review record. See [the doctrine and its limits](dark-desk.md).
 Protocol complete means the searches and four review questions were completed;
 it is not a factual verdict or a gate on the editor's lead handoff. The
-travel-local five-topic exercise was executed in the isolated 0.6.51+ candidate:
+travel-local five-topic exercise was executed in the isolated 0.6.52+ candidate:
 eight bounded runs, including the September 3–8 replay. The records and limits
 are in [the run-budget proof](proofs/dark-desk-run-budget-0651.md). This does
 not close a Halo-local or production acceptance exercise.
@@ -1189,10 +1189,10 @@ Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original
 
 Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
-## 0.6.51 notes
+## 0.6.52 notes
 
-0.6.51 adds model-specific Codex/Claude effort control, technical-failure recovery with an explicit runtime switch, and terminal handling for provider refusals. A named runtime or Automatic stays the recorded first choice; technical recovery retries only the unfinished call and records requested and actual model and effort. Unattended ladders put Claude Sonnet last and never select Opus. Neither a refusal nor an invalid provider response is a successful draft. Queue batches can be redrafted with another selected runtime and remain review-only.
+0.6.52 adds model-specific Codex/Claude effort control, technical-failure recovery with an explicit runtime switch, and terminal handling for provider refusals. A named runtime or Automatic stays the recorded first choice; technical recovery retries only the unfinished call and records requested and actual model and effort. Unattended ladders put Claude Sonnet last and never select Opus. Neither a refusal nor an invalid provider response is a successful draft. Queue batches can be redrafted with another selected runtime and remain review-only.
 
 The Daily scan panel is owner-editable for schedule time, runtime, supported effort, accepted sources, and a source cap of 1–12. Its result remains leads for the Queue, never direct publication. The Server health queue now separates retained failures from current queued/running work and the latest terminal workflow result.
 
-Direct Story/Opinion document intake reads all readable PDF pages subject to the 20-million-character retained text limit. Generic captures and Dark Desk's image-PDF OCR use bounded 12-page calls; **Read entire PDF** checkpoints those calls and resumes only unread pages until the packet is complete or the current click reaches its explicit budget. The release scope, Windows lifecycle repair, detached-child limitation, and evidence boundaries are in [the 0.6.51 release guide](releases/0.6.51.md).
+Direct Story/Opinion document intake reads all readable PDF pages subject to the 20-million-character retained text limit. Generic captures and Dark Desk's image-PDF OCR use bounded 12-page calls; **Read entire PDF** checkpoints those calls and resumes only unread pages until the packet is complete or the current click reaches its explicit budget. The release scope, Windows lifecycle repair, detached-child limitation, and evidence boundaries are in [the 0.6.52 release guide](releases/0.6.52.md).
