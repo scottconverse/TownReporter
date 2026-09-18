@@ -15,6 +15,7 @@ This section records the current source version. It does not assert a Git tag, G
 - Replaces the routine-notice policy bootstrap's session-level pg_advisory_lock/pg_advisory_unlock pair with a transaction-scoped pg_advisory_xact_lock, eliminating the pooled-connection lock leak that could exhaust the pool and hang the server (PR #70).
 - Reattaches durable job rows on server startup: queued jobs become claimable, running extraction jobs resume from their persisted page/stage/batch checkpoint, and stale rows from a dead process are adopted or requeued honestly rather than remaining stranded (PR #71).
 - Adds the restart-durability proof to the PostgreSQL integration CI job.
+
 ## 0.6.51 — 2026-09-16
 
 This section records the source release. It does not assert a GitHub publication, production deployment, fresh packaged-install result, or live-model result.
