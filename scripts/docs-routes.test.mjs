@@ -41,9 +41,12 @@ function markdownFiles(seed) {
 /** src/routes/desk.queue.tsx serves /desk/queue; [.] escapes a literal dot. */
 function routePath(file) {
   const name = file.replace(/\.tsx?$/, "");
-  const escaped = name.replace(/\[\.\]/g, "\u0000");
+  // Use a private-use sentinel instead of a control character: ESLint's
+  // no-control-regex correctly rejects a NUL expression, while this keeps the
+  // escape-and-restore trick unambiguous before route dots are normalized.
+  const escaped = name.replace(/\[\.\]/g, "\uE000");
   const path = "/" + escaped.replace(/^index$/, "").replace(/\.index$/, "").replace(/\./g, "/");
-  return (path.replace(/\u0000/g, ".").replace(/\/$/, "") || "/").replace(/\/(\$|:)\w+/g, "/:id");
+  return (path.replace(/\uE000/g, ".").replace(/\/$/, "") || "/").replace(/\/(\$|:)\w+/g, "/:id");
 }
 
 test("every URL the documentation names is a route the app serves", () => {
