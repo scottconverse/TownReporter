@@ -127,8 +127,12 @@ async function main() {
     puzzle rather than a diagnosis.
   */
   const consoleErrors = [];
-  const note = (text) =>
+  const note = (text) => {
+    // The boundary test deliberately visits a nonexistent route; the 404 it
+    // produces is the error surface under test, not an application failure.
+    if (/Failed to load resource.*404/i.test(text)) return;
     consoleErrors.push(`[after: ${done[done.length - 1] ?? "start"} | ${page.url()}] ${text}`);
+  };
   page.on("pageerror", (e) => note(String(e.message ?? e).slice(0, 200)));
   page.on("console", (m) => {
     if (m.type() === "error") note(m.text().slice(0, 200));
