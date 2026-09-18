@@ -1,11 +1,20 @@
 # Changelog
 
-Current release: **0.6.52**.
+Current release: **0.6.53**.
 
 ## Unreleased
 
 - Fixes the Windows promotion guard so it recognizes this checkout's actual backslash `.output\server\index.mjs` command line while still refusing an unrelated Node process. The focused regression executes both cases. This fixes a defect observed during the v0.6.51 promotion; it does not assert a production promotion of this candidate.
 
+## 0.6.53 — 2026-09-18
+
+This section records the current source version. It does not assert a Git tag, GitHub release, packaged Windows installer, production deployment, or live-model result.
+
+- Narrows the desk-flows browser 404 exception so it applies only to the deliberate nonexistent error-page route; unrelated missing resources still fail the walkthrough (PR #69).
+- Repairs release-record coherence: the v0.6.52 in-repo release note, TODO cross-references, and the GitHub release body now agree that v0.6.52 is published, and the repository docs no longer contradict that state.
+- Replaces the routine-notice policy bootstrap's session-level pg_advisory_lock/pg_advisory_unlock pair with a transaction-scoped pg_advisory_xact_lock, eliminating the pooled-connection lock leak that could exhaust the pool and hang the server (PR #70).
+- Reattaches durable job rows on server startup: queued jobs become claimable, running extraction jobs resume from their persisted page/stage/batch checkpoint, and stale rows from a dead process are adopted or requeued honestly rather than remaining stranded (PR #71).
+- Adds the restart-durability proof to the PostgreSQL integration CI job.
 ## 0.6.51 — 2026-09-16
 
 This section records the source release. It does not assert a GitHub publication, production deployment, fresh packaged-install result, or live-model result.
