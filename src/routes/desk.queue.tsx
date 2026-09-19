@@ -59,7 +59,43 @@ function QueuePage() {
     onError: (e) => setDeleteError(e instanceof Error ? e.message : "That did not delete."),
   });
   const [deleteError, setDeleteError] = useState("");
+  const [bulkDeleteNotice, setBulkDeleteNotice] = useState("");
+  const [selectedDeleteLeadIds, setSelectedDeleteLeadIds] = useState<number[]>([]);
+  const [confirmingBulkDelete, setConfirmingBulkDelete] = useState(false);
   const [undo, setUndo] = useState<number | null>(null);
+  const bulkRemove = useMutation({
+    mutationFn: async (leadIds: number[]) => {
+      const deletedIds: number[] = [];
+      const failures: string[] = [];
+      for (const leadId of leadIds) {
+        try {
+          const result = await deleteLead({ data: leadId });
+          if (result?.ok) deletedIds.push(leadId);
+          else failures.push(result?.error ?? `Lead #${leadId} did not delete.`);
+        } catch (cause) {
+          failures.push(cause instanceof Error ? cause.message : `Lead #${leadId} did not delete.`);
+        }
+      }
+      return { deletedIds, failures };
+    },
+    onSuccess: async ({ deletedIds, failures }) => {
+      setConfirmingBulkDelete(false);
+      setSelectedDeleteLeadIds((ids) => ids.filter((id) => !deletedIds.includes(id)));
+      setUndo(null);
+      setBulkDeleteNotice(
+        deletedIds.length > 0
+          ? `Deleted ${deletedIds.length} lead${deletedIds.length === 1 ? "" : "s"}. Recoverable for 30 days under Server > Recently deleted.`
+          : "",
+      );
+      setDeleteError(failures.join(" "));
+      await qc.invalidateQueries({ queryKey: ["leads"] });
+      await qc.invalidateQueries({ queryKey: ["trash"] });
+    },
+    onError: (cause) => {
+      setConfirmingBulkDelete(false);
+      setDeleteError(cause instanceof Error ? cause.message : "The selected leads did not delete.");
+    },
+  });
   const undoDelete = useMutation({
     mutationFn: (id: number) => restoreTrashItem({ data: id }),
     onSuccess: (res) => {
@@ -238,6 +274,9 @@ function QueuePage() {
       : (filter === "all" ? working : leads.filter((l) => l.status === filter)).sort(
           (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0),
         );
+  const shownIds = shown.map((lead) => lead.id);
+  const selectedDeleteLeads = selectedDeleteLeadIds.filter((leadId) => shownIds.includes(leadId));
+  const allShownSelected = shownIds.length > 0 && shownIds.every((leadId) => selectedDeleteLeadIds.includes(leadId));
 
   return (
     <DeskShell title="The queue" kicker="Leads">
@@ -408,18 +447,65 @@ function QueuePage() {
             type="button"
             className={"filter" + (filter === k ? " on" : "")}
             aria-pressed={filter === k}
-            onClick={() => setFilter(k)}
+            onClick={() => {
+              setFilter(k);
+              setSelectedDeleteLeadIds([]);
+              setConfirmingBulkDelete(false);
+              setBulkDeleteNotice("");
+            }}
           >
             {k} {counts[k]}
           </button>
         ))}
       </div>
 
+      {shown.length > 0 ? (
+        <section className="queue-bulk-delete" aria-label="Bulk delete leads">
+          <label>
+            <input
+              type="checkbox"
+              checked={allShownSelected}
+              onChange={(event) => {
+                setConfirmingBulkDelete(false);
+                setBulkDeleteNotice("");
+                setSelectedDeleteLeadIds(event.target.checked ? shownIds : []);
+              }}
+            />{" "}
+            Select all {filter === "all" ? "open" : filter} leads shown ({shown.length})
+          </label>
+          {selectedDeleteLeads.length > 0 ? (
+            confirmingBulkDelete ? (
+              <div className="queue-bulk-delete-confirm">
+                <span>
+                  Delete {selectedDeleteLeads.length} selected lead{selectedDeleteLeads.length === 1 ? "" : "s"} and any drafts? Published articles stay on the paper.
+                </span>
+                <InkButton
+                  tone="danger"
+                  small
+                  disabled={bulkRemove.isPending}
+                  onClick={() => bulkRemove.mutate(selectedDeleteLeads)}
+                >
+                  {bulkRemove.isPending ? "Deleting…" : `Yes, delete ${selectedDeleteLeads.length}`}
+                </InkButton>
+                <InkButton tone="quiet" small disabled={bulkRemove.isPending} onClick={() => setConfirmingBulkDelete(false)}>
+                  Keep
+                </InkButton>
+              </div>
+            ) : (
+              <InkButton tone="quiet-danger" small onClick={() => setConfirmingBulkDelete(true)}>
+                Delete selected ({selectedDeleteLeads.length})
+              </InkButton>
+            )
+          ) : null}
+        </section>
+      ) : null}
+
       {filter === "killed" && shown.some((l) => (l.resurfaced_count ?? 0) > 0) ? (
         <p className="meta seen-again-note">{SEEN_AGAIN_EXPLAINER}</p>
       ) : null}
 
       {deleteError ? <Notice kind="err">{deleteError}</Notice> : null}
+      {bulkDeleteNotice ? <Notice kind="ok">{bulkDeleteNotice}</Notice> : null}
       {undo != null ? (
         <Notice kind="ok">
           Deleted, and kept for 30 days.{" "}
@@ -478,6 +564,16 @@ function QueuePage() {
               onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
               onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}
               onDelete={() => remove.mutate(l.id)}
+              deleteSelected={selectedDeleteLeads.includes(l.id)}
+              onDeleteSelect={(selected) => {
+                setConfirmingBulkDelete(false);
+                setBulkDeleteNotice("");
+                setSelectedDeleteLeadIds((ids) =>
+                  selected
+                    ? [...ids.filter((id) => id !== l.id), l.id]
+                    : ids.filter((id) => id !== l.id),
+                );
+              }}
               onDraft={(modelChoice, modelEffort) => {
                 setDraftNotices((notices) => {
                   const next = { ...notices };
