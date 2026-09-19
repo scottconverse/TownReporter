@@ -1,0 +1,22 @@
+erDiagram
+    NEWSROOMS ||--o{ SOURCES : watches
+    NEWSROOMS ||--o{ LEADS : holds
+    NEWSROOMS ||--o{ ARTICLES : prints
+    SOURCES ||--o{ SNAPSHOTS : "hashed each scan"
+    SOURCES ||--o{ SOURCE_MONITORS : "expected cadence"
+    SNAPSHOTS ||--o{ ANOMALIES : "changed · gone · missing"
+    ANOMALIES ||--o{ LEADS : becomes
+    LEADS ||--o{ DRAFTS : "drafted into"
+    DRAFTS ||--o| ARTICLES : "published as"
+    ARTICLES ||--o{ CORRECTIONS : "dated, above"
+    INVESTIGATIONS ||--o{ FRONTIER_ITEMS : "still unopened"
+    INVESTIGATIONS ||--o{ ARTIFACTS : captured
+    INVESTIGATIONS ||--o{ ENTITIES : found
+    INVESTIGATIONS ||--o{ CLAIMS : "labelled + capped"
+    INVESTIGATIONS ||--o{ HYPOTHESES : "with what kills it"
+    INVESTIGATIONS ||--o{ DEAD_ENDS : "kept, reopenable"
+    INVESTIGATIONS ||--o{ INVESTIGATION_BRIEFS : "read this first"
+    EDITORIAL_REQUESTS ||--o| DRAFTS : "written into"
+    DRAFTS ||--o| EDITORIAL_EXTRAS : "fact sheet, not printed"
+    DESK_JOBS }o--|| NEWSROOMS : "scan draft dark editorial"
+    DELETED_ITEMS }o--|| NEWSROOMS : "a copy, for 30 days"

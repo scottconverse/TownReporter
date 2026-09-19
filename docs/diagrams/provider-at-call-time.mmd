@@ -1,0 +1,14 @@
+flowchart TB
+    CALL["A model-backed desk action"] --> KIND{"Story/Scan/Dark picker?"}
+    KIND -->|yes: Automatic| Q1{"LLM_* configured?"}
+    Q1 -->|yes| OAI["Try that gateway first"]
+    Q1 -->|no| READY["First ready<br/>Codex Terra → Claude Sonnet"]
+    KIND -->|yes: named choice| ONE["Try that recorded provider first"]
+    OAI --> SAVE["Persist effective provider on job"]
+    READY --> SAVE
+    ONE --> SAVE
+    SAVE --> RUN["Selected run uses that provider"]
+    RUN -->|quota, unavailable, login lapse, timeout or no output| NEXT["Retry only the unfinished call<br/>on the next ready runtime"]
+    RUN -->|refusal or unrecognized error| SAME["Stop and show the failure"]
+
+    style SAVE fill:#1c1a17,color:#fff

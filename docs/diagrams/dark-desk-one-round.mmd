@@ -1,0 +1,26 @@
+flowchart TB
+    OPEN["Open a file<br/>URL · person · LLC · rumour"] --> PLAN
+    DIALS[/"Dig · Nerve · Map"/] -.sets hops, floor, scope.-> PLAN
+    PLAN["Plan the hop<br/>(Haiku)"] --> SEARCH["Search + fetch"]
+    SEARCH --> CAP["Capture a copy"]
+    CAP --> EXTRACT["Entities · relationships<br/>signals · dead ends"]
+    EXTRACT --> HYG{"Claim hygiene"}
+    HYG -->|operational model narration| DROP["Filtered from signals"]
+    HYG -->|FACT with no citation| DOWN["Downgraded"]
+    HYG -->|lead| CLAMP["Confidence capped<br/>by label"]
+    CLAMP --> SYN["Synthesise<br/>(Opus)"]
+    SYN --> BRIEF["Brief:<br/>connections · hypothesis · strength<br/>supports · benign · what kills it"]
+    BRIEF --> STOP{"Budget spent?"}
+    STOP -->|no| PLAN
+    STOP -->|yes| PARK["Stop, say what is unread"]
+    PARK --> KEEP["Keep digging"] --> PLAN
+    BRIEF --> SPEC["Black Desk signal<br/>confidence at most 0.5"]
+    SPEC --> ADV["App adversarial searches<br/>four kinds, three source tiers"]
+    ADV --> VER["Dark Signal gate answers<br/>disproof, independence, context, self-reference"]
+    VER --> STATE["Record protocol state,<br/>missing context and opposing account"]
+    STATE --> WATCH["Keep investigating or watch"]
+    STATE --> QUEUE["Editor sends lead to queue"]
+    WATCH --> QUEUE
+
+    style DROP fill:#3a2a2a,color:#fff
+    style QUEUE fill:#7a2d2d,color:#fff

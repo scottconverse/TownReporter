@@ -912,6 +912,8 @@ flowchart TB
     TUNNEL --> EDITOR
 ```
 
+![System context: what the newsroom talks to](diagrams/system-context.svg)
+
 ## The pipeline: source to printed page
 
 ```mermaid
@@ -934,6 +936,8 @@ flowchart LR
     style G fill:#7a2d2d,color:#fff
     style P fill:#1c1a17,color:#fff
 ```
+
+![Pipeline: from watched source to printed page](diagrams/pipeline-source-to-page.svg)
 
 The red box is the only way to the paper. Everything upstream of it is
 assistance; everything downstream of it is a correction, never a silent edit.
@@ -963,6 +967,8 @@ sequenceDiagram
     E->>F: page polls
     F-->>E: the work, when it lands
 ```
+
+![Lifecycle of one job, end to end](diagrams/job-end-to-end.svg)
 
 ## Dark Desk, one round
 
@@ -997,6 +1003,8 @@ flowchart TB
     style QUEUE fill:#7a2d2d,color:#fff
 ```
 
+![One round of Dark Desk](diagrams/dark-desk-one-round.svg)
+
 Note what is missing from that diagram: any edge to the paper. The only way out
 of Dark Desk is **Send to the queue**, which files a lead a human then has to
 work.
@@ -1027,6 +1035,8 @@ flowchart LR
     style VOICE fill:#7a2d2d,color:#fff
 ```
 
+![The Opinion desk and its voice handoff](diagrams/opinion-voice-handoff.svg)
+
 The diagram shows both subscription writers. Claude and Codex receive the complete voice through their native instruction-file options. The writing pass retains research tools.
 The explicit Local model alternative reads the validated voice into a system
 message for the selected model server and uses the supplied material without
@@ -1056,6 +1066,8 @@ flowchart TB
     WD --> LOG
 ```
 
+![Keeping a deployment online](diagrams/keeping-it-online.svg)
+
 ## Data model, the shape of it
 
 ```mermaid
@@ -1083,6 +1095,8 @@ erDiagram
     DELETED_ITEMS }o--|| NEWSROOMS : "a copy, for 30 days"
 ```
 
+![Data model: the shape of the database](diagrams/data-model.svg)
+
 ## Choosing a provider, at call time
 
 ```mermaid
@@ -1101,6 +1115,8 @@ flowchart TB
 
     style SAVE fill:#1c1a17,color:#fff
 ```
+
+![Choosing a provider at call time](diagrams/provider-at-call-time.svg)
 
 ---
 

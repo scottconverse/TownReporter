@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant E as Editor
+    participant F as Server function
+    participant J as desk_jobs
+    participant W as Worker
+    participant M as Model
+    participant DB as Database
+
+    E->>F: Run scan / Draft / Keep digging / Write an editorial
+    F->>J: insert (kind, subject, queued)
+    F-->>E: returns at once — nothing waits on the model
+    W->>J: claim with a token
+    loop while running
+        W->>J: heartbeat
+    end
+    W->>M: call (budget from the provider)
+    M-->>W: result
+    W->>DB: file leads / draft / signals / editorial
+    W->>J: finished
+    E->>F: page polls
+    F-->>E: the work, when it lands

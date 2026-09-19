@@ -1,0 +1,15 @@
+flowchart TB
+    T["Scheduled task<br/>every 5 minutes"] --> WD["watchdog.ps1"]
+    WD --> C1{"App answering<br/>on PORT from .env?"}
+    C1 -->|no| R1["Start the app"]
+    C1 -->|yes| C2{"cloudflared<br/>running?"}
+    R1 --> C2
+    C2 -->|no| R2["Start the tunnel"]
+    C2 -->|yes| C3{"Public URL<br/>answers 200?"}
+    R2 --> C3
+    C3 -->|no| R3["Restart the tunnel"]
+    C3 -->|yes| OK["Write the check and stop"]
+    R3 --> OK
+
+    OPS["/desk/ops"] -.reads.-> LOG[("logs/watchdog.log")]
+    WD --> LOG
