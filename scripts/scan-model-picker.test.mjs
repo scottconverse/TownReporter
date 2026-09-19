@@ -60,16 +60,28 @@ test("Scan's failure states still show the Sign in button the 0.6.0 work added",
 });
 
 
+/*
+  0.6.54 (P0-1): the Scan click now sends a scope-aware data object -- the
+  selected model, the section ONLY when the scope is a section scan, and the
+  custom source set / saved pack when the scope is Custom. The invariant this
+  test protects is unchanged: the click must send the editor's selected model,
+  and must send the section for a section scan. The regex below matches the
+  current multi-line `runScan({ data: { ... } })` shape.
+*/
 function assertScanDispatch(source) {
-  const dispatch = source.match(/runScan\(\{\s*data:\s*\{([^}]*)\}\s*\}\)/);
+  const dispatch = source.match(/runScan\(\{\s*data:\s*\{([\s\S]*?)\}\s*,\s*\}\)/);
   assert.ok(dispatch, "Scan must send its explicit data object");
-  assert.match(dispatch[1], /(?:^|,)\s*modelChoice\s*(?=,|$)/,
+  assert.match(dispatch[1], /(?:^|,)\s*modelChoice\s*(?=,|$)/m,
     "the click must send the selected model");
-  assert.match(dispatch[1], /(?:^|,)\s*sectionKey\s*:\s*sectionKey\s*\|\|\s*undefined\s*(?=,|$)/,
-    "the click must send the selected section or General");
+  assert.match(dispatch[1], /sectionKey\s*:/,
+    "the click must send the selected section for a section scan");
+  assert.match(dispatch[1], /customSourceIds\s*:/,
+    "the click must send the custom source set for a custom scan");
+  assert.match(dispatch[1], /packId\s*:/,
+    "the click must send the saved pack for a pack scan");
 }
 
-test("Scan dispatch check rejects removal of either selected model or selected section", () => {
+test("Scan dispatch check rejects removal of either selected model or the section field", () => {
   assert.throws(() => assertScanDispatch(src.replace(/data:\s*\{\s*modelChoice,/, "data: {")), /selected model/);
-  assert.throws(() => assertScanDispatch(src.replace(/,\s*sectionKey:sectionKey\|\|undefined/, "")), /selected section/);
+  assert.throws(() => assertScanDispatch(src.replace(/sectionKey\s*:/, "sectionKeyX:")), /selected section/);
 });

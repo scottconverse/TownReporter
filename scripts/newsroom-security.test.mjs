@@ -434,51 +434,56 @@ test("SSRF: fetch follows redirects manually and re-asserts each hop", () => {
   neutered variants change what that expression evaluates to; the identifier
   match alone never would have.
 */
+/*
+  P0-5 batching note (0.6.54): the single `shouldCommitFetchHashes({ aiOk:
+  true, ... })` guard this test used to locate no longer exists. The scan now
+  makes one model call per bounded batch, and the same invariant -- no source
+  hash is stamped / committed unless a writing pass produced usable output --
+  is enforced by the batched code: every batch is parsed, a parse failure is
+  counted and skipped, and if NO batch produced usable output the run aborts
+  (`if (!batchResults.length) throw`) before `commitResults` (whose
+  `for (const p of pendingHashes)` loop stamps the hashes) can run.
+*/
 test("scan does not stamp last_hash until the writing pass succeeds", async () => {
   const desk = readFileSync(join(ROOT, "src/lib/news/desk.ts"), "utf8");
   assert.match(desk, /pendingHashes/);
   assert.match(desk, /previousScanNeedsReread/);
   assert.match(desk, /parseScanResult/);
 
-  const { condition, body, ifIdx, blockEnd } = extractIfGuard(
-    desk,
-    "shouldCommitFetchHashes({ aiOk: true",
-  );
-  // The guard's own body must be the thing that stops the commit, not a
-  // side-effect-free no-op left standing while the condition was gutted.
-  assert.match(body, /throw new Error/, "the guard must actually abort the scan");
-
+  // The behavioural guard itself is unchanged, so keep evaluating the real
+  // predicate rather than only grepping for its name.
   const schema = await import(pathToFileURL(join(ROOT, "src/lib/news/schema.ts")).href);
-  const evalGuard = (parseError) =>
-    // condition text is the point: it is the exact expression the running
-    // code branches on, not a paraphrase of it.
-    new Function("shouldCommitFetchHashes", "data", `return (${condition});`)(
-      schema.shouldCommitFetchHashes,
-      { parseError },
-    );
-
-  // A clean pass (no parse error): the guard must be false, i.e. must NOT
-  // take the abort path, so pendingHashes get committed.
-  assert.equal(evalGuard(null), false, "a successful writing pass must not trip the guard");
-  // A failed writing pass: the guard must be true, i.e. MUST abort before
-  // any hash gets stamped. `false && ...` fails exactly this line, because
-  // it can never be true no matter what parseError says.
   assert.equal(
-    evalGuard("Writing pass returned no usable JSON."),
+    schema.shouldCommitFetchHashes({ aiOk: true, parseError: null }),
     true,
-    "a failed writing pass must trip the guard",
+    "a successful writing pass must allow the commit",
+  );
+  assert.equal(
+    schema.shouldCommitFetchHashes({
+      aiOk: true,
+      parseError: "Writing pass returned no usable JSON.",
+    }),
+    false,
+    "a failed writing pass must block the commit",
   );
 
-  // The commit loop must textually follow the whole guarded block, not sit
-  // ahead of it where the throw could no longer prevent it from running.
-  const commitLoopIdx = desk.indexOf("for (const p of pendingHashes)");
-  assert.ok(
-    commitLoopIdx > blockEnd,
-    "the pendingHashes commit loop must come after the guard, not before it",
+  // New shape: when no batch produced usable output the run aborts with a
+  // throw before any hash can be stamped.
+  const noBatchGuard = extractIfGuard(desk, "if (!batchResults.length)");
+  assert.match(
+    noBatchGuard.body,
+    /throw new Error/,
+    "a scan with no usable batch output must abort, not commit",
   );
+
+  // The pendingHashes commit loop must run only after that abort guard.
+  const abortIdx = desk.indexOf("if (!batchResults.length)");
+  const commitLoopIdx = desk.indexOf("for (const p of pendingHashes)");
+  assert.ok(abortIdx !== -1, "the no-usable-output abort guard must exist");
+  assert.ok(commitLoopIdx !== -1, "the pendingHashes commit loop must exist");
   assert.ok(
-    ifIdx > desk.indexOf("const data = parseScanResult(raw)"),
-    "the guard must run after parsing, not before",
+    commitLoopIdx > abortIdx,
+    "the pendingHashes commit loop must come after the abort guard, not before it",
   );
 });
 
