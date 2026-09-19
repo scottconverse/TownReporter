@@ -499,9 +499,92 @@ export const listScans = createServerFn({ method: "GET" })
     return { rows, total: count?.total ?? rows.length };
   });
 
+/**
+ * P0-1: list accepted sources for the Custom sources picker. Only accepted
+ * rows -- proposed/rejected/unavailable are never selectable.
+ */
+export const listAcceptedScanSources = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    const sql = await getSql();
+    return sql<{
+      id: number;
+      title: string;
+      url: string;
+      kind: string;
+      tier: string;
+      status: string;
+    }>`
+      select id, title, url, kind, tier, status
+      from sources
+      where newsroom_id = ${owned(context)} and status = 'accepted'
+      order by case tier when 'A' then 0 when 'B' then 1 else 2 end, title asc
+    `;
+  });
+
+/** P0-2: saved source packs for this newsroom, with current accepted counts. */
+export const listScanSourcePacksFn = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    const { listScanSourcePacks } = await import("./scan-source-packs.server.ts");
+    return listScanSourcePacks(owned(context));
+  });
+
+/** P0-2: create or update a named pack from an explicit accepted source set. */
+export const saveScanSourcePackFn = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator(
+    (input: { name: string; sourceIds: number[]; packId?: number }) => input,
+  )
+  .handler(async ({ context, data }) => {
+    const { saveScanSourcePack } = await import("./scan-source-packs.server.ts");
+    return saveScanSourcePack({
+      newsroomId: owned(context),
+      userId: context.userId,
+      name: data.name,
+      sourceIds: data.sourceIds,
+      packId: data.packId,
+    });
+  });
+
+/** P0-2: rename a pack without touching its membership. */
+export const renameScanSourcePackFn = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { packId: number; name: string }) => input)
+  .handler(async ({ context, data }) => {
+    const { renameScanSourcePack } = await import("./scan-source-packs.server.ts");
+    await renameScanSourcePack({
+      newsroomId: owned(context),
+      packId: data.packId,
+      name: data.name,
+    });
+    return { ok: true as const };
+  });
+
+/** P0-2: delete a pack. Accepted sources themselves are untouched. */
+export const deleteScanSourcePackFn = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: { packId: number }) => input)
+  .handler(async ({ context, data }) => {
+    const { deleteScanSourcePack } = await import("./scan-source-packs.server.ts");
+    await deleteScanSourcePack({ newsroomId: owned(context), packId: data.packId });
+    return { ok: true as const };
+  });
 export const runScan = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { modelChoice?: string; modelEffort?: ModelEffort | null; sectionKey?: string } | undefined) => input ?? {})
+  .validator(
+    (
+      input:
+        | {
+            modelChoice?: string;
+            modelEffort?: ModelEffort | null;
+            sectionKey?: string;
+            customSourceIds?: number[];
+            packId?: number;
+          }
+        | undefined,
+    ) => input ?? {},
+  )
   .handler(async ({ context, data }) => {
     /*
       Check the model BEFORE spending the scan.
@@ -525,6 +608,8 @@ export const runScan = createServerFn({ method: "POST" })
       modelChoice,
       modelEffort: modelEffort(modelChoice, data.modelEffort),
       sectionKey: data.sectionKey,
+      customSourceIds: data.customSourceIds,
+      packId: data.packId,
     });
   });
 
@@ -590,9 +675,14 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const [scanRun] = await sql<{
     section_snapshot: string | null;
   }>`select section_snapshot from scan_runs where id=${runId} and newsroom_id=${owned(context)}`;
-  const sectionSnapshot = scanRun?.section_snapshot
-    ? (JSON.parse(scanRun.section_snapshot) as import("./section-types.ts").SectionScanSnapshot)
-    : null;
+  const parsedSnapshot = scanRun?.section_snapshot ? JSON.parse(scanRun.section_snapshot) : null;
+  const { isCustomScanSnapshot } = await import("./section-types.ts");
+  // P0-1: a Custom scan carries its explicit accepted source set in the
+  // snapshot; a section scan carries a section scope; otherwise General.
+  const customSnapshot = isCustomScanSnapshot(parsedSnapshot) ? parsedSnapshot : null;
+  const sectionSnapshot = customSnapshot
+    ? null
+    : (parsedSnapshot as import("./section-types.ts").SectionScanSnapshot | null);
   const allowedTopics = sectionSnapshot
     ? [sectionSnapshot.key]
     : sectionConfig.sections
@@ -606,10 +696,20 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       where newsroom_id = ${owned(context)} and status = 'accepted'
       order by case tier when 'A' then 0 when 'B' then 1 else 2 end, id asc
     `);
-  const sources = selectedScanSources(sectionSnapshot, allSources);
+  // Custom scope: only the explicitly selected, still-accepted sources. A
+  // source that lost acceptance between selection and run is dropped here, so
+  // unselected/non-accepted sources are never fetched.
+  const customIdSet = customSnapshot ? new Set(customSnapshot.sourceIds) : null;
+  const sources = customIdSet
+    ? allSources.filter((s) => s.status === "accepted" && customIdSet.has(s.id))
+    : selectedScanSources(sectionSnapshot, allSources);
   if (sectionSnapshot && !sources.length)
     throw new Error(
       "This section no longer has accepted assigned sources. Review Paper setup and start a new scan.",
+    );
+  if (customSnapshot && !sources.length)
+    throw new Error(
+      "None of the selected sources are still accepted. Choose the custom set again and start a new scan.",
     );
 
   const fetched: {

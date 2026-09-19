@@ -259,7 +259,22 @@ export function SectionsSetup() {
                 </p>
               ) : (
                 <details className="mt-4">
-                  <summary>Assigned accepted sources ({s.sourceIds.length})</summary>
+                  <summary>
+                    Assigned accepted sources ({s.sourceIds.length})
+                    {s.sourceIds.length === 0 ? " — none assigned yet" : ""}
+                  </summary>
+                  {/*
+                    P0-6: make a zero-source section visible and explain why its
+                    scan would refuse, before the editor clicks Run. No silent
+                    auto-assignment — assignment stays manual.
+                  */}
+                  {s.sourceIds.length === 0 ? (
+                    <p className="mt-2" role="status">
+                      <b>No sources assigned.</b> A section scan for “{s.name}” would refuse to run
+                      because it has no accepted assigned sources. Assign sources below, or leave it
+                      and use General Scan.
+                    </p>
+                  ) : null}
                   <p className="mt-2">
                     Section scans use only checked sources. General Scan continues to use all
                     accepted sources.
@@ -273,7 +288,49 @@ export function SectionsSetup() {
                       to accept sources first.
                     </p>
                   ) : (
-                    query.data!.sources.map((source) => (
+                    <>
+                      {/* P0-6: bulk assignment stays manual — these buttons only
+                          set the section's checked set to an explicit list. */}
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <InkButton
+                          tone="ghost"
+                          small
+                          disabled={busy}
+                          onClick={() =>
+                            edit(s.key, {
+                              sourceIds: [
+                                ...new Set([...s.sourceIds, ...query.data!.sources.map((x) => x.id)]),
+                              ],
+                            })
+                          }
+                        >
+                          Assign all accepted
+                        </InkButton>
+                        <InkButton
+                          tone="ghost"
+                          small
+                          disabled={busy || s.sourceIds.length === 0}
+                          onClick={() => edit(s.key, { sourceIds: [] })}
+                        >
+                          Clear section
+                        </InkButton>
+                        <InkButton
+                          tone="ghost"
+                          small
+                          disabled={busy}
+                          onClick={() => {
+                            const next = new Set(s.sourceIds);
+                            for (const other of config.sections) {
+                              if (["opinion", "about"].includes(other.key)) continue;
+                              for (const id of other.sourceIds) next.add(id);
+                            }
+                            edit(s.key, { sourceIds: [...next] });
+                          }}
+                        >
+                          Copy from other sections
+                        </InkButton>
+                      </div>
+                      {query.data!.sources.map((source) => (
                       <label className="mt-2 flex items-start gap-2" key={source.id}>
                         <input
                           type="checkbox"
@@ -290,7 +347,8 @@ export function SectionsSetup() {
                           {source.title} · {source.url}
                         </span>
                       </label>
-                    ))
+                      ))}
+                    </>
                   )}
                 </details>
               )}

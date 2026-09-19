@@ -32,6 +32,36 @@ export type SectionScanSnapshot = Pick<
 > & { revision: number };
 
 /** The worker revalidates acceptance after enqueue, even for pinned IDs. */
+/**
+ * P0-1: an editor-chosen explicit source set for one scan run.
+ *
+ * Distinct from a `SectionScanSnapshot` (which carries a section's assigned
+ * sources). This is the "Custom sources" scope: the editor picked these exact
+ * accepted sources. `sourceIds` is persisted into the run's snapshot BEFORE
+ * fetching begins, so the run is reproducible and auditable even if the source
+ * list changes mid-run.
+ */
+export type CustomScanSnapshot = {
+  kind: "custom";
+  sourceIds: number[];
+  /** Optional saved pack this selection came from (P0-2), for the run record. */
+  packId?: number;
+  packName?: string;
+};
+
+/** The union of every scan scope a run can carry in `section_snapshot`. */
+export type ScanScopeSnapshot = SectionScanSnapshot | CustomScanSnapshot;
+
+/** Narrow a parsed snapshot to the custom-source scope. */
+export function isCustomScanSnapshot(value: unknown): value is CustomScanSnapshot {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as { kind?: unknown }).kind === "custom" &&
+    Array.isArray((value as { sourceIds?: unknown }).sourceIds)
+  );
+}
 export function selectedScanSources<T extends { id: number; status: string }>(
   snapshot: SectionScanSnapshot | null,
   sources: T[],
