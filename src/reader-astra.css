@@ -1,3 +1,4 @@
+/* Public reader 14px floor: no informational text below 14px (pre-Option-B accessibility gate). */
 .reader {
   --bg: #f8faf9;
   --surface: #fff;
@@ -116,16 +117,16 @@
   padding: 0 40px;
   background: #eaf0ee;
   color: #53696a;
-  font-size: 11px;
+  font-size: 14px;
   letter-spacing: 0.02em;
 }
 .reader .prototype b {
-  font-size: 9px;
+  font-size: 14px;
   letter-spacing: 0.13em;
   margin-right: 12px;
 }
 .reader .prototype button {
-  font-size: 11px;
+  font-size: 14px;
   min-height: 30px;
 }
 .reader .prototype button:hover {
@@ -159,7 +160,7 @@
 .reader .locality {
   padding-left: 25px;
   border-left: 1px solid var(--line);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
   color: var(--muted);
 }
@@ -182,7 +183,7 @@
   padding: 10px 16px;
   border-radius: 8px;
   border: 1px solid var(--line);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   background: var(--surface);
   transition:
@@ -210,7 +211,7 @@
   background: var(--soft);
 }
 .reader .btn.small {
-  font-size: 12px;
+  font-size: 14px;
   min-height: 36px;
   padding: 7px 11px;
 }
@@ -228,7 +229,7 @@
   align-items: center;
 }
 .reader .sections a {
-  font-size: 13px;
+  font-size: 14px;
   padding: 18px 0;
   position: relative;
   white-space: nowrap;
@@ -250,7 +251,7 @@
 }
 .reader .navrow > .textlink,
 .reader .navrow .about-newsroom {
-  font-size: 12px;
+  font-size: 14px;
   white-space: nowrap;
 }
 .reader .reader-nav-actions {
@@ -267,7 +268,7 @@
   align-items: center;
   gap: 6px;
   color: var(--teal);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   min-height: 35px;
 }
@@ -285,7 +286,7 @@
   padding: 38px 0 25px;
 }
 .reader .eyebrow {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 750;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -298,12 +299,12 @@
   letter-spacing: -1px;
 }
 .reader .intro p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted);
   margin-top: 7px;
 }
 .reader .date {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
 }
 .reader .hero {
@@ -319,7 +320,7 @@
 }
 .reader .tag {
   display: inline-block;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 750;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -344,7 +345,7 @@
   max-width: 620px;
 }
 .reader .meta {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
   display: flex;
   align-items: center;
@@ -397,7 +398,7 @@
   align-items: center;
   gap: 9px;
   color: var(--teal);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 650;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -410,7 +411,7 @@
   margin: 20px 0 9px;
 }
 .reader .record p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted);
 }
 .reader .record-list {
@@ -432,12 +433,12 @@
 }
 .reader .record-list strong {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
   margin-bottom: 4px;
 }
 .reader .record-list p {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.45;
 }
 .reader .trustbar {
@@ -447,7 +448,7 @@
   gap: 20px;
   padding: 18px 3px;
   border-bottom: 1px solid var(--line);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
 }
 .reader .trustbar span {
@@ -486,13 +487,13 @@
   align-items: start;
 }
 .reader .datebox {
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.6;
   color: var(--muted);
   padding-top: 2px;
 }
 .reader .newsrow .tag {
-  font-size: 9px;
+  font-size: 14px;
   margin-bottom: 9px;
 }
 .reader .newsrow h3 {
@@ -502,7 +503,7 @@
   letter-spacing: -0.35px;
 }
 .reader .newsrow p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted);
   margin-top: 10px;
   line-height: 1.6;
@@ -528,7 +529,7 @@
   margin-bottom: 7px;
 }
 .reader .sidebarcard > p {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   margin-bottom: 18px;
 }
@@ -542,7 +543,7 @@
   gap: 11px;
   padding: 13px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 13px;
+  font-size: 14px;
 }
 .reader .topiclist a:last-child {
   border: 0;
@@ -564,7 +565,7 @@
   gap: 13px;
   padding: 16px 0;
   border-top: 1px solid #ded9d1;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .reader .toolitem svg:last-child {
@@ -587,7 +588,7 @@
   letter-spacing: -0.5px;
 }
 .reader .aboutstrip p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted);
   margin-top: 7px;
 }
@@ -624,7 +625,7 @@
   letter-spacing: -0.6px;
 }
 .reader .opinionfeature p {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   margin-top: 10px;
 }
@@ -642,7 +643,7 @@
   font-size: 26px;
 }
 .reader .footergrid p {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   max-width: 300px;
   margin-top: 12px;
@@ -655,10 +656,10 @@
   display: grid;
   gap: 13px;
   align-content: start;
-  font-size: 12px;
+  font-size: 14px;
 }
 .reader .footerlinks b {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
   margin-bottom: 4px;
 }
@@ -669,7 +670,7 @@
   display: flex;
   justify-content: space-between;
   gap: 25px;
-  font-size: 10px;
+  font-size: 14px;
   color: var(--muted);
 }
 .reader .pagehead {
@@ -689,7 +690,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   padding-top: 26px;
 }
@@ -728,14 +729,14 @@
   gap: 15px;
 }
 .reader .filters label {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   display: flex;
   gap: 9px;
   align-items: center;
 }
 .reader .filters select {
-  font-size: 12px;
+  font-size: 14px;
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -783,7 +784,7 @@
   border-bottom: 1px solid var(--line);
   padding: 18px 0;
   margin-top: 27px;
-  font-size: 12px;
+  font-size: 14px;
   gap: 15px;
 }
 .reader .byline strong {
@@ -805,7 +806,7 @@
   color: var(--teal);
   border-radius: 50%;
   font-family: var(--serif);
-  font-size: 13px;
+  font-size: 14px;
 }
 .reader .readingtools {
   display: flex;
@@ -824,12 +825,12 @@
   align-self: start;
   display: grid;
   gap: 15px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   padding-top: 8px;
 }
 .reader .contents strong {
-  font-size: 10px;
+  font-size: 14px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink);
@@ -856,7 +857,7 @@
 }
 .reader .articlebody .notice {
   font-family: "Segoe UI", sans-serif;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
   background: var(--warm);
   padding: 15px 19px;
@@ -883,7 +884,7 @@
   font-size: 23px;
 }
 .reader .sources > p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted);
 }
 .reader .sourcecard {
@@ -903,7 +904,7 @@
   font-weight: 650;
 }
 .reader .sourcecard p {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   line-height: 1.6;
   margin: 5px 0 13px;
@@ -914,7 +915,7 @@
   flex-wrap: wrap;
 }
 .reader .articleaside {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   padding-top: 10px;
 }
@@ -980,7 +981,7 @@
   line-height: 1.8;
 }
 .reader .comparison h3 {
-  font-size: 13px;
+  font-size: 14px;
   margin-bottom: 15px;
   font-weight: 650;
 }
@@ -993,7 +994,7 @@
   padding: 2px 4px;
 }
 .reader .badge {
-  font-size: 10px;
+  font-size: 14px;
   background: var(--soft);
   border-radius: 4px;
   padding: 5px 7px;
@@ -1035,7 +1036,7 @@
   border-top: 1px solid var(--line);
 }
 .reader .setting strong {
-  font-size: 13px;
+  font-size: 14px;
   display: block;
   margin-bottom: 12px;
 }
@@ -1069,7 +1070,7 @@
   background: #173e42;
   color: white;
   box-shadow: 0 5px 25px #0002;
-  font-size: 13px;
+  font-size: 14px;
   opacity: 0;
   pointer-events: none;
   transition: 0.2s;
@@ -1086,7 +1087,7 @@
   margin-top: 20px;
 }
 .reader .resultcount {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
 }
 .reader.mode-dark {
@@ -1167,7 +1168,7 @@
     gap: 27px;
   }
   .reader .sections a {
-    font-size: 12px;
+    font-size: 14px;
   }
   .reader .utilities .savedlabel {
     display: none;
@@ -1185,7 +1186,7 @@
     font-size: 0;
   }
   .reader .prototype b {
-    font-size: 9px;
+    font-size: 14px;
   }
   .reader .mast {
     height: 80px;
@@ -1218,7 +1219,7 @@
     flex: 1;
     width: auto;
     padding: 13px 0;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     align-items: center;
     order: 1;
@@ -1230,7 +1231,7 @@
   .reader .desk-entry {
     min-height: 38px;
     padding: 8px 11px;
-    font-size: 12px;
+    font-size: 14px;
   }
   .reader .sections {
     display: none;
@@ -1266,7 +1267,7 @@
     display: none;
   }
   .reader .intro p {
-    font-size: 12px;
+    font-size: 14px;
   }
   .reader .hero {
     grid-template-columns: 1fr;
@@ -1297,17 +1298,17 @@
     padding: 12px 0;
   }
   .reader .record-list p {
-    font-size: 12px;
+    font-size: 14px;
   }
   .reader .trustbar {
-    font-size: 11px;
+    font-size: 14px;
     align-items: start;
   }
   .reader .trustbar > span:nth-child(2) {
     display: none;
   }
   .reader .trustbar .textlink {
-    font-size: 11px;
+    font-size: 14px;
   }
   .reader .content-grid {
     grid-template-columns: 1fr;
@@ -1407,7 +1408,7 @@
   }
   .reader .readingtools .btn {
     flex: 1;
-    font-size: 12px;
+    font-size: 14px;
   }
   .reader .pagehead h1 {
     font-size: 35px;
@@ -1428,10 +1429,10 @@
     grid-template-columns: 1fr;
   }
   .reader .sourceactions .btn {
-    font-size: 11px;
+    font-size: 14px;
   }
   .reader .articlebody .notice {
-    font-size: 11px;
+    font-size: 14px;
   }
   .reader .articlebody {
     font-size: var(--reading);
@@ -1498,7 +1499,7 @@
 }
 .reader .articlebody .textlink {
   font-family: "Segoe UI", sans-serif;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .reader .lead .dek {
@@ -1567,7 +1568,7 @@
   color: var(--ink);
 }
 .reader #correctionform label span {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 400;
   color: var(--muted);
 }
@@ -1586,7 +1587,7 @@
   gap: 18px;
 }
 .reader #correctionform .form-help {
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
   margin: 18px 0;
   color: var(--muted);
@@ -1674,7 +1675,7 @@
 }
 .reader .footerlinks a,
 .reader .footer-button {
-  font-size: 13px;
+  font-size: 14px;
 }
 .reader .footerlinks a:hover,
 .reader .footer-button:hover {
