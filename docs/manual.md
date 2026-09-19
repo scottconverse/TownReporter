@@ -6,7 +6,7 @@ Dark Desk uses the city and state saved in Paper setup, plus its configured coun
 
 [Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.54 release guide and evidence boundaries](releases/0.6.54.md). A source release and running production deployment are separate facts.
 
-**Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
+**Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
 TownReporter is a civic newsroom you run yourself. A public paper on the front,
 a signed-in editor's desk behind it. It watches a city's meetings, packets,
