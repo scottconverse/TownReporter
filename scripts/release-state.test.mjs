@@ -116,5 +116,3 @@ test("the current-release statement in README, TODO, and the Windows guide does 
     );
   }
 });
-
-
