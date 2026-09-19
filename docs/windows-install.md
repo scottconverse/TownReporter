@@ -10,7 +10,7 @@ Use this path to run a persistent newsroom on your own Windows computer. The sou
 
 The target is to finish installation and a first manual editorial workflow in under an hour. Download speed, prerequisite installation and any model response time affect that result. This is a goal, not measured proof for every computer or connection.
 
-The repository includes automated Windows installer and package checks. The [0.6.54 release guide](releases/0.6.54.md) says the original 0.6.50 packaged-install job failed and does not assert a fresh 0.6.54 Windows package result, a published ZIP, or human acceptance. No fresh-machine human acceptance result is documented here.
+The repository includes automated Windows installer and package checks. The [0.6.54 release guide](releases/0.6.54.md) records the published v0.6.54 release: tag, GitHub release, and the Windows x64 ZIP `TownReporter-0.6.54-windows-x64.zip` (SHA-256 `dfbeb9b9…`). A fresh-machine human acceptance result is still not documented here.
 
 ## Download and install
 
