@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteScanSourcePackFn, listAcceptedScanSources, listScanSourcePacksFn, listScans, listSources, renameScanSourcePackFn, runScan, saveScanSourcePackFn } from "@/lib/news/desk";
@@ -11,6 +11,7 @@ import { ModelPicker } from "@/components/model-picker";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { useEditorSections } from "@/lib/use-sections";
+import { pageOffset, nextWindowSize, isHistoryExhausted, accumulateScanPages } from "@/lib/news/scan-history";
 
 export const Route = createFileRoute("/desk/scan")({ component: ScanPage });
 
@@ -28,19 +29,36 @@ function ScanPage() {
   const [packName,setPackName]=useState("");
   const { formatDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
-  // P0-4: bounded pages with a true total. `pages` grows as the editor clicks
-  // Show more; each page is a normal listScans call and never runs a scan.
+  /*
+    P0-4: real offset paging. Each request is ONE bounded page (pageSize), and
+    loaded pages are accumulated client-side, so older rows are appended rather
+    than replacing the window. The old `limit: pageSize * pages` form could
+    never reach row 51 once the server clamped `limit` to 50 — a permanent
+    "Show more (1 older)" that re-fetched the same rows and never exhausted.
+    Show more only pages history; it never reruns a scan.
+  */
   const [pages, setPages] = useState(1);
   const pageSize = 12;
+  // Rows accumulated across every page loaded so far.
+  const [loadedRows, setLoadedRows] = useState<import("@/lib/news/types").ScanRow[]>([]);
   const scans = useQuery({
     queryKey: ["scans", pages],
-    queryFn: () => listScans({ data: { limit: pageSize * pages, offset: 0 } }),
+    queryFn: () =>
+      listScans({
+        data: { limit: nextWindowSize(pageSize), offset: pageOffset(pages, pageSize) },
+      }),
     refetchInterval: (q) => {
       const row = q.state.data?.rows?.[0];
       if (row && !row.finished_at && !row.error) return 2000;
       return false;
     },
   });
+  // Accumulate each fetched page into the loaded list (de-duped by id).
+  useEffect(() => {
+    const rows = scans.data?.rows;
+    if (!rows) return;
+    setLoadedRows((prev) => accumulateScanPages(prev, rows));
+  }, [scans.data]);
   const sources = useQuery({ queryKey: ["sources"], queryFn: () => listSources() });
   // P0-1: accepted sources available for the Custom picker.
   const accepted = useQuery({ queryKey: ["scan-accepted"], queryFn: () => listAcceptedScanSources() });
@@ -91,9 +109,9 @@ function ScanPage() {
     },
   });
 
-  const history = scans.data?.rows ?? [];
+  const history = loadedRows;
   const totalScans = scans.data?.total ?? history.length;
-  const exhausted = history.length >= totalScans;
+  const exhausted = isHistoryExhausted(history.length, totalScans);
   const watch = (sources.data ?? []).filter((s) => s.status === "accepted").length;
   const last = history[0];
   // A row can look open (no finished_at, no error) forever if the process
