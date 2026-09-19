@@ -1,11 +1,21 @@
 # Changelog
 
-Current release: **0.6.53**.
+Current release: **0.6.54**.
 
 ## Unreleased
 
 - Fixes the Windows promotion guard so it recognizes this checkout's actual backslash `.output\server\index.mjs` command line while still refusing an unrelated Node process. The focused regression executes both cases. This fixes a defect observed during the v0.6.51 promotion; it does not assert a production promotion of this candidate.
 
+## 0.6.54 — 2026-09-18
+
+This section records the current source version. It does not assert a Git tag, GitHub release, packaged Windows installer, production deployment, or live-model result.
+
+- Adds a **Custom sources** scan scope: search accepted sources by name/URL, filter by kind/tier, select any number with a live count, and run a scan against exactly that set. Unselected, proposed, rejected, and unavailable sources are never fetched; the selected accepted IDs are persisted into the run snapshot before fetching.
+- Adds **saved source packs**: named, reusable sets of accepted sources with create/run/edit/rename/delete. A pack scan resolves the pack's CURRENT accepted membership at run time and never edits section configuration. New tables scan_source_packs and scan_source_pack_members (migration 0066).
+- Makes **coverage reporting truthful**: every run records selected, attempted, fetched, failed, analyzed, and model-batch counts plus the failed-source set (migration 0065). A zero-lead success, a provider failure, and a partial run now render differently, and the editor can see which sources failed.
+- Replaces the single 48,000-character analysis pass — which silently dropped every source past the budget — with **bounded per-batch model calls**. A 100-source scan is no longer truncated; a failed batch does not discard the successful batches' leads; leads are de-duplicated across batches with per-lead source attribution preserved. Resume-from-checkpoint is not included.
+- Adds **real offset paging** for scan history with a true total: the panel shows "Showing latest N of M" and a Show more control that appends older pages and disappears when exhausted. This fixes a defect where the old growing-window request could never reach past row 50.
+- Adds **section source counts and manual bulk assignment** (Assign all accepted / Clear section / Copy from other sections) with a visible warning when a section has zero accepted sources. No automatic assignment.
 ## 0.6.53 — 2026-09-18
 
 This section records the current source version. It does not assert a Git tag, GitHub release, packaged Windows installer, production deployment, or live-model result.
