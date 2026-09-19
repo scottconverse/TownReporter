@@ -1,0 +1,12 @@
+flowchart LR
+    R["One scan run"]
+    R --> S{"Did every<br/>selected source<br/>reach the model?"}
+    S -->|"no"| P["PARTIAL<br/>states plainly which sources failed"]
+    S -->|"yes"| Z{"Did any batch<br/>produce usable output?"}
+    Z -->|"no"| E["FAILURE<br/>provider/batch error — not a quiet zero"]
+    Z -->|"yes"| L{"Were any leads<br/>filed?"}
+    L -->|"yes"| OK["SUCCESS with leads"]
+    L -->|"no"| ZO["SUCCESS with zero leads<br/><i>not shown as an error</i>"]
+
+    style E fill:#7a2d2d,color:#fff
+    style P fill:#7a5a2d,color:#fff

@@ -226,6 +226,11 @@ As of 0.6.21 the desk is one main column (composer, then the queue) with a right
 
 ![Scan](images/05-scan.png)
 
+![Scan architecture: scope, bounded batching, and coverage accounting](diagrams/scan-overview.svg)
+
+The rendered diagram is also in [docs/diagrams/scan-architecture.md](diagrams/scan-architecture.md)
+alongside the run-reporting and history-paging diagrams.
+
 One press reads the sources you choose, hashes each one against the last
 snapshot, and files what changed as leads. It is a button, not a loop: it runs
 when you ask.
