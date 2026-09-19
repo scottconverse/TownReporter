@@ -540,19 +540,27 @@
   border-color: var(--line);
 }
 /*
-  Same story for the arbitrary-value / scale text-size utilities those
-  pages use below the 14px floor (`text-[11px]`, `text-xs` etc.) -- fixed
-  via selector here rather than editing the owning files. `text-sm` (14px)
-  is already at the floor and left alone.
+  The product rule is "Nothing informational under 14px."
+
+  This remap used to be scoped to `.desk-ltr`, so the desk obeyed the floor but
+  public routes kept the raw 11px/12px utilities -- verified in a browser on
+  `/`, `/login`, `/about`, `/corrections`, an article, and the error page. The
+  floor is now GLOBAL: the utilities are remapped at the root so every surface
+  (public and desk) obeys it.
+
+  `.desk-ltr` still multiplies by its own `--ts` text-scale factor so the desk's
+  Normal/Large preference keeps working; outside the desk `--ts` is undefined,
+  so the `var(--ts, 1)` fallback yields exactly 14px. `text-sm` (14px) is
+  already at the floor and left alone.
 */
-.desk-ltr .text-xs {
-  font-size: calc(0.875rem * var(--ts));
+.text-xs {
+  font-size: calc(0.875rem * var(--ts, 1));
 }
-.desk-ltr .text-\[11px\] {
-  font-size: calc(0.875rem * var(--ts));
+.text-\[11px\] {
+  font-size: calc(0.875rem * var(--ts, 1));
 }
-.desk-ltr .text-\[12px\] {
-  font-size: calc(0.875rem * var(--ts));
+.text-\[12px\] {
+  font-size: calc(0.875rem * var(--ts, 1));
 }
 /* Keyboard focus must stay visible against both the light and dark desk
    backgrounds. The global :focus-visible rule (styles.css ~line 77) uses a
