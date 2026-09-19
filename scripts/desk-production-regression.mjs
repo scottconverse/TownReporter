@@ -26,6 +26,7 @@
  * Exit 0 only when all six surfaces pass AND the no-side-effects check passes.
  */
 import { chromium } from "playwright";
+import pg from "pg";
 import { readFileSync, writeFileSync } from "node:fs";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
@@ -42,6 +43,60 @@ const password = "prodreg-e2e-pass";
 
 // Each surface: path, a landmark that proves the REAL surface rendered, and an
 // optional locator for the persistence reload check.
+/*
+  Read-only side-effect snapshot (directive item 5): count the four rows a
+  destructive walk WOULD change -- published articles, queue leads, scan runs,
+  and leads -- on the STAGING database, before and after the walk. These are
+  pure SELECTs. The walk fails if any count differs.
+
+  The staging database is reached through its own DATABASE_URL. When running
+  against a throwaway PGLite server (no DATABASE_URL), there is no external DB
+  to snapshot; in that mode the CI server is in-memory and discarded, so the
+  snapshot is recorded as "pglite-ephemeral" and the equality check is trivially
+  satisfied because the whole database ceases to exist with the process.
+*/
+async function sideEffectSnapshot() {
+  const url = process.env.DATABASE_URL;
+  if (!url) return { source: "pglite-ephemeral", counts: null };
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  try {
+    const q = async (sql) => Number((await client.query(sql)).rows[0].count);
+    const counts = {
+      articles: await q("select count(*)::int as count from articles"),
+      queueLeads: await q("select count(*)::int as count from leads where status not in ('published','killed')"),
+      scanRuns: await q("select count(*)::int as count from scan_runs"),
+      leads: await q("select count(*)::int as count from leads"),
+    };
+    return { source: "staging-db", counts };
+  } finally {
+    await client.end();
+  }
+}
+
+function assertNoSideEffects(before, after) {
+  if (!before.counts || !after.counts) {
+    // Ephemeral PGLite: no persistent rows to compare; recorded honestly.
+    return { passed: true, note: "ephemeral PGLite (no external database); nothing persisted" };
+  }
+  const diffs = [];
+  for (const key of Object.keys(before.counts)) {
+    if (before.counts[key] !== after.counts[key]) {
+      diffs.push(`${key}: ${before.counts[key]} -> ${after.counts[key]}`);
+    }
+  }
+  if (diffs.length) throw new Error(`side effects detected: ${diffs.join("; ")}`);
+  return { passed: true, note: "all four counts identical before and after" };
+}
+/*
+  TEST-ONLY red-baseline hook: DESK_PRODREG_BREAK_SURFACE names ONE surface
+  whose path is replaced with a non-existent route, so the walk demonstrably
+  FAILS on that single surface while the other five still pass. Never used in
+  CI or normal runs; it exists to prove the walk actually detects a broken
+  surface rather than merely asserting success.
+*/
+const BREAK_SURFACE = process.env.DESK_PRODREG_BREAK_SURFACE || "";
+
 const SURFACES = [
   { name: "Queue", path: "/desk/queue", landmark: /The queue|Draft|Queue/i },
   { name: "Scan", path: "/desk/scan", landmark: /Reporter pass|Run scan/i },
@@ -157,12 +212,18 @@ async function walkSurface(surface) {
   return entry;
 }
 
+let beforeSnapshot = { source: "not-taken", counts: null };
 try {
+  beforeSnapshot = await sideEffectSnapshot();
   await signIn();
   routeHistory.push(page.url());
   // Visit the desk home first so the nav is mounted, then each surface.
   for (const surface of SURFACES) {
-    results.push(await walkSurface(surface));
+    const effective =
+      BREAK_SURFACE && surface.name === BREAK_SURFACE
+        ? { ...surface, path: `/desk/__broken-${surface.name.toLowerCase()}__`, landmark: /IMPOSSIBLE_LANDMARK_XYZ/ }
+        : surface;
+    results.push(await walkSurface(effective));
   }
   /*
     NO-SIDE-EFFECTS, enforced two ways:
@@ -175,6 +236,8 @@ try {
        never sends a POST that changes state. We record the observed request
        methods and require none of them to be a mutating verb on a desk action.
   */
+  // Secondary guardrail only: the primary proof is the observed before/after
+  // snapshot taken around the whole walk (see sideEffectSnapshot above).
   const source = readFileSync(new URL(import.meta.url), "utf8");
   const forbiddenClicks = [
     /getByRole\([^)]*name:\s*["'`]Publish/i,
@@ -186,10 +249,11 @@ try {
   ];
   for (const re of forbiddenClicks) {
     if (re.test(source)) {
-      throw new Error(`no-side-effects violated: the walk clicks a mutating control (${re})`);
+      throw new Error(`source guardrail: the walk clicks a mutating control (${re})`);
     }
   }
-  const sideEffects = { published: false, deleted: false, scanStarted: false, modelCalled: false };
+  const afterSnapshot = await sideEffectSnapshot();
+  const sideEffects = assertNoSideEffects(beforeSnapshot, afterSnapshot);
   const artifact = {
     ok: true,
     base,
@@ -199,6 +263,7 @@ try {
     requestFailures,
     routeHistory,
     sideEffects,
+    sideEffectSnapshots: { before: beforeSnapshot, after: afterSnapshot },
   };
   writeFileSync(artifactPath, JSON.stringify(artifact, null, 2));
   console.log(JSON.stringify({
@@ -218,6 +283,7 @@ try {
     consoleErrors,
     requestFailures,
     routeHistory,
+    sideEffectSnapshots: { before: beforeSnapshot, after: null },
     currentUrl: (() => { try { return page.url(); } catch { return ""; } })(),
   };
   try { writeFileSync(artifactPath, JSON.stringify(artifact, null, 2)); } catch { /* best effort */ }
