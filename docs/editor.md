@@ -4,7 +4,7 @@ Dark Desk uses the city and state saved in Paper setup, plus its configured coun
 
 **Current release: [0.6.54](releases/0.6.54.md).** The release guide separates source changes from unverified GitHub publication, installation, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
-**Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
+**Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
 Dark Desk’s UI contract (for design and for anyone rewriting that page) is [dark-desk-editor.md](dark-desk-editor.md). The whole system, including how it is built, is [manual.md](manual.md). This page is the newsroom, in the order you use it.
 
