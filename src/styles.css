@@ -880,6 +880,9 @@
 .desk-ltr .board-lower>div+div {border-left:1px solid var(--line)}
 .desk-ltr .narrowish {max-width:1000px}
 .desk-ltr .filters {display:flex;gap:6px;margin-top:18px;flex-wrap:wrap}
+.desk-ltr .queue-bulk-delete {display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper-2)}
+.desk-ltr .queue-bulk-delete-confirm {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.desk-ltr .queue-delete-select {display:block}
 .desk-ltr .filter {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.1em;border:1px solid var(--line);padding:4px 12px;color:var(--mut);white-space:nowrap}
 .desk-ltr .filter.on {background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .desk-ltr .file-form {margin-top:16px;border:1px solid var(--line);padding:0 16px}

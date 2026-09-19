@@ -31,6 +31,8 @@ export function LeadRowView({
   onBack,
   onKill,
   onDelete,
+  deleteSelected = false,
+  onDeleteSelect,
   onDraft,
   drafting = false,
   draftNotice = null,
@@ -53,6 +55,8 @@ export function LeadRowView({
    * two-click delete on a row this small is the whole safety net it needs.
    */
   onDelete?: () => void;
+  deleteSelected?: boolean;
+  onDeleteSelect?: (selected: boolean) => void;
   onDraft?: (modelChoice: StoryModelChoice, modelEffort: ModelEffort | null) => void;
   drafting?: boolean;
   draftNotice?: { kind: "ok" | "err"; text: string } | null;
@@ -79,6 +83,17 @@ export function LeadRowView({
         <p className="meta">
           {lead.topic} · {formatAge(lead.created_at)} · {leadOrigin(lead)}
         </p>
+        {onDeleteSelect ? (
+          <label className="meta queue-delete-select">
+            <input
+              type="checkbox"
+              checked={deleteSelected}
+              aria-label={`Select ${lead.headline} for deletion`}
+              onChange={(event) => onDeleteSelect(event.target.checked)}
+            />{" "}
+            Select for deletion
+          </label>
+        ) : null}
         {onBatchSelect ? (
           <label className="meta">
             <input
