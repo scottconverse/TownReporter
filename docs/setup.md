@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current release: [0.6.54](releases/0.6.54.md).** See the release guide for changes, operating boundaries, and unverified GitHub-publication, deployment, and provider-run evidence. Editors should start at [the editor guide](editor.md).
+**Current release: [0.6.55](releases/0.6.55.md).** See the release guide for changes, operating boundaries, and unverified GitHub-publication, deployment, and provider-run evidence. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 

@@ -1,6 +1,6 @@
 # Changelog
 
-Current release: **0.6.54**.
+Current release: **0.6.55**.
 
 ## Unreleased
 

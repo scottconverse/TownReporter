@@ -2,11 +2,11 @@
 
 ## Current release work — 2026-09-16
 
-The current release is [0.6.54](docs/releases/0.6.54.md): **published** on GitHub at tag `v0.6.54` (source commit `c9402d794552556519710c8ee347d6d581a91c6a`), with the Windows x64 ZIP `TownReporter-0.6.54-windows-x64.zip` and its metadata/SHA-256 sidecars attached. This release adds custom scan source selection (General / Section / Custom scopes); saved source packs; truthful coverage accounting (selected / attempted / fetched / failed / analysed, batch counts, failed-source detail); bounded batch analysis replacing the single 48,000-character truncating pass; real offset paging for scan history with a true total; and per-section source counts with manual bulk assignment. Two additive migrations ship with it: `0065_scan_coverage_accounting.sql` and `0066_scan_source_packs.sql`.
+The current release is [0.6.55](docs/releases/0.6.55.md): the global 14px informational-text floor that closes a GauntletGate Critical; the corrected release-state documentation and release-state guard; and the new non-destructive authenticated desk regression with its CI job. Publication fields are recorded in the release note after the tag, GitHub release, and Windows assets are published.
 
 The following acceptance work remains EXPLICITLY OPEN and is not closed by this release: fresh-machine human acceptance of the Windows install; the live provider matrix (configured-provider behaviour across the full provider set); five useful Dark Desk outcomes plus the September 3–8 replay; and the post-crash detached-child limitation. Production deployment and live-model proof are not asserted here.
 
-Tag boundaries: `v0.6.54` is published at `c9402d794552556519710c8ee347d6d581a91c6a`; `v0.6.53` remains published at `baa6566`; `v0.6.52` remains published at `9834e81`.
+Tag boundaries: `v0.6.55` is cut from the merged 0.6.55 release commit; `v0.6.54` remains published at `c9402d794552556519710c8ee347d6d581a91c6a`; `v0.6.53` remains published at `baa6566`; `v0.6.52` remains published at `9834e81`.
 
 ## Historical work record
 
