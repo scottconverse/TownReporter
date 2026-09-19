@@ -2,9 +2,9 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.53 · deployment is recorded separately**
+**Version 0.6.54 · deployment is recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.53 release guide and evidence boundaries](releases/0.6.53.md). A source release and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.54 release guide and evidence boundaries](releases/0.6.54.md). A source release and running production deployment are separate facts.
 
 **Screenshot scope:** Embedded screenshots illustrate earlier desk layouts. The current Astra navigation and document workflow are described in the [current desk guide](editor-desk.md). Labels and locations in this text take precedence over archived screenshots.
 
