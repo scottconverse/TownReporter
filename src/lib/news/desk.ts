@@ -22,7 +22,6 @@ import {
   parseScanResult,
   previousScanNeedsReread,
   sanitizePublicUrls,
-  shouldCommitFetchHashes,
 } from "./schema";
 import { reportAndDraft } from "./report";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";

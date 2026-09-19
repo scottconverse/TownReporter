@@ -450,25 +450,21 @@ test("scan does not stamp last_hash until the writing pass succeeds", async () =
   assert.match(desk, /previousScanNeedsReread/);
   assert.match(desk, /parseScanResult/);
 
-  // The behavioural guard itself is unchanged, so keep evaluating the real
-  // predicate rather than only grepping for its name.
-  const schema = await import(pathToFileURL(join(ROOT, "src/lib/news/schema.ts")).href);
-  assert.equal(
-    schema.shouldCommitFetchHashes({ aiOk: true, parseError: null }),
-    true,
-    "a successful writing pass must allow the commit",
-  );
-  assert.equal(
-    schema.shouldCommitFetchHashes({
-      aiOk: true,
-      parseError: "Writing pass returned no usable JSON.",
-    }),
-    false,
-    "a failed writing pass must block the commit",
-  );
+  /*
+    The old version of this test evaluated `shouldCommitFetchHashes(...)`
+    directly. That predicate is no longer a production caller after the P0-5
+    batching rewrite: schema.ts still exports it (and its own unit tests in
+    scan-pass.test.ts / schema.test.ts still cover it), but desk.ts no longer
+    imports or calls it, so asserting on it here would verify a function the
+    running scan never executes -- the same "test a module, not the path" gap
+    the coupling-pin review flagged. The load-bearing invariant is the abort
+    guard below, which IS the production path, so that is what this test
+    protects. The dead import was removed from desk.ts; only the schema-level
+    unit tests cover the predicate now.
+  */
 
-  // New shape: when no batch produced usable output the run aborts with a
-  // throw before any hash can be stamped.
+  // When no batch produced usable output the run aborts with a throw before
+  // any hash can be stamped.
   const noBatchGuard = extractIfGuard(desk, "if (!batchResults.length)");
   assert.match(
     noBatchGuard.body,
