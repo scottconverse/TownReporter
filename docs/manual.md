@@ -226,13 +226,52 @@ As of 0.6.21 the desk is one main column (composer, then the queue) with a right
 
 ![Scan](images/05-scan.png)
 
-One press reads every watched source, hashes it against the last snapshot, and
-files what changed as leads. It is a button, not a loop: it runs when you ask.
-Previous scans are listed underneath with what each one found.
+![Scan architecture: scope, bounded batching, and coverage accounting](diagrams/scan-overview.svg)
+
+The rendered diagram is also in [docs/diagrams/scan-architecture.md](diagrams/scan-architecture.md)
+alongside the run-reporting and history-paging diagrams.
+
+One press reads the sources you choose, hashes each one against the last
+snapshot, and files what changed as leads. It is a button, not a loop: it runs
+when you ask.
+
+**Three scan scopes.** The scan picker offers:
+
+- **General Scan** — every accepted source.
+- **Section scan** — only the accepted sources assigned to one section.
+- **Custom sources** — exactly the set you pick. Search accepted sources by
+  name or URL, filter by kind and tier, and select any number; a live count
+  shows how many you have chosen. Proposed, rejected and unavailable sources
+  cannot be selected, and an unselected source is never fetched. The selected
+  IDs are saved into the run before the first fetch, so a run stays
+  reproducible even if the watch list changes while it runs.
+
+**Saved source packs.** A named set of accepted sources can be saved, run,
+edited, renamed and deleted. Running a pack resolves its *current* accepted
+membership at run time, so editing a pack never rewrites a scan already
+started, and a source that later stops being accepted drops out of the pack
+automatically. Running a pack does not change any section configuration.
+
+**What each run reports.** Every scan records the whole path from selection to
+filing — how many sources were selected, attempted, fetched, failed and
+actually analysed by the model; how many analysis batches ran and how many
+failed; and which sources failed, by name. A successful scan that finds nothing
+is shown as a success with zero leads, not as an error. A provider failure is
+shown as a failure, not as a quiet zero. A partial scan says so plainly.
+
+Large scans are split into bounded batches, one model call each, so a scan with
+a hundred sources is no longer silently cut off part-way through the list. If
+one batch fails, the others keep their leads; leads are de-duplicated across
+batches and each keeps its source attribution. A scan interrupted mid-way does
+not resume from a checkpoint in this version — start it again.
+
+Previous scans are listed underneath with a true total, for example "Showing
+latest 12 of 39", and **Show more** appends older runs a page at a time and
+disappears when there is nothing older to load.
 
 The owner can also configure a daily ordinary scan on the
 Server page. It starts disabled. The
-owner selects up to 12 accepted sources from any reporting beat, a local time
+owner selects accepted sources from any reporting beat, a local time
 in the paper's timezone, and one explicit model: Codex Astra, Sol, Terra, or
 Luna; Claude Fable, Opus, Sonnet, or Haiku; the selected local model; or a
 saved Custom AI connection such as an OpenAI-compatible Gemini endpoint; or
@@ -873,6 +912,8 @@ flowchart TB
     TUNNEL --> EDITOR
 ```
 
+![System context: what the newsroom talks to](diagrams/system-context.svg)
+
 ## The pipeline: source to printed page
 
 ```mermaid
@@ -895,6 +936,8 @@ flowchart LR
     style G fill:#7a2d2d,color:#fff
     style P fill:#1c1a17,color:#fff
 ```
+
+![Pipeline: from watched source to printed page](diagrams/pipeline-source-to-page.svg)
 
 The red box is the only way to the paper. Everything upstream of it is
 assistance; everything downstream of it is a correction, never a silent edit.
@@ -924,6 +967,8 @@ sequenceDiagram
     E->>F: page polls
     F-->>E: the work, when it lands
 ```
+
+![Lifecycle of one job, end to end](diagrams/job-end-to-end.svg)
 
 ## Dark Desk, one round
 
@@ -958,6 +1003,8 @@ flowchart TB
     style QUEUE fill:#7a2d2d,color:#fff
 ```
 
+![One round of Dark Desk](diagrams/dark-desk-one-round.svg)
+
 Note what is missing from that diagram: any edge to the paper. The only way out
 of Dark Desk is **Send to the queue**, which files a lead a human then has to
 work.
@@ -988,6 +1035,8 @@ flowchart LR
     style VOICE fill:#7a2d2d,color:#fff
 ```
 
+![The Opinion desk and its voice handoff](diagrams/opinion-voice-handoff.svg)
+
 The diagram shows both subscription writers. Claude and Codex receive the complete voice through their native instruction-file options. The writing pass retains research tools.
 The explicit Local model alternative reads the validated voice into a system
 message for the selected model server and uses the supplied material without
@@ -1017,6 +1066,8 @@ flowchart TB
     WD --> LOG
 ```
 
+![Keeping a deployment online](diagrams/keeping-it-online.svg)
+
 ## Data model, the shape of it
 
 ```mermaid
@@ -1044,6 +1095,8 @@ erDiagram
     DELETED_ITEMS }o--|| NEWSROOMS : "a copy, for 30 days"
 ```
 
+![Data model: the shape of the database](diagrams/data-model.svg)
+
 ## Choosing a provider, at call time
 
 ```mermaid
@@ -1062,6 +1115,8 @@ flowchart TB
 
     style SAVE fill:#1c1a17,color:#fff
 ```
+
+![Choosing a provider at call time](diagrams/provider-at-call-time.svg)
 
 ---
 

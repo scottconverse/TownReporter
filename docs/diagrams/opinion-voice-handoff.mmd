@@ -1,0 +1,21 @@
+flowchart LR
+    subgraph repo["This repository — public"]
+        UI["/desk/opinion"]
+        PACK["Pack builder<br/>subject · pointers · our story"]
+        PARSE["Parser<br/>headline · body · appendix<br/>fact sheet · image prompt"]
+        DRAFTS[("drafts +<br/>editorial_extras")]
+    end
+
+    subgraph private["Outside the repository"]
+        VOICE["The voice file<br/>~/.townreporter/voice/*.md"]
+    end
+
+    CLI["Claude or Codex CLI<br/>native voice file, web-enabled writing"]
+
+    UI --> PACK
+    PACK -->|"over stdin"| CLI
+    VOICE -.->|"path only"| CLI
+    CLI --> PARSE --> DRAFTS --> UI
+
+    style private fill:#2a2320,color:#fff
+    style VOICE fill:#7a2d2d,color:#fff

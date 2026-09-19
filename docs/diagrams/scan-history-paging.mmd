@@ -1,0 +1,13 @@
+sequenceDiagram
+    participant E as Editor
+    participant P as Scan page
+    participant D as listScans
+
+    E->>P: open Scan
+    P->>D: limit 12, offset 0
+    D-->>P: rows + true total
+    Note over P: "Showing latest 12 of 39"
+    E->>P: Show more
+    P->>D: limit 12, offset 12
+    D-->>P: next page
+    Note over P: append + de-duplicate by id<br/>control disappears when loaded >= total

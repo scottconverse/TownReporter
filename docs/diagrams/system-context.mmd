@@ -1,0 +1,35 @@
+flowchart TB
+    subgraph outside["The city, on the public web"]
+        CITY["City site · council · planning"]
+        PORTAL["Agenda portal<br/>(PrimeGov JSON API)"]
+        TAPE["YouTube · public-access TV"]
+        COUNTY["County · schools · utility"]
+        REDDIT["r/longmont"]
+    end
+
+    subgraph machine["One machine you own"]
+        APP["TownReporter<br/>Nitro node-server"]
+        DB[("PostgreSQL")]
+        PW["Playwright Chromium"]
+        WD["Watchdog<br/>every 5 min"]
+    end
+
+    subgraph models["Whichever model you point it at"]
+        CC["Claude Code CLI<br/>(no API key)"]
+        CX["Codex CLI<br/>(OAuth, native full access)"]
+        API["Anthropic API"]
+        OAI["Any OpenAI-compatible URL<br/>incl. a local model"]
+    end
+
+    READER(["Reader"])
+    EDITOR(["Editor"])
+
+    outside --> APP
+    APP <--> DB
+    APP --> PW
+    PW --> outside
+    APP --> models
+    WD -.watches, restarts.-> APP
+    APP --> TUNNEL["Cloudflare Tunnel"]
+    TUNNEL --> READER
+    TUNNEL --> EDITOR

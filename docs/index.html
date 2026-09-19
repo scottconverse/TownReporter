@@ -411,6 +411,11 @@
         grid-template-columns: repeat(3, 1fr);
         gap: 22px;
       }
+      .grid-2x2 {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 22px;
+      }
       .grid-2 > *,
       .grid-3 > *,
       .hero-grid > * {
@@ -418,6 +423,7 @@
       }
       @media (max-width: 900px) {
         .grid-2,
+        .grid-2x2,
         .grid-3 {
           grid-template-columns: 1fr;
         }
@@ -781,8 +787,8 @@
 
       <section id="new" class="wrap">
         <p class="eyebrow">Capabilities</p>
-        <h2>Pick the model everywhere, and the desk stays readable</h2>
-        <div class="grid-3">
+        <h2>Pick the model everywhere, steer every scan, and keep the desk readable</h2>
+        <div class="grid-2x2">
           <div class="panel">
             <h3>Pick the model everywhere</h3>
             <p class="cap" style="margin: 0 0 10px">One registry</p>
@@ -810,6 +816,26 @@
               Each writing model on the Server page now has its own Time per call, editable
               between 10 seconds and 60 minutes with the shipped default shown beside it and a
               Reset &mdash; so a slow local model finally gets the room it needs.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Steer exactly what a scan reads</h3>
+            <p class="cap" style="margin: 0 0 10px">Scan</p>
+            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
+              A scan now takes three scopes: General (every accepted source), Section
+              (one reporting beat), or Custom &mdash; search accepted sources, filter by
+              kind and tier, and pick exactly the set you want. Save a reusable source
+              pack per beat and run it without touching section setup.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>A scan that tells the truth about itself</h3>
+            <p class="cap" style="margin: 0 0 10px">Coverage</p>
+            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
+              Every run reports selected, fetched, failed, and actually analysed sources,
+              how many model batches ran, and which sources failed by name. Large scans
+              are split into bounded batches instead of being silently cut off, and the
+              history shows its real total with Show more.
             </p>
           </div>
         </div>
@@ -999,7 +1025,7 @@
           The installation target is under an hour; the release records measured timings and limits.
         </p>
         <p>
-          <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.50">Windows download · 0.6.50</a>
+          <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.54">Windows download · 0.6.54</a>
           <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/latest">Latest stable Windows</a>
           <a class="btn" href="https://github.com/scottconverse/TownReporter/blob/main/docs/windows-install.md">Installation guide</a>
         </p>
@@ -1146,6 +1172,7 @@ npm run dev
             meeting channels or local title vocabulary from a city name. The owner supplies them.
           </li>
           <li><b>Dark Desk has no publish button.</b> Its speculative signals and structured verification still require editorial judgment. The travel-local five-topic exercise was executed in the isolated 0.6.52+ candidate: eight bounded runs, including the September 3-8 replay. That is not a Halo-local or production acceptance exercise.</li>
+              <li><b>0.6.54:</b> custom scan source selection; saved reusable source packs; honest per-run coverage accounting (selected, attempted, fetched, failed, analysed, batches) with failed sources named; bounded batch analysis replacing a single truncated pass; real paged scan history with a true total; and section source counts with manual bulk assignment.</li>
           <li><b>0.6.52:</b> effort controls; preferred-first model routing with requested/actual model and effort receipts; terminal refusals; no automatic Opus; editable Daily scan settings; existing-Gemini migration; Grok repair; batch Redraft; job-history health copy; and direct readable-PDF intake are in source. Generic/Dark image OCR checkpoints bounded 12-page calls and resumes only unread pages when the editor selects <b>Read entire PDF</b>; the Windows lifecycle repair still cannot safely clean detached children after a root crash. The release record does not assert GitHub publication, deployment, a fresh Windows packaged-install result, or live-model proof.</li>
           <li><b>0.6.50:</b> Ollama Cloud models are labeled as hosted inference with their reported context window, and DeepSeek V4 Story drafting preserves the output budget for the actual draft.</li>
           <li><b>0.6.49:</b> Direct SuperGrok OAuth and newsroom Gemini connections join the shared model picker; Dark Desk develops leads within explicit run budgets, reporting Pull persists progress and partial documents, and Automatic can recover uploaded-document work after a technical provider failure.</li>

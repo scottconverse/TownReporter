@@ -1,0 +1,52 @@
+flowchart TB
+    subgraph scope["1 · Scope — what the editor chose"]
+        GEN["General<br/>all accepted sources"]
+        SEC["Section<br/>one beat's assigned sources"]
+        CUS["Custom<br/>exact picked set"]
+        PACK["Saved source pack<br/>resolves CURRENT accepted membership at run time"]
+    end
+
+    SNAP["Persist selected source IDs into the run snapshot<br/><i>before the first fetch</i>"]
+
+    subgraph fetch["2 · Fetch"]
+        F1["Fetch each selected source<br/>hash against last snapshot"]
+        F2["Record per-source outcome<br/>changed · disappeared · failed"]
+    end
+
+    subgraph batch["3 · Bounded batch analysis (was: one 48,000-char pass)"]
+        B1["Split ranked sources into bounded batches<br/>char budget + max sources per batch"]
+        B2["One model call per batch"]
+        B3["Parse each batch independently"]
+        B4{"Any batch usable?"}
+        B5["Merge batch results<br/>de-duplicate leads · keep source attribution"]
+        B6["Abort honestly<br/>throw before any hash is stamped"]
+    end
+
+    subgraph acct["4 · Coverage accounting (scan_runs)"]
+        A1["sources_selected · attempted · fetched · failed · analysed"]
+        A2["model_batches_used · model_batches_failed"]
+        A3["failed_sources<br/>which sources failed, by name"]
+    end
+
+    OUT["Leads filed<br/>+ proposed sources"]
+
+    GEN --> SNAP
+    SEC --> SNAP
+    CUS --> SNAP
+    PACK --> SNAP
+    SNAP --> F1
+    F1 --> F2
+    F2 --> B1
+    B1 --> B2
+    B2 --> B3
+    B3 --> B4
+    B4 -->|yes| B5
+    B4 -->|no batch produced output| B6
+    B5 --> A1
+    B5 --> A2
+    F2 --> A1
+    F2 --> A3
+    B5 --> OUT
+
+    style B6 fill:#7a2d2d,color:#fff
+    style OUT fill:#1c1a17,color:#fff

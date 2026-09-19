@@ -1,0 +1,18 @@
+flowchart LR
+    S["Watch list<br/>sources"] --> SC["Scan<br/>fetch + hash"]
+    SC --> D{"Compared to<br/>last snapshot"}
+    D -->|changed| L["Lead"]
+    D -->|disappeared| L
+    D -->|failed to appear| L
+    D -->|same| X["Nothing"]
+    L --> Q["Queue<br/>scored"]
+    Q --> DR["Draft<br/>+ reporting notes"]
+    DR --> W["Workbench<br/>redraft · PULL · edit"]
+    W --> G{"Editor"}
+    G -->|publish| P["The paper"]
+    G -->|hold| Q
+    G -->|kill| X
+    P --> C["Corrections<br/>dated, above the story"]
+
+    style G fill:#7a2d2d,color:#fff
+    style P fill:#1c1a17,color:#fff
