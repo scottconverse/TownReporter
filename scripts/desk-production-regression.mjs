@@ -227,5 +227,3 @@ try {
 }
 
 if (failure) process.exit(1);
-
-
