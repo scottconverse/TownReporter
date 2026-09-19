@@ -29,6 +29,9 @@ import {
   plainFinding,
   progressLine,
   scanCountsLine,
+  scanCoverageLine,
+  parseFailedSources,
+  failedSourcesLine,
   scanZeroWhy,
   sourceErrorKind,
   sourceLineFromUrl,
@@ -1288,5 +1291,84 @@ describe("buildScanUserMessage resident coverage contract", () => {
     assert.match(prompt, /Council approves library expansion \(2026-09-01\)/);
     assert.match(prompt, /keep genuine new developments/i);
     assert.match(prompt, /https:\/\/example\.test\/library/);
+  });
+});
+
+
+describe("scan coverage accounting (P0-3)", () => {
+  it("distinguishes a clean zero-lead success from a provider failure", () => {
+    const success = scanCoverageLine({
+      sources_selected: 40,
+      sources_attempted: 40,
+      sources_fetched: 40,
+      sources_failed: 0,
+      sources_analyzed: 40,
+      model_batches_used: 2,
+      model_batches_failed: 0,
+      leads_created: 0,
+      error: null,
+    });
+    const failure = scanCoverageLine({
+      sources_selected: 40,
+      sources_attempted: 40,
+      sources_fetched: 40,
+      sources_failed: 0,
+      sources_analyzed: 0,
+      model_batches_used: 1,
+      model_batches_failed: 1,
+      leads_created: 0,
+      error: "Claude Code request timed out after 150s",
+    });
+    assert.notEqual(success, failure, "zero-lead success and provider failure must render differently");
+    assert.match(success!, /0 leads/i);
+    assert.match(success!, /40/);
+    assert.doesNotMatch(success!, /failed/i);
+    assert.match(failure!, /provider failure/i);
+    assert.match(failure!, /nothing was analyzed/i);
+  });
+
+  it("states partial coverage plainly when some batches failed", () => {
+    const partial = scanCoverageLine({
+      sources_selected: 100,
+      sources_attempted: 100,
+      sources_fetched: 96,
+      sources_failed: 4,
+      sources_analyzed: 60,
+      model_batches_used: 3,
+      model_batches_failed: 1,
+      leads_created: 5,
+      error: null,
+    });
+    assert.match(partial!, /partial/i);
+    assert.match(partial!, /60/);
+    assert.match(partial!, /4/);
+  });
+
+  it("lists which sources failed, not just how many", () => {
+    const failures = parseFailedSources(
+      JSON.stringify([
+        { id: 7, title: "City Council agenda", url: "https://example.test/agenda", error: "404" },
+        { id: 9, title: "Schools board", url: "https://example.test/schools", error: "timed out" },
+      ]),
+    );
+    assert.equal(failures.length, 2);
+    assert.equal(failures[0]!.title, "City Council agenda");
+    assert.match(failedSourcesLine(failures)!, /City Council agenda/);
+    assert.match(failedSourcesLine(failures)!, /Schools board/);
+  });
+
+  it("returns null instead of a misleading line when a run predates coverage accounting", () => {
+    const legacy = scanCoverageLine({
+      sources_selected: 0,
+      sources_attempted: 0,
+      sources_fetched: 12,
+      sources_failed: 0,
+      sources_analyzed: 0,
+      model_batches_used: 0,
+      model_batches_failed: 0,
+      leads_created: 3,
+      error: null,
+    });
+    assert.equal(legacy, null, "a pre-migration run must not claim 0 analyzed as if it were measured");
   });
 });

@@ -434,51 +434,52 @@ test("SSRF: fetch follows redirects manually and re-asserts each hop", () => {
   neutered variants change what that expression evaluates to; the identifier
   match alone never would have.
 */
+/*
+  P0-5 batching note (0.6.54): the single `shouldCommitFetchHashes({ aiOk:
+  true, ... })` guard this test used to locate no longer exists. The scan now
+  makes one model call per bounded batch, and the same invariant -- no source
+  hash is stamped / committed unless a writing pass produced usable output --
+  is enforced by the batched code: every batch is parsed, a parse failure is
+  counted and skipped, and if NO batch produced usable output the run aborts
+  (`if (!batchResults.length) throw`) before `commitResults` (whose
+  `for (const p of pendingHashes)` loop stamps the hashes) can run.
+*/
 test("scan does not stamp last_hash until the writing pass succeeds", async () => {
   const desk = readFileSync(join(ROOT, "src/lib/news/desk.ts"), "utf8");
   assert.match(desk, /pendingHashes/);
   assert.match(desk, /previousScanNeedsReread/);
   assert.match(desk, /parseScanResult/);
 
-  const { condition, body, ifIdx, blockEnd } = extractIfGuard(
-    desk,
-    "shouldCommitFetchHashes({ aiOk: true",
-  );
-  // The guard's own body must be the thing that stops the commit, not a
-  // side-effect-free no-op left standing while the condition was gutted.
-  assert.match(body, /throw new Error/, "the guard must actually abort the scan");
+  /*
+    The old version of this test evaluated `shouldCommitFetchHashes(...)`
+    directly. That predicate is no longer a production caller after the P0-5
+    batching rewrite: schema.ts still exports it (and its own unit tests in
+    scan-pass.test.ts / schema.test.ts still cover it), but desk.ts no longer
+    imports or calls it, so asserting on it here would verify a function the
+    running scan never executes -- the same "test a module, not the path" gap
+    the coupling-pin review flagged. The load-bearing invariant is the abort
+    guard below, which IS the production path, so that is what this test
+    protects. The dead import was removed from desk.ts; only the schema-level
+    unit tests cover the predicate now.
+  */
 
-  const schema = await import(pathToFileURL(join(ROOT, "src/lib/news/schema.ts")).href);
-  const evalGuard = (parseError) =>
-    // condition text is the point: it is the exact expression the running
-    // code branches on, not a paraphrase of it.
-    new Function("shouldCommitFetchHashes", "data", `return (${condition});`)(
-      schema.shouldCommitFetchHashes,
-      { parseError },
-    );
-
-  // A clean pass (no parse error): the guard must be false, i.e. must NOT
-  // take the abort path, so pendingHashes get committed.
-  assert.equal(evalGuard(null), false, "a successful writing pass must not trip the guard");
-  // A failed writing pass: the guard must be true, i.e. MUST abort before
-  // any hash gets stamped. `false && ...` fails exactly this line, because
-  // it can never be true no matter what parseError says.
-  assert.equal(
-    evalGuard("Writing pass returned no usable JSON."),
-    true,
-    "a failed writing pass must trip the guard",
+  // When no batch produced usable output the run aborts with a throw before
+  // any hash can be stamped.
+  const noBatchGuard = extractIfGuard(desk, "if (!batchResults.length)");
+  assert.match(
+    noBatchGuard.body,
+    /throw new Error/,
+    "a scan with no usable batch output must abort, not commit",
   );
 
-  // The commit loop must textually follow the whole guarded block, not sit
-  // ahead of it where the throw could no longer prevent it from running.
+  // The pendingHashes commit loop must run only after that abort guard.
+  const abortIdx = desk.indexOf("if (!batchResults.length)");
   const commitLoopIdx = desk.indexOf("for (const p of pendingHashes)");
+  assert.ok(abortIdx !== -1, "the no-usable-output abort guard must exist");
+  assert.ok(commitLoopIdx !== -1, "the pendingHashes commit loop must exist");
   assert.ok(
-    commitLoopIdx > blockEnd,
-    "the pendingHashes commit loop must come after the guard, not before it",
-  );
-  assert.ok(
-    ifIdx > desk.indexOf("const data = parseScanResult(raw)"),
-    "the guard must run after parsing, not before",
+    commitLoopIdx > abortIdx,
+    "the pendingHashes commit loop must come after the abort guard, not before it",
   );
 });
 

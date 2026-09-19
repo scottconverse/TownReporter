@@ -32,6 +32,51 @@ export type SectionScanSnapshot = Pick<
 > & { revision: number };
 
 /** The worker revalidates acceptance after enqueue, even for pinned IDs. */
+/**
+ * P0-1: an editor-chosen explicit source set for one scan run.
+ *
+ * Distinct from a `SectionScanSnapshot` (which carries a section's assigned
+ * sources). This is the "Custom sources" scope: the editor picked these exact
+ * accepted sources. `sourceIds` is persisted into the run's snapshot BEFORE
+ * fetching begins, so the run is reproducible and auditable even if the source
+ * list changes mid-run.
+ */
+export type CustomScanSnapshot = {
+  kind: "custom";
+  sourceIds: number[];
+  /** Optional saved pack this selection came from (P0-2), for the run record. */
+  packId?: number;
+  packName?: string;
+};
+
+/** The union of every scan scope a run can carry in `section_snapshot`. */
+export type ScanScopeSnapshot = SectionScanSnapshot | CustomScanSnapshot;
+
+/**
+ * P0-1: the single source-selection predicate for a custom scan. This is the
+ * production filter -- `desk.ts`'s `performScanWork` calls THIS function, so a
+ * test that imports it is bound to the code that actually runs, not a copy.
+ *
+ * A custom scan fetches only the explicitly selected sources that are still
+ * accepted. Proposed, rejected, unavailable, and unselected rows are excluded.
+ */
+export function selectCustomScanSources<T extends { id: number; status: string }>(
+  snapshot: CustomScanSnapshot,
+  sources: T[],
+): T[] {
+  const ids = new Set(snapshot.sourceIds);
+  return sources.filter((s) => s.status === "accepted" && ids.has(s.id));
+}
+/** Narrow a parsed snapshot to the custom-source scope. */
+export function isCustomScanSnapshot(value: unknown): value is CustomScanSnapshot {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as { kind?: unknown }).kind === "custom" &&
+    Array.isArray((value as { sourceIds?: unknown }).sourceIds)
+  );
+}
 export function selectedScanSources<T extends { id: number; status: string }>(
   snapshot: SectionScanSnapshot | null,
   sources: T[],
