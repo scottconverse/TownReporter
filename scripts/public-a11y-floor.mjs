@@ -24,6 +24,25 @@ const base = checkedUrl(
 const FLOOR_PX = 14;
 // Routes with informational text. The article + error routes need ids resolved
 // at runtime; the caller supplies them or they are discovered from the page.
+/*
+  The article route is REQUIRED (the directive names it), so it is part of the
+  default set -- never an optional env var CI could omit. The path is resolved
+  at test time from the app's own sitemap, and if no article can be resolved
+  the test FAILS loudly rather than silently skipping coverage.
+
+  PUBLIC_A11Y_ARTICLE_PATH, when set, overrides the resolved path (useful for
+  pinning a specific fixture); it is not required for article coverage.
+*/
+async function resolveArticlePath(baseUrl) {
+  if (process.env.PUBLIC_A11Y_ARTICLE_PATH) return process.env.PUBLIC_A11Y_ARTICLE_PATH;
+  const res = await fetch(`${baseUrl}/sitemap.xml`);
+  if (!res.ok) throw new Error(`sitemap.xml returned ${res.status}; cannot resolve an article path`);
+  const xml = await res.text();
+  const match = xml.match(/<loc>[^<]*\/articles\/([^<]+)<\/loc>/i);
+  if (!match) throw new Error("sitemap.xml contained no /articles/ URL; cannot resolve an article path");
+  return `/articles/${match[1]}`;
+}
+
 const routes = [
   ["/", "home"],
   ["/login", "login"],
@@ -32,9 +51,8 @@ const routes = [
   ["/definitely-not-a-real-route-a11y", "error"],
   ["/get-the-code", "get-the-code"],
   ["/evidence/2251", "evidence"],
+  [await resolveArticlePath(base), "article"],
 ];
-const extra = process.env.PUBLIC_A11Y_ARTICLE_PATH;
-if (extra) routes.push([extra, "article"]);
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
