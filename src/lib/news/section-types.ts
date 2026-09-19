@@ -52,6 +52,21 @@ export type CustomScanSnapshot = {
 /** The union of every scan scope a run can carry in `section_snapshot`. */
 export type ScanScopeSnapshot = SectionScanSnapshot | CustomScanSnapshot;
 
+/**
+ * P0-1: the single source-selection predicate for a custom scan. This is the
+ * production filter -- `desk.ts`'s `performScanWork` calls THIS function, so a
+ * test that imports it is bound to the code that actually runs, not a copy.
+ *
+ * A custom scan fetches only the explicitly selected sources that are still
+ * accepted. Proposed, rejected, unavailable, and unselected rows are excluded.
+ */
+export function selectCustomScanSources<T extends { id: number; status: string }>(
+  snapshot: CustomScanSnapshot,
+  sources: T[],
+): T[] {
+  const ids = new Set(snapshot.sourceIds);
+  return sources.filter((s) => s.status === "accepted" && ids.has(s.id));
+}
 /** Narrow a parsed snapshot to the custom-source scope. */
 export function isCustomScanSnapshot(value: unknown): value is CustomScanSnapshot {
   return (

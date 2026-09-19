@@ -3,7 +3,7 @@ import {
   insertProposedNewsroomSource,
   saveAcceptedNewsroomSource,
 } from "./source-seeds.server.ts";
-import { selectedScanSources } from "./section-types.ts";
+import { selectCustomScanSources, selectedScanSources } from "./section-types.ts";
 import { scanSourceExcerpt } from "./scan-source-excerpt.ts";
 import { buildScanBatches, mergeScanBatchResults } from "./scan-batches.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
@@ -696,12 +696,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       where newsroom_id = ${owned(context)} and status = 'accepted'
       order by case tier when 'A' then 0 when 'B' then 1 else 2 end, id asc
     `);
-  // Custom scope: only the explicitly selected, still-accepted sources. A
-  // source that lost acceptance between selection and run is dropped here, so
-  // unselected/non-accepted sources are never fetched.
-  const customIdSet = customSnapshot ? new Set(customSnapshot.sourceIds) : null;
-  const sources = customIdSet
-    ? allSources.filter((s) => s.status === "accepted" && customIdSet.has(s.id))
+  // Custom scope: only the explicitly selected, still-accepted sources. The
+  // predicate lives in section-types.ts (`selectCustomScanSources`) so the
+  // focused test binds to the code that actually runs here, not a copy.
+  const sources = customSnapshot
+    ? selectCustomScanSources(customSnapshot, allSources)
     : selectedScanSources(sectionSnapshot, allSources);
   if (sectionSnapshot && !sources.length)
     throw new Error(

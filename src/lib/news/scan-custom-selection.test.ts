@@ -1,18 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isCustomScanSnapshot, type CustomScanSnapshot } from "./section-types.ts";
+import { readFileSync } from "node:fs";
+// NOTE: this imports the REAL production predicate from section-types.ts. The
+// point of this file is to be bound to the code `performScanWork` actually
+// runs, not to a re-implementation of it. See the "is what production calls"
+// test at the bottom, which fails if desk.ts stops using this function.
+import { isCustomScanSnapshot, selectCustomScanSources, type CustomScanSnapshot } from "./section-types.ts";
 
-/**
- * P0-1: a custom scan must fetch ONLY the selected accepted sources. This
- * asserts the selection filter directly (the fetch set), not the UI, by
- * reproducing the same predicate `performScanWork` applies to `allSources`.
- */
-function sourcesFetchedForCustomScan<
-  T extends { id: number; status: string },
->(snapshot: CustomScanSnapshot, allSources: T[]): T[] {
-  const ids = new Set(snapshot.sourceIds);
-  return allSources.filter((s) => s.status === "accepted" && ids.has(s.id));
-}
+const deskSource = readFileSync(new URL("./desk.ts", import.meta.url), "utf8");
 
 describe("custom scan selection (P0-1)", () => {
   const all = [
@@ -26,16 +21,14 @@ describe("custom scan selection (P0-1)", () => {
 
   it("fetches ONLY the selected accepted sources", () => {
     const snapshot: CustomScanSnapshot = { kind: "custom", sourceIds: [1, 3] };
-    const fetched = sourcesFetchedForCustomScan(snapshot, all).map((s) => s.id);
+    const fetched = selectCustomScanSources(snapshot, all).map((s) => s.id);
     assert.deepEqual(fetched, [1, 3]);
-    for (const unselected of [2]) {
-      assert.ok(!fetched.includes(unselected), "unselected accepted source must not be fetched");
-    }
+    assert.ok(!fetched.includes(2), "unselected accepted source must not be fetched");
   });
 
   it("never fetches proposed, rejected or unavailable sources even if selected", () => {
     const snapshot: CustomScanSnapshot = { kind: "custom", sourceIds: [1, 4, 5, 6] };
-    const fetched = sourcesFetchedForCustomScan(snapshot, all).map((s) => s.id);
+    const fetched = selectCustomScanSources(snapshot, all).map((s) => s.id);
     assert.deepEqual(fetched, [1]);
   });
 
@@ -56,5 +49,21 @@ describe("custom scan selection (P0-1)", () => {
     const snapshot: CustomScanSnapshot = { kind: "custom", sourceIds: [1, 2], packId: 5, packName: "Schools" };
     assert.equal(snapshot.packId, 5);
     assert.equal(snapshot.packName, "Schools");
+  });
+
+  it("is the predicate production actually calls (coupling pin)", () => {
+    // If this function is ever re-inlined or swapped in desk.ts, this fails,
+    // which is the point: the behavioral tests above must bind to the code
+    // that runs, not a copy that can silently drift.
+    assert.match(
+      deskSource,
+      /const sources = customSnapshot\s*\?\s*selectCustomScanSources\(customSnapshot, allSources\)/,
+      "performScanWork must call the exported selectCustomScanSources",
+    );
+    assert.doesNotMatch(
+      deskSource,
+      /allSources\.filter\(\(s\) => s\.status === "accepted" && customIdSet\.has\(s\.id\)\)/,
+      "the inline custom filter must not be reintroduced",
+    );
   });
 });
