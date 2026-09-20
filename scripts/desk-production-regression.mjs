@@ -98,15 +98,27 @@ const page = await context.newPage();
 const consoleErrors = [];
 const requestFailures = [];
 const observedRequests = [];
+const setupRequests = [];
 const routeHistory = [];
 
-// Actual request interception: record every request method, and fail the run on
-// any mutating method once the signed-in walk begins.
+// Actual request interception. The signed-in walk is the thing under test, so
+// only requests made AFTER walkStarted=true belong in the violation set.
+// The walk is preceded by a disclosed, intentionally mutating setup step
+// (creates a throwaway owner, completes first-run setup). Recording setup
+// requests here and then asserting over the whole list made the run fail on
+// its own disclosed setup -- a safety check that could not tell its setup
+// from a violation. Setup requests are still counted, in setupRequests, so
+// the artifact shows they happened.
 let walkStarted = false;
 page.on("request", (r) => {
-  observedRequests.push({ method: r.method(), url: r.url().slice(0, 200) });
-  if (walkStarted && !["GET", "HEAD", "OPTIONS"].includes(r.method().toUpperCase())) {
-    requestFailures.push({ url: r.url().slice(0, 200), error: `mutating request ${r.method()}` });
+  const record = { method: r.method(), url: r.url().slice(0, 200) };
+  if (!walkStarted) {
+    setupRequests.push(record);
+    return;
+  }
+  observedRequests.push(record);
+  if (!["GET", "HEAD", "OPTIONS"].includes(r.method().toUpperCase())) {
+    requestFailures.push({ url: record.url, error: `mutating request ${r.method()}` });
   }
 });
 page.on("console", (m) => {
