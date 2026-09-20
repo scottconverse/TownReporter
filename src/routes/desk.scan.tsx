@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { MeetingsActivity } from "@/components/meetings-activity";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteScanSourcePackFn, listAcceptedScanSources, listScanSourcePacksFn, listScans, listSources, renameScanSourcePackFn, runScan, saveScanSourcePackFn } from "@/lib/news/desk";
 import { editorScanError, scanCountsLine, scanCoverageLine, parseFailedSources, failedSourcesLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
@@ -334,6 +335,7 @@ function ScanPage() {
           ) : null}
         </div>
       )}
+      <MeetingsActivity />
     </DeskShell>
   );
 }
