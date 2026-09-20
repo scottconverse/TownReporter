@@ -6,7 +6,7 @@ import { withTransaction } from "../db.ts";
 import { listChannelVideos, pickMeetingVideos, type ListedVideo } from "./youtube.ts";
 import { captureMeetingCaptions, type CaptionCaptureFailure, type CaptionCaptureResult } from "./meeting-capture-ytdlp.ts";
 import { computeEndedAt } from "./meeting-capture-info.ts";
-import { captureDisposition } from "./meeting-revision.ts";
+import { applyDraftRevision, captureDisposition, detectRevision, dueForRecheck, nextCheckState } from "./meeting-revision.ts";
 import { storeMeetingTranscriptArtifact } from "./meeting-transcript-artifacts.ts";
 
 export type MeetingChannel = { url: string; label?: string };
@@ -220,4 +220,122 @@ export function meetingCoverageJson(result: MeetingAwarenessResult): string {
 }
 export function hashMeetingAwareness(result: MeetingAwarenessResult): string {
   return createHash("sha256").update(JSON.stringify(result)).digest("hex");
+}
+
+export type ProvisionalRecheckResult = {
+  checked: number;
+  revised: number;
+  settled: number;
+  failures: string[];
+};
+
+/**
+ * Provisional re-check (Slice 4 integration).
+ *
+ * Runs on every scan after awareness. Only captures whose disposition is
+ * provisional and whose last check is at least the cadence gap old are
+ * re-captured. Revision detection precedence is hash, then revision timestamp,
+ * then duration. Two unchanged checks separated in time settle a capture;
+ * the 48-hour ceiling settles it anyway and records settled_under_churn. A
+ * revision after final records a revision without re-provisioning.
+ */
+export async function recheckProvisionalMeetings(
+  sql: Sql,
+  newsroomId: number,
+  deps: MeetingAwarenessDeps = {},
+): Promise<ProvisionalRecheckResult> {
+  const capture = deps.captureMeeting ?? captureMeetingCaptions;
+  const storeTranscript = deps.storeMeetingTranscriptArtifact ?? storeMeetingTranscriptArtifact;
+  const runTransaction = deps.withTransaction ?? withTransaction;
+  const now = (deps.now ?? (() => new Date()))();
+  const failures: string[] = [];
+  const rows = await sql.query<{
+    video_id: string; title: string; published: string; caption_path: string | null;
+    caption_sha256: string | null; capture_disposition: "provisional" | "final" | null;
+    consecutive_unchanged: number | null; last_checked_at: string | null;
+    captured_at: string | null; duration_seconds: number | null;
+    caption_revision_timestamp: number | null; revision_count: number | null;
+  }>(
+    "select video_id,title,published,caption_path,caption_sha256,capture_disposition,consecutive_unchanged,last_checked_at,captured_at,duration_seconds,caption_revision_timestamp,revision_count from meeting_capture_records where newsroom_id=$1 and status='captured' and capture_disposition='provisional'",
+    [newsroomId],
+  );
+  let checked = 0;
+  let revised = 0;
+  let settled = 0;
+  for (const row of rows) {
+    if (!dueForRecheck({ status: row.capture_disposition ?? "final", lastCheckedAt: row.last_checked_at, now })) continue;
+    checked += 1;
+    const archivePath = meetingArchivePath(newsroomId);
+    const outputDir = join(meetingCaptionDir(newsroomId), row.video_id);
+    let result: CaptionCaptureResult;
+    try {
+      result = await capture({ videoId: row.video_id, outputDir, archivePath, sleepSubtitles: 2, sleepRequests: 1 });
+    } catch (error) {
+      failures.push(`${row.title}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    if (!result.ok) {
+      failures.push(`${row.title}: ${result.reason}`);
+      continue;
+    }
+    const signal = detectRevision({
+      priorSha256: row.caption_sha256,
+      nextSha256: result.parsed.sha256,
+      priorRevisionTimestamp: row.caption_revision_timestamp,
+      nextRevisionTimestamp: result.info.captionRevisionTimestamp,
+      priorDuration: row.duration_seconds,
+      nextDuration: result.info.durationSeconds,
+    });
+    const state = nextCheckState({
+      status: row.capture_disposition ?? "final",
+      consecutiveUnchanged: row.consecutive_unchanged ?? 0,
+      lastCheckedAt: row.last_checked_at,
+      firstCapturedAt: row.captured_at ?? now.toISOString(),
+      now,
+      changed: signal != null,
+    });
+    if (signal) revised += 1;
+    if (state.settled) settled += 1;
+    try {
+      await runTransaction(async (tx) => {
+        const priorArtifacts = await tx.query<{ id: number }>(
+          "select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1",
+          [newsroomId, row.video_id],
+        );
+        const priorArtifactId = priorArtifacts[0]?.id ?? null;
+        const stored = await storeTranscript(tx, { newsroomId, videoId: row.video_id, parsed: result.parsed });
+        if (signal) {
+          await tx.query(
+            "insert into meeting_transcript_revisions(newsroom_id,video_id,artifact_id,prior_artifact_id,revision_signal,prior_sha256,new_sha256) values($1,$2,$3,$4,$5,$6,$7)",
+            [newsroomId, row.video_id, stored.id, priorArtifactId, signal, row.caption_sha256, result.parsed.sha256],
+          );
+        }
+        await tx.query(
+          `update meeting_capture_records set
+             caption_sha256=$1, caption_path=$2, caption_format=$3, caption_revision_timestamp=$4,
+             duration_seconds=$5, capture_disposition=$6, consecutive_unchanged=$7, last_checked_at=now(),
+             settled_under_churn=$8, revision_count=$9, last_revision_at=$10, updated_at=now()
+           where newsroom_id=$11 and video_id=$12`,
+          [
+            result.parsed.sha256, result.parsed.sourcePath, result.parsed.format,
+            result.info.captionRevisionTimestamp, result.info.durationSeconds,
+            state.status, state.consecutiveUnchanged, state.settledUnderChurn,
+            (row.revision_count ?? 0) + (signal ? 1 : 0),
+            signal ? now.toISOString() : null, newsroomId, row.video_id,
+          ],
+        );
+      });
+      if (signal && row.caption_sha256) {
+        await applyDraftRevision(sql, {
+          newsroomId,
+          videoId: row.video_id,
+          previousSha256: row.caption_sha256,
+          nextSha256: result.parsed.sha256,
+        });
+      }
+    } catch (error) {
+      failures.push(`${row.title}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { checked, revised, settled, failures };
 }

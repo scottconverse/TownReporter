@@ -659,8 +659,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   let meetingAwareness: import("./meeting-capture.ts").MeetingAwarenessResult | null = null;
   if (meetingChannels.length > 0) {
     try {
-      const { runMeetingAwareness } = await import("./meeting-capture.ts");
+      const { runMeetingAwareness, recheckProvisionalMeetings } = await import("./meeting-capture.ts");
       meetingAwareness = await runMeetingAwareness(sql, owned(context));
+      const recheck = await recheckProvisionalMeetings(sql, owned(context));
+      if (recheck.failures.length) {
+        meetingAwareness.failures.push(...recheck.failures);
+        meetingAwareness.coverageLine = `${meetingAwareness.coverageLine} (recheck: ${recheck.checked} checked, ${recheck.revised} revised, ${recheck.settled} settled)`;
+      }
     } catch (e) {
       meetingAwareness = {
         configured: true,
