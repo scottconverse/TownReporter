@@ -470,7 +470,7 @@ export const listScans = createServerFn({ method: "GET" })
     const sql = await getSql();
     const { limit, offset } = data;
     const rows = await sql<ScanRow>`
-      select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed, sources_selected, sources_attempted, sources_failed, sources_analyzed, model_batches_used, model_batches_failed, failed_sources, summary, error, execution_origin
+      select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed, sources_selected, sources_attempted, sources_failed, sources_analyzed, model_batches_used, model_batches_failed, failed_sources, meetings_found, meetings_captured, meetings_failed, meeting_failures, summary, error, execution_origin
       from scan_runs
       where newsroom_id = ${owned(context)}
       order by started_at desc
@@ -655,6 +655,25 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const paperConfig = await getPaperConfig(owned(context));
   await ensureSeeds(context.userId, owned(context));
   const sql = await getSql();
+  const meetingChannels = paperConfig.youtubeChannels ?? [];
+  let meetingAwareness: import("./meeting-capture.ts").MeetingAwarenessResult | null = null;
+  if (meetingChannels.length > 0) {
+    try {
+      const { runMeetingAwareness } = await import("./meeting-capture.ts");
+      meetingAwareness = await runMeetingAwareness(sql, owned(context));
+    } catch (e) {
+      meetingAwareness = {
+        configured: true,
+        found: [],
+        uncaptured: [],
+        captured: [],
+        failed: [],
+        coverageLine: "",
+        failures: [e instanceof Error ? e.message : String(e)],
+        archivePath: null,
+      };
+    }
+  }
   let runId = job.subject_id;
   const { getSections } = await import("./sections.server.ts");
   const sectionConfig = await getSections(owned(context));
@@ -1080,6 +1099,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           model_batches_used = ${batches.length},
           model_batches_failed = ${batchesFailed},
           failed_sources = ${JSON.stringify(failedSources).slice(0, 32000)},
+          meetings_found = ${meetingAwareness?.found.length ?? 0},
+          meetings_captured = ${meetingAwareness?.captured.filter((r) => r.status === "captured").length ?? 0},
+          meetings_failed = ${meetingAwareness?.failed.length ?? 0},
+          meeting_failures = ${JSON.stringify(meetingAwareness?.failures ?? []).slice(0, 32000)},
           summary = ${summary}
       where id = ${runId} and newsroom_id = ${owned(context)}
     `;

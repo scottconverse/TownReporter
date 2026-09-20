@@ -100,6 +100,10 @@ export type ScanRow = {
   model_batches_used?: number;
   model_batches_failed?: number;
   failed_sources?: string | null;
+  meetings_found?: number;
+  meetings_captured?: number;
+  meetings_failed?: number;
+  meeting_failures?: string | null;
   summary: string | null;
   error: string | null;
   execution_origin?: "manual" | "scheduled";
