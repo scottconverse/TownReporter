@@ -8,6 +8,7 @@ import { captureMeetingCaptions, type CaptionCaptureFailure, type CaptionCapture
 import { computeEndedAt } from "./meeting-capture-info.ts";
 import { applyDraftRevision, captureDisposition, detectRevision, dueForRecheck, nextCheckState } from "./meeting-revision.ts";
 import { storeMeetingTranscriptArtifact } from "./meeting-transcript-artifacts.ts";
+import { runSection5ForArtifact } from "./meeting-story-section5-run.ts";
 
 export type MeetingChannel = { url: string; label?: string };
 export type MeetingCaptureStatus = "not-captured" | "captured" | "failed";
@@ -28,6 +29,7 @@ export type MeetingAwarenessDeps = {
   listChannelVideos?: typeof listChannelVideos;
   captureMeeting?: (input: { videoId: string; outputDir: string; archivePath: string; sleepSubtitles?: number; sleepRequests?: number }) => Promise<CaptionCaptureResult | CaptionCaptureFailure>;
   storeMeetingTranscriptArtifact?: typeof storeMeetingTranscriptArtifact;
+  runSection5?: typeof runSection5ForArtifact;
   withTransaction?: typeof withTransaction;
   now?: () => Date;
 };
@@ -176,6 +178,8 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
       await runTransaction(async (tx) => {
         await recordCaptureSuccess(tx, newsroomId, v, channels[0]!.url, result as Extract<CaptionCaptureResult, { ok: true }>, endedAt, disposition);
         await storeTranscript(tx, { newsroomId, videoId: v.id, parsed: result.parsed });
+        const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: v.id, title: v.title, artifactId: Number((await tx.query<{ id: number }>("select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1", [newsroomId, v.id]))[0]?.id ?? 0) });
+        if (!section5.aligned && section5.unalignedLead) failures.push(section5.unalignedLead.leadWhy);
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -304,6 +308,8 @@ export async function recheckProvisionalMeetings(
         );
         const priorArtifactId = priorArtifacts[0]?.id ?? null;
         const stored = await storeTranscript(tx, { newsroomId, videoId: row.video_id, parsed: result.parsed });
+        const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: row.video_id, title: row.title, artifactId: stored.id });
+        if (!section5.aligned && section5.unalignedLead) failures.push(section5.unalignedLead.leadWhy);
         if (signal) {
           await tx.query(
             "insert into meeting_transcript_revisions(newsroom_id,video_id,artifact_id,prior_artifact_id,revision_signal,prior_sha256,new_sha256) values($1,$2,$3,$4,$5,$6,$7)",
