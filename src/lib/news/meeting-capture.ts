@@ -5,6 +5,8 @@ import type { Sql } from "../db.ts";
 import { withTransaction } from "../db.ts";
 import { listChannelVideos, pickMeetingVideos, type ListedVideo } from "./youtube.ts";
 import { captureMeetingCaptions, type CaptionCaptureFailure, type CaptionCaptureResult } from "./meeting-capture-ytdlp.ts";
+import { computeEndedAt } from "./meeting-capture-info.ts";
+import { captureDisposition } from "./meeting-revision.ts";
 import { storeMeetingTranscriptArtifact } from "./meeting-transcript-artifacts.ts";
 
 export type MeetingChannel = { url: string; label?: string };
@@ -14,11 +16,13 @@ export type MeetingCaptureRecord = {
   status: MeetingCaptureStatus; failureReason?: string | null;
   captionPath?: string | null; captionFormat?: string | null;
   captionSha256?: string | null; captionCapturedAt?: string | null;
+  endedAt?: string | null; captureDisposition?: "provisional" | "final";
+  durationSeconds?: number | null; captionRevisionTimestamp?: number | null;
+  revisionCount?: number; settledUnderChurn?: boolean; lastRevisionAt?: string | null;
 };
 export type MeetingAwarenessResult = {
-  configured: boolean; found: ListedVideo[]; uncaptured: ListedVideo[];
-  captured: MeetingCaptureRecord[]; failed: MeetingCaptureRecord[];
-  coverageLine: string; failures: string[]; archivePath: string | null;
+  configured: boolean; found: ListedVideo[]; uncaptured: ListedVideo[]; captured: MeetingCaptureRecord[];
+  failed: MeetingCaptureRecord[]; coverageLine: string; failures: string[]; archivePath: string | null;
 };
 export type MeetingAwarenessDeps = {
   listChannelVideos?: typeof listChannelVideos;
@@ -89,10 +93,23 @@ async function recordCaptureFailure(sql: Sql, newsroomId: number, video: ListedV
     [newsroomId, video.id, video.url, video.title, video.published ?? "", reason],
   );
 }
-async function recordCaptureSuccess(sql: Sql, newsroomId: number, video: ListedVideo, channelUrl: string, result: Extract<CaptionCaptureResult, { ok: true }>): Promise<void> {
+async function recordCaptureSuccess(
+  sql: Sql, newsroomId: number, video: ListedVideo, channelUrl: string,
+  result: Extract<CaptionCaptureResult, { ok: true }>, endedAt: string | null, disposition: "provisional" | "final",
+): Promise<void> {
   await sql.query(
-    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,captured_at,caption_path,caption_format,caption_sha256,caption_captured_at,failure_reason) values($1,$2,$3,$4,$5,'captured',now(),$6,$7,$8,now(),null) on conflict(newsroom_id,video_id) do update set status='captured',captured_at=now(),caption_path=excluded.caption_path,caption_format=excluded.caption_format,caption_sha256=excluded.caption_sha256,caption_captured_at=now(),failure_reason=null,updated_at=now()",
-    [newsroomId, video.id, channelUrl, video.title, video.published ?? "", result.parsed.sourcePath, result.parsed.format, result.parsed.sha256],
+    `insert into meeting_capture_records(
+       newsroom_id,video_id,channel_url,title,published,status,captured_at,
+       caption_path,caption_format,caption_sha256,caption_captured_at,failure_reason,
+       ended_at,capture_disposition,duration_seconds,caption_revision_timestamp)
+     values($1,$2,$3,$4,$5,'captured',now(),$6,$7,$8,now(),null,$9,$10,$11,$12)
+     on conflict(newsroom_id,video_id) do update set
+       status='captured',captured_at=now(),caption_path=excluded.caption_path,
+       caption_format=excluded.caption_format,caption_sha256=excluded.caption_sha256,
+       caption_captured_at=now(),failure_reason=null,ended_at=excluded.ended_at,
+       capture_disposition=excluded.capture_disposition,duration_seconds=excluded.duration_seconds,
+       caption_revision_timestamp=excluded.caption_revision_timestamp,updated_at=now()`,
+    [newsroomId, video.id, channelUrl, video.title, video.published ?? "", result.parsed.sourcePath, result.parsed.format, result.parsed.sha256, endedAt, disposition, result.info.durationSeconds, result.info.captionRevisionTimestamp],
   );
 }
 
@@ -103,6 +120,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const capture = deps.captureMeeting ?? captureMeetingCaptions;
   const storeTranscript = deps.storeMeetingTranscriptArtifact ?? storeMeetingTranscriptArtifact;
   const runTransaction = deps.withTransaction ?? withTransaction;
+  const now = (deps.now ?? (() => new Date()))();
   const found: ListedVideo[] = [];
   const failures: string[] = [];
   for (const channel of channels) {
@@ -116,13 +134,18 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const records = await sql.query<{
     video_id: string; channel_url: string; title: string; published: string;
     status: MeetingCaptureStatus; failure_reason: string | null;
-    caption_path: string | null; caption_format: string | null;
-    caption_sha256: string | null; caption_captured_at: string | null;
-  }>("select video_id,channel_url,title,published,status,failure_reason,caption_path,caption_format,caption_sha256,caption_captured_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
+    caption_path: string | null; caption_format: string | null; caption_sha256: string | null;
+    caption_captured_at: string | null; ended_at: string | null; capture_disposition: "provisional" | "final" | null;
+    duration_seconds: number | null; caption_revision_timestamp: number | null;
+    revision_count: number | null; settled_under_churn: boolean | null; last_revision_at: string | null;
+  }>("select video_id,channel_url,title,published,status,failure_reason,caption_path,caption_format,caption_sha256,caption_captured_at,ended_at,capture_disposition,duration_seconds,caption_revision_timestamp,revision_count,settled_under_churn,last_revision_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
   const captured: MeetingCaptureRecord[] = records.map((r) => ({
     videoId: r.video_id, channelUrl: r.channel_url, title: r.title, published: r.published,
     status: r.status, failureReason: r.failure_reason, captionPath: r.caption_path,
     captionFormat: r.caption_format, captionSha256: r.caption_sha256, captionCapturedAt: r.caption_captured_at,
+    endedAt: r.ended_at, captureDisposition: r.capture_disposition ?? r.status === "captured" ? "final" : undefined,
+    durationSeconds: r.duration_seconds, captionRevisionTimestamp: r.caption_revision_timestamp,
+    revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false, lastRevisionAt: r.last_revision_at,
   }));
   const known = new Set(captured.filter((r) => r.status === "captured").map((r) => r.videoId));
   const uncaptured = found.filter((v) => !known.has(v.id));
@@ -147,11 +170,11 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
       failures.push(`${v.title}: ${result.reason}`);
       continue;
     }
-    // Single transaction boundary: capture record, transcript artifact, and its
-    // segments all commit together, on one transaction-scoped SQL handle.
+    const endedAt = computeEndedAt({ durationSeconds: result.info.durationSeconds, videoTimestamp: result.info.videoTimestamp });
+    const disposition = captureDisposition({ endedAt, now });
     try {
       await runTransaction(async (tx) => {
-        await recordCaptureSuccess(tx, newsroomId, v, channels[0]!.url, result as Extract<CaptionCaptureResult, { ok: true }>);
+        await recordCaptureSuccess(tx, newsroomId, v, channels[0]!.url, result as Extract<CaptionCaptureResult, { ok: true }>, endedAt, disposition);
         await storeTranscript(tx, { newsroomId, videoId: v.id, parsed: result.parsed });
       });
     } catch (error) {
@@ -163,13 +186,18 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const refreshed = await sql.query<{
     video_id: string; channel_url: string; title: string; published: string;
     status: MeetingCaptureStatus; failure_reason: string | null;
-    caption_path: string | null; caption_format: string | null;
-    caption_sha256: string | null; caption_captured_at: string | null;
-  }>("select video_id,channel_url,title,published,status,failure_reason,caption_path,caption_format,caption_sha256,caption_captured_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
+    caption_path: string | null; caption_format: string | null; caption_sha256: string | null;
+    caption_captured_at: string | null; ended_at: string | null; capture_disposition: "provisional" | "final" | null;
+    duration_seconds: number | null; caption_revision_timestamp: number | null;
+    revision_count: number | null; settled_under_churn: boolean | null; last_revision_at: string | null;
+  }>("select video_id,channel_url,title,published,status,failure_reason,caption_path,caption_format,caption_sha256,caption_captured_at,ended_at,capture_disposition,duration_seconds,caption_revision_timestamp,revision_count,settled_under_churn,last_revision_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
   const finalRecords: MeetingCaptureRecord[] = refreshed.map((r) => ({
     videoId: r.video_id, channelUrl: r.channel_url, title: r.title, published: r.published,
     status: r.status, failureReason: r.failure_reason, captionPath: r.caption_path,
     captionFormat: r.caption_format, captionSha256: r.caption_sha256, captionCapturedAt: r.caption_captured_at,
+    endedAt: r.ended_at, captureDisposition: r.capture_disposition ?? (r.status === "captured" ? "final" : undefined),
+    durationSeconds: r.duration_seconds, captionRevisionTimestamp: r.caption_revision_timestamp,
+    revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false, lastRevisionAt: r.last_revision_at,
   }));
   const failed = finalRecords.filter((r) => r.status === "failed");
   const archivePath = meetingArchivePath(newsroomId);

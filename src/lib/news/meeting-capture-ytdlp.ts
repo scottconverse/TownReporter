@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { parseCaptionFile, type ParsedCaptionFile } from "./caption-parse.ts";
+import { parseInfoSidecar, type ParsedInfoSidecar } from "./meeting-capture-info.ts";
 
 export type CaptionCaptureInput = {
   videoId: string;
@@ -15,6 +16,7 @@ export type CaptionCaptureSuccess = {
   ok: true;
   parsed: ParsedCaptionFile;
   infoPath: string | null;
+  info: ParsedInfoSidecar;
   argv: string[];
   stdout: string;
   stderr: string;
@@ -91,7 +93,7 @@ export async function captureMeetingCaptions(input: CaptionCaptureInput): Promis
   const outputDir = resolve(input.outputDir);
   mkdirSync(outputDir, { recursive: true });
   const argv = buildCaptionCaptureArgs(input);
-  const run = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+  const run = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolvePromise, reject) => {
     const child = spawn("python", argv, {
       cwd: outputDir,
       shell: false,
@@ -103,7 +105,7 @@ export async function captureMeetingCaptions(input: CaptionCaptureInput): Promis
     child.stdout.on("data", (chunk) => { stdout += String(chunk); });
     child.stderr.on("data", (chunk) => { stderr += String(chunk); });
     child.once("error", reject);
-    child.once("close", (code) => resolve({ code, stdout, stderr }));
+    child.once("close", (code) => resolvePromise({ code, stdout, stderr }));
   }).catch((error: unknown) => ({
     code: 1,
     stdout: "",
@@ -121,10 +123,20 @@ export async function captureMeetingCaptions(input: CaptionCaptureInput): Promis
     };
   }
   const parsed = parseCaptionFile(readFileSync(captionPath, "utf8"), captionPath);
+  const infoPath = findInfoFile(outputDir, input.videoId);
+  let info: ParsedInfoSidecar = { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null };
+  if (infoPath) {
+    try {
+      info = parseInfoSidecar(JSON.parse(readFileSync(infoPath, "utf8")));
+    } catch {
+      info = { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null };
+    }
+  }
   return {
     ok: true,
     parsed,
-    infoPath: findInfoFile(outputDir, input.videoId),
+    infoPath,
+    info,
     argv,
     stdout: run.stdout,
     stderr: run.stderr,

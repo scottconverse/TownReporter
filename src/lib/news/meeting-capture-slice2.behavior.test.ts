@@ -7,17 +7,6 @@ import type { Sql } from "../db.ts";
 
 type Row = Record<string, unknown>;
 
-/**
- * Faithful in-memory stand-in for meeting_capture_records.
- *
- * The real success path writes the capture record, transcript artifact, and
- * segments inside one withTransaction boundary. This harness supplies a
- * matching transaction seam that routes the transaction-scoped handle to the
- * same in-memory state, so the second run sees the same captured row the real
- * database would. Parameter order mirrors the real upserts exactly:
- *   $1 newsroom, $2 video, $3 channel, $4 title, $5 published,
- *   then caption path/format/sha for the captured upsert.
- */
 function statefulSql(): {
   sql: Sql;
   capturedSet: Set<string>;
@@ -52,6 +41,13 @@ function statefulSql(): {
         caption_format: isCaptured ? (params[6] as string) : null,
         caption_sha256: isCaptured ? (params[7] as string) : null,
         caption_captured_at: isCaptured ? "2026-01-01T00:00:00Z" : null,
+        ended_at: isCaptured ? null : null,
+        capture_disposition: isCaptured ? "final" : null,
+        duration_seconds: null,
+        caption_revision_timestamp: null,
+        revision_count: 0,
+        settled_under_churn: false,
+        last_revision_at: null,
       });
       if (status === "captured") captured.add(videoId);
       return [];
@@ -101,6 +97,7 @@ describe("meeting capture Slice 2 second-run suppression", () => {
             sourcePath: captionPath,
           },
           infoPath: null,
+          info: { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null },
           argv: [],
           stdout: "",
           stderr: "",
