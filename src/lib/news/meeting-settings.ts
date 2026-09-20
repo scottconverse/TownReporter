@@ -6,6 +6,7 @@ import { authMiddleware } from "../auth/middleware.ts";
 import { getSql } from "../db.ts";
 import { requireEditor, ForbiddenError } from "./membership.ts";
 import { loadMeetingPriority, saveMeetingPriority, type MeetingChannel } from "./meeting-capture.ts";
+import { DEFAULT_CAPTURE_CAPS } from "./meeting-capture-caps.ts";
 
 export type MeetingRetentionMode = "media" | "audio-only" | "transcript-only";
 
@@ -14,6 +15,8 @@ export type MeetingOperatorSettings = {
   storageRoot: string | null;
   retentionMode: MeetingRetentionMode;
   enabled: boolean;
+  durationCapSeconds: number;
+  sizeCapBytes: number;
 };
 
 const RETENTION_MODES: MeetingRetentionMode[] = ["media", "audio-only", "transcript-only"];
@@ -88,8 +91,8 @@ export const getMeetingSettingsFn = createServerFn({ method: "GET" })
     const newsroomId = await ownedNewsroomId(context.userId);
     const sql = await getSql();
     const channels = await loadMeetingPriority(sql, newsroomId);
-    const rows = await sql.query<{ storage_root: string | null; retention_mode: MeetingRetentionMode | null; enabled: boolean | null }>(
-      "select storage_root,retention_mode,enabled from meeting_capture_settings where newsroom_id=$1",
+    const rows = await sql.query<{ storage_root: string | null; retention_mode: MeetingRetentionMode | null; enabled: boolean | null; duration_cap_seconds: number | null; size_cap_bytes: number | string | null }>(
+      "select storage_root,retention_mode,enabled,duration_cap_seconds,size_cap_bytes from meeting_capture_settings where newsroom_id=$1",
       [newsroomId],
     );
     return {
@@ -97,6 +100,8 @@ export const getMeetingSettingsFn = createServerFn({ method: "GET" })
       storageRoot: rows[0]?.storage_root ?? null,
       retentionMode: rows[0]?.retention_mode ?? "transcript-only",
       enabled: rows[0]?.enabled ?? false,
+      durationCapSeconds: Number(rows[0]?.duration_cap_seconds ?? DEFAULT_CAPTURE_CAPS.durationCapSeconds),
+      sizeCapBytes: Number(rows[0]?.size_cap_bytes ?? DEFAULT_CAPTURE_CAPS.sizeCapBytes),
     };
   });
 
@@ -105,6 +110,8 @@ export type SaveMeetingSettingsInput = {
   storageRoot: string | null;
   retentionMode: MeetingRetentionMode;
   enabled: boolean;
+  durationCapSeconds: number;
+  sizeCapBytes: number;
 };
 
 export type SaveMeetingSettingsResult =
@@ -120,6 +127,8 @@ export const saveMeetingSettingsFn = createServerFn({ method: "POST" })
       storageRoot: d.storageRoot == null ? null : String(d.storageRoot),
       retentionMode: (d.retentionMode as MeetingRetentionMode) ?? "transcript-only",
       enabled: Boolean(d.enabled),
+      durationCapSeconds: Number(d.durationCapSeconds ?? DEFAULT_CAPTURE_CAPS.durationCapSeconds),
+      sizeCapBytes: Number(d.sizeCapBytes ?? DEFAULT_CAPTURE_CAPS.sizeCapBytes),
     };
   })
   .handler(async ({ context, data }): Promise<SaveMeetingSettingsResult> => {
@@ -153,6 +162,12 @@ export const saveMeetingSettingsFn = createServerFn({ method: "POST" })
       if (!writable.ok) return { ok: false, error: writable.error };
     }
 
+    if (!Number.isFinite(data.durationCapSeconds) || data.durationCapSeconds <= 0) {
+      return { ok: false, error: "Duration cap must be a positive number of seconds." };
+    }
+    if (!Number.isFinite(data.sizeCapBytes) || data.sizeCapBytes <= 0) {
+      return { ok: false, error: "Size cap must be a positive number of bytes." };
+    }
     if (data.enabled && cleaned.length === 0) {
       return { ok: false, error: "Add at least one meeting channel before turning meeting capture on." };
     }
@@ -168,11 +183,12 @@ export const saveMeetingSettingsFn = createServerFn({ method: "POST" })
     }
 
     await sql.query(
-      `insert into meeting_capture_settings(newsroom_id,storage_root,retention_mode,enabled)
-       values($1,$2,$3,$4)
+      `insert into meeting_capture_settings(newsroom_id,storage_root,retention_mode,enabled,duration_cap_seconds,size_cap_bytes)
+       values($1,$2,$3,$4,$5,$6)
        on conflict(newsroom_id) do update set storage_root=excluded.storage_root,
-         retention_mode=excluded.retention_mode,enabled=excluded.enabled,updated_at=now()`,
-      [newsroomId, data.storageRoot ? resolve(data.storageRoot) : null, data.retentionMode, data.enabled],
+         retention_mode=excluded.retention_mode,enabled=excluded.enabled,
+         duration_cap_seconds=excluded.duration_cap_seconds,size_cap_bytes=excluded.size_cap_bytes,updated_at=now()`,
+      [newsroomId, data.storageRoot ? resolve(data.storageRoot) : null, data.retentionMode, data.enabled, Math.round(data.durationCapSeconds), Math.round(data.sizeCapBytes)],
     );
 
     return { ok: true };

@@ -6,7 +6,7 @@ import {
   saveMeetingSettingsFn,
   type MeetingRetentionMode,
 } from "@/lib/news/meeting-settings";
-import { runMeetingsNow, forceRecaptureMeeting, type MeetingManualRunResult } from "@/lib/news/meeting-manual-run";
+import { runMeetingsNow, forceRecaptureMeeting, stopMeetingsNow, type MeetingManualRunResult } from "@/lib/news/meeting-manual-run";
 
 /*
   N-1: the meeting-capture operator configuration surface.
@@ -22,6 +22,8 @@ export function MeetingCaptureSettings() {
   const [storageRoot, setStorageRoot] = useState<string | null>(null);
   const [retentionMode, setRetentionMode] = useState<MeetingRetentionMode | null>(null);
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [durationCapHours, setDurationCapHours] = useState<number | null>(null);
+  const [sizeCapMb, setSizeCapMb] = useState<number | null>(null);
   const [newChannel, setNewChannel] = useState("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -32,6 +34,8 @@ export function MeetingCaptureSettings() {
     setStorageRoot(settings.data.storageRoot ?? "");
     setRetentionMode(settings.data.retentionMode);
     setEnabled(settings.data.enabled);
+    setDurationCapHours(Math.round((settings.data.durationCapSeconds / 3600) * 10) / 10);
+    setSizeCapMb(Math.round(settings.data.sizeCapBytes / (1024 * 1024)));
   }
 
   const save = useMutation({
@@ -42,6 +46,8 @@ export function MeetingCaptureSettings() {
           storageRoot: (storageRoot ?? "").trim() || null,
           retentionMode: retentionMode ?? "transcript-only",
           enabled: enabled ?? false,
+          durationCapSeconds: Math.round((durationCapHours ?? 8) * 3600),
+          sizeCapBytes: Math.round((sizeCapMb ?? 500) * 1024 * 1024),
         },
       }),
     onSuccess: async (result) => {
@@ -151,6 +157,33 @@ export function MeetingCaptureSettings() {
           </select>
         </Field>
 
+        <Field label="Capture caps" hint="A capture longer or larger than these is REFUSED with a reason, never silently truncated. Defaults: 8 hours, 500 MB (pending Scott's confirmation).">
+          <div className="flex items-center gap-3">
+            <label className="text-sm">Duration (hours)
+              <input
+                className={inputClass}
+                aria-label="Duration cap hours"
+                type="number"
+                min={0.5}
+                step={0.5}
+                value={durationCapHours ?? 8}
+                onChange={(e) => { setDurationCapHours(Number(e.target.value)); setSaved(false); }}
+              />
+            </label>
+            <label className="text-sm">Size (MB)
+              <input
+                className={inputClass}
+                aria-label="Size cap MB"
+                type="number"
+                min={1}
+                step={1}
+                value={sizeCapMb ?? 500}
+                onChange={(e) => { setSizeCapMb(Number(e.target.value)); setSaved(false); }}
+              />
+            </label>
+          </div>
+        </Field>
+
         {error && (
           <p role="alert" className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
             {error}
@@ -212,6 +245,15 @@ function ManualRunControls({ enabled }: { enabled: boolean }) {
         </InkButton>
         {!enabled && <span className="text-sm text-ink-2">Turn meeting capture on to run.</span>}
       </div>
+
+      {run.isPending && (
+        <div role="status" className="mt-3 flex items-center gap-3 text-sm text-ink-2">
+          <span>Capturing… progress shows in the scan history as it runs.</span>
+          <InkButton type="button" tone="quiet-danger" ariaLabel="Stop meetings now" onClick={() => { void stopMeetingsNow(); }}>
+            Stop
+          </InkButton>
+        </div>
+      )}
 
       <div className="mt-5">
         <SecHead title="Force a re-capture" sub="Overwrites the stored transcript for ONE meeting. Use only when you want to re-fetch a specific meeting's captions." />

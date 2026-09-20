@@ -5,13 +5,20 @@ import { createHash } from "node:crypto";
 import { parseCaptionFile, type ParsedCaptionFile } from "./caption-parse.ts";
 import { parseInfoSidecar, type ParsedInfoSidecar } from "./meeting-capture-info.ts";
 
+export type CaptureControl = {
+  /** N-5 Stop: aborting kills the in-flight yt-dlp child. */
+  signal?: AbortSignal;
+  /** N-5 progress: called with the current bytes on disk under outputDir. */
+  onProgress?: (bytes: number) => void;
+};
+
 export type CaptionCaptureInput = {
   videoId: string;
   outputDir: string;
   archivePath: string;
   sleepSubtitles?: number;
   sleepRequests?: number;
-};
+} & CaptureControl;
 
 export type CaptionCaptureSuccess = {
   ok: true;
@@ -28,6 +35,8 @@ export type CaptionCaptureFailure = {
   reason: string;
   argv: string[];
   stderr: string;
+  /** N-5: true when the capture was stopped by the operator rather than failing. */
+  stopped?: boolean;
 };
 
 export type CaptionCaptureResult = CaptionCaptureSuccess | CaptionCaptureFailure;
@@ -37,7 +46,7 @@ export type AudioCaptureInput = {
   outputDir: string;
   archivePath: string;
   sleepRequests?: number;
-};
+} & CaptureControl;
 
 export type AudioArtifact = {
   path: string;
@@ -61,6 +70,7 @@ export type AudioCaptureFailure = {
   reason: string;
   argv: string[];
   stderr: string;
+  stopped?: boolean;
 };
 
 export type AudioCaptureResult = AudioCaptureSuccess | AudioCaptureFailure;
@@ -196,8 +206,24 @@ function readInfo(outputDir: string, videoId: string): { infoPath: string | null
   }
 }
 
-async function runYtdlp(argv: string[], cwd: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
-  return await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolvePromise, reject) => {
+function dirBytes(dir: string): number {
+  try {
+    let total = 0;
+    for (const name of readdirSync(dir)) {
+      try { total += statSync(join(dir, name)).size; } catch { /* racing writes */ }
+    }
+    return total;
+  } catch {
+    return 0;
+  }
+}
+
+async function runYtdlp(
+  argv: string[],
+  cwd: string,
+  control: CaptureControl = {},
+): Promise<{ code: number | null; stdout: string; stderr: string; stopped: boolean }> {
+  return await new Promise<{ code: number | null; stdout: string; stderr: string; stopped: boolean }>((resolvePromise, reject) => {
     const child = spawn("python", argv, {
       cwd,
       shell: false,
@@ -206,14 +232,37 @@ async function runYtdlp(argv: string[], cwd: string): Promise<{ code: number | n
     });
     let stdout = "";
     let stderr = "";
+    let stopped = false;
+
+    // N-5 progress: poll the output directory for bytes written so far.
+    const progressTimer = control.onProgress
+      ? setInterval(() => { control.onProgress!(dirBytes(cwd)); }, 1000)
+      : null;
+    progressTimer?.unref?.();
+
+    // N-5 Stop: aborting the signal kills the child in-flight.
+    const onAbort = () => {
+      stopped = true;
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+    };
+    if (control.signal) {
+      if (control.signal.aborted) onAbort();
+      else control.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     child.stdout.on("data", (chunk) => { stdout += String(chunk); });
     child.stderr.on("data", (chunk) => { stderr += String(chunk); });
     child.once("error", reject);
-    child.once("close", (code) => resolvePromise({ code, stdout, stderr }));
+    child.once("close", (code) => {
+      if (progressTimer) clearInterval(progressTimer);
+      control.signal?.removeEventListener("abort", onAbort);
+      resolvePromise({ code, stdout, stderr, stopped });
+    });
   }).catch((error: unknown) => ({
     code: 1,
     stdout: "",
     stderr: error instanceof Error ? error.message : String(error),
+    stopped: false,
   }));
 }
 
@@ -221,8 +270,11 @@ export async function captureMeetingCaptions(input: CaptionCaptureInput): Promis
   const outputDir = resolve(input.outputDir);
   mkdirSync(outputDir, { recursive: true });
   const argv = buildCaptionCaptureArgs(input);
-  const run = await runYtdlp(argv, outputDir);
+  const run = await runYtdlp(argv, outputDir, { signal: input.signal, onProgress: input.onProgress });
 
+  if (run.stopped) {
+    return { ok: false, reason: "Capture stopped by the operator.", argv, stderr: run.stderr, stopped: true };
+  }
   if (run.code !== 0) return classifyYtdlpFailure({ exitCode: run.code, stderr: run.stderr });
   const captionPath = findCaptionFile(outputDir, input.videoId);
   if (!captionPath) {
@@ -260,7 +312,10 @@ export async function captureMeetingAudio(input: AudioCaptureInput): Promise<Aud
   const outputDir = resolve(input.outputDir);
   mkdirSync(outputDir, { recursive: true });
   const argv = buildAudioCaptureArgs(input);
-  const run = await runYtdlp(argv, outputDir);
+  const run = await runYtdlp(argv, outputDir, { signal: input.signal, onProgress: input.onProgress });
+  if (run.stopped) {
+    return { ok: false, reason: "Capture stopped by the operator.", argv, stderr: run.stderr, stopped: true };
+  }
   if (run.code !== 0) {
     return {
       ok: false,

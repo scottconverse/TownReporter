@@ -1,4 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
+
+/* N-5: an in-flight manual meeting pass can be stopped. One controller per newsroom. */
+const runningPasses = new Map<number, AbortController>();
+export function requestStopMeetingPass(newsroomId: number): boolean {
+  const c = runningPasses.get(newsroomId);
+  if (!c) return false;
+  c.abort();
+  return true;
+}
+export function isMeetingPassRunning(newsroomId: number): boolean { return runningPasses.has(newsroomId); }
 import { authMiddleware } from "../auth/middleware.ts";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { requireEditor, ForbiddenError } from "./membership.ts";
@@ -32,12 +42,12 @@ export type MeetingManualRunResult =
  */
 export async function runMeetingPassWritesRow(
   sql: Sql,
-  input: { newsroomId: number; runId: number },
+  input: { newsroomId: number; runId: number; signal?: AbortSignal },
 ): Promise<MeetingAwarenessResult> {
   let awareness: MeetingAwarenessResult;
   const failures: string[] = [];
   try {
-    awareness = await runMeetingAwareness(sql, input.newsroomId);
+    awareness = await runMeetingAwareness(sql, input.newsroomId, { captureMeeting: (ci) => captureMeetingCaptions({ ...ci, signal: input.signal }) });
     const recheck = await recheckProvisionalMeetings(sql, input.newsroomId);
     if (recheck.failures.length) {
       awareness.failures.push(...recheck.failures);
@@ -102,8 +112,10 @@ export const runMeetingsNow = createServerFn({ method: "POST" })
     );
     const runId = rows[0]!.id;
 
+    const controller = new AbortController();
+    runningPasses.set(newsroomId, controller);
     try {
-      const awareness = await runMeetingPassWritesRow(sql, { newsroomId, runId });
+      const awareness = await runMeetingPassWritesRow(sql, { newsroomId, runId, signal: controller.signal });
       return {
         ok: true, scanRunId: runId,
         found: awareness.found.length,
@@ -117,7 +129,18 @@ export const runMeetingsNow = createServerFn({ method: "POST" })
       const error = e instanceof Error ? e.message : String(e);
       await sql.query("update scan_runs set finished_at=now(), error=$1 where id=$2", [error, runId]);
       return { ok: false, error };
+    } finally {
+      runningPasses.delete(newsroomId);
     }
+  });
+
+/** N-5: stop an in-flight manual meeting pass. Records that it was stopped. */
+export const stopMeetingsNow = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }): Promise<{ ok: boolean; stopped: boolean }> => {
+    const newsroomId = await ownedNewsroomId(context.userId);
+    const stopped = requestStopMeetingPass(newsroomId);
+    return { ok: true, stopped };
   });
 
 /**

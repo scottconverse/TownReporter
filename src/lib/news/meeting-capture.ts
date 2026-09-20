@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Sql } from "../db.ts";
 import { withTransaction } from "../db.ts";
@@ -10,6 +10,7 @@ import { computeEndedAt } from "./meeting-capture-info.ts";
 import { applyDraftRevision, captureDisposition, detectRevision, dueForRecheck, nextCheckState } from "./meeting-revision.ts";
 import { storeMeetingTranscriptArtifact } from "./meeting-transcript-artifacts.ts";
 import { runSection5ForArtifact } from "./meeting-story-section5-run.ts";
+import { capsFromSettings, checkDurationCap, checkSizeCap, type CaptureCaps } from "./meeting-capture-caps.ts";
 
 export type MeetingChannel = { url: string; label?: string };
 export type MeetingCaptureStatus = "not-captured" | "captured" | "failed";
@@ -93,6 +94,18 @@ export function archiveCorrupt(text: string | null, records: MeetingCaptureRecor
   try { return serializeArchive(records) !== text && parseArchive(text).size === 0 && records.length > 0; } catch { return true; }
 }
 
+function safeFileSize(path: string): number | null {
+  try { return statSync(path).size; } catch { return null; }
+}
+
+/** N-5: a cap refusal is recorded with its named reason, not a silent truncation. */
+async function recordCaptureRefusal(sql: Sql, newsroomId: number, video: ListedVideo, reason: string): Promise<void> {
+  await sql.query(
+    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,failure_reason,refused_reason) values($1,$2,$3,$4,$5,'failed',$6,$6) on conflict(newsroom_id,video_id) do update set status='failed',failure_reason=excluded.failure_reason,refused_reason=excluded.refused_reason,updated_at=now()",
+    [newsroomId, video.id, video.url, video.title, video.published ?? "", reason],
+  );
+}
+
 async function recordAudioCaptureSuccess(
   sql: Sql, newsroomId: number, video: ListedVideo, channelUrl: string,
   result: Extract<AudioCaptureResult, { ok: true }>, endedAt: string | null, disposition: "provisional" | "final",
@@ -111,6 +124,15 @@ async function recordAudioCaptureSuccess(
        audio_bytes=excluded.audio_bytes,audio_captured_at=now(),audio_trigger_reason=excluded.audio_trigger_reason,
        updated_at=now()`,
     [newsroomId, video.id, channelUrl, video.title, video.published ?? "", endedAt, disposition, result.info.durationSeconds, storedPath, result.audio.format, result.audio.sha256, result.audio.byteSize, triggerReason],
+  );
+}
+
+
+/** N-5: a capture the operator stopped is recorded as stopped, not failed. */
+async function recordCaptureStopped(sql: Sql, newsroomId: number, video: ListedVideo, reason: string): Promise<void> {
+  await sql.query(
+    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,failure_reason) values($1,$2,$3,$4,$5,$6,$7) on conflict(newsroom_id,video_id) do update set status=excluded.status,failure_reason=excluded.failure_reason,updated_at=now()",
+    [newsroomId, video.id, video.url, video.title, video.published ?? "", "stopped", reason],
   );
 }
 
@@ -145,6 +167,10 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   // result as an unconfigured newsroom, without deleting any configuration.
   const meetingSettings = await sql.query<{ enabled: boolean | null }>("select enabled from meeting_capture_settings where newsroom_id=$1", [newsroomId]);
   if (meetingSettings.length && meetingSettings[0]!.enabled === false) return EMPTY_RESULT;
+  const capRows = await sql.query<{ duration_cap_seconds: number | null; size_cap_bytes: number | null }>(
+    "select duration_cap_seconds,size_cap_bytes from meeting_capture_settings where newsroom_id=$1", [newsroomId],
+  );
+  const caps: CaptureCaps = capsFromSettings(capRows[0]);
   const channels = await loadMeetingPriority(sql, newsroomId);
   if (!channels.length) return EMPTY_RESULT;
   const list = deps.listChannelVideos ?? listChannelVideos;
@@ -212,9 +238,22 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
           continue;
         }
         if (!audio.ok) {
-          const reason = `audio fallback failed: ${audio.reason}`;
-          await recordCaptureFailure(sql, newsroomId, v, reason);
+          const reason = audio.stopped ? audio.reason : `audio fallback failed: ${audio.reason}`;
+          await (audio.stopped ? recordCaptureStopped(sql, newsroomId, v, audio.reason) : recordCaptureFailure(sql, newsroomId, v, reason));
           failures.push(`${v.title}: ${reason}`);
+          continue;
+        }
+        // N-5 caps apply to the audio fallback too.
+        const audioDurRefusal = checkDurationCap(audio.info.durationSeconds, caps);
+        if (audioDurRefusal.refused) {
+          await recordCaptureRefusal(sql, newsroomId, v, audioDurRefusal.reason);
+          failures.push(`${v.title}: ${audioDurRefusal.reason}`);
+          continue;
+        }
+        const audioSizeRefusal = checkSizeCap(audio.audio.byteSize, caps);
+        if (audioSizeRefusal.refused) {
+          await recordCaptureRefusal(sql, newsroomId, v, audioSizeRefusal.reason);
+          failures.push(`${v.title}: ${audioSizeRefusal.reason}`);
           continue;
         }
         const audioEndedAt = computeEndedAt({ durationSeconds: audio.info.durationSeconds, videoTimestamp: audio.info.videoTimestamp });
@@ -234,8 +273,26 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
         }
         continue;
       }
-      await recordCaptureFailure(sql, newsroomId, v, result.reason);
+      if (result.stopped) {
+        await recordCaptureStopped(sql, newsroomId, v, result.reason);
+      } else {
+        await recordCaptureFailure(sql, newsroomId, v, result.reason);
+      }
       failures.push(`${v.title}: ${result.reason}`);
+      continue;
+    }
+    // N-5 duration cap: refuse a meeting longer than the cap, with a recorded reason.
+    const durRefusal = checkDurationCap(result.info.durationSeconds, caps);
+    if (durRefusal.refused) {
+      await recordCaptureRefusal(sql, newsroomId, v, durRefusal.reason);
+      failures.push(`${v.title}: ${durRefusal.reason}`);
+      continue;
+    }
+    // N-5 size cap: refuse a caption file larger than the cap.
+    const captionSizeRefusal = checkSizeCap(safeFileSize(result.parsed.sourcePath), caps);
+    if (captionSizeRefusal.refused) {
+      await recordCaptureRefusal(sql, newsroomId, v, captionSizeRefusal.reason);
+      failures.push(`${v.title}: ${captionSizeRefusal.reason}`);
       continue;
     }
     const endedAt = computeEndedAt({ durationSeconds: result.info.durationSeconds, videoTimestamp: result.info.videoTimestamp });
