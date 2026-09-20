@@ -53,12 +53,12 @@ describe("meeting section 5 spoken-transition alignment (Finding A)", () => {
 describe("meeting section 5 real vote source adapter (Finding B)", () => {
   it("extracts structured votes from a longmontcitycouncil.org meeting page", async () => {
     const { parseStructuredVotePage } = await import("./meeting-vote-sources.ts");
-    const html = `<html><body><div class="motion"><span class="item">R-2026-51</span><p>Motion: Approve the resolution</p><p>Moved by: Popkin</p><p>Seconded by: Coloffer</p><p>Result: Passed</p><p>Tally: 7-0</p></div></body></html>`;
+    const html = `<span class="ord-num">R-2026-44</span> <span class="badge badge-passed">Passed</span> <p>Matthew Popkin moved, seconded by Sean McCoy, to approve R-2026-44</p> <span class="tally-yes">7</span> <span class="tally-no">0</span>`;
     const votes = parseStructuredVotePage(html);
     assert.equal(votes.length, 1);
-    assert.equal(votes[0]?.item, "R-2026-51");
+    assert.equal(votes[0]?.item, "R-2026-44");
     assert.equal(votes[0]?.tally, "7-0");
-    assert.equal(votes[0]?.mover, "Popkin");
+    assert.equal(votes[0]?.mover, "Matthew Popkin");
     assert.equal(votes[0]?.result, "Passed");
     assert.equal(votes[0]?.source, "longmontcitycouncil.org");
   });

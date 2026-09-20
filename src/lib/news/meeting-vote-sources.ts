@@ -65,26 +65,41 @@ export type ParsedVoteRecord = VoteRecord & { item: string };
 
 export function parseStructuredVotePage(html: string): ParsedVoteRecord[] {
   const out: ParsedVoteRecord[] = [];
-  const blocks = html.split(/<(?:div|tr|article|li)\b[^>]*(?:class|id)="[^"]*motion[^"]*"[^>]*>/i).slice(1);
-  const candidates = blocks.length ? blocks : [html];
-  for (const rawBlock of candidates) {
-    const block = rawBlock.split(/<\/(?:div|tr|article|li)>/i)[0] ?? rawBlock;
-    const item = stripTags(block).match(/\b([OR]-\d{4}-\d{1,4})\b/i)?.[1] ?? "";
-    if (!item) continue;
-    const motion = field(block, /motion\s*:?\s*([^<]{5,300})/i);
-    const mover = field(block, /(?:moved\s+by|mover)\s*:?\s*([A-Z][^<]{1,60})/i);
-    const seconder = field(block, /seconded\s+by\s*:?\s*([A-Z][^<]{1,60})/i);
-    const resultRaw = field(block, /result\s*:?\s*(Passed|Failed)/i);
-    const tallyRaw = field(block, /tally\s*:?\s*([0-9]+\s*[-–]\s*[0-9]+)/i);
-    const tally = normaliseTally(tallyRaw);
-    if (!tally) continue;
+  const itemRe = /<span class="ord-num">([A-Z]-\d{4}-\d{1,4})<\/span>/g;
+  const marks: { item: string; index: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = itemRe.exec(html))) marks.push({ item: m[1]!, index: m.index });
+  if (!marks.length) return out;
+
+  for (let i = 0; i < marks.length; i += 1) {
+    const start = marks[i]!.index;
+    const stop = i + 1 < marks.length ? marks[i + 1]!.index : html.length;
+    const block = html.slice(start, stop);
+    const item = marks[i]!.item;
+
+    // Result badge: "badge-passed" / "badge-failed".
+    const result = /badge-passed/i.test(block) ? "Passed" : /badge-failed/i.test(block) ? "Failed" : "";
+
+    // Motion text: "NAME moved, seconded by NAME, to <action>".
+    const motionMatch = block.match(/<p[^>]*>\s*([^<]*?moved,?\s*seconded by[^<]*?)<\/p>/i);
+    const motionText = motionMatch ? motionMatch[1]!.replace(/\s+/g, " ").trim() : "";
+    const mover = motionText.match(/^([A-Z][^,]*?)\s+moved/i)?.[1]?.trim() ?? "";
+    const seconder = motionText.match(/seconded by\s+([A-Z][^,]*?),/i)?.[1]?.trim() ?? "";
+
+    // Tally from the tally-yes / tally-no spans, in order.
+    const yes = Number(block.match(/<span class="tally-yes">\s*(\d+)\s*<\/span>/)?.[1] ?? "");
+    const no = Number(block.match(/<span class="tally-no">\s*(\d+)\s*<\/span>/)?.[1] ?? "");
+    const hasTally = Number.isFinite(yes) && Number.isFinite(no) && block.includes("tally-yes");
+    const tally = hasTally ? `${yes}-${no}` : "";
+
+    if (!tally && !motionText) continue;
     out.push({
       item,
-      motion: motion || item,
+      motion: motionText || item,
       mover,
       seconder,
       tally,
-      result: resultRaw || "not established",
+      result: result || "not established",
       source: "longmontcitycouncil.org" as VoteSource,
     });
   }

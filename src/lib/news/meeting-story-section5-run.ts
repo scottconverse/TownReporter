@@ -80,18 +80,30 @@ export async function runSection5ForArtifact(
 
   const structured = await fetchStructuredVotesForDate(input.meetingDate ?? "").catch(() => ({ found: false, reason: "structured vote lookup failed", records: [], url: "" }));
   const availability = voteSourceAvailability({ structuredRecordFound: structured.found, minutesFound: false, packetFound: false, transcriptFound: segments.length > 0 });
-  const votes: StructuredVote[] = chunks.map((chunk) =>
-    extractStructuredVote({
+  // Structured records are keyed by ordinance/resolution id (O-2026-46), while
+  // chunks are keyed by agenda item number (9). Attach a record to the chunk
+  // whose transcript span actually mentions that identifier or motion text.
+  const chunkText = (chunk: (typeof chunks)[number]) =>
+    segments.filter((s) => chunk.segmentIndexes.includes(s.segmentIndex)).map((s) => s.excerpt).join(" ");
+  const votes: StructuredVote[] = chunks.map((chunk) => {
+    const text = chunkText(chunk).toLowerCase();
+    const matched = structured.records.find((r) => {
+      if (r.item === chunk.item) return true;
+      // The transcript says "ordinance 2026-47"; the record is "O-2026-47".
+      // Compare on the numeric identity so the O/R prefix does not matter.
+      const bare = r.item.replace(/^[A-Z]-/i, "").toLowerCase();
+      if (text.includes(r.item.toLowerCase()) || (bare.length > 4 && text.includes(bare))) return true;
+      const head = r.motion.slice(0, 40).toLowerCase();
+      return head.length > 10 && text.includes(head);
+    }) ?? null;
+    return extractStructuredVote({
       item: chunk.item,
-      structuredRecord: null,
+      structuredRecord: matched,
       minutes: null,
       packet: null,
-      transcript: {
-        excerpt: segments.filter((s) => chunk.segmentIndexes.includes(s.segmentIndex)).map((s) => s.excerpt).join(" "),
-        source: "transcript",
-      },
-    }),
-  );
+      transcript: { excerpt: chunkText(chunk), source: "transcript" },
+    });
+  });
 
   await persistSection5(sql, {
     newsroomId: input.newsroomId,

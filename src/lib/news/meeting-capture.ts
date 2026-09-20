@@ -178,7 +178,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
       await runTransaction(async (tx) => {
         await recordCaptureSuccess(tx, newsroomId, v, channels[0]!.url, result as Extract<CaptionCaptureResult, { ok: true }>, endedAt, disposition);
         await storeTranscript(tx, { newsroomId, videoId: v.id, parsed: result.parsed, infoSourcePath: result.infoPath });
-        const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: v.id, title: v.title, artifactId: Number((await tx.query<{ id: number }>("select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1", [newsroomId, v.id]))[0]?.id ?? 0) });
+        const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: v.id, title: v.title, meetingDate: v.published, artifactId: Number((await tx.query<{ id: number }>("select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1", [newsroomId, v.id]))[0]?.id ?? 0) });
         if (!section5.aligned && section5.unalignedLead) failures.push(section5.unalignedLead.leadWhy);
       });
     } catch (error) {
@@ -308,7 +308,7 @@ export async function recheckProvisionalMeetings(
         );
         const priorArtifactId = priorArtifacts[0]?.id ?? null;
         const stored = await storeTranscript(tx, { newsroomId, videoId: row.video_id, parsed: result.parsed, infoSourcePath: result.infoPath });
-        const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: row.video_id, title: row.title, artifactId: stored.id });
+        const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: row.video_id, title: row.title, meetingDate: row.published, artifactId: stored.id });
         if (!section5.aligned && section5.unalignedLead) failures.push(section5.unalignedLead.leadWhy);
         if (signal) {
           await tx.query(
