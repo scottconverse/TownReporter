@@ -1,4 +1,6 @@
-import { mkdirSync, copyFileSync, existsSync } from "node:fs";
+import { mkdirSync, copyFileSync, existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import type { Sql } from "../db.ts";
 import type { ParsedCaptionFile } from "./caption-parse.ts";
@@ -85,9 +87,40 @@ async function loadStorageRoot(sql: Sql, newsroomId: number): Promise<string> {
  * record, the artifact, and the segments to commit atomically pass a
  * transaction-scoped handle (see runMeetingAwareness).
  */
+export type StoredInfoSidecar = {
+  infoPath: string | null;
+  infoSha256: string | null;
+  infoBytes: number | null;
+  infoMissingReason: string | null;
+};
+
+/**
+ * Copies the yt-dlp info sidecar next to the transcript artifact and records its
+ * own path, byte size, and SHA-256. A missing sidecar is recorded explicitly
+ * rather than silently succeeding.
+ */
+export function storeMeetingInfoSidecar(sourceInfoPath: string | null | undefined, targetDir: string): StoredInfoSidecar {
+  if (!sourceInfoPath) {
+    return { infoPath: null, infoSha256: null, infoBytes: null, infoMissingReason: "yt-dlp did not write an info sidecar for this capture" };
+  }
+  if (!existsSync(sourceInfoPath)) {
+    return { infoPath: null, infoSha256: null, infoBytes: null, infoMissingReason: "info sidecar missing at storage time: " + sourceInfoPath };
+  }
+  mkdirSync(targetDir, { recursive: true });
+  const targetPath = join(targetDir, "info.json");
+  const bytes = readFileSync(sourceInfoPath);
+  copyFileSync(sourceInfoPath, targetPath);
+  return {
+    infoPath: targetPath,
+    infoSha256: createHash("sha256").update(bytes).digest("hex"),
+    infoBytes: statSync(targetPath).size,
+    infoMissingReason: null,
+  };
+}
+
 export async function storeMeetingTranscriptArtifact(
   sql: Sql,
-  input: { newsroomId: number; videoId: string; parsed: ParsedCaptionFile; sourceMethod?: string },
+  input: { newsroomId: number; videoId: string; parsed: ParsedCaptionFile; infoSourcePath?: string | null; sourceMethod?: string },
 ): Promise<MeetingTranscriptArtifact> {
   const storageRoot = await loadStorageRoot(sql, input.newsroomId);
   const retentionMode = await loadRetentionMode(sql, input.newsroomId);
@@ -100,16 +133,17 @@ export async function storeMeetingTranscriptArtifact(
     if (!existsSync(input.parsed.sourcePath)) throw new Error(`Captured caption file is missing: ${input.parsed.sourcePath}`);
     copyFileSync(input.parsed.sourcePath, targetPath);
   }
+  const sidecar = storeMeetingInfoSidecar(input.infoSourcePath, targetDir);
   const segments = parseTranscriptSegments(input.parsed.text, input.parsed.sha256);
   const rows = await sql.query<{ id: number; captured_at: string }>(
     `insert into meeting_transcript_artifacts
-       (newsroom_id,video_id,artifact_type,storage_path,format,sha256,captured_at,source_method,retention_mode)
-     values ($1,$2,'transcript',$3,$4,$5,now(),$6,$7)
+       (newsroom_id,video_id,artifact_type,storage_path,format,sha256,captured_at,source_method,retention_mode,info_path,info_sha256,info_bytes,info_missing_reason)
+     values ($1,$2,'transcript',$3,$4,$5,now(),$6,$7,$8,$9,$10,$11)
      on conflict (newsroom_id,video_id,artifact_type,sha256)
      do update set storage_path=excluded.storage_path,format=excluded.format,source_method=excluded.source_method,
-       retention_mode=excluded.retention_mode,updated_at=now()
+       retention_mode=excluded.retention_mode,info_path=excluded.info_path,info_sha256=excluded.info_sha256,info_bytes=excluded.info_bytes,info_missing_reason=excluded.info_missing_reason,updated_at=now()
      returning id,captured_at::text as captured_at`,
-    [input.newsroomId, input.videoId, targetPath, input.parsed.format, input.parsed.sha256, input.sourceMethod ?? "yt-dlp-captions", retentionMode],
+    [input.newsroomId, input.videoId, targetPath, input.parsed.format, input.parsed.sha256, input.sourceMethod ?? "yt-dlp-captions", retentionMode, sidecar.infoPath, sidecar.infoSha256, sidecar.infoBytes, sidecar.infoMissingReason],
   );
   const artifactId = rows[0]?.id;
   if (!artifactId) throw new Error("Meeting transcript artifact insert returned no id.");

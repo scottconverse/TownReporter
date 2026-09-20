@@ -1,5 +1,6 @@
 import type { Sql } from "../db.ts";
 import { primeGovDocumentsForTitle } from "./primegov.ts";
+import { packetItemsForMeeting } from "./meeting-agenda-items.ts";
 import {
   alignMeeting,
   chunkByAgendaItem,
@@ -13,6 +14,7 @@ import { persistSection5, unalignedMeetingLead } from "./meeting-story-section5-
 
 export type Section5Deps = {
   packetForTitle?: typeof primeGovDocumentsForTitle;
+  packetItemsForMeeting?: typeof packetItemsForMeeting;
 };
 
 export type Section5Result = {
