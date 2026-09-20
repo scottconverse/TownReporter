@@ -1,13 +1,13 @@
 /**
- * Single source of truth for platform head chrome (PWA, extensions.js, OG),
+ * Single source of truth for the app head chrome (PWA manifest, touch icon, share-card meta),
  * shared by the Vite plugin and Nitro middleware. Plain ESM so `node --test`
  * and the Nitro bundler can both consume it.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const DEFAULT_APP_NAME = "Grok App";
-export const OG_SERVICE_URL_DEFAULT = "https://og.grok.me";
+export const DEFAULT_APP_NAME = "TownReporter";
+export const OG_SERVICE_URL_DEFAULT = "";
 export const OG_SITE_REL_PATH = "src/lib/og/site.json";
 
 const SHARE_META_KEYS = new Set([
@@ -55,30 +55,16 @@ function placeholderCardColor(site = {}) {
 }
 
 /**
- * "wild-race.grok.me" → "Wild Race". Only published app hosts encode the
- * display name in the first label. Preview / guest hosts are image origins
- * only — slugifying them produced internal names like "Hds Abc 3000 Xy".
+ * The product display name. Deliberately independent of the deployment host:
+ * a self-hosted newspaper is named by its own configuration, never by the host
+ * it is served from and never by the tool that built it.
+ *
+ * hostHeader is accepted for call-site compatibility and is intentionally unused;
+ * `resolveOgTitle` reads src/lib/og/site.json first and the document <title> next.
  */
 export function appNameFromHost(hostHeader) {
-  const host = String(hostHeader ?? "")
-    .split(",")[0]
-    .trim()
-    .split(":")[0]
-    .toLowerCase();
-  if (!host.endsWith(".grok.me")) {
-    return DEFAULT_APP_NAME;
-  }
-  const slug = host.split(".")[0] ?? "";
-  if (!slug || slug === "www" || !/^[a-z0-9-]{1,63}$/.test(slug)) {
-    return DEFAULT_APP_NAME;
-  }
-  return (
-    slug
-      .split("-")
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ") || DEFAULT_APP_NAME
-  );
+  void hostHeader;
+  return DEFAULT_APP_NAME;
 }
 
 /** True for Vercel system domains. Envoy rewrites origin Host to these; they SSO-protect `/og.jpg`. */
@@ -128,7 +114,7 @@ export function isInstallQuery(url) {
 export function isDocumentPath(pathname) {
   const path = String(pathname ?? "");
   return (
-    !path.startsWith("/__grok/") &&
+    !path.startsWith("/__app/") &&
     !path.startsWith("/api/") &&
     !path.startsWith("/@") &&
     !path.startsWith("/node_modules") &&
@@ -167,11 +153,11 @@ export function renderWebManifest(hostHeader) {
       start_url: "/",
       scope: "/",
       display: "standalone",
-      background_color: "#000000",
-      theme_color: "#000000",
+      background_color: "#F6F1E7",
+      theme_color: "#F6F1E7",
       icons: [
         {
-          src: "/__grok/icon-180.png",
+          src: "/__app/icon-180.png",
           sizes: "180x180",
           type: "image/png",
         },
@@ -182,12 +168,12 @@ export function renderWebManifest(hostHeader) {
   );
 }
 
-export function grokPwaHeadTags(appName = DEFAULT_APP_NAME) {
+export function appChromeHeadTags(appName = DEFAULT_APP_NAME) {
   return [
     // Standalone display comes from the manifest ("display": "standalone");
     // the legacy *-web-app-capable metas it replaces are deliberately absent.
-    ["manifest", '<link rel="manifest" href="/__grok/manifest.webmanifest">'],
-    ["apple-touch-icon", '<link rel="apple-touch-icon" href="/__grok/icon-180.png">'],
+    ["manifest", '<link rel="manifest" href="/__app/manifest.webmanifest">'],
+    ["apple-touch-icon", '<link rel="apple-touch-icon" href="/__app/icon-180.png">'],
     [
       "apple-mobile-web-app-title",
       `<meta name="apple-mobile-web-app-title" content="${escapeHtml(appName)}">`,
@@ -202,7 +188,7 @@ export function grokPwaHeadTags(appName = DEFAULT_APP_NAME) {
 
 export const GROK_EXTENSIONS_SCRIPT_SRC = "https://grok.com/grok-app-builder/extensions.js";
 
-export function readGrokProjectId() {
+export function readBuilderProjectId() {
   const fromProcess = typeof process !== "undefined" ? process.env?.VITE_PROJECT_ID : "";
   return String(fromProcess ?? "").trim();
 }
@@ -217,7 +203,7 @@ export function readXCreatorId() {
   return String(fromProcess ?? "").trim();
 }
 
-export function grokXCreatorHeadTags(creator = readXCreator(), creatorId = readXCreatorId()) {
+export function appXCreatorHeadTags(creator = readXCreator(), creatorId = readXCreatorId()) {
   const name = String(creator ?? "").trim();
   const id = String(creatorId ?? "").trim();
   if (!name || !id) return [];
@@ -228,7 +214,7 @@ export function grokXCreatorHeadTags(creator = readXCreator(), creatorId = readX
 }
 
 /** Platform "Created with Grok" banner — injected into every HTML document. */
-export function grokExtensionsHeadTags(projectId = readGrokProjectId()) {
+export function appExtensionsHeadTags(projectId = readBuilderProjectId()) {
   const id = escapeHtml(projectId);
   const tags = [];
   if (projectId) {
@@ -333,7 +319,7 @@ function applyCustomCardFromFs(site, cwd) {
   return { ...site, card: "custom", image: disk };
 }
 
-export function grokOgHeadTags({
+export function appOgHeadTags({
   host = "",
   appName = DEFAULT_APP_NAME,
   site = {},
@@ -355,15 +341,24 @@ export function grokOgHeadTags({
   }
   if (publicHost) {
     const asset = resolveOgCardAsset(site, cwd);
-    const custom = Boolean(asset);
-    let image = custom
-      ? `https://${publicHost}${asset.startsWith("/") ? asset : `/${asset}`}`
-      : `${ogServiceUrl()}/v1/card.png?host=${encodeURIComponent(publicHost)}&title=${encodeURIComponent(title)}`;
-    const color = !custom ? placeholderCardColor(site) : "";
-    if (color) image += `&color=${encodeURIComponent(color)}`;
-    tags.push(`<meta property="og:image" content="${escapeHtml(image)}">`);
-    tags.push(`<meta property="og:image:width" content="1200">`);
-    tags.push(`<meta property="og:image:height" content="630">`);
+    /*
+      No custom card and no configured card service: emit NO og:image.
+      This module used to fall back to a hosted placeholder card service,
+      so a self-hosted paper with no card of its own sent every reader's
+      social preview through a third-party origin. A paper with no card is
+      better served by the platform default than by somebody else's service.
+    */
+    const service = ogServiceUrl();
+    if (asset || service) {
+      const image = asset
+        ? `https://${publicHost}${asset.startsWith("/") ? asset : `/${asset}`}`
+        : `${service}/v1/card.png?host=${encodeURIComponent(publicHost)}&title=${encodeURIComponent(title)}`;
+      const color = !asset ? placeholderCardColor(site) : "";
+      const withColor = color ? `${image}&color=${encodeURIComponent(color)}` : image;
+      tags.push(`<meta property="og:image" content="${escapeHtml(withColor)}">`);
+      tags.push(`<meta property="og:image:width" content="1200">`);
+      tags.push(`<meta property="og:image:height" content="630">`);
+    }
     const banner = String(site.banner ?? "").trim();
     if (banner) {
       const bannerUrl = `https://${publicHost}${banner.startsWith("/") ? banner : `/${banner}`}`;
@@ -439,7 +434,7 @@ export function normalizeHeadContext(ctx = {}) {
   const appName = resolveOgTitle(site, ctx.appName ?? DEFAULT_APP_NAME, ctx.host ?? "");
   return {
     appName,
-    projectId: ctx.projectId ?? readGrokProjectId(),
+    projectId: ctx.projectId ?? readBuilderProjectId(),
     creator: ctx.creator ?? readXCreator(),
     creatorId: ctx.creatorId ?? readXCreatorId(),
     host: ctx.host ?? "",
@@ -448,7 +443,7 @@ export function normalizeHeadContext(ctx = {}) {
   };
 }
 
-export function injectGrokPwaHead(html, ctx = {}) {
+export function injectAppHead(html, ctx = {}) {
   if (typeof html !== "string") return html;
   const { site, projectId, creator, creatorId, host, cwd } = normalizeHeadContext(ctx);
   const documentTitle = titleFromDocument(html);
@@ -463,15 +458,15 @@ export function injectGrokPwaHead(html, ctx = {}) {
   const ownKeys = definedShareMetaKeys(html);
   let next = html;
 
-  const missing = grokPwaHeadTags(appName)
+  const missing = appChromeHeadTags(appName)
     .filter(([key]) => {
-      if (key === "manifest") return !next.includes('href="/__grok/manifest.webmanifest"');
-      if (key === "apple-touch-icon") return !next.includes('href="/__grok/icon-180.png"');
+      if (key === "manifest") return !next.includes('href="/__app/manifest.webmanifest"');
+      if (key === "apple-touch-icon") return !next.includes('href="/__app/icon-180.png"');
       return !next.includes(`name="${key}"`);
     })
     .map(([, tag]) => tag);
 
-  const ogTags = grokOgHeadTags({ host, appName, site, documentTitle, cwd }).filter(
+  const ogTags = appOgHeadTags({ host, appName, site, documentTitle, cwd }).filter(
     (tag) => !ownKeys.has(shareMetaKeyOf(tag)),
   );
   if (ogTags.length) next = insertAfterHeadOpen(next, ogTags.join(""));
@@ -485,7 +480,7 @@ export function injectGrokPwaHead(html, ctx = {}) {
     does nothing outside the builder.
   */
   if (projectId && !next.includes("/grok-app-builder/extensions.js")) {
-    missing.push(...grokExtensionsHeadTags(projectId));
+    missing.push(...appExtensionsHeadTags(projectId));
   } else if (projectId && !next.includes('name="grok-project-id"')) {
     missing.push(`<meta name="grok-project-id" content="${escapeHtml(projectId)}">`);
   }
@@ -496,7 +491,7 @@ export function injectGrokPwaHead(html, ctx = {}) {
   ) {
     missing.push(`<meta property="grok:app_id" content="${escapeHtml(projectId)}">`);
   }
-  const creatorTags = grokXCreatorHeadTags(creator, creatorId);
+  const creatorTags = appXCreatorHeadTags(creator, creatorId);
   if (creatorTags.length > 0) {
     const hasCreator =
       next.includes('property="x:creator" content=') ||
@@ -527,7 +522,7 @@ export function createHeadInjector(ctx = {}) {
   let done = false;
 
   const apply = (html) =>
-    injectGrokPwaHead(html, {
+    injectAppHead(html, {
       appName: normalized.appName,
       projectId: normalized.projectId,
       creator: normalized.creator,
