@@ -2,7 +2,7 @@
 
 ## Current release work — 2026-09-16
 
-The current release is [0.6.55](docs/releases/0.6.55.md): the global 14px informational-text floor that closes a GauntletGate Critical; the corrected release-state documentation and release-state guard; and the new non-destructive authenticated desk regression with its CI job. Publication fields are recorded in the release note after the tag, GitHub release, and Windows assets are published.
+The current release is [0.6.56](docs/releases/0.6.56.md): fixes the v0.6.55 self-referential hash defect by making the package-internal note point to the `.sha256` sidecar as the hash authority, and adds the release-sealed hash guard. Publication fields are recorded in the release note after the tag, GitHub release, and Windows assets are published.
 
 The following acceptance work remains EXPLICITLY OPEN and is not closed by this release: fresh-machine human acceptance of the Windows install; the live provider matrix (configured-provider behaviour across the full provider set); five useful Dark Desk outcomes plus the September 3–8 replay; and the post-crash detached-child limitation. Production deployment and live-model proof are not asserted here.
 
