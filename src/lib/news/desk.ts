@@ -1091,6 +1091,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     });
     if (resurfacedSentence)
       summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;
+    const meetingCoverageLine = meetingAwareness?.coverageLine ?? "";
+    if (meetingCoverageLine)
+      summary = summary ? `${summary} ${meetingCoverageLine}`.slice(0, 1200) : meetingCoverageLine;
     await writeSql`
       update scan_runs
       set finished_at = now(),
