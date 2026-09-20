@@ -205,8 +205,17 @@ async function walkSurface(surface) {
 
 let beforeSnapshot = { source: "not-taken", counts: null, hashes: null };
 try {
-  beforeSnapshot = await sideEffectSnapshot();
+  /*
+    The before-snapshot must be taken AFTER the disclosed setup step, not
+    before it. signIn() creates a throwaway owner and completes first-run
+    setup, which writes a welcome article. Snapshotting before that and
+    comparing after made the run report its own setup as a walk side effect
+    ("articles hash changed") -- the same defect the request-recorded set had:
+    an assertion that cannot tell its disclosed setup from a violation.
+    The read-only claim is about the WALK, so the window is the walk.
+  */
   await signIn();
+  beforeSnapshot = await sideEffectSnapshot();
   walkStarted = true;
   routeHistory.push(page.url());
   for (const surface of SURFACES) {
