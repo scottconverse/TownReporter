@@ -1,7 +1,8 @@
 import { mkdirSync, copyFileSync, existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { isAbsolutePathAnyPlatform } from "./absolute-path.ts";
 import { statSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { Sql } from "../db.ts";
 import type { ParsedCaptionFile } from "./caption-parse.ts";
 
@@ -26,7 +27,7 @@ export function resolveMeetingStorageRoot(configured: string | null | undefined)
     throw new Error("Meeting transcript storage root is not configured; refusing to write inside the app directory.");
   }
   const value = configured.trim();
-  if (!isAbsolute(value)) throw new Error(`Meeting transcript storage root must be absolute: ${value}`);
+  if (!isAbsolutePathAnyPlatform(value)) throw new Error(`Meeting transcript storage root must be absolute: ${value}`);
   return resolve(value);
 }
 

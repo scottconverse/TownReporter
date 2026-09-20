@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { authMiddleware } from "../auth/middleware.ts";
@@ -7,6 +7,7 @@ import { getSql } from "../db.ts";
 import { requireEditor, ForbiddenError } from "./membership.ts";
 import { loadMeetingPriority, saveMeetingPriority, type MeetingChannel } from "./meeting-capture.ts";
 import { DEFAULT_CAPTURE_CAPS } from "./meeting-capture-caps.ts";
+import { isAbsolutePathAnyPlatform } from "./absolute-path.ts";
 
 export type MeetingRetentionMode = "media" | "audio-only" | "transcript-only";
 
@@ -48,7 +49,7 @@ export function youtubeChannelRejectionReason(raw: string): string | null {
 export function storageRootRejectionReason(raw: string | null | undefined): string | null {
   const value = (raw ?? "").trim();
   if (!value) return "Storage root is required. Enter an absolute folder path, e.g. D:\\TownReporter\\meetings";
-  if (!isAbsolute(value)) {
+  if (!isAbsolutePathAnyPlatform(value)) {
     return `Storage root must be an absolute path (got "${value}"). Enter a full path such as D:\\TownReporter\\meetings or /mnt/data/meetings.`;
   }
   return null;
