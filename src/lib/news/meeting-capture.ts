@@ -141,6 +141,10 @@ async function recordCaptureSuccess(
 }
 
 export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: MeetingAwarenessDeps = {}): Promise<MeetingAwarenessResult> {
+  // N-1: the operator enable/disable control. Disabled returns the same no-op
+  // result as an unconfigured newsroom, without deleting any configuration.
+  const meetingSettings = await sql.query<{ enabled: boolean | null }>("select enabled from meeting_capture_settings where newsroom_id=$1", [newsroomId]);
+  if (meetingSettings.length && meetingSettings[0]!.enabled === false) return EMPTY_RESULT;
   const channels = await loadMeetingPriority(sql, newsroomId);
   if (!channels.length) return EMPTY_RESULT;
   const list = deps.listChannelVideos ?? listChannelVideos;

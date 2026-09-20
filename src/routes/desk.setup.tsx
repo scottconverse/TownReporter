@@ -53,10 +53,11 @@ function SetupPage() {
       lede={
         <>
           Tell the desk what paper this is. This writes the paper's name, city,
-          state, timezone, tagline, starting watch list, meeting-video channels
-          and meeting-title keywords. It also rewrites the welcome article so
-          it introduces this city instead of the sample text. You can change
-          any of this later from the Server page.
+          state, timezone, tagline, starting watch list and meeting-title
+          keywords. It also rewrites the welcome article so it introduces this
+          city instead of the sample text. Meeting-capture channels are
+          configured separately on the Server page under "Meeting capture".
+          You can change any of this later from the Server page.
         </>
       }
     >
