@@ -1,8 +1,9 @@
 import { mkdirSync, copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { isAbsolute, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { Sql } from "../db.ts";
 import type { MeetingRetentionMode } from "./meeting-transcript-artifacts.ts";
+import { isAbsolutePathAnyPlatform, normalizeAbsolutePath } from "./absolute-path.ts";
 
 export type MeetingAudioArtifact = {
   id: number;
@@ -24,8 +25,8 @@ function resolveRoot(configured: string | null | undefined): string {
     throw new Error("Meeting transcript storage root is not configured; refusing to write inside the app directory.");
   }
   const value = configured.trim();
-  if (!isAbsolute(value)) throw new Error(`Meeting transcript storage root must be absolute: ${value}`);
-  return resolve(value);
+  if (!isAbsolutePathAnyPlatform(value)) throw new Error(`Meeting transcript storage root must be absolute: ${value}`);
+  return normalizeAbsolutePath(value);
 }
 
 /**

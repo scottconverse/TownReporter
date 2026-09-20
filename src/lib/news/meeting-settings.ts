@@ -7,7 +7,7 @@ import { getSql } from "../db.ts";
 import { requireEditor, ForbiddenError } from "./membership.ts";
 import { loadMeetingPriority, saveMeetingPriority, type MeetingChannel } from "./meeting-capture.ts";
 import { DEFAULT_CAPTURE_CAPS } from "./meeting-capture-caps.ts";
-import { isAbsolutePathAnyPlatform } from "./absolute-path.ts";
+import { isAbsolutePathAnyPlatform, normalizeAbsolutePath } from "./absolute-path.ts";
 
 export type MeetingRetentionMode = "media" | "audio-only" | "transcript-only";
 
@@ -60,7 +60,7 @@ export function storageRootRejectionReason(raw: string | null | undefined): stri
  * time. The error names the exact path and the underlying failure.
  */
 export function assertStorageRootWritable(root: string): { ok: true } | { ok: false; error: string } {
-  const resolved = resolve(root);
+  const resolved = normalizeAbsolutePath(root);
   const probe = join(resolved, `.townreporter-write-test-${Date.now()}`);
   try {
     mkdirSync(resolved, { recursive: true });
@@ -189,7 +189,7 @@ export const saveMeetingSettingsFn = createServerFn({ method: "POST" })
        on conflict(newsroom_id) do update set storage_root=excluded.storage_root,
          retention_mode=excluded.retention_mode,enabled=excluded.enabled,
          duration_cap_seconds=excluded.duration_cap_seconds,size_cap_bytes=excluded.size_cap_bytes,updated_at=now()`,
-      [newsroomId, data.storageRoot ? resolve(data.storageRoot) : null, data.retentionMode, data.enabled, Math.round(data.durationCapSeconds), Math.round(data.sizeCapBytes)],
+      [newsroomId, data.storageRoot ? normalizeAbsolutePath(data.storageRoot) : null, data.retentionMode, data.enabled, Math.round(data.durationCapSeconds), Math.round(data.sizeCapBytes)],
     );
 
     return { ok: true };
