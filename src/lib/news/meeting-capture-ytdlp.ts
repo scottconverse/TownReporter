@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { parseCaptionFile, type ParsedCaptionFile } from "./caption-parse.ts";
 import { parseInfoSidecar, type ParsedInfoSidecar } from "./meeting-capture-info.ts";
 
@@ -30,6 +31,44 @@ export type CaptionCaptureFailure = {
 };
 
 export type CaptionCaptureResult = CaptionCaptureSuccess | CaptionCaptureFailure;
+
+export type AudioCaptureInput = {
+  videoId: string;
+  outputDir: string;
+  archivePath: string;
+  sleepRequests?: number;
+};
+
+export type AudioArtifact = {
+  path: string;
+  format: "opus";
+  byteSize: number;
+  sha256: string;
+};
+
+export type AudioCaptureSuccess = {
+  ok: true;
+  audio: AudioArtifact;
+  infoPath: string | null;
+  info: ParsedInfoSidecar;
+  argv: string[];
+  stdout: string;
+  stderr: string;
+};
+
+export type AudioCaptureFailure = {
+  ok: false;
+  reason: string;
+  argv: string[];
+  stderr: string;
+};
+
+export type AudioCaptureResult = AudioCaptureSuccess | AudioCaptureFailure;
+
+const AUDIO_SOURCE_METHOD = "yt-dlp-audio-opus";
+export function audioSourceMethod(): string {
+  return AUDIO_SOURCE_METHOD;
+}
 
 export function buildCaptionCaptureArgs(input: CaptionCaptureInput): string[] {
   const outputDir = resolve(input.outputDir);
@@ -62,6 +101,39 @@ export function buildCaptionCaptureArgs(input: CaptionCaptureInput): string[] {
   ];
 }
 
+/**
+ * Audio-required branch (spec 3.2). Used only when the caption fetch returned no
+ * usable track or produced a track the parser rejected. Extracts opus audio at
+ * quality 5 and writes the info sidecar so duration/ended-at still resolve.
+ * No subtitle flags here: captions already failed.
+ */
+export function buildAudioCaptureArgs(input: AudioCaptureInput): string[] {
+  const outputDir = resolve(input.outputDir);
+  const archivePath = resolve(input.archivePath);
+  const outputTemplate = join(outputDir, "%(id)s.%(ext)s");
+  return [
+    "-m",
+    "yt_dlp",
+    "-x",
+    "--audio-format",
+    "opus",
+    "--audio-quality",
+    "5",
+    "--write-info-json",
+    "--js-runtimes",
+    "node",
+    "--sleep-requests",
+    String(input.sleepRequests ?? 1),
+    "--download-archive",
+    archivePath,
+    "--paths",
+    outputDir,
+    "-o",
+    outputTemplate,
+    `https://www.youtube.com/watch?v=${input.videoId}`,
+  ];
+}
+
 export function classifyYtdlpFailure(input: { exitCode: number | null; stderr: string }): CaptionCaptureFailure {
   const rateLimited = /\b429\b|too many requests/i.test(input.stderr);
   return {
@@ -72,6 +144,24 @@ export function classifyYtdlpFailure(input: { exitCode: number | null; stderr: s
     argv: [],
     stderr: input.stderr,
   };
+}
+
+/**
+ * Detection for M-1. Audio is required only when captions are genuinely
+ * unavailable or unusable — never on a normal successful caption path, and
+ * never for an HTTP 429 / transient transport failure (that is a paced retry,
+ * not an audio condition).
+ */
+export function requiresAudioFallback(result: CaptionCaptureFailure): boolean {
+  if (/\b429\b|too many requests/i.test(result.reason)) return false;
+  const reason = result.reason.toLowerCase();
+  return (
+    reason.includes("wrote no srv3 or vtt caption file") ||
+    reason.includes("no text") ||
+    reason.includes("no usable") ||
+    reason.includes("caption file has no text") ||
+    reason.includes("parser rejected")
+  );
 }
 
 function findCaptionFile(outputDir: string, videoId: string): string | null {
@@ -89,13 +179,27 @@ function findInfoFile(outputDir: string, videoId: string): string | null {
   return name ? join(outputDir, name) : null;
 }
 
-export async function captureMeetingCaptions(input: CaptionCaptureInput): Promise<CaptionCaptureResult> {
-  const outputDir = resolve(input.outputDir);
-  mkdirSync(outputDir, { recursive: true });
-  const argv = buildCaptionCaptureArgs(input);
-  const run = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolvePromise, reject) => {
+function findAudioFile(outputDir: string, videoId: string): string | null {
+  const files = readdirSync(outputDir)
+    .filter((name) => name.startsWith(`${videoId}.`) && /\.(opus|m4a|webm|ogg|mp3|wav)$/i.test(name) && !/\.info\.json$/i.test(name))
+    .sort((a, b) => a.localeCompare(b));
+  return files.length ? join(outputDir, files[0]!) : null;
+}
+
+function readInfo(outputDir: string, videoId: string): { infoPath: string | null; info: ParsedInfoSidecar } {
+  const infoPath = findInfoFile(outputDir, videoId);
+  if (!infoPath) return { infoPath: null, info: { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null } };
+  try {
+    return { infoPath, info: parseInfoSidecar(JSON.parse(readFileSync(infoPath, "utf8"))) };
+  } catch {
+    return { infoPath, info: { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null } };
+  }
+}
+
+async function runYtdlp(argv: string[], cwd: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolvePromise, reject) => {
     const child = spawn("python", argv, {
-      cwd: outputDir,
+      cwd,
       shell: false,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -111,6 +215,13 @@ export async function captureMeetingCaptions(input: CaptionCaptureInput): Promis
     stdout: "",
     stderr: error instanceof Error ? error.message : String(error),
   }));
+}
+
+export async function captureMeetingCaptions(input: CaptionCaptureInput): Promise<CaptionCaptureResult> {
+  const outputDir = resolve(input.outputDir);
+  mkdirSync(outputDir, { recursive: true });
+  const argv = buildCaptionCaptureArgs(input);
+  const run = await runYtdlp(argv, outputDir);
 
   if (run.code !== 0) return classifyYtdlpFailure({ exitCode: run.code, stderr: run.stderr });
   const captionPath = findCaptionFile(outputDir, input.videoId);
@@ -122,19 +233,61 @@ export async function captureMeetingCaptions(input: CaptionCaptureInput): Promis
       stderr: run.stderr,
     };
   }
-  const parsed = parseCaptionFile(readFileSync(captionPath, "utf8"), captionPath);
-  const infoPath = findInfoFile(outputDir, input.videoId);
-  let info: ParsedInfoSidecar = { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null };
-  if (infoPath) {
-    try {
-      info = parseInfoSidecar(JSON.parse(readFileSync(infoPath, "utf8")));
-    } catch {
-      info = { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null };
-    }
+  let parsed: ParsedCaptionFile;
+  try {
+    parsed = parseCaptionFile(readFileSync(captionPath, "utf8"), captionPath);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `caption file has no text (parser rejected): ${error instanceof Error ? error.message : String(error)}`,
+      argv,
+      stderr: run.stderr,
+    };
   }
+  const { infoPath, info } = readInfo(outputDir, input.videoId);
   return {
     ok: true,
     parsed,
+    infoPath,
+    info,
+    argv,
+    stdout: run.stdout,
+    stderr: run.stderr,
+  };
+}
+
+export async function captureMeetingAudio(input: AudioCaptureInput): Promise<AudioCaptureResult> {
+  const outputDir = resolve(input.outputDir);
+  mkdirSync(outputDir, { recursive: true });
+  const argv = buildAudioCaptureArgs(input);
+  const run = await runYtdlp(argv, outputDir);
+  if (run.code !== 0) {
+    return {
+      ok: false,
+      reason: classifyYtdlpFailure({ exitCode: run.code, stderr: run.stderr }).reason,
+      argv,
+      stderr: run.stderr,
+    };
+  }
+  const audioPath = findAudioFile(outputDir, input.videoId);
+  if (!audioPath) {
+    return {
+      ok: false,
+      reason: "yt-dlp exited 0 but wrote no audio file",
+      argv,
+      stderr: run.stderr,
+    };
+  }
+  const bytes = readFileSync(audioPath);
+  const { infoPath, info } = readInfo(outputDir, input.videoId);
+  return {
+    ok: true,
+    audio: {
+      path: audioPath,
+      format: "opus",
+      byteSize: statSync(audioPath).size,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    },
     infoPath,
     info,
     argv,

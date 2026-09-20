@@ -57,6 +57,8 @@ describe("meeting capture Slice 2 yt-dlp runner", () => {
     assert.ok(!args.includes("en.*"));
     assert.ok(!args.some((a) => a.includes("en-orig")));
     assert.ok(!args.includes("-f"));
+    // The captions-first path must NOT request audio. The audio-required
+    // fallback is a separate branch bound to by meeting-capture-m1-audio.test.ts.
     assert.ok(!args.includes("-x"));
     assert.ok(!args.includes("--audio-format"));
   });

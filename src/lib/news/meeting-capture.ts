@@ -4,7 +4,8 @@ import { dirname, join } from "node:path";
 import type { Sql } from "../db.ts";
 import { withTransaction } from "../db.ts";
 import { listChannelVideos, pickMeetingVideos, type ListedVideo } from "./youtube.ts";
-import { captureMeetingCaptions, type CaptionCaptureFailure, type CaptionCaptureResult } from "./meeting-capture-ytdlp.ts";
+import { captureMeetingCaptions, captureMeetingAudio, requiresAudioFallback, type CaptionCaptureFailure, type CaptionCaptureResult, type AudioCaptureResult } from "./meeting-capture-ytdlp.ts";
+import { storeMeetingAudioArtifact } from "./meeting-audio-artifacts.ts";
 import { computeEndedAt } from "./meeting-capture-info.ts";
 import { applyDraftRevision, captureDisposition, detectRevision, dueForRecheck, nextCheckState } from "./meeting-revision.ts";
 import { storeMeetingTranscriptArtifact } from "./meeting-transcript-artifacts.ts";
@@ -19,6 +20,7 @@ export type MeetingCaptureRecord = {
   captionSha256?: string | null; captionCapturedAt?: string | null;
   endedAt?: string | null; captureDisposition?: "provisional" | "final";
   durationSeconds?: number | null; captionRevisionTimestamp?: number | null;
+  audioPath?: string | null; audioFormat?: string | null; audioSha256?: string | null; audioBytes?: number | null; audioTriggerReason?: string | null;
   revisionCount?: number; settledUnderChurn?: boolean; lastRevisionAt?: string | null;
 };
 export type MeetingAwarenessResult = {
@@ -28,6 +30,8 @@ export type MeetingAwarenessResult = {
 export type MeetingAwarenessDeps = {
   listChannelVideos?: typeof listChannelVideos;
   captureMeeting?: (input: { videoId: string; outputDir: string; archivePath: string; sleepSubtitles?: number; sleepRequests?: number }) => Promise<CaptionCaptureResult | CaptionCaptureFailure>;
+  captureAudio?: (input: { videoId: string; outputDir: string; archivePath: string; sleepRequests?: number }) => Promise<AudioCaptureResult>;
+  storeMeetingAudioArtifact?: typeof storeMeetingAudioArtifact;
   storeMeetingTranscriptArtifact?: typeof storeMeetingTranscriptArtifact;
   runSection5?: typeof runSection5ForArtifact;
   withTransaction?: typeof withTransaction;
@@ -89,6 +93,27 @@ export function archiveCorrupt(text: string | null, records: MeetingCaptureRecor
   try { return serializeArchive(records) !== text && parseArchive(text).size === 0 && records.length > 0; } catch { return true; }
 }
 
+async function recordAudioCaptureSuccess(
+  sql: Sql, newsroomId: number, video: ListedVideo, channelUrl: string,
+  result: Extract<AudioCaptureResult, { ok: true }>, endedAt: string | null, disposition: "provisional" | "final",
+  artifactId: number, triggerReason: string, storedPath: string,
+): Promise<void> {
+  await sql.query(
+    `insert into meeting_capture_records(
+       newsroom_id,video_id,channel_url,title,published,status,captured_at,
+       failure_reason,ended_at,capture_disposition,duration_seconds,
+       audio_path,audio_format,audio_sha256,audio_bytes,audio_captured_at,audio_trigger_reason)
+     values($1,$2,$3,$4,$5,'captured',now(),null,$6,$7,$8,$9,$10,$11,$12,now(),$13)
+     on conflict(newsroom_id,video_id) do update set
+       status='captured',captured_at=now(),failure_reason=null,ended_at=excluded.ended_at,
+       capture_disposition=excluded.capture_disposition,duration_seconds=excluded.duration_seconds,
+       audio_path=excluded.audio_path,audio_format=excluded.audio_format,audio_sha256=excluded.audio_sha256,
+       audio_bytes=excluded.audio_bytes,audio_captured_at=now(),audio_trigger_reason=excluded.audio_trigger_reason,
+       updated_at=now()`,
+    [newsroomId, video.id, channelUrl, video.title, video.published ?? "", endedAt, disposition, result.info.durationSeconds, storedPath, result.audio.format, result.audio.sha256, result.audio.byteSize, triggerReason],
+  );
+}
+
 async function recordCaptureFailure(sql: Sql, newsroomId: number, video: ListedVideo, reason: string): Promise<void> {
   await sql.query(
     "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,failure_reason) values($1,$2,$3,$4,$5,'failed',$6) on conflict(newsroom_id,video_id) do update set status='failed',failure_reason=excluded.failure_reason,updated_at=now()",
@@ -120,6 +145,8 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   if (!channels.length) return EMPTY_RESULT;
   const list = deps.listChannelVideos ?? listChannelVideos;
   const capture = deps.captureMeeting ?? captureMeetingCaptions;
+  const captureAudio = deps.captureAudio ?? captureMeetingAudio;
+  const storeAudio = deps.storeMeetingAudioArtifact ?? storeMeetingAudioArtifact;
   const storeTranscript = deps.storeMeetingTranscriptArtifact ?? storeMeetingTranscriptArtifact;
   const runTransaction = deps.withTransaction ?? withTransaction;
   const now = (deps.now ?? (() => new Date()))();
@@ -140,7 +167,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
     caption_captured_at: string | null; ended_at: string | null; capture_disposition: "provisional" | "final" | null;
     duration_seconds: number | null; caption_revision_timestamp: number | null;
     revision_count: number | null; settled_under_churn: boolean | null; last_revision_at: string | null;
-  }>("select video_id,channel_url,title,published,status,failure_reason,caption_path,caption_format,caption_sha256,caption_captured_at,ended_at,capture_disposition,duration_seconds,caption_revision_timestamp,revision_count,settled_under_churn,last_revision_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
+  }>("select video_id,channel_url,title,published,status,failure_reason,caption_path,caption_format,caption_sha256,caption_captured_at,ended_at,capture_disposition,duration_seconds,caption_revision_timestamp,audio_path,audio_format,audio_sha256,audio_bytes,audio_trigger_reason,revision_count,settled_under_churn,last_revision_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
   const captured: MeetingCaptureRecord[] = records.map((r) => ({
     videoId: r.video_id, channelUrl: r.channel_url, title: r.title, published: r.published,
     status: r.status, failureReason: r.failure_reason, captionPath: r.caption_path,
@@ -168,6 +195,41 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
       continue;
     }
     if (!result.ok) {
+      // M-1: audio is required ONLY when captions are missing or unusable.
+      if (requiresAudioFallback(result)) {
+        const triggerReason = `Captions unavailable or rejected; audio fallback required. yt-dlp caption result: ${result.reason}`;
+        let audio: AudioCaptureResult;
+        try {
+          audio = await captureAudio({ videoId: v.id, outputDir, archivePath, sleepRequests: 1 });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          await recordCaptureFailure(sql, newsroomId, v, `audio fallback failed: ${reason}`);
+          failures.push(`${v.title}: audio fallback failed: ${reason}`);
+          continue;
+        }
+        if (!audio.ok) {
+          const reason = `audio fallback failed: ${audio.reason}`;
+          await recordCaptureFailure(sql, newsroomId, v, reason);
+          failures.push(`${v.title}: ${reason}`);
+          continue;
+        }
+        const audioEndedAt = computeEndedAt({ durationSeconds: audio.info.durationSeconds, videoTimestamp: audio.info.videoTimestamp });
+        const audioDisposition = captureDisposition({ endedAt: audioEndedAt, now });
+        try {
+          await runTransaction(async (tx) => {
+            const stored = await storeAudio(tx, {
+              newsroomId, videoId: v.id, audioSourcePath: audio.audio.path,
+              format: audio.audio.format, triggerReason, infoSourcePath: audio.infoPath,
+            });
+            await recordAudioCaptureSuccess(tx, newsroomId, v, channels[0]!.url, audio, audioEndedAt, audioDisposition, stored.id, triggerReason, stored.storagePath);
+          });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          await recordCaptureFailure(sql, newsroomId, v, reason);
+          failures.push(`${v.title}: ${reason}`);
+        }
+        continue;
+      }
       await recordCaptureFailure(sql, newsroomId, v, result.reason);
       failures.push(`${v.title}: ${result.reason}`);
       continue;
@@ -194,7 +256,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
     caption_captured_at: string | null; ended_at: string | null; capture_disposition: "provisional" | "final" | null;
     duration_seconds: number | null; caption_revision_timestamp: number | null;
     revision_count: number | null; settled_under_churn: boolean | null; last_revision_at: string | null;
-  }>("select video_id,channel_url,title,published,status,failure_reason,caption_path,caption_format,caption_sha256,caption_captured_at,ended_at,capture_disposition,duration_seconds,caption_revision_timestamp,revision_count,settled_under_churn,last_revision_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
+  }>("select video_id,channel_url,title,published,status,failure_reason,caption_path,caption_format,caption_sha256,caption_captured_at,ended_at,capture_disposition,duration_seconds,caption_revision_timestamp,audio_path,audio_format,audio_sha256,audio_bytes,audio_trigger_reason,revision_count,settled_under_churn,last_revision_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
   const finalRecords: MeetingCaptureRecord[] = refreshed.map((r) => ({
     videoId: r.video_id, channelUrl: r.channel_url, title: r.title, published: r.published,
     status: r.status, failureReason: r.failure_reason, captionPath: r.caption_path,
