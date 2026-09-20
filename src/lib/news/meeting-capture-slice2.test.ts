@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { isAbsolute } from "node:path";
 
 const parserPath = new URL("./caption-parse.ts", import.meta.url);
 const runnerPath = new URL("./meeting-capture-ytdlp.ts", import.meta.url);
@@ -58,6 +59,23 @@ describe("meeting capture Slice 2 yt-dlp runner", () => {
     assert.ok(!args.includes("-f"));
     assert.ok(!args.includes("-x"));
     assert.ok(!args.includes("--audio-format"));
+  });
+
+  it("resolves --download-archive, --paths, and -o to absolute paths", async () => {
+    const { buildCaptionCaptureArgs } = await import("./meeting-capture-ytdlp.ts");
+    const args = buildCaptionCaptureArgs({
+      videoId: "L1AnMLsLwtk",
+      outputDir: "work/capture-2",
+      archivePath: "work/capture-2/archive.txt",
+    });
+    const archiveArg = args[args.indexOf("--download-archive") + 1]!;
+    const pathsArg = args[args.indexOf("--paths") + 1]!;
+    const outArg = args[args.indexOf("-o") + 1]!;
+    assert.equal(isAbsolute(archiveArg), true, `not absolute: ${archiveArg}`);
+    assert.equal(isAbsolute(pathsArg), true, `not absolute: ${pathsArg}`);
+    assert.equal(isAbsolute(outArg), true, `not absolute: ${outArg}`);
+    assert.ok(!args.includes("work/capture-2"), "relative output leaked into argv");
+    assert.ok(!args.some((arg) => arg.startsWith("work/")), "relative path leaked into argv");
   });
 
   it("turns HTTP 429 and non-zero exit into named failures, not success", async () => {

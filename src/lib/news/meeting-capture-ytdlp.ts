@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { parseCaptionFile, type ParsedCaptionFile } from "./caption-parse.ts";
 
 export type CaptionCaptureInput = {
@@ -30,7 +30,9 @@ export type CaptionCaptureFailure = {
 export type CaptionCaptureResult = CaptionCaptureSuccess | CaptionCaptureFailure;
 
 export function buildCaptionCaptureArgs(input: CaptionCaptureInput): string[] {
-  const outputTemplate = join(input.outputDir, "%(id)s.%(ext)s");
+  const outputDir = resolve(input.outputDir);
+  const archivePath = resolve(input.archivePath);
+  const outputTemplate = join(outputDir, "%(id)s.%(ext)s");
   return [
     "-m",
     "yt_dlp",
@@ -49,9 +51,9 @@ export function buildCaptionCaptureArgs(input: CaptionCaptureInput): string[] {
     "--sleep-requests",
     String(input.sleepRequests ?? 1),
     "--download-archive",
-    input.archivePath,
+    archivePath,
     "--paths",
-    input.outputDir,
+    outputDir,
     "-o",
     outputTemplate,
     `https://www.youtube.com/watch?v=${input.videoId}`,
@@ -86,11 +88,12 @@ function findInfoFile(outputDir: string, videoId: string): string | null {
 }
 
 export async function captureMeetingCaptions(input: CaptionCaptureInput): Promise<CaptionCaptureResult> {
-  mkdirSync(input.outputDir, { recursive: true });
+  const outputDir = resolve(input.outputDir);
+  mkdirSync(outputDir, { recursive: true });
   const argv = buildCaptionCaptureArgs(input);
   const run = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn("python", argv, {
-      cwd: input.outputDir,
+      cwd: outputDir,
       shell: false,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -108,7 +111,7 @@ export async function captureMeetingCaptions(input: CaptionCaptureInput): Promis
   }));
 
   if (run.code !== 0) return classifyYtdlpFailure({ exitCode: run.code, stderr: run.stderr });
-  const captionPath = findCaptionFile(input.outputDir, input.videoId);
+  const captionPath = findCaptionFile(outputDir, input.videoId);
   if (!captionPath) {
     return {
       ok: false,
@@ -121,7 +124,7 @@ export async function captureMeetingCaptions(input: CaptionCaptureInput): Promis
   return {
     ok: true,
     parsed,
-    infoPath: findInfoFile(input.outputDir, input.videoId),
+    infoPath: findInfoFile(outputDir, input.videoId),
     argv,
     stdout: run.stdout,
     stderr: run.stderr,
