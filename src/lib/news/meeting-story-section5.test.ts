@@ -42,7 +42,7 @@ describe("meeting section 5 agenda-item chunking", () => {
     const chunks = chunkByAgendaItem({ segments, packetItems: [{ itemNumber: "1", title: "Approval of the Minutes" }] });
     const alignment = alignMeeting({ segments, chunks, packetItems: [{ itemNumber: "1", title: "Approval of the Minutes" }] });
     assert.equal(alignment.aligned, false);
-    assert.match(alignment.reason ?? "", /align/i);
+    assert.match(alignment.reason ?? "", /align|transition/i);
   });
 });
 

@@ -19,8 +19,8 @@ function harness(input: { aligned: boolean }) {
     if (/from meeting_transcript_segments/i.test(text)) {
       return [
         { segment_index: 0, start_seconds: 0, end_seconds: 60, excerpt: "Roll call and pledge.", caption_sha256: "abc123" },
-        { segment_index: 1, start_seconds: 60, end_seconds: 600, excerpt: "Item 1, approval of the minutes. Motion to approve by Mayor Prom, seconded by Council Member Coloffer.", caption_sha256: "abc123" },
-        { segment_index: 2, start_seconds: 600, end_seconds: 2400, excerpt: "Item 2, the airport rates and charges study.", caption_sha256: "abc123" },
+        { segment_index: 1, start_seconds: 60, end_seconds: 600, excerpt: "agenda item 1 approval of the minutes", caption_sha256: "abc123" },
+        { segment_index: 2, start_seconds: 600, end_seconds: 2400, excerpt: "item 2 airport rates and charges study", caption_sha256: "abc123" },
       ] as T[];
     }
     return [] as T[];
@@ -41,12 +41,15 @@ describe("meeting section 5 real pipeline integration", () => {
             id: 1, title: "City Council Regular Session", date: "2026-07-28", dateTime: "2026-07-28T18:00:00",
             time: "18:00", location: "Council Chambers",
             documentList: [
-              { id: 1, templateId: 1, compileOutputType: 1, templateName: "Approval of the Minutes", link: null },
-              { id: 2, templateId: 2, compileOutputType: 1, templateName: "Airport Rates and Charges Study", link: null },
+              { id: 1, templateId: 1, compileOutputType: 1, templateName: "Agenda", link: null },
             ],
           },
           urls: [],
         }),
+        packetItemsForMeeting: async () => [
+          { itemNumber: "1", title: "Approval of the Minutes" },
+          { itemNumber: "2", title: "Airport Rates and Charges Study" },
+        ],
       },
     );
     assert.equal(result.aligned, true);

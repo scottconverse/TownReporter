@@ -1,6 +1,7 @@
 import type { Sql } from "../db.ts";
 import { primeGovDocumentsForTitle } from "./primegov.ts";
 import { packetItemsForMeeting } from "./meeting-agenda-items.ts";
+import { fetchStructuredVotesForDate, voteSourceAvailability } from "./meeting-vote-sources.ts";
 import {
   alignMeeting,
   chunkByAgendaItem,
@@ -37,7 +38,7 @@ export type Section5Result = {
  */
 export async function runSection5ForArtifact(
   sql: Sql,
-  input: { newsroomId: number; videoId: string; title: string; artifactId: number },
+  input: { newsroomId: number; videoId: string; title: string; artifactId: number; meetingDate?: string; },
   deps: Section5Deps = {},
 ): Promise<Section5Result> {
   const artifactRows = await sql.query<{ id: number; storage_path: string; sha256: string }>(
@@ -65,11 +66,10 @@ export async function runSection5ForArtifact(
   let packetItems: PacketItem[] = [];
   try {
     const packet = await packetLookup(input.title);
-    if (packet?.meeting?.documentList?.length) {
-      packetItems = packet.meeting.documentList.map((doc, index) => ({
-        itemNumber: String(index + 1),
-        title: doc.templateName,
-      }));
+    if (packet?.meeting) {
+      // Real item list comes from the compiled agenda document via the parser,
+      // not from documentList template names ("Agenda"/"Packet").
+      packetItems = await (deps.packetItemsForMeeting ?? packetItemsForMeeting)(packet.meeting);
     }
   } catch {
     packetItems = [];
@@ -78,6 +78,8 @@ export async function runSection5ForArtifact(
   const chunks = chunkByAgendaItem({ segments, packetItems });
   const alignment = alignMeeting({ segments, chunks, packetItems });
 
+  const structured = await fetchStructuredVotesForDate(input.meetingDate ?? "").catch(() => ({ found: false, reason: "structured vote lookup failed", records: [], url: "" }));
+  const availability = voteSourceAvailability({ structuredRecordFound: structured.found, minutesFound: false, packetFound: false, transcriptFound: segments.length > 0 });
   const votes: StructuredVote[] = chunks.map((chunk) =>
     extractStructuredVote({
       item: chunk.item,
