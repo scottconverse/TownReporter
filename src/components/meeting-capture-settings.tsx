@@ -6,6 +6,7 @@ import {
   saveMeetingSettingsFn,
   type MeetingRetentionMode,
 } from "@/lib/news/meeting-settings";
+import { runMeetingsNow, forceRecaptureMeeting, type MeetingManualRunResult } from "@/lib/news/meeting-manual-run";
 
 /*
   N-1: the meeting-capture operator configuration surface.
@@ -162,7 +163,96 @@ export function MeetingCaptureSettings() {
             {save.isPending ? "Saving…" : "Save meeting capture settings"}
           </InkButton>
         </div>
+
+        <ManualRunControls enabled={enabled ?? false} />
       </div>
+    </section>
+  );
+}
+
+/*
+  N-2: manual run control. "Run meetings now" runs a pass on demand with no daily
+  reservation limit; the result shown is read from the scan_runs row the run wrote
+  (found / captured / failed / named failures), not from an in-memory summary.
+  The forced re-capture control overwrites one specific meeting's stored transcript
+  and records that it was forced.
+*/
+function ManualRunControls({ enabled }: { enabled: boolean }) {
+  const qc = useQueryClient();
+  const [result, setResult] = useState<MeetingManualRunResult | null>(null);
+  const [forceId, setForceId] = useState("");
+  const [forceTitle, setForceTitle] = useState("");
+  const [forcePublished, setForcePublished] = useState("");
+  const [forceChannel, setForceChannel] = useState("");
+
+  const run = useMutation({
+    mutationFn: () => runMeetingsNow(),
+    onSuccess: (r) => { setResult(r); void qc.invalidateQueries({ queryKey: ["scans"] }); },
+    onError: (e) => setResult({ ok: false, error: e instanceof Error ? e.message : String(e) }),
+  });
+  const force = useMutation({
+    mutationFn: () => forceRecaptureMeeting({
+      data: { videoId: forceId.trim(), channelUrl: forceChannel.trim(), title: forceTitle.trim(), published: forcePublished.trim() },
+    }),
+    onSuccess: (r) => { setResult(r); void qc.invalidateQueries({ queryKey: ["scans"] }); },
+    onError: (e) => setResult({ ok: false, error: e instanceof Error ? e.message : String(e) }),
+  });
+
+  return (
+    <section className="mt-8 border-t border-rule pt-5">
+      <SecHead title="Run now" sub="Run a meeting-capture pass on demand. This does not consume the daily scheduled run, and you can run it as often as you like." />
+      <div className="mt-3 flex items-center gap-3">
+        <InkButton
+          type="button"
+          ariaLabel="Run meetings now"
+          disabled={!enabled || run.isPending || force.isPending}
+          onClick={() => run.mutate()}
+        >
+          {run.isPending ? "Running…" : "Run meetings now"}
+        </InkButton>
+        {!enabled && <span className="text-sm text-ink-2">Turn meeting capture on to run.</span>}
+      </div>
+
+      <div className="mt-5">
+        <SecHead title="Force a re-capture" sub="Overwrites the stored transcript for ONE meeting. Use only when you want to re-fetch a specific meeting's captions." />
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <input className={inputClass} aria-label="Force video id" placeholder="YouTube video id (11 chars)" value={forceId} onChange={(e) => setForceId(e.target.value)} />
+          <input className={inputClass} aria-label="Force channel URL" placeholder="Channel URL" value={forceChannel} onChange={(e) => setForceChannel(e.target.value)} />
+          <input className={inputClass} aria-label="Force meeting title" placeholder="Meeting title" value={forceTitle} onChange={(e) => setForceTitle(e.target.value)} />
+          <input className={inputClass} aria-label="Force meeting date" placeholder="Published date (e.g. 2026-07-28)" value={forcePublished} onChange={(e) => setForcePublished(e.target.value)} />
+        </div>
+        <div className="mt-3">
+          <InkButton
+            type="button"
+            ariaLabel="Force re-capture meeting"
+            tone="quiet"
+            disabled={force.isPending || run.isPending || !forceId.trim()}
+            onClick={() => force.mutate()}
+          >
+            {force.isPending ? "Re-capturing…" : "Force re-capture (overwrites the stored transcript)"}
+          </InkButton>
+        </div>
+      </div>
+
+      {result && (
+        <div className="mt-5 rounded border border-rule bg-paper px-3 py-3 text-sm">
+          {result.ok ? (
+            <>
+              <p className="font-medium">
+                Run #{result.scanRunId}: {result.found} found, {result.captured} captured, {result.failed} failed{result.forced ? " (forced re-capture)" : ""}
+              </p>
+              <p className="text-ink-2">{result.coverageLine}</p>
+              {result.failures.length > 0 && (
+                <ul className="mt-2 list-disc pl-5 text-red-800">
+                  {result.failures.map((f, i) => <li key={i}>{f}</li>)}
+                </ul>
+              )}
+            </>
+          ) : (
+            <p role="alert" className="text-red-800">{result.error}</p>
+          )}
+        </div>
+      )}
     </section>
   );
 }
