@@ -1,21 +1,17 @@
-/*
-  Meeting-capture Slice 1: step-zero awareness only.
-
-  This module answers "is there a meeting we have not read?" at the top of a
-  scan. It does not download, capture, transcribe, or draft. The database
-  capture record is authoritative; the yt-dlp archive file is a regenerable
-  cache derived from that record and is never allowed to override it.
-*/
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Sql } from "../db.ts";
 import {
-  isMeetingTitle,
   listChannelVideos,
   pickMeetingVideos,
   type ListedVideo,
 } from "./youtube.ts";
+import {
+  captureMeetingCaptions,
+  type CaptionCaptureFailure,
+  type CaptionCaptureResult,
+} from "./meeting-capture-ytdlp.ts";
 
 export type MeetingChannel = { url: string; label?: string };
 export type MeetingCaptureStatus = "not-captured" | "captured" | "failed";
@@ -27,6 +23,10 @@ export type MeetingCaptureRecord = {
   published: string;
   status: MeetingCaptureStatus;
   failureReason?: string | null;
+  captionPath?: string | null;
+  captionFormat?: string | null;
+  captionSha256?: string | null;
+  captionCapturedAt?: string | null;
 };
 
 export type MeetingAwarenessResult = {
@@ -42,10 +42,18 @@ export type MeetingAwarenessResult = {
 
 export type MeetingAwarenessDeps = {
   listChannelVideos?: typeof listChannelVideos;
+  captureMeeting?: (input: {
+    videoId: string;
+    outputDir: string;
+    archivePath: string;
+    sleepSubtitles?: number;
+    sleepRequests?: number;
+  }) => Promise<CaptionCaptureResult | CaptionCaptureFailure>;
   now?: () => Date;
 };
 
 const ARCHIVE_DIR = join(process.env.TOWNREPORTER_DATA_DIR || process.cwd(), "meeting-capture");
+const CAPTION_DIR = join(process.env.TOWNREPORTER_DATA_DIR || process.cwd(), "meeting-captions");
 const EMPTY_RESULT: MeetingAwarenessResult = {
   configured: false,
   found: [],
@@ -59,6 +67,10 @@ const EMPTY_RESULT: MeetingAwarenessResult = {
 
 export function meetingArchivePath(newsroomId: number): string {
   return join(ARCHIVE_DIR, `newsroom-${newsroomId}`, "yt-dlp-archive.txt");
+}
+
+export function meetingCaptionDir(newsroomId: number): string {
+  return join(CAPTION_DIR, `newsroom-${newsroomId}`);
 }
 
 export function parseArchive(text: string): Set<string> {
@@ -142,6 +154,26 @@ export function archiveCorrupt(text: string | null, records: MeetingCaptureRecor
   }
 }
 
+async function recordCaptureFailure(sql: Sql, newsroomId: number, video: ListedVideo, reason: string): Promise<void> {
+  await sql.query(
+    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,failure_reason) values($1,$2,$3,$4,$5,'failed',$6) on conflict(newsroom_id,video_id) do update set status='failed',failure_reason=excluded.failure_reason,updated_at=now()",
+    [newsroomId, video.id, video.url, video.title, video.published ?? "", reason],
+  );
+}
+
+async function recordCaptureSuccess(
+  sql: Sql,
+  newsroomId: number,
+  video: ListedVideo,
+  channelUrl: string,
+  result: Extract<CaptionCaptureResult, { ok: true }>,
+): Promise<void> {
+  await sql.query(
+    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,captured_at,caption_path,caption_format,caption_sha256,caption_captured_at,failure_reason) values($1,$2,$3,$4,$5,'captured',now(),$6,$7,$8,now(),null) on conflict(newsroom_id,video_id) do update set status='captured',captured_at=now(),caption_path=excluded.caption_path,caption_format=excluded.caption_format,caption_sha256=excluded.caption_sha256,caption_captured_at=now(),failure_reason=null,updated_at=now()",
+    [newsroomId, video.id, channelUrl, video.title, video.published ?? "", result.parsed.sourcePath, result.parsed.format, result.parsed.sha256],
+  );
+}
+
 export async function runMeetingAwareness(
   sql: Sql,
   newsroomId: number,
@@ -150,6 +182,7 @@ export async function runMeetingAwareness(
   const channels = await loadMeetingPriority(sql, newsroomId);
   if (!channels.length) return EMPTY_RESULT;
   const list = deps.listChannelVideos ?? listChannelVideos;
+  const capture = deps.captureMeeting ?? captureMeetingCaptions;
   const found: ListedVideo[] = [];
   const failures: string[] = [];
   for (const channel of channels) {
@@ -163,30 +196,59 @@ export async function runMeetingAwareness(
   const records = await sql.query<{
     video_id: string; channel_url: string; title: string; published: string;
     status: MeetingCaptureStatus; failure_reason: string | null;
-  }>("select video_id,channel_url,title,published,status,failure_reason from meeting_capture_records where newsroom_id=$1", [newsroomId]);
+    caption_path: string | null; caption_format: string | null; caption_sha256: string | null;
+    caption_captured_at: string | null;
+  }>("select video_id,channel_url,title,published,status,failure_reason,caption_path,caption_format,caption_sha256,caption_captured_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
   const captured: MeetingCaptureRecord[] = records.map((r) => ({
     videoId: r.video_id, channelUrl: r.channel_url, title: r.title, published: r.published,
-    status: r.status, failureReason: r.failure_reason,
+    status: r.status, failureReason: r.failure_reason, captionPath: r.caption_path,
+    captionFormat: r.caption_format, captionSha256: r.caption_sha256, captionCapturedAt: r.caption_captured_at,
   }));
   const known = new Set(captured.filter((r) => r.status === "captured").map((r) => r.videoId));
   const uncaptured = found.filter((v) => !known.has(v.id));
   for (const v of uncaptured) {
+    const archivePath = meetingArchivePath(newsroomId);
+    const outputDir = join(meetingCaptionDir(newsroomId), v.id);
     await sql.query(
       "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status) values($1,$2,$3,$4,$5,'not-captured') on conflict(newsroom_id,video_id) do update set title=excluded.title,published=excluded.published,updated_at=now()",
       [newsroomId, v.id, channels[0]!.url, v.title, v.published ?? ""],
     );
+    try {
+      const result = await capture({ videoId: v.id, outputDir, archivePath, sleepSubtitles: 2, sleepRequests: 1 });
+      if (!result.ok) {
+        await recordCaptureFailure(sql, newsroomId, v, result.reason);
+        failures.push(`${v.title}: ${result.reason}`);
+      } else {
+        await recordCaptureSuccess(sql, newsroomId, v, channels[0]!.url, result as CaptionCaptureResult & { ok: true });
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      await recordCaptureFailure(sql, newsroomId, v, reason);
+      failures.push(`${v.title}: ${reason}`);
+    }
   }
-  const failed = captured.filter((r) => r.status === "failed");
+  const refreshed = await sql.query<{
+    video_id: string; channel_url: string; title: string; published: string;
+    status: MeetingCaptureStatus; failure_reason: string | null;
+    caption_path: string | null; caption_format: string | null; caption_sha256: string | null;
+    caption_captured_at: string | null;
+  }>("select video_id,channel_url,title,published,status,failure_reason,caption_path,caption_format,caption_sha256,caption_captured_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
+  const finalRecords: MeetingCaptureRecord[] = refreshed.map((r) => ({
+    videoId: r.video_id, channelUrl: r.channel_url, title: r.title, published: r.published,
+    status: r.status, failureReason: r.failure_reason, captionPath: r.caption_path,
+    captionFormat: r.caption_format, captionSha256: r.caption_sha256, captionCapturedAt: r.caption_captured_at,
+  }));
+  const failed = finalRecords.filter((r) => r.status === "failed");
   const archivePath = meetingArchivePath(newsroomId);
   const archiveText = await readArchive(archivePath);
-  const reconciled = reconcileArchive(archiveText, captured);
-  if (reconciled.changed) regenerateArchive(archivePath, captured);
-  const coverageLine = `meetings: ${found.length} found, ${captured.filter((r) => r.status === "captured").length} captured, ${failed.length} failed`;
+  const reconciled = reconcileArchive(archiveText, finalRecords);
+  if (reconciled.changed) regenerateArchive(archivePath, finalRecords);
+  const coverageLine = `meetings: ${found.length} found, ${finalRecords.filter((r) => r.status === "captured").length} captured, ${failed.length} failed`;
   return {
     configured: true,
     found,
     uncaptured,
-    captured,
+    captured: finalRecords,
     failed,
     coverageLine,
     failures: [...failures, ...failed.map((r) => `${r.title}: ${r.failureReason ?? "capture failed"}`)],

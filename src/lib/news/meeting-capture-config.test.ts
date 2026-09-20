@@ -14,7 +14,8 @@ describe("meeting Slice 1 configuration and honest coverage", () => {
   });
 
   it("names meetings as their own coverage class with failures named", () => {
-    assert.match(source, /meetings: \$\{found\.length\} found, \$\{captured/);
+    assert.match(source, /meetings: \$\{found\.length\} found/);
+    assert.match(source, /captured, \$\{failed\.length\} failed/);
     assert.match(source, /failures: \[\.\.\.failures, \.\.\.failed\.map/);
     assert.match(desk, /meeting_failures/);
   });
