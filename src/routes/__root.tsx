@@ -97,8 +97,8 @@ export const Route = createRootRoute({
         { rel: "stylesheet", href: appCss },
         { rel: "stylesheet", href: deskCss },
         { rel: "stylesheet", href: readerCss },
-        { rel: "manifest", href: "/__grok/manifest.webmanifest" },
-        { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
+        { rel: "manifest", href: "/__app/manifest.webmanifest" },
+        { rel: "apple-touch-icon", href: "/__app/icon-180.png" },
         // Without an explicit icon the browser falls back to /favicon.ico, which
         // does not exist — a 404 on every page load and a blank tab icon.
         // public/favicon.svg was shipped but never referenced.
