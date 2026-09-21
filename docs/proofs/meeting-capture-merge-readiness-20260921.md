@@ -90,21 +90,31 @@ them could not fail:
 
 This branch changes `src/components/meeting-capture-settings.tsx` (the N-5 resume
 control), so the two browser proof scripts for that panel were run against a
-built server on a fresh, unclaimed database.
+built server and a fresh, unclaimed database. The third, for the Captured
+meetings surface on the scan desk, was read for the same class of defect.
 
 - **`scripts/meeting-settings-e2e.mjs` passes, exit 0.** It owns the desk, opens
   Server -> Meeting capture, saves a good configuration, and gets all three named
   rejections back: a relative storage root, a non-YouTube channel URL, and an
   unwritable path (each with its own message, quoted in the output).
-- **`scripts/meeting-manual-run-e2e.mjs` does not run as written.** It clicks
-  "Run meetings now" without first turning meeting capture on, so the button is
-  correctly disabled and the click times out; and it never adds a channel, so
-  even with capture enabled the pass has nothing to list and no `Run #N` row
-  appears. Neither is a defect in the product: the Run button's disabled
-  condition is unchanged from `main`, and an unconfigured newsroom is meant to
-  no-op. The script is missing two setup steps.
+- **`scripts/meeting-manual-run-e2e.mjs` was unrunnable as written, and is now fixed.**
+  It clicked "Run meetings now" without first turning meeting capture on, so the
+  button was correctly disabled and the click timed out; and it never added a
+  channel, so even with capture enabled the pass would have had nothing to list and
+  no `Run #N` row to wait for. Neither was a defect in the product -- the Run
+  button's disabled condition is unchanged from `main`, and an unconfigured
+  newsroom is meant to no-op -- but the proof could not run. It now configures the
+  panel first, using the sequence the N-1 script already proved. Re-run against a
+  built server and a fresh database: exit 0, three manual runs all
+  `execution_origin=manual` with `daily_reservation_id` null, zero daily
+  reservations consumed, 11 captures, and the forced re-capture marked with its
+  prior caption hash preserved.
+- **`scripts/meeting-activity-e2e.mjs` passes** with its seed (`work/n3-seed.sql`):
+  9 of 9 rendered checks, 0 problems, including the provisional "may still change"
+  label. It needs pre-seeded data and is not self-contained, which the script does
+  not say.
 
-Neither script is run by CI, which is why this went unnoticed.
+None of the three is run by CI, which is why the N-2 gap went unnoticed.
 
 ## What a merge would ship
 
