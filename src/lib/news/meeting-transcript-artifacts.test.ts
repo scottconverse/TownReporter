@@ -56,6 +56,59 @@ describe("meeting transcript artifacts Slice 3", () => {
     assert.deepEqual(retentionPlan("transcript-only").allows, ["transcript-only"]);
   });
 
+  /*
+    The load path, which is the ONLY path production uses.
+
+    `resolveTranscriptCitation` was well covered and always passed, because the
+    test handed it a segment that already carried an `item`. Every row production
+    actually writes has `item = null`, because nothing in the codebase ever
+    populates that column -- so a citation named a timestamp and never the agenda
+    item it sat under, silently, and the suite stayed green.
+
+    This binds to `loadTranscriptCitation` against a stub SQL handle that returns
+    exactly the shape the database returns: segments with a null item, and chunks
+    that know which segments belong to which item. It fails against the old
+    implementation and passes against the fix.
+  */
+  it("resolves the agenda item on the load path, from the chunks, not from segment.item", async () => {
+    const { loadTranscriptCitation } = await import("./meeting-transcript-artifacts.ts");
+
+    const calls: string[] = [];
+    const sql = {
+      query: async (text: string, params?: unknown[]) => {
+        calls.push(text);
+        if (/from meeting_transcript_artifacts/.test(text)) {
+          return [{ id: 13, storage_path: "C:\\data\\m.srv3", sha256: "abc123", video_id: "vid1" }];
+        }
+        if (/from meeting_transcript_segments/.test(text)) {
+          return [
+            { segment_index: 0, start_seconds: 0, end_seconds: 10, item: null, excerpt: "agenda opened", caption_sha256: "abc123" },
+            { segment_index: 1, start_seconds: 18448, end_seconds: 18452, item: null, excerpt: "And that is all uh city manager remarks.", caption_sha256: "abc123" },
+          ];
+        }
+        if (/from meeting_agenda_chunks/.test(text)) {
+          assert.deepEqual(params, ["vid1"], "the chunk lookup must be scoped to this artifact's video");
+          return [
+            { item: "5", segment_indexes: [0] },
+            { item: "8", segment_indexes: [1] },
+          ];
+        }
+        throw new Error("unexpected query: " + text);
+      },
+    };
+
+    const byTime = await loadTranscriptCitation(sql, { artifactId: 13, timestampSeconds: 18450 });
+    assert.equal(byTime.item, "8", "a citation must name the agenda item it sits under");
+    assert.equal(byTime.segmentIndex, 1);
+    assert.equal(byTime.excerpt, "And that is all uh city manager remarks.");
+    assert.equal(byTime.captionSha256, "abc123");
+
+    const byIndex = await loadTranscriptCitation(sql, { artifactId: 13, segmentIndex: 0 });
+    assert.equal(byIndex.item, "5");
+
+    assert.ok(calls.some((q) => /meeting_agenda_chunks/.test(q)), "the item must come from the chunk table");
+  });
+
   it("draft evidence token covers transcriptCitations so a stale citation cannot publish", async () => {
     const { evidenceReviewToken } = await import("./draft-evidence.ts");
     const base = { id: 1, headline: "H", dek: "D", topic: "T", body: "B", source_urls: "[]", provenance_json: "[]", found_note: "", unanswered: "[]", research_json: JSON.stringify({ transcriptCitations: [{ artifactId: 7, segmentIndex: 1, captionSha256: "abc" }] }) };
