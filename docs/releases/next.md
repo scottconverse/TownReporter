@@ -191,6 +191,9 @@ test that was checked to fail against the previous code:
   not, so a configured-looking paper quietly stopped producing. It now pauses
   with a reason naming the fix.
 
+The full merge-readiness record, including what was deliberately left open, is at
+[the meeting capture readiness proof](../proofs/meeting-capture-merge-readiness-20260921.md).
+
 Targeted evidence: `node --experimental-strip-types --test src/lib/news/meeting-*.test.ts`
 passed 103 tests in 40 suites. The full suite passed 2,246 tests with 2,198
 passing, 0 failing and 48 skipped. The 20 database-gated tests passed against a
