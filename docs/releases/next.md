@@ -204,9 +204,20 @@ Limits of this evidence:
   has posted inside that window during this work. The re-check is wired into every
   capture pass, but it has not yet been observed against a real provisional
   capture.
-- **No story has been drafted from a meeting transcript.** Section 5 produces
-  chunks, alignments and structured votes, and deliberately does not draft; a
-  writer that consumes a meeting transcript does not exist yet.
+- **No story has been drafted from a meeting transcript, and the pieces that
+  would connect one are unpopulated by construction.** Section 5 produces chunks,
+  alignments and structured votes and deliberately does not draft. The citation
+  resolver, the `meeting_draft_transcript_links` table, its `citation_snapshot`,
+  and the revision detection that consumes it are all built -- but nothing
+  inserts a link row, so the table holds 0 rows and the revision check finds
+  nothing to look at on every pass. That is also why the provisional-to-revision
+  cycle above cannot be observed yet, even once a meeting lands inside the
+  24-hour window: the re-check would run and exit having found no links.
+- The revision writer also overwrites `transcriptCitations` with an empty array
+  when it does run (`meeting-revision.ts:198`), discarding citations it had just
+  parsed three lines earlier. That is harmless while no links exist, and becomes
+  a real lost-citation bug the moment they do. Recorded here rather than fixed,
+  because fixing it needs the missing writer first.
 - The captured set is Longmont only, from two channels, on one machine and one
   local PostgreSQL.
 - This branch adds one migration, `0077_meeting_capture_resume.sql`. Ten more
