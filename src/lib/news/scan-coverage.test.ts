@@ -71,7 +71,7 @@ describe("scan run writes coverage accounting (P0-3)", () => {
       reintroducing the guard). That is the test theater this suite exists to
       prevent, so the check below binds to the two-branch structure itself.
     */
-    const branch = /if \(deps\.scheduledCommit\) \{([\s\S]*?)\} else \{([\s\S]*?)\n    \}/.exec(block);
+    const branch = /if \(deps\.scheduledCommit\) \{([\s\S]*?)\} else \{([\s\S]*?)\n {4}\}/.exec(block);
     assert.ok(branch, "the outage write must branch on scheduledCommit with an else");
     assert.match(branch[1], /deps\.scheduledCommit\(recordFailedRun\)/, "scheduled path commits through its transaction");
     assert.match(branch[2], /recordFailedRun\(sql\)/, "manual path writes directly");
