@@ -74,6 +74,68 @@ async function reset() {
 }
 beforeEach(reset);
 
+describe("daily scan refuses loudly, never silently", () => {
+    /*
+      The scheduled scan used to skip in silence when the account that
+      configured it was no longer the newsroom owner. No log line, no
+      pause_reason, no notice in the UI: a configured-looking paper simply
+      stopped producing, and nothing told the operator why.
+
+      The timezone and runtime checks in the same function already paused the
+      policy with a sentence. This binds to that behaviour for the owner case.
+    */
+    it("pauses the policy with a reason when the configuring account is not the owner", async () => {
+      const sql = await getSql();
+      await sql.query("update newsroom_members set role='editor' where user_id='owner-501'");
+      await sql.query("delete from daily_scan_reservations where newsroom_id=501");
+
+      const result = await tickDailyScans(new Date("2026-09-04T14:00:00Z"), {
+        runtimeSnapshot: async () => ({ ok: true }) as never,
+        kick: false,
+      });
+
+      assert.equal(result.reserved, 0, "it must not reserve a run for a non-owner");
+      const [row] = await sql.query<{ paused: boolean; pause_reason: string | null }>(
+        "select paused, pause_reason from daily_scan_policies where newsroom_id=501",
+      );
+      assert.equal(row.paused, true, "the policy must be paused, not left looking healthy");
+      assert.match(
+        row.pause_reason ?? "",
+        /no longer the owner/i,
+        "the pause_reason must tell the operator what to fix",
+      );
+    });
+
+    it("reserves normally once the configuring account is the owner again", async () => {
+      /*
+        Same setup the passing catch-up test uses: the reservation needs a paper
+        timezone, an accepted source and a shaped runtime, and the fixture's own
+        seeded job/reservation must be cleared. Without those the tick returns 0
+        for reasons that have nothing to do with ownership, which is exactly what
+        this test is NOT about.
+      */
+      const sql = await getSql();
+      await sql.query("delete from daily_scan_reservations");
+      await sql.query("delete from desk_jobs");
+      await sql.query("delete from scan_runs");
+      await sql.query("insert into paper_settings(newsroom_id,timezone) values(501,'America/Denver')");
+      await sql.query("insert into sources values(1,501,'https://example.test/source','Source','rss',1,'accepted',null,null,null)");
+
+      const runtimeSnapshot = async () => ({
+        runtime: "codex-terra" as const,
+        modelChoice: "codex-balanced",
+        model: "selected-terra",
+        transport: "codex",
+      });
+
+      const result = await tickDailyScans(new Date("2026-09-04T14:00:00Z"), {
+        runtimeSnapshot,
+        kick: false,
+      });
+      assert.deepEqual(result, { reserved: 1 }, "an owner-configured policy must reserve a run");
+    });
+  });
+
 describe("scheduled final commit fence", () => {
   it("commits computed results only while policy, owner, and lease are current", async () => {
     await commitDailyScanResults(job, (sql) =>
