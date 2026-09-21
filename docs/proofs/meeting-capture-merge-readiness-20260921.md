@@ -86,6 +86,26 @@ them could not fail:
   identical before and after and identical to live). The scratch database and
   dump were removed. Production was read and never written.
 
+## Proof-script defects found while checking the UI change
+
+This branch changes `src/components/meeting-capture-settings.tsx` (the N-5 resume
+control), so the two browser proof scripts for that panel were run against a
+built server on a fresh, unclaimed database.
+
+- **`scripts/meeting-settings-e2e.mjs` passes, exit 0.** It owns the desk, opens
+  Server -> Meeting capture, saves a good configuration, and gets all three named
+  rejections back: a relative storage root, a non-YouTube channel URL, and an
+  unwritable path (each with its own message, quoted in the output).
+- **`scripts/meeting-manual-run-e2e.mjs` does not run as written.** It clicks
+  "Run meetings now" without first turning meeting capture on, so the button is
+  correctly disabled and the click times out; and it never adds a channel, so
+  even with capture enabled the pass has nothing to list and no `Run #N` row
+  appears. Neither is a defect in the product: the Run button's disabled
+  condition is unchanged from `main`, and an unconfigured newsroom is meant to
+  no-op. The script is missing two setup steps.
+
+Neither script is run by CI, which is why this went unnoticed.
+
 ## What a merge would ship
 
 Meeting capture that watches the configured channels, captures captions with
