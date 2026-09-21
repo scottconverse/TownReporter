@@ -84,13 +84,23 @@ describe("meeting transcript artifacts Slice 3", () => {
           return [
             { segment_index: 0, start_seconds: 0, end_seconds: 10, item: null, excerpt: "agenda opened", caption_sha256: "abc123" },
             { segment_index: 1, start_seconds: 18448, end_seconds: 18452, item: null, excerpt: "And that is all uh city manager remarks.", caption_sha256: "abc123" },
+            { segment_index: 2, start_seconds: 18452, end_seconds: 18456, item: null, excerpt: "next item", caption_sha256: "abc123" },
           ];
         }
         if (/from meeting_agenda_chunks/.test(text)) {
           assert.deepEqual(params, ["vid1"], "the chunk lookup must be scoped to this artifact's video");
+          /*
+            `segment_indexes` is a TEXT column holding JSON, not a jsonb column
+            and not a Postgres array -- the live database returns "[2442]", a
+            string. Passing arrays here would exercise the Array.isArray branch,
+            which production never takes, and would prove the wrong path. The
+            malformed row below is included because a bad value must not throw
+            away the items it sits beside.
+          */
           return [
-            { item: "5", segment_indexes: [0] },
-            { item: "8", segment_indexes: [1] },
+            { item: "5", segment_indexes: "[0]" },
+            { item: "8", segment_indexes: "[1,2]" },
+            { item: "9", segment_indexes: "not json" },
           ];
         }
         throw new Error("unexpected query: " + text);
@@ -105,6 +115,10 @@ describe("meeting transcript artifacts Slice 3", () => {
 
     const byIndex = await loadTranscriptCitation(sql, { artifactId: 13, segmentIndex: 0 });
     assert.equal(byIndex.item, "5");
+
+    // The second index of a multi-index chunk must also resolve.
+    const seg2 = await loadTranscriptCitation(sql, { artifactId: 13, segmentIndex: 2 });
+    assert.equal(seg2.item, "8", "every index in a chunk must resolve, not just the first");
 
     assert.ok(calls.some((q) => /meeting_agenda_chunks/.test(q)), "the item must come from the chunk table");
   });
