@@ -215,7 +215,14 @@ Limits of this evidence:
 - Production has only reached `0066`; its `_migrations` ledger ends at
   `0066_scan_source_packs.sql`. So deploying this work means applying **eleven**
   migrations (`0067` through `0077`), not one, and all eleven are unapplied in
-  production. All eleven have been applied to the development database only.
+  production.
+- The eleven were dry-run against a **restore of production**, not the
+  development database: `pg_dump` of the live paper restored into a scratch
+  database at 86 tables and ledger `0066`, then migrated by the app's own
+  `scripts/migrate.mjs`. All eleven applied, exit 0. The copy ended at 96 tables
+  with ten new `meeting_*` tables and its ledger at `0077`. Existing data was
+  unchanged: sources 286, articles 61, leads 199, scan runs 46 and members 1,
+  identical before and after and identical to the live counts.
 
 ## Not asserted by this document
 
