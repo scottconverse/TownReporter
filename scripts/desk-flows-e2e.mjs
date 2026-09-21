@@ -356,7 +356,7 @@ async function main() {
 
   // Selecting must NOT delete. Prove it survives a reload before confirmation.
   await bulkRow.getByLabel(`Select ${leadHeadline} for deletion`).check();
-  await page.getByRole("button", { name: /Delete selected \\(1\\)/ }).waitFor({ timeout: 10_000 });
+  await page.getByRole("button", { name: /Delete selected \(1\)/ }).waitFor({ timeout: 10_000 });
   await page.reload({ waitUntil: "networkidle" });
   await page.locator(".lead-row", { hasText: leadHeadline }).first().waitFor({ timeout: 20_000 });
   step("selecting a lead for deletion does not delete it until confirmed");
@@ -364,10 +364,10 @@ async function main() {
   // Confirm, then assert it is gone and the notice is honest about recovery.
   const bulkRow2 = page.locator(".lead-row", { hasText: leadHeadline }).first();
   await bulkRow2.getByLabel(`Select ${leadHeadline} for deletion`).check();
-  await page.getByRole("button", { name: /Delete selected \\(1\\)/ }).click();
+  await page.getByRole("button", { name: /Delete selected \(1\)/ }).click();
   await page.getByRole("button", { name: /Yes, delete 1/ }).waitFor({ timeout: 10_000 });
   await page.getByRole("button", { name: /Yes, delete 1/ }).click();
-  await page.getByText(/Deleted 1 lead\\. Recoverable for 30 days/).waitFor({ timeout: 20_000 });
+  await page.getByText(/Deleted 1 lead\. Recoverable for 30 days/).waitFor({ timeout: 20_000 });
   step("bulk delete confirms once and reports the 30-day recovery");
 
   await page.reload({ waitUntil: "networkidle" });
