@@ -18,6 +18,15 @@ export type CaptionCaptureInput = {
   archivePath: string;
   sleepSubtitles?: number;
   sleepRequests?: number;
+  /**
+   * N-5 Continue: this run is resuming a capture the operator stopped.
+   *
+   * yt-dlp continues a partial `.part` file by default as long as the output
+   * template is unchanged, so this does not change the download itself -- it
+   * makes the intent explicit and lets the caller record that the run was a
+   * resume rather than a fresh attempt.
+   */
+  resume?: boolean;
 } & CaptureControl;
 
 export type CaptionCaptureSuccess = {
@@ -46,6 +55,8 @@ export type AudioCaptureInput = {
   outputDir: string;
   archivePath: string;
   sleepRequests?: number;
+  /** N-5 Continue: see CaptionCaptureInput.resume. */
+  resume?: boolean;
 } & CaptureControl;
 
 export type AudioArtifact = {
@@ -105,6 +116,10 @@ export function buildCaptionCaptureArgs(input: CaptionCaptureInput): string[] {
     archivePath,
     "--paths",
     outputDir,
+    // N-5 Continue: keep (and resume) a partial rather than starting over.
+    // yt-dlp continues a .part file by default; passing it explicitly makes
+    // the intent visible in the recorded argv and pins the behaviour.
+    ...(input.resume ? ["--continue"] : []),
     "-o",
     outputTemplate,
     `https://www.youtube.com/watch?v=${input.videoId}`,
@@ -138,6 +153,8 @@ export function buildAudioCaptureArgs(input: AudioCaptureInput): string[] {
     archivePath,
     "--paths",
     outputDir,
+    // N-5 Continue: keep (and resume) a partial rather than starting over.
+    ...(input.resume ? ["--continue"] : []),
     "-o",
     outputTemplate,
     `https://www.youtube.com/watch?v=${input.videoId}`,

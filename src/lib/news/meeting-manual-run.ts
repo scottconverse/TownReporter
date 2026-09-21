@@ -12,7 +12,7 @@ export function isMeetingPassRunning(newsroomId: number): boolean { return runni
 import { authMiddleware } from "../auth/middleware.ts";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { requireEditor, ForbiddenError } from "./membership.ts";
-import { runMeetingAwareness, recheckProvisionalMeetings, type MeetingAwarenessResult } from "./meeting-capture.ts";
+import { runMeetingAwareness, recheckProvisionalMeetings, resumeStoppedMeetings, type MeetingAwarenessResult } from "./meeting-capture.ts";
 import { storeMeetingTranscriptArtifact } from "./meeting-transcript-artifacts.ts";
 import { runSection5ForArtifact } from "./meeting-story-section5-run.ts";
 import { captureMeetingCaptions } from "./meeting-capture-ytdlp.ts";
@@ -141,6 +141,25 @@ export const stopMeetingsNow = createServerFn({ method: "POST" })
     const newsroomId = await ownedNewsroomId(context.userId);
     const stopped = requestStopMeetingPass(newsroomId);
     return { ok: true, stopped };
+  });
+
+/**
+ * N-5 Continue: resume meeting captures the operator STOPPED.
+ *
+ * A stopped capture is not terminal. yt-dlp left a partial behind and will
+ * continue it, and the capture record is unique per (newsroom, video), so a
+ * resume updates that existing row rather than creating a second one.
+ *
+ * Records with no resumable partial are reported as skipped with a named
+ * reason instead of being offered as a resume that has nothing behind it.
+ */
+export const resumeStoppedMeetingsNow = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }): Promise<{ ok: boolean; resumed: number; skipped: number; failures: string[]; coverageLine: string }> => {
+    const newsroomId = await ownedNewsroomId(context.userId);
+    const sql = await getSql();
+    const result = await resumeStoppedMeetings(sql, newsroomId);
+    return { ok: true, ...result };
   });
 
 /**
