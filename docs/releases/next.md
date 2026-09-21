@@ -130,6 +130,89 @@ added: `scripts/docs-links.test.mjs` (50 files, 229 relative links, 0 missing)
 and `scripts/docs-routes.test.mjs` (28 routes, 27 documented paths, 0
 unresolved).
 
+## Meeting capture
+
+The paper now watches city YouTube channels, captures the captions for
+governance meetings, keeps the transcript as a local artifact with provenance,
+and reads the result the way an editor needs it: which meeting, which agenda
+item, which timestamp, and the verbatim words.
+
+Capture is captions-first. `yt-dlp` runs with `--skip-download --write-subs
+--write-auto-subs --write-info-json`, so a two-hour meeting costs about 136 KB
+of captions instead of 120 MB of audio.
+
+Live results from this branch, on the Longmont channels:
+
+- **21 meetings found, 19 captured** across both channels in one pass, spanning
+  City Council study and regular sessions, Planning & Zoning, LURA, Housing
+  Authority, Transportation, Parks and Recreation, Sustainability, Callahan
+  House, and Arts in Public Places.
+- **18 transcript artifacts and 45,177 timestamped segments** written to the
+  configured storage root, each with a SHA-256 and a sidecar `info.json`.
+- **No re-capture.** A second pass left all 18 pre-existing captures
+  byte-identical, including `caption_captured_at`. One meeting that had been
+  rate-limited (HTTP 429) on the first pass captured on the second; two failed
+  because the events had not happened yet and YouTube correctly refuses to serve
+  them.
+- **Audio fallback proven on a real meeting.** Longmont City Council for
+  2013-01-29 has no caption track. Captions failed honestly, the audio fallback
+  ran, and a **266,021,584-byte opus file** was written and recorded with its
+  mandatory trigger reason. The file's size and SHA-256 were re-checked on disk
+  after the run and both match the record.
+- **Vote extraction refuses to guess.** Eleven structured votes were extracted
+  from real transcripts and all eleven report `not established`, because advisory
+  boards and study sessions have no ordinance roll-call record at
+  `longmontcitycouncil.org`. None was inferred from prose.
+- **Alignment fails honestly.** Sixteen meetings recorded a named reason
+  ("no packet item list available for alignment", "spoken transitions did not
+  align with enough of the transcript", "no spoken transcript transition matched
+  a packet item") and filed a single untimed record with no item-level draft,
+  rather than inventing item boundaries.
+- **Citations carry the agenda item.** A citation resolves to item, timestamp,
+  verbatim excerpt, caption hash and storage path. On the Sept 15 council study
+  session, 18,448s resolves to item 8 with the city manager remarks excerpt, and
+  1,258s to item 5.
+- **The unattended clock runs it.** Scan run 37 was reserved by the built
+  server's own scheduler with `execution_origin = scheduled`, fetched and analyzed
+  12 of 12 sources with no failures, and found 21 meetings. No human action was
+  involved in that chain.
+
+Two real defects were found and fixed while proving this, each with a regression
+test that was checked to fail against the previous code:
+
+- `meeting_transcript_segments.item` is never written by any code path, so every
+  citation returned `item: null` on all 47,592 rows. The item is now resolved at
+  read time from `meeting_agenda_chunks`, the one table that knows segment
+  membership, instead of storing a second copy that would go stale whenever
+  alignment re-runs.
+- `tickDailyScans` skipped in silence when the account that configured the daily
+  scan was no longer the newsroom owner. Every neighbouring check in that
+  function pauses the policy with a sentence an operator can act on; this one did
+  not, so a configured-looking paper quietly stopped producing. It now pauses
+  with a reason naming the fix.
+
+Targeted evidence: `node --experimental-strip-types --test src/lib/news/meeting-*.test.ts`
+passed 103 tests in 40 suites. The full suite passed 2,246 tests with 2,198
+passing, 0 failing and 48 skipped. The 20 database-gated tests passed against a
+real PostgreSQL. `npm run typecheck` passed and `npx eslint . --ignore-pattern
+"work/**"` reported 0 errors.
+
+Limits of this evidence:
+
+- **No provisional-to-revision cycle has run.** That path requires a meeting
+  captured within 24 hours of its `ended_at`, and no Longmont governance meeting
+  has posted inside that window during this work. The re-check is wired into every
+  capture pass, but it has not yet been observed against a real provisional
+  capture.
+- **No story has been drafted from a meeting transcript.** Section 5 produces
+  chunks, alignments and structured votes, and deliberately does not draft; a
+  writer that consumes a meeting transcript does not exist yet.
+- The captured set is Longmont only, from two channels, on one machine and one
+  local PostgreSQL.
+- Eleven migrations (`0067` through `0077`) accompany this work. They have been
+  applied to the development database and **not** to production, which serves
+  0.6.54.
+
 ## Not asserted by this document
 
 No release, tag, GitHub publication, production deployment, promoted candidate,
