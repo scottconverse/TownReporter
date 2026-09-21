@@ -36,7 +36,24 @@ describe("meeting capture Slice 4 re-check and draft revision path", () => {
     assert.equal(result.affected[0]?.segmentIndex, 2);
     const draftWrite = writes.find((w) => /update drafts/i.test(w.text));
     assert.ok(draftWrite, "linked draft updated");
-    assert.match(String(draftWrite!.params[0]), /transcriptCitations/);
+    /*
+      Pin the citations themselves, not the presence of a key name.
+
+      This asserted only that the written JSON contains the string
+      "transcriptCitations", which an empty array satisfies -- and an empty
+      array is what the code wrote, discarding the citation it had just parsed
+      and used to decide the revision affected segment 2. The assertion would
+      also have passed if the code had written nothing at all.
+    */
+    const written = JSON.parse(String(draftWrite!.params[0])) as {
+      transcriptCitations?: Array<{ segmentIndex: number; captionSha256: string }>;
+    };
+    assert.ok(
+      Array.isArray(written.transcriptCitations) && written.transcriptCitations.length > 0,
+      "the revision notice must not discard the draft's citations",
+    );
+    assert.equal(written.transcriptCitations[0]!.segmentIndex, 2, "the cited segment must survive");
+    assert.equal(written.transcriptCitations[0]!.captionSha256, "old");
     assert.equal(writes.some((w) => /insert into articles/i.test(w.text)), false, "no auto-publish");
   });
 });
