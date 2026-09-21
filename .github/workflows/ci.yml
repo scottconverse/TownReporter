@@ -263,16 +263,36 @@ jobs:
           }
           node scripts/desk-flows-e2e.mjs
 
-  # Directive item 5: an authenticated, NON-DESTRUCTIVE desk regression that
-  # walks Queue, Scan, Sources, Published, Stats, and Server signed-in. It
-  # creates its own throwaway owner on an UNCLAIMED desk (no DATABASE_URL ->
-  # PGLite, exactly like desk-flows), never publishes, deletes, or starts a
-  # scan/model call. Per-surface evidence (route/status/console/request/
-  # persistence) is written to a JSON artifact.
+  # Directive item 5: an authenticated desk regression that walks Queue, Scan,
+  # Sources, Published, Stats, and Server signed-in. The signed-in walk itself is
+  # read-only, but when no state file is supplied the run first performs an
+  # INTENTIONALLY MUTATING setup step (creates a throwaway owner + first-run
+  # setup) and discloses it in the artifact. No-side-effects is enforced against
+  # a DISPOSABLE Postgres via counts AND deterministic row hashes; if the
+  # snapshots cannot be collected the run FAILS. Every request method is
+  # recorded and any mutating method fails the run.
   desk-production-regression:
-    name: The production-desk regression, signed in and read-only
+    name: The production-desk regression, signed in (disclosed mutating setup)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: townreporter_desk_regression
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:ci@127.0.0.1:5432/townreporter_desk_regression
+      BETTER_AUTH_SECRET: ci-desk-regression-secret-not-for-production
+      PORT: "8080"
+      HOST: 127.0.0.1
+      DESK_PRODREG_BASE_URL: http://127.0.0.1:8080
+      DESK_PRODREG_ARTIFACT: desk-production-regression.json
+      TOWNREPORTER_CLAUDE_CODE: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -282,14 +302,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run build
-      - name: Walk six desk surfaces signed-in, read-only
-        env:
-          BETTER_AUTH_SECRET: ci-desk-regression-secret-not-for-production
-          PORT: "8080"
-          HOST: 127.0.0.1
-          DESK_PRODREG_BASE_URL: http://127.0.0.1:8080
-          DESK_PRODREG_ARTIFACT: desk-production-regression.json
-          TOWNREPORTER_CLAUDE_CODE: "0"
+      - name: Walk six desk surfaces signed-in (disclosed mutating setup)
         run: |
           npm start > /tmp/desk-regression.log 2>&1 &
           for i in $(seq 1 60); do

@@ -3,6 +3,10 @@ export type EvidenceDecision = "keep" | "remove";
 function memo(raw: string | null | undefined): Record<string, unknown> {
   try { const parsed = JSON.parse(raw ?? "{}"); return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; }
 }
+function transcriptCitationsFromResearch(raw: string | null | undefined): unknown {
+  const research = memo(raw);
+  return research.transcriptCitations ?? null;
+}
 const normalized = (body: string) => body.replace(/\s+/g, " ").trim();
 export function publicEvidenceWasRemoved(draft: Partial<DraftRow>): boolean {
   return (memo(draft.research_json).evidenceReview as { decision?: string } | undefined)?.decision === "remove";
@@ -18,7 +22,7 @@ export function evidenceNeedsReview(draft: Partial<DraftRow>, body: string): boo
 }
 /** A review applies to the exact evidence the editor saw, not a newer draft. */
 export function evidenceReviewToken(draft: Partial<DraftRow>): string {
-  return JSON.stringify([draft.id, draft.headline, draft.dek, draft.topic, draft.body, draft.source_urls, draft.provenance_json, draft.found_note, draft.unanswered, draft.research_json]);
+  return JSON.stringify([draft.id, draft.headline, draft.dek, draft.topic, draft.body, draft.source_urls, draft.provenance_json, draft.found_note, draft.unanswered, draft.research_json, transcriptCitationsFromResearch(draft.research_json)]);
 }
 export function reconcileDraftEvidence(draft: Partial<DraftRow>, body: string, decision?: EvidenceDecision) {
   const previous = memo(draft.research_json);

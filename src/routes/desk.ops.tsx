@@ -48,6 +48,7 @@ import { editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
 import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { DailyScanSettings } from "@/components/daily-scan-settings";
+import { MeetingCaptureSettings } from "@/components/meeting-capture-settings";
 import { RoutineNoticePermissions } from "@/components/routine-notice-permissions";
 import { CustomAiConnections } from "@/components/custom-ai-connections";
 import { XaiOauthConnection } from "@/components/xai-oauth-connection";
@@ -112,6 +113,7 @@ const SETTINGS_PANELS = [
   "Writing models",
   "Custom connections",
   "Daily scan",
+  "Meeting capture",
   "Routine notices",
   "Paper identity",
   "Sections",
@@ -210,6 +212,9 @@ function OpsPage() {
           </div>
           <div hidden={panel !== "Daily scan"}>
             <DailyScanSettings />
+          </div>
+          <div hidden={panel !== "Meeting capture"}>
+            <MeetingCaptureSettings />
           </div>
           <div hidden={panel !== "Routine notices"}>
             <RoutineNoticePermissions />

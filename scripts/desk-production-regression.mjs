@@ -1,101 +1,84 @@
 #!/usr/bin/env node
 /**
- * Authenticated, NON-DESTRUCTIVE desk regression (directive item 5).
+ * Authenticated desk regression (directive item 5).
  *
  * Signs in, then walks the six desk surfaces -- Queue, Scan, Sources, Published,
  * Stats, Server -- and fails if any of them is unreachable, renders an error,
- * logs a console/page error, or drops a request. It is a read-only walk: it
- * never publishes, deletes, edits, or starts a scan/dig/editorial.
+ * logs a console/page error, or drops a request.
  *
- * It reuses the existing pieces rather than re-implementing them:
- *   - scripts/first-run-setup-step.mjs  (create the owner + complete setup)
- *   - scripts/browser-guard.mjs         (loopback-only target guard)
+ * HONEST SAFETY MODEL (see the per-run artifact's `safety` block):
+ *   - The SIGNED-IN WALK itself is read-only: it only navigates and reads.
+ *   - When DESK_PRODREG_STATE_FILE is unset, the run performs an INTENTIONALLY
+ *     MUTATING setup step first: it creates a throwaway owner and completes
+ *     first-run setup. That is disclosed in the artifact, never claimed away.
+ *   - No-side-effects is enforced against a DISPOSABLE DATABASE via DATABASE_URL
+ *     using counts AND deterministic row hashes. If the snapshots cannot be
+ *     collected, the run FAILS rather than claiming safety.
+ *   - Every browser request is recorded; any mutating method fails the run.
  *
- * Running against a PRODUCTION-DERIVED STAGING environment or an explicitly
- * supplied TEST ACCOUNT only. Never production credentials, never port 3000.
+ * NEVER production credentials, never port 3000.
  *
  * Env:
  *   DESK_PRODREG_BASE_URL   required-ish; defaults to http://127.0.0.1:8080
  *   DESK_PRODREG_STATE_FILE optional Playwright storage state for an existing
  *                           test account. When set, the walk signs in via that
  *                           state and does NOT create an owner. When unset, it
- *                           creates its own throwaway owner on an unclaimed desk
- *                           (CI pattern, like desk-flows-e2e.mjs).
+ *                           creates its own throwaway owner (disclosed as a
+ *                           mutating setup step) on a disposable database.
  *   DESK_PRODREG_ARTIFACT   optional path to write the per-surface JSON artifact.
- *
- * Exit 0 only when all six surfaces pass AND the no-side-effects check passes.
+ *   DATABASE_URL            REQUIRED: a disposable database. Snapshots are
+ *                           taken against it before and after the walk.
  */
 import { chromium } from "playwright";
 import pg from "pg";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import {
+  assertNoMutatingRequests,
+  assertNoSideEffects,
+  setupStepDisclosure,
+  snapshotTableSpecs,
+} from "./desk-production-regression-logic.mjs";
 
 const base = checkedUrl(
   process.env.DESK_PRODREG_BASE_URL || "http://127.0.0.1:8080",
 ).replace(/\/$/, "");
 const stateFile = process.env.DESK_PRODREG_STATE_FILE;
 const artifactPath = process.env.DESK_PRODREG_ARTIFACT || "desk-production-regression.json";
+const usedSetupStep = !stateFile;
 
 const stamp = Date.now();
 const email = `prodreg-${stamp}@townreporter.test`;
 const password = "prodreg-e2e-pass";
 
-// Each surface: path, a landmark that proves the REAL surface rendered, and an
-// optional locator for the persistence reload check.
 /*
-  Read-only side-effect snapshot (directive item 5): count the four rows a
-  destructive walk WOULD change -- published articles, queue leads, scan runs,
-  and leads -- on the STAGING database, before and after the walk. These are
-  pure SELECTs. The walk fails if any count differs.
-
-  The staging database is reached through its own DATABASE_URL. When running
-  against a throwaway PGLite server (no DATABASE_URL), there is no external DB
-  to snapshot; in that mode the CI server is in-memory and discarded, so the
-  snapshot is recorded as "pglite-ephemeral" and the equality check is trivially
-  satisfied because the whole database ceases to exist with the process.
+  Deterministic side-effect snapshot. Counts alone cannot catch a row that was
+  edited in place, so each table also gets an order-stable md5 over its full row
+  set. Requires DATABASE_URL: without it there is nothing to snapshot, and this
+  script refuses to claim a safety property it cannot prove.
 */
 async function sideEffectSnapshot() {
   const url = process.env.DATABASE_URL;
-  if (!url) return { source: "pglite-ephemeral", counts: null };
+  if (!url) {
+    throw new Error(
+      "DATABASE_URL is required: this regression must run against a disposable database so the no-side-effects check can actually fail in CI.",
+    );
+  }
   const client = new pg.Client({ connectionString: url });
   await client.connect();
   try {
-    const q = async (sql) => Number((await client.query(sql)).rows[0].count);
-    const counts = {
-      articles: await q("select count(*)::int as count from articles"),
-      queueLeads: await q("select count(*)::int as count from leads where status not in ('published','killed')"),
-      scanRuns: await q("select count(*)::int as count from scan_runs"),
-      leads: await q("select count(*)::int as count from leads"),
-    };
-    return { source: "staging-db", counts };
+    const counts = {};
+    const hashes = {};
+    for (const spec of snapshotTableSpecs()) {
+      counts[spec.table] = Number((await client.query(spec.countSql)).rows[0].count);
+      hashes[spec.table] = String((await client.query(spec.hashSql)).rows[0].hash);
+    }
+    return { source: "disposable-db", counts, hashes };
   } finally {
     await client.end();
   }
 }
-
-function assertNoSideEffects(before, after) {
-  if (!before.counts || !after.counts) {
-    // Ephemeral PGLite: no persistent rows to compare; recorded honestly.
-    return { passed: true, note: "ephemeral PGLite (no external database); nothing persisted" };
-  }
-  const diffs = [];
-  for (const key of Object.keys(before.counts)) {
-    if (before.counts[key] !== after.counts[key]) {
-      diffs.push(`${key}: ${before.counts[key]} -> ${after.counts[key]}`);
-    }
-  }
-  if (diffs.length) throw new Error(`side effects detected: ${diffs.join("; ")}`);
-  return { passed: true, note: "all four counts identical before and after" };
-}
-/*
-  TEST-ONLY red-baseline hook: DESK_PRODREG_BREAK_SURFACE names ONE surface
-  whose path is replaced with a non-existent route, so the walk demonstrably
-  FAILS on that single surface while the other five still pass. Never used in
-  CI or normal runs; it exists to prove the walk actually detects a broken
-  surface rather than merely asserting success.
-*/
-const BREAK_SURFACE = process.env.DESK_PRODREG_BREAK_SURFACE || "";
 
 const SURFACES = [
   { name: "Queue", path: "/desk/queue", landmark: /The queue|Draft|Queue/i },
@@ -114,7 +97,30 @@ const page = await context.newPage();
 
 const consoleErrors = [];
 const requestFailures = [];
+const observedRequests = [];
+const setupRequests = [];
 const routeHistory = [];
+
+// Actual request interception. The signed-in walk is the thing under test, so
+// only requests made AFTER walkStarted=true belong in the violation set.
+// The walk is preceded by a disclosed, intentionally mutating setup step
+// (creates a throwaway owner, completes first-run setup). Recording setup
+// requests here and then asserting over the whole list made the run fail on
+// its own disclosed setup -- a safety check that could not tell its setup
+// from a violation. Setup requests are still counted, in setupRequests, so
+// the artifact shows they happened.
+let walkStarted = false;
+page.on("request", (r) => {
+  const record = { method: r.method(), url: r.url().slice(0, 200) };
+  if (!walkStarted) {
+    setupRequests.push(record);
+    return;
+  }
+  observedRequests.push(record);
+  if (!["GET", "HEAD", "OPTIONS"].includes(r.method().toUpperCase())) {
+    requestFailures.push({ url: record.url, error: `mutating request ${r.method()}` });
+  }
+});
 page.on("console", (m) => {
   if (m.type() === "error") consoleErrors.push({ url: page.url(), text: m.text().slice(0, 300) });
 });
@@ -125,9 +131,7 @@ page.on("requestfailed", (r) => {
   requestFailures.push({ url: r.url().slice(0, 200), error: r.failure()?.errorText ?? "" });
 });
 page.on("response", (r) => {
-  if (r.status() >= 500) {
-    requestFailures.push({ url: r.url().slice(0, 200), error: `HTTP ${r.status()}` });
-  }
+  if (r.status() >= 500) requestFailures.push({ url: r.url().slice(0, 200), error: `HTTP ${r.status()}` });
 });
 
 const results = [];
@@ -135,25 +139,23 @@ let failure = null;
 
 async function signIn() {
   if (stateFile) {
-    // Existing test account: verify the session actually reaches the desk.
     await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "A clear desk. A good story.", exact: true })
       .waitFor({ timeout: 30_000 });
     return;
   }
   /*
-    Fresh throwaway owner on an UNCLAIMED desk, exactly as desk-flows-e2e.mjs
-    does it: the create-account form is the same shape (Name/Email/Password/
-    Confirm password -> "Create editor account"), then first-run setup.
-    If the desk is already claimed, this path cannot create an owner and we
-    fail honestly instead of silently walking someone else's desk.
+    Intentionally mutating setup step. It creates a throwaway owner on a
+    disposable database and completes first-run setup. Disclosed in the artifact
+    as an explicitly mutating step; the read-only claim applies to the signed-in
+    walk that follows, not to this setup.
   */
   await page.goto(`${base}/login`, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: /Create the desk|Editor sign-in/ }).waitFor({ timeout: 30_000 });
   const createVisible = await page.getByLabel("Confirm password").count();
   if (!createVisible) {
     throw new Error(
-      "desk is already claimed (no create-account form). Point DESK_PRODREG_BASE_URL at a staging environment with an unclaimed desk, or supply DESK_PRODREG_STATE_FILE.",
+      "desk is already claimed (no create-account form). Point DESK_PRODREG_BASE_URL at a disposable environment with an unclaimed desk, or supply DESK_PRODREG_STATE_FILE.",
     );
   }
   await page.getByLabel("Name").fill("ProdReg Editor");
@@ -187,77 +189,54 @@ async function walkSurface(surface) {
   const text = (await page.locator("body").innerText()).replace(/\s+/g, " ");
   entry.text = text.slice(0, 400);
   entry.landmarkOk = surface.landmark.test(text);
-  if (!entry.landmarkOk) {
-    throw new Error(`${surface.name}: landmark not found on ${surface.path}`);
-  }
-  if (entry.status && entry.status >= 400) {
-    throw new Error(`${surface.name}: HTTP ${entry.status} on ${surface.path}`);
-  }
-  // Persistence check: reload and confirm the same surface landmark still renders.
+  if (!entry.landmarkOk) throw new Error(`${surface.name}: landmark not found on ${surface.path}`);
+  if (entry.status && entry.status >= 400) throw new Error(`${surface.name}: HTTP ${entry.status} on ${surface.path}`);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForTimeout(800);
   const after = (await page.locator("body").innerText()).replace(/\s+/g, " ");
   entry.persistenceOk = surface.landmark.test(after);
-  if (!entry.persistenceOk) {
-    throw new Error(`${surface.name}: surface did not persist across reload`);
-  }
+  if (!entry.persistenceOk) throw new Error(`${surface.name}: surface did not persist across reload`);
   entry.consoleErrors = consoleErrors.slice(before);
   entry.requestFailures = requestFailures.slice(rfBefore);
-  if (entry.consoleErrors.length) {
-    throw new Error(`${surface.name}: console/page errors: ${JSON.stringify(entry.consoleErrors)}`);
-  }
-  if (entry.requestFailures.length) {
-    throw new Error(`${surface.name}: request failures: ${JSON.stringify(entry.requestFailures)}`);
-  }
+  if (entry.consoleErrors.length) throw new Error(`${surface.name}: console/page errors: ${JSON.stringify(entry.consoleErrors)}`);
+  if (entry.requestFailures.length) throw new Error(`${surface.name}: request failures: ${JSON.stringify(entry.requestFailures)}`);
   return entry;
 }
 
-let beforeSnapshot = { source: "not-taken", counts: null };
+let beforeSnapshot = { source: "not-taken", counts: null, hashes: null };
 try {
-  beforeSnapshot = await sideEffectSnapshot();
-  await signIn();
-  routeHistory.push(page.url());
-  // Visit the desk home first so the nav is mounted, then each surface.
-  for (const surface of SURFACES) {
-    const effective =
-      BREAK_SURFACE && surface.name === BREAK_SURFACE
-        ? { ...surface, path: `/desk/__broken-${surface.name.toLowerCase()}__`, landmark: /IMPOSSIBLE_LANDMARK_XYZ/ }
-        : surface;
-    results.push(await walkSurface(effective));
-  }
   /*
-    NO-SIDE-EFFECTS, enforced two ways:
-    1. Structural: this script contains no click on a mutating control. The
-       only interactions are page.goto, reload, and reading innerText / status.
-       A regex audit of the source proves no publish/delete/run-scan click is
-       possible from this file.
-    2. Observable: every surface row is read-only. `landmarkOk` +
-       `persistenceOk` prove the screens render and survive a reload; the walk
-       never sends a POST that changes state. We record the observed request
-       methods and require none of them to be a mutating verb on a desk action.
+    The before-snapshot must be taken AFTER the disclosed setup step, not
+    before it. signIn() creates a throwaway owner and completes first-run
+    setup, which writes a welcome article. Snapshotting before that and
+    comparing after made the run report its own setup as a walk side effect
+    ("articles hash changed") -- the same defect the request-recorded set had:
+    an assertion that cannot tell its disclosed setup from a violation.
+    The read-only claim is about the WALK, so the window is the walk.
   */
-  // Secondary guardrail only: the primary proof is the observed before/after
-  // snapshot taken around the whole walk (see sideEffectSnapshot above).
-  const source = readFileSync(new URL(import.meta.url), "utf8");
-  const forbiddenClicks = [
-    /getByRole\([^)]*name:\s*["'`]Publish/i,
-    /getByRole\([^)]*name:\s*["'`]Delete/i,
-    /getByRole\([^)]*name:\s*["'`]Yes, delete/i,
-    /getByRole\([^)]*name:\s*["'`]Run scan/i,
-    /getByRole\([^)]*name:\s*["'`]Draft with AI/i,
-    /getByRole\([^)]*name:\s*["'`]Keep digging/i,
-  ];
-  for (const re of forbiddenClicks) {
-    if (re.test(source)) {
-      throw new Error(`source guardrail: the walk clicks a mutating control (${re})`);
-    }
+  await signIn();
+  beforeSnapshot = await sideEffectSnapshot();
+  walkStarted = true;
+  routeHistory.push(page.url());
+  for (const surface of SURFACES) {
+    results.push(await walkSurface(surface));
   }
+  assertNoMutatingRequests(observedRequests.filter((r) => r.method !== "GET" && r.method !== "HEAD" && r.method !== "OPTIONS"));
   const afterSnapshot = await sideEffectSnapshot();
   const sideEffects = assertNoSideEffects(beforeSnapshot, afterSnapshot);
+  const safety = {
+    walkIsReadOnly: true,
+    setupStep: setupStepDisclosure(usedSetupStep),
+    snapshotSource: beforeSnapshot.source,
+    snapshotTables: Object.keys(beforeSnapshot.counts ?? {}),
+    snapshotMethod: "count(*) plus order-stable md5 over full row set",
+    mutatingRequests: [],
+  };
   const artifact = {
     ok: true,
     base,
-    mode: stateFile ? "existing-test-account" : "throwaway-owner",
+    mode: stateFile ? "existing-test-account" : "throwaway-owner-with-disclosed-mutating-setup",
+    safety,
     surfaces: results,
     consoleErrors,
     requestFailures,
@@ -269,6 +248,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     mode: artifact.mode,
+    safety,
     surfaces: results.map((r) => ({ surface: r.surface, status: r.status, landmarkOk: r.landmarkOk, persistenceOk: r.persistenceOk })),
     artifact: artifactPath,
   }, null, 2));
@@ -277,8 +257,14 @@ try {
   const artifact = {
     ok: false,
     base,
-    mode: stateFile ? "existing-test-account" : "throwaway-owner",
+    mode: stateFile ? "existing-test-account" : "throwaway-owner-with-disclosed-mutating-setup",
     error: failure,
+    safety: {
+      walkIsReadOnly: walkStarted,
+      setupStep: setupStepDisclosure(usedSetupStep),
+      snapshotSource: beforeSnapshot.source,
+      mutatingRequests: observedRequests.filter((r) => !["GET", "HEAD", "OPTIONS"].includes(r.method.toUpperCase())),
+    },
     surfaces: results,
     consoleErrors,
     requestFailures,
