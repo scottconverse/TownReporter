@@ -1,7 +1,11 @@
 # Meeting capture: merge readiness, 2026-09-21
 
-**Branch:** `feat/meeting-capture-continue-20260921` at `dc726ff`
+**Branch:** `feat/meeting-capture-continue-20260921`
 **State:** Ready to merge. Not pushed, not merged, not tagged, not deployed.
+
+The gates below were run at `dc726ff`. The only commits after it add this proof
+and a link to it from the release note; no source file changed, so the results
+still describe the branch head.
 
 This records what was verified, on what, and what is deliberately left open. It
 does not assert a merge, a release, a tag or a deployment.
