@@ -968,8 +968,21 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
 
   if (!batchResults.length) {
     const error = lastBatchError ?? "Writing pass returned no usable JSON.";
-    if (!deps.scheduledCommit)
-      await sql`
+    /*
+      Record the failed run on BOTH commit paths.
+
+      This wrote the scan_runs row only when there was no scheduledCommit, so a
+      SCHEDULED scan in which every model batch failed threw before anything was
+      persisted: no counts, no coverage line, no error row. The desk then showed
+      nothing at all, and "the scan ran and everything failed" was
+      indistinguishable from "the scan never ran" -- the exact silent-failure
+      class the coverage accounting exists to eliminate.
+
+      The scheduled path commits through the caller-supplied transaction so the
+      write lands in the same unit of work as the rest of a scheduled run.
+    */
+    const recordFailedRun = async (writeSql: Sql) => {
+      await writeSql`
         update scan_runs
         set finished_at = now(), sources_fetched = ${fetchedCount},
             sources_selected = ${sources.length}, sources_attempted = ${watchSlice.length},
@@ -979,6 +992,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
             error = ${error}
         where id = ${runId} and newsroom_id = ${owned(context)}
       `;
+    };
+    if (deps.scheduledCommit) {
+      await deps.scheduledCommit(recordFailedRun);
+    } else {
+      await recordFailedRun(sql);
+    }
     throw new Error(error);
   }
 
