@@ -213,11 +213,14 @@ Limits of this evidence:
   nothing to look at on every pass. That is also why the provisional-to-revision
   cycle above cannot be observed yet, even once a meeting lands inside the
   24-hour window: the re-check would run and exit having found no links.
-- The revision writer also overwrites `transcriptCitations` with an empty array
-  when it does run (`meeting-revision.ts:198`), discarding citations it had just
-  parsed three lines earlier. That is harmless while no links exist, and becomes
-  a real lost-citation bug the moment they do. Recorded here rather than fixed,
-  because fixing it needs the missing writer first.
+- The revision writer was discarding the draft's citations when it wrote its
+  notice: it set `transcriptCitations` to an empty array after parsing the same
+  list to decide which claims the revision affected. Because the evidence token
+  covers `transcriptCitations`, the publish guard would have been checking an
+  empty list while the draft still quoted the transcript. Fixed, with a test that
+  fails against the previous code. The existing test could not catch it -- it
+  asserted only that the written JSON mentions the key name, which an empty array
+  satisfies.
 - The captured set is Longmont only, from two channels, on one machine and one
   local PostgreSQL.
 - This branch adds one migration, `0077_meeting_capture_resume.sql`. Ten more
