@@ -209,9 +209,13 @@ Limits of this evidence:
   writer that consumes a meeting transcript does not exist yet.
 - The captured set is Longmont only, from two channels, on one machine and one
   local PostgreSQL.
-- Eleven migrations (`0067` through `0077`) accompany this work. They have been
-  applied to the development database and **not** to production, which serves
-  0.6.54.
+- This branch adds one migration, `0077_meeting_capture_resume.sql`. Ten more
+  (`0067` through `0076`) already exist on `main` from the earlier meeting-capture
+  slices.
+- Production has only reached `0066`; its `_migrations` ledger ends at
+  `0066_scan_source_packs.sql`. So deploying this work means applying **eleven**
+  migrations (`0067` through `0077`), not one, and all eleven are unapplied in
+  production. All eleven have been applied to the development database only.
 
 ## Not asserted by this document
 
