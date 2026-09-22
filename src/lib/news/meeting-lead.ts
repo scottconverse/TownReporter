@@ -141,7 +141,20 @@ export async function fileMeetingLead(
       captionSha256: c.captionSha256,
     })),
   });
-  const notesWithScratch = JSON.stringify({ ...(JSON.parse(notesJson) as Record<string, unknown>), scratch });
+  /*
+    researchScope must be on the lead.
+
+    draftLead resolves scope as input.researchScope ?? parseNotes(lead.notes_json)
+    .researchScope ?? "public". Nothing passes the first, so a meeting lead
+    without this defaults to PUBLIC scope and the writer goes looking for a
+    different story on the web while the transcript sits unused in scratch.
+    Supplied scope is what makes this lead draft from its own record.
+  */
+  const notesWithScratch = JSON.stringify({
+    ...(JSON.parse(notesJson) as Record<string, unknown>),
+    researchScope: "supplied",
+    scratch,
+  });
   const rows = await sql.query<{ id: number }>(
     `insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
