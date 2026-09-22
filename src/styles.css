@@ -1450,3 +1450,16 @@
 .desk-ltr .story-name-check li {margin-bottom:12px}
 .desk-ltr .story-name-check summary {cursor:pointer;text-decoration:underline;text-underline-offset:3px;padding:12px 0}
 .desk-ltr .story-name-check blockquote {margin:8px 0;border-left:2px solid var(--line);padding-left:12px;color:var(--fg2)}
+
+/*
+  "Where this came from" -- the meeting citation block on a story draft.
+
+  Sized with the same 0.875rem floor and --ts scale as .note-one, so it obeys the
+  desk text-size control and does not add to the small-text problem the UI pass is
+  meant to fix.
+*/
+.desk-ltr .meeting-citations {list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:10px}
+.desk-ltr .meeting-citation-head {margin:0;font-size:calc(0.875rem * var(--ts));color:var(--fg)}
+.desk-ltr .meeting-citation-time {font-variant-numeric:tabular-nums;color:var(--fg2)}
+.desk-ltr .meeting-citation-excerpt {margin:2px 0 0;font-size:calc(0.875rem * var(--ts));color:var(--fg2);text-wrap:pretty;border-left:2px solid var(--rule);padding-left:8px}
+

@@ -1,6 +1,7 @@
 import { StoryBody } from "@/components/story-body";
 import { StoryDocumentList } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
+import { MeetingSourceBlock } from "@/components/meeting-source-block";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import {
   evidenceNeedsReview,
@@ -1644,7 +1645,14 @@ function ReportingNotesPane({
     does not exist, and printing it unchecked is how the paper prints something
     false. The checkbox is the editor saying they opened the city's site.
   */
-  const gateClaims = notes.todo.map((t, i) => ({ t, i })).filter((row) => row.t.src === "gate");
+  /*
+    "Where this came from" sits at the top of the notes on a meeting story.
+
+    It renders nothing for a draft with no transcript citations, so every other
+    story in the paper is unchanged.
+  */
+  const meetingSourceBlock = <MeetingSourceBlock notes={notes} />;
+    const gateClaims = notes.todo.map((t, i) => ({ t, i })).filter((row) => row.t.src === "gate");
   const absenceBlock = gateClaims.length ? (
     <div className="note-sec note-gate">
       <p className="side-label">Verify before print · Claims of absence</p>
@@ -1747,7 +1755,8 @@ function ReportingNotesPane({
               ? "This draft was written before notes were kept. Redraft fills them; lines you add stay."
               : "Draft with AI fills this. You can add a line."}
           </p>
-          {absenceBlock}
+          {meetingSourceBlock}
+      {absenceBlock}
           {todoList("empty")}
         </>
       ) : (
