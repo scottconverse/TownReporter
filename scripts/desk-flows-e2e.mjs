@@ -343,6 +343,39 @@ async function main() {
   await page.locator(".lead-row", { hasText: leadHeadline }).first().waitFor({ timeout: 20_000 });
   step("the restored lead is back on the queue");
 
+  // ── Queue: bulk delete with select-all and a single confirmation ──────────
+  //
+  // Two properties matter and both are asserted: the confirmation is mandatory
+  // (selecting alone must not delete), and the deleted lead is really gone.
+  await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
+  const bulkRow = page.locator(".lead-row", { hasText: leadHeadline }).first();
+  await bulkRow.waitFor({ timeout: 20_000 });
+
+  await page.locator(".queue-bulk-delete").first().waitFor({ timeout: 20_000 });
+  step("the queue exposes bulk delete");
+
+  // Selecting must NOT delete. Prove it survives a reload before confirmation.
+  await bulkRow.getByLabel(`Select ${leadHeadline} for deletion`).check();
+  await page.getByRole("button", { name: /Delete selected \(1\)/ }).waitFor({ timeout: 10_000 });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator(".lead-row", { hasText: leadHeadline }).first().waitFor({ timeout: 20_000 });
+  step("selecting a lead for deletion does not delete it until confirmed");
+
+  // Confirm, then assert it is gone and the notice is honest about recovery.
+  const bulkRow2 = page.locator(".lead-row", { hasText: leadHeadline }).first();
+  await bulkRow2.getByLabel(`Select ${leadHeadline} for deletion`).check();
+  await page.getByRole("button", { name: /Delete selected \(1\)/ }).click();
+  await page.getByRole("button", { name: /Yes, delete 1/ }).waitFor({ timeout: 10_000 });
+  await page.getByRole("button", { name: /Yes, delete 1/ }).click();
+  await page.getByText(/Deleted 1 lead\. Recoverable for 30 days/).waitFor({ timeout: 20_000 });
+  step("bulk delete confirms once and reports the 30-day recovery");
+
+  await page.reload({ waitUntil: "networkidle" });
+  if (await page.locator(".lead-row", { hasText: leadHeadline }).count()) {
+    throw new Error("bulk-deleted lead is still on the queue after reload");
+  }
+  step("the bulk-deleted lead is gone after reload");
+
   // ── Dark Desk dials open and describe themselves ──────────────────────────
   await page.goto(`${base}/desk/dark`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Dark Desk", exact: true }).waitFor();
