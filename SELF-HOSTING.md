@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.56**. See the [0.6.56 release guide](docs/releases/0.6.56.md); it records the source release and does not assert GitHub publication or deployment.
+Repository documentation version: **0.6.60**. See the [0.6.60 release guide](docs/releases/0.6.60.md); it records the source release and does not assert GitHub publication or deployment.
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
