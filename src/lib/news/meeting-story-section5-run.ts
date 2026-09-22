@@ -25,6 +25,14 @@ export type Section5Result = {
   voteCount: number;
   unalignedLead: ReturnType<typeof unalignedMeetingLead> | null;
   citations: ReturnType<typeof resolveItemCitation>[];
+  /*
+    What the lead and the drafting input need, carried out of this function
+    rather than re-queried. Section 5 already has the chunks and the votes in
+    hand; a caller that has to re-read them from the database is a second source
+    of truth for the same meeting, and the two can disagree.
+  */
+  items: { item: string; title: string; startSeconds: number }[];
+  votes: StructuredVote[];
 };
 
 /**
@@ -140,5 +148,7 @@ export async function runSection5ForArtifact(
     voteCount: votes.filter((v) => v.established).length,
     unalignedLead,
     citations,
+    items: alignment.chunks.map((c) => ({ item: c.item, title: c.title, startSeconds: c.startSeconds })),
+    votes,
   };
 }

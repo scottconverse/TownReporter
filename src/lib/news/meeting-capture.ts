@@ -10,6 +10,7 @@ import { computeEndedAt } from "./meeting-capture-info.ts";
 import { applyDraftRevision, captureDisposition, detectRevision, dueForRecheck, nextCheckState } from "./meeting-revision.ts";
 import { storeMeetingTranscriptArtifact } from "./meeting-transcript-artifacts.ts";
 import { runSection5ForArtifact } from "./meeting-story-section5-run.ts";
+import { fileMeetingLead } from "./meeting-lead.ts";
 import { capsFromSettings, checkDurationCap, checkSizeCap, type CaptureCaps } from "./meeting-capture-caps.ts";
 
 export type MeetingChannel = { url: string; label?: string };
@@ -373,6 +374,35 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
         await storeTranscript(tx, { newsroomId, videoId: v.id, parsed: result.parsed, infoSourcePath: result.infoPath });
         const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: v.id, title: v.title, meetingDate: v.published, artifactId: Number((await tx.query<{ id: number }>("select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1", [newsroomId, v.id]))[0]?.id ?? 0) });
         if (!section5.aligned && section5.unalignedLead) failures.push(section5.unalignedLead.leadWhy);
+        if (section5.aligned && section5.citations.length) {
+          /*
+            File the lead that carries the transcript to the desk. Before this,
+            Section 5 produced aligned items, structured votes and resolved
+            citations and returned them to a caller that dropped them: no lead,
+            no job, no draft, and the paper gained nothing from the meeting.
+          */
+          await fileMeetingLead(tx, {
+            newsroomId,
+            /*
+              leads.user_id is a real column: a lead is owned by an editor.
+              The capture pass has no signed-in user, so it resolves the
+              newsroom owner, who is the editor this meeting is filed for.
+            */
+            userId: (await tx.query<{ user_id: string }>("select user_id from newsroom_members where newsroom_id=$1 and role='owner' limit 1", [newsroomId]))[0]?.user_id ?? "",
+            videoId: v.id,
+            title: v.title,
+            meetingDate: v.published ?? null,
+            topic: "council",
+            sourceUrls: [`https://www.youtube.com/watch?v=${v.id}`],
+            items: section5.items,
+            establishedVotes: section5.voteCount,
+            citations: section5.citations.map((c) => ({
+              item: c.item, segmentIndex: c.segmentIndex, timestampSeconds: c.timestampSeconds,
+              excerpt: c.excerpt, captionSha256: c.captionSha256,
+            })),
+            artifactId: Number((await tx.query<{ id: number }>("select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1", [newsroomId, v.id]))[0]?.id ?? 0),
+          });
+        }
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -503,6 +533,30 @@ export async function recheckProvisionalMeetings(
         const stored = await storeTranscript(tx, { newsroomId, videoId: row.video_id, parsed: result.parsed, infoSourcePath: result.infoPath });
         const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: row.video_id, title: row.title, meetingDate: row.published, artifactId: stored.id });
         if (!section5.aligned && section5.unalignedLead) failures.push(section5.unalignedLead.leadWhy);
+        if (section5.aligned && section5.citations.length) {
+          /*
+            The same filing on the revision pass, so a meeting whose tape was
+            corrected while it was provisional still reaches the desk. Section
+            5 has just re-run for the new artifact; the lead carries the new
+            citations.
+          */
+          await fileMeetingLead(tx, {
+            newsroomId,
+            userId: (await tx.query<{ user_id: string }>("select user_id from newsroom_members where newsroom_id=$1 and role='owner' limit 1", [newsroomId]))[0]?.user_id ?? "",
+            videoId: row.video_id,
+            title: row.title,
+            meetingDate: row.published ?? null,
+            topic: "council",
+            sourceUrls: [`https://www.youtube.com/watch?v=${row.video_id}`],
+            items: section5.items,
+            establishedVotes: section5.voteCount,
+            citations: section5.citations.map((c) => ({
+              item: c.item, segmentIndex: c.segmentIndex, timestampSeconds: c.timestampSeconds,
+              excerpt: c.excerpt, captionSha256: c.captionSha256,
+            })),
+            artifactId: stored.id,
+          });
+        }
         if (signal) {
           await tx.query(
             "insert into meeting_transcript_revisions(newsroom_id,video_id,artifact_id,prior_artifact_id,revision_signal,prior_sha256,new_sha256) values($1,$2,$3,$4,$5,$6,$7)",
