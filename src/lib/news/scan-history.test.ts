@@ -56,3 +56,47 @@ describe("scan history paging (P0-4, >50 runs)", () => {
     assert.match(scanRouteSource, /accumulateScanPages\(/, "the Scan page must accumulate, not replace");
   });
 });
+
+/*
+  A same-id row is not "already correct" -- it is "already present, and its
+  latest values win". The Scan page refetches every 2 seconds while a run is in
+  flight and merges each response with accumulateScanPages. Dropping same-id rows
+  meant the updated row never reached the screen: the Run button stayed enabled,
+  no busy indicator appeared, and the run looked dead until the app was restarted.
+
+  These assert the update path, not the shape, so they fail against the
+  drop-on-seen implementation.
+*/
+describe("scan history refresh (a running scan must be able to change on screen)", () => {
+  it("takes the newer values when the same run is refetched", () => {
+    const running = [{ id: 47, finished_at: null, error: null, leads: 0 }];
+    const finished = [{ id: 47, finished_at: "2026-09-22T20:00:00Z", error: null, leads: 9 }];
+    const merged = accumulateScanPages(running, finished);
+    assert.equal(merged.length, 1, "the same run must not be duplicated");
+    assert.equal(merged[0].finished_at, "2026-09-22T20:00:00Z", "the newer row must win");
+    assert.equal(merged[0].leads, 9, "newer counts must reach the screen");
+  });
+
+  it("lets a run go from error-free to failed on refresh", () => {
+    const running = [{ id: 47, finished_at: null, error: null }];
+    const failed = [{ id: 47, finished_at: "2026-09-22T20:00:00Z", error: "provider refused" }];
+    const merged = accumulateScanPages(running, failed);
+    assert.equal(merged[0].error, "provider refused", "a failure must be able to appear");
+  });
+
+  it("keeps the list newest-first after an in-place update", () => {
+    const existing = [{ id: 47, finished_at: null }, { id: 46, finished_at: "x" }, { id: 45, finished_at: "y" }];
+    const incoming = [{ id: 47, finished_at: "now" }, { id: 46, finished_at: "x" }];
+    const merged = accumulateScanPages(existing, incoming);
+    assert.deepEqual(merged.map((r) => r.id), [47, 46, 45], "order must stay newest-first");
+    assert.equal(merged[0].finished_at, "now");
+  });
+
+  it("still dedupes across overlapping pages while taking the newer row", () => {
+    const first = [{ id: 5, v: 1 }, { id: 4, v: 1 }];
+    const second = [{ id: 4, v: 2 }, { id: 3, v: 1 }];
+    const merged = accumulateScanPages(first, second);
+    assert.deepEqual(merged.map((r) => r.id), [5, 4, 3], "no duplicates");
+    assert.equal(merged.find((r) => r.id === 4).v, 2, "overlap must take the newer copy");
+  });
+});
