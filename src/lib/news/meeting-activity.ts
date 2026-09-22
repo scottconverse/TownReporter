@@ -28,6 +28,19 @@ export type MeetingActivityRow = {
   alignmentReason: string | null;
   chunks: { item: string; title: string; startSeconds: number; endSeconds: number }[];
   votes: { item: string; mover: string | null; seconder: string | null; tally: string | null; result: string; source: string | null }[];
+  /*
+    What the meeting produced for the desk.
+
+    A capture that transcribed perfectly and produced no story is a different
+    outcome from one that produced a draft waiting to be read, and the desk could
+    not tell them apart: the rows showed the transcription state and stopped
+    there. The lead the capture pass files carries the video id in its notes, so
+    the connection exists in the data.
+  */
+  leadId: number | null;
+  leadStatus: string | null;
+  draftId: number | null;
+  citationCount: number;
 };
 
 /**
@@ -93,7 +106,35 @@ export const listMeetingActivity = createServerFn({ method: "GET" })
       votesByVideo.set(v.video_id, list);
     }
 
+    /*
+      Meeting leads, matched on the video id the capture pass wrote into their
+      notes. Read as jsonb rather than parsed in JS so the match happens in the
+      database and does not depend on a shape the parser might later change.
+    */
+    const meetingLeads = await sql.query<{
+      lead_id: number; lead_status: string; draft_id: number | null; video_id: string; citation_count: number;
+    }>(
+      /*
+        The cast is guarded. A lead whose notes are not valid JSON would otherwise
+        throw here and take the whole Scan desk down with it -- one bad row breaking
+        an unrelated screen is a worse failure than the one being fixed. The regex
+        check keeps the cast to rows that can actually survive it.
+      */
+      `select l.id as lead_id, l.status as lead_status,
+              (select d.id from drafts d where d.lead_id = l.id and d.newsroom_id = l.newsroom_id order by d.updated_at desc, d.id desc limit 1) as draft_id,
+              (l.notes_json::jsonb -> 'meeting' ->> 'videoId') as video_id,
+              coalesce(jsonb_array_length(l.notes_json::jsonb -> 'transcriptCitations'), 0) as citation_count
+         from leads l
+        where l.newsroom_id = $1
+          and l.notes_json is not null
+          and l.notes_json ~ '^[[:space:]]*{'
+          and l.notes_json::jsonb -> 'meeting' ->> 'videoId' is not null`,
+      [newsroomId],
+    );
+    const leadByVideo = new Map(meetingLeads.map((l) => [l.video_id, l]));
+
     return records.map((r) => {
+      const leadRow = leadByVideo.get(r.video_id);
       const artifact = byVideo.get(r.video_id);
       const alignment = alignByVideo.get(r.video_id);
       return {
@@ -108,6 +149,10 @@ export const listMeetingActivity = createServerFn({ method: "GET" })
         aligned: alignment?.aligned ?? null, alignmentReason: alignment?.reason ?? null,
         chunks: chunksByVideo.get(r.video_id) ?? [],
         votes: votesByVideo.get(r.video_id) ?? [],
+        leadId: leadRow?.lead_id ?? null,
+        leadStatus: leadRow?.lead_status ?? null,
+        draftId: leadRow?.draft_id ?? null,
+        citationCount: leadRow?.citation_count ?? 0,
       };
     });
   });
