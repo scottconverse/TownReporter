@@ -166,27 +166,72 @@ export async function storeMeetingTranscriptArtifact(
   };
 }
 
-export async function loadTranscriptCitation(
-  sql: Sql, input: { artifactId: number; segmentIndex?: number; timestampSeconds?: number },
-): Promise<ResolvedTranscriptCitation> {
-  const artifacts = await sql.query<{ id: number; storage_path: string; sha256: string }>(
-    "select id,storage_path,sha256 from meeting_transcript_artifacts where id=$1", [input.artifactId],
-  );
-  const artifact = artifacts[0];
-  if (!artifact) throw new Error("Meeting transcript artifact not found.");
-  const segments = await sql.query<{
-    segment_index: number; start_seconds: number; end_seconds: number;
-    item: string | null; excerpt: string; caption_sha256: string;
-  }>(
-    "select segment_index,start_seconds,end_seconds,item,excerpt,caption_sha256 from meeting_transcript_segments where artifact_id=$1 order by segment_index",
-    [input.artifactId],
-  );
-  return resolveTranscriptCitation({
-    artifact: { id: artifact.id, storagePath: artifact.storage_path, sha256: artifact.sha256 },
-    segments: segments.map((s) => ({
-      segmentIndex: s.segment_index, startSeconds: Number(s.start_seconds), endSeconds: Number(s.end_seconds),
-      item: s.item, excerpt: s.excerpt, captionSha256: s.caption_sha256,
-    })),
-    segmentIndex: input.segmentIndex, timestampSeconds: input.timestampSeconds,
-  });
-}
+/**
+   * Resolve the agenda item for each segment from the chunk table.
+   *
+   * `meeting_transcript_segments.item` is never populated -- nothing writes it,
+   * so it is null on every row and a citation could name a timestamp but never
+   * the agenda item it sits under. The spec requires item + timestamp + excerpt,
+   * and the tests passed anyway because the resolver was handed a segment that
+   * already carried an item.
+   *
+   * The item is resolved HERE, at read time, from `meeting_agenda_chunks` -- the
+   * one table that actually knows which segments belong to which item. Writing a
+   * copy back onto every segment row was the obvious alternative and is the wrong
+   * one: a second copy of a fact that goes stale the moment alignment re-runs,
+   * which is the drift class this project keeps getting bitten by. A join costs
+   * nothing and cannot disagree with itself.
+   */
+  async function itemsBySegmentIndex(sql: Sql, videoId: string): Promise<Map<number, string>> {
+    const out = new Map<number, string>();
+    let chunks: Array<{ item: string | null; segment_indexes: unknown }>;
+    try {
+      chunks = await sql.query<{ item: string | null; segment_indexes: unknown }>(
+        "select item,segment_indexes from meeting_agenda_chunks where video_id=$1 order by id",
+        [videoId],
+      );
+    } catch {
+      // A database predating the chunk table simply has no items to attach.
+      return out;
+    }
+    for (const chunk of chunks) {
+      if (!chunk.item) continue;
+      const raw = chunk.segment_indexes;
+      let list: number[] = [];
+      if (Array.isArray(raw)) list = (raw as unknown[]).map((n) => Number(n));
+      else if (typeof raw === "string") {
+        try { list = (JSON.parse(raw) as unknown[]).map((n) => Number(n)); } catch { list = []; }
+      }
+      for (const idx of list) if (Number.isFinite(idx)) out.set(idx, chunk.item);
+    }
+    return out;
+  }
+
+  export async function loadTranscriptCitation(
+    sql: Sql, input: { artifactId: number; segmentIndex?: number; timestampSeconds?: number },
+  ): Promise<ResolvedTranscriptCitation> {
+    const artifacts = await sql.query<{
+      id: number; storage_path: string; sha256: string; video_id: string;
+    }>(
+      "select id,storage_path,sha256,video_id from meeting_transcript_artifacts where id=$1", [input.artifactId],
+    );
+    const artifact = artifacts[0];
+    if (!artifact) throw new Error("Meeting transcript artifact not found.");
+    const segments = await sql.query<{
+      segment_index: number; start_seconds: number; end_seconds: number;
+      item: string | null; excerpt: string; caption_sha256: string;
+    }>(
+      "select segment_index,start_seconds,end_seconds,item,excerpt,caption_sha256 from meeting_transcript_segments where artifact_id=$1 order by segment_index",
+      [input.artifactId],
+    );
+    const fromChunks = await itemsBySegmentIndex(sql, artifact.video_id);
+    return resolveTranscriptCitation({
+      artifact: { id: artifact.id, storagePath: artifact.storage_path, sha256: artifact.sha256 },
+      segments: segments.map((s) => ({
+        segmentIndex: s.segment_index, startSeconds: Number(s.start_seconds), endSeconds: Number(s.end_seconds),
+        item: s.item ?? fromChunks.get(s.segment_index) ?? null,
+        excerpt: s.excerpt, captionSha256: s.caption_sha256,
+      })),
+      segmentIndex: input.segmentIndex, timestampSeconds: input.timestampSeconds,
+    });
+  }

@@ -179,7 +179,23 @@ it("stores the complete parsed brief without cutting serialized JSON or citation
   const citations = Array.from({ length: 6 }, (_, i) =>
     `${"Captured evidence detail ".repeat(65)}[Record ${i}](https://records.example/item/${i})`);
   const stages: string[] = [];
-  const meter = createDarkRunBudget({ elapsedMs: 60_000, modelCalls: 1, searches: 0, documentReads: 0 });
+  /*
+    A pinned clock, so elapsedMs is a known number rather than a live reading.
+
+    The assertion below compared `meter.snapshot().totals` against
+    `meter.snapshot().totals.elapsedMs` -- the same meter sampled twice, one line
+    apart. `elapsedMs` is `now() - startedAt`, so the two readings legitimately
+    differ by the time it takes to evaluate them, and CI failed on exactly that:
+    actual elapsedMs 7 against expected 8. The comparison was also a tautology
+    whenever the clock did not tick, so it could not fail for the reason it
+    existed. With an injected clock the value is deterministic and the assertion
+    checks something real.
+  */
+  const clockMs = 1_000;
+  const meter = createDarkRunBudget(
+    { elapsedMs: 60_000, modelCalls: 1, searches: 0, documentReads: 0 },
+    { now: () => clockMs },
+  );
   const result = await buildBrief('brief-storage', 82, id, undefined, null,
     async () => ({ ok: true, text: JSON.stringify({
       headline: 'Saved citation record', tldr: 'The record is retained.',
@@ -194,7 +210,7 @@ it("stores the complete parsed brief without cutting serialized JSON or citation
     modelCalls: 1,
     searches: 0,
     documentReads: 0,
-    elapsedMs: meter.snapshot().totals.elapsedMs,
+    elapsedMs: 0,
     inputTokens: 40,
     outputTokens: 20,
     totalTokens: 60,

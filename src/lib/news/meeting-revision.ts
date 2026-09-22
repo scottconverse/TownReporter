@@ -193,9 +193,22 @@ export async function applyDraftRevision(
       "update meeting_draft_transcript_links set revision_notice=$1, updated_at=now() where newsroom_id=$2 and draft_id=$3 and artifact_id=$4",
       [notice, input.newsroomId, link.draft_id, link.artifact_id],
     );
+    /*
+      Keep the citations, do not clear them.
+
+      This wrote `transcriptCitations: []`, discarding the very list parsed
+      eight lines up and used to decide which claims the revision affects. A
+      draft that cites the tape would lose every citation at exactly the moment
+      the machinery decided those citations mattered -- and the evidence token
+      covers transcriptCitations, so the guard would then be checking an empty
+      list while the draft still quoted the transcript.
+
+      The parsed citations are written back, so the snapshot and the draft
+      agree and the review token still changes when a citation moves.
+    */
     await sql.query(
       "update drafts set research_json = coalesce(research_json,'{}') || $1, updated_at=now() where id=$2 and newsroom_id=$3",
-      [JSON.stringify({ transcriptRevisionNotice: notice, transcriptCitations: [] }), link.draft_id, input.newsroomId],
+      [JSON.stringify({ transcriptRevisionNotice: notice, transcriptCitations: citations }), link.draft_id, input.newsroomId],
     );
     draftsUpdated += 1;
   }

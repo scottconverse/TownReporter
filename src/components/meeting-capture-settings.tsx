@@ -6,7 +6,7 @@ import {
   saveMeetingSettingsFn,
   type MeetingRetentionMode,
 } from "@/lib/news/meeting-settings";
-import { runMeetingsNow, forceRecaptureMeeting, stopMeetingsNow, type MeetingManualRunResult } from "@/lib/news/meeting-manual-run";
+import { runMeetingsNow, forceRecaptureMeeting, stopMeetingsNow, resumeStoppedMeetingsNow, type MeetingManualRunResult } from "@/lib/news/meeting-manual-run";
 
 /*
   N-1: the meeting-capture operator configuration surface.
@@ -213,6 +213,7 @@ export function MeetingCaptureSettings() {
 function ManualRunControls({ enabled }: { enabled: boolean }) {
   const qc = useQueryClient();
   const [result, setResult] = useState<MeetingManualRunResult | null>(null);
+  const [resumeResult, setResumeResult] = useState<{ ok: boolean; resumed: number; skipped: number; failures: string[]; coverageLine: string } | null>(null);
   const [forceId, setForceId] = useState("");
   const [forceTitle, setForceTitle] = useState("");
   const [forcePublished, setForcePublished] = useState("");
@@ -231,6 +232,21 @@ function ManualRunControls({ enabled }: { enabled: boolean }) {
     onError: (e) => setResult({ ok: false, error: e instanceof Error ? e.message : String(e) }),
   });
 
+  /*
+    N-5 Continue: resume captures the operator stopped. A stopped capture is
+    not terminal -- yt-dlp left a partial and will continue it. Captures with
+    nothing on disk are reported as skipped with a named reason rather than
+    offered as a resume with nothing behind it.
+  */
+  const resume = useMutation({
+    mutationFn: () => resumeStoppedMeetingsNow(),
+    onSuccess: (r) => {
+      setResumeResult(r);
+      void qc.invalidateQueries({ queryKey: ["scans"] });
+    },
+    onError: (e) => setResumeResult({ ok: false, resumed: 0, skipped: 0, failures: [e instanceof Error ? e.message : String(e)], coverageLine: "" }),
+  });
+
   return (
     <section className="mt-8 border-t border-rule pt-5">
       <SecHead title="Run now" sub="Run a meeting-capture pass on demand. This does not consume the daily scheduled run, and you can run it as often as you like." />
@@ -245,6 +261,39 @@ function ManualRunControls({ enabled }: { enabled: boolean }) {
         </InkButton>
         {!enabled && <span className="text-sm text-ink-2">Turn meeting capture on to run.</span>}
       </div>
+
+      {/*
+        N-5 Continue. Only offered when there is something to continue: a
+        stopped capture that still has a partial on disk. The result names how
+        many resumed and how many were skipped, so an empty resume is never
+        reported as a success.
+      */}
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <InkButton
+          type="button"
+          ariaLabel="Resume stopped meeting captures"
+          tone="quiet"
+          disabled={!enabled || resume.isPending || run.isPending}
+          onClick={() => resume.mutate()}
+        >
+          {resume.isPending ? "Resuming…" : "Resume stopped captures"}
+        </InkButton>
+        <span className="text-sm text-ink-2">
+          Continues a capture you stopped, using the partial already on disk.
+        </span>
+      </div>
+
+      {resumeResult && (
+        <p role="status" className="mt-2 text-sm text-ink-2">
+          {resumeResult.resumed > 0
+            ? `Resumed ${resumeResult.resumed} capture${resumeResult.resumed === 1 ? "" : "s"}.`
+            : "Nothing to resume."}
+          {resumeResult.skipped > 0
+            ? ` ${resumeResult.skipped} stopped capture${resumeResult.skipped === 1 ? "" : "s"} had no partial on disk and would have to start over.`
+            : ""}
+          {resumeResult.failures.length > 0 ? ` ${resumeResult.failures.join(" ")}` : ""}
+        </p>
+      )}
 
       {run.isPending && (
         <div role="status" className="mt-3 flex items-center gap-3 text-sm text-ink-2">

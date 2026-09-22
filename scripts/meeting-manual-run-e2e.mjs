@@ -43,6 +43,27 @@ try {
   await page.getByRole("heading", { name: "Meeting capture" }).waitFor({ timeout: 20000 });
   step("panel renders");
 
+  /*
+    Configure the panel before running, which this script previously omitted.
+
+    "Run meetings now" is disabled unless meeting capture is enabled
+    (`disabled={!enabled || run.isPending || force.isPending}`), so clicking it
+    without turning capture on just waits for a disabled button and times out.
+    And a newsroom with no channels has nothing to list, so even an enabled pass
+    produces no `Run #N` row to wait for. Neither is a product defect -- both are
+    the configured behaviour -- but it made this proof unrunnable as written.
+
+    Same sequence the N-1 script uses, which passes.
+  */
+  const storageDir = process.env.N2_STORAGE || "C:/Users/scott/Desktop/Code/townreporter-reliability-0651/work/n2-storage";
+  await page.getByLabel("Meeting capture enabled").check();
+  await page.getByLabel("New meeting channel URL").fill("https://www.youtube.com/@CityofLongmont");
+  await page.getByRole("button", { name: "Add" }).click();
+  await page.getByLabel("Storage root").fill(storageDir);
+  await page.getByRole("button", { name: "Save meeting capture settings" }).click();
+  await page.getByText("Saved.", { exact: true }).waitFor({ timeout: 20000 });
+  step("capture configured: one channel, enabled");
+
   // RUN 1
   await page.getByRole("button", { name: "Run meetings now" }).click();
   await page.getByText(/Run #\d+:/).waitFor({ timeout: 600000 });

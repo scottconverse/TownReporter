@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.56](docs/releases/0.6.56.md).** Published 2026-09-19 on GitHub with the Windows installer asset; the release record separates published source from production-deployment and live-model results. [0.6.50 release guide](docs/releases/0.6.50.md) · [Changelog](CHANGELOG.md).
+**Current release: [0.6.60](docs/releases/0.6.60.md).** Meeting capture: the paper watches the configured city YouTube channels, captures captions locally with provenance, aligns them to agenda items and reads votes from the structured record. Published on GitHub with the Windows installer asset; the release record separates published source from production-deployment and live-model results. [0.6.50 release guide](docs/releases/0.6.50.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, installation checks and deployment evidence are recorded separately in the [release guide](docs/releases/0.6.56.md).
+Release source, installation checks and deployment evidence are recorded separately in the [release guide](docs/releases/0.6.60.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -52,7 +52,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-Download the Windows x64 installer ZIP named `TownReporter-<version>-windows-x64.zip` from the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest); the source-code ZIP is not the installer. If that asset is missing, stop and use a release that provides it. Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks. The 0.6.56 release fixes the v0.6.55 self-referential hash defect by making the package-internal note point to the `.sha256` sidecar as the hash authority, and adds the release-sealed hash guard. The exact v0.6.56 tag, source commit, Windows x64 ZIP name, and sidecar are recorded in the release note after publication.
+Download the Windows x64 installer ZIP named `TownReporter-<version>-windows-x64.zip` from the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest); the source-code ZIP is not the installer. If that asset is missing, stop and use a release that provides it. Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks. The 0.6.60 release adds meeting capture. Its package-internal note points to the `.sha256` sidecar as the hash authority, the rule introduced in 0.6.56. The exact v0.6.60 tag, source commit, Windows x64 ZIP name, and sidecar are recorded in the release note after publication.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first manual editorial workflow within an hour with working internet; that is a goal, not a measured fresh-machine result, and no fresh-machine human acceptance is documented. Release evidence records only the stated automated installer and package checks and their limits. Public hosting is separate from this local installation.
 

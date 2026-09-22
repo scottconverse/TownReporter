@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Sql } from "../db.ts";
 import { withTransaction } from "../db.ts";
@@ -30,8 +30,8 @@ export type MeetingAwarenessResult = {
 };
 export type MeetingAwarenessDeps = {
   listChannelVideos?: typeof listChannelVideos;
-  captureMeeting?: (input: { videoId: string; outputDir: string; archivePath: string; sleepSubtitles?: number; sleepRequests?: number }) => Promise<CaptionCaptureResult | CaptionCaptureFailure>;
-  captureAudio?: (input: { videoId: string; outputDir: string; archivePath: string; sleepRequests?: number }) => Promise<AudioCaptureResult>;
+  captureMeeting?: (input: { videoId: string; outputDir: string; archivePath: string; sleepSubtitles?: number; sleepRequests?: number; resume?: boolean }) => Promise<CaptionCaptureResult | CaptionCaptureFailure>;
+  captureAudio?: (input: { videoId: string; outputDir: string; archivePath: string; sleepRequests?: number; resume?: boolean }) => Promise<AudioCaptureResult>;
   storeMeetingAudioArtifact?: typeof storeMeetingAudioArtifact;
   storeMeetingTranscriptArtifact?: typeof storeMeetingTranscriptArtifact;
   runSection5?: typeof runSection5ForArtifact;
@@ -128,11 +128,32 @@ async function recordAudioCaptureSuccess(
 }
 
 
+/**
+ * N-5 Continue: find the resumable partial yt-dlp left behind for a video.
+ *
+ * yt-dlp writes `<id>.<ext>.part` next to the output template and continues it
+ * on the next run. Stop SIGKILLs the child mid-write, so the partial survives —
+ * but nothing recorded that it exists. Without this the desk could not tell
+ * "stopped, nothing to resume" from "stopped, a partial is waiting", and a
+ * re-run started from zero.
+ */
+export function findResumablePartial(outputDir: string, videoId: string): string | null {
+  try {
+    const entries = readdirSync(outputDir);
+    const hit = entries.find((name) => name.startsWith(`${videoId}.`) && name.endsWith(".part"));
+    if (!hit) return null;
+    const full = join(outputDir, hit);
+    return statSync(full).size > 0 ? full : null;
+  } catch {
+    return null;
+  }
+}
+
 /** N-5: a capture the operator stopped is recorded as stopped, not failed. */
-async function recordCaptureStopped(sql: Sql, newsroomId: number, video: ListedVideo, reason: string): Promise<void> {
+async function recordCaptureStopped(sql: Sql, newsroomId: number, video: ListedVideo, reason: string, partialPath: string | null): Promise<void> {
   await sql.query(
-    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,failure_reason) values($1,$2,$3,$4,$5,$6,$7) on conflict(newsroom_id,video_id) do update set status=excluded.status,failure_reason=excluded.failure_reason,updated_at=now()",
-    [newsroomId, video.id, video.url, video.title, video.published ?? "", "stopped", reason],
+    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,failure_reason,partial_path) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(newsroom_id,video_id) do update set status=excluded.status,failure_reason=excluded.failure_reason,partial_path=excluded.partial_path,updated_at=now()",
+    [newsroomId, video.id, video.url, video.title, video.published ?? "", "stopped", reason, partialPath],
   );
 }
 
@@ -160,6 +181,55 @@ async function recordCaptureSuccess(
        caption_revision_timestamp=excluded.caption_revision_timestamp,updated_at=now()`,
     [newsroomId, video.id, channelUrl, video.title, video.published ?? "", result.parsed.sourcePath, result.parsed.format, result.parsed.sha256, endedAt, disposition, result.info.durationSeconds, result.info.captionRevisionTimestamp],
   );
+}
+
+/**
+ * N-5 Continue: resume captures the operator stopped, in place.
+ *
+ * A stopped capture is not terminal. yt-dlp left a `.part` file behind and will
+ * continue it, and meeting_capture_records is unique (newsroom_id, video_id) —
+ * so a resume UPDATES the existing record rather than creating a second one.
+ *
+ * Only records with a recorded resumable partial are attempted: a stopped
+ * capture with nothing on disk would re-download from the start, which is a
+ * fresh attempt, not a resume, and is reported as such instead of silently
+ * presented as one.
+ */
+export async function resumeStoppedMeetings(
+  sql: Sql,
+  newsroomId: number,
+  deps: MeetingAwarenessDeps = {},
+): Promise<{ resumed: number; skipped: number; failures: string[]; coverageLine: string }> {
+  const stopped = await sql<{ video_id: string; title: string; partial_path: string | null }>`
+    select video_id, title, partial_path
+      from meeting_capture_records
+     where newsroom_id = ${newsroomId} and status = 'stopped'
+     order by updated_at asc
+  `;
+  const failures: string[] = [];
+  let resumed = 0;
+  let skipped = 0;
+  for (const record of stopped) {
+    if (!record.partial_path || !existsSync(record.partial_path)) {
+      skipped += 1;
+      failures.push(`${record.title}: stopped with no resumable partial on disk; a new capture is required`);
+      continue;
+    }
+    const capture = deps.captureMeeting ?? captureMeetingCaptions;
+    const outputDir = meetingCaptionDir(newsroomId);
+    const result = await capture({ videoId: record.video_id, outputDir, archivePath: meetingArchivePath(newsroomId), resume: true });
+    if (result.ok) {
+      await sql.query(
+        "update meeting_capture_records set status = 'captured', failure_reason = null, partial_path = null, resumed_at = now(), updated_at = now() where newsroom_id = $1 and video_id = $2",
+        [newsroomId, record.video_id],
+      );
+      resumed += 1;
+      continue;
+    }
+    failures.push(`${record.title}: ${result.reason}`);
+  }
+  const coverageLine = `meetings resume: ${resumed} resumed, ${skipped} skipped (no partial), ${failures.length} failed`;
+  return { resumed, skipped, failures, coverageLine };
 }
 
 export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: MeetingAwarenessDeps = {}): Promise<MeetingAwarenessResult> {
@@ -239,7 +309,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
         }
         if (!audio.ok) {
           const reason = audio.stopped ? audio.reason : `audio fallback failed: ${audio.reason}`;
-          await (audio.stopped ? recordCaptureStopped(sql, newsroomId, v, audio.reason) : recordCaptureFailure(sql, newsroomId, v, reason));
+          await (audio.stopped ? recordCaptureStopped(sql, newsroomId, v, audio.reason, findResumablePartial(outputDir, v.id)) : recordCaptureFailure(sql, newsroomId, v, reason));
           failures.push(`${v.title}: ${reason}`);
           continue;
         }
@@ -274,7 +344,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
         continue;
       }
       if (result.stopped) {
-        await recordCaptureStopped(sql, newsroomId, v, result.reason);
+        await recordCaptureStopped(sql, newsroomId, v, result.reason, findResumablePartial(outputDir, v.id));
       } else {
         await recordCaptureFailure(sql, newsroomId, v, result.reason);
       }

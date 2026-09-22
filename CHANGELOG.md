@@ -1,6 +1,18 @@
 # Changelog
 
-Current release: **0.6.56**.
+Current release: **0.6.60**.
+
+## 0.6.60 — 2026-09-21
+
+This section records the source release. It does not assert a Git tag, GitHub release, packaged Windows installer, production deployment, or live-model result. A full per-change account with its evidence and limits is in the 0.6.60 release guide.
+
+- Adds **meeting capture**: the paper watches the newsroom's configured city YouTube channels, captures captions first (`--skip-download --write-subs --write-auto-subs --write-info-json`), keeps the transcript as a local artifact with a SHA-256 and an `info.json` sidecar, and reads the result as which meeting, which agenda item, which timestamp and the verbatim words. Audio fallback exists for meetings with no caption track and records a mandatory trigger reason.
+- Adds **agenda alignment and structured votes**: the transcript is split into agenda items, aligned to the packet when one is available, and votes are read from the structured record rather than inferred from prose. Eleven structured votes on real meetings all reported `not established`, because advisory boards and study sessions have no ordinance roll-call record; none was inferred. Sixteen meetings recorded a named alignment failure rather than inventing item boundaries.
+- Adds **the capture controls**: a Server to Meeting capture panel with channels in priority order, storage root, retention mode and caps, plus manual run, stop, resume and force re-capture. Resuming a stopped capture no longer restarts from zero (migration 0077).
+- Fixes a citation defect: `meeting_transcript_segments.item` is never written by any code path, so every citation returned `item: null` on all 47,592 rows. The item is now resolved at read time from `meeting_agenda_chunks`, the one table that knows segment membership.
+- Fixes a silent stop: `tickDailyScans` skipped in silence when the account that configured the daily scan was no longer the newsroom owner, while every neighbouring check pauses the policy with an actionable reason. It now pauses with a reason naming the fix.
+- Fixes a lost-citation defect: the revision writer discarded a draft's transcript citations after parsing the same list to decide which claims the revision affected, so the publish guard would have been checking an empty list while the draft still quoted the transcript.
+- Runs meeting capture inside the existing bounded-batch scan with truthful coverage accounting, including a meetings line in the scan report.
 
 ## Unreleased
 

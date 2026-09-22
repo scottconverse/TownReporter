@@ -112,7 +112,31 @@ export async function tickDailyScans(
       "select user_id from newsroom_members where newsroom_id=$1 and user_id=$2 and role='owner' limit 1",
       [p.newsroom_id, p.configured_by_user_id],
     );
-    if (!owner) continue;
+    /*
+      Say WHY, like the timezone and runtime checks above do.
+
+      This was a bare `continue`, and it is the one condition an operator can
+      actually fix. If the account that configured the daily scan stops being
+      the newsroom owner -- someone is replaced, a second editor is promoted,
+      a role changes during setup -- the scheduled scan never ran again: no
+      log line, no pause_reason, no notice anywhere in the UI. The paper
+      looked configured and quietly stopped producing.
+
+      Pausing with a reason is the same shape the two neighbouring checks
+      already use, so the UI has something to show and the operator gets a
+      sentence telling them what to do.
+    */
+    if (!owner) {
+      await sql.query(
+        "update daily_scan_policies set paused=true,pause_reason=$2,revision=revision+1,updated_at=now() where newsroom_id=$1 and revision=$3",
+        [
+          p.newsroom_id,
+          "The account that configured the daily scan is no longer the owner of this newsroom. Make that account the owner again in Editors & access, then resume the daily scan.",
+          p.revision,
+        ],
+      );
+      continue;
+    }
     const [authorized] = await sql.query(
       "select 1 from daily_scan_policies p join newsroom_members m on m.newsroom_id=p.newsroom_id and m.user_id=p.configured_by_user_id and m.role='owner' where p.newsroom_id=$1 and p.enabled=true and p.paused=false and p.revision=$2",
       [p.newsroom_id, p.revision],
