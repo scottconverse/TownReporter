@@ -24,6 +24,8 @@ import {
   sanitizePublicUrls,
 } from "./schema";
 import { reportAndDraft } from "./report";
+import { linkDraftToTranscript } from "./meeting-draft-transcript-link.ts";
+import { deriveUsedCitations } from "./meeting-draft-citations.ts";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
 import {
   evidenceNeedsReview,
@@ -1673,6 +1675,39 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     returning id
   `;
     if (savedDraft) {
+      /*
+        Link a meeting draft to the transcript it drew from.
+
+        This is the call that makes the revision machinery do real work.
+        meeting_draft_transcript_links has held 0 rows since migration 0070
+        because nothing ever wrote to it, so recheckProvisionalMeetings ran on
+        every capture pass, found no links, and exited having done nothing. With
+        a link row, the re-check compares the citation hashes against the new
+        caption hash and records a revision notice when the tape moved.
+
+        The citations are DERIVED from what this draft says, never inherited from
+        the material it was given, so a redraft describes itself rather than the
+        previous draft. A draft that used no transcript material writes no row.
+      */
+      const meetingCitations = prevNotes.transcriptCitations ?? [];
+      if (prevNotes.meeting && meetingCitations.length) {
+        const used = deriveUsedCitations({
+          candidates: meetingCitations.map((c) => ({
+            item: c.item, segmentIndex: c.segmentIndex, captionSha256: c.captionSha256, excerpt: c.excerpt,
+          })),
+          headline: reported.headline,
+          dek: reported.dek,
+          body: reported.body,
+        });
+        if (used.length) {
+          await linkDraftToTranscript(sql, {
+            newsroomId: owned(context),
+            draftId: Number(savedDraft.id),
+            artifactId: prevNotes.meeting.artifactId,
+            citations: used,
+          });
+        }
+      }
       const completion = JSON.stringify(
         buildDraftCompletionReceipt({
           checkpointDraftId,
