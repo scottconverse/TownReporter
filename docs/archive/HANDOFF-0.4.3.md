@@ -39,8 +39,6 @@ It is not the Longmont Times-Call, not the city, and not a replacement for eithe
 
 Stack: TanStack Start + Vite + React, Better Auth (email/password, optional Grok OAuth), PGLite in preview / Postgres in production, Playwright Chromium for JS civic pages and YouTube transcripts, xAI (`XAI_API_KEY`) or any OpenAI-compatible gateway.
 
-`package.json` is still named `app-builder-workspace`. That is leftover scaffold. Do not “fix” the name unless he asks. It is cosmetic and it churns lockfile noise.
-
 ---
 
 ## How he talks
