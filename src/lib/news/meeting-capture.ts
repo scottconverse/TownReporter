@@ -396,6 +396,10 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
             sourceUrls: [`https://www.youtube.com/watch?v=${v.id}`],
             items: section5.items,
             establishedVotes: section5.voteCount,
+            votes: section5.votes.map((v) => ({
+              item: v.item, established: v.established, motion: v.motion, mover: v.mover,
+              seconder: v.seconder, tally: v.tally, result: v.result, source: v.source,
+            })),
             citations: section5.citations.map((c) => ({
               item: c.item, segmentIndex: c.segmentIndex, timestampSeconds: c.timestampSeconds,
               excerpt: c.excerpt, captionSha256: c.captionSha256,
@@ -550,6 +554,10 @@ export async function recheckProvisionalMeetings(
             sourceUrls: [`https://www.youtube.com/watch?v=${row.video_id}`],
             items: section5.items,
             establishedVotes: section5.voteCount,
+            votes: section5.votes.map((v) => ({
+              item: v.item, established: v.established, motion: v.motion, mover: v.mover,
+              seconder: v.seconder, tally: v.tally, result: v.result, source: v.source,
+            })),
             citations: section5.citations.map((c) => ({
               item: c.item, segmentIndex: c.segmentIndex, timestampSeconds: c.timestampSeconds,
               excerpt: c.excerpt, captionSha256: c.captionSha256,

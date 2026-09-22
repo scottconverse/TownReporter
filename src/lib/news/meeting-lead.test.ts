@@ -29,6 +29,7 @@ describe("meeting lead", () => {
       establishedVotes: 1,
       citations: [{ item: "9", segmentIndex: 4612, timestampSeconds: 18450, excerpt: "the motion carries", captionSha256: "abc123" }],
       artifactId: 4,
+      votes: [{ item: "9", established: true, motion: "Approve Ordinance O-2026-46", mover: "Matthew Popkin", seconder: "Jake Marsing", tally: "6-1", result: "Passed", source: "longmontcitycouncil.org" }],
     });
     assert.equal(result.leadId, 88);
     const write = calls.find((c) => /insert into leads/.test(c.text));
@@ -43,6 +44,14 @@ describe("meeting lead", () => {
     assert.equal(notes.transcriptCitations[0]!.segmentIndex, 4612);
     assert.equal(notes.transcriptCitations[0]!.captionSha256, "abc123", "the hash is what the revision check needs");
     assert.equal(notes.transcriptCitations[0]!.timestamp, "05:07:30", "the editor needs a readable timestamp");
+    /*
+      scratch is what the drafting step actually reads as evidence. A lead that
+      carried citations but left scratch empty would reach the writer with a
+      headline and a URL and no transcript, and draft from nothing.
+    */
+    assert.match(notes.scratch, /MEETING: City Council Regular Session/, "the transcript evidence must reach the draft");
+    assert.match(notes.scratch, /the motion carries/, "the verbatim excerpt must be in the evidence block");
+    assert.match(notes.scratch, /tally 6-1/, "the structured vote must be in the evidence block");
   });
 
   it("says the record established no vote rather than implying one", () => {
@@ -87,7 +96,7 @@ describe("meeting lead", () => {
     };
     await fileMeetingLead(sql, {
       newsroomId: 1, userId: "editor", videoId: "v", title: "T", meetingDate: null,
-      topic: "council", sourceUrls: [], items: [], establishedVotes: 0, citations: [], artifactId: 1,
+      topic: "council", sourceUrls: [], items: [], establishedVotes: 0, citations: [], artifactId: 1, votes: [],
     });
     assert.equal(calls.length, 1, "only the lead insert; nothing else is touched");
     const params = calls[0]!.params;

@@ -1,4 +1,5 @@
 import type { Sql } from "../db.ts";
+import { meetingEvidenceBlock } from "./meeting-draft-input.ts";
 
 /**
  * Files the meeting lead that carries a transcript to the desk.
@@ -85,9 +86,40 @@ export async function fileMeetingLead(
     establishedVotes: number;
     citations: MeetingLeadCitation[];
     artifactId: number;
+    /** The structured record, as the pipeline extracted it. Never inferred from prose. */
+    votes: {
+      item: string;
+      established: boolean;
+      motion: string | null;
+      mover: string | null;
+      seconder: string | null;
+      tally: string | null;
+      result: string | null;
+      /** Null when the record names no source; the evidence block says so rather than guessing. */
+      source: string | null;
+    }[];
   },
 ): Promise<{ leadId: number; headline: string }> {
   const copy = meetingLeadCopy(input);
+  /*
+    The evidence block, written into scratch.
+
+    scratch is the field the drafting step reads as evidence -- the same field
+    the "Write a story" box fills with the pasted text. A meeting lead that did
+    not fill it would reach the writer with a headline and a URL and no
+    transcript at all, and draft from nothing: the failure would look like a thin
+    story rather than a missing one.
+  */
+  const scratch = meetingEvidenceBlock({
+    title: input.title,
+    meetingDate: input.meetingDate,
+    videoUrl: input.sourceUrls[0] ?? `https://www.youtube.com/watch?v=${input.videoId}`,
+    items: input.citations.map((c) => ({
+      item: c.item, title: input.items.find((i) => i.item === c.item)?.title ?? "",
+      startSeconds: c.timestampSeconds, excerpt: c.excerpt,
+    })),
+    votes: input.votes,
+  });
   const notesJson = JSON.stringify({
     meeting: {
       videoId: input.videoId,
@@ -109,13 +141,14 @@ export async function fileMeetingLead(
       captionSha256: c.captionSha256,
     })),
   });
+  const notesWithScratch = JSON.stringify({ ...(JSON.parse(notesJson) as Record<string, unknown>), scratch });
   const rows = await sql.query<{ id: number }>(
     `insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      returning id`,
     [
       input.userId, input.newsroomId, copy.headline, copy.why, input.topic,
-      JSON.stringify(input.sourceUrls), copy.why.slice(0, 400), 0, "new", notesJson,
+      JSON.stringify(input.sourceUrls), copy.why.slice(0, 400), 0, "new", notesWithScratch,
     ],
   );
   const leadId = rows[0]?.id;

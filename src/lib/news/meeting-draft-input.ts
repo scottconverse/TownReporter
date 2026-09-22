@@ -32,7 +32,8 @@ export type MeetingDraftMaterial = {
     seconder: string | null;
     tally: string | null;
     result: string | null;
-    source: string;
+    /** Null when the record names no source. Reported as unknown, never guessed. */
+    source: string | null;
   }[];
 };
 
@@ -86,7 +87,7 @@ export function meetingEvidenceBlock(material: MeetingDraftMaterial): string {
         v.seconder ? `seconded by ${v.seconder}` : "",
         v.tally ? `tally ${v.tally}` : "",
         v.result ? `result: ${v.result}` : "",
-        `source: ${v.source}`,
+        v.source ? `source: ${v.source}` : "source: not named in the record",
       ].filter(Boolean);
       out.push(`- ${bits.join("; ")}`);
     }
