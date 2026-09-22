@@ -42,6 +42,24 @@ export type ReportingNotes = {
   suppliedUrls?: string[];
   /** Explicit editor command captured at the authenticated Write box, not from source text. */
   editorialAssignment?: EditorialAssignment;
+  /**
+   * A captured meeting, when this lead came from one.
+   *
+   * These two fields are what carry a transcript from the capture pass into the
+   * desk. They are parsed explicitly below: parseNotes builds an explicit object
+   * rather than spreading the raw JSON, so a field it does not name is dropped
+   * on read. Filing citations the parser then discards looks identical to filing
+   * none, which is the silent-loss shape this codebase keeps finding.
+   */
+  meeting?: { videoId: string; title: string; date: string | null; artifactId: number };
+  transcriptCitations?: {
+    item: string;
+    segmentIndex: number;
+    timestampSeconds: number;
+    timestamp?: string;
+    excerpt: string;
+    captionSha256: string;
+  }[];
 };
 
 function todoSource(raw: unknown): NoteTodo["src"] {
@@ -137,10 +155,59 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
         ? { editorialAssignment: editorialAssignmentFromText((o.editorialAssignment as EditorialAssignment).text) } : {}),
       ...(o.researchScope === "supplied" || o.researchScope === "public" ? { researchScope: o.researchScope } : {}),
       ...(Array.isArray(o.suppliedUrls) ? { suppliedUrls: o.suppliedUrls.filter((u): u is string => typeof u === "string").slice(0, 8) } : {}),
+      ...meetingFromRaw(o),
     };
   } catch {
     return base;
   }
+}
+
+/**
+ * The meeting fields, read defensively.
+ *
+ * A malformed or partial meeting block must not take the rest of the notes down
+ * with it, and a citation without a segment index or a caption hash is not
+ * citeable -- the revision check compares those hashes -- so it is dropped rather
+ * than stored as a link that can never match.
+ */
+function meetingFromRaw(o: Record<string, unknown>): Pick<ReportingNotes, "meeting" | "transcriptCitations"> {
+  const out: Pick<ReportingNotes, "meeting" | "transcriptCitations"> = {};
+  const m = o.meeting;
+  if (m && typeof m === "object") {
+    const r = m as Record<string, unknown>;
+    const videoId = String(r.videoId ?? "").trim();
+    const artifactId = Number(r.artifactId ?? 0);
+    if (videoId && Number.isFinite(artifactId) && artifactId > 0) {
+      out.meeting = {
+        videoId: videoId.slice(0, 64),
+        title: String(r.title ?? "").slice(0, 300),
+        date: r.date == null ? null : String(r.date).slice(0, 40),
+        artifactId,
+      };
+    }
+  }
+  if (Array.isArray(o.transcriptCitations)) {
+    const citations = o.transcriptCitations
+      .map((row) => {
+        if (!row || typeof row !== "object") return null;
+        const r = row as Record<string, unknown>;
+        const segmentIndex = Number(r.segmentIndex);
+        const captionSha256 = String(r.captionSha256 ?? "").trim();
+        if (!Number.isFinite(segmentIndex) || segmentIndex < 0 || !captionSha256) return null;
+        return {
+          item: String(r.item ?? "").slice(0, 40),
+          segmentIndex,
+          timestampSeconds: Number(r.timestampSeconds ?? 0) || 0,
+          ...(r.timestamp ? { timestamp: String(r.timestamp).slice(0, 20) } : {}),
+          excerpt: String(r.excerpt ?? "").slice(0, 2000),
+          captionSha256: captionSha256.slice(0, 128),
+        };
+      })
+      .filter((c): c is NonNullable<typeof c> => Boolean(c))
+      .slice(0, 200);
+    if (citations.length) out.transcriptCitations = citations;
+  }
+  return out;
 }
 
 export function notesHaveMemo(n: ReportingNotes): boolean {
