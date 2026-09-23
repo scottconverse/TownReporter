@@ -41,7 +41,7 @@ import { refreshLocalCatalog, type LocalCatalog } from "./local-models.ts";
 
 /**
  * Idempotent runtime ensure for the PGLite preview and unit-test paths,
- * mirroring migrations/0029_provider_settings.sql exactly. Same reason
+ * mirroring the provider tables from migrations 0029, 0041, and 0083. Same reason
  * `ensurePaperSettingsSchema` exists: Node's test runner never runs
  * `migrations/*.sql` (see src/lib/db.ts createPgliteSql -- `import.meta.glob`
  * is a Vite-only transform), so the schema has to be stated twice.
@@ -116,12 +116,12 @@ function stillListed(
  * than returned: a retired provider's stored timeout must not resurface as a
  * budget for whatever id happens to be reused later.
  *
- * The `local-model` id's `localModel` field is resolved against the LIVE
- * catalog before this returns: the editor's stored pick when it is still on
- * the server's list, else the currently discovered default. Every caller
+ * An explicit scoped `local-model` pick is preserved even if its server is
+ * temporarily unavailable; legacy unscoped picks still resolve against the
+ * live catalog and fall back to its discovered default. Every caller
  * that threads `overrides["local-model"]?.localModel` straight into
  * `grokChat`'s `opts.localModel` (report.ts, dark.ts, investigate.ts)
- * therefore gets "the stored pick, or the discovered default" for free,
+ * therefore gets the correct per-job pick for free,
  * without needing to know `local-models.ts` exists. Discovery is a cheap,
  * cached (20s), localhost-only call; a failure there is swallowed and
  * simply leaves the stored pick (or nothing) in place, exactly as it stood

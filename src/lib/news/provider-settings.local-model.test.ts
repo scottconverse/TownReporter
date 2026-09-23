@@ -2,6 +2,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
 import { resetLocalCatalogCacheForTests } from "./local-models.ts";
+import { probeProvider } from "./ai.ts";
 import {
   ensureProviderSettingsSchema,
   readProviderOverrides,
@@ -93,6 +94,25 @@ describe("the per-newsroom local-model override resolves against the live catalo
     assert.equal(result.scan["local-model"]?.localModel?.id, "deepseek-v4.1-flash:cloud");
     assert.equal(result.picker.override?.id, "deepseek-v4.1-flash:cloud");
     assert.match(result.picker.notice ?? "", /not reachable or listed/);
+  });
+
+  it("preflights the scoped Ollama pick even when LM Studio is configured globally", async () => {
+    const sql = await getSql();
+    await sql.query(`insert into newsrooms (id, name) values ($1, 'Scoped model test') on conflict (id) do nothing`, [NEWSROOM_ID]);
+    await sql.query(`insert into newsroom_local_model_choices (newsroom_id, scope, base_url, model_id) values ($1, 'scan', $2, 'gemma4:e4b')`, [NEWSROOM_ID, OLLAMA_BASE]);
+    const oldBase = process.env.LLM_BASE_URL;
+    const oldModel = process.env.LLM_MODEL;
+    process.env.LLM_BASE_URL = "http://127.0.0.1:1234/v1";
+    process.env.LLM_MODEL = "a-local-model";
+    try {
+      const result = await withFetch(fetchWithOllamaOnly(), () => probeProvider("local-model", NEWSROOM_ID, undefined, "scan"));
+      assert.equal(result.ok, true);
+    } finally {
+      if (oldBase === undefined) delete process.env.LLM_BASE_URL;
+      else process.env.LLM_BASE_URL = oldBase;
+      if (oldModel === undefined) delete process.env.LLM_MODEL;
+      else process.env.LLM_MODEL = oldModel;
+    }
   });
 
   it("keeps the stored pick when it is still on the server's model list", async () => {

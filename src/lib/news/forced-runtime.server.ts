@@ -90,7 +90,7 @@ export async function validateForcedRuntime(
     const { resolveCustomAiChoice } = await import("./custom-ai-connections.server.ts");
     const connection = await resolveCustomAiChoice(newsroomId, id);
     const { probeProvider } = await import("./ai.ts");
-    const ready = await probeProvider(runtime, newsroomId);
+    const ready = await probeProvider(runtime, newsroomId, undefined, "forced");
     if (!ready.ok) throw new Error(ready.error);
     const exactEffort = modelEffort(runtime, effort, connection.modelId);
     return {
@@ -108,7 +108,7 @@ export async function validateForcedRuntime(
       await import("./xai-oauth.server.ts")
     ).resolveXaiOauthConnection(newsroomId);
     const { probeProvider } = await import("./ai.ts");
-    const ready = await probeProvider(runtime, newsroomId);
+    const ready = await probeProvider(runtime, newsroomId, undefined, "forced");
     if (!ready.ok) throw new Error(ready.error);
     const exactEffort = modelEffort(runtime, effort, connection.modelId);
     return {

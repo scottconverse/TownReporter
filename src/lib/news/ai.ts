@@ -516,6 +516,7 @@ export async function probeProvider(
   choice?: EffectiveProviderChoice | string,
   newsroomId?: number,
   adapters?: Pick<GrokChatAdapters, "resolveCustom" | "resolveLocal" | "resolveXaiOauth">,
+  scope?: "story" | "scan" | "opinion" | "dark" | "forced",
 ): Promise<ProviderProbe> {
   if (choice && isCustomModelChoice(choice)) {
     const resolved = await resolveCustomProvider(choice, newsroomId, adapters?.resolveCustom);
@@ -571,13 +572,13 @@ export async function probeProvider(
     return { ok: false, error: `No model in the Automatic ladder is ready. ${failures.join(" ")}` };
   }
   let provider = resolveProvider(choice);
-  if (!provider && choice === "local-model") {
+  if (choice === "local-model" && (scope || !provider)) {
     let localOverride: LocalModelOverride | null = null;
     localOverride = adapters?.resolveLocal
       ? await adapters.resolveLocal(newsroomId)
-      : (await (await import("./provider-settings.ts")).resolveLocalModelChoice(newsroomId))
+      : (await (await import("./provider-settings.ts")).resolveLocalModelChoice(newsroomId, scope))
           .override;
-    provider = resolveProvider(choice, localOverride);
+    if (localOverride) provider = resolveProvider(choice, localOverride);
   }
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
   if (provider.kind === "codex") {

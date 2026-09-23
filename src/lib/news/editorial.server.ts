@@ -397,7 +397,7 @@ export async function fileEditorial(
           noTools: true,
           reasoningEffort: snapshot.modelEffort,
         }),
-        probe: (choice) => probeProvider(choice, input.newsroomId),
+        probe: (choice) => probeProvider(choice, input.newsroomId, undefined, "opinion"),
         resolve: async (choice) => ({
           modelChoice: choice as EffectiveOpinionModelChoice,
           modelEffort: modelEffort(choice, nameRuntime.modelEffort),

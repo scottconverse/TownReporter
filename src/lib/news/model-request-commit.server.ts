@@ -89,7 +89,8 @@ export async function commitStoryDraftForAuthenticatedEditor(
   }
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
-  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, deps.probeProvider ?? probeProvider);
+  const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "story"));
+  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe);
   const providerProbe = preflight.probe;
   const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {
@@ -195,7 +196,8 @@ export async function commitScanForAuthenticatedEditor(
   },
   deps: ScanCommitDeps = {},
 ) {
-  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, deps.probeProvider ?? probeProvider);
+  const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "scan"));
+  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe);
   const providerProbe = preflight.probe;
   const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {

@@ -402,17 +402,17 @@ const snapshotDarkSettingsFor = createServerOnlyFn(async (newsroomId: number, ru
  */
 async function probeDarkProvider(choice?: string, newsroomId?: number) {
   if (choice !== "auto") {
-    const first = await probeProvider(choice, newsroomId);
+    const first = await probeProvider(choice, newsroomId, undefined, "dark");
     if (first.ok) return first;
     const plan = await planAutomaticFailover({
       source: "editor",
       current: choice ?? "auto",
       error: first.error,
-      probe: (candidate) => probeProvider(candidate, newsroomId),
+      probe: (candidate) => probeProvider(candidate, newsroomId, undefined, "dark"),
       ladder: DARK_AUTOMATIC_LADDER,
     });
     if (!plan) return first;
-    const resolved = await probeProvider(plan.next, newsroomId);
+    const resolved = await probeProvider(plan.next, newsroomId, undefined, "dark");
     if (!resolved.ok) return first;
     const previousLabel = modelChoiceLabel(choice ?? "auto");
     return {
@@ -428,7 +428,7 @@ async function probeDarkProvider(choice?: string, newsroomId?: number) {
   }
   const failures: string[] = [];
   for (const rung of ["configured", ...DARK_AUTOMATIC_LADDER]) {
-    const result = await probeProvider(rung, newsroomId);
+    const result = await probeProvider(rung, newsroomId, undefined, "dark");
     if (result.ok) return result;
     failures.push(result.error);
   }
@@ -1739,7 +1739,7 @@ async function runVerificationStage(
         noTools: true,
         reasoningEffort: snapshot.modelEffort,
       }),
-      probe: (candidate) => probeProvider(candidate, newsroomId),
+      probe: (candidate) => probeProvider(candidate, newsroomId, undefined, "dark"),
       resolve: async (candidate) => ({
         modelChoice: candidate,
         modelEffort: effortForChoice(candidate, active.modelEffort),
@@ -1932,7 +1932,7 @@ async function executeDarkRun(
           source: opts.automatic ? "auto" : "editor",
           current: activeChoice,
           error,
-          probe: (next) => probeProvider(next, newsroomId),
+          probe: (next) => probeProvider(next, newsroomId, undefined, "dark"),
           ladder: DARK_AUTOMATIC_LADDER,
         });
         if (!plan) return null;
@@ -3567,7 +3567,7 @@ export async function performBriefWork(job: DeskJob) {
         choice: snapshot.modelChoice,
         reasoningEffort: snapshot.modelEffort,
       }),
-      probe: (choice) => probeProvider(choice, newsroomId),
+      probe: (choice) => probeProvider(choice, newsroomId, undefined, "dark"),
       resolve: async (choice) => ({
         modelChoice: choice,
         modelEffort: effortForChoice(choice, active.modelEffort),

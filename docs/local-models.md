@@ -24,6 +24,13 @@ remain selectable, but this short comparison does not qualify them as defaults
 for unattended publishing. A short brief is also not proof of long meeting
 draft quality or PDF understanding.
 
+On the same meeting facts in a separate structured-extraction check, Qwen 3.5
+and DeepSeek returned accurate JSON, GLM 5.2 returned accurate JSON inside a
+code fence (which TownReporter's JSON extractor accepts), and GLM 5.3 Flash
+returned reasoning prose instead of the requested JSON. This is why the
+initial practical choices are DeepSeek for scan/extraction and GLM 5.2 for
+short-form story prose; they remain editorial aids, not autonomous publishers.
+
 Install [Ollama](https://ollama.com). Run `ollama pull gemma4:12b` (or any
 model you like). Start TownReporter. The Writing model picker lists it under
 **Local model** — nothing else to configure.

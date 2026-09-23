@@ -193,7 +193,7 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
           </select>
           <span className="model-picker-help">
             {selectedModel?.cloud
-              ? `This model runs on Ollama's hosted service, not on this computer${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. Reasoning is off by default for drafting so the output budget can go to the story.${selectedModel.vision ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it." : ""}`
+              ? `This model runs on Ollama's hosted service, not on this computer, and may use your Ollama allowance${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. ${modelEffortsFor("local-model", selectedModel.id).includes("none") ? "TownReporter requests thinking off by default for this model." : "This model's thinking behavior is set by the provider; check its output before using it."}${selectedModel.vision ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it." : ""}`
               : `This model runs on the computer hosting TownReporter. Loaded models answer faster; the first call can take a minute or more.${selectedModel?.vision ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it." : ""}`}
           </span>
           {notice ? <span className="model-picker-help">{notice}</span> : null}
