@@ -121,6 +121,7 @@ async function recordAudioCaptureSuccess(
        audio_path,audio_format,audio_sha256,audio_bytes,audio_captured_at,audio_trigger_reason)
      values($1,$2,$3,$4,$5,'captured',now(),null,$6,$7,$8,$9,$10,$11,$12,now(),$13)
      on conflict(newsroom_id,video_id) do update set
+       channel_url=excluded.channel_url,title=excluded.title,published=excluded.published,
        status='captured',captured_at=now(),failure_reason=null,ended_at=excluded.ended_at,
        capture_disposition=excluded.capture_disposition,duration_seconds=excluded.duration_seconds,
        audio_path=excluded.audio_path,audio_format=excluded.audio_format,audio_sha256=excluded.audio_sha256,
@@ -177,6 +178,7 @@ async function recordCaptureSuccess(
        ended_at,capture_disposition,duration_seconds,caption_revision_timestamp)
      values($1,$2,$3,$4,$5,'captured',now(),$6,$7,$8,now(),null,$9,$10,$11,$12)
      on conflict(newsroom_id,video_id) do update set
+       channel_url=excluded.channel_url,title=excluded.title,published=excluded.published,
        status='captured',captured_at=now(),caption_path=excluded.caption_path,
        caption_format=excluded.caption_format,caption_sha256=excluded.caption_sha256,
        caption_captured_at=now(),failure_reason=null,ended_at=excluded.ended_at,
@@ -253,16 +255,23 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const storeTranscript = deps.storeMeetingTranscriptArtifact ?? storeMeetingTranscriptArtifact;
   const runTransaction = deps.withTransaction ?? withTransaction;
   const now = (deps.now ?? (() => new Date()))();
-  const found: ListedVideo[] = [];
+  type ListedMeetingVideo = ListedVideo & { channelUrl: string };
+  const foundById = new Map<string, ListedMeetingVideo>();
   const failures: string[] = [];
   for (const channel of channels) {
     try {
       const listed = await list(channel.url);
-      found.push(...pickMeetingVideos(listed, 50));
+      for (const video of pickMeetingVideos(listed, 50)) {
+        // Channel priority is authoritative when the same upload appears in
+        // more than one configured feed. Preserve the actual first source;
+        // never relabel every video as if it came from channels[0].
+        if (!foundById.has(video.id)) foundById.set(video.id, { ...video, channelUrl: channel.url });
+      }
     } catch (e) {
       failures.push(`${channel.url}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+  const found = [...foundById.values()];
   const records = await sql.query<{
     video_id: string; channel_url: string; title: string; published: string;
     status: MeetingCaptureStatus; failure_reason: string | null;
@@ -285,8 +294,8 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
     const archivePath = meetingArchivePath(newsroomId);
     const outputDir = join(meetingCaptionDir(newsroomId), v.id);
     await sql.query(
-      "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status) values($1,$2,$3,$4,$5,'not-captured') on conflict(newsroom_id,video_id) do update set title=excluded.title,published=excluded.published,updated_at=now()",
-      [newsroomId, v.id, channels[0]!.url, v.title, v.published ?? ""],
+      "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status) values($1,$2,$3,$4,$5,'not-captured') on conflict(newsroom_id,video_id) do update set channel_url=excluded.channel_url,title=excluded.title,published=excluded.published,updated_at=now()",
+      [newsroomId, v.id, v.channelUrl, v.title, v.published ?? ""],
     );
     let result: CaptionCaptureResult;
     try {
@@ -337,7 +346,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
               newsroomId, videoId: v.id, audioSourcePath: audio.audio.path,
               format: audio.audio.format, triggerReason, infoSourcePath: audio.infoPath,
             });
-            await recordAudioCaptureSuccess(tx, newsroomId, v, channels[0]!.url, audio, audioEndedAt, audioDisposition, stored.id, triggerReason, stored.storagePath);
+            await recordAudioCaptureSuccess(tx, newsroomId, v, v.channelUrl, audio, audioEndedAt, audioDisposition, stored.id, triggerReason, stored.storagePath);
           });
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
@@ -372,7 +381,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
     const disposition = captureDisposition({ endedAt, now });
     try {
       await runTransaction(async (tx) => {
-        await recordCaptureSuccess(tx, newsroomId, v, channels[0]!.url, result as Extract<CaptionCaptureResult, { ok: true }>, endedAt, disposition);
+        await recordCaptureSuccess(tx, newsroomId, v, v.channelUrl, result as Extract<CaptionCaptureResult, { ok: true }>, endedAt, disposition);
         await storeTranscript(tx, { newsroomId, videoId: v.id, parsed: result.parsed, infoSourcePath: result.infoPath });
         const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: v.id, title: v.title, meetingDate: v.published, artifactId: Number((await tx.query<{ id: number }>("select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1", [newsroomId, v.id]))[0]?.id ?? 0) });
         if (!section5.aligned && section5.unalignedLead) failures.push(section5.unalignedLead.leadWhy);

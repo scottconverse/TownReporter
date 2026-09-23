@@ -8,15 +8,16 @@ import type { Sql } from "../db.ts";
 
 type Row = Record<string, unknown>;
 
-function statefulSql(storageRoot: string): {
+function statefulSql(storageRoot: string, channels = [{ channel_url: "https://youtube.com/@city", position: 0 }]): {
   sql: Sql;
   capturedSet: Set<string>;
+  records: () => Row[];
   withTransaction: <T>(fn: (tx: Sql) => Promise<T>) => Promise<T>;
 } {
   const rows = new Map<string, Row>();
   const captured = new Set<string>();
   const run = (text: string, params: unknown[] = []): Row[] | null => {
-    if (/from meeting_channel_priority/i.test(text)) return [{ channel_url: "https://youtube.com/@city", position: 0 }];
+    if (/from meeting_channel_priority/i.test(text)) return channels;
     if (/from meeting_capture_settings/i.test(text)) return [{ storage_root: storageRoot, retention_mode: "transcript-only" }];
     if (/from meeting_capture_records/i.test(text)) return [...rows.values()];
     if (/insert into meeting_capture_records/i.test(text)) {
@@ -49,7 +50,7 @@ function statefulSql(storageRoot: string): {
   };
   const sql = makeSql();
   const withTransaction = async <T>(fn: (tx: Sql) => Promise<T>): Promise<T> => fn(makeSql());
-  return { sql, capturedSet: captured, withTransaction };
+  return { sql, capturedSet: captured, records: () => [...rows.values()], withTransaction };
 }
 
 describe("meeting capture Slice 2 second-run suppression", () => {
@@ -90,5 +91,47 @@ describe("meeting capture Slice 2 second-run suppression", () => {
     assert.match(first.coverageLine, /1 captured/);
     assert.match(second.coverageLine, /1 captured/);
     assert.deepEqual([...state.capturedSet], ["L1AnMLsLwtk"]);
+  });
+
+  it("preserves the actual source channel and deduplicates by configured priority", async () => {
+    const { runMeetingAwareness } = await import("./meeting-capture.ts");
+    const storageRoot = mkdtempSync(join(tmpdir(), "townreporter-meeting-channels-"));
+    const captionPath = join(storageRoot, "meeting.en.srv3");
+    const captionText = "Item 1, approval of the minutes.";
+    writeFileSync(captionPath, captionText, "utf8");
+    const captionSha256 = createHash("sha256").update(captionText).digest("hex");
+    const city = "https://youtube.com/@CityofLongmont";
+    const lpm = "https://youtube.com/@LongmontPublicMedia";
+    const state = statefulSql(storageRoot, [
+      { channel_url: city, position: 0 },
+      { channel_url: lpm, position: 1 },
+    ]);
+    const deps = {
+      listChannelVideos: async (channelUrl: string) => channelUrl === city
+        ? [
+            { id: "city-only", title: "City Council Regular Session", published: "2026-09-22", url: "https://youtube.com/watch?v=city-only", duration: 100, tab: "streams" as const },
+            { id: "duplicate", title: "Planning and Zoning Commission", published: "2026-09-16", url: "https://youtube.com/watch?v=duplicate", duration: 100, tab: "streams" as const },
+          ]
+        : [
+            { id: "lpm-only", title: "Museum Advisory Board", published: "2026-09-17", url: "https://youtube.com/watch?v=lpm-only", duration: 100, tab: "videos" as const },
+            { id: "duplicate", title: "Planning and Zoning Commission", published: "2026-09-16", url: "https://youtube.com/watch?v=duplicate", duration: 100, tab: "videos" as const },
+          ],
+      captureMeeting: async () => ({
+        ok: true as const,
+        parsed: { text: captionText, format: "srv3" as const, sha256: captionSha256, sourcePath: captionPath },
+        infoPath: null,
+        info: { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null },
+        argv: [], stdout: "", stderr: "",
+      }),
+      withTransaction: state.withTransaction,
+      runSection5: async () => ({ aligned: true, alignmentReason: null, chunkCount: 1, voteCount: 0, unalignedLead: null, citations: [] }),
+    };
+
+    const result = await runMeetingAwareness(state.sql, 1, deps as never);
+    const records = new Map(state.records().map((row) => [String(row.video_id), row]));
+    assert.equal(result.found.length, 3, "the duplicate upload must be captured once");
+    assert.equal(records.get("city-only")?.channel_url, city);
+    assert.equal(records.get("lpm-only")?.channel_url, lpm);
+    assert.equal(records.get("duplicate")?.channel_url, city, "the higher-priority channel must own a duplicate");
   });
 });
