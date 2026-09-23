@@ -634,14 +634,14 @@ export async function applyCapturedMeetingTranscript(
     }
     await tx.query(
       `update meeting_capture_records set
-         channel_url=$1,title=$2,published=$3,status='captured',failure_reason=null,
-         captured_at=coalesce(captured_at,now()),caption_path=$4,caption_format=$5,
-         caption_sha256=$6,caption_captured_at=now(),ended_at=$7,
+       channel_url=$1,title=$2,published=$3,status='captured',failure_reason=null,
+         captured_at=coalesce(captured_at,$19),caption_path=$4,caption_format=$5,
+         caption_sha256=$6,caption_captured_at=$19,ended_at=$7,
          caption_revision_timestamp=$8,duration_seconds=$9,capture_disposition=$10,
-         consecutive_unchanged=$11,last_checked_at=now(),settled_under_churn=$12,
+         consecutive_unchanged=$11,last_checked_at=$19,settled_under_churn=$12,
          revision_count=$13,last_revision_at=$14,
-         forced_recapture=$15,forced_recapture_at=case when $15 then now() else forced_recapture_at end,
-         prior_caption_sha256=case when $15 then $16 else prior_caption_sha256 end,updated_at=now()
+         forced_recapture=$15,forced_recapture_at=case when $15 then $19 else forced_recapture_at end,
+         prior_caption_sha256=case when $15 then $16 else prior_caption_sha256 end,updated_at=$19
        where newsroom_id=$17 and video_id=$18`,
       [
         input.video.channelUrl, input.video.title, input.video.published,
@@ -649,7 +649,7 @@ export async function applyCapturedMeetingTranscript(
         input.result.info.captionRevisionTimestamp, input.result.info.durationSeconds,
         state.status, state.consecutiveUnchanged, state.settledUnderChurn,
         (prior.revision_count ?? 0) + (signal ? 1 : 0), signal ? now.toISOString() : null,
-        input.forced === true, prior.caption_sha256, input.newsroomId, input.video.id,
+        input.forced === true, prior.caption_sha256, input.newsroomId, input.video.id, now.toISOString(),
       ],
     );
     return { revised: signal != null, settled: state.settled, artifactId: stored.id, warnings };
