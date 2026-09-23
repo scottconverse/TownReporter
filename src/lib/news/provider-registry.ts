@@ -495,16 +495,22 @@ export const CLAUDE_CLI_EFFORTS: readonly ModelEffort[] = ["low", "medium", "hig
 const AUTOMATIC_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
 const GROK_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high"];
 const DEEPSEEK_V4_1_FLASH_EFFORTS: readonly ModelEffort[] = ["none", "low", "high", "max"];
+const QWEN_3_8_EFFORTS: readonly ModelEffort[] = ["none"];
+
+function defaultsToThinkingOff(model: string | undefined | null): boolean {
+  const id = model?.trim() ?? "";
+  return /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)
+    || /^(?:models\/)?qwen3\.8(?:[-:/]|$)/i.test(id);
+}
 
 /**
  * Run-scoped effort is a model capability, not an OpenAI-compatible protocol
  * capability. Unknown/custom models therefore get provider default rather
- * than a made-up portable list. The DeepSeek cloud model is the first local
- * catalog model with an exact declared mapping: DSH exposes off/low/high/max;
- * TownReporter persists `none` for the shared effort type and the Ollama
- * OpenAI-compatible transport maps it to the explicit `reasoning_effort:
- * "none"` disable value. Omitting the field means provider default and can
- * turn thinking back on.
+ * than a made-up portable list. DeepSeek cloud declares off/low/high/max.
+ * Qwen 3.8 is deliberately narrower: its installed LM Studio endpoint was
+ * measured accepting `reasoning_effort: "none"` and returning answer content,
+ * while omitting the field spent the whole output budget on reasoning. No
+ * unmeasured Qwen effort levels are offered.
  */
 export function openAiCompatibleModelEfforts(
   model: string | undefined | null,
@@ -513,6 +519,7 @@ export function openAiCompatibleModelEfforts(
   if (/^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)) {
     return DEEPSEEK_V4_1_FLASH_EFFORTS;
   }
+  if (/^(?:models\/)?qwen3\.8(?:[-:/]|$)/i.test(id)) return QWEN_3_8_EFFORTS;
   // Gemini's OpenAI-compatible endpoint does not declare the same effort
   // vocabulary for the saved 2.5 preset. Use its provider default safely.
   if (/^(?:models\/)?gemini-/i.test(id)) return [];
@@ -523,10 +530,7 @@ export function modelEffortLabel(
   effort: ModelEffort,
   model?: string | null,
 ): string {
-  if (
-    effort === "none" &&
-    /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(model?.trim() ?? "")
-  ) {
+  if (effort === "none" && defaultsToThinkingOff(model)) {
     return "Off — no extra thinking";
   }
   return MODEL_EFFORT_LABELS[effort];
@@ -574,7 +578,7 @@ export function defaultModelEffort(
   // distinguishes that from an omitted effort, which means provider default.
   if (
     choices.includes("none") &&
-    /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(exactModel?.trim() ?? "")
+    defaultsToThinkingOff(exactModel)
   ) {
     return "none";
   }
