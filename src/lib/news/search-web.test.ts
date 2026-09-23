@@ -255,7 +255,7 @@ describe("optional Halo Gateway provider", () => {
     process.env.TOWNREPORTER_GATEWAY_MCP_URL = "http://127.0.0.1:8765/mcp";
     const calls: string[] = [];
     setHaloFetchImplForTests(async (_url, init) => {
-      const body = JSON.parse(String(init.body));
+      const body = JSON.parse(String(init!.body));
       calls.push(body.method);
       if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
       if (body.method === "tools/call")
@@ -299,7 +299,7 @@ describe("optional Halo Gateway provider", () => {
   it("records Gateway zero in lineage then falls back without a real request", async () => {
     process.env.TOWNREPORTER_GATEWAY_MCP_URL = "http://127.0.0.1:8765/mcp";
     setHaloFetchImplForTests(async (_url, init) => {
-      const body = JSON.parse(String(init.body));
+      const body = JSON.parse(String(init!.body));
       if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
       if (body.method === "tools/call")
         return new Response(
@@ -445,7 +445,7 @@ describe("optional relevance-aware continuation", () => {
     process.env.TOWNREPORTER_GATEWAY_MCP_URL = "http://127.0.0.1:8765/mcp";
     const calls: string[] = [];
     setHaloFetchImplForTests(async (_url, init) => {
-      const body = JSON.parse(String(init.body));
+      const body = JSON.parse(String(init!.body));
       calls.push(body.method);
       if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
       if (body.method === "tools/call")

@@ -103,9 +103,9 @@ it("keeps bounded multi-source evidence as valid JSON through draft and publicat
     unanswered,
     claims: [],
     research_memo: {},
-  } as ReportedDraftResult;
+  } as unknown as ReportedDraftResult;
   assert.ok(findings.every((finding) => finding.text.length <= 1200));
-  assert.ok(findings.every((finding) => finding.excerpt.length <= 800));
+  assert.ok(findings.every((finding) => finding.excerpt!.length <= 800));
   assert.ok(findings.every((finding) => finding.locators.length === 12));
   assert.ok(JSON.stringify(provenance).length > 8000);
   assert.ok(JSON.stringify(findings).length > 8000);
@@ -193,7 +193,7 @@ it("keeps an explicit empty citation list empty through draft save and publicati
     unanswered: [],
     claims: [],
     research_memo: {},
-  } as ReportedDraftResult;
+  } as unknown as ReportedDraftResult;
   const job = {
     id: jobRow.id,
     newsroom_id: newsroomId,
@@ -227,7 +227,7 @@ it("keeps an explicit empty citation list empty through draft save and publicati
 
   await saveDraftForEditor(
     { userId, newsroomId },
-    { leadId: lead.id, headline: reported.headline, dek: reported.dek, body: reported.body, topic: reported.topic },
+    { leadId: lead.id, headline: (reported as any).headline, dek: (reported as any).dek, body: (reported as any).body, topic: (reported as any).topic },
   );
   [draft] = await sql.query<{ source_urls: string; research_json: string }>(
     "select source_urls,research_json from drafts where lead_id=$1 and newsroom_id=$2",

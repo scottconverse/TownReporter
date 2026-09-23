@@ -181,17 +181,17 @@ describe("meeting transcript artifacts Slice 3", () => {
       },
     };
 
-    const byTime = await loadTranscriptCitation(sql, { artifactId: 13, timestampSeconds: 18450 });
+    const byTime = await loadTranscriptCitation(sql as unknown as import("../db.ts").Sql, { artifactId: 13, timestampSeconds: 18450 });
     assert.equal(byTime.item, "8", "a citation must name the agenda item it sits under");
     assert.equal(byTime.segmentIndex, 1);
     assert.equal(byTime.excerpt, "And that is all uh city manager remarks.");
     assert.equal(byTime.captionSha256, "abc123");
 
-    const byIndex = await loadTranscriptCitation(sql, { artifactId: 13, segmentIndex: 0 });
+    const byIndex = await loadTranscriptCitation(sql as unknown as import("../db.ts").Sql, { artifactId: 13, segmentIndex: 0 });
     assert.equal(byIndex.item, "5");
 
     // The second index of a multi-index chunk must also resolve.
-    const seg2 = await loadTranscriptCitation(sql, { artifactId: 13, segmentIndex: 2 });
+    const seg2 = await loadTranscriptCitation(sql as unknown as import("../db.ts").Sql, { artifactId: 13, segmentIndex: 2 });
     assert.equal(seg2.item, "8", "every index in a chunk must resolve, not just the first");
 
     assert.ok(calls.some((q) => /meeting_agenda_chunks/.test(q)), "the item must come from the chunk table");

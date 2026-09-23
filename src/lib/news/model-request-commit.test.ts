@@ -148,7 +148,7 @@ describe("authenticated Codex commit boundary", () => {
     const result = await commitOpinionForAuthenticatedEditor({
       context: { userId, newsroomId: 1 }, subject: "", retryRequestId: old.id, modelChoice: "auto",
     }, readyOpinionDeps);
-    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    assert.equal(result.ok, true, result.ok ? "" : (result as any).error);
     if (result.ok) {
       const [doc] = await sql<{ editorial_request_id: number }>`select editorial_request_id from story_documents where id=${documentId}`;
       assert.equal(doc?.editorial_request_id, result.requestId);
@@ -177,7 +177,7 @@ describe("authenticated Codex commit boundary", () => {
     const result = await commitOpinionForAuthenticatedEditor({
       context: { userId, newsroomId: 1 }, subject: editedText, retryRequestId: old.id, modelChoice: "auto",
     }, readyOpinionDeps);
-    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    assert.equal(result.ok, true, result.ok ? "" : (result as any).error);
     if (result.ok) {
       const docs = await sql.query<{ id: string; text: string }>(
         "select id,convert_from(original,'UTF8') as text from story_documents where editorial_request_id=$1 order by id",
@@ -320,7 +320,7 @@ describe("authenticated Codex commit boundary", () => {
         }),
         enqueueJob: async (opts) => {
           storyEnqueueCalls += 1;
-          storyEnqueueSources.push(opts.modelChoiceSource);
+          storyEnqueueSources.push(opts.modelChoiceSource ?? "");
           return enqueueJob({ ...opts, kick: false });
         },
       },
@@ -360,7 +360,7 @@ describe("authenticated Codex commit boundary", () => {
         }),
         enqueueJob: async (opts) => {
           storyEnqueueCalls += 1;
-          storyEnqueueSources.push(opts.modelChoiceSource);
+          storyEnqueueSources.push(opts.modelChoiceSource ?? "");
           return enqueueJob({ ...opts, kick: false });
         },
       },
@@ -500,7 +500,7 @@ describe("authenticated Codex commit boundary", () => {
 
     assert.equal(result.ok, false);
     if (result.ok) assert.fail("an enqueue failure must not report success");
-    assert.match(result.error, /nothing is writing/i);
+    assert.match((result as any).error, /nothing is writing/i);
     assert.equal(auditCalls, 0);
     const rows = await sql<{ id: number; error: string | null; finished_at: string | null }>`
       select id, error, finished_at from editorial_requests where user_id = ${userId}
@@ -555,7 +555,7 @@ describe("authenticated Codex commit boundary", () => {
       },
     );
 
-    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    assert.equal(result.ok, true, result.ok ? "" : (result as any).error);
     if (!result.ok) return;
     assert.equal(result.modelChoice, "local-model");
     assert.equal(enqueuedChoice, "local-model");
@@ -605,7 +605,7 @@ describe("authenticated Codex commit boundary", () => {
       );
 
       assert.equal(result.ok, true);
-      if (!result.ok) assert.fail(result.error);
+      if (!result.ok) assert.fail((result as any).error);
       const requests = await sql<{ id: number; model_choice: string; finished_at: string | null }>`
         select id, model_choice, finished_at from editorial_requests where user_id = ${userId}
       `;
@@ -692,7 +692,7 @@ describe("authenticated Codex commit boundary", () => {
       },
     );
     assert.equal(editorPick.ok, true);
-    if (!editorPick.ok) assert.fail(editorPick.error);
+    if (!editorPick.ok) assert.fail((editorPick as any).error);
     assert.equal(editorPick.modelChoice, "codex-frontier");
     assert.equal(editorEnqueueCalls, 1);
     const [editorJob] = await sql<{ model_choice: string; model_choice_source: string }>`
@@ -752,7 +752,7 @@ describe("authenticated Codex commit boundary", () => {
       },
     );
     assert.equal(autoPick.ok, true);
-    if (!autoPick.ok) assert.fail(autoPick.error);
+    if (!autoPick.ok) assert.fail((autoPick as any).error);
     assert.equal(autoPick.modelChoice, "claude-frontier");
     assert.equal(autoEnqueueCalls, 1);
     const [autoJob] = await sql<{ model_choice: string; model_choice_source: string }>`

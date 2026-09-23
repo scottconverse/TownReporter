@@ -204,7 +204,7 @@ describe("report citation repair", { timeout: 15_000 }, () => {
     assert.deepEqual(result.source_urls, [citationSource]);
     assert.deepEqual(result.claims, [{ fact: stableFact, url: citationSource, kind: "news" }]);
     assert.match(result.integrity_notes, /could not connect this draft's factual claims/i);
-    assert.deepEqual(result.research_memo.nameCheck.rows.map((row) => [row.name, row.status, row.spelling]), [
+    assert.deepEqual(result.research_memo.nameCheck!.rows.map((row) => [row.name, row.status, row.spelling]), [
       ["Harold Dominquez", "corrected", "Harold Dominguez"],
     ]);
   });

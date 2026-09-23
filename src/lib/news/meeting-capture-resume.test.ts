@@ -62,8 +62,8 @@ describe("N-5 Continue: resuming a stopped meeting capture", () => {
 
     assert.equal(out.resumed, 1, "one capture resumed");
     assert.equal(out.skipped, 0, "nothing skipped");
-    assert.equal(capturedInput?.resume, true, "the capturer was told this is a resume, not a fresh attempt");
-    assert.equal(capturedInput?.videoId, "L1AnMLsLwtk", "the same video was resumed");
+    assert.equal((capturedInput as any)?.resume, true, "the capturer was told this is a resume, not a fresh attempt");
+    assert.equal((capturedInput as any)?.videoId, "L1AnMLsLwtk", "the same video was resumed");
     const moved = updates.find((u) => /status = ''captured''|status = 'captured'/.test(u.text));
     assert.ok(moved, "the existing record must be updated to captured");
     assert.equal(moved.params[0], 7, "the update targets the newsroom");

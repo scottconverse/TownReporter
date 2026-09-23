@@ -58,6 +58,10 @@ import {
   setPageWatchStateFor,
   actOnPageWatchFor,
 } from "./page-watch.ts";
+
+type CheckResult = Awaited<ReturnType<typeof checkPageWatchFor>>;
+const checkState = (result: CheckResult): string | undefined =>
+  "state" in result ? result.state : undefined;
 import { getSql, getPglite } from "../db.ts";
 // Use the real base newsroom schema; Node lacks Vite's migration glob.
 before(async () => {
@@ -97,14 +101,14 @@ test("slash-only watch redirects preserve first, unchanged and changed capture h
   });
   try {
     const first = await checkPageWatchFor(identity, created.id, { fetch: ingestDocument });
-    assert.equal(first.state, "first-capture");
+    assert.equal(checkState(first), "first-capture");
     assert.equal(
-      (await checkPageWatchFor(identity, created.id, { fetch: ingestDocument })).state,
+      checkState(await checkPageWatchFor(identity, created.id, { fetch: ingestDocument })),
       "unchanged",
     );
     content = "The library now opens at ten and hosts the community reading group on Thursday.";
     assert.equal(
-      (await checkPageWatchFor(identity, created.id, { fetch: ingestDocument })).state,
+      checkState(await checkPageWatchFor(identity, created.id, { fetch: ingestDocument })),
       "changed",
     );
     const detail = await pageWatchDetailFor(identity, created.id);
@@ -188,27 +192,27 @@ test(
       fetch: async () =>
         doc("Contract value is $12 million. This is the official posted procurement record."),
     });
-    assert.equal(first.state, "first-capture");
+    assert.equal(checkState(first), "first-capture");
     const fail = await checkPageWatchFor(identity, created.id, {
       fetch: async () => {
         throw new Error("offline");
       },
     });
-    assert.equal(fail.state, "failed");
+    assert.equal(checkState(fail), "failed");
     const same = await checkPageWatchFor(identity, created.id, {
       fetch: async () =>
         doc("Contract value is $12 million. This is the official posted procurement record."),
     });
-    assert.equal(same.state, "unchanged");
+    assert.equal(checkState(same), "unchanged");
     const changed = await checkPageWatchFor(identity, created.id, {
       fetch: async () =>
         doc("Contract value is $13 million. This is the official posted procurement record."),
     });
-    assert.equal(changed.state, "changed");
+    assert.equal(checkState(changed), "changed");
     const detail = await pageWatchDetailFor(identity, created.id);
-    assert.equal(detail.history.length, 4);
-    assert.match(detail.history[0].diff, /12 million/);
-    assert.match(detail.history[0].diff, /13 million/);
+    assert.equal(detail!.history.length, 4);
+    assert.match(detail!.history[0]!.diff!, /12 million/);
+    assert.match(detail!.history[0]!.diff!, /13 million/);
   },
 );
 test(
@@ -239,8 +243,8 @@ test(
     await setPageWatchStateFor(identity, created.id, "active");
     await setPageWatchStateFor(identity, created.id, "stopped");
     const detail = await pageWatchDetailFor(identity, created.id);
-    assert.equal(detail.watch.watch_state, "stopped");
-    assert.equal(detail.history.length, 1);
+    assert.equal(detail!.watch.watch_state, "stopped");
+    assert.equal(detail!.history.length, 1);
   },
 );
 test(
@@ -276,7 +280,7 @@ test(
         return doc("not reached");
       },
     });
-    assert.equal(second.busy, true);
+    assert.equal("busy" in second && second.busy, true);
     release();
     await first;
     assert.equal(calls, 1);
@@ -292,6 +296,7 @@ test(
       fetch: async () =>
         doc("Public record changed from $12 million to $13 million in the posted contract."),
     });
+    assert.ok("checkId" in captured);
     const sql = await getSql();
     await sql.query(
       `create table if not exists leads(id serial primary key,user_id text,newsroom_id integer,headline text,why text,topic text,status text,source_urls text,evidence text,newsworthiness integer,investigation_id integer)`,
@@ -304,7 +309,7 @@ test(
       (
         await actOnPageWatchFor(identity, {
           watchId: other.id,
-          checkId: captured.checkId,
+          checkId: captured.checkId!,
           action: "lead",
           sectionKey: "schools",
         })
@@ -313,14 +318,14 @@ test(
     );
     const a = await actOnPageWatchFor(identity, {
       watchId: created.id,
-      checkId: captured.checkId,
+      checkId: captured.checkId!,
       action: "lead",
       sectionKey: "schools",
     });
     assert.ok(a.ok);
     const b = await actOnPageWatchFor(identity, {
       watchId: created.id,
-      checkId: captured.checkId,
+      checkId: captured.checkId!,
       action: "lead",
       sectionKey: "schools",
     });
@@ -342,8 +347,8 @@ test(
         doc("Scheduled checks retain the same trustworthy captured text and history."),
     });
     const detail = await pageWatchDetailFor(identity, created.id);
-    assert.equal(detail.history.length, 1);
-    assert.equal(detail.history[0].state, "first-capture");
+    assert.equal(detail!.history.length, 1);
+    assert.equal(detail!.history[0]!.state, "first-capture");
   },
 );
 
@@ -374,8 +379,8 @@ test(
     release();
     assert.equal((await stale).ok, false);
     const detail = await pageWatchDetailFor(identity, c.id);
-    assert.equal(detail.history.length, 1);
-    assert.match(detail.history[0].full_text, /NEW WORKER/);
+    assert.equal(detail!.history.length, 1);
+    assert.match(detail!.history[0]!.full_text, /NEW WORKER/);
     let resume!: () => void, signal!: () => void;
     const hold = new Promise<void>((r) => (resume = r)),
       inFlight = new Promise<void>((r) => (signal = r));
@@ -391,7 +396,7 @@ test(
     resume();
     await checking;
     const stopped = await pageWatchDetailFor(identity, c.id);
-    assert.equal(stopped.watch.watch_state, "stopped");
+    assert.equal(stopped!.watch.watch_state, "stopped");
     const sql = await getSql();
     const rows = await sql`select enabled from source_monitors where id=${c.id}`;
     assert.equal(rows[0]!.enabled, false);
@@ -407,6 +412,7 @@ test(
       fetch: async () => doc("The stored capture belongs only to this watched public record."),
     });
     assert.ok(result.ok);
+    assert.ok("checkId" in result);
     const sql = await getSql();
     const inv = await sql<{
       id: number;
@@ -453,7 +459,7 @@ test(
       ).ok,
       false,
     );
-    assert.equal((await pageWatchDetailFor(identity, c.id)).history.length, 0);
+    assert.equal((await pageWatchDetailFor(identity, c.id))!.history.length, 0);
   },
 );
 
@@ -472,8 +478,8 @@ test(
     assert.equal(duplicate.id, c.id);
     assert.equal(duplicate.alreadyExists, true);
     const detail = await pageWatchDetailFor(identity, c.id);
-    assert.equal(detail.watch.title, "Watch duplicate");
-    assert.equal(detail.watch.watch_state, "stopped");
+    assert.equal(detail!.watch.title, "Watch duplicate");
+    assert.equal(detail!.watch.watch_state, "stopped");
   },
 );
 
@@ -501,7 +507,7 @@ test(
     const versions =
       await sql`select count(*)::int as n from artifact_versions where full_text like ${"%STALE_BOUNDARY_CAPTURE%"}`;
     assert.equal(versions[0]!.n, 0);
-    assert.equal((await pageWatchDetailFor(identity, c.id)).history.length, 1);
+    assert.equal((await pageWatchDetailFor(identity, c.id))!.history.length, 1);
   },
 );
 
@@ -530,9 +536,9 @@ test(
     assert.ok(newer);
     assert.ok((await newer).ok);
     const detail = await pageWatchDetailFor(identity, c.id);
-    assert.equal(detail.history.length, 2);
-    assert.match(detail.history[0].full_text, /Newer worker/);
-    assert.match(detail.history[1].full_text, /Old worker/);
+    assert.equal(detail!.history.length, 2);
+    assert.match(detail!.history[0]!.full_text, /Newer worker/);
+    assert.match(detail!.history[1]!.full_text, /Old worker/);
   },
 );
 

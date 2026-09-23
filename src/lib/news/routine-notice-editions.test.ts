@@ -128,7 +128,7 @@ test("routes explicit cancellation and non-scheduled event statuses to review", 
     { issuer: "Arts", title: "Concert", start: "2026-09-08T18:00:00-06:00", venue: "Park", eventStatus: "EventCancelled" },
     { issuer: "Arts", title: "Concert", start: "2026-09-08T18:00:00-06:00", venue: "Park", cancellation: "postponed" },
   ]) {
-    const result = eligibleRoutineNotices([n("community-arts-event-logistics", fields, "cancel")], "2026-09-08", "America/Denver");
+    const result = eligibleRoutineNotices([n("community-arts-event-logistics", fields as unknown as Record<string, string>, "cancel")], "2026-09-08", "America/Denver");
     assert.equal(result.eligible.length, 0);
     assert.equal(result.review.length, 1);
   }

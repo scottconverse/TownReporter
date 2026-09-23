@@ -1437,15 +1437,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     const { forcedOcrOptions, runForcedChat, validateForcedRuntime } = await import("./forced-runtime.server.ts");
     const validateBatchRuntime = deps.validateBatchRuntime ?? validateForcedRuntime;
     let activeBatchSnapshot = batchSnapshot;
-    const adapters =
-      deps.batchChatAdapters ??
-      ({
+    const adapters = {
         claude: async (input) => (await import("./ai-claude-code.server.ts")).claudeCodeChat(input),
         codex: async (input) => (await import("./ai-codex.server.ts")).codexChat(input),
         local: grokChat,
         custom: grokChat,
         xai: grokChat,
-      } satisfies NonNullable<PerformDraftWorkDeps["batchChatAdapters"]>);
+        ...deps.batchChatAdapters,
+      } satisfies Required<NonNullable<PerformDraftWorkDeps["batchChatAdapters"]>>;
     reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
       await batchGuard();
       const switchState: { receipt: null | {

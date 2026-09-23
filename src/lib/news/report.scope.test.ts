@@ -1,7 +1,7 @@
 import { NAME_INVENTORY_SYSTEM } from "./name-check-work.ts";
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { reportAndDraft, REPORT_RESEARCH_SYSTEM, REPORT_WRITE_SYSTEM, REPORT_EDIT_SYSTEM, linkOutletInBody, type FetchedDoc } from "./report.ts";
+import { reportAndDraft, REPORT_RESEARCH_SYSTEM, REPORT_WRITE_SYSTEM, REPORT_EDIT_SYSTEM, linkOutletInBody, type FetchedDoc, type ReportDeps } from "./report.ts";
 import type { LeadRow } from "./types.ts";
 import { runAbsenceGate } from "./absence-gate.ts";
 import { draftSourceInputs } from "./draft-input.ts";
@@ -252,7 +252,7 @@ it("keeps a useful overlong draft with an honest form and visible length warning
   }
   assert.equal(calls, 3);
 });
-function dependencies(log: { searches: string[]; fetched: string[]; packets: string[] }) {
+function dependencies(log: { searches: string[]; fetched: string[]; packets: string[] }): ReportDeps {
   return {
     paper: async () => ({ name: "TownReporter", city: "Longmont", state: "Colorado", officialDomains: [] }),
     search: async (q: string) => { log.searches.push(q); return [{ url: alien, title: "Test automation vendor raises money" }]; },

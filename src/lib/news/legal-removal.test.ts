@@ -337,6 +337,7 @@ it("descriptor removal preserves independent drafts and refuses completion from 
     { headline: "Control", body: "Control", appendix: "", factSheet: "", imagePrompt: "" },
     "claude-frontier",
   );
+  if (!before.ok) assert.fail(before.error);
   assert.equal(
     before.draftId,
     otherDraft.id,

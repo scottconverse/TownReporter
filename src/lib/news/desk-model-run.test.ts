@@ -63,7 +63,7 @@ const successfulDraft: ReportedDraftResult = {
   unanswered: [],
   research_memo: {} as ReportedDraftResult extends { research_memo: infer R } ? R : never,
   claims: [],
-} as ReportedDraftResult;
+} as unknown as ReportedDraftResult;
 
 describe("runPinnedCallWithFailover", () => {
   it("retries only the failed pinned Queue call on a ready technical fallback", async () => {
@@ -81,7 +81,7 @@ describe("runPinnedCallWithFailover", () => {
           ? { ok: false as const, error: LIVE_TIMEOUT_NO_OUTPUT }
           : { ok: true as const, text: "draft" };
       },
-      probe: async (choice) => ({ ok: true, label: "Claude Sonnet", choice }),
+      probe: async (choice) => ({ ok: true, label: "Claude Sonnet", choice: (choice ?? "claude-sonnet") as any }),
       resolve: async (choice) => {
         assert.equal(choice, "claude-sonnet");
         return fallback;

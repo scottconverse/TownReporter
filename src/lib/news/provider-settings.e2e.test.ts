@@ -128,7 +128,7 @@ if (dbProbe.ok) {
       values (${OWNER_ID}, 'owner', ${NEWSROOM_ID})
       on conflict (user_id) do update set role = 'owner', newsroom_id = ${NEWSROOM_ID}
     `;
-  }, 60_000);
+  }, { timeout: 60_000 });
 
   after(async () => {
     await closePoolForTests?.();
@@ -142,7 +142,7 @@ if (dbProbe.ok) {
       .catch(() => undefined);
     await admin.query(`DROP DATABASE IF EXISTS ${dbName}`);
     await admin.end();
-  }, 30_000);
+  }, { timeout: 30_000 });
 }
 
 describe("provider_settings round-trips on a real Postgres", { skip }, () => {

@@ -233,7 +233,7 @@ describe("Opinion completion commit", () => {
         { checkEditorialNames: skipNameCheck, setJobStage: async () => undefined },
       );
       assert.equal(result.ok, true);
-      if (!result.ok) assert.fail(result.error);
+      if (!result.ok) assert.fail((result as any).error);
 
       const [stored] = await sql<{
         draft_id: number;
@@ -320,7 +320,7 @@ describe("Opinion completion commit", () => {
       TEST_EDITORIAL,
     );
     assert.equal(filed.ok, true);
-    if (!filed.ok) assert.fail(filed.error);
+    if (!filed.ok) assert.fail((filed as any).error);
     const request = await insertRequest(sql, {
       userId,
       modelChoice: "claude-frontier",
@@ -417,7 +417,7 @@ describe("Opinion completion commit", () => {
         { checkEditorialNames: skipNameCheck, setJobStage: async () => undefined },
       );
       assert.equal(filed.ok, true);
-      if (!filed.ok) assert.fail(filed.error);
+      if (!filed.ok) assert.fail((filed as any).error);
       releaseFailure();
       await delayedFailure;
 

@@ -101,7 +101,7 @@ describe("reportAndDraft progress stages", { timeout: 30_000 }, () => {
     };
     const success = await reportAndDraft(
       { userId: "stage-success", lead, urls: [SOURCE], memory: [] },
-      { ...baseDeps, chat: successChat, onStage: async (stage) => successStages.push(stage) },
+    { ...baseDeps, chat: successChat, onStage: async (stage) => { successStages.push(stage); } },
     );
     assert.ok(!("error" in success), "mocked normal pipeline should succeed");
     assert.deepEqual(successStages, expected);
@@ -114,7 +114,7 @@ describe("reportAndDraft progress stages", { timeout: 30_000 }, () => {
     };
     const failure = await reportAndDraft(
       { userId: "stage-failure", lead, urls: [SOURCE], memory: [] },
-      { ...baseDeps, chat: failureChat, onStage: async (stage) => failureStages.push(stage) },
+    { ...baseDeps, chat: failureChat, onStage: async (stage) => { failureStages.push(stage); } },
     );
     assert.deepEqual(failure, { error: "Mock drafting failure" });
     assert.equal(failureStages.at(-1), "Writing the draft");

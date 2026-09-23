@@ -195,12 +195,12 @@ describe("routine notice structural contracts", () => {
   });
 
   it("accepts explicit online participation instead of requiring a physical place", () => {
-    const library = structuredClone(valid[0]);
+    const library = structuredClone(valid[0]) as any;
     delete library.fields.location;
     library.fields.participationUrl = field("https://civic.example/story-time", "/join");
     assert.equal(validateRoutineNotice(library).valid, true);
 
-    const event = structuredClone(valid[2]);
+    const event = structuredClone(valid[2]) as any;
     delete event.fields.venue;
     event.fields.onlineUrl = field("https://civic.example/concert", "$.url");
     assert.equal(validateRoutineNotice(event).valid, true);
@@ -243,8 +243,8 @@ describe("routine notice structural contracts", () => {
     const result = validateRoutineNotice(valid[0]);
     assert.equal(result.valid, true);
     if (!result.valid) return;
-    assert.deepEqual(result.notice.fields.start, valid[0].fields.start);
-    assert.equal(result.notice.normalizedFields.start, valid[0].fields.start.value);
+    assert.deepEqual(result.notice.fields.start, (valid[0].fields as any).start);
+    assert.equal(result.notice.normalizedFields.start, (valid[0].fields as any).start.value);
     assert.notEqual(result.notice.normalizedFields, result.notice.fields);
     assert.equal(result.notice.provenanceVerification, "unverified");
     assert.equal("eligible" in result, false);
@@ -252,7 +252,7 @@ describe("routine notice structural contracts", () => {
   });
 
   it("rejects ambiguous local timestamps but preserves explicit date-only values", () => {
-    const ambiguous = structuredClone(valid[0]);
+    const ambiguous = structuredClone(valid[0]) as any;
     ambiguous.fields.start = field("2026-11-01T01:30:00", "$.startDate");
     assert.deepEqual(validateRoutineNotice(ambiguous), {
       valid: false,
@@ -270,7 +270,7 @@ describe("routine notice structural contracts", () => {
 
   it("rejects skipped and repeated zoned local times while accepting a unique one", () => {
     for (const start of ["2026-03-08T02:30:00", "2026-11-01T01:30:00"]) {
-      const input = structuredClone(valid[0]);
+      const input = structuredClone(valid[0]) as any;
       input.fields.start = field(start, "$.startDate");
       input.fields.timezone = field("America/Denver", "paper.timezone");
       assert.deepEqual(validateRoutineNotice(input), {
@@ -280,14 +280,14 @@ describe("routine notice structural contracts", () => {
       });
     }
 
-    const unique = structuredClone(valid[0]);
+    const unique = structuredClone(valid[0]) as any;
     unique.fields.start = field("2026-03-08T03:30:00", "$.startDate");
     unique.fields.timezone = field("America/Denver", "paper.timezone");
     assert.equal(validateRoutineNotice(unique).valid, true);
   });
 
   it("requires structurally complete, but still unverified, provenance", () => {
-    const input = structuredClone(valid[0]);
+    const input = structuredClone(valid[0]) as any;
     input.provenance.sourceId = 0;
     assert.deepEqual(validateRoutineNotice(input), {
       valid: false,
@@ -298,7 +298,7 @@ describe("routine notice structural contracts", () => {
 
   it("builds stable fingerprint material independent of field insertion order", () => {
     const first = validateRoutineNotice(valid[0]);
-    const reordered = structuredClone(valid[0]);
+    const reordered = structuredClone(valid[0]) as any;
     reordered.fields = Object.fromEntries(
       Object.entries(reordered.fields).reverse(),
     ) as typeof reordered.fields;
@@ -322,7 +322,7 @@ describe("routine notice structural contracts", () => {
       "2026-11-01T10:00:00.5",
       "0096-02-30",
     ]) {
-      const input = structuredClone(valid[0]);
+      const input = structuredClone(valid[0]) as any;
       input.fields.start = field(start, "$.startDate");
       assert.deepEqual(validateRoutineNotice(input), {
         valid: false,
@@ -347,23 +347,23 @@ describe("routine notice structural contracts", () => {
 
   it("enforces structural URL, boolean, status, and time-order fields", () => {
     const cases: Array<[RoutineNoticeInput, string]> = [];
-    const url = structuredClone(valid[3]);
+    const url = structuredClone(valid[3]) as any;
     url.fields.registrationUrl = field("javascript:alert(1)", "/registrationUrl");
     cases.push([url, "registrationUrl"]);
 
-    const boolean = structuredClone(valid[1]);
+    const boolean = structuredClone(valid[1]) as any;
     boolean.fields.registrationRequired = field("maybe", "/registrationRequired");
     cases.push([boolean, "registrationRequired"]);
 
-    const status = structuredClone(valid[2]);
+    const status = structuredClone(valid[2]) as any;
     status.fields.cancellation = field("not sure", "$.eventStatus");
     cases.push([status, "cancellation"]);
 
-    const timezone = structuredClone(valid[0]);
+    const timezone = structuredClone(valid[0]) as any;
     timezone.fields.timezone = field("Mars/Olympus", "paper.timezone");
     cases.push([timezone, "timezone"]);
 
-    const reversed = structuredClone(valid[0]);
+    const reversed = structuredClone(valid[0]) as any;
     reversed.fields.end = field("2026-11-01T09:00:00-07:00", "$.endDate");
     cases.push([reversed, "end"]);
 
@@ -375,7 +375,7 @@ describe("routine notice structural contracts", () => {
       });
     }
 
-    const requiredLink = structuredClone(valid[1]);
+    const requiredLink = structuredClone(valid[1]) as any;
     delete requiredLink.fields.registrationUrl;
     requiredLink.fields.registrationRequired = field("true", "/registrationRequired");
     assert.deepEqual(validateRoutineNotice(requiredLink), {
@@ -386,7 +386,7 @@ describe("routine notice structural contracts", () => {
   });
 
   it("accepts a unique local HH:mm value and renders its explicit timezone", () => {
-    const input = structuredClone(valid[0]);
+    const input = structuredClone(valid[0]) as any;
     input.fields.start = field("2026-09-08T10:00", "$.startDate");
     input.fields.timezone = field("America/Denver", "paper.timezone");
     const result = validateRoutineNotice(input);
@@ -395,7 +395,7 @@ describe("routine notice structural contracts", () => {
   });
 
   it("rejects an explicit offset that contradicts the source-asserted named timezone", () => {
-    const input = structuredClone(valid[0]);
+    const input = structuredClone(valid[0]) as any;
     input.fields.start = field("2026-07-01T10:00:00-07:00", "$.startDate");
     input.fields.timezone = field("America/Denver", "$.timezone");
     assert.deepEqual(validateRoutineNotice(input), {

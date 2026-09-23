@@ -200,7 +200,7 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     assert.equal(args.includes("--disable"), true);
     assert.equal(args.includes("read-only"), true);
     assert.equal(args.includes("--ignore-user-config"), true);
-    assert.equal(args.includes("--ignore-rules"), false);
+    assert.equal((args as string[]).includes("--ignore-rules"), false);
     assert.equal(args.includes("--skip-git-repo-check"), true);
   });
 

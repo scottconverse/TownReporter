@@ -466,7 +466,7 @@ describe("grokChat", () => {
           calls.push(`resolve:${newsroomId}:${id}`);
           return { baseUrl: "https://custom.example/v1", modelId: "custom-model", apiKey: "test-secret" };
         },
-        openai: async (provider) => {
+        openai: async (provider: { baseUrl: string; model: string; label: string }) => {
           calls.push(`openai:${provider.baseUrl}:${provider.model}:${provider.label}`);
           return { ok: true as const, text: "custom answer" };
         },

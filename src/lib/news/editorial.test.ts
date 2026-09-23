@@ -6,6 +6,7 @@ import {
   opinionHeadline,
   parseEditorial,
 } from "./editorial.ts";
+import type { EditorialOrchestrationRuntime as EditorialRuntime, WriteEditorialInput } from "./editorial-orchestration.ts";
 
 /** The shape the voice file says it delivers, in its stated order. */
 const DELIVERED = `The rail district wants your money twice
@@ -278,45 +279,7 @@ describe("the editorial writer respects a disabled CLI", () => {
 
 type EditorialChatResult = { ok: true; text: string } | { ok: false; error: string };
 
-type EditorialRuntime = {
-  findVoiceFile: () => Promise<
-    { ok: true; voice: { path: string; bytes: number } } | { ok: false; error: string }
-  >;
-  runClaudePair: () => Promise<EditorialChatResult>;
-  runLocalPair: () => Promise<EditorialChatResult>;
-  runCustomPair: () => Promise<EditorialChatResult>;
-  fileEditorial: () => Promise<{
-    ok: true;
-    draftId: number;
-    headline: string;
-    words: number;
-    hadAppendix: boolean;
-  }>;
-  timeoutMs: () => number;
-};
-
-type EditorialOrchestrator = (
-  input: {
-    userId: string;
-    newsroomId: number;
-    subject: string;
-    pointers: [];
-    sourceKind: string;
-    sourceRef: string;
-    modelChoice: string;
-  },
-  runtime: EditorialRuntime,
-) => Promise<
-  | {
-      ok: true;
-      draftId: number;
-      headline: string;
-      words: number;
-      hadAppendix: boolean;
-      modelChoice: "claude-frontier" | "local-model";
-    }
-  | { ok: false; error: string }
->;
+type EditorialOrchestrator = typeof import("./editorial-orchestration.ts").orchestrateEditorial;
 
 async function loadEditorialOrchestrator(): Promise<EditorialOrchestrator> {
   const loaded = await import("./editorial-orchestration.ts").catch(() => ({}));
@@ -329,7 +292,7 @@ async function loadEditorialOrchestrator(): Promise<EditorialOrchestrator> {
   return candidate as EditorialOrchestrator;
 }
 
-const ORCHESTRATION_INPUT = {
+const ORCHESTRATION_INPUT: WriteEditorialInput = {
   userId: "editor-1",
   newsroomId: 1,
   subject: "Longmont budget",
@@ -456,7 +419,7 @@ describe("Opinion routes the exact selected cloud model", () => {
       claudeRuntime(events, { ok: true, text: DELIVERED }),
     );
     assert.equal(result.ok, true);
-    if (!result.ok) assert.fail(result.error);
+    if (!result.ok) assert.fail((result as { error: string }).error);
     assert.equal(result.modelChoice, "codex-frontier");
     assert.deepEqual(events, ["voice:locate", "codex", "file"]);
   });
@@ -480,7 +443,7 @@ describe("Opinion routes the exact selected cloud model", () => {
       claudeRuntime(events, { ok: true, text: DELIVERED }),
     );
     assert.equal(result.ok, true);
-    if (!result.ok) assert.fail(result.error);
+    if (!result.ok) assert.fail((result as { error: string }).error);
     assert.equal(result.modelChoice, "codex-frontier");
     assert.deepEqual(events, ["voice:locate", "codex", "file"]);
   });
@@ -499,7 +462,7 @@ describe("Opinion routes the exact selected cloud model", () => {
         { ...ORCHESTRATION_INPUT, modelChoice: choice },
         runtime,
       );
-      assert.equal(result.ok, true, result.ok ? "" : result.error);
+      assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
       if (result.ok) assert.equal(result.modelChoice, choice);
       assert.deepEqual(events, ["voice:locate", "codex", "file"]);
     });
@@ -524,7 +487,7 @@ describe("Opinion routes the exact selected cloud model", () => {
         { ...ORCHESTRATION_INPUT, modelChoice: choice },
         runtime,
       );
-      assert.equal(result.ok, true, result.ok ? "" : result.error);
+      assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
       if (result.ok) assert.equal(result.modelChoice, choice);
       assert.deepEqual(events, ["voice:locate", "claude", "file"]);
     });
@@ -549,7 +512,7 @@ describe("Opinion routes the exact selected cloud model", () => {
     );
     assert.equal(result.ok, false);
     if (result.ok) assert.fail("filed on a failed pair");
-    assert.match(result.error, /Claude is unavailable/);
+    assert.match((result as { error: string }).error, /Claude is unavailable/);
     assert.equal(events.includes("file"), false);
   });
 
@@ -567,7 +530,7 @@ describe("Opinion routes the exact selected cloud model", () => {
       );
       assert.equal(result.ok, false);
       if (result.ok) assert.fail("a refusal was filed");
-      assert.match(result.error, /declined|Nothing was filed/i);
+      assert.match((result as { error: string }).error, /declined|Nothing was filed/i);
       assert.equal(events.includes("file"), false);
     });
   }
@@ -583,7 +546,7 @@ describe("Opinion routes the exact selected cloud model", () => {
       ORCHESTRATION_INPUT,
       claudeRuntime(events, { ok: true, text: piece }),
     );
-    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     assert.equal(events.includes("file"), true);
   });
 
@@ -602,7 +565,7 @@ describe("Opinion routes the exact selected cloud model", () => {
       return { ok: true, text: DELIVERED };
     };
     const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
-    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (result.ok) assert.equal(result.modelChoice, "claude-sonnet");
     assert.deepEqual(events, ["voice:locate", "codex", "claude", "file"]);
   });
@@ -618,7 +581,7 @@ describe("Opinion routes the exact selected cloud model", () => {
     const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
     assert.equal(result.ok, false);
     assert.deepEqual(events, ["voice:locate", "codex"]);
-    if (!result.ok) assert.match(result.error, /declined this request/i);
+    if (!result.ok) assert.match((result as { error: string }).error, /declined this request/i);
   });
 });
 
@@ -637,7 +600,7 @@ describe("Opinion runs one Local model pair when explicitly picked", () => {
       { ...ORCHESTRATION_INPUT, modelChoice: "local-model" },
       localRuntime(events, { ok: true, text: DELIVERED }),
     );
-    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (!result.ok) return;
     assert.equal(result.modelChoice, "local-model");
     assert.deepEqual(events, ["voice:locate", "local", "file"]);
@@ -668,7 +631,7 @@ describe("Opinion runs one Local model pair when explicitly picked", () => {
       { ...ORCHESTRATION_INPUT, modelChoice: "local-model" },
       runtime,
     );
-    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (!result.ok) return;
     assert.equal(result.modelChoice, "codex-frontier");
     assert.deepEqual(events, ["voice:locate", "local", "codex", "file"]);
@@ -686,7 +649,7 @@ describe("Opinion runs one Local model pair when explicitly picked", () => {
     );
     assert.equal(result.ok, false);
     if (result.ok) assert.fail("a refusal was filed");
-    assert.match(result.error, /declined|Nothing was filed/i);
+    assert.match((result as { error: string }).error, /declined|Nothing was filed/i);
     assert.equal(events.includes("file"), false);
   });
 });
@@ -700,7 +663,7 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
       { ...ORCHESTRATION_INPUT, modelChoice: choice },
       customRuntime(events, { ok: true, text: DELIVERED }),
     );
-    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (!result.ok) return;
     assert.equal(result.modelChoice, choice);
     assert.deepEqual(events, ["voice:locate", "custom", "file"]);
@@ -713,7 +676,7 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
       { ...ORCHESTRATION_INPUT, modelChoice: "grok-oauth" },
       customRuntime(events, { ok: true, text: DELIVERED }),
     );
-    assert.equal(result.ok, true, result.ok ? "" : result.error);
+    assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (!result.ok) return;
     assert.equal(result.modelChoice, "grok-oauth");
     assert.deepEqual(events, ["voice:locate", "custom", "file"]);

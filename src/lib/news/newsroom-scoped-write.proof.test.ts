@@ -68,7 +68,7 @@ describe("a newsroom-scoped write lands in the caller's own newsroom, not always
     const res = await writeStoryForAuthenticatedEditor(
       { context: { userId, newsroomId: 2 }, text, modelChoice: "auto" },
       {
-        probeProvider: async () => ({ ok: true as const, choice: "claude-frontier" as const }),
+        probeProvider: async () => ({ ok: true as const, label: "Claude Frontier", choice: "claude-frontier" as const }),
         enqueueJob: async (opts) => enqueueJob({ ...opts, kick: false }),
       },
     );
@@ -109,7 +109,7 @@ describe("a newsroom-scoped write lands in the caller's own newsroom, not always
     const res = await writeStoryForAuthenticatedEditor(
       { context: { userId, newsroomId: 1 }, text, modelChoice: "auto" },
       {
-        probeProvider: async () => ({ ok: true as const, choice: "claude-frontier" as const }),
+        probeProvider: async () => ({ ok: true as const, label: "Claude Frontier", choice: "claude-frontier" as const }),
         enqueueJob: async (opts) => enqueueJob({ ...opts, kick: false }),
       },
     );

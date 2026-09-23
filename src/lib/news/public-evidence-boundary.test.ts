@@ -35,8 +35,8 @@ test("public article serialization excludes private provenance and findings from
   const result=publicArticle(article({}));
   assert.deepEqual(result.provenance,[{url:"https://public.example/record",version_id:11,capture_event_id:21,role:"record"}]);
   assert.deepEqual(result.findings,[{text:"Public finding",source_urls:["https://public.example/record"],artifact_version_ids:[11],capture_event_ids:[21],locators:[],excerpt:undefined}]);
-  assert.deepEqual(JSON.parse(result.provenance_json),result.provenance);
-  assert.deepEqual(JSON.parse(result.found_note),JSON.parse(JSON.stringify(result.findings)));
+  assert.deepEqual(JSON.parse(result.provenance_json!),result.provenance);
+  assert.deepEqual(JSON.parse(result.found_note!),JSON.parse(JSON.stringify(result.findings)));
   assert.doesNotMatch(JSON.stringify(result),/private\.example|Private finding/);
 });
 

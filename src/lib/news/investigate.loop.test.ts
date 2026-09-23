@@ -303,7 +303,7 @@ describe("researchLoop integration", { timeout: 120000 }, () => {
   it("lets the bounded post-search selector choose a later hit before automatic discovery", async () => {
     const user = `loop-post-search-selector-${Date.now()}`;
     const { id } = await bootInv(user, "Investigate award record");
-    const hits = [1, 2, 3].map((n) => ({ title: `Award result ${n}`, url: `https://records.example/result-${n}` }));
+    const hits = [1, 2, 3].map((n) => ({ title: `Award result ${n}`, url: `https://records.example/result-${n}`, snippet: "" }));
     const fetched: string[] = [];
     let selectorPack = "";
     const result = await researchLoop({
@@ -341,7 +341,7 @@ describe("researchLoop integration", { timeout: 120000 }, () => {
         calls++;
         return { ...emptyPlan(), planner_error: "selector unavailable", fetch_urls: ["https://records.example/heuristic-not-selected"] };
       },
-      searchAttempt: async () => ({ state: "SEARCH_SUCCESS_RESULTS", hits: [{ title: "Actual award", url: source }], provider: "test" }),
+      searchAttempt: async () => ({ state: "SEARCH_SUCCESS_RESULTS", hits: [{ title: "Actual award", url: source, snippet: "" }], provider: "test" }),
       fetch: async (url) => { fetched.push(url); return { ok: true, status: 200, text: "Actual award record.", title: "Award", extras: [] }; },
       archives: async () => [],
     });

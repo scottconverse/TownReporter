@@ -70,10 +70,11 @@ it(
   { skip, timeout: 15000 },
   async () => {
     const fake = async () => ({
-      runtime: "codex-terra" as const,
-      modelChoice: "codex-balanced",
+      requestedRuntime: "codex-balanced" as const, requestedEffort: null, resolvedRuntime: "codex-balanced" as const, switchReason: null, switchNote: null,
+        runtime: "codex-terra" as const,
+      modelChoice: "codex-balanced" as const,
       model: "registry-model",
-      transport: "codex",
+      transport: "codex" as const,
     });
     await Promise.all([
       daily.tickDailyScans(new Date("2026-09-04T13:00:00Z"), {

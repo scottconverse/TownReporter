@@ -134,14 +134,14 @@ describe("monitor change outcomes", () => {
 describe("internal evidence gaps", () => {
   it("does not turn absent citations into new civic leads", () => {
     assert.deepEqual(rankWorthItems({ anomalies: [
-      { kind: "anomaly", summary: "No cited official document links the participant to a named office.", url: null },
-      { kind: "anomaly", summary: "No cited contest-specific record establishes the count.", url: null },
+      { kind: "anomaly", summary: "No cited official document links the participant to a named office.", details: "", url: null },
+      { kind: "anomaly", summary: "No cited contest-specific record establishes the count.", details: "", url: null },
     ] }), []);
   });
 
   it("does not invent monitoring provenance for a generic investigation anomaly", () => {
     const [card] = rankWorthItems({ anomalies: [
-      { kind: "anomaly", summary: "Two firms share an address; the relationship is unverified.", url: null },
+      { kind: "anomaly", summary: "Two firms share an address; the relationship is unverified.", details: "", url: null },
     ] }).map(presentWorthItem);
     assert.match(card.why, /investigation follow-up/i);
     assert.doesNotMatch(card.why, /monitored public record/i);

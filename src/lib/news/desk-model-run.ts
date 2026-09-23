@@ -163,7 +163,7 @@ export type PerformDraftWorkDeps = {
   setJobModelRuntime?: typeof setJobModelRuntime;
   setJobStage?: typeof setJobStage;
   setJobFailoverNote?: typeof setJobFailoverNote;
-  batchChatAdapters?: {
+  batchChatAdapters?: Partial<{
     claude: (input: {
       system: string;
       user: string;
@@ -181,7 +181,7 @@ export type PerformDraftWorkDeps = {
     local: typeof import("./ai.ts").grokChat;
     custom: typeof import("./ai.ts").grokChat;
     xai: typeof import("./ai.ts").grokChat;
-  };
+  }>;
   batchOcrAdapters?: import("./ocr.ts").OcrAdapters;
   /** Hermetic resolver for batch failover tests; production uses the shared
    * forced-runtime validator. */

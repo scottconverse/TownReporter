@@ -19,7 +19,7 @@ afterEach(() => {
 
 function serveScan(): void {
   setFetchImplForTests(async () =>
-    new Response(singleRenderedPdfFixture(), {
+    new Response(Buffer.from(singleRenderedPdfFixture()), {
       headers: { "content-type": "application/pdf" },
     }),
   );
@@ -195,7 +195,7 @@ describe("ordinary public-document OCR model routing", () => {
         ],
         adapters: {
           codex: async (_image, _timeoutMs, model) => {
-            if (model.model === "gpt-5.6-terra") {
+            if (model!.model === "gpt-5.6-terra") {
               throw new Error("Codex request timed out after 90s, 0 bytes out");
             }
             laterReadyCalls += 1;

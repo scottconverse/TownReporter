@@ -9,7 +9,7 @@ import { resetLocalDiscoveryReachableForTests } from "./provider-registry.ts";
 
 const ENV_KEYS = ["LLM_BASE_URL", "LLM_MODEL", "TOWNREPORTER_LOCAL_DISCOVERY"];
 
-function withEnv(vars: Record<string, string | undefined>, fn: () => Promise<void>) {
+function withEnv<T>(vars: Record<string, string | undefined>, fn: () => Promise<T>): Promise<T> {
   const prev: Record<string, string | undefined> = {};
   for (const k of ENV_KEYS) {
     prev[k] = process.env[k];

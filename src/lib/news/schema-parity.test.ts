@@ -243,7 +243,7 @@ if (dbProbe.ok) {
       (newsroom_id,request_id,source_id,source_url_hash,format_key,policy_revision,adapter_key,adapter_version,state,actor)
       values (8811,'00000000-0000-4000-8000-000000000881',${routineSource.id},'proof','library-notice',1,
         'schema-event-jsonld',1,'capture-failed','pg-legal-other')`,/legal removal/);
-  }, 60_000);
+  }, { timeout: 60_000 });
 
   after(async () => {
     await closePoolForTests?.();
@@ -259,7 +259,7 @@ if (dbProbe.ok) {
       await admin.query(`DROP DATABASE IF EXISTS ${name}`);
     }
     await admin.end();
-  }, 30_000);
+  }, { timeout: 30_000 });
 }
 
 /** table -> sorted column names, for every base table in the public schema. */

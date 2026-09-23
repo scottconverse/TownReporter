@@ -69,8 +69,9 @@ describe("scan history paging (P0-4, >50 runs)", () => {
 */
 describe("scan history refresh (a running scan must be able to change on screen)", () => {
   it("takes the newer values when the same run is refetched", () => {
-    const running = [{ id: 47, finished_at: null, error: null, leads: 0 }];
-    const finished = [{ id: 47, finished_at: "2026-09-22T20:00:00Z", error: null, leads: 9 }];
+    type Row = { id: number; finished_at: string | null; error: string | null; leads: number };
+    const running: Row[] = [{ id: 47, finished_at: null, error: null, leads: 0 }];
+    const finished: Row[] = [{ id: 47, finished_at: "2026-09-22T20:00:00Z", error: null, leads: 9 }];
     const merged = accumulateScanPages(running, finished);
     assert.equal(merged.length, 1, "the same run must not be duplicated");
     assert.equal(merged[0].finished_at, "2026-09-22T20:00:00Z", "the newer row must win");
@@ -78,8 +79,9 @@ describe("scan history refresh (a running scan must be able to change on screen)
   });
 
   it("lets a run go from error-free to failed on refresh", () => {
-    const running = [{ id: 47, finished_at: null, error: null }];
-    const failed = [{ id: 47, finished_at: "2026-09-22T20:00:00Z", error: "provider refused" }];
+    type Row = { id: number; finished_at: string | null; error: string | null };
+    const running: Row[] = [{ id: 47, finished_at: null, error: null }];
+    const failed: Row[] = [{ id: 47, finished_at: "2026-09-22T20:00:00Z", error: "provider refused" }];
     const merged = accumulateScanPages(running, failed);
     assert.equal(merged[0].error, "provider refused", "a failure must be able to appear");
   });
@@ -97,6 +99,6 @@ describe("scan history refresh (a running scan must be able to change on screen)
     const second = [{ id: 4, v: 2 }, { id: 3, v: 1 }];
     const merged = accumulateScanPages(first, second);
     assert.deepEqual(merged.map((r) => r.id), [5, 4, 3], "no duplicates");
-    assert.equal(merged.find((r) => r.id === 4).v, 2, "overlap must take the newer copy");
+    assert.equal(merged.find((r) => r.id === 4)!.v, 2, "overlap must take the newer copy");
   });
 });

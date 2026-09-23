@@ -37,6 +37,7 @@ describe("meeting lead", () => {
     assert.match(write!.text, /on conflict \(newsroom_id,meeting_video_id,meeting_artifact_id,meeting_lead_purpose\)/i, "the database must enforce one lead per artifact and purpose");
     const notes = JSON.parse(String(write!.params[9])) as {
       meeting: { videoId: string; artifactId: number };
+      scratch: string;
       transcriptCitations: { segmentIndex: number; captionSha256: string; timestamp: string }[];
     };
     assert.equal(notes.meeting.videoId, "L1AnMLsLwtk");

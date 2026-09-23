@@ -40,7 +40,7 @@ it("reads a 15-page PDF through its final page, beyond the old 12-page OCR limit
     async () => {},
   );
   assert.equal(result.pages, 15);
-  assert.match(result.text, /FINAL PAGE DECISION: approve 731250 dollars/);
+  assert.match(result.text ?? "", /FINAL PAGE DECISION: approve 731250 dollars/);
 });
 it("preserves every character in a long transcript and every reading chunk", async () => {
   const original =
@@ -83,7 +83,7 @@ it("extracts Word body text without dropping the final paragraph", async () => {
     1,
     async () => {},
   );
-  assert.match(result.text, /WORD DOCUMENT DECISION: library opens October 23/);
+  assert.match(result.text ?? "", /WORD DOCUMENT DECISION: library opens October 23/);
 });
 it("validates supported file types and fails visibly instead of truncating oversized text", () => {
   for (const ext of ["md", "txt", "pdf", "png", "jpg", "webp", "doc", "docx", "srt", "vtt", "csv"])
@@ -171,7 +171,7 @@ it("retains multipart bytes exactly and rejects cross-newsroom, skipped and repe
   const rows = await sql.query("select original,status from story_documents where id=$1", [
     saved.id,
   ]);
-  assert.deepEqual(Buffer.from(rows[0].original), Buffer.concat([first, last]));
+  assert.deepEqual(Buffer.from((rows[0] as any).original), Buffer.concat([first, last]));
   assert.equal(rows[0].status, "uploaded");
   await assert.rejects(
     () =>

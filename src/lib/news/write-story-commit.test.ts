@@ -76,7 +76,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
       }, {
         getSql: async () => sql, getSections: async () => sectionConfig,
         audit: async () => {}, assertRate: async () => {},
-        probeProvider: async () => ({ ok: true, choice: "claude-frontier" }),
+        probeProvider: async () => ({ ok: true, label: "Claude Frontier", choice: "claude-frontier" }),
         enqueueJob: opts => enqueueJob({ ...opts, kick: false }),
       });
       assert.ok(result.ok);
@@ -98,7 +98,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
         getSections: async (newsroomId) => { assert.equal(newsroomId, 820); return sectionConfig; },
         getSql: async () => { touched = true; return sql; },
         audit: async () => {}, assertRate: async () => {},
-        probeProvider: async () => ({ ok: true, choice: "claude-frontier" }),
+        probeProvider: async () => ({ ok: true, label: "Claude Frontier", choice: "claude-frontier" }),
         enqueueJob: opts => enqueueJob({ ...opts, kick: false }),
       });
       assert.equal(result.ok, false);
@@ -176,7 +176,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
         probeProvider: async (choice) => {
           probeCalls += 1;
           assert.equal(choice, "auto");
-          return { ok: true as const, choice: "claude-frontier" as const };
+          return { ok: true as const, label: "Claude Frontier", choice: "claude-frontier" as const };
         },
         enqueueJob: async (opts) => {
           enqueueCalls += 1;
@@ -229,6 +229,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
     );
     assert.equal(res.ok, false);
     if (res.ok) return assert.fail("a missing provider must refuse the draft");
+    if (!("leadId" in res)) return assert.fail("the failed draft must retain its filed lead");
     assert.ok(res.leadId, "the lead is filed before the provider is asked");
     assert.match(res.error, /Codex is not installed/i);
 

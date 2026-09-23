@@ -174,7 +174,7 @@ if (dbProbe.ok) {
     await page.getByLabel("Confirm password").fill(OWNER_PASSWORD);
     await page.getByRole("button", { name: "Create editor account" }).click();
     await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
-  }, 240_000);
+  }, { timeout: 240_000 });
 
   after(async () => {
     await page?.close().catch(() => undefined);
@@ -188,7 +188,7 @@ if (dbProbe.ok) {
     );
     await admin.query(`DROP DATABASE IF EXISTS ${dbName}`);
     await admin.end();
-  }, 30_000);
+  }, { timeout: 30_000 });
 }
 
 describe("giving up the desk", () => {

@@ -134,7 +134,7 @@ if (dbProbe.ok) {
     } finally {
       await db.end();
     }
-  }, 240_000);
+  }, { timeout: 240_000 });
 
   after(async () => {
     await page?.close().catch(() => undefined);
@@ -148,7 +148,7 @@ if (dbProbe.ok) {
     );
     await admin.query(`DROP DATABASE IF EXISTS ${dbName}`);
     await admin.end();
-  }, 30_000);
+  }, { timeout: 30_000 });
 }
 
 describe("a run that died mid-work", () => {

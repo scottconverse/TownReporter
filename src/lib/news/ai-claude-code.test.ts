@@ -80,7 +80,7 @@ describe("parseCliEnvelope", () => {
         timedOut: false,
         inputTokens: 12,
       });
-      assert.equal(out.meta?.totalTokens, undefined);
+      assert.equal("totalTokens" in (out.meta ?? {}), false);
     }
   });
 

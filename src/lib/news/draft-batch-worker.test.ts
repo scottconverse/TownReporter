@@ -38,7 +38,7 @@ const reported = {
   unanswered: [],
   claims: [],
   research_memo: {},
-} as ReportedDraftResult;
+} as unknown as ReportedDraftResult;
 
 async function fixture(newsroomId: number) {
   const sql = await getSql();
@@ -109,17 +109,17 @@ it("actual draft worker uses only the persisted forced transport", async () => {
   const previousKey = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = "must-not-be-used";
   setFetchImplForTests(
-    async () => new Response(singleRenderedPdfFixture(), { headers: { "content-type": "application/pdf" } }),
+    async () => new Response(Buffer.from(singleRenderedPdfFixture()), { headers: { "content-type": "application/pdf" } }),
   );
   try {
     await performDraftWork(job, {
       reportAndDraft: async (_input, deps) => {
-        const document = await deps.ingest?.("https://93.184.216.34/scan.pdf");
+        const document = await deps!.ingest?.("https://93.184.216.34/scan.pdf");
         assert.match(document?.text ?? "", /OCR passage/);
-        const capture = await deps.capture?.(userId, document!);
+        const capture = await deps!.capture?.(userId, document!);
         assert.ok(capture?.version_id);
         assert.ok(capture?.capture_event_id);
-        const answer = await deps.chat?.("system", "user", 100, "codex-frontier", { timeoutMs: 12_345 });
+        const answer = await deps!.chat?.("system", "user", 100, "codex-frontier", { timeoutMs: 12_345 });
         assert.equal(answer?.ok, true);
         return {
           ...reported,
@@ -193,10 +193,11 @@ it("withdrawn membership immediately before capture leaves no persisted capture"
           job.newsroom_id,
           userId,
         ]);
-        await deps.capture?.(userId, {
+        await deps!.capture?.(userId, {
           url: "https://example.com/withdrawn-capture",
           title: "Withdrawn",
           text: "This captured passage is long enough to be useful to a draft.",
+          extras: [],
         });
         return reported;
       },
@@ -242,7 +243,7 @@ for (const selected of ["codex-terra", "codex-sol", "local"] as const) {
     const calls: string[] = [];
     await performDraftWork(job, {
       reportAndDraft: async (_input, deps) => {
-        const answer = await deps.chat?.("system", "user", 100);
+        const answer = await deps!.chat?.("system", "user", 100);
         assert.equal(answer?.ok, true);
         return reported;
       },
@@ -256,7 +257,7 @@ for (const selected of ["codex-terra", "codex-sol", "local"] as const) {
           return { ok: true, text: "answer" };
         },
         local: async (_system, _user, _tokens, options) => {
-          calls.push("local:" + options.localModel?.id);
+          calls.push("local:" + options!.localModel?.id);
           return { ok: true, text: "answer" };
         },
       },
@@ -284,7 +285,7 @@ for (const boundary of ["membership", "lease"] as const) {
           } else {
             await sql.query("update desk_jobs set claim_token='replacement' where id=$1", [job.id]);
           }
-          await deps.chat?.("system", "user", 100);
+          await deps!.chat?.("system", "user", 100);
           return reported;
         },
         batchChatAdapters: {
@@ -314,7 +315,7 @@ it("fails over only after a technical selected-transport failure", async () => {
   const calls: string[] = [];
   await performDraftWork(job, {
       reportAndDraft: async (_input, deps) => {
-        const answer = await deps.chat?.("system", "user", 100);
+        const answer = await deps!.chat?.("system", "user", 100);
         return answer?.ok ? reported : { error: answer?.error ?? "failed" };
       },
       batchChatAdapters: {
@@ -341,7 +342,7 @@ it("fails over only after a technical selected-transport failure", async () => {
         transport: "codex" as const,
         model: "selected-terra",
         modelEffort: "medium" as const,
-      }),
+      }) as any,
       setJobStage: async () => undefined,
     });
   assert.deepEqual(calls, ["claude", "codex"]);

@@ -25,9 +25,9 @@ before(async () => {
     "Ordinary routine checks must not use an operator PostgreSQL database",
   );
   ({ getSql } = db);
-  checks = await vite.ssrLoadModule("/src/lib/news/routine-notice-checks.server.ts");
-  automation = await vite.ssrLoadModule("/src/lib/news/routine-notice-automation.ts");
-  ingestModule = await vite.ssrLoadModule("/src/lib/news/ingest.ts");
+  checks = await vite.ssrLoadModule("/src/lib/news/routine-notice-checks.server.ts") as typeof checks;
+  automation = await vite.ssrLoadModule("/src/lib/news/routine-notice-automation.ts") as typeof automation;
+  ingestModule = await vite.ssrLoadModule("/src/lib/news/ingest.ts") as typeof ingestModule;
   ({ setFetchImplForTests } = await vite.ssrLoadModule("/src/lib/news/fetch-url.ts"));
 });
 
@@ -527,7 +527,7 @@ describe("routine notice manual checks", () => {
     const f = await fixture();
     const failed = htmlDocument("");
     failed.status = 503;
-    failed.outcome = "error";
+    failed.outcome = "fetch-failed";
     failed.contentType = "text/plain";
     failed.rawBytes = undefined;
     const result = await checks.checkRoutineNoticeSourceForOwner(

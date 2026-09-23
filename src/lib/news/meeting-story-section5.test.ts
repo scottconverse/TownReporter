@@ -10,10 +10,10 @@ describe("meeting section 5 agenda-item chunking", () => {
     assert.equal(existsSync(modPath), true, "meeting-story-section5.ts must exist");
     const { chunkByAgendaItem } = await import("./meeting-story-section5.ts");
     const segments = [
-      { segmentIndex: 0, startSeconds: 0, endSeconds: 60, excerpt: "Good evening. We call the meeting to order and take roll call." },
-      { segmentIndex: 1, startSeconds: 60, endSeconds: 600, excerpt: "Item 1, approval of the minutes. Motion to approve the minutes by Mayor Prom, seconded by Council Member Coloffer." },
-      { segmentIndex: 2, startSeconds: 600, endSeconds: 2400, excerpt: "Item 2, the airport rates and charges study. The consultant presented the landing fee analysis." },
-      { segmentIndex: 3, startSeconds: 2400, endSeconds: 3000, excerpt: "Item 3, second reading of Ordinance O-2026-54. Council member Popkin moved to approve." },
+      { segmentIndex: 0, startSeconds: 0, endSeconds: 60, captionSha256: "fixture-sha", excerpt: "Good evening. We call the meeting to order and take roll call." },
+      { segmentIndex: 1, startSeconds: 60, endSeconds: 600, captionSha256: "fixture-sha", excerpt: "Item 1, approval of the minutes. Motion to approve the minutes by Mayor Prom, seconded by Council Member Coloffer." },
+      { segmentIndex: 2, startSeconds: 600, endSeconds: 2400, captionSha256: "fixture-sha", excerpt: "Item 2, the airport rates and charges study. The consultant presented the landing fee analysis." },
+      { segmentIndex: 3, startSeconds: 2400, endSeconds: 3000, captionSha256: "fixture-sha", excerpt: "Item 3, second reading of Ordinance O-2026-54. Council member Popkin moved to approve." },
     ];
     const chunks = chunkByAgendaItem({
       segments,
@@ -36,8 +36,8 @@ describe("meeting section 5 agenda-item chunking", () => {
   it("reports unalignable when the packet does not match the transcript", async () => {
     const { alignMeeting, chunkByAgendaItem } = await import("./meeting-story-section5.ts");
     const segments = [
-      { segmentIndex: 0, startSeconds: 0, endSeconds: 60, excerpt: "We call the meeting to order." },
-      { segmentIndex: 1, startSeconds: 60, endSeconds: 120, excerpt: "Discussion of a completely unrelated zoning variance." },
+      { segmentIndex: 0, startSeconds: 0, endSeconds: 60, captionSha256: "fixture-sha", excerpt: "We call the meeting to order." },
+      { segmentIndex: 1, startSeconds: 60, endSeconds: 120, captionSha256: "fixture-sha", excerpt: "Discussion of a completely unrelated zoning variance." },
     ];
     const chunks = chunkByAgendaItem({ segments, packetItems: [{ itemNumber: "1", title: "Approval of the Minutes" }] });
     const alignment = alignMeeting({ segments, chunks, packetItems: [{ itemNumber: "1", title: "Approval of the Minutes" }] });

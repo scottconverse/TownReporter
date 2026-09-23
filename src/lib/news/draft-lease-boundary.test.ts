@@ -37,7 +37,7 @@ const result: ReportedDraftResult = {
   unanswered: [],
   research_memo: {} as ReportedDraftResult extends { research_memo: infer R } ? R : never,
   claims: [],
-} as ReportedDraftResult;
+} as unknown as ReportedDraftResult;
 
 async function fixture(newsroomId: number) {
   const sql = await getSql();

@@ -48,7 +48,7 @@ function section5For(caption: ReturnType<typeof capturedCaption>) {
   return async () => ({
     aligned: true, alignmentReason: null, chunkCount: 1, voteCount: 1, unalignedLead: null,
     items: [{ item: "4", title: "Housing plan", startSeconds: 0 }],
-    votes: [{ item: "4", established: true, motion: "Approve the housing plan", mover: "A", seconder: "B", tally: "6-1", result: "Passed", source: "structured-vote-record", provenance: [], disagreements: [] }],
+    votes: [{ item: "4", established: true, motion: "Approve the housing plan", mover: "A", seconder: "B", tally: "6-1", result: "Passed", source: "longmontcitycouncil.org" as const, provenance: [], disagreements: [] }],
     citations: [{ item: "4", segmentIndex: 0, timestampSeconds: 0, endSeconds: 4, excerpt: caption.text, captionSha256: caption.sha256, storagePath: caption.sourcePath }],
   });
 }
@@ -104,7 +104,7 @@ describe("meeting chain uses real application entrypoints in its own disposable 
     assert.ok(lead?.id, "the real capture path must file the meeting lead");
     const [jobRow] = await sql.query<{ id: number }>("insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'draft',$3,'local-model','editor','supplied','default','running','Drafting','meeting-chain-claim') returning id", [userId, newsroomId, lead.id]);
     const job = { id: jobRow!.id, newsroom_id: newsroomId, user_id: userId, kind: "draft", subject_id: lead.id, model_choice: "local-model", model_choice_source: "editor", research_scope: "supplied", lane: "default", status: "running", stage: "Drafting", claim_token: "meeting-chain-claim" } as DeskJob;
-    const reported = { headline: "Council approves housing plan", dek: "The council voted Tuesday.", body: captionA.text, topic: "council", source_urls: [`https://www.youtube.com/watch?v=${videoId}`], integrity_notes: "", memory_entities: [], form: "news", provenance: [], found_note: "", findings: [], unanswered: [], claims: [], research_memo: {} } as ReportedDraftResult;
+    const reported = { headline: "Council approves housing plan", dek: "The council voted Tuesday.", body: captionA.text, topic: "council", source_urls: [`https://www.youtube.com/watch?v=${videoId}`], integrity_notes: "", memory_entities: [], form: "news", provenance: [], found_note: "", findings: [], unanswered: [], claims: [], research_memo: {} } as unknown as ReportedDraftResult;
     await performDraftWork(job, { readStoryDocuments: async () => "", reportAndDraft: async () => reported, setJobStage: async () => undefined });
     const [draftA] = await sql.query<{ id: number }>("select id from drafts where newsroom_id=$1 and lead_id=$2 order by id desc limit 1", [newsroomId, lead.id]);
     const [linkA] = await sql.query<{ artifact_id: number; citation_snapshot: string }>("select artifact_id,citation_snapshot from meeting_draft_transcript_links where newsroom_id=$1 and draft_id=$2", [newsroomId, draftA!.id]);

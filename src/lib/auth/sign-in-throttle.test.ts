@@ -228,14 +228,14 @@ if (dbProbe.ok) {
         `could not create the test operator account (status ${signUpRes.status}): ${signUpRes.text}`,
       );
     }
-  }, 180_000);
+  }, { timeout: 180_000 });
 
   after(async () => {
     server?.kill();
     serverLockout?.kill();
     await dropDatabase(dbName);
     await dropDatabase(dbNameLockout);
-  }, 30_000);
+  }, { timeout: 30_000 });
 }
 
 describe("sign-in is throttled", () => {

@@ -82,7 +82,7 @@ if (dbProbe.ok) {
     fileScanLeads = leadFiling.fileScanLeads;
     getSql = db.getSql;
     closePoolForTests = db.closePoolForTests;
-  }, 60_000);
+  }, { timeout: 60_000 });
 
   after(async () => {
     await closePoolForTests?.();
@@ -96,7 +96,7 @@ if (dbProbe.ok) {
       .catch(() => undefined);
     await admin.query(`DROP DATABASE IF EXISTS ${dbName}`);
     await admin.end();
-  }, 30_000);
+  }, { timeout: 30_000 });
 }
 
 describe("fileScanLeads stamps a resurfaced lead instead of refiling it", () => {
