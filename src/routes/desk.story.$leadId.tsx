@@ -10,7 +10,7 @@ import {
 } from "@/lib/news/draft-evidence";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Busy,
   Chip,
@@ -452,7 +452,7 @@ function StoryPage() {
       setMsg(error instanceof Error ? error.message : "Evidence review could not be saved."),
   });
 
-  const applyCheckedDraft = async (
+  const applyCheckedDraft = useCallback(async (
     draftId: number,
     originalDraftId: number,
     expected?: EditableDraftFields,
@@ -556,7 +556,7 @@ function StoryPage() {
       );
     }
     return true;
-  };
+  }, [id, refetch]);
 
   const reconcile = useMutation({
     mutationFn: () => requestDraftReconciliationFn({ data: { leadId: id, modelChoice, modelEffort } }),
@@ -636,7 +636,7 @@ function StoryPage() {
         setReconcileNoteError(true);
         setReconcileNoteWarning(false);
       });
-  }, [reconcileStatus.data]);
+  }, [reconcileStatus.data, applyCheckedDraft]);
 
   const publish = useMutation({
     mutationFn: async () => {
