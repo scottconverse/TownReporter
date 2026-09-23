@@ -218,6 +218,8 @@ jobs:
         run: node --experimental-strip-types --test src/lib/news/routine-notice-automation.postgres.test.ts
       - name: Meeting capture, draft provenance, and transcript revision hold across real PostgreSQL transactions
         run: node --experimental-strip-types --test src/lib/news/meeting-chain.postgres.test.ts
+      - name: Meeting capture and publication serialize on one real PostgreSQL fence
+        run: node --experimental-strip-types --test src/lib/news/meeting-revision-concurrency.postgres.test.ts
 
   # These two walks each need an UNCLAIMED desk: they create their own owner
   # at /login, and the first account in owns the newsroom.
