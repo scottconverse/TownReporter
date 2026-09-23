@@ -501,6 +501,184 @@ export type ProvisionalRecheckResult = {
   failures: string[];
 };
 
+type ExistingMeetingCapture = {
+  video_id: string;
+  channel_url: string;
+  title: string;
+  published: string;
+  status: MeetingCaptureStatus;
+  caption_sha256: string | null;
+  capture_disposition: "provisional" | "final" | null;
+  consecutive_unchanged: number | null;
+  last_checked_at: string | null;
+  captured_at: string | null;
+  duration_seconds: number | null;
+  caption_revision_timestamp: number | null;
+  revision_count: number | null;
+};
+
+/**
+ * Persist one successful caption capture through the canonical revision path.
+ *
+ * Scheduled rechecks and the editor's explicit "Force re-capture" control use
+ * this same function. That is load-bearing: a manual button must not bypass the
+ * shared publication lock, immutable artifact storage, alignment, lead filing,
+ * draft notices, or post-publication review creation.
+ */
+export async function applyCapturedMeetingTranscript(
+  sql: Sql,
+  input: {
+    newsroomId: number;
+    userId: string;
+    video: { id: string; channelUrl: string; title: string; published: string };
+    result: Extract<CaptionCaptureResult, { ok: true }>;
+    forced?: boolean;
+    now?: Date;
+  },
+  deps: Pick<MeetingAwarenessDeps, "storeMeetingTranscriptArtifact" | "runSection5" | "withTransaction"> = {},
+): Promise<{ revised: boolean; settled: boolean; artifactId: number; warnings: string[] }> {
+  void sql; // The transaction owns the authoritative connection.
+  const storeTranscript = deps.storeMeetingTranscriptArtifact ?? storeMeetingTranscriptArtifact;
+  const runTransaction = deps.withTransaction ?? withTransaction;
+  const now = input.now ?? new Date();
+  const endedAt = computeEndedAt({
+    durationSeconds: input.result.info.durationSeconds,
+    videoTimestamp: input.result.info.videoTimestamp,
+  });
+  const initialDisposition = captureDisposition({ endedAt, now });
+
+  return runTransaction(async (tx) => {
+    await tx.query(
+      `insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status)
+       values($1,$2,$3,$4,$5,'not-captured')
+       on conflict(newsroom_id,video_id) do nothing`,
+      [input.newsroomId, input.video.id, input.video.channelUrl, input.video.title, input.video.published],
+    );
+    await lockMeetingRevisionForCapture(tx, { newsroomId: input.newsroomId, videoId: input.video.id });
+    const priorRows = await tx.query<ExistingMeetingCapture>(
+      `select video_id,channel_url,title,published,status,caption_sha256,capture_disposition,
+              consecutive_unchanged,last_checked_at,captured_at,duration_seconds,
+              caption_revision_timestamp,revision_count
+         from meeting_capture_records where newsroom_id=$1 and video_id=$2`,
+      [input.newsroomId, input.video.id],
+    );
+    const prior = priorRows[0]!;
+    const hadCapture = prior.status === "captured" && Boolean(prior.caption_sha256);
+    const signal = hadCapture
+      ? detectRevision({
+          priorSha256: prior.caption_sha256,
+          nextSha256: input.result.parsed.sha256,
+          priorRevisionTimestamp: prior.caption_revision_timestamp,
+          nextRevisionTimestamp: input.result.info.captionRevisionTimestamp,
+          priorDuration: prior.duration_seconds,
+          nextDuration: input.result.info.durationSeconds,
+        })
+      : null;
+    const state = hadCapture
+      ? nextCheckState({
+          status: prior.capture_disposition ?? initialDisposition,
+          consecutiveUnchanged: prior.consecutive_unchanged ?? 0,
+          lastCheckedAt: prior.last_checked_at,
+          firstCapturedAt: prior.captured_at ?? now.toISOString(),
+          now,
+          changed: signal != null,
+        })
+      : {
+          status: initialDisposition,
+          consecutiveUnchanged: 0,
+          settled: false,
+          settledUnderChurn: false,
+          revisionRecorded: false,
+        };
+    const priorArtifacts = await tx.query<{ id: number }>(
+      "select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1",
+      [input.newsroomId, input.video.id],
+    );
+    const priorArtifactId = priorArtifacts[0]?.id ?? null;
+    const stored = await storeTranscript(tx, {
+      newsroomId: input.newsroomId,
+      videoId: input.video.id,
+      parsed: input.result.parsed,
+      infoSourcePath: input.result.infoPath,
+    });
+    const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, {
+      newsroomId: input.newsroomId,
+      videoId: input.video.id,
+      title: input.video.title,
+      meetingDate: input.video.published,
+      artifactId: stored.id,
+    });
+    const warnings = section5.aligned || !section5.unalignedLead ? [] : [section5.unalignedLead.leadWhy];
+    if ((!hadCapture || signal) && section5.aligned && section5.citations.length) {
+      await fileMeetingLead(tx, {
+        newsroomId: input.newsroomId,
+        userId: input.userId,
+        videoId: input.video.id,
+        title: input.video.title,
+        meetingDate: input.video.published || null,
+        topic: "council",
+        sourceUrls: [`https://www.youtube.com/watch?v=${input.video.id}`],
+        items: section5.items,
+        establishedVotes: section5.voteCount,
+        votes: section5.votes.map((vote) => ({
+          item: vote.item, established: vote.established, motion: vote.motion, mover: vote.mover,
+          seconder: vote.seconder, tally: vote.tally, result: vote.result, source: vote.source,
+        })),
+        citations: section5.citations.map((citation) => ({
+          item: citation.item, segmentIndex: citation.segmentIndex,
+          timestampSeconds: citation.timestampSeconds, excerpt: citation.excerpt,
+          captionSha256: citation.captionSha256,
+        })),
+        artifactId: stored.id,
+      });
+    }
+    if (signal) {
+      await tx.query(
+        "insert into meeting_transcript_revisions(newsroom_id,video_id,artifact_id,prior_artifact_id,revision_signal,prior_sha256,new_sha256) values($1,$2,$3,$4,$5,$6,$7)",
+        [input.newsroomId, input.video.id, stored.id, priorArtifactId, signal, prior.caption_sha256, input.result.parsed.sha256],
+      );
+      if (prior.caption_sha256) {
+        await applyDraftRevision(tx, {
+          newsroomId: input.newsroomId,
+          videoId: input.video.id,
+          previousSha256: prior.caption_sha256,
+          nextSha256: input.result.parsed.sha256,
+        });
+        if (priorArtifactId != null) {
+          await flagPublishedArticlesForTranscriptRevision(tx, {
+            newsroomId: input.newsroomId,
+            videoId: input.video.id,
+            priorArtifactId,
+            currentArtifactId: stored.id,
+            reason: signal,
+          });
+        }
+      }
+    }
+    await tx.query(
+      `update meeting_capture_records set
+         channel_url=$1,title=$2,published=$3,status='captured',failure_reason=null,
+         captured_at=coalesce(captured_at,now()),caption_path=$4,caption_format=$5,
+         caption_sha256=$6,caption_captured_at=now(),ended_at=$7,
+         caption_revision_timestamp=$8,duration_seconds=$9,capture_disposition=$10,
+         consecutive_unchanged=$11,last_checked_at=now(),settled_under_churn=$12,
+         revision_count=$13,last_revision_at=$14,
+         forced_recapture=$15,forced_recapture_at=case when $15 then now() else forced_recapture_at end,
+         prior_caption_sha256=case when $15 then $16 else prior_caption_sha256 end,updated_at=now()
+       where newsroom_id=$17 and video_id=$18`,
+      [
+        input.video.channelUrl, input.video.title, input.video.published,
+        stored.storagePath, input.result.parsed.format, input.result.parsed.sha256, endedAt,
+        input.result.info.captionRevisionTimestamp, input.result.info.durationSeconds,
+        state.status, state.consecutiveUnchanged, state.settledUnderChurn,
+        (prior.revision_count ?? 0) + (signal ? 1 : 0), signal ? now.toISOString() : null,
+        input.forced === true, prior.caption_sha256, input.newsroomId, input.video.id,
+      ],
+    );
+    return { revised: signal != null, settled: state.settled, artifactId: stored.id, warnings };
+  });
+}
+
 /**
  * Provisional re-check (Slice 4 integration).
  *
@@ -517,18 +695,16 @@ export async function recheckProvisionalMeetings(
   deps: MeetingAwarenessDeps = {},
 ): Promise<ProvisionalRecheckResult> {
   const capture = deps.captureMeeting ?? captureMeetingCaptions;
-  const storeTranscript = deps.storeMeetingTranscriptArtifact ?? storeMeetingTranscriptArtifact;
-  const runTransaction = deps.withTransaction ?? withTransaction;
   const now = (deps.now ?? (() => new Date()))();
   const failures: string[] = [];
   const rows = await sql.query<{
-    video_id: string; title: string; published: string; caption_path: string | null;
+    video_id: string; channel_url: string; title: string; published: string; caption_path: string | null;
     caption_sha256: string | null; capture_disposition: "provisional" | "final" | null;
     consecutive_unchanged: number | null; last_checked_at: string | null;
     captured_at: string | null; duration_seconds: number | null;
     caption_revision_timestamp: number | null; revision_count: number | null;
   }>(
-    "select video_id,title,published,caption_path,caption_sha256,capture_disposition,consecutive_unchanged,last_checked_at,captured_at,duration_seconds,caption_revision_timestamp,revision_count from meeting_capture_records where newsroom_id=$1 and status='captured' and capture_disposition='provisional'",
+    "select video_id,channel_url,title,published,caption_path,caption_sha256,capture_disposition,consecutive_unchanged,last_checked_at,captured_at,duration_seconds,caption_revision_timestamp,revision_count from meeting_capture_records where newsroom_id=$1 and status='captured' and capture_disposition='provisional'",
     [newsroomId],
   );
   let checked = 0;
@@ -549,101 +725,21 @@ export async function recheckProvisionalMeetings(
       failures.push(`${row.title}: ${result.reason}`);
       continue;
     }
-    const signal = detectRevision({
-      priorSha256: row.caption_sha256,
-      nextSha256: result.parsed.sha256,
-      priorRevisionTimestamp: row.caption_revision_timestamp,
-      nextRevisionTimestamp: result.info.captionRevisionTimestamp,
-      priorDuration: row.duration_seconds,
-      nextDuration: result.info.durationSeconds,
-    });
-    const state = nextCheckState({
-      status: row.capture_disposition ?? "final",
-      consecutiveUnchanged: row.consecutive_unchanged ?? 0,
-      lastCheckedAt: row.last_checked_at,
-      firstCapturedAt: row.captured_at ?? now.toISOString(),
-      now,
-      changed: signal != null,
-    });
-    if (signal) revised += 1;
-    if (state.settled) settled += 1;
     try {
-      await runTransaction(async (tx) => {
-        await lockMeetingRevisionForCapture(tx, { newsroomId, videoId: row.video_id });
-        const priorArtifacts = await tx.query<{ id: number }>(
-          "select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1",
-          [newsroomId, row.video_id],
-        );
-        const priorArtifactId = priorArtifacts[0]?.id ?? null;
-        const stored = await storeTranscript(tx, { newsroomId, videoId: row.video_id, parsed: result.parsed, infoSourcePath: result.infoPath });
-        const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: row.video_id, title: row.title, meetingDate: row.published, artifactId: stored.id });
-        if (!section5.aligned && section5.unalignedLead) failures.push(section5.unalignedLead.leadWhy);
-        if (signal && section5.aligned && section5.citations.length) {
-          /*
-            The same filing on the revision pass, so a meeting whose tape was
-            corrected while it was provisional still reaches the desk. Section
-            5 has just re-run for the new artifact; the lead carries the new
-            citations.
-          */
-          await fileMeetingLead(tx, {
-            newsroomId,
-            userId: (await tx.query<{ user_id: string }>("select user_id from newsroom_members where newsroom_id=$1 and role='owner' limit 1", [newsroomId]))[0]?.user_id ?? "",
-            videoId: row.video_id,
-            title: row.title,
-            meetingDate: row.published ?? null,
-            topic: "council",
-            sourceUrls: [`https://www.youtube.com/watch?v=${row.video_id}`],
-            items: section5.items,
-            establishedVotes: section5.voteCount,
-            votes: section5.votes.map((v) => ({
-              item: v.item, established: v.established, motion: v.motion, mover: v.mover,
-              seconder: v.seconder, tally: v.tally, result: v.result, source: v.source,
-            })),
-            citations: section5.citations.map((c) => ({
-              item: c.item, segmentIndex: c.segmentIndex, timestampSeconds: c.timestampSeconds,
-              excerpt: c.excerpt, captionSha256: c.captionSha256,
-            })),
-            artifactId: stored.id,
-          });
-        }
-        if (signal) {
-          await tx.query(
-            "insert into meeting_transcript_revisions(newsroom_id,video_id,artifact_id,prior_artifact_id,revision_signal,prior_sha256,new_sha256) values($1,$2,$3,$4,$5,$6,$7)",
-            [newsroomId, row.video_id, stored.id, priorArtifactId, signal, row.caption_sha256, result.parsed.sha256],
-          );
-        }
-        await tx.query(
-          `update meeting_capture_records set
-             caption_sha256=$1, caption_path=$2, caption_format=$3, caption_revision_timestamp=$4,
-             duration_seconds=$5, capture_disposition=$6, consecutive_unchanged=$7, last_checked_at=now(),
-             settled_under_churn=$8, revision_count=$9, last_revision_at=$10, updated_at=now()
-           where newsroom_id=$11 and video_id=$12`,
-          [
-            result.parsed.sha256, result.parsed.sourcePath, result.parsed.format,
-            result.info.captionRevisionTimestamp, result.info.durationSeconds,
-            state.status, state.consecutiveUnchanged, state.settledUnderChurn,
-            (row.revision_count ?? 0) + (signal ? 1 : 0),
-            signal ? now.toISOString() : null, newsroomId, row.video_id,
-          ],
-        );
-        if (signal && row.caption_sha256) {
-          await applyDraftRevision(tx, {
-            newsroomId,
-            videoId: row.video_id,
-            previousSha256: row.caption_sha256,
-            nextSha256: result.parsed.sha256,
-          });
-          if (priorArtifactId != null) {
-            await flagPublishedArticlesForTranscriptRevision(tx, {
-              newsroomId,
-              videoId: row.video_id,
-              priorArtifactId,
-              currentArtifactId: stored.id,
-              reason: signal,
-            });
-          }
-        }
-      });
+      const userId = (await sql.query<{ user_id: string }>(
+        "select user_id from newsroom_members where newsroom_id=$1 and role='owner' limit 1",
+        [newsroomId],
+      ))[0]?.user_id ?? "";
+      const applied = await applyCapturedMeetingTranscript(sql, {
+        newsroomId,
+        userId,
+        video: { id: row.video_id, channelUrl: row.channel_url, title: row.title, published: row.published },
+        result: result as Extract<CaptionCaptureResult, { ok: true }>,
+        now,
+      }, deps);
+      if (applied.revised) revised += 1;
+      if (applied.settled) settled += 1;
+      failures.push(...applied.warnings);
     } catch (error) {
       failures.push(`${row.title}: ${error instanceof Error ? error.message : String(error)}`);
     }

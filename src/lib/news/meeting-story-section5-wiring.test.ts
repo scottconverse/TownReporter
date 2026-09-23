@@ -30,6 +30,7 @@ function harness(storageRoot: string, captionPath: string, captionSha256: string
     if (/insert into leads/i.test(text)) { filedLeads += 1; return [{ id: 77 }]; }
     if (/insert into meeting_capture_records/i.test(text)) {
       const [newsroomId, videoId, channelUrl, title, published] = params as [number, string, string, string, string];
+      if (/on conflict\s*\(newsroom_id,video_id\)\s*do nothing/i.test(text) && rows.has(videoId)) return [];
       const isCaptured = text.includes("'captured'");
       rows.set(videoId, {
         newsroom_id: newsroomId, video_id: videoId, channel_url: channelUrl, title, published,
