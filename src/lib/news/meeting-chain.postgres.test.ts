@@ -152,7 +152,10 @@ describe("meeting chain uses real application entrypoints in its own disposable 
     const revised = await recheckProvisionalMeetings(sql, newsroomId, {
       captureMeeting: async () => ({ ok: true as const, parsed: { text: captionB.text, format: "vtt" as const, sha256: captionB.sha256, sourcePath: captionB.sourcePath }, infoPath: captionB.infoPath, info: { durationSeconds: 300, videoTimestamp: Date.parse("2026-09-22T12:00:00Z") / 1000, captionRevisionTimestamp: 2 }, argv: [], stdout: "", stderr: "" }),
       runSection5: section5For(captionB),
-      now: () => new Date("2026-09-22T12:20:00Z"),
+      // The production cadence is three hours. The canonical first-capture
+      // path now records last_checked_at, so prove B through a genuinely due
+      // recheck instead of depending on the old missing-timestamp defect.
+      now: () => new Date("2026-09-22T15:20:00Z"),
     });
     assert.equal(revised.revised, 1);
     assert.deepEqual(revised.failures, []);
