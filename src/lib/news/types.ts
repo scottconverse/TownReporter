@@ -35,6 +35,9 @@ export type LeadRow = {
   /** The prior lead is returned only when it still belongs to this newsroom.
    * A removed target is deliberately null rather than leaking historical text. */
   possible_duplicate?: { id: number; headline: string; status: string } | null;
+  meeting_video_id?: string | null;
+  meeting_artifact_id?: number | null;
+  meeting_lead_purpose?: string | null;
 };
 
 export type DraftRow = {

@@ -1208,7 +1208,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     return current;
   };
   const leads = await sql<LeadRow>`
-    select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at, notes_json
+    select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at, notes_json,
+           meeting_video_id,meeting_artifact_id,meeting_lead_purpose
     from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
   `;
   const lead = leads[0];
@@ -1240,6 +1241,16 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   `;
 
   const prevNotes = parseNotes(lead.notes_json);
+  const meetingMaterial =
+    lead.meeting_video_id && lead.meeting_artifact_id && lead.meeting_lead_purpose === "transcript-story"
+      ? await (await import("./meeting-draft-material.server.ts")).loadMeetingDraftMaterial(sql, {
+          newsroomId: owned(context),
+          artifactId: Number(lead.meeting_artifact_id),
+          videoId: lead.meeting_video_id,
+          fallbackTitle: lead.headline,
+          videoUrl: urls.find((url) => /youtube\.com|youtu\.be/i.test(url)),
+        })
+      : null;
   const researchScope = job.research_scope ?? prevNotes.researchScope ?? "public";
   const sourceInput = draftSourceInputs(urls, prevNotes, researchScope);
   const { retainedWatchSources } = await import("./retained-watch-source.server.ts");
@@ -1313,11 +1324,15 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     userId: context.userId,
     newsroomId: context.newsroomId,
     lead,
-    urls: sourceInput.urls,
+    // The immutable captured transcript is the source for a meeting story.
+    // Re-fetching the YouTube watch page can return stale "upcoming" chrome and
+    // contradict a completed recording, which produced the exact false draft
+    // this path is designed to prevent.
+    urls: meetingMaterial ? [] : sourceInput.urls,
     retainedSources: await retainedWatchSources(sql, owned(context), leadId, sourceInput.urls),
     memory,
-    extraEvidence: prevNotes.scratch,
-    extraEvidenceLimitChars: prevNotes.meeting ? 200_000 : undefined,
+    extraEvidence: meetingMaterial?.evidence ?? prevNotes.scratch,
+    extraEvidenceLimitChars: meetingMaterial ? 200_000 : undefined,
     editorialAssignment: prevNotes.editorialAssignment,
     researchScope,
     extraUrls: sourceInput.extraUrls,
@@ -1699,8 +1714,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         the material it was given, so a redraft describes itself rather than the
         previous draft. A draft that used no transcript material writes no row.
       */
-      const meetingCitations = prevNotes.transcriptCitations ?? [];
-      if (prevNotes.meeting && meetingCitations.length) {
+      const meetingCitations = meetingMaterial?.citations ?? prevNotes.transcriptCitations ?? [];
+      const meeting = meetingMaterial?.meeting ?? prevNotes.meeting;
+      if (meeting && meetingCitations.length) {
         const used = deriveUsedCitations({
           candidates: meetingCitations.map((c) => ({
             item: c.item, segmentIndex: c.segmentIndex, captionSha256: c.captionSha256, excerpt: c.excerpt,
@@ -1713,7 +1729,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           await linkDraftToTranscript(sql, {
             newsroomId: owned(context),
             draftId: Number(savedDraft.id),
-            artifactId: prevNotes.meeting.artifactId,
+            artifactId: meeting.artifactId,
             citations: used,
           });
         }
