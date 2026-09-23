@@ -58,6 +58,12 @@ export function meetingArchivePath(newsroomId: number, root = meetingRuntimeRoot
 export function meetingCaptionDir(newsroomId: number, root = meetingRuntimeRoot()): string {
   return join(root, "meeting-captions", `newsroom-${newsroomId}`);
 }
+export function storedCaptureDisposition(
+  stored: "provisional" | "final" | null,
+  status: MeetingCaptureStatus,
+): "provisional" | "final" | undefined {
+  return stored ?? (status === "captured" ? "final" : undefined);
+}
 export function prepareMeetingCapturePaths(newsroomId: number, videoId: string): { archivePath: string; outputDir: string } {
   const archivePath = meetingArchivePath(newsroomId);
   const outputDir = join(meetingCaptionDir(newsroomId), videoId);
@@ -294,7 +300,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
     videoId: r.video_id, channelUrl: r.channel_url, title: r.title, published: r.published,
     status: r.status, failureReason: r.failure_reason, captionPath: r.caption_path,
     captionFormat: r.caption_format, captionSha256: r.caption_sha256, captionCapturedAt: r.caption_captured_at,
-    endedAt: r.ended_at, captureDisposition: r.capture_disposition ?? r.status === "captured" ? "final" : undefined,
+    endedAt: r.ended_at, captureDisposition: storedCaptureDisposition(r.capture_disposition, r.status),
     durationSeconds: r.duration_seconds, captionRevisionTimestamp: r.caption_revision_timestamp,
     revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false, lastRevisionAt: r.last_revision_at,
   }));
@@ -452,7 +458,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
     videoId: r.video_id, channelUrl: r.channel_url, title: r.title, published: r.published,
     status: r.status, failureReason: r.failure_reason, captionPath: r.caption_path,
     captionFormat: r.caption_format, captionSha256: r.caption_sha256, captionCapturedAt: r.caption_captured_at,
-    endedAt: r.ended_at, captureDisposition: r.capture_disposition ?? (r.status === "captured" ? "final" : undefined),
+    endedAt: r.ended_at, captureDisposition: storedCaptureDisposition(r.capture_disposition, r.status),
     durationSeconds: r.duration_seconds, captionRevisionTimestamp: r.caption_revision_timestamp,
     revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false, lastRevisionAt: r.last_revision_at,
   }));

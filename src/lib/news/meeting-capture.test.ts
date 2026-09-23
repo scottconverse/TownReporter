@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { serializeArchive, parseArchive, reconcileArchive, archiveCorrupt, meetingArchivePath, meetingCaptionDir, meetingRuntimeRoot } from "./meeting-capture.ts";
+import { serializeArchive, parseArchive, reconcileArchive, archiveCorrupt, meetingArchivePath, meetingCaptionDir, meetingRuntimeRoot, storedCaptureDisposition } from "./meeting-capture.ts";
 
 const records = [
   { videoId: "aaaaaaaaaaa", channelUrl: "https://youtube.com/@city", title: "Council 1", published: "2026-01-01", status: "captured" as const },
@@ -18,6 +18,13 @@ describe("meeting capture archive is a regenerable cache", () => {
   it("keeps legacy and source-run fallbacks explicit", () => {
     assert.equal(meetingRuntimeRoot({ TOWNREPORTER_DATA_DIR: "C:\\Legacy" }, "C:\\App"), "C:\\Legacy");
     assert.equal(meetingRuntimeRoot({}, "C:\\App"), "C:\\App");
+  });
+
+  it("preserves a stored provisional disposition instead of relabeling it final", () => {
+    assert.equal(storedCaptureDisposition("provisional", "captured"), "provisional");
+    assert.equal(storedCaptureDisposition("final", "captured"), "final");
+    assert.equal(storedCaptureDisposition(null, "captured"), "final");
+    assert.equal(storedCaptureDisposition(null, "failed"), undefined);
   });
 
   it("database wins when the file says captured but the record says not captured", () => {
