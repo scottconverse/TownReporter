@@ -30,6 +30,7 @@ describe("published meeting evidence and later transcript revisions", () => {
     assert.match(calls[0]!.text, /insert into meeting_article_transcript_links/i);
     assert.match(calls[0]!.text, /select .*l\.artifact_id.*l\.citation_snapshot/is);
     assert.match(calls[0]!.text, /a\.sha256/i, "published provenance must freeze the artifact hash");
+    assert.match(calls[0]!.text, /l\.is_current=true/i, "publication must freeze only the current draft evidence, not historical links");
     assert.deepEqual(calls[0]!.params, [3, 72, 41]);
   });
 

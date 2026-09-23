@@ -143,6 +143,25 @@ describe("meeting publish guard", () => {
     assert.deepEqual(stale, [], "an unchanged tape must not block the editor");
   });
 
+  it("uses artifact B after redraft while retaining artifact A as historical evidence", async () => {
+    const research = JSON.stringify({ meetingEvidence: { used: true, artifactId: 5 } });
+    const stale = await staleMeetingCitations(sqlReturning([
+      {
+        draft_id: 41, research_json: research, artifact_id: 4, is_current: false,
+        citation_snapshot: JSON.stringify([{ artifactId: 4, segmentIndex: 7, captionSha256: "old-hash" }]),
+        revision_notice: "The recording changed.", video_id: "meeting-1", linked_sha256: "old-hash",
+        current_artifact_id: 5, current_sha256: "new-hash",
+      },
+      {
+        draft_id: 41, research_json: research, artifact_id: 5, is_current: true,
+        citation_snapshot: JSON.stringify([{ artifactId: 5, segmentIndex: 7, captionSha256: "new-hash" }]),
+        revision_notice: null, video_id: "meeting-1", linked_sha256: "new-hash",
+        current_artifact_id: 5, current_sha256: "new-hash",
+      },
+    ]), { newsroomId: 1, draftId: 41 });
+    assert.deepEqual(stale, [], "historical A must remain stored without blocking the current B-linked draft");
+  });
+
   it("stays out of the way for a draft with no transcript links", async () => {
     /*
       Every other story in the paper. A guard that fired here would block ordinary

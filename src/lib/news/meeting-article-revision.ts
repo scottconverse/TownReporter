@@ -78,10 +78,10 @@ export async function recordPublishedMeetingEvidence(
   const rows = await sql.query<{ article_id: number }>(
     `insert into meeting_article_transcript_links
        (newsroom_id,article_id,origin_draft_id,artifact_id,artifact_sha256,video_id,citation_snapshot)
-     select l.newsroom_id,$2,l.draft_id,l.artifact_id,a.sha256,a.video_id,l.citation_snapshot
+      select l.newsroom_id,$2,l.draft_id,l.artifact_id,a.sha256,a.video_id,l.citation_snapshot
        from meeting_draft_transcript_links l
        join meeting_transcript_artifacts a on a.id=l.artifact_id
-      where l.newsroom_id=$1 and l.draft_id=$3
+       where l.newsroom_id=$1 and l.draft_id=$3 and l.is_current=true
      on conflict (newsroom_id,article_id,artifact_id) do nothing
      returning article_id`,
     [input.newsroomId, input.articleId, input.draftId],

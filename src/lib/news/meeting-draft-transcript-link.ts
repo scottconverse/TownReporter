@@ -51,10 +51,10 @@ export async function loadDraftMeetingEvidence(
               where current.newsroom_id=l.newsroom_id and current.video_id=a.video_id
                 and current.artifact_type='transcript'
               order by current.captured_at desc,current.id desc limit 1) as current_sha256
-       from meeting_draft_transcript_links l
-       join meeting_transcript_artifacts a on a.id=l.artifact_id
-       left join meeting_capture_records c on c.newsroom_id=l.newsroom_id and c.video_id=a.video_id
-      where l.newsroom_id=$1 and l.draft_id=$2
+      from meeting_draft_transcript_links l
+      join meeting_transcript_artifacts a on a.id=l.artifact_id
+      left join meeting_capture_records c on c.newsroom_id=l.newsroom_id and c.video_id=a.video_id
+      where l.newsroom_id=$1 and l.draft_id=$2 and l.is_current=true
       order by l.updated_at desc,l.id desc limit 1`,
     [input.newsroomId, input.draftId],
   );
@@ -164,11 +164,17 @@ export async function linkDraftToTranscript(
     return { linked: false, snapshot };
   }
   await sql.query(
+    `update meeting_draft_transcript_links
+        set is_current=false
+      where newsroom_id=$1 and draft_id=$2 and is_current=true`,
+    [input.newsroomId, input.draftId],
+  );
+  await sql.query(
     `insert into meeting_draft_transcript_links
-       (newsroom_id,draft_id,artifact_id,citation_snapshot)
-     values ($1,$2,$3,$4)
+       (newsroom_id,draft_id,artifact_id,citation_snapshot,is_current,revision_notice)
+     values ($1,$2,$3,$4,true,null)
      on conflict (newsroom_id,draft_id,artifact_id)
-     do update set citation_snapshot=excluded.citation_snapshot, updated_at=now()`,
+     do update set citation_snapshot=excluded.citation_snapshot,is_current=true,revision_notice=null,updated_at=now()`,
     [input.newsroomId, input.draftId, input.artifactId, snapshot],
   );
   await sql.query(

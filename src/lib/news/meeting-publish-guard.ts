@@ -38,6 +38,7 @@ type GuardRow = {
   linked_sha256: string | null;
   current_artifact_id: number | null;
   current_sha256: string | null;
+  is_current?: boolean | null;
 };
 
 type SnapshotCitation = {
@@ -111,7 +112,7 @@ export async function staleMeetingCitations(
               order by current.captured_at desc,current.id desc limit 1) as current_sha256
        from drafts d
        left join meeting_draft_transcript_links l
-         on l.newsroom_id=d.newsroom_id and l.draft_id=d.id
+         on l.newsroom_id=d.newsroom_id and l.draft_id=d.id and l.is_current=true
        left join meeting_transcript_artifacts linked on linked.id=l.artifact_id
       where d.newsroom_id=$1 and d.id=$2
       order by l.id`,
@@ -123,7 +124,7 @@ export async function staleMeetingCitations(
 
   const stale: StaleCitation[] = [];
   const claimsMeetingEvidence = rows.some((row) => draftClaimsMeetingEvidence(row.research_json));
-  const linkedRows = rows.filter((row) => row.artifact_id != null);
+  const linkedRows = rows.filter((row) => row.artifact_id != null && row.is_current !== false);
   if (!linkedRows.length) {
     return claimsMeetingEvidence
       ? [{ artifactId: null, segmentIndex: -1, recorded: "missing", current: "missing", reason: "missing-link" }]

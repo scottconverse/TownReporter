@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type { Sql } from "../db.ts";
 import { citationSnapshotFor, linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
 
@@ -61,9 +62,14 @@ describe("meeting draft to transcript link", () => {
       citations: [{ segmentIndex: 2, captionSha256: "hh" }],
     });
     assert.equal(result.linked, true);
-    const write = calls.find((c) => /meeting_draft_transcript_links/.test(c.text));
+    const deactivate = calls.find((c) => /update meeting_draft_transcript_links/.test(c.text));
+    assert.ok(deactivate, "the prior evidence link must become historical before the current link changes");
+    assert.match(deactivate!.text, /is_current=false/);
+    const write = calls.find((c) => /insert into meeting_draft_transcript_links/.test(c.text));
     assert.ok(write, "the link table must be written");
     assert.match(write!.text, /on conflict \(newsroom_id,draft_id,artifact_id\)/, "re-linking must update, not accumulate");
+    assert.match(write!.text, /is_current=true/);
+    assert.match(write!.text, /revision_notice=null/);
     assert.deepEqual(write!.params, [3, 41, 9, result.snapshot]);
     const marker = calls.find((c) => /update drafts set research_json/.test(c.text));
     assert.ok(marker, "the same transaction must mark that this draft used meeting evidence");
@@ -111,6 +117,13 @@ describe("meeting draft to transcript link", () => {
       item: "7", segmentIndex: 2, timestampSeconds: 65, excerpt: "used words", captionSha256: "used-hash",
     });
     assert.equal(evidence?.newerTranscriptExists, true);
+  });
+
+  it("migrates historical links while enforcing exactly one current link per draft", () => {
+    const migration = readFileSync(new URL("../../../migrations/0082_current_draft_transcript_link.sql", import.meta.url), "utf8");
+    assert.match(migration, /add column if not exists is_current boolean not null default false/i);
+    assert.match(migration, /row_number\(\) over \(partition by newsroom_id,draft_id/i);
+    assert.match(migration, /unique index[\s\S]*\(newsroom_id,draft_id\)[\s\S]*where is_current/i);
   });
 });
 
