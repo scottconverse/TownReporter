@@ -39,6 +39,7 @@ export type MeetingAwarenessDeps = {
   storeMeetingTranscriptArtifact?: typeof storeMeetingTranscriptArtifact;
   runSection5?: typeof runSection5ForArtifact;
   withTransaction?: typeof withTransaction;
+  applyCapturedMeetingTranscript?: typeof applyCapturedMeetingTranscript;
   now?: () => Date;
 };
 
@@ -193,27 +194,6 @@ async function recordCaptureFailure(sql: Sql, newsroomId: number, video: ListedV
     [newsroomId, video.id, video.url, video.title, video.published ?? "", reason],
   );
 }
-async function recordCaptureSuccess(
-  sql: Sql, newsroomId: number, video: ListedVideo, channelUrl: string,
-  result: Extract<CaptionCaptureResult, { ok: true }>, endedAt: string | null, disposition: "provisional" | "final",
-): Promise<void> {
-  await sql.query(
-    `insert into meeting_capture_records(
-       newsroom_id,video_id,channel_url,title,published,status,captured_at,
-       caption_path,caption_format,caption_sha256,caption_captured_at,failure_reason,
-       ended_at,capture_disposition,duration_seconds,caption_revision_timestamp)
-     values($1,$2,$3,$4,$5,'captured',now(),$6,$7,$8,now(),null,$9,$10,$11,$12)
-     on conflict(newsroom_id,video_id) do update set
-       channel_url=excluded.channel_url,title=excluded.title,published=excluded.published,
-       status='captured',captured_at=now(),caption_path=excluded.caption_path,
-       caption_format=excluded.caption_format,caption_sha256=excluded.caption_sha256,
-       caption_captured_at=now(),failure_reason=null,ended_at=excluded.ended_at,
-       capture_disposition=excluded.capture_disposition,duration_seconds=excluded.duration_seconds,
-       caption_revision_timestamp=excluded.caption_revision_timestamp,updated_at=now()`,
-    [newsroomId, video.id, channelUrl, video.title, video.published ?? "", result.parsed.sourcePath, result.parsed.format, result.parsed.sha256, endedAt, disposition, result.info.durationSeconds, result.info.captionRevisionTimestamp],
-  );
-}
-
 /**
  * N-5 Continue: resume captures the operator stopped, in place.
  *
@@ -231,8 +211,8 @@ export async function resumeStoppedMeetings(
   newsroomId: number,
   deps: MeetingAwarenessDeps = {},
 ): Promise<{ resumed: number; skipped: number; failures: string[]; coverageLine: string }> {
-  const stopped = await sql<{ video_id: string; title: string; partial_path: string | null }>`
-    select video_id, title, partial_path
+  const stopped = await sql<{ video_id: string; channel_url: string; title: string; published: string; partial_path: string | null }>`
+    select video_id, channel_url, title, published, partial_path
       from meeting_capture_records
      where newsroom_id = ${newsroomId} and status = 'stopped'
      order by updated_at asc
@@ -240,6 +220,13 @@ export async function resumeStoppedMeetings(
   const failures: string[] = [];
   let resumed = 0;
   let skipped = 0;
+  const applyCaptured = deps.applyCapturedMeetingTranscript ?? applyCapturedMeetingTranscript;
+  const ownerUserId = stopped.length
+    ? (await sql.query<{ user_id: string }>(
+        "select user_id from newsroom_members where newsroom_id=$1 and role='owner' limit 1",
+        [newsroomId],
+      ))[0]?.user_id ?? ""
+    : "";
   for (const record of stopped) {
     if (!record.partial_path || !existsSync(record.partial_path)) {
       skipped += 1;
@@ -247,14 +234,33 @@ export async function resumeStoppedMeetings(
       continue;
     }
     const capture = deps.captureMeeting ?? captureMeetingCaptions;
-    const outputDir = meetingCaptionDir(newsroomId);
+    // Resume in the directory that owns the recorded .part file. Initial
+    // captures use a per-video directory; pointing yt-dlp at the newsroom root
+    // would start a fresh file while the real partial sat one level below.
+    const outputDir = dirname(record.partial_path);
     const result = await capture({ videoId: record.video_id, outputDir, archivePath: meetingArchivePath(newsroomId), resume: true });
     if (result.ok) {
-      await sql.query(
-        "update meeting_capture_records set status = 'captured', failure_reason = null, partial_path = null, resumed_at = now(), updated_at = now() where newsroom_id = $1 and video_id = $2",
-        [newsroomId, record.video_id],
-      );
-      resumed += 1;
+      try {
+        const applied = await applyCaptured(sql, {
+          newsroomId,
+          userId: ownerUserId,
+          video: {
+            id: record.video_id,
+            channelUrl: record.channel_url,
+            title: record.title,
+            published: record.published,
+          },
+          result: result as Extract<CaptionCaptureResult, { ok: true }>,
+        }, deps);
+        await sql.query(
+          "update meeting_capture_records set partial_path = null, resumed_at = now(), updated_at = now() where newsroom_id = $1 and video_id = $2",
+          [newsroomId, record.video_id],
+        );
+        failures.push(...applied.warnings);
+        resumed += 1;
+      } catch (error) {
+        failures.push(`${record.title}: ${error instanceof Error ? error.message : String(error)}`);
+      }
       continue;
     }
     failures.push(`${record.title}: ${result.reason}`);
@@ -278,8 +284,8 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const capture = deps.captureMeeting ?? captureMeetingCaptions;
   const captureAudio = deps.captureAudio ?? captureMeetingAudio;
   const storeAudio = deps.storeMeetingAudioArtifact ?? storeMeetingAudioArtifact;
-  const storeTranscript = deps.storeMeetingTranscriptArtifact ?? storeMeetingTranscriptArtifact;
   const runTransaction = deps.withTransaction ?? withTransaction;
+  const applyCaptured = deps.applyCapturedMeetingTranscript ?? applyCapturedMeetingTranscript;
   const now = (deps.now ?? (() => new Date()))();
   type ListedMeetingVideo = ListedVideo & { channelUrl: string };
   const foundById = new Map<string, ListedMeetingVideo>();
@@ -408,48 +414,19 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
       failures.push(`${v.title}: ${captionSizeRefusal.reason}`);
       continue;
     }
-    const endedAt = computeEndedAt({ durationSeconds: result.info.durationSeconds, videoTimestamp: result.info.videoTimestamp });
-    const disposition = captureDisposition({ endedAt, now });
     try {
-      await runTransaction(async (tx) => {
-        await recordCaptureSuccess(tx, newsroomId, v, v.channelUrl, result as Extract<CaptionCaptureResult, { ok: true }>, endedAt, disposition);
-        await storeTranscript(tx, { newsroomId, videoId: v.id, parsed: result.parsed, infoSourcePath: result.infoPath });
-        const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: v.id, title: v.title, meetingDate: v.published, artifactId: Number((await tx.query<{ id: number }>("select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1", [newsroomId, v.id]))[0]?.id ?? 0) });
-        if (!section5.aligned && section5.unalignedLead) failures.push(section5.unalignedLead.leadWhy);
-        if (section5.aligned && section5.citations.length) {
-          /*
-            File the lead that carries the transcript to the desk. Before this,
-            Section 5 produced aligned items, structured votes and resolved
-            citations and returned them to a caller that dropped them: no lead,
-            no job, no draft, and the paper gained nothing from the meeting.
-          */
-          await fileMeetingLead(tx, {
-            newsroomId,
-            /*
-              leads.user_id is a real column: a lead is owned by an editor.
-              The capture pass has no signed-in user, so it resolves the
-              newsroom owner, who is the editor this meeting is filed for.
-            */
-            userId: (await tx.query<{ user_id: string }>("select user_id from newsroom_members where newsroom_id=$1 and role='owner' limit 1", [newsroomId]))[0]?.user_id ?? "",
-            videoId: v.id,
-            title: v.title,
-            meetingDate: v.published ?? null,
-            topic: "council",
-            sourceUrls: [`https://www.youtube.com/watch?v=${v.id}`],
-            items: section5.items,
-            establishedVotes: section5.voteCount,
-            votes: section5.votes.map((v) => ({
-              item: v.item, established: v.established, motion: v.motion, mover: v.mover,
-              seconder: v.seconder, tally: v.tally, result: v.result, source: v.source,
-            })),
-            citations: section5.citations.map((c) => ({
-              item: c.item, segmentIndex: c.segmentIndex, timestampSeconds: c.timestampSeconds,
-              excerpt: c.excerpt, captionSha256: c.captionSha256,
-            })),
-            artifactId: Number((await tx.query<{ id: number }>("select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1", [newsroomId, v.id]))[0]?.id ?? 0),
-          });
-        }
-      });
+      const ownerUserId = (await sql.query<{ user_id: string }>(
+        "select user_id from newsroom_members where newsroom_id=$1 and role='owner' limit 1",
+        [newsroomId],
+      ))[0]?.user_id ?? "";
+      const applied = await applyCaptured(sql, {
+        newsroomId,
+        userId: ownerUserId,
+        video: { id: v.id, channelUrl: v.channelUrl, title: v.title, published: v.published ?? "" },
+        result: result as Extract<CaptionCaptureResult, { ok: true }>,
+        now,
+      }, deps);
+      failures.push(...applied.warnings);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       await recordCaptureFailure(sql, newsroomId, v, reason);

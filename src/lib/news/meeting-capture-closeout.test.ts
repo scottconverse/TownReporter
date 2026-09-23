@@ -14,14 +14,19 @@ describe("meeting capture closeout: provisional re-check is wired into the scan 
     assert.match(block, /recheckProvisionalMeetings/);
   });
 
-  it("re-check calls detectRevision, nextCheckState, and applyDraftRevision", () => {
+  it("re-check uses the canonical helper that detects, records, and applies revisions", () => {
     const source = readFileSync(new URL("./meeting-capture.ts", import.meta.url), "utf8");
-    const start = source.indexOf("export async function recheckProvisionalMeetings");
-    const body = source.slice(start);
-    assert.match(body, /detectRevision/);
-    assert.match(body, /nextCheckState/);
-    assert.match(body, /applyDraftRevision/);
-    assert.match(body, /meeting_transcript_revisions/);
-    assert.match(body, /dueForRecheck/);
+    const helperStart = source.indexOf("export async function applyCapturedMeetingTranscript");
+    const helperEnd = source.indexOf("export async function recheckProvisionalMeetings", helperStart);
+    const helper = source.slice(helperStart, helperEnd);
+    assert.match(helper, /detectRevision/);
+    assert.match(helper, /nextCheckState/);
+    assert.match(helper, /applyDraftRevision/);
+    assert.match(helper, /meeting_transcript_revisions/);
+
+    const recheck = source.slice(helperEnd);
+    assert.match(recheck, /dueForRecheck/);
+    assert.match(recheck, /applyCapturedMeetingTranscript/,
+      "the scheduled re-check must not reimplement or bypass the canonical revision path");
   });
 });

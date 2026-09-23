@@ -42,6 +42,18 @@ function harness(storageRoot: string, captionPath: string, captionSha256: string
       });
       return [];
     }
+    if (/update meeting_capture_records set/i.test(text) && /caption_path=\$4/i.test(text)) {
+      const videoId = String(params[17]);
+      const row = rows.get(videoId);
+      if (row) Object.assign(row, {
+        channel_url: params[0], title: params[1], published: params[2], status: "captured",
+        caption_path: params[3], caption_format: params[4], caption_sha256: params[5],
+        caption_captured_at: "2026-01-01T00:00:00Z", failure_reason: null,
+        ended_at: params[6], caption_revision_timestamp: params[7], duration_seconds: params[8],
+        capture_disposition: params[9], revision_count: params[12], last_revision_at: params[13],
+      });
+      return [];
+    }
     if (/insert into meeting_transcript_artifacts/i.test(text)) return [{ id: 5, captured_at: "2026-01-01T00:00:00Z" }];
     if (/insert into meeting_transcript_segments/i.test(text)) return [];
     if (/from meeting_transcript_artifacts/i.test(text)) return [{ id: 5, storage_path: captionPath, sha256: captionSha256 }];

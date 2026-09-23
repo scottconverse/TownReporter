@@ -22,6 +22,7 @@ function statefulSql(storageRoot: string, channels = [{ channel_url: "https://yo
     if (/from meeting_capture_records/i.test(text)) return [...rows.values()];
     if (/insert into meeting_capture_records/i.test(text)) {
       const [newsroomId, videoId, channelUrl, title, published] = params as [number, string, string, string, string];
+      if (/on conflict\s*\(newsroom_id,video_id\)\s*do nothing/i.test(text) && rows.has(videoId)) return [];
       const isCaptured = text.includes("'captured'");
       const isFailed = text.includes("'failed'");
       const status = isCaptured ? "captured" : isFailed ? "failed" : "not-captured";
@@ -37,6 +38,21 @@ function statefulSql(storageRoot: string, channels = [{ channel_url: "https://yo
         revision_count: 0, settled_under_churn: false, last_revision_at: null,
       });
       if (status === "captured") captured.add(videoId);
+      return [];
+    }
+    if (/update meeting_capture_records set/i.test(text) && /caption_path=\$4/i.test(text)) {
+      const videoId = String(params[17]);
+      const row = rows.get(videoId);
+      if (row) {
+        Object.assign(row, {
+          channel_url: params[0], title: params[1], published: params[2], status: "captured",
+          caption_path: params[3], caption_format: params[4], caption_sha256: params[5],
+          caption_captured_at: "2026-01-01T00:00:00Z", failure_reason: null,
+          ended_at: params[6], caption_revision_timestamp: params[7], duration_seconds: params[8],
+          capture_disposition: params[9], revision_count: params[12], last_revision_at: params[13],
+        });
+        captured.add(videoId);
+      }
       return [];
     }
     if (/insert into meeting_transcript_artifacts/i.test(text)) return [{ id: 5, captured_at: "2026-01-01T00:00:00Z" }];
