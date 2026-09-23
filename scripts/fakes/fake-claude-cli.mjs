@@ -138,7 +138,7 @@ if (argv[0] === "auth" && argv[1] === "login") {
     value = argv[allowedIdx + 1] ?? "";
   }
   process.stdout.write(
-    JSON.stringify({ is_error: false, result: JSON.stringify({ flag, value }) }) + "\n",
+    JSON.stringify({ is_error: false, result: JSON.stringify({ flag, value, argv, cwd: process.cwd() }) }) + "\n",
   );
   process.exit(0);
 } else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_ECHO_READ_CALL === "1") {
@@ -154,7 +154,7 @@ if (argv[0] === "auth" && argv[1] === "login") {
   let stdin = "";
   for await (const chunk of process.stdin) stdin += chunk;
   process.stdout.write(
-    JSON.stringify({ is_error: false, result: JSON.stringify({ tools, stdin }) }) + "\n",
+    JSON.stringify({ is_error: false, result: JSON.stringify({ tools, stdin, argv, cwd: process.cwd() }) }) + "\n",
   );
   process.exit(0);
 } else if (argv[0] === "-p" && process.env.FAKE_CLAUDE_QUOTA_PROMPTS === "1") {

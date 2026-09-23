@@ -30,7 +30,7 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { assertNotAnArgument } from "./voice.server.ts";
 import { spawnPlan } from "./cli-spawn.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
@@ -315,6 +315,12 @@ export async function claudeCodeChat(opts: {
         "Pass one or the other.",
     );
   }
+  const safeReportingTools = new Set(["WebSearch", "WebFetch"]);
+  const forbiddenTools = (opts.allowedTools ?? []).filter((tool) => !safeReportingTools.has(tool));
+  if (forbiddenTools.length) {
+    cleanupTempDir();
+    throw new Error(`Refusing tools outside the reporting boundary: ${forbiddenTools.join(", ")}`);
+  }
   if (opts.reasoningEffort && !CLAUDE_CLI_EFFORTS.includes(opts.reasoningEffort)) {
     cleanupTempDir();
     throw new Error(
@@ -342,6 +348,14 @@ export async function claudeCodeChat(opts: {
 
   const args = [
     "-p",
+    "--restricted",
+    "--strict-mcp-config",
+    "--safe-mode",
+    "--disable-slash-commands",
+    "--permission-mode", "dontAsk",
+    "--permission-prompts", "none",
+    "--no-session-persistence",
+    "--no-chrome",
     ...(usingFile
       ? ["--system-prompt-file", systemPromptFile!]
       : ["--system-prompt", opts.system]),
@@ -478,6 +492,14 @@ export async function claudeCodeReadChat(opts: {
 
   const args = [
     "-p",
+    "--restricted",
+    "--strict-mcp-config",
+    "--safe-mode",
+    "--disable-slash-commands",
+    "--permission-mode", "dontAsk",
+    "--permission-prompts", "none",
+    "--no-session-persistence",
+    "--no-chrome",
     "--tools",
     "Read",
     "--setting-sources",
@@ -503,7 +525,8 @@ export async function claudeCodeReadChat(opts: {
       const plan = spawnPlan(bin, args);
       child = spawn(plan.command, plan.args, {
         stdio: ["pipe", "pipe", "pipe"],
-        cwd: process.env.TMPDIR || process.env.TEMP || process.cwd(),
+        // Restricted mode confines Read to this one per-page temp directory.
+        cwd: dirname(opts.filePath),
         windowsHide: true,
       });
     } catch {

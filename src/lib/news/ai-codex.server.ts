@@ -290,7 +290,15 @@ export function buildCodexArgs(input: {
   return [
     "--ask-for-approval",
     "never",
-    "--search",
+    "--ignore-user-config",
+    "--disable", "shell_tool",
+    "--disable", "computer_use",
+    "--disable", "browser_use",
+    "--disable", "apps",
+    "--disable", "plugins",
+    "--disable", "multi_agent",
+    "--disable", "hooks",
+    ...(input.webSearch ? ["--search"] : []),
     "exec",
     // Packaged installations run from an extracted, non-Git directory. This
     // is the Codex CLI's documented opt-out for that repository check; it
@@ -304,7 +312,7 @@ export function buildCodexArgs(input: {
       : []),
     ...(configuredReasoning ? ["-c", `model_reasoning_effort=${configuredReasoning}`] : []),
     "--sandbox",
-    "danger-full-access",
+    "read-only",
     "--ephemeral",
     "--color",
     "never",
