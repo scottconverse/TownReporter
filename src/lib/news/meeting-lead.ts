@@ -164,9 +164,16 @@ export async function fileMeetingLead(
     `insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json,
                         meeting_video_id,meeting_artifact_id,meeting_lead_purpose)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'transcript-story')
-     on conflict (newsroom_id,meeting_video_id,meeting_artifact_id,meeting_lead_purpose)
+     on conflict (newsroom_id,meeting_video_id,meeting_lead_purpose)
        where meeting_video_id is not null and meeting_artifact_id is not null and meeting_lead_purpose is not null
-     do update set headline=excluded.headline
+     do update set headline=excluded.headline,
+                   why=excluded.why,
+                   topic=excluded.topic,
+                   source_urls=excluded.source_urls,
+                   evidence=excluded.evidence,
+                   notes_json=excluded.notes_json,
+                   meeting_artifact_id=excluded.meeting_artifact_id,
+                   updated_at=now()
      returning id`,
     [
       input.userId, input.newsroomId, copy.headline, copy.why, input.topic,

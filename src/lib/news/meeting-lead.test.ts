@@ -39,7 +39,9 @@ describe("meeting lead", () => {
     assert.equal(result.leadId, 88);
     const write = calls.find((c) => /insert into leads/.test(c.text));
     assert.ok(write, "the lead must be filed");
-    assert.match(write!.text, /on conflict \(newsroom_id,meeting_video_id,meeting_artifact_id,meeting_lead_purpose\)/i, "the database must enforce one lead per artifact and purpose");
+    assert.match(write!.text, /on conflict \(newsroom_id,meeting_video_id,meeting_lead_purpose\)/i, "the database must enforce one transcript-story lead per meeting video");
+    assert.doesNotMatch(write!.text, /on conflict \(newsroom_id,meeting_video_id,meeting_artifact_id,meeting_lead_purpose\)/i, "a new transcript artifact must not become a duplicate Queue lead");
+    assert.match(write!.text, /meeting_artifact_id=excluded\.meeting_artifact_id/i, "a revision must move the existing lead to the current immutable artifact");
     const notes = JSON.parse(String(write!.params[9])) as {
       meeting: { videoId: string; artifactId: number };
       scratch: string;
@@ -110,6 +112,23 @@ describe("meeting lead", () => {
     const params = calls[0]!.params;
     assert.equal(params[7], 0, "newsworthiness is not asserted by the capture pass");
     assert.equal(params[8], "new", "the lead enters the ordinary queue");
+  });
+
+  it("preserves editorial state when a revision refreshes the existing lead", async () => {
+    const calls: { text: string; params: unknown[] }[] = [];
+    const sql = (async () => [] as never[]) as unknown as Sql;
+    sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
+      calls.push({ text, params });
+      return [{ id: 12 }] as unknown as T[];
+    };
+    await fileMeetingLead(sql, {
+      newsroomId: 1, userId: "editor", videoId: "same-video", title: "Council", meetingDate: "2026-09-22",
+      topic: "council", sourceUrls: [], items: [], establishedVotes: 0, citations: [], artifactId: 9, votes: [],
+    });
+    const write = calls[0]!.text;
+    assert.match(write, /meeting_artifact_id=excluded\.meeting_artifact_id/i);
+    assert.doesNotMatch(write, /status=excluded\.status/i, "drafted, killed, or assigned state must not reset to new");
+    assert.doesNotMatch(write, /user_id=excluded\.user_id/i, "the revision must not reassign the editor's lead");
   });
 });
 
