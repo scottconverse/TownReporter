@@ -469,7 +469,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const coverageLine = `meetings: ${found.length} found, ${finalRecords.filter((r) => r.status === "captured").length} captured, ${failed.length} failed`;
   return {
     configured: true, found, uncaptured, captured: finalRecords, failed, coverageLine,
-    failures: [...failures, ...failed.map((r) => `${r.title}: ${r.failureReason ?? "capture failed"}`)],
+    failures: [...new Set([...failures, ...failed.map((r) => `${r.title}: ${r.failureReason ?? "capture failed"}`)])],
     archivePath,
   };
 }

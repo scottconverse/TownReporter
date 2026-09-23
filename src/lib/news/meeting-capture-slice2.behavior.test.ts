@@ -167,4 +167,24 @@ describe("meeting capture Slice 2 second-run suppression", () => {
       else process.env.TOWNREPORTER_DATA_ROOT = priorRoot;
     }
   });
+
+  it("reports one named failure when the failed record and capture pass describe the same error", async () => {
+    const { runMeetingAwareness } = await import("./meeting-capture.ts");
+    const storageRoot = mkdtempSync(join(tmpdir(), "townreporter-meeting-failure-"));
+    const state = statefulSql(storageRoot);
+    const result = await runMeetingAwareness(state.sql, 1, {
+      listChannelVideos: async () => [{
+        id: "failure0001", title: "City Council Meeting", published: "2026-09-22",
+        url: "https://youtube.com/watch?v=failure0001", duration: 100, tab: "streams" as const,
+      }],
+      captureMeeting: async () => ({
+        ok: false as const, stopped: false, reason: "yt-dlp rate limited (HTTP 429)",
+        argv: [], stdout: "", stderr: "",
+      }),
+      withTransaction: state.withTransaction,
+    } as never);
+
+    assert.deepEqual(result.failures, ["City Council Meeting: yt-dlp rate limited (HTTP 429)"]);
+    assert.equal(result.failed.length, 1);
+  });
 });
