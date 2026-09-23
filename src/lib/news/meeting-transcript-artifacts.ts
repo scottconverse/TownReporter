@@ -186,7 +186,16 @@ export async function storeMeetingTranscriptArtifact(
     throw new Error(`Stored meeting artifact is missing or does not match its hash: ${targetPath}`);
   }
   const sidecar = storeMeetingInfoSidecar(input.infoSourcePath, targetDir);
-  const segments = parseTranscriptSegments(input.parsed.text, input.parsed.sha256);
+  const segments = input.parsed.segments?.length
+    ? input.parsed.segments.map((segment, segmentIndex) => ({
+        segmentIndex,
+        startSeconds: segment.startSeconds,
+        endSeconds: segment.endSeconds,
+        item: null,
+        excerpt: segment.excerpt,
+        captionSha256: input.parsed.sha256,
+      }))
+    : parseTranscriptSegments(input.parsed.text, input.parsed.sha256);
   const rows = await sql.query<{ id: number; captured_at: string }>(
     `insert into meeting_transcript_artifacts
        (newsroom_id,video_id,artifact_type,storage_path,format,sha256,captured_at,source_method,retention_mode,info_path,info_sha256,info_bytes,info_missing_reason)

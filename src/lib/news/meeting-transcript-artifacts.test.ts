@@ -30,6 +30,39 @@ describe("meeting transcript artifacts Slice 3", () => {
     assert.ok(segments[1]!.startSeconds >= segments[0]!.startSeconds);
   });
 
+  it("persists the real caption cue times when the parser provides them", async () => {
+    const { parseCaptionFile } = await import("./caption-parse.ts");
+    const { storeMeetingTranscriptArtifact } = await import("./meeting-transcript-artifacts.ts");
+    const root = mkdtempSync(join(tmpdir(), "townreporter-real-caption-times-"));
+    try {
+      const raw = '<?xml version="1.0"?><timedtext><body><p t="1250" d="2750">Opening</p><p t="8500" d="1500">Vote called</p></body></timedtext>';
+      const sourcePath = join(root, "timed.srv3");
+      writeFileSync(sourcePath, raw, "utf8");
+      const insertedSegments: unknown[][] = [];
+      const sql = (async () => [] as never[]) as unknown as Sql;
+      sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
+        if (/select storage_root/i.test(text)) return [{ storage_root: root }] as T[];
+        if (/select retention_mode/i.test(text)) return [{ retention_mode: "transcript-only" }] as T[];
+        if (/insert into meeting_transcript_artifacts/i.test(text)) return [{ id: 1, captured_at: "2026-09-23T00:00:00Z" }] as T[];
+        if (/insert into meeting_transcript_segments/i.test(text)) { insertedSegments.push(params); return [] as T[]; }
+        throw new Error(`unexpected query: ${text}`);
+      };
+
+      await storeMeetingTranscriptArtifact(sql, {
+        newsroomId: 1,
+        videoId: "timed-video",
+        parsed: parseCaptionFile(raw, sourcePath),
+      });
+
+      assert.deepEqual(insertedSegments.map((params) => [params[2], params[3], params[5]]), [
+        [1.25, 4, "Opening"],
+        [8.5, 10, "Vote called"],
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("resolves a citation by segment index and by timestamp to item, timestamp, excerpt, hash, path", async () => {
     const { resolveTranscriptCitation } = await import("./meeting-transcript-artifacts.ts");
     const artifact = { id: 7, storagePath: "C:\\data\\meet.srv3", sha256: "abc123" };
