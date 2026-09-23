@@ -77,6 +77,25 @@ test("a published current release note carries the tag, asset, and source commit
   assert.match(note, /[a-f0-9]{40}/, "note must name a 40-char source commit");
 });
 
+test("the 0.6.60 record distinguishes its audited candidate from the released merge", () => {
+  const note = read("docs/releases/0.6.60.md");
+  assert.match(note, /Audited source candidate:\*\*\s*`69db1d0802b8e78853b5bbd393324bf0d710de12`/);
+  assert.match(note, /Released merge commit and tag target:\*\*\s*`e97db885364a09db6914371e53a7c3a961cd9c23`/);
+  assert.match(note, /1e781465600bd6ee7b08953253a55002a748bb84b4f8014827af991d0c490463/);
+  assert.doesNotMatch(note, /No release, tag, GitHub publication[^\n]*is asserted here/i);
+  for (const file of ["CHANGELOG.md", "SELF-HOSTING.md", "docs/editor.md", "docs/setup.md"]) {
+    const current = read(file).split(/\r?\n/).slice(0, 16).join("\n");
+    assert.doesNotMatch(current, /unverified GitHub|does not assert GitHub|does not assert a Git tag/i, `${file} denies the published 0.6.60 release`);
+  }
+});
+
+test("the retired Opinion-only environment override is not advertised", () => {
+  assert.doesNotMatch(read(".env.example"), /TOWNREPORTER_EDITORIAL_MODEL/);
+  const modelChoice = read("src/lib/news/model-choice.ts");
+  assert.match(modelChoice, /DEFAULT_OPINION_MODEL\s*=\s*"codex-frontier"/);
+  assert.match(modelChoice, /OPINION_AUTOMATIC_LADDER\s*=\s*\["codex-frontier",\s*"claude-sonnet"\]/);
+});
+
 /*
   Historical entries are legitimate: README's "Recent releases" list keeps an
   older release's "does not assert GitHub publication" line, and dated records

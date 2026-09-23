@@ -9,8 +9,8 @@ usual for this project.
 
 | Version | Supported |
 |---|---|
-| 0.5.x | Yes — fixes land on the current release |
-| < 0.5 | No. Upgrade before reporting, in case the issue is already closed. |
+| 0.6.x | Yes — fixes land on the current release |
+| < 0.6 | No. Upgrade before reporting, in case the issue is already closed. |
 
 There is one active release line, maintained by one person.
 
@@ -126,8 +126,6 @@ your desk sends where and to whom.
 
 ---
 
-*This file was written on 2026-08-29 against the checked-out code (not the
-live `townreporter.org` deployment, which was out of scope for that review).
-The reporting address above is a placeholder: the maintainer needs to fill it
-in, or confirm GitHub's private vulnerability reporting is enabled for this
-repository, before this file is fully load-bearing.*
+*This policy describes the maintained repository release line. GitHub private
+vulnerability reporting is the supported confidential reporting route and is
+checked by the repository's security-policy test.*
