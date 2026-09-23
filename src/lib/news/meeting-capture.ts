@@ -42,18 +42,28 @@ export type MeetingAwarenessDeps = {
   now?: () => Date;
 };
 
-const ARCHIVE_DIR = join(process.env.TOWNREPORTER_DATA_DIR || process.cwd(), "meeting-capture");
-const CAPTION_DIR = join(process.env.TOWNREPORTER_DATA_DIR || process.cwd(), "meeting-captions");
 const EMPTY_RESULT: MeetingAwarenessResult = {
   configured: false, found: [], uncaptured: [], captured: [], failed: [],
   coverageLine: "", failures: [], archivePath: null,
 };
 
-export function meetingArchivePath(newsroomId: number): string {
-  return join(ARCHIVE_DIR, `newsroom-${newsroomId}`, "yt-dlp-archive.txt");
+export function meetingRuntimeRoot(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): string {
+  // The Windows installer owns TOWNREPORTER_DATA_ROOT. DATA_DIR is retained
+  // only for older source deployments that already set it.
+  return env.TOWNREPORTER_DATA_ROOT || env.TOWNREPORTER_DATA_DIR || cwd;
 }
-export function meetingCaptionDir(newsroomId: number): string {
-  return join(CAPTION_DIR, `newsroom-${newsroomId}`);
+export function meetingArchivePath(newsroomId: number, root = meetingRuntimeRoot()): string {
+  return join(root, "meeting-capture", `newsroom-${newsroomId}`, "yt-dlp-archive.txt");
+}
+export function meetingCaptionDir(newsroomId: number, root = meetingRuntimeRoot()): string {
+  return join(root, "meeting-captions", `newsroom-${newsroomId}`);
+}
+export function prepareMeetingCapturePaths(newsroomId: number, videoId: string): { archivePath: string; outputDir: string } {
+  const archivePath = meetingArchivePath(newsroomId);
+  const outputDir = join(meetingCaptionDir(newsroomId), videoId);
+  mkdirSync(dirname(archivePath), { recursive: true });
+  mkdirSync(outputDir, { recursive: true });
+  return { archivePath, outputDir };
 }
 export function parseArchive(text: string): Set<string> {
   const ids = new Set<string>();
@@ -291,8 +301,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const known = new Set(captured.filter((r) => r.status === "captured").map((r) => r.videoId));
   const uncaptured = found.filter((v) => !known.has(v.id));
   for (const v of uncaptured) {
-    const archivePath = meetingArchivePath(newsroomId);
-    const outputDir = join(meetingCaptionDir(newsroomId), v.id);
+    const { archivePath, outputDir } = prepareMeetingCapturePaths(newsroomId, v.id);
     await sql.query(
       "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status) values($1,$2,$3,$4,$5,'not-captured') on conflict(newsroom_id,video_id) do update set channel_url=excluded.channel_url,title=excluded.title,published=excluded.published,updated_at=now()",
       [newsroomId, v.id, v.channelUrl, v.title, v.published ?? ""],
@@ -507,8 +516,7 @@ export async function recheckProvisionalMeetings(
   for (const row of rows) {
     if (!dueForRecheck({ status: row.capture_disposition ?? "final", lastCheckedAt: row.last_checked_at, now })) continue;
     checked += 1;
-    const archivePath = meetingArchivePath(newsroomId);
-    const outputDir = join(meetingCaptionDir(newsroomId), row.video_id);
+    const { archivePath, outputDir } = prepareMeetingCapturePaths(newsroomId, row.video_id);
     let result: CaptionCaptureResult;
     try {
       result = await capture({ videoId: row.video_id, outputDir, archivePath, sleepSubtitles: 2, sleepRequests: 1 });

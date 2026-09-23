@@ -15,7 +15,7 @@ import { requireEditor, ForbiddenError } from "./membership.ts";
 import { runMeetingAwareness, recheckProvisionalMeetings, resumeStoppedMeetings, type MeetingAwarenessResult } from "./meeting-capture.ts";
 import { storeMeetingTranscriptArtifact } from "./meeting-transcript-artifacts.ts";
 import { captureMeetingCaptions } from "./meeting-capture-ytdlp.ts";
-import { meetingCaptionDir, meetingArchivePath } from "./meeting-capture.ts";
+import { prepareMeetingCapturePaths } from "./meeting-capture.ts";
 
 export type MeetingManualRunResult =
   | {
@@ -197,10 +197,9 @@ export const forceRecaptureMeeting = createServerFn({ method: "POST" })
     );
     const priorSha = prior[0]?.caption_sha256 ?? null;
 
-    const outputDir = meetingCaptionDir(newsroomId);
-    const archivePath = meetingArchivePath(newsroomId);
+    const { outputDir, archivePath } = prepareMeetingCapturePaths(newsroomId, data.videoId);
     try {
-      const result = await captureMeetingCaptions({ videoId: data.videoId, outputDir: `${outputDir}/${data.videoId}`, archivePath });
+      const result = await captureMeetingCaptions({ videoId: data.videoId, outputDir, archivePath });
       if (!result.ok) {
         await sql.query("update scan_runs set finished_at=now(), error=$1, meetings_found=1, meetings_failed=1, meeting_failures=$2 where id=$3",
           [result.reason, JSON.stringify([`${data.title}: ${result.reason}`]), runId]);
