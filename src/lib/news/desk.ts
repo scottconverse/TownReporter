@@ -24,9 +24,15 @@ import {
   sanitizePublicUrls,
 } from "./schema";
 import { reportAndDraft } from "./report";
-import { linkDraftToTranscript } from "./meeting-draft-transcript-link.ts";
+import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
 import { staleMeetingCitations, staleCitationNotice } from "./meeting-publish-guard.ts";
 import { lockMeetingsForDraftPublish } from "./meeting-revision-lock.ts";
+import {
+  listPublishedMeetingReviews as loadPublishedMeetingReviews,
+  recordPublishedMeetingEvidence,
+  resolvePublishedMeetingReview,
+  type PublishedMeetingReview,
+} from "./meeting-article-revision.ts";
 import { deriveUsedCitations } from "./meeting-draft-citations.ts";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
 import {
@@ -382,6 +388,9 @@ export const getLead = createServerFn({ method: "GET" })
     `;
     const evidenceToken = drafts[0] ? evidenceReviewToken(drafts[0]) : "";
     const draft = drafts[0] ? unpackStoredDraft({ ...drafts[0] }) : null;
+    const draftMeetingEvidence = drafts[0]
+      ? await loadDraftMeetingEvidence(sql, { newsroomId: owned(context), draftId: Number(drafts[0].id) })
+      : null;
     if (draft?.body) draft.body = stripReporterNotebook(draft.body);
     let notes = parseNotes(lead.notes_json);
     if (!notes.todo.length && draft?.unanswered) {
@@ -425,6 +434,7 @@ export const getLead = createServerFn({ method: "GET" })
     return {
       lead,
       draft,
+      draftMeetingEvidence,
       evidenceToken,
       articleSlug: live[0]?.slug ?? null,
       openedExtractionByUrl: extractionByUrl,
@@ -2293,6 +2303,11 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}, ${row.id}
       ) returning id
     `;
+      await recordPublishedMeetingEvidence(sql, {
+        newsroomId: owned(context),
+        articleId: printed.id,
+        draftId: Number(row.id),
+      });
       await sql`
       update leads set status = 'published' where id = ${leadId} and newsroom_id = ${owned(context)}
     `;
@@ -2323,7 +2338,7 @@ export const publishLead = createServerFn({ method: "POST" })
 
 export const addCorrection = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { articleSlug?: string; body: string }) => input)
+  .validator((input: { articleSlug?: string; body: string; meetingReviewId?: number }) => input)
   .handler(async ({ context, data }) => {
     const { performAddCorrection } = await import("./corrections.ts");
     return performAddCorrection({ userId: context.userId, newsroomId: owned(context) }, data);
@@ -2339,7 +2354,31 @@ export type DeskPublishedRow = {
   lead_id: number | null;
   lead_score: number | null;
   corrections: { date: string; body: string }[];
+  transcriptReviews: PublishedMeetingReview[];
 };
+
+export const resolveMeetingArticleReview = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: {
+    reviewId: number;
+    resolution: "still-accurate" | "correction-required";
+    acceptedArtifactId: number;
+    note: string;
+    confirmedSegmentIndices: number[];
+  }) => input)
+  .handler(async ({ context, data }) => {
+    if (!data.note.trim()) return { ok: false as const, error: "Record what you checked or what needs correction." };
+    await withTransaction((sql) => resolvePublishedMeetingReview(sql, {
+      newsroomId: owned(context),
+      reviewId: data.reviewId,
+      reviewerId: context.userId,
+      resolution: data.resolution,
+      acceptedArtifactId: data.acceptedArtifactId,
+      note: data.note.trim(),
+      confirmedSegmentIndices: data.confirmedSegmentIndices,
+    }));
+    return { ok: true as const };
+  });
 
 export const listPublishedDesk = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
@@ -2376,10 +2415,18 @@ export const listPublishedDesk = createServerFn({ method: "GET" })
       list.push({ date: c.created_at, body: c.body });
       byArt.set(c.article_id, list);
     }
+    const reviews = await loadPublishedMeetingReviews(sql, owned(context));
+    const reviewsByArticle = new Map<number, PublishedMeetingReview[]>();
+    for (const review of reviews) {
+      const list = reviewsByArticle.get(review.article.id) ?? [];
+      list.push(review);
+      reviewsByArticle.set(review.article.id, list);
+    }
     return arts.map((a) => ({
       ...a,
       lead_score: a.lead_score == null ? null : Number(a.lead_score),
       corrections: byArt.get(a.id) ?? [],
+      transcriptReviews: reviewsByArticle.get(a.id) ?? [],
     }));
   });
 

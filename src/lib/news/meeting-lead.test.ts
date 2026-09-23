@@ -34,6 +34,7 @@ describe("meeting lead", () => {
     assert.equal(result.leadId, 88);
     const write = calls.find((c) => /insert into leads/.test(c.text));
     assert.ok(write, "the lead must be filed");
+    assert.match(write!.text, /on conflict \(newsroom_id,meeting_video_id,meeting_artifact_id,meeting_lead_purpose\)/i, "the database must enforce one lead per artifact and purpose");
     const notes = JSON.parse(String(write!.params[9])) as {
       meeting: { videoId: string; artifactId: number };
       transcriptCitations: { segmentIndex: number; captionSha256: string; timestamp: string }[];
@@ -98,7 +99,7 @@ describe("meeting lead", () => {
       newsroomId: 1, userId: "editor", videoId: "v", title: "T", meetingDate: null,
       topic: "council", sourceUrls: [], items: [], establishedVotes: 0, citations: [], artifactId: 1, votes: [],
     });
-    assert.equal(calls.length, 1, "only the lead insert; nothing else is touched");
+    assert.equal(calls.length, 1, "only the idempotent lead insert; nothing else is touched");
     const params = calls[0]!.params;
     assert.equal(params[7], 0, "newsworthiness is not asserted by the capture pass");
     assert.equal(params[8], "new", "the lead enters the ordinary queue");

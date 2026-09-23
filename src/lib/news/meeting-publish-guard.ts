@@ -186,7 +186,7 @@ export function staleCitationNotice(stale: StaleCitation[]): string {
     .join(", ");
   return [
     `The recording this draft quotes has changed since it was written (${count} citation${count === 1 ? "" : "s"} affected${where ? `: ${where}` : ""}).`,
-    "The draft may no longer quote the tape accurately. Redraft it from the current recording, or check the changed moments and confirm the draft still matches, before publishing.",
+    "The draft may no longer quote the tape accurately. Redraft it from the current recording before publishing; the replacement draft will derive and bind a new citation snapshot.",
   ].join(" ");
 }
 

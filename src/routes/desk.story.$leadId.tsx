@@ -86,6 +86,7 @@ import {
   type EditableDraftFields,
 } from "@/lib/news/draft-reconcile-actions";
 import { parseDraftCompletionReceipt } from "@/lib/news/draft-completion";
+import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
   component: StoryPage,
@@ -1225,6 +1226,7 @@ function StoryPage() {
               hasDraft={Boolean(data.draft)}
               locked={locked || onPaper}
               openedExtractionByUrl={data.openedExtractionByUrl ?? {}}
+              draftMeetingEvidence={data.draftMeetingEvidence}
             />
           </section>
         </aside>
@@ -1495,6 +1497,7 @@ function ReportingNotesPane({
   hasDraft,
   locked,
   openedExtractionByUrl,
+  draftMeetingEvidence,
 }: {
   leadId: number;
   notes: ReportingNotes;
@@ -1502,6 +1505,7 @@ function ReportingNotesPane({
   locked: boolean;
   /** Capture-time extraction method for each `notes.opened` url, when known (see getLead). */
   openedExtractionByUrl: Record<string, string | null>;
+  draftMeetingEvidence: DraftMeetingEvidence | null;
 }) {
   const qc = useQueryClient();
   const [line, setLine] = useState("");
@@ -1651,7 +1655,7 @@ function ReportingNotesPane({
     It renders nothing for a draft with no transcript citations, so every other
     story in the paper is unchanged.
   */
-  const meetingSourceBlock = <MeetingSourceBlock notes={notes} />;
+  const meetingSourceBlock = <MeetingSourceBlock notes={notes} usedEvidence={draftMeetingEvidence} />;
     const gateClaims = notes.todo.map((t, i) => ({ t, i })).filter((row) => row.t.src === "gate");
   const absenceBlock = gateClaims.length ? (
     <div className="note-sec note-gate">

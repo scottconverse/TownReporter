@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { globSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { jobs } from "./ci-yaml.mjs";
+import { postgresTestFiles } from "./postgres-test-discovery.mjs";
 
 /**
  * A test that can skip for a missing database is only honest if CI runs it
@@ -16,29 +18,17 @@ import { jobs } from "./ci-yaml.mjs";
  * CI, so the properties they prove were only ever checked on one developer's
  * machine and nobody's pipeline said so.
  *
- * This does not hardcode that list of three files. It finds every test file
- * that imports `probePostgres` from `src/lib/test-support/pg-admin.ts` --
- * the shared helper that makes a "no database, skip with a reason" test
- * possible in this repo -- and checks that its path string appears inside a
- * CI job whose env sets `TEST_POSTGRES_ADMIN_URL` (the only way a real
- * connection's host/port/user/password reach these tests; see
- * src/lib/test-support/pg-admin.ts for why a hardcoded fallback cannot be
- * this file's job). A future fourth file gets covered by this gate the
- * moment it imports the same helper, with nothing here to update.
+ * This does not hardcode a list of helpers or test filenames. It follows each
+ * test's static local imports and finds any test that can reach a direct `pg`
+ * import or reads `TEST_POSTGRES_ADMIN_URL`. It then checks that the test's
+ * path appears inside a CI job whose environment provides that URL. A future
+ * test using another helper or a direct `pg` import is covered automatically.
  */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
 
-/** Every `src/**\/*.test.ts` file that imports the shared DB-probe helper. */
-function dbSkippableTestFiles() {
-  const files = globSync("src/**/*.test.ts", { cwd: ROOT });
-  return files
-    .filter((f) => {
-      const src = readFileSync(join(ROOT, f), "utf8");
-      return /from\s+["'].*test-support\/pg-admin\.ts["']/.test(src) && src.includes("probePostgres");
-    })
-    .map((f) => f.split("\\").join("/")); // stable on Windows and POSIX alike
-}
+/** Every `src/**\/*.test.ts` file with statically discoverable Postgres capability. */
+const dbSkippableTestFiles = () => postgresTestFiles(ROOT);
 
 /**
  * Jobs whose env actually hands these tests a real connection to use.
@@ -59,7 +49,7 @@ test("every DB-skippable test file is run by a CI job that provides a database",
   const files = dbSkippableTestFiles();
   assert.ok(
     files.length > 0,
-    "found zero test files importing pg-admin.ts's probePostgres -- this gate's own detection " +
+    "found zero test files with statically discoverable Postgres capability -- this gate's own detection " +
       "is broken, or every Postgres-integration test has been deleted",
   );
 
@@ -78,4 +68,13 @@ test("every DB-skippable test file is run by a CI job that provides a database",
     `these test files can skip for a missing database but are not referenced by any CI job ` +
       `that provides one (checked: ${dbJobs.join(", ") || "none"}): ${offenders.join(", ")}`,
   );
+});
+
+test("database-test discovery follows a differently named helper down to direct pg capability", () => {
+  const root = mkdtempSync(join(tmpdir(), "townreporter-pg-discovery-"));
+  const lib = join(root, "src", "lib");
+  mkdirSync(lib, { recursive: true });
+  writeFileSync(join(lib, "odd-helper.ts"), `export { Client as StrangeConnection } from "pg";\n`);
+  writeFileSync(join(lib, "surprise.test.ts"), `import { StrangeConnection } from "./odd-helper.ts";\nvoid StrangeConnection;\n`);
+  assert.deepEqual(postgresTestFiles(root), ["src/lib/surprise.test.ts"]);
 });

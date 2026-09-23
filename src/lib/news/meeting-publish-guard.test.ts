@@ -187,6 +187,7 @@ describe("meeting publish guard", () => {
     assert.match(notice, /recording this draft quotes has changed/);
     assert.match(notice, /segment 4612/, "the editor must be told which moment moved");
     assert.match(notice, /Redraft it from the current recording/, "and what to do next");
+    assert.doesNotMatch(notice, /publish anyway|override|confirm the draft still matches/i, "there is no blanket override");
   });
 
   it("says one citation, not one citations", () => {

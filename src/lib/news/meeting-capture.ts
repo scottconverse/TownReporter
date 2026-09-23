@@ -13,6 +13,7 @@ import { runSection5ForArtifact } from "./meeting-story-section5-run.ts";
 import { fileMeetingLead } from "./meeting-lead.ts";
 import { capsFromSettings, checkDurationCap, checkSizeCap, type CaptureCaps } from "./meeting-capture-caps.ts";
 import { lockMeetingRevisionForCapture } from "./meeting-revision-lock.ts";
+import { flagPublishedArticlesForTranscriptRevision } from "./meeting-article-revision.ts";
 
 export type MeetingChannel = { url: string; label?: string };
 export type MeetingCaptureStatus = "not-captured" | "captured" | "failed";
@@ -539,7 +540,7 @@ export async function recheckProvisionalMeetings(
         const stored = await storeTranscript(tx, { newsroomId, videoId: row.video_id, parsed: result.parsed, infoSourcePath: result.infoPath });
         const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: row.video_id, title: row.title, meetingDate: row.published, artifactId: stored.id });
         if (!section5.aligned && section5.unalignedLead) failures.push(section5.unalignedLead.leadWhy);
-        if (section5.aligned && section5.citations.length) {
+        if (signal && section5.aligned && section5.citations.length) {
           /*
             The same filing on the revision pass, so a meeting whose tape was
             corrected while it was provisional still reaches the desk. Section
@@ -594,6 +595,15 @@ export async function recheckProvisionalMeetings(
             previousSha256: row.caption_sha256,
             nextSha256: result.parsed.sha256,
           });
+          if (priorArtifactId != null) {
+            await flagPublishedArticlesForTranscriptRevision(tx, {
+              newsroomId,
+              videoId: row.video_id,
+              priorArtifactId,
+              currentArtifactId: stored.id,
+              reason: signal,
+            });
+          }
         }
       });
     } catch (error) {
