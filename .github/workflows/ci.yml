@@ -323,6 +323,54 @@ jobs:
         with:
           name: desk-production-regression-evidence
           path: desk-production-regression.json
+
+  # Regression for the production symptom where Run scan did work, but the
+  # already-open Scan page never replaced its cached running row with the same
+  # row's finished values. This job seeds and finishes one row directly: no
+  # source fetch, model request, credential, or provider spending is involved.
+  scan-refresh-browser:
+    name: An open Scan page observes its running row finish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: townreporter_scan_refresh
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:ci@127.0.0.1:5432/townreporter_scan_refresh
+      SCANFIX_DATABASE_URL: postgres://postgres:ci@127.0.0.1:5432/townreporter_scan_refresh
+      BETTER_AUTH_SECRET: ci-scan-refresh-secret-not-for-production
+      PORT: "8080"
+      HOST: 127.0.0.1
+      SCANFIX_BASE_URL: http://127.0.0.1:8080
+      TOWNREPORTER_CLAUDE_CODE: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Keep the open page synchronized with the same scan row
+        run: |
+          npm start > /tmp/scan-refresh.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ || {
+            echo "built server did not come up"; tail -n 80 /tmp/scan-refresh.log; exit 1;
+          }
+          node scripts/scan-refresh-runtime-proof.mjs
+
   # The Writing models panel: the screen an operator reaches on the worst day,
   # when a writing-model login has lapsed and every draft is failing. All of it
   # is screen behaviour -- the right words in the row, a link rendered as a real

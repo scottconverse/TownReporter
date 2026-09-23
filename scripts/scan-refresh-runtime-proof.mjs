@@ -15,14 +15,16 @@
  * second assertion cannot pass, because the row is dropped on merge.
  *
  *   SCANFIX_BASE_URL=http://127.0.0.1:3491 \\
- *   SCANFIX_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/townreporter_dev \\
+ *   SCANFIX_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/townreporter_scan_refresh \\
  *   node scripts/scan-refresh-runtime-proof.mjs
  */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { execFileSync } from "node:child_process";
+import pg from "pg";
 import { checkedUrl } from "./browser-guard.mjs";
+
+const { Client } = pg;
 
 const base = checkedUrl(
   process.env.SCANFIX_BASE_URL || "http://127.0.0.1:3491",
@@ -30,28 +32,27 @@ const base = checkedUrl(
 
 const dbUrl = process.env.SCANFIX_DATABASE_URL;
 if (!dbUrl) {
-  console.error("SCANFIX_DATABASE_URL is required (dev database only).");
+  console.error("SCANFIX_DATABASE_URL is required (disposable database only).");
+  process.exit(2);
+}
+const databaseName = new URL(dbUrl).pathname.replace(/^\//, "").toLowerCase();
+if (!databaseName || ["postgres", "townreporter", "townreporter_dev"].includes(databaseName)) {
+  console.error(`SCANFIX_DATABASE_URL must name a disposable database; refused ${databaseName || "(none)"}.`);
   process.exit(2);
 }
 
-const psqlBin = process.env.SCANFIX_PSQL || "psql";
-// townreporter_dev already has an editor, so the desk shows sign-in rather
-// than first-run setup. The staging account is created by ops/stage.ps1 into
-// townreporter_dev only; see docs/staging.md.
 const email = process.env.SCANFIX_EMAIL || "staging@townreporter.test";
 const password = process.env.SCANFIX_PASSWORD || "staging-walk-2026";
 const evidenceDir = resolve(process.env.SCANFIX_ARTIFACT_DIR || "../scan-refresh-evidence");
 mkdirSync(evidenceDir, { recursive: true });
 
-function sql(statement) {
-  return execFileSync(psqlBin, [dbUrl, "-tAc", statement], { encoding: "utf8" }).trim();
-}
+const database = new Client({ connectionString: dbUrl });
+await database.connect();
 
-// psql appends a command status line (INSERT 0 1) to -tAc output, so take the
-// first line that is a bare integer -- the returned id -- not the last line.
-function sqlScalar(statement) {
-  const lines = sql(statement).split(/\r?\n/).map((l) => l.trim());
-  return lines.find((l) => /^-?\d+$/.test(l)) || "";
+async function sqlScalar(statement) {
+  const result = await database.query(statement);
+  const first = result.rows[0] ? Object.values(result.rows[0])[0] : "";
+  return first == null ? "" : String(first);
 }
 
 const done = [];
@@ -67,11 +68,13 @@ async function dump(page, err) {
   console.error(`  steps reached: ${done.length ? done.join(" -> ") : "(none)"}`);
   if (text) console.error(`\n  page text (first 1200 chars):\n${text.slice(0, 1200)}`);
   await page?.screenshot({ path: join(evidenceDir, "failure.png"), fullPage: true }).catch(() => {});
-  process.exit(1);
 }
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
+let openId = "";
+let jobId = "";
+let exitCode = 0;
 
 try {
   await page.goto(`${base}/login`, { waitUntil: "networkidle" });
@@ -90,8 +93,8 @@ try {
 
   // (the Scan desk is opened below, after the open run exists)
 
-  const newsroomId = sql("select newsroom_id from scan_runs order by id desc limit 1;") || "1";
-  const userId = sql("select user_id from newsroom_members order by created_at limit 1;");
+  const newsroomId = (await sqlScalar("select newsroom_id from newsroom_members order by newsroom_id limit 1;")) || "1";
+  const userId = await sqlScalar("select user_id from newsroom_members order by created_at limit 1;");
   if (!userId || !/^[0-9a-zA-Z-]+$/.test(userId)) throw new Error(`could not resolve a user_id, got: ${userId}`);
 
   // Insert an OPEN scan row: no finished_at, no error. Deliberately NOT a real
@@ -101,7 +104,7 @@ try {
     "insert into scan_runs (newsroom_id, user_id, summary, sources_selected, sources_attempted, " +
     "sources_failed, sources_analyzed, model_batches_used, model_batches_failed, leads_created, " +
     "started_at, execution_origin) values (NEWROOM, USERID, MSG, 0, 0, 0, 0, 0, 0, 0, now(), MANUAL) returning id;";
-  const openId = sqlScalar(
+  openId = await sqlScalar(
     openTemplate
       .replace("NEWROOM", newsroomId)
       .replace("USERID", `'${userId}'`)
@@ -121,7 +124,7 @@ try {
   const jobTemplate =
     "insert into desk_jobs (newsroom_id, user_id, kind, subject_id, status, created_at, updated_at) " +
     "values (NEWROOM, USERID, SCANKIND, SUBJECT, RUNNING, now(), now()) returning id;";
-  const jobId = sqlScalar(
+  jobId = await sqlScalar(
     jobTemplate
       .replace("NEWROOM", newsroomId)
       .replace("USERID", `'${userId}'`)
@@ -149,8 +152,8 @@ try {
   step("page shows the busy state while the run is open");
 
   // Now finish that same row. Same id. This is the merge the bug broke.
-  sql(`update scan_runs set finished_at = now(), leads_created = 3, summary = 'runtime proof: finished run' where id = ${openId};`);
-  sql(`update desk_jobs set status = 'completed', finished_at = now(), updated_at = now() where id = ${jobId};`);
+  await database.query("update scan_runs set finished_at = now(), leads_created = 3, summary = 'runtime proof: finished run' where id = $1", [openId]);
+  await database.query("update desk_jobs set status = 'completed', finished_at = now(), updated_at = now() where id = $1", [jobId]);
   step("marked the same run finished in the database");
 
   // Under the old code the row is dropped on merge and the busy state never
@@ -167,14 +170,22 @@ try {
   step("the finished run's updated values reached the screen");
 
   // Leave the dev database as we found it.
-  sql(`delete from desk_jobs where id = ${jobId};`);
-  sql(`delete from scan_runs where id = ${openId};`);
-  step("removed the proof rows from the dev database");
+  await database.query("delete from desk_jobs where id = $1", [jobId]);
+  await database.query("delete from scan_runs where id = $1", [openId]);
+  jobId = "";
+  openId = "";
+  step("removed the proof rows from the disposable database");
 
   console.log(`\n  PASS: ${done.length} steps, 0 problems`);
   console.log(`  evidence: ${evidenceDir}`);
-  await browser.close();
-  process.exit(0);
 } catch (err) {
   await dump(page, err);
+  exitCode = 1;
+} finally {
+  if (jobId) await database.query("delete from desk_jobs where id = $1", [jobId]).catch(() => undefined);
+  if (openId) await database.query("delete from scan_runs where id = $1", [openId]).catch(() => undefined);
+  await browser.close();
+  await database.end();
 }
+
+process.exit(exitCode);
