@@ -95,7 +95,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
   try { savedEffort = modelEffort(choice, (JSON.parse(job.result_json || "{}") as {modelEffort?: unknown}).modelEffort); }
   catch { savedEffort = modelEffort(choice, null); }
   let active = { modelChoice: choice, modelEffort: savedEffort };
-  const overrides: ProviderOverrides = await readProviderOverrides(job.newsroom_id).catch(() => ({}));
+  const overrides: ProviderOverrides = await readProviderOverrides(job.newsroom_id, "story").catch(() => ({}));
   const budget = providerBudget(choice, overrides);
   const runChat: ReportChat = async (system,user,maxTokens,_modelChoice,options) => {
     const attempted = await runPinnedCallWithFailover({

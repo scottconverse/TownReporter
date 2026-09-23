@@ -923,9 +923,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   });
   const batches = buildScanBatches({ sources: batchSources });
 
-  const batchTimeoutMs = scanCallTimeoutFor(
-    await readProviderOverrides(job.newsroom_id).catch(() => ({})),
-  );
+  const scanOverrides: import("./provider-registry.ts").ProviderOverrides =
+    await readProviderOverrides(job.newsroom_id, "scan").catch(() => ({}));
+  const batchTimeoutMs = scanCallTimeoutFor(scanOverrides);
   const batchResults: import("./schema.ts").ParsedScanResult[] = [];
   let batchesFailed = 0;
   let lastBatchError: string | null = null;
@@ -949,6 +949,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     const ai = await runScanChatWithFailover({
       job,
       newsroomId: job.newsroom_id,
+      localModel: scanOverrides["local-model"]?.localModel,
       system: scanSystem({
         name: paperConfig.name,
         city: paperConfig.city,
@@ -1345,7 +1346,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       A failed read is not a reason to refuse to draft -- an empty object
       means "no overrides", which is what every paper had before this.
     */
-    providerOverrides: await readProviderOverrides(owned(context)).catch(() => ({})),
+    providerOverrides: await readProviderOverrides(owned(context), "story").catch(() => ({})),
   };
   const reportDeps: Parameters<typeof reportAndDraft>[1] = {
     onStage: (stage) => setStage(job.id, stage),

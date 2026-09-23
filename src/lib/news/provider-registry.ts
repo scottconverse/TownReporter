@@ -499,11 +499,13 @@ const AUTOMATIC_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhi
 const GROK_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high"];
 const DEEPSEEK_V4_1_FLASH_EFFORTS: readonly ModelEffort[] = ["none", "low", "high", "max"];
 const QWEN_3_8_EFFORTS: readonly ModelEffort[] = ["none"];
+const QWEN_3_5_CLOUD_EFFORTS: readonly ModelEffort[] = ["none"];
 
 function defaultsToThinkingOff(model: string | undefined | null): boolean {
   const id = model?.trim() ?? "";
   return /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)
-    || /^(?:models\/)?qwen3\.8(?:[-:/]|$)/i.test(id);
+    || /^(?:models\/)?qwen3\.8(?:[-:/]|$)/i.test(id)
+    || /^(?:models\/)?qwen3\.5:397b-cloud$/i.test(id);
 }
 
 /**
@@ -523,6 +525,7 @@ export function openAiCompatibleModelEfforts(
     return DEEPSEEK_V4_1_FLASH_EFFORTS;
   }
   if (/^(?:models\/)?qwen3\.8(?:[-:/]|$)/i.test(id)) return QWEN_3_8_EFFORTS;
+  if (/^(?:models\/)?qwen3\.5:397b-cloud$/i.test(id)) return QWEN_3_5_CLOUD_EFFORTS;
   // Gemini's OpenAI-compatible endpoint does not declare the same effort
   // vocabulary for the saved 2.5 preset. Use its provider default safely.
   if (/^(?:models\/)?gemini-/i.test(id)) return [];

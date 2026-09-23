@@ -65,7 +65,7 @@ export async function validateForcedRuntime(
   effort?: ModelEffort | null,
 ): Promise<ForcedRuntimeSnapshot> {
   if (runtime === "local" || runtime === "local-model") {
-    const local = await resolveLocalModelChoice(newsroomId);
+    const local = await resolveLocalModelChoice(newsroomId, "forced");
     if (
       !local.override ||
       !/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:\/|$)/i.test(

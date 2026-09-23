@@ -228,7 +228,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
       // resolution `localGateway()` already does, exactly as before this
       // wiring existed.
       const localModel = await import("./provider-settings.ts")
-        .then((m) => m.resolveLocalModelChoice(editorialInput.newsroomId))
+        .then((m) => m.resolveLocalModelChoice(editorialInput.newsroomId, "opinion"))
         .then((r) => r.override)
         .catch(() => undefined);
       return grokChat(

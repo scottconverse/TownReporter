@@ -1838,7 +1838,7 @@ async function executeDarkRun(
 ) {
   const sql = await getSql();
   const choice = opts.choice;
-  const overrides = await readProviderOverrides(newsroomId).catch(() => ({}));
+  const overrides = await readProviderOverrides(newsroomId, "dark").catch(() => ({}));
   const runRows = await sql<{ id: number }>`
     insert into dark_runs (user_id, newsroom_id, model_choice, model_effort)
     values (${userId}, ${newsroomId}, ${choice ?? null}, ${opts.modelEffort ?? null}) returning id
@@ -2598,7 +2598,7 @@ export async function performDarkRound(job: DeskJob) {
   */
   let choice = effectiveStoryModelChoice(job.model_choice);
   const modelEffort = savedJobEffort(job);
-  const overrides = await readProviderOverrides(owned(context)).catch(() => ({}));
+  const overrides = await readProviderOverrides(owned(context), "dark").catch(() => ({}));
   const runRows = await sql<{ id: number }>`
     insert into dark_runs (user_id, newsroom_id, model_choice, model_effort, investigation_id)
     values (${context.userId}, ${owned(context)}, ${choice}, ${modelEffort}, ${id}) returning id
@@ -3551,7 +3551,7 @@ export async function startBriefJob(
 /** What the queue runs for a `brief` job. */
 export async function performBriefWork(job: DeskJob) {
   const newsroomId = job.newsroom_id;
-  const overrides = await readProviderOverrides(newsroomId).catch(() => ({}));
+  const overrides = await readProviderOverrides(newsroomId, "dark").catch(() => ({}));
   await setJobStage(job.id, "Writing editor brief");
   let active = {
     modelChoice: effectiveStoryModelChoice(job.model_choice),

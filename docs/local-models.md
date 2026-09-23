@@ -1,5 +1,29 @@
 # Local models
 
+## Ollama Cloud is an optional hosted choice
+
+If the TownReporter host is signed in to Ollama and has Cloud models available,
+the model picker lists them in the Ollama group and labels them **Ollama Cloud**.
+These requests run on Ollama's hosted service; they are not processed on the
+TownReporter computer. They may consume the operator's Ollama allowance or
+incur charges. LM Studio, on-device Ollama models, and llama.cpp remain available.
+
+Choose **Local model** for a Story, Scan, Opinion, Dark Desk, or forced-model
+run, then choose the exact model below it. TownReporter remembers a separate
+model for each of those five jobs. An older, unscoped saved choice remains a
+fallback until the editor makes a choice for that job. Refresh the catalog if
+the Ollama model list changes.
+
+On 23 September 2026, four Ollama Cloud candidates were given the same short
+Longmont council evidence packet. `glm-5.2:cloud` produced the cleanest brief;
+`deepseek-v4.1-flash:cloud` produced a usable one. `qwen3.5:397b-cloud`
+returned no answer at the default output budget unless reasoning was explicitly
+off; with it off, the answer made unsupported claims. `glm-5.3-flash:cloud`
+spent its budget on reasoning even with a no-reasoning request. Those last two
+remain selectable, but this short comparison does not qualify them as defaults
+for unattended publishing. A short brief is also not proof of long meeting
+draft quality or PDF understanding.
+
 Install [Ollama](https://ollama.com). Run `ollama pull gemma4:12b` (or any
 model you like). Start TownReporter. The Writing model picker lists it under
 **Local model** — nothing else to configure.

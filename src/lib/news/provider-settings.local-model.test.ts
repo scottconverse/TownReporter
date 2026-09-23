@@ -6,6 +6,7 @@ import {
   ensureProviderSettingsSchema,
   readProviderOverrides,
   resolveLocalModelChoice,
+  saveLocalModel,
 } from "./provider-settings.ts";
 
 const NEWSROOM_ID = 9001;
@@ -59,7 +60,39 @@ describe("the per-newsroom local-model override resolves against the live catalo
   });
   afterEach(async () => {
     await storeRawLocalModel(null, null);
+    const sql = await getSql();
+    await sql.query(`delete from newsroom_local_model_choices where newsroom_id = $1`, [NEWSROOM_ID]);
+    await sql.query(`delete from newsroom_members where user_id = 'scoped-model-editor'`);
     resetLocalCatalogCacheForTests();
+  });
+
+  it("keeps scan and story Ollama choices separate while preserving the legacy fallback", async () => {
+    const sql = await getSql();
+    await sql.query(`insert into newsrooms (id, name) values ($1, 'Scoped model test') on conflict (id) do nothing`, [NEWSROOM_ID]);
+    await sql.query(`insert into newsroom_members (user_id, role, newsroom_id) values ('scoped-model-editor', 'editor', $1) on conflict (user_id) do update set newsroom_id = excluded.newsroom_id`, [NEWSROOM_ID]);
+    await storeRawLocalModel(OLLAMA_BASE, "gemma4:12b");
+    assert.deepEqual(await saveLocalModel("scoped-model-editor", { baseUrl: OLLAMA_BASE, id: "gemma4:e4b" }, "scan"), { ok: true });
+    const result = await withFetch(fetchWithOllamaOnly(), async () => ({
+      scan: await readProviderOverrides(NEWSROOM_ID, "scan"),
+      story: await readProviderOverrides(NEWSROOM_ID, "story"),
+      picker: await resolveLocalModelChoice(NEWSROOM_ID, "scan"),
+    }));
+    assert.equal(result.scan["local-model"]?.localModel?.id, "gemma4:e4b");
+    assert.equal(result.story["local-model"]?.localModel?.id, "gemma4:12b");
+    assert.equal(result.picker.override?.id, "gemma4:e4b");
+  });
+
+  it("does not replace an unavailable scoped cloud choice with the catalog default", async () => {
+    const sql = await getSql();
+    await sql.query(`insert into newsrooms (id, name) values ($1, 'Scoped model test') on conflict (id) do nothing`, [NEWSROOM_ID]);
+    await sql.query(`insert into newsroom_local_model_choices (newsroom_id, scope, base_url, model_id) values ($1, 'scan', $2, 'deepseek-v4.1-flash:cloud')`, [NEWSROOM_ID, OLLAMA_BASE]);
+    const result = await withFetch(fetchWithOllamaOnly(), async () => ({
+      scan: await readProviderOverrides(NEWSROOM_ID, "scan"),
+      picker: await resolveLocalModelChoice(NEWSROOM_ID, "scan"),
+    }));
+    assert.equal(result.scan["local-model"]?.localModel?.id, "deepseek-v4.1-flash:cloud");
+    assert.equal(result.picker.override?.id, "deepseek-v4.1-flash:cloud");
+    assert.match(result.picker.notice ?? "", /not reachable or listed/);
   });
 
   it("keeps the stored pick when it is still on the server's model list", async () => {

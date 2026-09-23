@@ -28,7 +28,7 @@ import { createServerFn } from "@tanstack/react-start";
 */
 import { authMiddleware } from "../auth/middleware.ts";
 import { getSql } from "../db.ts";
-import { requireEditor, ForbiddenError, DEFAULT_NEWSROOM_ID } from "./membership.ts";
+import { requireEditor, ForbiddenError, DEFAULT_NEWSROOM_ID, ensureNewsroomSchema } from "./membership.ts";
 import {
   PROVIDER_REGISTRY,
   clampBudgetMs,
@@ -47,6 +47,7 @@ import { refreshLocalCatalog, type LocalCatalog } from "./local-models.ts";
  * is a Vite-only transform), so the schema has to be stated twice.
  */
 export async function ensureProviderSettingsSchema() {
+  await ensureNewsroomSchema();
   const sql = await getSql();
   await sql.query(`
     create table if not exists provider_settings (
@@ -67,6 +68,16 @@ export async function ensureProviderSettingsSchema() {
   // table predates it -- same reason the rest of this function exists.
   await sql.query(`alter table provider_settings add column if not exists local_model_base_url text`);
   await sql.query(`alter table provider_settings add column if not exists local_model_id text`);
+  await sql.query(`
+    create table if not exists newsroom_local_model_choices (
+      newsroom_id integer not null references newsrooms(id) on delete cascade,
+      scope text not null check (scope in ('story', 'scan', 'opinion', 'dark', 'forced')),
+      base_url text not null,
+      model_id text not null,
+      updated_at timestamptz not null default now(),
+      primary key (newsroom_id, scope)
+    )
+  `);
 }
 
 type ProviderSettingRow = {
@@ -79,6 +90,14 @@ type ProviderSettingRow = {
 };
 
 const LOCAL_MODEL_PROVIDER_ID = "local-model";
+export type LocalModelScope = "story" | "scan" | "opinion" | "dark" | "forced";
+const LOCAL_MODEL_SCOPES: readonly string[] = ["story", "scan", "opinion", "dark", "forced"];
+
+function cleanScope(value: unknown): LocalModelScope | undefined {
+  return typeof value === "string" && LOCAL_MODEL_SCOPES.includes(value)
+    ? value as LocalModelScope
+    : undefined;
+}
 
 /** Is a stored `{baseUrl,id}` still on that server's current model list? */
 function stillListed(
@@ -117,6 +136,7 @@ function stillListed(
  */
 export async function readProviderOverrides(
   newsroomId: number = DEFAULT_NEWSROOM_ID,
+  scope?: LocalModelScope,
 ): Promise<ProviderOverrides> {
   await ensureProviderSettingsSchema();
   const sql = await getSql();
@@ -137,7 +157,14 @@ export async function readProviderOverrides(
           : null,
     };
   }
-  const stored = out[LOCAL_MODEL_PROVIDER_ID]?.localModel;
+  const explicitScoped = scope ? await rawScopedLocalModel(newsroomId, scope) : null;
+  const stored = explicitScoped ?? out[LOCAL_MODEL_PROVIDER_ID]?.localModel;
+  if (explicitScoped) {
+    // A temporary Ollama outage must never silently send the editor's chosen
+    // cloud work to an unrelated LM Studio model on another server.
+    out[LOCAL_MODEL_PROVIDER_ID] = { ...(out[LOCAL_MODEL_PROVIDER_ID] ?? {}), localModel: explicitScoped };
+    return out;
+  }
   try {
     const catalog = await refreshLocalCatalog();
     const resolved = stillListed(stored, catalog) ? stored : catalog.defaultModel;
@@ -177,9 +204,14 @@ export type LocalModelChoice = {
 /** The raw stored pick, with no catalog fallback applied -- for the notice only. */
 async function rawStoredLocalModel(
   newsroomId: number,
+  scope?: LocalModelScope,
 ): Promise<{ baseUrl: string; id: string } | null> {
   await ensureProviderSettingsSchema();
   const sql = await getSql();
+  if (scope) {
+    const scoped = await rawScopedLocalModel(newsroomId, scope);
+    if (scoped) return scoped;
+  }
   const rows = await sql<Pick<ProviderSettingRow, "local_model_base_url" | "local_model_id">>`
     select local_model_base_url, local_model_id from provider_settings
     where newsroom_id = ${newsroomId} and provider_id = ${LOCAL_MODEL_PROVIDER_ID}
@@ -190,15 +222,28 @@ async function rawStoredLocalModel(
     : null;
 }
 
+async function rawScopedLocalModel(newsroomId: number, scope: LocalModelScope) {
+  const sql = await getSql();
+  const scoped = await sql<{ base_url: string; model_id: string }>`
+    select base_url, model_id from newsroom_local_model_choices
+    where newsroom_id = ${newsroomId} and scope = ${scope}
+  `;
+  return scoped[0] ? { baseUrl: scoped[0].base_url, id: scoped[0].model_id } : null;
+}
+
 export async function resolveLocalModelChoice(
   newsroomId: number = DEFAULT_NEWSROOM_ID,
+  scope?: LocalModelScope,
 ): Promise<LocalModelChoice> {
   const [stored, catalog] = await Promise.all([
-    rawStoredLocalModel(newsroomId),
+    rawStoredLocalModel(newsroomId, scope),
     refreshLocalCatalog(),
   ]);
   if (!stored) return { override: catalog.defaultModel, notice: null, catalog };
   if (stillListed(stored, catalog)) return { override: stored, notice: null, catalog };
+  if (scope && await rawScopedLocalModel(newsroomId, scope)) {
+    return { override: stored, notice: `${stored.id} is not reachable or listed right now. This job will keep your choice and report an error if it cannot connect.`, catalog };
+  }
   if (catalog.defaultModel) {
     return {
       override: catalog.defaultModel,
@@ -215,10 +260,24 @@ export type SaveLocalModelResult = { ok: true } | { ok: false; error: string };
 export async function saveLocalModel(
   userId: string,
   choice: { baseUrl: string; id: string } | null,
+  scope?: LocalModelScope,
 ): Promise<SaveLocalModelResult> {
   const me = await requireEditor(userId);
   await ensureProviderSettingsSchema();
   const sql = await getSql();
+  if (scope) {
+    if (choice) {
+      await sql.query(`
+        insert into newsroom_local_model_choices (newsroom_id, scope, base_url, model_id)
+        values ($1, $2, $3, $4)
+        on conflict (newsroom_id, scope) do update
+          set base_url = excluded.base_url, model_id = excluded.model_id, updated_at = now()
+      `, [me.newsroomId, scope, choice.baseUrl, choice.id]);
+    } else {
+      await sql.query(`delete from newsroom_local_model_choices where newsroom_id = $1 and scope = $2`, [me.newsroomId, scope]);
+    }
+    return { ok: true };
+  }
   await sql.query(
     `
       insert into provider_settings (newsroom_id, provider_id, local_model_base_url, local_model_id)
@@ -235,23 +294,27 @@ export async function saveLocalModel(
 
 export const getLocalModelChoice = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .handler(async ({ context }): Promise<LocalModelChoice> => {
+  .validator((raw: unknown) => cleanScope((raw as { scope?: unknown } | null)?.scope))
+  .handler(async ({ context, data }): Promise<LocalModelChoice> => {
     const me = await requireEditor(context.userId);
-    return resolveLocalModelChoice(me.newsroomId);
+    return resolveLocalModelChoice(me.newsroomId, data);
   });
 
 export const saveLocalModelFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((raw: unknown) => {
-    const v = (raw ?? {}) as { baseUrl?: unknown; id?: unknown };
+    const v = (raw ?? {}) as { baseUrl?: unknown; id?: unknown; scope?: unknown };
+    const scope = cleanScope(v.scope);
+    const invalidScope = v.scope !== undefined && !scope;
     if (typeof v.baseUrl === "string" && typeof v.id === "string" && v.baseUrl && v.id) {
-      return { baseUrl: v.baseUrl, id: v.id };
+      return { choice: { baseUrl: v.baseUrl, id: v.id }, scope, invalidScope };
     }
-    return null;
+    return { choice: null, scope, invalidScope };
   })
   .handler(async ({ context, data }): Promise<SaveLocalModelResult> => {
     try {
-      return await saveLocalModel(context.userId, data);
+      if (data.invalidScope) return { ok: false, error: "Choose a valid model-use scope." };
+      return await saveLocalModel(context.userId, data.choice, data.scope);
     } catch (err) {
       if (err instanceof ForbiddenError) return { ok: false, error: err.message };
       throw err;
