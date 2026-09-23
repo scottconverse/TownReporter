@@ -6,7 +6,9 @@ import {
   isMeetingTitle,
   isYoutubeChannel,
   MEETING_KEYWORDS,
+  needsYtDlpChannelFallback,
   parseChannelTabHtml,
+  parseYtDlpChannelJson,
   parseTranscriptPanel,
   pickMeetingVideos,
   sameMeeting,
@@ -97,6 +99,35 @@ describe("meeting filter", () => {
     assert.equal(rows[0]?.id, "7OdoRvfRArI");
     assert.match(rows[0]?.title ?? "", /City Council/);
     assert.equal(rows[0]?.duration, 5 * 3600 + 30);
+  });
+
+  it("parses bounded yt-dlp channel fallback output", () => {
+    const rows = parseYtDlpChannelJson(JSON.stringify({ entries: [
+      { id: "xk9TiMKxOJQ", title: "Sustainability Advisory Board Meeting Sept. 16, 2026", duration: 4240 },
+      { id: "mJOf8rQS1Vc", title: "Planning and Zoning Commission 9/23/26", live_status: "is_upcoming" },
+      { id: "too-short", title: "ignored" },
+      { id: "xk9TiMKxOJQ", title: "duplicate" },
+    ] }), "videos");
+    assert.deepEqual(rows, [{
+      id: "xk9TiMKxOJQ",
+      title: "Sustainability Advisory Board Meeting Sept. 16, 2026",
+      published: "",
+      url: "https://www.youtube.com/watch?v=xk9TiMKxOJQ",
+      duration: 4240,
+      tab: "videos",
+    }]);
+  });
+
+  it("falls back when YouTube serves only membership chrome or no rows", () => {
+    assert.equal(needsYtDlpChannelFallback([]), true);
+    assert.equal(needsYtDlpChannelFallback([{
+      id: "wOKZ_KDzFUM", title: "Want to join this channel?", published: "",
+      url: "https://www.youtube.com/watch?v=wOKZ_KDzFUM", duration: 0, tab: "videos",
+    }]), true);
+    assert.equal(needsYtDlpChannelFallback([{
+      id: "xk9TiMKxOJQ", title: "Sustainability Advisory Board Meeting Sept. 16, 2026", published: "",
+      url: "https://www.youtube.com/watch?v=xk9TiMKxOJQ", duration: 4240, tab: "videos",
+    }]), false);
   });
 });
 

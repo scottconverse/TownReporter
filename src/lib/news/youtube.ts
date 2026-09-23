@@ -1,4 +1,5 @@
 import { assertPublicHttpUrl, fetchPublicHttp } from "./fetch-url.ts";
+import { spawn } from "node:child_process";
 import { htmlToPlainText } from "./html-text.ts";
 
 /** Same ceiling as ingest ARCHIVE_TEXT_CAP. Retrieval slices; storage does not. */
@@ -275,6 +276,125 @@ async function fetchChannelTab(channelUrl: string, tab: "streams" | "videos"): P
   }
 }
 
+type YtDlpFlatEntry = {
+  id?: unknown;
+  title?: unknown;
+  duration?: unknown;
+  timestamp?: unknown;
+  upload_date?: unknown;
+  url?: unknown;
+  live_status?: unknown;
+};
+
+type YtDlpFlatPlaylist = { entries?: unknown };
+
+function ytdlpPublished(entry: YtDlpFlatEntry): string {
+  if (typeof entry.timestamp === "number" && Number.isFinite(entry.timestamp)) {
+    return new Date(entry.timestamp * 1000).toISOString();
+  }
+  if (typeof entry.upload_date === "string" && /^\d{8}$/.test(entry.upload_date)) {
+    return `${entry.upload_date.slice(0, 4)}-${entry.upload_date.slice(4, 6)}-${entry.upload_date.slice(6, 8)}`;
+  }
+  return "";
+}
+
+/** Parse bounded `yt-dlp --flat-playlist --dump-single-json` output. */
+export function parseYtDlpChannelJson(raw: string, tab: ListedVideo["tab"]): ListedVideo[] {
+  let parsed: YtDlpFlatPlaylist;
+  try {
+    parsed = JSON.parse(raw) as YtDlpFlatPlaylist;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed.entries)) return [];
+  const rows: ListedVideo[] = [];
+  const seen = new Set<string>();
+  for (const value of parsed.entries) {
+    if (!value || typeof value !== "object") continue;
+    const entry = value as YtDlpFlatEntry;
+    const id = typeof entry.id === "string" ? entry.id : "";
+    const title = typeof entry.title === "string" ? entry.title.trim() : "";
+    // The streams tab lists scheduled council sessions months in advance.
+    // Those are awareness items, not completed meeting records, and trying to
+    // capture them would turn an ordinary scan into a row of false failures.
+    if (entry.live_status === "is_upcoming" || entry.live_status === "is_live") continue;
+    if (!/^[\w-]{11}$/.test(id) || !title || seen.has(id)) continue;
+    seen.add(id);
+    rows.push({
+      id,
+      title,
+      published: ytdlpPublished(entry),
+      url: `https://www.youtube.com/watch?v=${id}`,
+      duration: typeof entry.duration === "number" && Number.isFinite(entry.duration)
+        ? Math.max(0, Math.round(entry.duration))
+        : 0,
+      tab,
+    });
+  }
+  return rows;
+}
+
+function runYtDlpChannelTab(channelUrl: string, tab: "streams" | "videos"): Promise<ListedVideo[]> {
+  const base = channelUrl.replace(/\/(videos|streams|featured|playlists|about)\/?$/, "").replace(/\/$/, "");
+  const target = `${base}/${tab}`;
+  return new Promise((resolveRows) => {
+    const argv = [
+      "-m", "yt_dlp",
+      "--flat-playlist",
+      "--dump-single-json",
+      "--playlist-end", "50",
+      "--js-runtimes", "node",
+      target,
+    ];
+    const child = spawn("python", argv, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (rows: ListedVideo[]) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveRows(rows);
+    };
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      if (stdout.length < 8_000_000) stdout += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk: Buffer | string) => {
+      if (stderr.length < 64_000) stderr += chunk.toString();
+    });
+    child.on("error", () => finish([]));
+    child.on("close", (code) => {
+      if (code !== 0 || !stdout.trim()) return finish([]);
+      finish(parseYtDlpChannelJson(stdout, tab));
+    });
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* already exited */ }
+      finish([]);
+    }, 60_000);
+    void stderr;
+  });
+}
+
+async function listChannelVideosWithYtDlp(channelUrl: string): Promise<ListedVideo[]> {
+  let url: URL;
+  try { url = new URL(channelUrl); } catch { return []; }
+  if (!isYoutubeChannel(url)) return [];
+  const rows: ListedVideo[] = [];
+  const seen = new Set<string>();
+  for (const tab of ["streams", "videos"] as const) {
+    for (const row of await runYtDlpChannelTab(channelUrl, tab)) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+export function needsYtDlpChannelFallback(rows: ListedVideo[]): boolean {
+  return !rows.some((row) => isMeetingTitle(row.title));
+}
+
 export async function listChannelVideos(channelUrl: string): Promise<ListedVideo[]> {
   const seen = new Map<string, ListedVideo>();
   const out: ListedVideo[] = [];
@@ -316,6 +436,14 @@ export async function listChannelVideos(channelUrl: string): Promise<ListedVideo
   }
   for (const tab of ["streams", "videos"] as const) {
     for (const row of await fetchChannelTab(handleUrl, tab)) push(row);
+  }
+  // YouTube regularly changes the server-rendered channel markup. When the
+  // bounded HTML/RSS path yields nothing useful, use the same installed
+  // yt-dlp runtime that meeting capture already requires. Without this
+  // fallback the desk can capture a video by explicit ID but its automatic and
+  // manual meeting sweep silently discovers zero meetings.
+  if (needsYtDlpChannelFallback(out)) {
+    for (const row of await listChannelVideosWithYtDlp(handleUrl)) push(row);
   }
   return out;
 }
