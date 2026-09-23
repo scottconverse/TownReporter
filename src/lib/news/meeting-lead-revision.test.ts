@@ -22,8 +22,7 @@ test("a revised transcript refreshes one meeting lead without resetting its edit
       notes_json text not null,
       meeting_video_id text,
       meeting_artifact_id integer,
-      meeting_lead_purpose text,
-      updated_at timestamptz not null default now()
+      meeting_lead_purpose text
     )`);
     await db.exec(`create unique index leads_meeting_artifact_purpose_uidx
       on leads (newsroom_id,meeting_video_id,meeting_artifact_id,meeting_lead_purpose)

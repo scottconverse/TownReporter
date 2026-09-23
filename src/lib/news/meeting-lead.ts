@@ -172,8 +172,7 @@ export async function fileMeetingLead(
                    source_urls=excluded.source_urls,
                    evidence=excluded.evidence,
                    notes_json=excluded.notes_json,
-                   meeting_artifact_id=excluded.meeting_artifact_id,
-                   updated_at=now()
+                   meeting_artifact_id=excluded.meeting_artifact_id
      returning id`,
     [
       input.userId, input.newsroomId, copy.headline, copy.why, input.topic,
