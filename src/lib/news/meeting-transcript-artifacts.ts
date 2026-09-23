@@ -1,7 +1,6 @@
-import { mkdirSync, copyFileSync, existsSync, readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
 import { isAbsolutePathAnyPlatform, normalizeAbsolutePath } from "./absolute-path.ts";
-import { statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Sql } from "../db.ts";
 import type { ParsedCaptionFile } from "./caption-parse.ts";
@@ -95,6 +94,56 @@ export type StoredInfoSidecar = {
   infoMissingReason: string | null;
 };
 
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * Put verified bytes at an immutable, content-addressed path.
+ *
+ * The temporary file lives beside the destination so rename is atomic on the
+ * same filesystem. A concurrent writer of the same hash is harmless: whichever
+ * rename wins, the loser verifies the final bytes before discarding its temp.
+ */
+function writeVerifiedImmutableFile(sourcePath: string, targetPath: string, expectedSha256: string): number {
+  if (!existsSync(sourcePath)) throw new Error(`Captured artifact file is missing: ${sourcePath}`);
+  const sourceBytes = readFileSync(sourcePath);
+  const sourceSha256 = sha256(sourceBytes);
+  if (sourceSha256 !== expectedSha256) {
+    throw new Error(`Captured artifact hash mismatch for ${sourcePath}: expected ${expectedSha256}, got ${sourceSha256}`);
+  }
+
+  if (existsSync(targetPath)) {
+    const existingSha256 = sha256(readFileSync(targetPath));
+    if (existingSha256 !== expectedSha256) {
+      throw new Error(`Immutable meeting artifact path contains different bytes: ${targetPath}`);
+    }
+    return sourceBytes.byteLength;
+  }
+
+  const temporaryPath = `${targetPath}.tmp-${process.pid}-${randomUUID()}`;
+  try {
+    writeFileSync(temporaryPath, sourceBytes, { flag: "wx" });
+    const temporarySha256 = sha256(readFileSync(temporaryPath));
+    if (temporarySha256 !== expectedSha256) {
+      throw new Error(`Temporary meeting artifact failed hash verification: ${temporaryPath}`);
+    }
+    try {
+      renameSync(temporaryPath, targetPath);
+    } catch (error) {
+      if (!existsSync(targetPath) || sha256(readFileSync(targetPath)) !== expectedSha256) throw error;
+    }
+  } finally {
+    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+  }
+
+  const finalSha256 = sha256(readFileSync(targetPath));
+  if (finalSha256 !== expectedSha256) {
+    throw new Error(`Stored meeting artifact failed final hash verification: ${targetPath}`);
+  }
+  return sourceBytes.byteLength;
+}
+
 /**
  * Copies the yt-dlp info sidecar next to the transcript artifact and records its
  * own path, byte size, and SHA-256. A missing sidecar is recorded explicitly
@@ -108,13 +157,14 @@ export function storeMeetingInfoSidecar(sourceInfoPath: string | null | undefine
     return { infoPath: null, infoSha256: null, infoBytes: null, infoMissingReason: "info sidecar missing at storage time: " + sourceInfoPath };
   }
   mkdirSync(targetDir, { recursive: true });
-  const targetPath = join(targetDir, "info.json");
   const bytes = readFileSync(sourceInfoPath);
-  copyFileSync(sourceInfoPath, targetPath);
+  const infoSha256 = sha256(bytes);
+  const targetPath = join(targetDir, `info-${infoSha256}.json`);
+  const infoBytes = writeVerifiedImmutableFile(sourceInfoPath, targetPath, infoSha256);
   return {
     infoPath: targetPath,
-    infoSha256: createHash("sha256").update(bytes).digest("hex"),
-    infoBytes: statSync(targetPath).size,
+    infoSha256,
+    infoBytes,
     infoMissingReason: null,
   };
 }
@@ -129,10 +179,11 @@ export async function storeMeetingTranscriptArtifact(
   const targetDir = join(storageRoot, `newsroom-${input.newsroomId}`, input.videoId);
   mkdirSync(targetDir, { recursive: true });
   const extension = input.parsed.format === "srv3" ? ".srv3" : ".vtt";
-  const targetPath = join(targetDir, `${input.videoId}.en${extension}`);
+  const targetPath = join(targetDir, `transcript-${input.parsed.sha256}${extension}`);
   if (resolve(input.parsed.sourcePath) !== resolve(targetPath)) {
-    if (!existsSync(input.parsed.sourcePath)) throw new Error(`Captured caption file is missing: ${input.parsed.sourcePath}`);
-    copyFileSync(input.parsed.sourcePath, targetPath);
+    writeVerifiedImmutableFile(input.parsed.sourcePath, targetPath, input.parsed.sha256);
+  } else if (!existsSync(targetPath) || sha256(readFileSync(targetPath)) !== input.parsed.sha256) {
+    throw new Error(`Stored meeting artifact is missing or does not match its hash: ${targetPath}`);
   }
   const sidecar = storeMeetingInfoSidecar(input.infoSourcePath, targetDir);
   const segments = parseTranscriptSegments(input.parsed.text, input.parsed.sha256);

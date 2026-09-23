@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { Sql } from "../db.ts";
 
 const modulePath = new URL("./meeting-transcript-artifacts.ts", import.meta.url);
 
@@ -54,6 +58,76 @@ describe("meeting transcript artifacts Slice 3", () => {
     }
     assert.deepEqual(retentionPlan("media").allows, ["media", "audio-only", "transcript-only"]);
     assert.deepEqual(retentionPlan("transcript-only").allows, ["transcript-only"]);
+  });
+
+  it("preserves different caption and info revisions as separately hash-addressed files", async () => {
+    const { storeMeetingTranscriptArtifact } = await import("./meeting-transcript-artifacts.ts");
+    const root = mkdtempSync(join(tmpdir(), "townreporter-meeting-artifacts-"));
+    try {
+      const captionA = "WEBVTT\n\n00:00.000 --> 00:04.000\nOriginal words\n";
+      const captionB = "WEBVTT\n\n00:00.000 --> 00:04.000\nCorrected words\n";
+      const infoA = JSON.stringify({ id: "meeting-1", duration: 60, revision: 1 });
+      const infoB = JSON.stringify({ id: "meeting-1", duration: 61, revision: 2 });
+      const captionAPath = join(root, "capture-a.vtt");
+      const captionBPath = join(root, "capture-b.vtt");
+      const infoAPath = join(root, "capture-a.info.json");
+      const infoBPath = join(root, "capture-b.info.json");
+      writeFileSync(captionAPath, captionA, "utf8");
+      writeFileSync(captionBPath, captionB, "utf8");
+      writeFileSync(infoAPath, infoA, "utf8");
+      writeFileSync(infoBPath, infoB, "utf8");
+
+      const inserted: Array<{ storagePath: string; infoPath: string | null; sha256: string; infoSha256: string | null }> = [];
+      let nextId = 1;
+      const sql = (async () => [] as never[]) as unknown as Sql;
+      sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
+        if (/select storage_root/i.test(text)) return [{ storage_root: root }] as T[];
+        if (/select retention_mode/i.test(text)) return [{ retention_mode: "transcript-only" }] as T[];
+        if (/insert into meeting_transcript_artifacts/i.test(text)) {
+          inserted.push({
+            storagePath: String(params[2]),
+            sha256: String(params[4]),
+            infoPath: params[7] == null ? null : String(params[7]),
+            infoSha256: params[8] == null ? null : String(params[8]),
+          });
+          return [{ id: nextId++, captured_at: "2026-09-22T00:00:00.000Z" }] as T[];
+        }
+        if (/insert into meeting_transcript_segments/i.test(text)) return [] as T[];
+        throw new Error(`unexpected query: ${text}`);
+      };
+
+      const shaA = createHash("sha256").update(captionA).digest("hex");
+      const shaB = createHash("sha256").update(captionB).digest("hex");
+      const storedA = await storeMeetingTranscriptArtifact(sql, {
+        newsroomId: 7,
+        videoId: "meeting-1",
+        parsed: { text: "Original words", format: "vtt", sha256: shaA, sourcePath: captionAPath },
+        infoSourcePath: infoAPath,
+      });
+      const storedB = await storeMeetingTranscriptArtifact(sql, {
+        newsroomId: 7,
+        videoId: "meeting-1",
+        parsed: { text: "Corrected words", format: "vtt", sha256: shaB, sourcePath: captionBPath },
+        infoSourcePath: infoBPath,
+      });
+
+      assert.notEqual(storedA.storagePath, storedB.storagePath, "different caption hashes must never share a path");
+      assert.equal(readFileSync(storedA.storagePath, "utf8"), captionA, "storing B must not change A's bytes");
+      assert.equal(readFileSync(storedB.storagePath, "utf8"), captionB);
+      assert.equal(createHash("sha256").update(readFileSync(storedA.storagePath)).digest("hex"), shaA);
+      assert.equal(createHash("sha256").update(readFileSync(storedB.storagePath)).digest("hex"), shaB);
+
+      assert.equal(inserted.length, 2);
+      assert.notEqual(inserted[0]!.infoPath, inserted[1]!.infoPath, "different info hashes must never share a path");
+      assert.equal(readFileSync(inserted[0]!.infoPath!, "utf8"), infoA, "storing B must not change A's sidecar");
+      assert.equal(readFileSync(inserted[1]!.infoPath!, "utf8"), infoB);
+      assert.match(storedA.storagePath, new RegExp(shaA));
+      assert.match(storedB.storagePath, new RegExp(shaB));
+      assert.match(inserted[0]!.infoPath!, new RegExp(inserted[0]!.infoSha256!));
+      assert.match(inserted[1]!.infoPath!, new RegExp(inserted[1]!.infoSha256!));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   /*
