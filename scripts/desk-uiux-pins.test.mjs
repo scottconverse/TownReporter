@@ -56,8 +56,12 @@ test("the walk that measured all of this still exists", async () => {
   assert.match(walk, /\/desk\/opinion/, "so is Opinion");
 });
 
-test("the source registry file picker has an accessible name", async () => {
+test("both source registry import controls have accessible names", async () => {
   const sources = await readFile(new URL("../src/routes/desk.sources.tsx", import.meta.url), "utf8");
+  assert.match(
+    sources,
+    /<textarea[\s\S]{0,180}aria-label="Paste source registry"|aria-label="Paste source registry"[\s\S]{0,180}<textarea/,
+  );
   assert.match(
     sources,
     /type="file"[\s\S]{0,160}aria-label="Choose source registry file"|aria-label="Choose source registry file"[\s\S]{0,160}type="file"/,

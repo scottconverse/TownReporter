@@ -187,6 +187,7 @@ function SourcesPage() {
         <textarea
           rows={5}
           className="bulk"
+          aria-label="Paste source registry"
           value={bulk}
           onChange={(e) => setBulk(e.target.value)}
           placeholder={
