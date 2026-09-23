@@ -41,7 +41,6 @@ import {
   mayInheritLeadSources,
 } from "./draft-evidence.ts";
 import { webSearch } from "./search-web";
-import { namedSubjects } from "./extract";
 import { absenceClaims } from "./absence-gate";
 import {
   applyTodoPatch,
@@ -1195,7 +1194,6 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     await import("./draft-order.server.ts");
   const runReport = deps.reportAndDraft ?? reportAndDraft;
   const probe = deps.probe ?? probeProvider;
-  const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
   const setModelRuntime = deps.setJobModelRuntime ?? setJobModelRuntime;
   const setStage = deps.setJobStage ?? setJobStage;
   const setFailoverNote = deps.setJobFailoverNote ?? setJobFailoverNote;

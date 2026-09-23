@@ -93,7 +93,7 @@ describe("responsive researchLoop", { timeout: 120_000 }, () => {
         contexts.push(context);
         return { type: "read", url: `https://city.example/missing-${contexts.length}`, reason: "check it" };
       },
-      fetch: async (url) => ({ ok: false, status: 404, title: "Not found", text: "", extras: [], outcome: "not-found" }),
+      fetch: async (_url) => ({ ok: false, status: 404, title: "Not found", text: "", extras: [], outcome: "not-found" }),
       search: async () => [],
       planner: async () => emptyPlan(),
       archives: async () => [],

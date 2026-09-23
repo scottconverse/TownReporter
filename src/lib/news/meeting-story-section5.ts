@@ -37,8 +37,6 @@ export type AlignmentResult = {
 */
 const SPOKEN_ITEM = /\b(?:agenda\s+)?item\s+(?:number\s+)?([0-9]{1,2}[A-Z]{0,3}[0-9]{0,2})\b/i;
 const SPOKEN_IDENTIFIER = /\b([OR]-\d{4}-\d{1,4})\b/i;
-const NEXT_ITEM = /\b(?:moving on|next item|the next agenda item|next agenda item)\b/i;
-
 export function spokenTransitionKey(excerpt: string): { kind: "item" | "identifier" | "next"; value: string } | null {
   const normalised = excerpt.replace(/\s+/g, " ");
   const identifier = normalised.match(SPOKEN_IDENTIFIER)?.[1];

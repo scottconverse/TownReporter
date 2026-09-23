@@ -39,8 +39,6 @@ import type { EditorialAssignment } from "./write-story.ts";
 import { checkStoryNames, replaceName, type UploadedNameEvidence } from "./name-check-work.ts";
 import { nameCheckNotes, nameCheckText, type NameCheck } from "./name-check.ts";
 import { parseDocumentClaims, type DocumentReportedClaim } from "./document-reconcile-evidence.ts";
-import { outletNamesForHost, uncreditedOutlets } from "./source-credit.ts";
-
 export { stripReporterNotebook } from "./strip-draft.ts";
 export { outletNamesForHost, uncreditedOutlets } from "./source-credit.ts";
 

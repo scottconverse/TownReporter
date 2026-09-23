@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { after, before, test } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
-import type { DeskJob } from "./jobs.ts";
 
 let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;

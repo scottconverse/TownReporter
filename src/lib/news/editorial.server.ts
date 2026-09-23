@@ -26,7 +26,7 @@ import {
   type Editorial,
   type EditorialPointer,
 } from "./editorial.ts";
-import { modelEffort, plannerModelFor, providerEntry, providerModel, type ModelEffort } from "./provider-registry.ts";
+import { modelEffort, plannerModelFor, providerEntry, providerModel } from "./provider-registry.ts";
 import { failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
 import { nameCheckText, type NameCheck } from "./name-check.ts";
 import { officialDomains } from "./absence-gate.ts";

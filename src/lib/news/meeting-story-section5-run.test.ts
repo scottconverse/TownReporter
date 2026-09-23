@@ -8,7 +8,7 @@ import type { Sql } from "../db.ts";
  * fails if the pipeline stops calling chunking, alignment, vote extraction,
  * persistence, or the unaligned path.
  */
-function harness(input: { aligned: boolean }) {
+function harness() {
   const writes: { text: string; params: unknown[] }[] = [];
   const sql = (async () => [] as never[]) as unknown as Sql;
   sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
@@ -31,7 +31,7 @@ function harness(input: { aligned: boolean }) {
 describe("meeting section 5 real pipeline integration", () => {
   it("runs chunking, alignment, vote extraction, persistence, and citation resolution from the stored artifact", async () => {
     const { runSection5ForArtifact } = await import("./meeting-story-section5-run.ts");
-    const { sql, writes } = harness({ aligned: true });
+    const { sql, writes } = harness();
     const result = await runSection5ForArtifact(
       sql,
       { newsroomId: 1, videoId: "L1AnMLsLwtk", title: "City Council Regular Session", artifactId: 5 },
@@ -64,7 +64,7 @@ describe("meeting section 5 real pipeline integration", () => {
 
   it("takes the honest unaligned path when packet items do not align", async () => {
     const { runSection5ForArtifact } = await import("./meeting-story-section5-run.ts");
-    const { sql, writes } = harness({ aligned: false });
+    const { sql, writes } = harness();
     const result = await runSection5ForArtifact(
       sql,
       { newsroomId: 1, videoId: "L1AnMLsLwtk", title: "City Council Regular Session", artifactId: 5 },

@@ -36,26 +36,6 @@ export function voteSourceAvailability(input: {
   };
 }
 
-function stripTags(html: string): string {
-  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function field(block: string, label: RegExp): string {
-  const text = stripTags(block);
-  const m = text.match(label);
-  if (!m) return "";
-  // Stop the captured value at the next labelled field so "Moved by: Popkin
-  // Seconded by: ..." yields "Popkin", not the rest of the block.
-  const raw = (m[1] ?? "").split(/\b(?:Motion|Moved by|Mover|Seconded by|Result|Tally|Item)\s*:/i)[0] ?? "";
-  return raw.trim();
-}
-
-function normaliseTally(raw: string): string {
-  const m = raw.match(/(\d+)\s*[-–]\s*(\d+)/);
-  if (!m) return "";
-  return `${m[1]}-${m[2]}`;
-}
-
 /**
  * Parse a longmontcitycouncil.org meeting page into structured vote records.
  * The page is server-rendered HTML with one block per motion carrying the item

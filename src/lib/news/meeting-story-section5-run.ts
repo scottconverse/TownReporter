@@ -1,7 +1,7 @@
 import type { Sql } from "../db.ts";
 import { primeGovDocumentsForTitle } from "./primegov.ts";
 import { packetItemsForMeeting } from "./meeting-agenda-items.ts";
-import { fetchStructuredVotesForDate, voteSourceAvailability } from "./meeting-vote-sources.ts";
+import { fetchStructuredVotesForDate } from "./meeting-vote-sources.ts";
 import {
   alignMeeting,
   chunkByAgendaItem,
@@ -87,7 +87,6 @@ export async function runSection5ForArtifact(
   const alignment = alignMeeting({ segments, chunks, packetItems });
 
   const structured = await fetchStructuredVotesForDate(input.meetingDate ?? "").catch(() => ({ found: false, reason: "structured vote lookup failed", records: [], url: "" }));
-  const availability = voteSourceAvailability({ structuredRecordFound: structured.found, minutesFound: false, packetFound: false, transcriptFound: segments.length > 0 });
   // Structured records are keyed by ordinance/resolution id (O-2026-46), while
   // chunks are keyed by agenda item number (9). Attach a record to the chunk
   // whose transcript span actually mentions that identifier or motion text.

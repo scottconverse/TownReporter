@@ -2,9 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   NEWSROOM_NOTE,
-  RESEARCH_INSTRUCTIONS,
   buildEditorialPack,
-  buildWritingPack,
   opinionHeadline,
   parseEditorial,
 } from "./editorial.ts";

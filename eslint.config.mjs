@@ -19,6 +19,13 @@ export default tseslint.config(
       // git and out of the lint budget. The reports beside them are the
       // deliverable; these are the throwaway that produced them.
       "artifacts/**",
+      // Local capture evidence and one-off audit harnesses are deliberately
+      // untracked. Product lint must be reproducible from the repository,
+      // rather than varying with whichever live-proof files happen to remain
+      // in an operator's checkout.
+      "work/**",
+      "meeting-captions/**",
+      "meeting-capture/**",
       // Agent worktrees. A workflow that isolates a role gives it a throwaway
       // copy of the repository under .claude/worktrees/, and if that role runs
       // a build, the copy carries a full .output/ of minified bundles. Linting

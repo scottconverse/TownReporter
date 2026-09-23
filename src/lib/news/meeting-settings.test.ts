@@ -4,8 +4,6 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const modPath = new URL("./meeting-settings.ts", import.meta.url);
-
 describe("N-1 meeting channel URL validation", () => {
   it("accepts the recognizable YouTube channel forms", async () => {
     const { youtubeChannelRejectionReason } = await import("./meeting-settings.ts");

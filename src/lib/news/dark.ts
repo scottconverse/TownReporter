@@ -2791,7 +2791,7 @@ export async function sendDarkSignalToQueueFor(
   userId: string,
   newsroomId: number,
   id: number,
-  opts: { asTip?: boolean } = {},
+  _opts: { asTip?: boolean } = {},
 ): Promise<
   | { ok: true; leadId: number; asTip: boolean }
   | { ok: false; error: string; blocked?: "unverified" | "watch" }
@@ -2890,7 +2890,7 @@ export async function queueInvestigationFor(
   userId: string,
   newsroomId: number,
   id: number,
-  opts: { asTip?: boolean } = {},
+  _opts: { asTip?: boolean } = {},
 ) {
   await ensureDarkSchema();
   const sql = await getSql();

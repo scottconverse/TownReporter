@@ -91,7 +91,7 @@ describe("meeting section 5 pipeline wiring", () => {
     const captionPath = join(storageRoot, "L1AnMLsLwtk.en.srv3");
     writeFileSync(captionPath, "Item 1, approval of the minutes.", "utf8");
     const state = harness(storageRoot, captionPath);
-    state.sql.query = async <T = Row>(text: string, params: unknown[] = []) => {
+    state.sql.query = async <T = Row>(text: string, _params: unknown[] = []) => {
       if (/from meeting_capture_records/i.test(text) && /capture_disposition/.test(text)) {
         return [{
           video_id: "L1AnMLsLwtk", title: "City Council Regular Session", published: "2026-01-01",

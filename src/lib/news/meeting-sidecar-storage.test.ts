@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
 describe("meeting sidecar storage (Finding 1)", () => {
   it("adds sidecar columns to meeting_transcript_artifacts", () => {

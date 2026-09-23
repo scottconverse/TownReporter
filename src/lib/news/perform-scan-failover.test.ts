@@ -5,7 +5,6 @@ import { runScanChatWithFailover, scanCallTimeoutMs } from "./scan-model-run.ts"
 const LIVE_401 =
   "Claude Code error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
 
-const LIVE_TIMEOUT_NO_OUTPUT = "Claude Code request timed out after 150s, 0 bytes out";
 const CODEX_AUTH_FAILURE =
   "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";
 const CODEX_TIMEOUT_NO_OUTPUT = "Codex request timed out after 150s, 0 bytes out";
