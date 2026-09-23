@@ -47,7 +47,7 @@ function capturedCaption(label: "a" | "b") {
 function section5For(caption: ReturnType<typeof capturedCaption>) {
   return async () => ({
     aligned: true, alignmentReason: null, chunkCount: 1, voteCount: 1, unalignedLead: null,
-    items: [{ item: "4", title: "Housing plan", startSeconds: 0 }],
+    items: [{ item: "4", title: "Housing plan", startSeconds: 0, excerpt: caption.text }],
     votes: [{ item: "4", established: true, motion: "Approve the housing plan", mover: "A", seconder: "B", tally: "6-1", result: "Passed", source: "longmontcitycouncil.org" as const, provenance: [], disagreements: [] }],
     citations: [{ item: "4", segmentIndex: 0, timestampSeconds: 0, endSeconds: 4, excerpt: caption.text, captionSha256: caption.sha256, storagePath: caption.sourcePath }],
   });

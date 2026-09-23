@@ -153,7 +153,7 @@ describe("meeting capture Slice 2 second-run suppression", () => {
       let captureCalls = 0;
       await runMeetingAwareness(state.sql, 1, {
         listChannelVideos: async () => [{ id: videoId, title: "City Council Meeting", published: "2026-09-22", url: `https://youtube.com/watch?v=${videoId}`, duration: 100, tab: "streams" as const }],
-        captureMeeting: async ({ archivePath: received }) => {
+        captureMeeting: async ({ archivePath: received }: { archivePath: string }) => {
           captureCalls += 1;
           assert.doesNotMatch(readFileSync(received, "utf8"), new RegExp(videoId), "stale cache entry must be removed before capture");
           return { ok: true as const, parsed: { text: captionText, format: "srv3" as const, sha256: captionSha256, sourcePath: captionPath }, infoPath: null, info: { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null }, argv: [], stdout: "", stderr: "" };
