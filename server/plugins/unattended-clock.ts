@@ -1,4 +1,6 @@
 import { startUnattendedScheduler } from "../../src/lib/news/unattended-scheduler.ts";
+import { getSql } from "../../src/lib/db.ts";
+import { reconcileConfiguredMeetingArtifactStorage } from "../../src/lib/news/meeting-artifact-reconciliation.ts";
 
 /**
  * Start the built server's unattended clock at boot (ENG-202).
@@ -15,6 +17,10 @@ import { startUnattendedScheduler } from "../../src/lib/news/unattended-schedule
  * cadence is owned by the Vite plugin there. NODE_ENV is not consulted --
  * this deployment never sets it.
  */
-export default function unattendedClock() {
+export default async function unattendedClock() {
+  const reconciliation = await reconcileConfiguredMeetingArtifactStorage(await getSql());
+  if (reconciliation.failed.length) {
+    console.error("[meeting-artifacts] startup reconciliation could not check every configured newsroom", reconciliation.failed);
+  }
   startUnattendedScheduler();
 }
