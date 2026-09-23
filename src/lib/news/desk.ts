@@ -1333,6 +1333,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     memory,
     extraEvidence: meetingMaterial?.evidence ?? prevNotes.scratch,
     extraEvidenceLimitChars: meetingMaterial ? 200_000 : undefined,
+    extraEvidenceMode: meetingMaterial ? "meeting-transcript" : undefined,
     editorialAssignment: prevNotes.editorialAssignment,
     researchScope,
     extraUrls: sourceInput.extraUrls,

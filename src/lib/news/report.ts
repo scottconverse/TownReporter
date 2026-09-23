@@ -1238,6 +1238,7 @@ export async function reportAndDraft(
     extraEvidence?: string;
     /** Meeting item spans are retained evidence, not ordinary short editor notes. */
     extraEvidenceLimitChars?: number;
+    extraEvidenceMode?: "meeting-transcript";
     documentEvidence?: string;
     /** Authorized retained originals used only for spelling receipts. */
     documentNameEvidence?: UploadedNameEvidence[];
@@ -1340,6 +1341,15 @@ export async function reportAndDraft(
   const chat = timedChat(nameReserve);
   const nameChat = timedChat(0);
 
+  let effectiveExtraEvidence = opts.extraEvidence ?? "";
+  if (opts.extraEvidenceMode === "meeting-transcript" && effectiveExtraEvidence.length > 90_000) {
+    const { retrieveMeetingEvidence } = await import("./meeting-evidence-retrieval.ts");
+    const retrieved = await retrieveMeetingEvidence(effectiveExtraEvidence, chat, {
+      onBatch: (current, total) => deps.onStage?.(`Reading the full meeting transcript (${current}/${total})`),
+    });
+    effectiveExtraEvidence = retrieved.evidence;
+  }
+
   const seedUrls = sanitizePublicUrls([...opts.urls, ...(opts.extraUrls ?? [])]).slice(0, 6);
   const retained = (opts.retainedSources ?? []).filter(d => seedUrls.includes(d.url) && d.text.trim());
   const retainedNotes = retained.map(d => `Used the filed capture of ${d.url} from ${d.captured_at} (${d.extraction_method || "text"}), not a fresh fetch.${d.extraction_method?.includes("partial") ? " Only the indicated pages were read; unread pages are not evidence." : ""}`).join("\n");
@@ -1359,7 +1369,7 @@ export async function reportAndDraft(
       seen.add(d.url);
       if (checkRelevance && !seedUrls.includes(d.url) && !discoveredDocumentMatches(
         `${d.title} ${d.text}`,
-        `${opts.lead.headline} ${opts.lead.why} ${opts.extraEvidence ?? ""} ${docs.filter(x => seedUrls.includes(x.url) && !isIndexUrl(x.url)).map(x => x.text).join(" ")}`,
+        `${opts.lead.headline} ${opts.lead.why} ${effectiveExtraEvidence} ${docs.filter(x => seedUrls.includes(x.url) && !isIndexUrl(x.url)).map(x => x.text).join(" ")}`,
       )) continue;
       if (d.text) {
         const rec = await capture(opts.userId, d);
@@ -1374,7 +1384,7 @@ export async function reportAndDraft(
   await take(seedUrls, 6, true);
   const blob = [
     opts.documentEvidence ?? "",
-    opts.extraEvidence ?? "",
+    effectiveExtraEvidence,
     docs.map((d) => `${d.title}\n${d.url}\n${d.text}`).join("\n\n"),
   ]
     .filter(Boolean)
@@ -1440,7 +1450,7 @@ export async function reportAndDraft(
   );
 
   const promptExtraEvidence = boundedExtraEvidence(
-    opts.extraEvidence,
+    effectiveExtraEvidence,
     opts.extraEvidenceLimitChars,
   );
   const researchUser = `${assignmentBlock}\n\nLead: ${opts.lead.headline}
