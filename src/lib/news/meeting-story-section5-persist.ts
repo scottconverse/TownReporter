@@ -23,7 +23,7 @@ export async function persistSection5(
          (newsroom_id,video_id,artifact_id,item,title,start_seconds,end_seconds,segment_indexes)
        values ($1,$2,$3,$4,$5,$6,$7,$8)
        on conflict (newsroom_id,video_id,item)
-       do update set title=excluded.title,start_seconds=excluded.start_seconds,
+       do update set artifact_id=excluded.artifact_id,title=excluded.title,start_seconds=excluded.start_seconds,
          end_seconds=excluded.end_seconds,segment_indexes=excluded.segment_indexes`,
       [input.newsroomId, input.videoId, input.artifactId, chunk.item, chunk.title, chunk.startSeconds, chunk.endSeconds, JSON.stringify(chunk.segmentIndexes)],
     );

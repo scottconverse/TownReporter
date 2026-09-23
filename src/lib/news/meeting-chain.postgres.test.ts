@@ -10,6 +10,7 @@ import { createServer, type ViteDevServer } from "vite";
 import type { Sql } from "../db.ts";
 import type { DeskJob } from "./jobs.ts";
 import type { ReportedDraftResult } from "./desk-model-run.ts";
+import { persistSection5 } from "./meeting-story-section5-persist.ts";
 import { integrationRequested, probePostgres, resolveAdminUrl, withDatabase } from "../test-support/pg-admin.ts";
 
 const adminUrl = integrationRequested() ? resolveAdminUrl() : "";
@@ -45,12 +46,43 @@ function capturedCaption(label: "a" | "b") {
 }
 
 function section5For(caption: ReturnType<typeof capturedCaption>) {
-  return async () => ({
-    aligned: true, alignmentReason: null, chunkCount: 1, voteCount: 1, unalignedLead: null,
-    items: [{ item: "4", title: "Housing plan", startSeconds: 0, excerpt: caption.text }],
-    votes: [{ item: "4", established: true, motion: "Approve the housing plan", mover: "A", seconder: "B", tally: "6-1", result: "Passed", source: "longmontcitycouncil.org" as const, provenance: [], disagreements: [] }],
-    citations: [{ item: "4", segmentIndex: 0, timestampSeconds: 0, endSeconds: 4, excerpt: caption.text, captionSha256: caption.sha256, storagePath: caption.sourcePath }],
-  });
+  return async (sectionSql: Sql, input: { newsroomId: number; videoId: string; artifactId: number }) => {
+    const segments = await sectionSql.query<{ segment_index: number; start_seconds: number; end_seconds: number }>(
+      "select segment_index,start_seconds,end_seconds from meeting_transcript_segments where artifact_id=$1 order by segment_index",
+      [input.artifactId],
+    );
+    assert.ok(segments.length, "the real capture path must persist transcript segments before section 5");
+    const chunk = {
+      item: "4",
+      title: "Housing plan",
+      startSeconds: Number(segments[0]!.start_seconds),
+      endSeconds: Number(segments.at(-1)!.end_seconds),
+      segmentIndexes: segments.map((segment) => segment.segment_index),
+    };
+    const vote = {
+      item: "4", established: true, motion: "Approve the housing plan", mover: "A", seconder: "B",
+      tally: "6-1", result: "Passed", source: "longmontcitycouncil.org" as const,
+      provenance: [], disagreements: [],
+    };
+    await persistSection5(sectionSql, {
+      newsroomId: input.newsroomId,
+      videoId: input.videoId,
+      artifactId: input.artifactId,
+      chunks: [chunk],
+      alignment: { aligned: true, reason: null, chunks: [chunk] },
+      votes: [vote],
+    });
+    return {
+      aligned: true, alignmentReason: null, chunkCount: 1, voteCount: 1, unalignedLead: null,
+      items: [{ item: "4", title: "Housing plan", startSeconds: chunk.startSeconds, excerpt: caption.text }],
+      votes: [vote],
+      citations: segments.map((segment) => ({
+        item: "4", segmentIndex: segment.segment_index, timestampSeconds: Number(segment.start_seconds),
+        endSeconds: Number(segment.end_seconds), excerpt: caption.text,
+        captionSha256: caption.sha256, storagePath: caption.sourcePath,
+      })),
+    };
+  };
 }
 
 if (probe.ok) {

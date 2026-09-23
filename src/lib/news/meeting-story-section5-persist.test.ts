@@ -24,6 +24,7 @@ describe("meeting section 5 persistence and unalignable behavior", () => {
       }],
     });
     assert.ok(writes.some((w) => /meeting_agenda_chunks/.test(w.text)));
+    assert.ok(writes.some((w) => /artifact_id=excluded\.artifact_id/.test(w.text)), "a revised meeting must move its chunks to the new immutable artifact");
     assert.ok(writes.some((w) => /meeting_alignments/.test(w.text)));
     assert.ok(writes.some((w) => /meeting_structured_votes/.test(w.text)));
     assert.ok(writes.some((w) => /provenance/.test(w.text)));
