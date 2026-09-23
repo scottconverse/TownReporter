@@ -1,13 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Sql } from "../db.ts";
 
 type Row = Record<string, unknown>;
 
-function statefulSql(): {
+function statefulSql(storageRoot: string): {
   sql: Sql;
   capturedSet: Set<string>;
   withTransaction: <T>(fn: (tx: Sql) => Promise<T>) => Promise<T>;
@@ -16,7 +17,7 @@ function statefulSql(): {
   const captured = new Set<string>();
   const run = (text: string, params: unknown[] = []): Row[] | null => {
     if (/from meeting_channel_priority/i.test(text)) return [{ channel_url: "https://youtube.com/@city", position: 0 }];
-    if (/from meeting_capture_settings/i.test(text)) return [{ storage_root: "C:\\TownReporterData\\meetings", retention_mode: "transcript-only" }];
+    if (/from meeting_capture_settings/i.test(text)) return [{ storage_root: storageRoot, retention_mode: "transcript-only" }];
     if (/from meeting_capture_records/i.test(text)) return [...rows.values()];
     if (/insert into meeting_capture_records/i.test(text)) {
       const [newsroomId, videoId, channelUrl, title, published] = params as [number, string, string, string, string];
@@ -56,8 +57,10 @@ describe("meeting capture Slice 2 second-run suppression", () => {
     const { runMeetingAwareness } = await import("./meeting-capture.ts");
     const storageRoot = mkdtempSync(join(tmpdir(), "townreporter-meeting-live-"));
     const captionPath = join(storageRoot, "L1AnMLsLwtk.en.srv3");
-    writeFileSync(captionPath, "Item 1, approval of the minutes.", "utf8");
-    const state = statefulSql();
+    const captionText = "Item 1, approval of the minutes.";
+    writeFileSync(captionPath, captionText, "utf8");
+    const captionSha256 = createHash("sha256").update(captionText).digest("hex");
+    const state = statefulSql(storageRoot);
     let calls = 0;
     const deps = {
       listChannelVideos: async () => [{
@@ -68,7 +71,7 @@ describe("meeting capture Slice 2 second-run suppression", () => {
         calls += 1;
         return {
           ok: true as const,
-          parsed: { text: "Item 1, approval of the minutes.", format: "srv3" as const, sha256: "a".repeat(64), sourcePath: captionPath },
+          parsed: { text: captionText, format: "srv3" as const, sha256: captionSha256, sourcePath: captionPath },
           infoPath: null,
           info: { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null },
           argv: [], stdout: "", stderr: "",
