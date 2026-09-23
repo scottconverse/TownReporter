@@ -210,6 +210,19 @@ describe("resolveProvider", () => {
     assert.ok(budget("codex-frontier").wallMs >= 420_000);
   });
 
+  it("gives a local model enough wall clock to draft from a long meeting", () => {
+    const budget = providerBudget as unknown as (
+      choice: string,
+    ) => ReturnType<typeof providerBudget>;
+    const local = budget("local-model");
+    // The real four-hour-meeting acceptance path took 1,209,024 ms across
+    // transcript retrieval, planning, writing, editing, and name checking.
+    // Keep a bounded cushion above that measured path while retaining the
+    // separate per-answer ceiling.
+    assert.ok(local.wallMs >= 2_400_000);
+    assert.equal(local.callMs, 600_000);
+  });
+
   it("keeps Automatic's configured gateway on the conservative pipeline budget", () => {
     withEnv(
       {

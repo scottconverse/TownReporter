@@ -207,7 +207,10 @@ export const KIND_BUDGETS: Record<ProviderKind, ProviderBudget> = {
   anthropic: { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 },
   openai: { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 },
   "xai-oauth": { wallMs: 420_000, callMs: 180_000, reserveMs: 180_000 },
-  local: { wallMs: 600_000, callMs: 600_000, reserveMs: 60_000 },
+  // A measured four-hour council-meeting draft takes about 20 minutes across
+  // nine local-model calls. Forty minutes is a bounded whole-pipeline guard;
+  // the ceiling for any one answer remains ten minutes.
+  local: { wallMs: 2_400_000, callMs: 600_000, reserveMs: 60_000 },
 };
 
 /**
