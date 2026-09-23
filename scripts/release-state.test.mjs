@@ -1,6 +1,6 @@
 /*
-  Release-state honesty: in-repo docs must not describe the current release as
-  unpublished once its GitHub release is actually published.
+  Release-state honesty: in-repo docs must not guess a mutable GitHub state or
+  describe the current version as unpublished after its release exists.
 
   Why this exists (directive item 4): v0.6.54 shipped to GitHub while
   `docs/releases/0.6.54.md` still said "Source release prepared; Git tag,
@@ -43,8 +43,9 @@ test("the current release note does not claim 'not published' once released", ()
   // wording; a published note is not.
   const declaresUnreleased = /\*\*State:\*\*\s*Unreleased/i.test(note);
   const declaresReleased = /\*\*State:\*\*\s*Released/i.test(note);
+  const delegatesState = /\*\*State:\*\*\s*External release record/i.test(note);
 
-  if (!declaresUnreleased) {
+  if (!declaresUnreleased && !delegatesState) {
     for (const re of prepPhrases) {
       assert.doesNotMatch(
         note,
@@ -57,24 +58,35 @@ test("the current release note does not claim 'not published' once released", ()
       declaresReleased ? /\*\*State:\*\*\s*Released/i : /Released/i,
       `${notePath} must state the current release is Released`,
     );
-  } else {
+  } else if (declaresUnreleased) {
     assert.doesNotMatch(
       note,
       /\*\*State:\*\*\s*Released/i,
       `${notePath} declares Unreleased but also claims Released`,
     );
+  } else {
+    assert.doesNotMatch(note, /\*\*State:\*\*\s*(?:Released|Unreleased)/i);
+    assert.match(note, /GitHub is the authority for whether the[\s\S]*assets exist/i);
   }
 });
 
-test("a published current release note carries the tag, asset, and source commit", () => {
+test("the current release note names its tag and artifact authorities", () => {
   const version = JSON.parse(read("package.json")).version;
   const note = read(`docs/releases/${version}.md`);
   const declaresUnreleased = /\*\*State:\*\*\s*Unreleased/i.test(note);
+  const delegatesState = /\*\*State:\*\*\s*External release record/i.test(note);
   if (declaresUnreleased) return; // honest pre-publication note: nothing required here
 
   assert.match(note, new RegExp(`v${version.replace(/\./g, "\\.")}`), "note must name the tag");
   assert.match(note, /TownReporter-[0-9.]+-windows-x64\.zip/, "note must name the Windows asset");
-  assert.match(note, /[a-f0-9]{40}/, "note must name a 40-char source commit");
+  if (delegatesState) {
+    assert.match(note, /\.zip\.json/, "external release record must name the source metadata sidecar");
+    assert.match(note, /\.zip\.sha256/, "external release record must name the checksum sidecar");
+    assert.doesNotMatch(note, /\b[a-f0-9]{40}\b/i, "a package note cannot self-embed its own source commit");
+    assert.doesNotMatch(note, /\b[a-f0-9]{64}\b/i, "a package note cannot self-embed its own ZIP hash");
+  } else {
+    assert.match(note, /[a-f0-9]{40}/, "released historical note must name a 40-char source commit");
+  }
 });
 
 test("the 0.6.60 record distinguishes its audited candidate from the released merge", () => {

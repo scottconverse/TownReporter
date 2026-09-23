@@ -1,6 +1,16 @@
 # Changelog
 
-Current release: **0.6.60**.
+Current software version: **0.6.61**. Publication state is recorded by GitHub.
+
+## 0.6.61 — 2026-09-22
+
+- Fixed the Scan page so an already-open page replaces a running scan row with that same row's finished values instead of appearing stuck until reload.
+- Completed the meeting transcript-to-draft path with persisted used citations, immutable transcript revisions, revision-aware publication holds, and editor review when a recording changes after publication.
+- Serialized meeting capture and publication on the same database fence and made missing or malformed meeting provenance fail closed.
+- Added startup reconciliation for transcript files and database records, hardened reporting-agent tool boundaries, and made guarded HTTP fetching fail closed if its protected transport cannot initialize.
+- Added accessible meeting evidence controls, current security and model documentation, packaged font notices, strict test typechecking, pinned CI actions, disposable PostgreSQL/browser gates, and an explicit frozen-history policy for legacy audit artifacts.
+
+The packaged release note names `v0.6.61` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.60 — 2026-09-21
 
