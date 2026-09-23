@@ -305,7 +305,7 @@ function ManualRunControls({ enabled }: { enabled: boolean }) {
       )}
 
       <div className="mt-5">
-        <SecHead title="Force a re-capture" sub="Overwrites the stored transcript for ONE meeting. Use only when you want to re-fetch a specific meeting's captions." />
+        <SecHead title="Force a re-capture" sub="Fetches ONE meeting again and keeps any changed transcript as a new immutable revision. The earlier recording evidence remains available." />
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           <input className={inputClass} aria-label="Force video id" placeholder="YouTube video id (11 chars)" value={forceId} onChange={(e) => setForceId(e.target.value)} />
           <input className={inputClass} aria-label="Force channel URL" placeholder="Channel URL" value={forceChannel} onChange={(e) => setForceChannel(e.target.value)} />
@@ -320,7 +320,7 @@ function ManualRunControls({ enabled }: { enabled: boolean }) {
             disabled={force.isPending || run.isPending || !forceId.trim()}
             onClick={() => force.mutate()}
           >
-            {force.isPending ? "Re-capturing…" : "Force re-capture (overwrites the stored transcript)"}
+            {force.isPending ? "Re-capturing…" : "Force re-capture and retain revision"}
           </InkButton>
         </div>
       </div>

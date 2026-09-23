@@ -5,6 +5,13 @@ import { readFileSync } from "node:fs";
 const modPath = new URL("./meeting-manual-run.ts", import.meta.url);
 
 describe("N-2 manual meeting run", () => {
+  it("describes forced capture as an immutable revision, never an overwrite", () => {
+    const ui = readFileSync(new URL("../../components/meeting-capture-settings.tsx", import.meta.url), "utf8");
+    assert.match(ui, /new immutable revision/i);
+    assert.match(ui, /earlier recording evidence remains available/i);
+    assert.doesNotMatch(ui, /overwrites the stored transcript/i);
+  });
+
   it("writes execution_origin='manual' with daily_reservation_id NULL (not a reservation)", async () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync(modPath, "utf8");
