@@ -21,7 +21,7 @@ describe("meeting evidence retrieval", () => {
       longEvidence(),
       async (_system, user) => {
         calls.push(user);
-        const indexes = [...user.matchAll(/segment (\d+)/g)].map((match) => Number(match[1]));
+        const indexes = [...user.matchAll(/^\[(\d+)\]/gm)].map((match) => Number(match[1]));
         const chosen = indexes[Math.floor(indexes.length / 2)]!;
         return { ok: true as const, text: JSON.stringify({ findings: [{ summary: `Finding in segment ${chosen}`, why_newsworthy: "local decision", segment_indexes: [chosen] }] }) };
       },
@@ -29,7 +29,7 @@ describe("meeting evidence retrieval", () => {
     );
     assert.ok(calls.length > 1, "a long record must be read in more than one pass");
     assert.equal(result.batchesExamined, calls.length);
-    assert.equal(calls.flatMap((call) => [...call.matchAll(/segment (\d+)/g)].map((match) => Number(match[1]))).length, 320);
+    assert.equal(calls.flatMap((call) => [...call.matchAll(/^\[(\d+)\]/gm)].map((match) => Number(match[1]))).length, 320);
     assert.match(result.evidence, /MEETING-WIDE REPORTER INDEX/);
     assert.match(result.evidence, /RAW TRANSCRIPT WINDOWS/);
     assert.match(result.evidence, /Council approved the housing contract/);

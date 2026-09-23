@@ -60,13 +60,19 @@ function batches(rows: SegmentLine[], maxChars: number): SegmentLine[][] {
   let current: SegmentLine[] = [];
   let chars = 0;
   for (const row of rows) {
-    if (current.length && chars + row.raw.length + 1 > maxChars) {
+    // The reporter pass needs every spoken word and a stable segment key, not
+    // the verbose timestamp label repeated on every two-second caption. The
+    // final evidence restores the full timestamped raw windows. Compacting only
+    // this indexing pass lets a 98-minute record fit one 32K-context call while
+    // still examining every segment.
+    const compactLength = row.text.length + String(row.index).length + 4;
+    if (current.length && chars + compactLength > maxChars) {
       out.push(current);
       current = [];
       chars = 0;
     }
     current.push(row);
-    chars += row.raw.length + 1;
+    chars += compactLength;
   }
   if (current.length) out.push(current);
   return out;
@@ -99,7 +105,7 @@ export async function retrieveMeetingEvidence(
 ): Promise<{ evidence: string; batchesExamined: number; findings: number }> {
   const rows = transcriptRows(evidence);
   if (!rows.length) return { evidence, batchesExamined: 0, findings: 0 };
-  const parts = batches(rows, Math.max(8_000, Math.min(options.batchChars ?? 26_000, 40_000)));
+  const parts = batches(rows, Math.max(8_000, Math.min(options.batchChars ?? 100_000, 110_000)));
   const findings: ReporterFinding[] = [];
   for (let i = 0; i < parts.length; i += 1) {
     const part = parts[i]!;
@@ -113,8 +119,8 @@ export async function retrieveMeetingEvidence(
         "Return JSON only: {\"findings\":[{\"summary\":\"...\",\"why_newsworthy\":\"...\",\"segment_indexes\":[1,2]}]}.",
         "Use only segment numbers present in this part. Quote or closely track the source wording in each summary. Return at most eight findings.",
       ].join("\n"),
-      `PART ${i + 1} OF ${parts.length}\n${part.map((row) => row.raw).join("\n")}`,
-      900,
+      `PART ${i + 1} OF ${parts.length}\n${part.map((row) => `[${row.index}] ${row.text}`).join("\n")}`,
+      700,
     );
     if (response.ok) {
       findings.push(...parseFindings(response.text, new Set(part.map((row) => row.index))));
