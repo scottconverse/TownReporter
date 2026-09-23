@@ -39,8 +39,39 @@ describe("meeting evidence retrieval", () => {
   it("keeps distributed and signal windows when a reporter pass fails", async () => {
     const result = await retrieveMeetingEvidence(longEvidence(180), async () => ({ ok: false as const, error: "offline" }), { batchChars: 8_000 });
     assert.equal(result.findings, 0);
+    assert.equal(result.batchesExamined, 0);
+    assert.match(result.evidence, /0 of \d+ sequential transcript parts were read/i);
+    assert.match(result.evidence, /failed and contribute only deterministic raw windows/i);
     assert.match(result.evidence, /segment 0/);
     assert.match(result.evidence, /segment 179/);
     assert.match(result.evidence, /segment 170/);
+  });
+
+  it("keeps four-hour-style caption batches and the writer evidence below a 32K local context", async () => {
+    const evidence = [
+      "MEETING: Four-hour council",
+      "This recording has ended and the transcript below was captured successfully.",
+      ...Array.from({ length: 7_200 }, (_, index) =>
+        `[${String(Math.floor(index / 3600)).padStart(2, "0")}:${String(Math.floor((index % 3600) / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}; segment ${index}] ${index % 11 === 0 ? "Council discussed a motion, contract, public hearing, budget, and vote." : `Caption fragment ${index} from the public meeting record.`}`,
+      ),
+      "--- VOTES, FROM THE STRUCTURED RECORD ---",
+      "No vote was established from the structured record.",
+    ].join("\n");
+    const calls: string[] = [];
+    const result = await retrieveMeetingEvidence(evidence, async (_system, user) => {
+      calls.push(user);
+      const indexes = [...user.matchAll(/^\[(\d+)\]/gm)].map((match) => Number(match[1]));
+      const chosen = indexes[Math.floor(indexes.length / 2)]!;
+      return {
+        ok: true as const,
+        text: JSON.stringify({ findings: [{ summary: `Decision near ${chosen}`, why_newsworthy: "public action", segment_indexes: [chosen] }] }),
+      };
+    });
+    assert.ok(calls.length >= 5, "the long record must be split into conservative sequential reads");
+    assert.ok(calls.every((call) => call.length <= 56_000), `largest batch was ${Math.max(...calls.map((call) => call.length))} characters`);
+    assert.ok(result.evidence.length <= 48_000, `writer evidence was ${result.evidence.length} characters`);
+    assert.match(result.evidence, /segment 0/);
+    assert.match(result.evidence, /segment 7199/);
+    assert.match(result.evidence, /No vote was established/);
   });
 });

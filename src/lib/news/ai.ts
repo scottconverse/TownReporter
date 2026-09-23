@@ -885,10 +885,8 @@ export async function grokChat(
       };
     }
   }
-  if (!res.ok)
-    return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
   let body: {
-    error?: { message?: string } | string;
+    error?: { message?: string; type?: string; code?: string | number } | string;
     model?: string;
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
@@ -896,7 +894,36 @@ export async function grokChat(
   try {
     body = (await res.json()) as typeof body;
   } catch {
-    return { ok: false, error: `${llm.label} returned an unreadable response`, meta: openAiMeta() };
+    return {
+      ok: false,
+      error: res.ok ? `${llm.label} returned an unreadable response` : `${llm.label} API error ${res.status}`,
+      meta: openAiMeta(),
+    };
+  }
+  if (!res.ok) {
+    // Do not reflect arbitrary remote-provider bodies into a job or the desk.
+    // For the loopback local model, recognize the one actionable structured
+    // failure an editor can fix by choosing a larger-context model or reducing
+    // the supplied record. This also replaces the opaque "API error 400" that
+    // hid a measured 35k-token request against a 32k context.
+    const detail = typeof body.error === "string" ? body.error : body.error?.message;
+    const kind = typeof body.error === "object" ? body.error?.type : "";
+    let localEndpoint = false;
+    try {
+      localEndpoint = /^(?:127\.0\.0\.1|localhost|\[::1\]|::1)$/i.test(new URL(llm.baseUrl).hostname);
+    } catch {
+      localEndpoint = false;
+    }
+    const localContextFailure =
+      llm.label !== "Custom AI" && localEndpoint &&
+      (/context/i.test(kind ?? "") || /exceeds?.{0,30}context|context.{0,30}(?:size|window|length)/i.test(detail ?? ""));
+    return {
+      ok: false,
+      error: localContextFailure
+        ? "Local model request exceeds its context window. TownReporter will split or compact the meeting record; choose a larger-context local model if this continues."
+        : `${llm.label} API error ${res.status}`,
+      meta: openAiMeta(body),
+    };
   }
   if (body.error) {
     const detail = typeof body.error === "string" ? body.error : body.error.message;

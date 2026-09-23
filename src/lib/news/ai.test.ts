@@ -542,6 +542,33 @@ describe("grokChat", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("turns a loopback model context rejection into an actionable desk error", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            type: "exceed_context_size_error",
+            message: "request (35018 tokens) exceeds the available context size (32768 tokens)",
+          },
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    try {
+      const result = await grokChat("system", "user", 8, {
+        choice: "local-model",
+        localModel: { baseUrl: "http://127.0.0.1:1234/v1", id: "qwen3.8-27b" },
+      });
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.match(result.error, /context window/i);
+        assert.doesNotMatch(result.error, /35018|32768/);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe("model-picker provider readiness", () => {
