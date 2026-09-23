@@ -1,9 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Sql } from "../db.ts";
 
 type Row = Record<string, unknown>;
@@ -133,5 +133,38 @@ describe("meeting capture Slice 2 second-run suppression", () => {
     assert.equal(records.get("city-only")?.channel_url, city);
     assert.equal(records.get("lpm-only")?.channel_url, lpm);
     assert.equal(records.get("duplicate")?.channel_url, city, "the higher-priority channel must own a duplicate");
+  });
+
+  it("repairs a stale archive before it can suppress a database-uncaptured meeting", async () => {
+    const storageRoot = mkdtempSync(join(tmpdir(), "townreporter-meeting-stale-archive-"));
+    const priorRoot = process.env.TOWNREPORTER_DATA_ROOT;
+    process.env.TOWNREPORTER_DATA_ROOT = storageRoot;
+    try {
+      const { meetingArchivePath, runMeetingAwareness } = await import("./meeting-capture.ts");
+      const videoId = "stale000001";
+      const archivePath = meetingArchivePath(1);
+      mkdirSync(dirname(archivePath), { recursive: true });
+      writeFileSync(archivePath, `youtube ${videoId}\n`, "utf8");
+      const captionPath = join(storageRoot, "meeting.en.srv3");
+      const captionText = "Item 1, approval of the minutes.";
+      writeFileSync(captionPath, captionText, "utf8");
+      const captionSha256 = createHash("sha256").update(captionText).digest("hex");
+      const state = statefulSql(storageRoot);
+      let captureCalls = 0;
+      await runMeetingAwareness(state.sql, 1, {
+        listChannelVideos: async () => [{ id: videoId, title: "City Council Meeting", published: "2026-09-22", url: `https://youtube.com/watch?v=${videoId}`, duration: 100, tab: "streams" as const }],
+        captureMeeting: async ({ archivePath: received }) => {
+          captureCalls += 1;
+          assert.doesNotMatch(readFileSync(received, "utf8"), new RegExp(videoId), "stale cache entry must be removed before capture");
+          return { ok: true as const, parsed: { text: captionText, format: "srv3" as const, sha256: captionSha256, sourcePath: captionPath }, infoPath: null, info: { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null }, argv: [], stdout: "", stderr: "" };
+        },
+        withTransaction: state.withTransaction,
+        runSection5: async () => ({ aligned: true, alignmentReason: null, chunkCount: 1, voteCount: 0, unalignedLead: null, citations: [] }),
+      } as never);
+      assert.equal(captureCalls, 1);
+    } finally {
+      if (priorRoot === undefined) delete process.env.TOWNREPORTER_DATA_ROOT;
+      else process.env.TOWNREPORTER_DATA_ROOT = priorRoot;
+    }
   });
 });

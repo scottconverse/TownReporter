@@ -298,6 +298,12 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
     durationSeconds: r.duration_seconds, captionRevisionTimestamp: r.caption_revision_timestamp,
     revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false, lastRevisionAt: r.last_revision_at,
   }));
+  // The database is the capture source of truth. Reconcile the yt-dlp cache
+  // BEFORE asking yt-dlp to capture anything; doing this only after the pass
+  // lets a stale file suppress a meeting the database says is uncaptured.
+  const archivePath = meetingArchivePath(newsroomId);
+  const beforeCapture = reconcileArchive(await readArchive(archivePath), captured);
+  if (beforeCapture.changed) regenerateArchive(archivePath, captured);
   const known = new Set(captured.filter((r) => r.status === "captured").map((r) => r.videoId));
   const uncaptured = found.filter((v) => !known.has(v.id));
   for (const v of uncaptured) {
@@ -451,7 +457,6 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
     revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false, lastRevisionAt: r.last_revision_at,
   }));
   const failed = finalRecords.filter((r) => r.status === "failed");
-  const archivePath = meetingArchivePath(newsroomId);
   const archiveText = await readArchive(archivePath);
   const reconciled = reconcileArchive(archiveText, finalRecords);
   if (reconciled.changed) regenerateArchive(archivePath, finalRecords);
