@@ -83,6 +83,23 @@ export async function linkDraftToTranscript(
      do update set citation_snapshot=excluded.citation_snapshot, updated_at=now()`,
     [input.newsroomId, input.draftId, input.artifactId, snapshot],
   );
+  await sql.query(
+    `update drafts set research_json =
+       (coalesce(nullif(research_json,''),'{}')::jsonb || $1::jsonb)::text,
+       updated_at=now()
+     where id=$2 and newsroom_id=$3`,
+    [
+      JSON.stringify({
+        meetingEvidence: {
+          used: true,
+          artifactId: input.artifactId,
+          citationCount: JSON.parse(snapshot).length,
+        },
+      }),
+      input.draftId,
+      input.newsroomId,
+    ],
+  );
   return { linked: true, snapshot };
 }
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import type { Sql } from "../db.ts";
 
 type Row = Record<string, unknown>;
@@ -59,11 +60,12 @@ function harness() {
   return { sql: makeSql(), leads, withTransaction: async <T>(fn: (tx: Sql) => Promise<T>) => fn(makeSql()) };
 }
 
-function captionFile(name: string): string {
+function captionFile(name: string): { path: string; sha256: string } {
   const root = mkdtempSync(join(tmpdir(), "townreporter-meeting-lead-"));
   const p = join(root, name);
-  writeFileSync(p, "Item 9, second reading of ordinance 2026-46.", "utf8");
-  return p;
+  const bytes = Buffer.from("Item 9, second reading of ordinance 2026-46.", "utf8");
+  writeFileSync(p, bytes);
+  return { path: p, sha256: createHash("sha256").update(bytes).digest("hex") };
 }
 
 const VIDEO = {
@@ -74,13 +76,13 @@ const VIDEO = {
 describe("capture files the meeting lead", () => {
   it("files a lead carrying the citations when the meeting aligned", async () => {
     const { runMeetingAwareness } = await import("./meeting-capture.ts");
-    const path = captionFile("a.srv3");
+    const caption = captionFile("a.srv3");
     const h = harness();
     const deps = {
       listChannelVideos: async () => [VIDEO],
       captureMeeting: async () => ({
         ok: true as const,
-        parsed: { text: "Item 9, second reading of ordinance 2026-46.", format: "srv3" as const, sha256: "a".repeat(64), sourcePath: path },
+        parsed: { text: "Item 9, second reading of ordinance 2026-46.", format: "srv3" as const, sha256: caption.sha256, sourcePath: caption.path },
         infoPath: null,
         info: { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null },
         argv: [], stdout: "", stderr: "",
@@ -90,11 +92,11 @@ describe("capture files the meeting lead", () => {
         aligned: true, alignmentReason: null, chunkCount: 1, voteCount: 1, unalignedLead: null,
         items: [{ item: "9", title: "Second Reading", startSeconds: 18450 }],
         votes: [{ item: "9", established: true, motion: "Approve", mover: "A", seconder: "B", tally: "6-1", result: "Passed", source: "longmontcitycouncil.org", provenance: [], disagreements: [] }],
-        citations: [{ item: "9", segmentIndex: 4612, timestampSeconds: 18450, endSeconds: 18454, excerpt: "the motion carries", captionSha256: "a".repeat(64), storagePath: path }],
+        citations: [{ item: "9", segmentIndex: 4612, timestampSeconds: 18450, endSeconds: 18454, excerpt: "the motion carries", captionSha256: caption.sha256, storagePath: caption.path }],
       }),
     };
-    await runMeetingAwareness(h.sql, 1, deps as never);
-    assert.equal(h.leads.length, 1, "exactly one lead must be filed for one aligned meeting");
+    const result = await runMeetingAwareness(h.sql, 1, deps as never);
+    assert.equal(h.leads.length, 1, `exactly one lead must be filed for one aligned meeting; failures=${JSON.stringify(result.failures)}`);
     const write = h.leads[0]!;
     assert.match(write.text, /insert into leads/);
     const notes = JSON.parse(String(write.params[9])) as {
@@ -110,13 +112,13 @@ describe("capture files the meeting lead", () => {
 
   it("files nothing when the meeting did not align", async () => {
     const { runMeetingAwareness } = await import("./meeting-capture.ts");
-    const path = captionFile("b.srv3");
+    const caption = captionFile("b.srv3");
     const h = harness();
     const deps = {
       listChannelVideos: async () => [VIDEO],
       captureMeeting: async () => ({
         ok: true as const,
-        parsed: { text: "unstructured", format: "srv3" as const, sha256: "b".repeat(64), sourcePath: path },
+        parsed: { text: "unstructured", format: "srv3" as const, sha256: caption.sha256, sourcePath: caption.path },
         infoPath: null,
         info: { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null },
         argv: [], stdout: "", stderr: "",

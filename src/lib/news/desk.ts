@@ -26,6 +26,7 @@ import {
 import { reportAndDraft } from "./report";
 import { linkDraftToTranscript } from "./meeting-draft-transcript-link.ts";
 import { staleMeetingCitations, staleCitationNotice } from "./meeting-publish-guard.ts";
+import { lockMeetingsForDraftPublish } from "./meeting-revision-lock.ts";
 import { deriveUsedCitations } from "./meeting-draft-citations.ts";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
 import {
@@ -2214,33 +2215,6 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       error:
         "The story changed after its evidence was gathered. Review the evidence in the workbench before publishing.",
     };
-  /*
-    A meeting draft also has to match the tape.
-
-    Its citations name specific moments in a recording. If the recording was
-    revised after the draft was written, the quoted words may no longer be there,
-    and publishing would print a claim about a tape that no longer says it -- the
-    failure this feature exists to prevent. The citations live on the lead, which
-    is where the capture pass filed them.
-
-    Nothing happens here for a draft with no transcript citations, so every other
-    story in the paper publishes exactly as before.
-  */
-  {
-    const sql = await getSql();
-    const leadRows = await sql<{ notes_json: string | null }>`
-      select notes_json from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
-    `;
-    const meetingCitations = parseNotes(leadRows[0]?.notes_json ?? null).transcriptCitations ?? [];
-    if (meetingCitations.length) {
-      const stale = await staleMeetingCitations(sql, {
-        newsroomId: owned(context),
-        draftId: Number(row.id),
-        citations: meetingCitations.map((c) => ({ segmentIndex: c.segmentIndex, captionSha256: c.captionSha256 })),
-      });
-      if (stale.length) return { ok: false as const, error: staleCitationNotice(stale) };
-    }
-  }
   const draft = unpackStoredDraft({ ...row });
   draft.body = stripReporterNotebook(draft.body);
 
@@ -2279,6 +2253,22 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     leadId,
     row,
     async (sql) => {
+      /*
+        Publication and capture share the same lead -> meeting-record fence.
+        Once this lock is held, either this transaction observes the old tape
+        and publishes before a revision, or it observes the new tape and blocks
+        the old draft. A capture cannot commit between this check and insert.
+      */
+      await lockMeetingsForDraftPublish(sql, {
+        newsroomId: owned(context),
+        draftId: Number(row.id),
+      });
+      const stale = await staleMeetingCitations(sql, {
+        newsroomId: owned(context),
+        draftId: Number(row.id),
+      });
+      if (stale.length) return { blocked: true as const, error: staleCitationNotice(stale) };
+
       // `articles.slug` is UNIQUE. The old code checked once and, on a clash,
       // appended the lead id without re-checking — so a second collision (a
       // headline that slugifies to an existing "<base>-<leadId>", or a
@@ -2313,9 +2303,11 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         values (${context.userId}, ${owned(context)}, ${entity.slice(0, 80)}, ${draft.dek.slice(0, 200)}, ${printed.id})
       `;
       }
-      return { slug, id: printed.id };
+      return { blocked: false as const, slug, id: printed.id };
     },
   );
+
+  if (published.blocked) return { ok: false as const, error: published.error };
 
   await audit(context.userId, "publish", `Article ${published.id}`, owned(context), {
     kind: "articles",

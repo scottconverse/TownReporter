@@ -12,6 +12,7 @@ import { storeMeetingTranscriptArtifact } from "./meeting-transcript-artifacts.t
 import { runSection5ForArtifact } from "./meeting-story-section5-run.ts";
 import { fileMeetingLead } from "./meeting-lead.ts";
 import { capsFromSettings, checkDurationCap, checkSizeCap, type CaptureCaps } from "./meeting-capture-caps.ts";
+import { lockMeetingRevisionForCapture } from "./meeting-revision-lock.ts";
 
 export type MeetingChannel = { url: string; label?: string };
 export type MeetingCaptureStatus = "not-captured" | "captured" | "failed";
@@ -529,6 +530,7 @@ export async function recheckProvisionalMeetings(
     if (state.settled) settled += 1;
     try {
       await runTransaction(async (tx) => {
+        await lockMeetingRevisionForCapture(tx, { newsroomId, videoId: row.video_id });
         const priorArtifacts = await tx.query<{ id: number }>(
           "select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1",
           [newsroomId, row.video_id],
@@ -585,15 +587,15 @@ export async function recheckProvisionalMeetings(
             signal ? now.toISOString() : null, newsroomId, row.video_id,
           ],
         );
+        if (signal && row.caption_sha256) {
+          await applyDraftRevision(tx, {
+            newsroomId,
+            videoId: row.video_id,
+            previousSha256: row.caption_sha256,
+            nextSha256: result.parsed.sha256,
+          });
+        }
       });
-      if (signal && row.caption_sha256) {
-        await applyDraftRevision(sql, {
-          newsroomId,
-          videoId: row.video_id,
-          previousSha256: row.caption_sha256,
-          nextSha256: result.parsed.sha256,
-        });
-      }
     } catch (error) {
       failures.push(`${row.title}: ${error instanceof Error ? error.message : String(error)}`);
     }

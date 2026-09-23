@@ -65,6 +65,13 @@ describe("meeting draft to transcript link", () => {
     assert.ok(write, "the link table must be written");
     assert.match(write!.text, /on conflict \(newsroom_id,draft_id,artifact_id\)/, "re-linking must update, not accumulate");
     assert.deepEqual(write!.params, [3, 41, 9, result.snapshot]);
+    const marker = calls.find((c) => /update drafts set research_json/.test(c.text));
+    assert.ok(marker, "the same transaction must mark that this draft used meeting evidence");
+    assert.match(marker!.text, /research_json::jsonb|research_json,''\),'\{\}'\)::jsonb/, "existing research must be merged, not discarded");
+    assert.deepEqual(JSON.parse(String(marker!.params[0])), {
+      meetingEvidence: { used: true, artifactId: 9, citationCount: 1 },
+    });
+    assert.deepEqual(marker!.params.slice(1), [41, 3]);
   });
 
   it("writes no link for a draft with no citations", async () => {
