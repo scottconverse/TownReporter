@@ -78,8 +78,9 @@ export function meetingEvidenceBlock(material: MeetingDraftMaterial): string {
       a tally gets invented.
     */
     out.push("No vote was established from the structured record for any item in this meeting.");
-    out.push("Do not state a vote, a tally, or a result. If the transcript appears to describe one,");
-    out.push("say the record does not establish it rather than reporting it as fact.");
+    out.push("If the transcript clearly records a vote or result, report it promptly as transcript-based");
+    out.push("and say that structured or official confirmation is still pending. Do not invent an unclear");
+    out.push("tally. If later records differ, the published story must be reviewed and corrected.");
   } else {
     for (const v of established) {
       const bits = [

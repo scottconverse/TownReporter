@@ -41,7 +41,7 @@ describe("meeting draft input", () => {
     assert.match(block, /moved by Matthew Popkin/);
   });
 
-  it("refuses to let an unestablished vote read as a tally", () => {
+  it("permits a clearly recorded transcript vote while requiring its source to be labelled", () => {
     /*
       The transcript above literally says "the motion carries, six to one". If the
       record does not establish a vote, the block must say so and must tell the
@@ -50,7 +50,9 @@ describe("meeting draft input", () => {
     */
     const block = meetingEvidenceBlock({ ...base, votes: [{ ...base.votes[0]!, established: false }] });
     assert.match(block, /No vote was established from the structured record/);
-    assert.match(block, /Do not state a vote, a tally, or a result/);
+    assert.match(block, /report it promptly as transcript-based/);
+    assert.match(block, /structured or official confirmation is still pending/);
+    assert.doesNotMatch(block, /Do not state a vote, a tally, or a result/);
     assert.doesNotMatch(block, /tally 6-1/, "an unestablished vote must not be carried as a tally");
     assert.doesNotMatch(block, /source: longmontcitycouncil\.org/, "and must not carry a source it lacks");
   });

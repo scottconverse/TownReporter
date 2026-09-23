@@ -77,5 +77,37 @@ describe("meeting draft citation derivation", () => {
     });
     assert.deepEqual(derived, [], "no citations means no link row is written");
   });
+
+  it("links a paraphrase whose evidence spans adjacent caption fragments", () => {
+    const candidates: CandidateCitation[] = [
+      { item: "9", segmentIndex: 100, captionSha256: "tape", excerpt: "the applicant requested" },
+      { item: "9", segmentIndex: 101, captionSha256: "tape", excerpt: "approval to reduce the garage setback" },
+      { item: "9", segmentIndex: 102, captionSha256: "tape", excerpt: "to zero feet along the western property line" },
+      { item: "9", segmentIndex: 103, captionSha256: "tape", excerpt: "subject to a complete parcel survey" },
+    ];
+    const derived = deriveUsedCitations({
+      candidates,
+      headline: "Commission approves garage variance",
+      dek: "A zero-foot setback was approved.",
+      body: "The commission approved a garage setback reduction to zero feet along the western property line, conditioned on a complete parcel survey.",
+    });
+    assert.ok(derived.length >= 2, "the supporting span is linked even though each fragment is too small alone");
+    assert.ok(derived.every((citation) => citation.captionSha256 === "tape"));
+  });
+
+  it("does not link an unrelated nearby passage merely because it is from the same meeting", () => {
+    const candidates: CandidateCitation[] = [
+      { item: "5", segmentIndex: 200, captionSha256: "tape", excerpt: "parking permit prices downtown" },
+      { item: "5", segmentIndex: 201, captionSha256: "tape", excerpt: "new signs and meter maintenance" },
+      { item: "5", segmentIndex: 202, captionSha256: "tape", excerpt: "garage enforcement begins Monday" },
+    ];
+    const derived = deriveUsedCitations({
+      candidates,
+      headline: "Commission approves a residential variance",
+      dek: "A setback was reduced.",
+      body: "The applicant must submit a parcel survey before receiving the permit.",
+    });
+    assert.deepEqual(derived, [], "same-meeting proximity is not evidence that the draft used the passage");
+  });
 });
 

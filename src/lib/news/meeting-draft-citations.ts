@@ -30,12 +30,29 @@ const STOPWORDS = new Set([
   "city", "council", "meeting", "item", "member", "members", "staff",
 ]);
 
+function stem(word: string): string {
+  if (word.length > 7 && word.endsWith("tion")) return word.slice(0, -4);
+  if (word.length > 7 && word.endsWith("ment")) return word.slice(0, -4);
+  if (word.length > 6 && word.endsWith("ies")) return `${word.slice(0, -3)}y`;
+  if (word.length > 6 && word.endsWith("ing")) return word.slice(0, -3).replace(/(.)\1$/, "$1");
+  if (word.length > 5 && word.endsWith("ed")) return word.slice(0, -2).replace(/(.)\1$/, "$1");
+  if (word.length > 6 && word.endsWith("al")) return word.slice(0, -2);
+  if (word.length > 5 && word.endsWith("es")) return word.slice(0, -2);
+  if (word.length > 5 && word.endsWith("s")) return word.slice(0, -1);
+  return word;
+}
+
 function meaningfulWords(text: string): string[] {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .filter((w) => w.length > 4 && !STOPWORDS.has(w));
+    .filter((w) => w.length > 4 && !STOPWORDS.has(w))
+    .map(stem);
+}
+
+function uniqueWords(text: string): Set<string> {
+  return new Set(meaningfulWords(text));
 }
 
 /**
@@ -85,8 +102,68 @@ export function deriveUsedCitations(input: {
   body: string;
 }): { segmentIndex: number; captionSha256: string }[] {
   const text = [input.headline, input.dek, input.body].join("\n");
-  return input.candidates
-    .filter((c) => citationWasUsed(c, text))
-    .map((c) => ({ segmentIndex: c.segmentIndex, captionSha256: c.captionSha256 }));
+  const draftWords = uniqueWords(text);
+  const selected = new Map<number, CandidateCitation>();
+  const scores = new Map<number, number>();
+
+  for (const candidate of input.candidates) {
+    if (citationWasUsed(candidate, text)) {
+      selected.set(candidate.segmentIndex, candidate);
+      scores.set(candidate.segmentIndex, 100 + [...uniqueWords(candidate.excerpt)].filter((word) => draftWords.has(word)).length);
+    }
+  }
+
+  /*
+    Auto-captions arrive as tiny fragments, often only two or three spoken words.
+    A finished sentence routinely paraphrases a fact spread across several adjacent
+    fragments, so no individual fragment can satisfy the conservative matcher above.
+    Evaluate a bounded local window as one passage, then retain only the fragments in
+    that passage that share meaningful words with the finished prose. This preserves
+    the governing rule (derive from the finished draft) without treating every
+    transcript fragment made available to the writer as evidence it used.
+  */
+  for (let center = 0; center < input.candidates.length; center += 1) {
+    const anchor = input.candidates[center]!;
+    const passage = input.candidates.filter(
+      (candidate) =>
+        candidate.item === anchor.item &&
+        Math.abs(candidate.segmentIndex - anchor.segmentIndex) <= 4,
+    );
+    if (passage.length < 2) continue;
+
+    const passageWords = uniqueWords(passage.map((candidate) => candidate.excerpt).join(" "));
+    const shared = [...passageWords].filter((word) => draftWords.has(word));
+    const minimum = passageWords.size <= 12 ? 3 : 4;
+    if (shared.length < minimum || shared.length / passageWords.size < 0.2) continue;
+
+    const ranked = passage
+      .map((candidate) => ({
+        candidate,
+        score: [...uniqueWords(candidate.excerpt)].filter((word) => draftWords.has(word)).length,
+      }))
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score || a.candidate.segmentIndex - b.candidate.segmentIndex)
+      .slice(0, 3);
+    for (const { candidate, score } of ranked) {
+      selected.set(candidate.segmentIndex, candidate);
+      scores.set(candidate.segmentIndex, Math.max(scores.get(candidate.segmentIndex) ?? 0, shared.length * 10 + score));
+    }
+  }
+
+  const bounded: CandidateCitation[] = [];
+  for (const candidate of [...selected.values()].sort(
+    (a, b) => (scores.get(b.segmentIndex) ?? 0) - (scores.get(a.segmentIndex) ?? 0) || a.segmentIndex - b.segmentIndex,
+  )) {
+    if (bounded.some((kept) => kept.item === candidate.item && Math.abs(kept.segmentIndex - candidate.segmentIndex) <= 1)) continue;
+    bounded.push(candidate);
+    if (bounded.length === 50) break;
+  }
+
+  return bounded
+    .sort((a, b) => a.segmentIndex - b.segmentIndex)
+    .map((candidate) => ({
+      segmentIndex: candidate.segmentIndex,
+      captionSha256: candidate.captionSha256,
+    }));
 }
 

@@ -1752,6 +1752,7 @@ function ReportingNotesPane({
           <span className="chip dnp">does not print</span>
         </div>
       ) : null}
+      {meetingSourceBlock}
       {!filled ? (
         <>
           <p className="note-one" style={{ marginTop: small ? 0 : 8 }}>
@@ -1759,7 +1760,6 @@ function ReportingNotesPane({
               ? "This draft was written before notes were kept. Redraft fills them; lines you add stay."
               : "Draft with AI fills this. You can add a line."}
           </p>
-          {meetingSourceBlock}
       {absenceBlock}
           {todoList("empty")}
         </>
