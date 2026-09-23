@@ -110,7 +110,7 @@ describe("meeting transcript artifacts Slice 3", () => {
       writeFileSync(infoAPath, infoA, "utf8");
       writeFileSync(infoBPath, infoB, "utf8");
 
-      const inserted: Array<{ storagePath: string; infoPath: string | null; sha256: string; infoSha256: string | null }> = [];
+      const inserted: Array<{ storagePath: string; byteSize: number; infoPath: string | null; sha256: string; infoSha256: string | null }> = [];
       let nextId = 1;
       const sql = (async () => [] as never[]) as unknown as Sql;
       sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
@@ -120,8 +120,9 @@ describe("meeting transcript artifacts Slice 3", () => {
           inserted.push({
             storagePath: String(params[2]),
             sha256: String(params[4]),
-            infoPath: params[7] == null ? null : String(params[7]),
-            infoSha256: params[8] == null ? null : String(params[8]),
+            byteSize: Number(params[7]),
+            infoPath: params[8] == null ? null : String(params[8]),
+            infoSha256: params[9] == null ? null : String(params[9]),
           });
           return [{ id: nextId++, captured_at: "2026-09-22T00:00:00.000Z" }] as T[];
         }
@@ -151,6 +152,8 @@ describe("meeting transcript artifacts Slice 3", () => {
       assert.equal(createHash("sha256").update(readFileSync(storedB.storagePath)).digest("hex"), shaB);
 
       assert.equal(inserted.length, 2);
+      assert.equal(inserted[0]!.byteSize, Buffer.byteLength(captionA), "the transcript size is recorded with its hash and path");
+      assert.equal(inserted[1]!.byteSize, Buffer.byteLength(captionB), "each immutable revision records its own exact size");
       assert.notEqual(inserted[0]!.infoPath, inserted[1]!.infoPath, "different info hashes must never share a path");
       assert.equal(readFileSync(inserted[0]!.infoPath!, "utf8"), infoA, "storing B must not change A's sidecar");
       assert.equal(readFileSync(inserted[1]!.infoPath!, "utf8"), infoB);

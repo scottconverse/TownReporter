@@ -12,7 +12,7 @@ export type MeetingTranscriptSegment = {
 };
 export type MeetingTranscriptArtifact = {
   id: number; newsroomId: number; videoId: string; artifactType: "transcript";
-  storagePath: string; format: string; sha256: string; capturedAt: string;
+  storagePath: string; format: string; sha256: string; byteSize: number; capturedAt: string;
   sourceMethod: string; retentionMode: MeetingRetentionMode;
 };
 export type ResolvedTranscriptCitation = {
@@ -180,10 +180,13 @@ export async function storeMeetingTranscriptArtifact(
   mkdirSync(targetDir, { recursive: true });
   const extension = input.parsed.format === "srv3" ? ".srv3" : ".vtt";
   const targetPath = join(targetDir, `transcript-${input.parsed.sha256}${extension}`);
+  let byteSize: number;
   if (resolve(input.parsed.sourcePath) !== resolve(targetPath)) {
-    writeVerifiedImmutableFile(input.parsed.sourcePath, targetPath, input.parsed.sha256);
+    byteSize = writeVerifiedImmutableFile(input.parsed.sourcePath, targetPath, input.parsed.sha256);
   } else if (!existsSync(targetPath) || sha256(readFileSync(targetPath)) !== input.parsed.sha256) {
     throw new Error(`Stored meeting artifact is missing or does not match its hash: ${targetPath}`);
+  } else {
+    byteSize = readFileSync(targetPath).byteLength;
   }
   const sidecar = storeMeetingInfoSidecar(input.infoSourcePath, targetDir);
   const segments = input.parsed.segments?.length
@@ -198,13 +201,13 @@ export async function storeMeetingTranscriptArtifact(
     : parseTranscriptSegments(input.parsed.text, input.parsed.sha256);
   const rows = await sql.query<{ id: number; captured_at: string }>(
     `insert into meeting_transcript_artifacts
-       (newsroom_id,video_id,artifact_type,storage_path,format,sha256,captured_at,source_method,retention_mode,info_path,info_sha256,info_bytes,info_missing_reason)
-     values ($1,$2,'transcript',$3,$4,$5,now(),$6,$7,$8,$9,$10,$11)
+       (newsroom_id,video_id,artifact_type,storage_path,format,sha256,captured_at,source_method,retention_mode,byte_size,info_path,info_sha256,info_bytes,info_missing_reason)
+     values ($1,$2,'transcript',$3,$4,$5,now(),$6,$7,$8,$9,$10,$11,$12)
      on conflict (newsroom_id,video_id,artifact_type,sha256)
      do update set storage_path=excluded.storage_path,format=excluded.format,source_method=excluded.source_method,
-       retention_mode=excluded.retention_mode,info_path=excluded.info_path,info_sha256=excluded.info_sha256,info_bytes=excluded.info_bytes,info_missing_reason=excluded.info_missing_reason,updated_at=now()
+       retention_mode=excluded.retention_mode,byte_size=excluded.byte_size,info_path=excluded.info_path,info_sha256=excluded.info_sha256,info_bytes=excluded.info_bytes,info_missing_reason=excluded.info_missing_reason,updated_at=now()
      returning id,captured_at::text as captured_at`,
-    [input.newsroomId, input.videoId, targetPath, input.parsed.format, input.parsed.sha256, input.sourceMethod ?? "yt-dlp-captions", retentionMode, sidecar.infoPath, sidecar.infoSha256, sidecar.infoBytes, sidecar.infoMissingReason],
+    [input.newsroomId, input.videoId, targetPath, input.parsed.format, input.parsed.sha256, input.sourceMethod ?? "yt-dlp-captions", retentionMode, byteSize, sidecar.infoPath, sidecar.infoSha256, sidecar.infoBytes, sidecar.infoMissingReason],
   );
   const artifactId = rows[0]?.id;
   if (!artifactId) throw new Error("Meeting transcript artifact insert returned no id.");
@@ -221,7 +224,7 @@ export async function storeMeetingTranscriptArtifact(
   }
   return {
     id: artifactId, newsroomId: input.newsroomId, videoId: input.videoId, artifactType: "transcript",
-    storagePath: targetPath, format: input.parsed.format, sha256: input.parsed.sha256,
+    storagePath: targetPath, format: input.parsed.format, sha256: input.parsed.sha256, byteSize,
     capturedAt: rows[0]!.captured_at, sourceMethod: input.sourceMethod ?? "yt-dlp-captions", retentionMode,
   };
 }
