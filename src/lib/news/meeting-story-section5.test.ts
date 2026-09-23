@@ -11,9 +11,13 @@ describe("meeting section 5 agenda-item chunking", () => {
     const { chunkByAgendaItem } = await import("./meeting-story-section5.ts");
     const segments = [
       { segmentIndex: 0, startSeconds: 0, endSeconds: 60, captionSha256: "fixture-sha", excerpt: "Good evening. We call the meeting to order and take roll call." },
-      { segmentIndex: 1, startSeconds: 60, endSeconds: 600, captionSha256: "fixture-sha", excerpt: "Item 1, approval of the minutes. Motion to approve the minutes by Mayor Prom, seconded by Council Member Coloffer." },
-      { segmentIndex: 2, startSeconds: 600, endSeconds: 2400, captionSha256: "fixture-sha", excerpt: "Item 2, the airport rates and charges study. The consultant presented the landing fee analysis." },
-      { segmentIndex: 3, startSeconds: 2400, endSeconds: 3000, captionSha256: "fixture-sha", excerpt: "Item 3, second reading of Ordinance O-2026-54. Council member Popkin moved to approve." },
+      { segmentIndex: 1, startSeconds: 60, endSeconds: 120, captionSha256: "fixture-sha", excerpt: "Item 1, approval of the minutes. Motion to approve the minutes by Mayor Prom, seconded by Council Member Coloffer." },
+      { segmentIndex: 2, startSeconds: 120, endSeconds: 300, captionSha256: "fixture-sha", excerpt: "Council discussed a correction to the May 12 minutes before voting." },
+      { segmentIndex: 3, startSeconds: 300, endSeconds: 360, captionSha256: "fixture-sha", excerpt: "A speaker repeated that item 1 should record the corrected attendance." },
+      { segmentIndex: 4, startSeconds: 600, endSeconds: 660, captionSha256: "fixture-sha", excerpt: "Item 2, the airport rates and charges study. The consultant presented the landing fee analysis." },
+      { segmentIndex: 5, startSeconds: 660, endSeconds: 1200, captionSha256: "fixture-sha", excerpt: "The consultant said the proposed fee would raise annual revenue by $240,000." },
+      { segmentIndex: 6, startSeconds: 2400, endSeconds: 2460, captionSha256: "fixture-sha", excerpt: "Item 3, second reading of Ordinance O-2026-54. Council member Popkin moved to approve." },
+      { segmentIndex: 7, startSeconds: 2460, endSeconds: 3000, captionSha256: "fixture-sha", excerpt: "The ordinance passed after council debated the effective date." },
     ];
     const chunks = chunkByAgendaItem({
       segments,
@@ -25,12 +29,14 @@ describe("meeting section 5 agenda-item chunking", () => {
     });
     assert.equal(chunks.length, 3);
     assert.equal(chunks[0]?.item, "1");
-    assert.ok(chunks[0]!.segmentIndexes.includes(1));
+    assert.deepEqual(chunks[0]!.segmentIndexes, [1, 2, 3], "the first item includes its full discussion, including a repeated item mention");
     assert.equal(chunks[1]?.item, "2");
-    assert.ok(chunks[1]!.segmentIndexes.includes(2));
+    assert.deepEqual(chunks[1]!.segmentIndexes, [4, 5], "the second item stops at the next agenda boundary");
     assert.equal(chunks[2]?.item, "3");
-    assert.ok(chunks[2]!.segmentIndexes.includes(3));
+    assert.deepEqual(chunks[2]!.segmentIndexes, [6, 7], "the final item reaches the end of the transcript");
     assert.ok(chunks.every((c) => c.segmentIndexes.length > 0));
+    const allIndexes = chunks.flatMap((chunk) => chunk.segmentIndexes);
+    assert.equal(new Set(allIndexes).size, allIndexes.length, "agenda chunks must never overlap");
   });
 
   it("reports unalignable when the packet does not match the transcript", async () => {

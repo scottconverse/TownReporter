@@ -1317,6 +1317,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     retainedSources: await retainedWatchSources(sql, owned(context), leadId, sourceInput.urls),
     memory,
     extraEvidence: prevNotes.scratch,
+    extraEvidenceLimitChars: prevNotes.meeting ? 200_000 : undefined,
     editorialAssignment: prevNotes.editorialAssignment,
     researchScope,
     extraUrls: sourceInput.extraUrls,

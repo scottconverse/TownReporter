@@ -25,7 +25,12 @@ describe("meeting lead", () => {
       meetingDate: "2026-09-15",
       topic: "council",
       sourceUrls: ["https://longmontcitycouncil.org/meetings/2026-09-15/"],
-      items: [{ item: "9", title: "Second Reading" }],
+      items: [{
+        item: "9",
+        title: "Second Reading",
+        startSeconds: 18420,
+        excerpt: "Council debated the effective date and heard that the ordinance would take effect October 1. Later, the motion carries.",
+      }],
       establishedVotes: 1,
       citations: [{ item: "9", segmentIndex: 4612, timestampSeconds: 18450, excerpt: "the motion carries", captionSha256: "abc123" }],
       artifactId: 4,
@@ -53,6 +58,7 @@ describe("meeting lead", () => {
     */
     assert.match(notes.scratch, /MEETING: City Council Regular Session/, "the transcript evidence must reach the draft");
     assert.match(notes.scratch, /the motion carries/, "the verbatim excerpt must be in the evidence block");
+    assert.match(notes.scratch, /take effect October 1/, "later substantive discussion from the full item span must reach the draft");
     assert.match(notes.scratch, /tally 6-1/, "the structured vote must be in the evidence block");
   });
 

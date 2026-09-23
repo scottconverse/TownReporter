@@ -47,6 +47,7 @@ export function MeetingSourceBlock({
   usedEvidence?: DraftMeetingEvidence | null;
 }) {
   const candidates = meetingCitationsFor(notes);
+  const visibleCandidates = candidates.slice(0, 50);
   const citations = usedEvidence?.citations ?? [];
   if (!citations.length && !candidates.length) return null;
   const meeting = usedEvidence?.meeting ?? notes.meeting;
@@ -93,13 +94,18 @@ export function MeetingSourceBlock({
         <details>
           <summary>Transcript material considered ({candidates.length})</summary>
           <ul className="meeting-citations">
-            {candidates.map((c) => (
+            {visibleCandidates.map((c) => (
               <li key={`candidate-${c.segmentIndex}-${c.item}`}>
                 <p className="meeting-citation-head"><b>Item {c.item || "unlabelled"}</b> · {c.timestamp ?? meetingClock(c.timestampSeconds)}</p>
                 <p className="meeting-citation-excerpt">{c.excerpt}</p>
               </li>
             ))}
           </ul>
+          {candidates.length > visibleCandidates.length ? (
+            <p className="note-one">
+              Showing 50 of {candidates.length} timestamped transcript segments considered by the draft.
+            </p>
+          ) : null}
         </details>
       ) : null}
       {videoId && citations.length ? (

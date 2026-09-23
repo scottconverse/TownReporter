@@ -78,9 +78,9 @@ export function chunkByAgendaItem(input: {
   segments: TranscriptSegment[];
   packetItems: PacketItem[];
 }): AgendaChunk[] {
-  const chunks: AgendaChunk[] = [];
+  const boundaries: { packetItem: PacketItem; segmentPosition: number }[] = [];
   for (const packetItem of input.packetItems) {
-    const matched = input.segments.filter((segment) => {
+    const segmentPosition = input.segments.findIndex((segment) => {
       const transition = spokenTransitionKey(segment.excerpt);
       if (transition) {
         if (transition.kind === "item" && itemNumbersMatch(transition.value, packetItem.itemNumber)) return true;
@@ -96,16 +96,23 @@ export function chunkByAgendaItem(input: {
       }
       return false;
     });
-    if (!matched.length) continue;
-    chunks.push({
-      item: packetItem.itemNumber,
-      title: packetItem.title,
-      segmentIndexes: matched.map((s) => s.segmentIndex),
-      startSeconds: Math.min(...matched.map((s) => s.startSeconds)),
-      endSeconds: Math.max(...matched.map((s) => s.endSeconds)),
-    });
+    if (segmentPosition >= 0) boundaries.push({ packetItem, segmentPosition });
   }
-  return chunks;
+  boundaries.sort((a, b) => a.segmentPosition - b.segmentPosition);
+  const uniqueBoundaries = boundaries.filter(
+    (boundary, index) => index === 0 || boundary.segmentPosition !== boundaries[index - 1]!.segmentPosition,
+  );
+  return uniqueBoundaries.map((boundary, index) => {
+    const next = uniqueBoundaries[index + 1]?.segmentPosition ?? input.segments.length;
+    const span = input.segments.slice(boundary.segmentPosition, next);
+    return {
+      item: boundary.packetItem.itemNumber,
+      title: boundary.packetItem.title,
+      segmentIndexes: span.map((segment) => segment.segmentIndex),
+      startSeconds: span[0]!.startSeconds,
+      endSeconds: span.at(-1)!.endSeconds,
+    };
+  });
 }
 
 export function alignMeeting(input: {

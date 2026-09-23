@@ -27,6 +27,13 @@ describe("meeting draft input", () => {
     assert.match(block, /the motion carries, six to one/, "the verbatim excerpt must be present");
   });
 
+  it("states that a captured meeting is complete so the writer cannot turn it into an upcoming event", () => {
+    const block = meetingEvidenceBlock(base);
+    assert.match(block, /recording has ended/i);
+    assert.match(block, /transcript below was captured successfully/i);
+    assert.match(block, /do not\s+describe the meeting as merely scheduled or upcoming/i);
+  });
+
   it("states a vote only as the structured record states it", () => {
     const block = meetingEvidenceBlock(base);
     assert.match(block, /tally 6-1/, "the record tally must be carried");

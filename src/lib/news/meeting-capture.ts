@@ -42,6 +42,16 @@ export type MeetingAwarenessDeps = {
   now?: () => Date;
 };
 
+export function namedMeetingFailures(
+  listingFailures: string[],
+  failedRecords: MeetingCaptureRecord[],
+): string[] {
+  return [...new Set([
+    ...listingFailures,
+    ...failedRecords.map((record) => `${record.title}: ${record.failureReason ?? "capture failed"}`),
+  ])];
+}
+
 const EMPTY_RESULT: MeetingAwarenessResult = {
   configured: false, found: [], uncaptured: [], captured: [], failed: [],
   coverageLine: "", failures: [], archivePath: null,
@@ -469,7 +479,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const coverageLine = `meetings: ${found.length} found, ${finalRecords.filter((r) => r.status === "captured").length} captured, ${failed.length} failed`;
   return {
     configured: true, found, uncaptured, captured: finalRecords, failed, coverageLine,
-    failures: [...new Set([...failures, ...failed.map((r) => `${r.title}: ${r.failureReason ?? "capture failed"}`)])],
+    failures: namedMeetingFailures(failures, failed),
     archivePath,
   };
 }

@@ -82,7 +82,7 @@ export async function fileMeetingLead(
     meetingDate: string | null;
     topic: string;
     sourceUrls: string[];
-    items: { item: string; title: string }[];
+    items: { item: string; title: string; startSeconds?: number; excerpt?: string }[];
     establishedVotes: number;
     citations: MeetingLeadCitation[];
     artifactId: number;
@@ -114,10 +114,15 @@ export async function fileMeetingLead(
     title: input.title,
     meetingDate: input.meetingDate,
     videoUrl: input.sourceUrls[0] ?? `https://www.youtube.com/watch?v=${input.videoId}`,
-    items: input.citations.map((c) => ({
-      item: c.item, title: input.items.find((i) => i.item === c.item)?.title ?? "",
-      startSeconds: c.timestampSeconds, excerpt: c.excerpt,
-    })),
+    items: input.items.map((item) => {
+      const itemCitations = input.citations.filter((citation) => citation.item === item.item);
+      return {
+        item: item.item,
+        title: item.title,
+        startSeconds: item.startSeconds ?? itemCitations[0]?.timestampSeconds ?? 0,
+        excerpt: item.excerpt?.trim() || itemCitations.map((citation) => citation.excerpt).join(" "),
+      };
+    }),
     votes: input.votes,
   });
   const notesJson = JSON.stringify({

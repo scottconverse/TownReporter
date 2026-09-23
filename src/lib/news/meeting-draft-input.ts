@@ -61,6 +61,8 @@ export function meetingEvidenceBlock(material: MeetingDraftMaterial): string {
   out.push("verbatim from the recording and carries the timestamp it was spoken at. Treat it as");
   out.push("the record of what was said. It is auto-captioned, so names and numbers can be");
   out.push("mangled: if an excerpt is unclear, say so rather than guessing.");
+  out.push("This recording has ended and the transcript below was captured successfully. Do not");
+  out.push("describe the meeting as merely scheduled or upcoming, and do not claim the transcript is missing.");
   out.push("");
   for (const item of material.items) {
     out.push(`--- ITEM ${item.item}${item.title ? `: ${item.title}` : ""} (from ${meetingClock(item.startSeconds)}) ---`);

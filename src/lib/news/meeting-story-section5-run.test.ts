@@ -19,8 +19,10 @@ function harness() {
     if (/from meeting_transcript_segments/i.test(text)) {
       return [
         { segment_index: 0, start_seconds: 0, end_seconds: 60, excerpt: "Roll call and pledge.", caption_sha256: "abc123" },
-        { segment_index: 1, start_seconds: 60, end_seconds: 600, excerpt: "agenda item 1 approval of the minutes", caption_sha256: "abc123" },
-        { segment_index: 2, start_seconds: 600, end_seconds: 2400, excerpt: "item 2 airport rates and charges study", caption_sha256: "abc123" },
+        { segment_index: 1, start_seconds: 60, end_seconds: 120, excerpt: "agenda item 1 approval of the minutes", caption_sha256: "abc123" },
+        { segment_index: 2, start_seconds: 120, end_seconds: 600, excerpt: "The clerk corrected the attendance in the May 12 minutes.", caption_sha256: "abc123" },
+        { segment_index: 3, start_seconds: 600, end_seconds: 660, excerpt: "item 2 airport rates and charges study", caption_sha256: "abc123" },
+        { segment_index: 4, start_seconds: 660, end_seconds: 2400, excerpt: "The consultant projected $240,000 in annual revenue from the fee change.", caption_sha256: "abc123" },
       ] as T[];
     }
     return [] as T[];
@@ -60,6 +62,9 @@ describe("meeting section 5 real pipeline integration", () => {
     assert.ok(result.citations.length >= 1, "citations resolved from stored segments");
     assert.equal(result.citations[0]?.captionSha256, "abc123");
     assert.ok(result.citations[0]!.excerpt.length < 1000, "citation excerpt is bounded, not the whole file");
+    assert.ok(result.citations.some((citation) => citation.segmentIndex === 4), "later substantive transcript segments remain citeable");
+    assert.match(result.items.find((item) => item.item === "2")?.excerpt ?? "", /\$240,000/, "the writer receives the full bounded item span, not just its transition line");
+    assert.match(result.items.find((item) => item.item === "2")?.excerpt ?? "", /\[00:11:00; segment 4\]/, "every later segment carries its own timestamp and stable segment index");
   });
 
   it("takes the honest unaligned path when packet items do not align", async () => {
