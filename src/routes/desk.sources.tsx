@@ -212,6 +212,7 @@ function SourcesPage() {
           <input
             ref={fileRef}
             type="file"
+            aria-label="Choose source registry file"
             accept=".txt,.csv,.md,.tsv,text/plain,text/csv,text/markdown"
             className="hidden"
             onChange={(e) => {

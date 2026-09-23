@@ -30,12 +30,9 @@ export type MeetingCitation = {
 };
 
 /**
- * The citations a draft actually used, read off its own notes.
- *
- * Deliberately reads from the lead's recorded citations rather than re-deriving
- * them in the browser: the server already derived what the draft used, and a
- * second derivation here could disagree with the link table the revision check
- * reads.
+ * Candidate citations carried by the lead. These are shown separately from the
+ * persisted used-citation snapshot; they must never be presented as evidence
+ * the current draft actually used.
  */
 export function meetingCitationsFor(notes: Pick<ReportingNotes, "meeting" | "transcriptCitations">): MeetingCitation[] {
   if (!notes.meeting) return [];

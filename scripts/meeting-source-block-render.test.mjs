@@ -31,17 +31,27 @@ const full = {
   meeting: { videoId: "L1AnMLsLwtk", title: "City Council Regular Session", date: "2026-09-15", artifactId: 4 },
   transcriptCitations: [{ item: "9", segmentIndex: 4612, timestampSeconds: 18450, timestamp: "05:07:30", excerpt: "the motion carries six to one", captionSha256: "abc" }],
 };
+const usedEvidence = {
+  meeting: full.meeting,
+  artifactId: 4,
+  artifactSha256: "abc",
+  currentArtifactId: 4,
+  currentSha256: "abc",
+  newerTranscriptExists: false,
+  revisionNotice: null,
+  citations: full.transcriptCitations,
+};
 
 test("shows the agenda item, the timestamp and the verbatim words", () => {
-  const html = renderToStaticMarkup(createElement(MeetingSourceBlock, { notes: full }));
-  assert.match(html, /Where this came from/);
+  const html = renderToStaticMarkup(createElement(MeetingSourceBlock, { notes: full, usedEvidence }));
+  assert.match(html, /Where this draft came from/);
   assert.match(html, /Item 9/, "the editor must see which agenda item");
   assert.match(html, /05:07:30/, "the editor must see the timestamp");
   assert.match(html, /the motion carries six to one/, "the editor must see the words from the tape");
 });
 
 test("puts the recording one click away at the cited moment", () => {
-  const html = renderToStaticMarkup(createElement(MeetingSourceBlock, { notes: full }));
+  const html = renderToStaticMarkup(createElement(MeetingSourceBlock, { notes: full, usedEvidence }));
   assert.match(html, /youtube\.com\/watch\?v=L1AnMLsLwtk&amp;t=18450s/, "the tape must be one click away at the cited moment");
 });
 
@@ -49,10 +59,27 @@ test("renders nothing for an ordinary story", () => {
   assert.equal(renderToStaticMarkup(createElement(MeetingSourceBlock, { notes: empty })), "");
 });
 
-test("renders nothing when a meeting has no citations recorded", () => {
+test("renders nothing when a meeting has no transcript material", () => {
   const notes = { ...empty, meeting: { videoId: "v", title: "T", date: null, artifactId: 1 } };
   assert.equal(renderToStaticMarkup(createElement(MeetingSourceBlock, { notes })), "");
   assert.deepEqual(meetingCitationsFor(notes), []);
+});
+
+test("separates the draft's persisted used subset from candidate material", () => {
+  const notes = {
+    ...full,
+    transcriptCitations: [
+      ...full.transcriptCitations,
+      { item: "10", segmentIndex: 5000, timestampSeconds: 20000, timestamp: "05:33:20", excerpt: "candidate words not used", captionSha256: "abc" },
+    ],
+  };
+  const html = renderToStaticMarkup(createElement(MeetingSourceBlock, { notes, usedEvidence }));
+  const usedHeading = html.indexOf("Where this draft came from");
+  const candidateHeading = html.indexOf("Transcript material considered (2)");
+  assert.ok(usedHeading >= 0 && candidateHeading > usedHeading);
+  assert.match(html.slice(usedHeading, candidateHeading), /the motion carries six to one/);
+  assert.doesNotMatch(html.slice(usedHeading, candidateHeading), /candidate words not used/);
+  assert.match(html.slice(candidateHeading), /candidate words not used/);
 });
 
 test("formats a clock the way the editor reads it, and never renders NaN", () => {

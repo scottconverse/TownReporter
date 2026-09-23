@@ -11,7 +11,8 @@ import { test } from "node:test";
 
     Desk, Queue, Scan, Sources, Published, Opinion, Dark Desk, Server, Stats
     -- all HTTP 200, all with a level-1 heading, all with a computed minimum
-    font size of exactly 14px, and 1 unnamed control across 1,255.
+    font size of exactly 14px. The one unnamed Sources control found by that
+    walk was the hidden registry-file input; it now has an explicit name.
 
   The text-size half of the item is therefore done and enforced by the existing
   14px floor plus this measurement. These tests keep it from regressing without
@@ -53,5 +54,13 @@ test("the walk that measured all of this still exists", async () => {
   assert.match(walk, /aria-label/, "the walk must check accessible names");
   assert.match(walk, /\/desk\/dark/, "the dark desk is one of the surfaces under review");
   assert.match(walk, /\/desk\/opinion/, "so is Opinion");
+});
+
+test("the source registry file picker has an accessible name", async () => {
+  const sources = await readFile(new URL("../src/routes/desk.sources.tsx", import.meta.url), "utf8");
+  assert.match(
+    sources,
+    /type="file"[\s\S]{0,160}aria-label="Choose source registry file"|aria-label="Choose source registry file"[\s\S]{0,160}type="file"/,
+  );
 });
 
