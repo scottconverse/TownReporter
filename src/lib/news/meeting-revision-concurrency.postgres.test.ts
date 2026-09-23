@@ -116,6 +116,42 @@ if (probe.ok) {
 }
 
 describe("meeting revision and publication share one PostgreSQL lock order", { skip }, () => {
+  it("publication owns the canonical meeting row, not only the lead row", async () => {
+    const seeded = await seedMeeting("publication-meeting-row");
+    const publication = await connection();
+    const contender = await connection();
+    try {
+      const { lockMeetingsForDraftPublish } = await import("./meeting-revision-lock.ts");
+      await publication.query("begin");
+      await publication.query("select id from leads where newsroom_id=$1 and id=$2 for update", [newsroomId, seeded.leadId]);
+      await lockMeetingsForDraftPublish(sqlFrom(publication), { newsroomId, draftId: seeded.draftId });
+
+      await contender.query("begin");
+      await contender.query("set local lock_timeout='100ms'");
+      let lockError: unknown;
+      try {
+        await contender.query(
+          "select video_id from meeting_capture_records where newsroom_id=$1 and video_id=$2 for update",
+          [newsroomId, "publication-meeting-row"],
+        );
+      } catch (error) {
+        lockError = error;
+      }
+      assert.equal(
+        (lockError as { code?: string } | undefined)?.code,
+        "55P03",
+        "publication must hold the canonical meeting row; removing that lock must fail this assertion",
+      );
+      await contender.query("rollback");
+      await publication.query("rollback");
+    } finally {
+      await contender.query("rollback").catch(() => undefined);
+      await publication.query("rollback").catch(() => undefined);
+      await contender.end();
+      await publication.end();
+    }
+  });
+
   it("capture B first makes an A-linked publication observe B and fail closed", async () => {
     console.log(`meeting revision concurrency scratch database: ${dbName}`);
     const seeded = await seedMeeting("capture-first");

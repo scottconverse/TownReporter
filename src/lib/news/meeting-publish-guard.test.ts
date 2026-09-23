@@ -24,7 +24,7 @@ describe("meeting publish guard", () => {
       research_json: JSON.stringify({ meetingEvidence: { used: true } }),
       artifact_id: 4,
       citation_snapshot: JSON.stringify([{ artifactId: 4, segmentIndex: 4612, captionSha256: "old-hash" }]),
-      revision_notice: "The recording changed.",
+      revision_notice: null,
       video_id: "meeting-1",
       linked_sha256: "old-hash",
       current_artifact_id: 5,

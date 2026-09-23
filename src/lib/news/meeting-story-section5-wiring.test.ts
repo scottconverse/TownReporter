@@ -17,14 +17,17 @@ function harness(storageRoot: string, captionPath: string, captionSha256: string
   sql: Sql;
   withTransaction: <T>(fn: (tx: Sql) => Promise<T>) => Promise<T>;
   section5Calls: () => number;
+  filedLeads: () => number;
   seedCaptured: (videoId: string) => void;
 } {
   const rows = new Map<string, Row>();
   let section5Calls = 0;
+  let filedLeads = 0;
   const run = (text: string, params: unknown[] = []): Row[] | null => {
     if (/from meeting_channel_priority/i.test(text)) return [{ channel_url: "https://youtube.com/@city", position: 0 }];
     if (/from meeting_capture_settings/i.test(text)) return [{ storage_root: storageRoot, retention_mode: "transcript-only" }];
     if (/from meeting_capture_records/i.test(text)) return [...rows.values()];
+    if (/insert into leads/i.test(text)) { filedLeads += 1; return [{ id: 77 }]; }
     if (/insert into meeting_capture_records/i.test(text)) {
       const [newsroomId, videoId, channelUrl, title, published] = params as [number, string, string, string, string];
       const isCaptured = text.includes("'captured'");
@@ -62,7 +65,7 @@ function harness(storageRoot: string, captionPath: string, captionSha256: string
     caption_revision_timestamp: null, revision_count: 0, settled_under_churn: false,
     last_revision_at: null,
   });
-  return { sql, withTransaction, section5Calls: () => section5Calls, seedCaptured };
+  return { sql, withTransaction, section5Calls: () => section5Calls, filedLeads: () => filedLeads, seedCaptured };
 }
 
 describe("meeting section 5 pipeline wiring", () => {
@@ -139,5 +142,47 @@ describe("meeting section 5 pipeline wiring", () => {
     };
     await recheckProvisionalMeetings(state.sql, 1, deps as never);
     assert.equal(section5Ran, 1, "revision path must call section 5");
+  });
+
+  it("an unchanged provisional recheck never files another lead", async () => {
+    const { recheckProvisionalMeetings } = await import("./meeting-capture.ts");
+    const storageRoot = mkdtempSync(join(tmpdir(), "townreporter-s5-unchanged-"));
+    const captionPath = join(storageRoot, "L1AnMLsLwtk.en.srv3");
+    const captionText = "Item 1, approval of the minutes.";
+    const captionSha256 = createHash("sha256").update(captionText).digest("hex");
+    writeFileSync(captionPath, captionText, "utf8");
+    const state = harness(storageRoot, captionPath, captionSha256);
+    state.seedCaptured("L1AnMLsLwtk");
+    state.sql.query = async <T = Row>(text: string, _params: unknown[] = []) => {
+      if (/from meeting_capture_records/i.test(text) && /capture_disposition/.test(text)) {
+        return [{
+          video_id: "L1AnMLsLwtk", title: "City Council Regular Session", published: "2026-01-01",
+          caption_path: captionPath, caption_sha256: captionSha256, capture_disposition: "provisional",
+          consecutive_unchanged: 0, last_checked_at: null, captured_at: "2026-01-01T00:00:00Z",
+          duration_seconds: null, caption_revision_timestamp: null, revision_count: 0,
+        }] as T[];
+      }
+      return [] as T[];
+    };
+    const deps = {
+      captureMeeting: async () => ({
+        ok: true as const,
+        parsed: { text: captionText, format: "srv3" as const, sha256: captionSha256, sourcePath: captionPath },
+        infoPath: null,
+        info: { durationSeconds: null, videoTimestamp: null, captionRevisionTimestamp: null },
+        argv: [], stdout: "", stderr: "",
+      }),
+      withTransaction: state.withTransaction,
+      runSection5: async () => ({
+        aligned: true, alignmentReason: null, chunkCount: 1, voteCount: 0, unalignedLead: null,
+        items: [{ item: "1", title: "Minutes", startSeconds: 0 }], votes: [],
+        citations: [{ item: "1", segmentIndex: 0, timestampSeconds: 0, endSeconds: 4,
+          excerpt: captionText, captionSha256, storagePath: captionPath }],
+      }),
+      now: () => new Date("2026-01-01T01:00:00Z"),
+    };
+    const result = await recheckProvisionalMeetings(state.sql, 1, deps as never);
+    assert.equal(result.revised, 0);
+    assert.equal(state.filedLeads(), 0, "unchanged transcript checks must not file duplicate Queue leads");
   });
 });
