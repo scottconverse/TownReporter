@@ -418,6 +418,16 @@ describe("meeting chain uses real application entrypoints in its own disposable 
       staleResult instanceof Error || (typeof staleResult === "object" && staleResult !== null && "ok" in staleResult && staleResult.ok === false),
       "after B commits, the A-linked draft must be rejected",
     );
+    /*
+      B's revision did not only put a notice on the link: meeting-revision.ts
+      rewrites the draft's research_json in the same breath, and a section
+      confirmation is recorded against exactly that identity. So the
+      confirmation taken before B does not cover the row that exists now, and
+      the editor re-reads and re-confirms the version on screen before trying
+      again -- otherwise this retry stops at the section gate and the
+      current-artifact guard these assertions exist for is never reached.
+    */
+    await confirmSectionForCurrentDraft(lead!.id);
     const blockedAAfterB = await performPublish({ userId, newsroomId }, lead!.id);
     assert.equal(blockedAAfterB.ok, false, "a retry after B commits must reach and fail the current-artifact publication guard");
     if (!blockedAAfterB.ok) assert.match(blockedAAfterB.error, /recording this draft quotes has changed/i);
