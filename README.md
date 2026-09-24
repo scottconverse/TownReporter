@@ -5,7 +5,7 @@
 **Current software version: [0.6.62](docs/releases/0.6.62.md).** Every published story now says plainly how it was made; a draft's section must be confirmed before the story prints; and a story that names a news outlet its Sources do not cover is refused unless an editor records the override. Spawned provider CLIs receive a named environment allow-list rather than the server's environment, the URL guard reads the IPv4 transition and translation ranges, and Grok federation is opt-in only. GitHub remains the authority for publication state. [0.6.61 release guide](docs/releases/0.6.61.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.61 release guide](docs/releases/0.6.61.md).
+Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.62 release guide](docs/releases/0.6.62.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -122,7 +122,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-Download the Windows x64 installer ZIP named `TownReporter-<version>-windows-x64.zip` from the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest); the source-code ZIP is not the installer. If that asset is missing, stop and use a release that provides it. Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks. The 0.6.61 package adds the complete transcript-to-editor path and the Scan-page refresh repair. Its package note names the expected tag and assets; the JSON metadata and `.sha256` sidecar are the authorities for source commit and ZIP hash, while GitHub records publication state.
+Download the Windows x64 installer ZIP named `TownReporter-<version>-windows-x64.zip` from the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest); the source-code ZIP is not the installer. If that asset is missing, stop and use a release that provides it. Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks. The 0.6.62 package adds the public-trust and security fixes recorded in its release guide; the 0.6.61 package added the complete transcript-to-editor path and the Scan-page refresh repair. The current package note names the expected tag and assets; the JSON metadata and `.sha256` sidecar are the authorities for source commit and ZIP hash, while GitHub records publication state.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first manual editorial workflow within an hour with working internet; that is a goal, not a measured fresh-machine result, and no fresh-machine human acceptance is documented. Release evidence records only the stated automated installer and package checks and their limits. Public hosting is separate from this local installation.
 
@@ -471,6 +471,6 @@ Twelve rendered diagrams, each with its Mermaid source beside it. The index is [
 
 ## Recent releases
 
-**0.6.61** is the current version. Meeting recordings reach the Queue and a draft with persisted used citations; immutable transcript revisions block stale publication and create an editor review without rewriting published history. Read the [0.6.61 release guide](docs/releases/0.6.61.md) for what it claims and what it does not.
+**0.6.62** is the current version. Published stories state how they were made, a draft's section must be confirmed before it prints, and a story naming a news outlet its Sources do not cover is refused until an editor records the override. The first-owner claim is one locked transaction, provider CLIs receive a named environment, the URL guard blocks the IPv4 transition and translation ranges, and Grok federation is opt-in only. Read the [0.6.62 release guide](docs/releases/0.6.62.md) for what it claims and what it does not.
 
 Release notes for every earlier version, moved verbatim out of this README, are in the [release history](docs/releases/README.md). Line-by-line detail is in [CHANGELOG.md](CHANGELOG.md).
