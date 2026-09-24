@@ -33,6 +33,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { assertNotAnArgument } from "./voice.server.ts";
 import { resolveCliPath, spawnPlan } from "./cli-spawn.server.ts";
+import { claudeChildEnv } from "./cli-child-env.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
 import { CLAUDE_CLI_EFFORTS, type ModelEffort } from "./provider-registry.ts";
 
@@ -150,6 +151,7 @@ export async function probeClaudeCode(label = "Claude"): Promise<
       child = spawn(plan.command, plan.args, {
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
+        env: claudeChildEnv(),
       });
     } catch {
       resolve({ ok: false, error: CLAUDE_CLI_MISSING });
@@ -398,6 +400,10 @@ export async function claudeCodeChat(opts: {
         // Run detached from any project so no stray CLAUDE.md is discovered.
         cwd: process.env.TMPDIR || process.env.TEMP || process.cwd(),
         windowsHide: true,
+        // An allow-list, not this process's whole environment: the child is a
+        // program that reads what it is given, and it does not need the
+        // paper's secrets. See cli-child-env.server.ts.
+        env: claudeChildEnv(),
       });
     } catch {
       cleanupTempDir();
@@ -531,6 +537,7 @@ export async function claudeCodeReadChat(opts: {
         // Restricted mode confines Read to this one per-page temp directory.
         cwd: dirname(opts.filePath),
         windowsHide: true,
+        env: claudeChildEnv(),
       });
     } catch {
       resolve({ ok: false, error: CLAUDE_CLI_MISSING, meta: baseMeta(false) });

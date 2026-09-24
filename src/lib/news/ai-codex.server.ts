@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { resolveCliPath, spawnPlan } from "./cli-spawn.server.ts";
+import { codexChildEnv } from "./cli-child-env.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
 import { modelEffortsForModel, type ModelEffort } from "./provider-registry.ts";
 
@@ -167,15 +168,14 @@ function run(
 ): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean; durationMs: number }> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
-    const appData = process.env.APPDATA?.trim();
-    const userRoot =
-      process.env.USERPROFILE?.trim() || (appData ? path.resolve(appData, "..", "..") : undefined);
-    const childEnv = {
-      ...process.env,
-      ...(userRoot && !process.env.USERPROFILE ? { USERPROFILE: userRoot } : {}),
-      ...(userRoot && !process.env.HOME ? { HOME: userRoot } : {}),
-      ...(userRoot && !process.env.CODEX_HOME ? { CODEX_HOME: path.join(userRoot, ".codex") } : {}),
-    };
+    /*
+      Codex gets an allow-list, not a copy of this process's environment.
+
+      Spreading `process.env` handed a child that reads the open web the
+      paper's `BETTER_AUTH_SECRET`, its `DATABASE_URL`, every provider key and
+      the Grok secret. See cli-child-env.server.ts for what a CLI does need.
+    */
+    const childEnv = codexChildEnv();
     let child: ReturnType<typeof spawn>;
     try {
       const plan = spawnPlan(bin, args);
