@@ -55,6 +55,11 @@ import {
 } from "./notes";
 import { provenanceFromUrls } from "./findings";
 import {
+  namedOutlet,
+  namedOutletNotice,
+  unresolvedNamedOutlets,
+} from "./outlet-credit";
+import {
   buildScanUserMessage,
   composeZeroLeadSummary,
   kindFromSourceUrl,
@@ -446,12 +451,27 @@ export const getLead = createServerFn({ method: "GET" })
       notes.topicConfirmation.topic === String(drafts[0]?.topic ?? "").trim()
         ? notes.topicConfirmation.topic
         : null;
+    /*
+      The named-outlet check, run for display only -- performPublish decides.
+
+      Same inputs the publish gate uses, so the desk and the refusal cannot
+      disagree about what is outstanding: the body as it will print (the
+      notebook is already stripped above), the Sources the reader will see, and
+      the overrides already recorded for this draft. The recorded rows
+      themselves are returned too: an override is a decision the paper made, and
+      the desk is where a person can see who made it.
+    */
+    const outletReport = await performNamedOutletReport(context, id);
+    const namedOutlets = outletReport.namedOutlets;
+    const outletOverrides = outletReport.overrides;
     return {
       lead,
       draft,
       draftMeetingEvidence,
       evidenceToken,
       topicConfirmed,
+      namedOutlets,
+      outletOverrides,
       articleSlug: live[0]?.slug ?? null,
       openedExtractionByUrl: extractionByUrl,
       job,
@@ -2293,6 +2313,185 @@ export const confirmDraftTopic = createServerFn({ method: "POST" })
   .validator((leadId: number) => leadId)
   .handler(async ({ context, data: leadId }) => performConfirmDraftTopic(context, leadId));
 
+/**
+ * The titles a reader will see on this draft's Sources list.
+ *
+ * Two places hold them. The draft's own provenance is what the page prints for
+ * each captured record, and the newsroom's source list is where an operator
+ * typed the name of the outlet they were reading. Either one naming the outlet
+ * is enough: the first is what the reader is shown, the second is what the
+ * editor was looking at when they filed the source.
+ */
+async function sourceTitlesForDraft(
+  sql: Sql,
+  newsroomId: number,
+  draft: { source_urls: string; provenance_json?: string | null },
+): Promise<string[]> {
+  const urls = parseUrlList(draft.source_urls);
+  const titles: string[] = [];
+  try {
+    const stored = JSON.parse(draft.provenance_json || "[]") as { title?: string; url?: string }[];
+    // Only entries the public list actually shows: a provenance row dropped
+    // from Sources is not a source the reader can check.
+    if (Array.isArray(stored)) {
+      for (const item of stored) {
+        if (item?.url && !urls.includes(item.url)) continue;
+        const title = String(item?.title ?? "").trim();
+        if (title) titles.push(title);
+      }
+    }
+  } catch {
+    /* a draft whose provenance will not parse has no titles to offer */
+  }
+  if (urls.length) {
+    const rows = await sql<{ title: string }>`
+      select title from sources where newsroom_id = ${newsroomId} and url = any(${urls})
+    `;
+    for (const r of rows) if (r.title) titles.push(r.title);
+  }
+  return titles;
+}
+
+export type NamedOutletReport = {
+  /** Outlets the body names that the Sources do not show, and no one has overridden. */
+  namedOutlets: string[];
+  /** The overrides already recorded for this draft, oldest first. */
+  overrides: { outlet: string; overridden_by: string; overridden_at: string }[];
+};
+
+/**
+ * What the desk shows about the named-outlet check, for one lead.
+ *
+ * `performPublish` is the gate; this asks the same question for display, from
+ * the same helper and the same inputs -- the body as it prints, the Sources
+ * the reader will see (including the lead's, for a legacy draft that inherits
+ * them), and the overrides recorded for this draft. The desk and the refusal
+ * therefore cannot disagree about what is outstanding: a button the editor
+ * cannot press, or a refusal with nothing on screen to fix it, would both be
+ * the same bug wearing a different coat.
+ *
+ * It is a plain function rather than part of the story loader so that the
+ * desk's half of the check can be driven in a test without a browser.
+ */
+export async function performNamedOutletReport(
+  context: { userId: string; newsroomId?: number },
+  leadId: number,
+): Promise<NamedOutletReport> {
+  const sql = await getSql();
+  const drafts = await sql<DraftRow>`
+    select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
+           provenance_json, form, found_note, unanswered, research_json
+    from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
+    order by updated_at desc, id desc limit 1
+  `;
+  const row = drafts[0];
+  if (!row) return { namedOutlets: [], overrides: [] };
+  const draft = unpackStoredDraft({ ...row });
+  draft.body = stripReporterNotebook(draft.body);
+  let sourceUrls = parseUrlList(draft.source_urls);
+  if (sourceUrls.length === 0 && mayInheritLeadSources(row)) {
+    const leads = await sql<{ source_urls: string }>`
+      select source_urls from leads
+      where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
+    `;
+    sourceUrls = sanitizePublicUrls(parseUrlList(leads[0]?.source_urls ?? "[]"));
+  }
+  const overrides = await sql<{
+    outlet: string;
+    overridden_by: string;
+    overridden_at: string;
+  }>`
+    select outlet, overridden_by, overridden_at from named_outlet_overrides
+    where newsroom_id = ${owned(context)} and draft_id = ${Number(row.id)}
+    order by id
+  `;
+  return {
+    namedOutlets: unresolvedNamedOutlets({
+      body: draft.body,
+      sourceUrls,
+      sourceTitles: await sourceTitlesForDraft(sql, owned(context), draft),
+      overridden: overrides.map((o) => o.outlet),
+    }),
+    overrides,
+  };
+}
+
+/*
+  THE NAMED-OUTLET OVERRIDE (0.6.62).
+
+  An editor can clear one named-and-uncovered outlet for one draft, and this is
+  the only way past the publish gate below. The row it writes is the paper's
+  record of the decision: who accepted the claim, when, for which outlet, on
+  which draft. The desk shows it back; the public page never does.
+
+  It refuses to record an override the draft does not need -- an outlet the
+  story never names, or one its Sources already cover. A row saying an editor
+  overrode something is worth less than nothing if it can be created for a
+  claim the editor never saw.
+*/
+export async function performOverrideNamedOutlet(
+  context: { userId: string; newsroomId?: number },
+  leadId: number,
+  outletName: string,
+): Promise<{ ok: true; outlet: string } | { ok: false; error: string }> {
+  const outlet = namedOutlet(outletName);
+  if (!outlet) {
+    return {
+      ok: false as const,
+      error: `"${outletName}" is not one of the outlets this check knows about, so it cannot be overridden.`,
+    };
+  }
+  const decision = await withTransaction(async (sql) => {
+    const drafts = await sql<DraftRow>`
+      select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
+             provenance_json, form, found_note, unanswered, research_json
+      from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
+      order by updated_at desc, id desc limit 1
+    `;
+    const row = drafts[0];
+    if (!row) return { ok: false as const, error: "Draft this lead before overriding an outlet." };
+    const draft = unpackStoredDraft({ ...row });
+    draft.body = stripReporterNotebook(draft.body);
+    const unresolved = unresolvedNamedOutlets({
+      body: draft.body,
+      sourceUrls: parseUrlList(draft.source_urls),
+      sourceTitles: await sourceTitlesForDraft(sql, owned(context), draft),
+    });
+    if (!unresolved.includes(outlet.name)) {
+      return {
+        ok: false as const,
+        error: `${outlet.name} needs no override on this draft — the story does not name it, or its Sources already show it.`,
+      };
+    }
+    // Clicking twice is the same decision. The table is append-only, so the
+    // second click must not try to write over the first row.
+    await sql`
+      insert into named_outlet_overrides (newsroom_id, draft_id, lead_id, outlet, overridden_by)
+      values (${owned(context)}, ${row.id}, ${leadId}, ${outlet.name}, ${context.userId})
+      on conflict (newsroom_id, draft_id, outlet) do nothing
+    `;
+    return { ok: true as const, outlet: outlet.name, draftId: Number(row.id) };
+  });
+  if (!decision.ok) return { ok: false as const, error: decision.error };
+  /*
+    Audited outside the transaction, where every other publish-path audit sits.
+    `audit` runs on the pooled connection, not the transaction's, and on PGlite
+    there is one connection: writing from inside the transaction deadlocks it.
+  */
+  await audit(context.userId, "override_named_outlet", `Draft ${decision.draftId}`, owned(context), {
+    kind: "drafts",
+    id: decision.draftId,
+  });
+  return { ok: true as const, outlet: decision.outlet };
+}
+
+export const overrideNamedOutlet = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((data: { leadId: number; outlet: string }) => data)
+  .handler(async ({ context, data }) =>
+    performOverrideNamedOutlet(context, data.leadId, data.outlet),
+  );
+
 export const performPublish = createServerOnlyFn(async function performPublish(
   context: { userId: string; newsroomId?: number },
   leadId: number,
@@ -2423,6 +2622,35 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     row.provenance_json && row.provenance_json !== "[]" ? row.provenance_json : "";
   if (!provenanceJson) {
     provenanceJson = JSON.stringify(provenanceFromUrls(parseUrlList(draft.source_urls)));
+  }
+
+  /*
+    THE NAMED-OUTLET CHECK (0.6.62).
+
+    A story that says "the Denver Post reported" is asking the reader to trust
+    a report the paper has not shown them. The Sources list is the only place
+    they can check it, and if the outlet is not there, nothing on the page
+    tells them where the claim came from -- or that anyone at the paper looked.
+
+    It runs here, after the lead-source fallback above, because the list it
+    judges is the list the article will print. An editor clears one outlet at a
+    time with an override recorded in named_outlet_overrides, read back here --
+    per draft, so clearing the Denver Post for this story says nothing about
+    the Longmont Leader, and nothing about the next draft.
+  */
+  const outletSql = await getSql();
+  const overrideRows = await outletSql<{ outlet: string }>`
+    select outlet from named_outlet_overrides
+    where newsroom_id = ${owned(context)} and draft_id = ${row.id}
+  `;
+  const unresolvedOutlets = unresolvedNamedOutlets({
+    body: draft.body,
+    sourceUrls: parseUrlList(draft.source_urls),
+    sourceTitles: await sourceTitlesForDraft(outletSql, owned(context), draft),
+    overridden: overrideRows.map((r) => r.outlet),
+  });
+  if (unresolvedOutlets.length) {
+    return { ok: false as const, error: namedOutletNotice(unresolvedOutlets) };
   }
 
   const baseSlug = slugify(draft.headline);

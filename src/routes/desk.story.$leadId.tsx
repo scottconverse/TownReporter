@@ -30,6 +30,7 @@ import {
   resolveDraftMeetingReview,
   continuePullJob,
   confirmDraftTopic,
+  overrideNamedOutlet,
   recordFollowUpReply,
   saveDraft,
   saveReportingNotes,
@@ -481,6 +482,28 @@ function StoryPage() {
     },
   });
 
+  /*
+    Overriding a named-outlet block: one outlet at a time, for this draft. The
+    server checks the draft still names that outlet and its Sources still do
+    not show it, so this button cannot record a decision about a claim the
+    editor was never looking at. What it writes -- who, when, which outlet,
+    which draft -- is the paper's record, and the desk shows it back below.
+  */
+  const overrideOutlet = useMutation({
+    mutationFn: (outlet: string) => overrideNamedOutlet({ data: { leadId: id, outlet } }),
+    onSuccess: async (res) => {
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      setMsg(
+        res.ok
+          ? `Recorded: you overrode the outlet check for ${res.outlet} on this draft.`
+          : res.error,
+      );
+    },
+    onError: (err) => {
+      setMsg(err instanceof Error ? err.message : "Could not record the override.");
+    },
+  });
+
   const reviewEvidence = useMutation({
     mutationFn: (decision: EvidenceDecision) =>
       saveDraft({
@@ -836,13 +859,27 @@ function StoryPage() {
     editing the body or the section after confirming puts the gate back.
   */
   const topicConfirmed = Boolean(data.topicConfirmed) && data.topicConfirmed === topic && !hasUnsavedDraftEdits;
+  /*
+    Naming another newsroom's reporting and not showing the reader where it
+    came from blocks printing, the same way an unconfirmed claim of absence
+    does -- `namedOutlets` is the server's own answer to that question, so the
+    desk cannot disagree with the refusal.
+  */
+  const outletBlocked =
+    data.namedOutlets.length === 0
+      ? ""
+      : data.namedOutlets.length === 1
+        ? `Deal with the named outlet first`
+        : `Deal with the ${data.namedOutlets.length} named outlets first`;
   const blockedReason = openClaims.length
     ? openClaims.length === 1
       ? "Confirm the claim of absence first"
       : `Confirm the ${openClaims.length} claims of absence first`
-    : topicConfirmed
-      ? ""
-      : "Confirm the section first";
+    : outletBlocked
+      ? outletBlocked
+      : topicConfirmed
+        ? ""
+        : "Confirm the section first";
 
   return (
     <DeskShell title={data.lead.headline} kicker="Workbench" hideTitle>
@@ -997,6 +1034,7 @@ function StoryPage() {
                     disabled={
                       publish.isPending ||
                       !topicConfirmed ||
+                      data.namedOutlets.length > 0 ||
                       evidenceStale ||
                       reviewEvidence.isPending ||
                       reconcileActive
@@ -1021,6 +1059,7 @@ function StoryPage() {
                       !body.trim() ||
                       openClaims.length > 0 ||
                       !topicConfirmed ||
+                      data.namedOutlets.length > 0 ||
                       evidenceStale ||
                       reviewEvidence.isPending ||
                       reconcileActive
@@ -1050,6 +1089,18 @@ function StoryPage() {
                           }}
                         >
                           Open reporting notes
+                        </button>
+                      ) : outletBlocked ? (
+                        <button
+                          type="button"
+                          className="inline-link"
+                          onClick={() =>
+                            document
+                              .getElementById("story-outlets")
+                              ?.scrollIntoView({ block: "center" })
+                          }
+                        >
+                          Go to the named outlets
                         </button>
                       ) : (
                         <button
@@ -1481,6 +1532,74 @@ function StoryPage() {
                   </>
                 )}
               </div>
+              {/*
+                THE NAMED-OUTLET CHECK (0.6.62).
+
+                A body that says "the Denver Post reported" is asking the reader
+                to trust a report the paper has not shown them. The server
+                refuses to print while an outlet is named and its Sources do not
+                show it, unless an editor overrides that outlet for this draft
+                -- one at a time, and recorded: who, when, which outlet, which
+                draft.
+
+                This is the desk's half of it: what is outstanding, the button
+                that records the decision, and the record itself. None of it
+                reaches the public page -- a reader does not need the paper's
+                internal argument, but the newsroom needs the paper trail.
+              */}
+              {data.draft ? (
+                <div id="story-outlets">
+                  {data.namedOutlets.length > 0 ? (
+                    <>
+                      <p className="note publish-blocked">
+                        The body names{" "}
+                        {data.namedOutlets.length === 1
+                          ? data.namedOutlets[0]
+                          : data.namedOutlets.join(", ")}{" "}
+                        and the Sources do not show{" "}
+                        {data.namedOutlets.length === 1 ? "it" : "them"}. Add the source you read,
+                        or override {data.namedOutlets.length === 1 ? "it" : "each one"} for this
+                        draft.
+                      </p>
+                      {onPaper ? null : (
+                        <div>
+                          {data.namedOutlets.map((outlet) => (
+                            <InkButton
+                              key={outlet}
+                              tone="quiet"
+                              disabled={overrideOutlet.isPending}
+                              onClick={() => overrideOutlet.mutate(outlet)}
+                            >
+                              {overrideOutlet.isPending ? "Recording…" : `Override ${outlet}`}
+                            </InkButton>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="note">
+                      Every outlet the body names is in the Sources. Editing the body re-runs this
+                      check.
+                    </p>
+                  )}
+                  {data.outletOverrides.length > 0 ? (
+                    <>
+                      <p className="note">
+                        Overrides recorded for this draft — this is the paper's record, and it
+                        prints nowhere:
+                      </p>
+                      <ul className="note">
+                        {data.outletOverrides.map((o) => (
+                          <li key={`${o.outlet}-${o.overridden_at}`}>
+                            <strong>{o.outlet}</strong> — by {o.overridden_by} on{" "}
+                            {new Date(o.overridden_at).toLocaleString()}.
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
               <Field label="Body">
                 <textarea
                   ref={bodyField}
