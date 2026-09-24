@@ -14,15 +14,22 @@
  * Tri-mode:
  *   - Deployed: the deployer injects a per-app `GROK_AUTH_*` + `BETTER_AUTH_URL`
  *     + `DATABASE_URL`, so real federated auth is persisted in Postgres.
- *   - Sandbox live preview: no injection -> falls back to the shared **preview
- *     client** (`./preview`) and derives the preview's `https://*.grok-sandbox.com`
- *     origin from the request, so real sign-in works (no demo users). Sessions
- *     and identities persist in the embedded PGLite DB (same DB as app data);
- *     the process restart wipes both. Live-preview iframe clients use a bearer
- *     token (partitioned cookies) — see `client.ts`.
- *   - Off (`VITE_AUTH_ENABLED=false`, the shipped default): no providers;
- *     `requireUserId` resolves a dev user with no database configured, and
- *     throws fail-closed once `DATABASE_URL` is set (see `verify.server.ts`).
+ *   - Sandbox live preview: `TOWNREPORTER_GROK_PREVIEW=1` uses the shared
+ *     **preview client** (`./preview`) and derives the preview's
+ *     `https://*.grok-sandbox.com` origin from the request, so real sign-in
+ *     works (no demo users). Sessions and identities persist in the embedded
+ *     PGLite DB (same DB as app data); the process restart wipes both.
+ *     Live-preview iframe clients use a bearer token (partitioned cookies) —
+ *     see `client.ts`.
+ *   - Everything else, including a plain self-hosted paper: email and password
+ *     at this app's own `/api/auth/*`, and NO OAuth provider registered at all.
+ *     The preview client is opt-in by name because its secret is committed here.
+ *   - Off (`VITE_AUTH_ENABLED=false`): no providers; `requireUserId` resolves a
+ *     dev user with no database configured, and throws fail-closed once
+ *     `DATABASE_URL` is set (see `verify.server.ts`).
+ *
+ * The Grok questions — is auth on, is a broker client configured — are answered
+ * in `./grok-federation`, which explains why they are two questions.
  *
  * NEVER import this from client code — it pulls in `pg` + the preview secret +
  * server-only Better Auth internals. The client uses `@/lib/auth/client`;
@@ -40,6 +47,7 @@ import { emailAndPasswordEnabled } from "./email-password";
 import { GATE_PROVIDER_ID, gateIdentitySessions, safeTanstackStartCookies } from "./gate-session.server";
 import { GROK_PROVIDERS } from "./providers";
 import { pgliteDialect } from "./pglite-dialect";
+import { authEnforced, grokFederation, grokFederationWarning } from "./grok-federation";
 import {
   GROK_ISSUER_DEFAULT,
   PREVIEW_ALLOWED_HOSTS,
@@ -112,20 +120,36 @@ const env = (key: string): string | undefined => {
   return value ? value : undefined;
 };
 
-// Explicit off-switch. The deployer sets `VITE_AUTH_ENABLED=true` when it
-// provisions auth; set it to "false" to force auth off everywhere (dev user).
-const authDisabled = env("VITE_AUTH_ENABLED") === "false";
+/**
+ * True when this process enforces auth.
+ *
+ * NOT the same question as "is a broker client configured". A self-hosted paper
+ * signs its editor in with email and password and has no broker at all, and
+ * those installs are the ones this product is for. Auth is enforced unless
+ * `VITE_AUTH_ENABLED=false` -- that is the whole rule, and it is now in one
+ * place (`./grok-federation`, which a test can read without `pg`).
+ */
+export const authConfigured = authEnforced(process.env);
 
-// Broker federation creds: the deployer injects a per-app client when deployed;
-// otherwise fall back to the shared live-preview client, which the broker accepts
-// for any `*.grok-sandbox.com` callback (see `./preview`).
+// Broker federation creds. Deployed, the deployer injects a per-app client.
+// Otherwise NO provider is registered -- the shared live-preview client in
+// `./preview` has its secret committed to this repository, so it is only ever
+// used when the operator asks for it by name. What used to be here was two `??`
+// fallbacks to that client, which meant every install federated to the broker
+// without asking; the measured case is in `./grok-federation`.
 const grokIssuer = env("GROK_AUTH_ISSUER") ?? GROK_ISSUER_DEFAULT;
-const grokClientId = env("GROK_AUTH_CLIENT_ID") ?? PREVIEW_CLIENT_ID;
-const grokClientSecret = env("GROK_AUTH_CLIENT_SECRET") ?? PREVIEW_CLIENT_SECRET;
-
-/** True when federated sign-in is active (real auth is enforced). */
-export const authConfigured =
-  !authDisabled && Boolean(grokClientId && grokClientSecret);
+const federation = grokFederation(process.env, () => ({
+  clientId: PREVIEW_CLIENT_ID,
+  clientSecret: PREVIEW_CLIENT_SECRET,
+}));
+const federationWarning = grokFederationWarning(process.env);
+if (federationWarning) console.warn(federationWarning);
+if (federation?.from === "preview") {
+  console.warn(
+    "[auth] TOWNREPORTER_GROK_PREVIEW=1: federated sign-in uses the shared " +
+      "preview client, whose secret is public in this repository. Sandbox only.",
+  );
+}
 
 // This app's own Better Auth origin. When deployed the deployer injects the
 // public URL. In the sandbox live preview there's no fixed URL (each preview gets
@@ -215,12 +239,12 @@ export const SESSION_TOKEN_COOKIE = "__Host-grok-auth.session_token";
 
 // Built separately so the `betterAuth({...})` call stays easy to edit without
 // breaking brackets (models often trip on the conditional plugin spread).
-const grokOAuthPlugin = authConfigured
+const grokOAuthPlugin = federation
   ? genericOAuth({
       config: GROK_PROVIDERS.map(({ providerId, idp }) => ({
         providerId,
-        clientId: grokClientId as string,
-        clientSecret: grokClientSecret as string,
+        clientId: federation.clientId,
+        clientSecret: federation.clientSecret,
         // Prefer static endpoints over `discoveryUrl` so initiating (and
         // completing) OAuth does not wait on a broker discovery fetch.
         authorizationUrl: grokAuthorizationUrl,
