@@ -46,6 +46,109 @@ describe("isBlockedAddress", () => {
     assert.equal(isBlockedAddress("::ffff:808:808"), false);
     assert.equal(isBlockedAddress("::ffff:8.8.8.8"), false);
   });
+
+  /*
+    Ranges that reach a private address through a literal the filter has to
+    read past. Each case is a pair: an address inside the range that resolves
+    to something private (blocked), and one inside the same range that reaches
+    a public host (allowed). The pairs matter -- a range blocked wholesale
+    would pass the first half of every one of these and break the second.
+  */
+  it("blocks 198.18.0.0/15 (benchmarking) and allows the addresses either side", () => {
+    for (const ip of ["198.18.0.1", "198.18.255.255", "198.19.0.1", "198.19.255.255"]) {
+      assert.equal(isBlockedAddress(ip), true, ip);
+    }
+    assert.equal(isBlockedAddress("198.17.255.255"), false);
+    assert.equal(isBlockedAddress("198.20.0.1"), false);
+  });
+
+  it("blocks 192.0.0.0/24 (IETF protocol assignments) and allows its neighbours", () => {
+    for (const ip of ["192.0.0.0", "192.0.0.1", "192.0.0.170", "192.0.0.255"]) {
+      assert.equal(isBlockedAddress(ip), true, ip);
+    }
+    assert.equal(isBlockedAddress("192.0.1.1"), false);
+    assert.equal(isBlockedAddress("192.0.255.255"), false);
+  });
+
+  it("blocks the NAT64 well-known prefix 64:ff9b::/96 by the IPv4 it embeds", () => {
+    for (const ip of [
+      "64:ff9b::127.0.0.1",
+      "64:ff9b::7f00:1",
+      "64:ff9b::10.0.0.1",
+      "64:ff9b::a00:1",
+      "64:ff9b::169.254.169.254",
+      "64:ff9b::a9fe:a9fe",
+      "64:ff9b::192.168.1.1",
+    ]) {
+      assert.equal(isBlockedAddress(ip), true, ip);
+    }
+    assert.equal(isBlockedAddress("64:ff9b::808:808"), false);
+    assert.equal(isBlockedAddress("64:ff9b::6812:2001"), false);
+  });
+
+  it("refuses an IPv6 literal with a dotted IPv4 tail, whatever address it carries", () => {
+    // Not a range rule: a literal mixing ':' and '.' is not something a
+    // resolver returns, so it is refused outright rather than judged. That was
+    // the behaviour before these ranges were added, and it is kept.
+    for (const ip of [
+      "64:ff9b::8.8.8.8",
+      "64:ff9b::127.0.0.1",
+      "2002:808:808::1.2.3.4",
+      "64:ff9b:1:808:8:800::9.9.9.9",
+    ]) {
+      assert.equal(isBlockedAddress(ip), true, ip);
+    }
+  });
+
+  it("blocks the local-use NAT64 prefix 64:ff9b:1::/48 by the IPv4 it embeds", () => {
+    // RFC 6052's /48 layout: the first two octets occupy the fourth hextet,
+    // the third and fourth follow after a zero octet, so 10.1.2.3 is
+    // `64:ff9b:1:a01:2:300::`. The IPv4 is not in the last 32 bits here.
+    for (const ip of [
+      "64:ff9b:1:a01:2:300::",
+      "64:ff9b:1:7f00:0:100::",
+      "64:ff9b:1:c0a8:1:100::",
+      "64:ff9b:1::7f00:1",
+      "64:ff9b:1::a00:1",
+      "64:ff9b:1:a9fe:a9fe::",
+    ]) {
+      assert.equal(isBlockedAddress(ip), true, ip);
+    }
+    // A translation to a public host must still be fetchable.
+    assert.equal(isBlockedAddress("64:ff9b:1:808:8:800::"), false);
+    assert.equal(isBlockedAddress("64:ff9b:1:6812:20:100::"), false);
+  });
+
+  it("blocks 6to4 2002::/16 by the IPv4 in its first two hextets", () => {
+    for (const ip of [
+      "2002:7f00:1::",
+      "2002:7f00:1::1",
+      "2002:a00:1::",
+      "2002:c0a8:101::",
+      "2002:a9fe:a9fe::",
+      "2002:ac10:1::",
+    ]) {
+      assert.equal(isBlockedAddress(ip), true, ip);
+    }
+    assert.equal(isBlockedAddress("2002:808:808::"), false);
+    assert.equal(isBlockedAddress("2002:6818:201::"), false);
+  });
+
+  it("blocks IPv4-mapped ::ffff:0:0/96 by the IPv4 it carries", () => {
+    for (const ip of [
+      "::ffff:0:0",
+      "::ffff:0.0.0.0",
+      "::ffff:127.0.0.1",
+      "::ffff:10.0.0.1",
+      "::ffff:192.0.0.1",
+      "::ffff:198.18.0.1",
+      "0:0:0:0:0:ffff:198.18.0.1",
+    ]) {
+      assert.equal(isBlockedAddress(ip), true, ip);
+    }
+    assert.equal(isBlockedAddress("::ffff:1.1.1.1"), false);
+    assert.equal(isBlockedAddress("::ffff:198.20.0.1"), false);
+  });
 });
 
 describe("assertHttpUrl", () => {
