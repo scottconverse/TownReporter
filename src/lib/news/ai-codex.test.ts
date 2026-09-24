@@ -10,6 +10,7 @@ import {
   classifyCodexDiagnostic,
   codexFailureMessage,
   codexChat,
+  findCodexCli,
   parseCodexJsonl,
   probeCodex,
   runCodexProcessForTest,
@@ -125,6 +126,61 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
       process.chdir(applicationCwd);
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  /*
+    The CI failure this guards (jobs `failover` and `story-quota-failover`,
+    run 35937277597): both jobs set `CODEX_CLI_PATH` to the RELATIVE
+    `scripts/fakes/fake-codex-cli.mjs`, exactly as an operator writes it. The
+    finder checks that path with `access()`, which resolves it against the
+    server's cwd -- and the draft call is then spawned with `cwd: tmpdir()` on
+    purpose, so Codex cannot read the repo while reporting. Node looked for
+    `<temp>/scripts/fakes/fake-codex-cli.mjs`, found nothing, and exited 1 with
+    "Cannot find module". No failure classifier reads that as an auth lapse, so
+    the desk reported the generic "Codex could not complete this draft." and
+    Automatic never made its one permitted move to Claude Sonnet.
+  */
+  it("runs a relative CODEX_CLI_PATH from the temp reporting cwd instead of failing to find it", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "codex-relative-cli-test-"));
+    const jsonl =
+      [
+        JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "RELATIVE_OK" } }),
+        JSON.stringify({ type: "turn.completed", usage: { input_tokens: 7, output_tokens: 3 } }),
+      ].join("\n") + "\n";
+    const applicationCwd = process.cwd();
+    try {
+      await writeFile(path.join(dir, "relative-cli.mjs"), `process.stdout.write(${JSON.stringify(jsonl)});`);
+      process.chdir(dir);
+      const resolved = await withEnv({ CODEX_CLI_PATH: "./relative-cli.mjs" }, () => findCodexCli());
+      assert.equal(
+        path.resolve(resolved ?? ""),
+        path.resolve(path.join(dir, "relative-cli.mjs")),
+        "the finder must name the file the operator pointed at",
+      );
+      assert.ok(
+        path.isAbsolute(resolved ?? ""),
+        `a relative CODEX_CLI_PATH must leave the finder absolute, or the spawn resolves it against tmpdir(); got ${JSON.stringify(resolved)}`,
+      );
+      const result = await withEnv(
+        { CODEX_CLI_PATH: "./relative-cli.mjs" },
+        () => codexChat({ system: "System", user: "User", model: "gpt-5.6-terra", timeoutMs: 5_000 }),
+      );
+      assert.equal(result.ok, true, "the CLI must actually start, not merely exist");
+      if (!result.ok) return;
+      assert.equal(result.text, "RELATIVE_OK");
+      assert.equal(result.meta?.inputTokens, 7);
+    } finally {
+      process.chdir(applicationCwd);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves the bare `codex` PATH fallback alone rather than inventing a path for it", async () => {
+    const resolved = await withEnv(
+      { CODEX_CLI_PATH: undefined, APPDATA: undefined },
+      () => findCodexCli(),
+    );
+    assert.equal(resolved, "codex");
   });
 
   it("classifies native outcomes without retaining worker text", () => {

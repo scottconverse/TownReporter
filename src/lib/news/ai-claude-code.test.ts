@@ -1,13 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import {
   CLAUDE_CLI_MISSING,
   claudeCliCandidates,
   claudeCodeChat,
+  findClaudeCli,
   parseCliEnvelope,
   resetClaudeCliCache,
 } from "./ai-claude-code.server.ts";
@@ -460,6 +461,57 @@ describe("claudeCodeReadChat sends --tools Read and names exactly one file", () 
       restore();
       resetClaudeCliCache();
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/*
+ * The same relative-path defect Unit B fixed in the Codex adapter. An operator
+ * writes `CLAUDE_CLI_PATH=scripts/fakes/fake-claude-cli.mjs`, the finder checks
+ * it with `access()` against the server's cwd, and every call is then spawned
+ * from TMPDIR/TEMP (so no stray CLAUDE.md is discovered). Node resolved the
+ * relative script against the temp folder, exited 1 with "Cannot find module",
+ * and the desk reported a provider failure for a CLI that never ran. The
+ * failover job lands on this adapter, so the fake has to start from either cwd.
+ */
+describe("claudeCodeChat runs a relative CLAUDE_CLI_PATH from the temp reporting cwd", () => {
+  it("resolves it to the file the finder vouched for, so the spawn finds it", async () => {
+    const spawnCwd = await mkdtemp(join(tmpdir(), "claude-relative-cli-cwd-"));
+    // Exactly the shape CI sets, relative to the checkout root.
+    const relativeToRoot = relative(ROOT, FAKE_CLAUDE);
+    const applicationCwd = process.cwd();
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: relativeToRoot,
+      FAKE_CLAUDE_ECHO_TOOLS: "1",
+      TMPDIR: spawnCwd,
+      TEMP: spawnCwd,
+    });
+    resetClaudeCliCache();
+    try {
+      process.chdir(ROOT);
+      assert.equal(
+        await findClaudeCli(),
+        FAKE_CLAUDE,
+        "a relative CLAUDE_CLI_PATH must leave the finder absolute, or the spawn resolves it against TMPDIR",
+      );
+      const result = await claudeCodeChat({
+        system: "Return JSON only.",
+        user: "plan the next hop",
+        model: "claude-opus-5",
+        timeoutMs: 10_000,
+      });
+      assert.equal(result.ok, true, "the CLI must actually start, not merely exist");
+      if (!result.ok) return;
+      // The cwd really was the temp folder the adapter reports from, and the
+      // CLI still started -- which is the whole point: an absolute path is
+      // what makes those two facts compatible.
+      const echoed = JSON.parse(result.text) as { flag: string; value: string; cwd: string };
+      assert.equal(echoed.cwd, spawnCwd);
+    } finally {
+      process.chdir(applicationCwd);
+      restore();
+      resetClaudeCliCache();
+      await rm(spawnCwd, { recursive: true, force: true });
     }
   });
 });
