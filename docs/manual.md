@@ -1131,6 +1131,63 @@ flowchart TB
 
 ![Choosing a provider at call time](diagrams/provider-at-call-time.svg)
 
+## How a meeting becomes a story
+
+A council meeting arrives as a recording, not as an article. Capture turns it into a transcript
+revision and an ordinary lead in the Queue. From there an editor gives direction, drafts from a
+bounded slice of the transcript, and publishes only when the citations the draft actually used
+are still current. Nothing on this path prints on its own.
+
+```mermaid
+flowchart TB
+    subgraph where["Where the recording comes from"]
+        CH["YouTube channel<br/>public-access TV"]
+    end
+    PG["PrimeGov portal<br/>agenda and packet"]
+
+    subgraph capturing["Capture · Run meetings now"]
+        CAP["Capture the recording"]
+        REV["Transcript revision<br/>content-addressed, immutable"]
+    end
+
+    subgraph queued["The Queue"]
+        LEAD["An ordinary lead<br/>status: new"]
+    end
+
+    subgraph writing["The story workspace"]
+        DIR["Story direction for AI"]
+        DRAFT["Draft with AI<br/>bounded slice of the transcript"]
+        USED["Used citations persisted<br/>read off what the draft says"]
+        MASK["Name check masks<br/>unverified speaker names"]
+        REDRAFT["Redraft and reverify citations"]
+    end
+
+    GATE{"Publication gate<br/>citations current?"}
+    PAPER(["The printed story"])
+    REVIEW["One editor review<br/>published article unchanged"]
+
+    CH --> CAP
+    PG -.->|"agenda items join the story"| DRAFT
+    CAP --> REV
+    REV --> LEAD
+    LEAD --> DIR
+    DIR --> DRAFT
+    DRAFT --> USED
+    USED --> MASK
+    MASK --> GATE
+    GATE -->|current| PAPER
+    GATE -->|"stale, missing or hash mismatch"| REDRAFT
+    REDRAFT --> GATE
+    REV -.->|"recording revised after publication"| REVIEW
+    PAPER -.->|"review only, the printed story is not rewritten"| REVIEW
+```
+
+![How a meeting becomes a story](diagrams/meeting-to-story.svg)
+
+Pulled notes are leads, not evidence. A vote tally or a mover can appear with no citation. A
+masked name reads stiffly ("an unidentified speaker"). YouTube can rate-limit a capture (HTTP
+429); a later pass picks it up. Captions are not minutes. A person approves every ordinary story.
+
 ---
 
 # Part 6 — Reference
