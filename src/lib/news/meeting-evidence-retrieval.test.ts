@@ -53,6 +53,39 @@ function itemizedMeetingRows(): string {
   ].join("\n");
 }
 
+// The real direction from the redraft that produced drafts 161/162. It says how
+// to write; it never names an item. The redraft it produced covered an electric
+// budget presentation where "the council took no vote" instead of the meeting's
+// recorded 4-3 decision.
+const REDRAFT_DIRECTION = [
+  "Lead with the main decision this meeting actually made and its recorded vote: name the motion, who moved and seconded it, the tally, and the result in the first two paragraphs.",
+  "Treat the meeting as completed and write in the past tense -- no 'will consider', 'is expected to', or 'could'.",
+  "Report only what the recording says: if a figure, date, or name is not stated, write 'not stated in the recording' instead of estimating it, and do not attribute any decision to a person the transcript does not name.",
+].join(" ");
+
+// Two items, one recorded decision and one presentation with no vote. The
+// presentation's wording is where the old substring counter found the
+// direction's instruction words: "report" in "reports" and "main" in
+// "maintenance".
+function directionAmbiguousMeeting(): string {
+  return meetingRows(140, {
+    10: "Council discusses the marijuana hospitality licensing motion.",
+    12: "The marijuana hospitality licensing motion carries four to three.",
+    95: "The electric director reports the maintenance backlog and the figures for this year.",
+    97: "The council took no vote on the electric department update.",
+  });
+}
+
+function directionFindings(): { ok: true; text: string } {
+  return {
+    ok: true,
+    text: JSON.stringify({ findings: [
+      { summary: "Council revives marijuana hospitality licensing", why: "The motion carries four to three and resumes business licensing policy", segment_indexes: [10, 12] },
+      { summary: "Electric director reports the maintenance backlog", why: "The council took no vote on the electric department update", segment_indexes: [95, 97] },
+    ] }),
+  };
+}
+
 describe("meeting evidence retrieval", () => {
   it("keeps an editor-named ordinance on its recorded passage or refuses it", async () => {
     const evidence = meetingRows(180, {
@@ -275,6 +308,21 @@ describe("meeting evidence retrieval", () => {
       ] }),
     }), { editorialAssignment: "transportation contract" });
     assert.equal(result.focus?.summary, "Council approved a transportation contract");
+  });
+
+  it("keeps the meeting's recorded decision when the direction only says how to write", async () => {
+    const result = await retrieveMeetingEvidence(directionAmbiguousMeeting(), async () => directionFindings(), { editorialAssignment: REDRAFT_DIRECTION });
+    assert.equal(result.focus, null, "a direction that names no item must not lock one");
+    assert.equal(result.focusScope, "meeting");
+    assert.equal(result.focusedEvidence, "");
+    assert.match(result.evidence, /MEETING-WIDE REPORTER INDEX/);
+    assert.match(result.evidence, /carries four to three/);
+    // The same material still narrows when the direction names the item.
+    const named = await retrieveMeetingEvidence(directionAmbiguousMeeting(), async () => directionFindings(), { editorialAssignment: `${REDRAFT_DIRECTION} Focus on the marijuana hospitality licensing vote.` });
+    assert.equal(named.focusScope, "item");
+    assert.equal(named.focus?.summary, "Council revives marijuana hospitality licensing");
+    assert.match(named.focusedEvidence, /carries four to three/);
+    assert.doesNotMatch(named.focusedEvidence, /maintenance backlog|no vote on the electric/);
   });
 
   it("keeps a substantial same-item context block under the 20K cap for a long agenda section", async () => {

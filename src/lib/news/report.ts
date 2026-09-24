@@ -97,6 +97,13 @@ export type ResearchMemo = {
   nameCheck?: NameCheck;
   /** The single transcript-backed subject and exactly what the writer could see. */
   meetingFocus?: MeetingStoryFocus;
+  /**
+   * The editor's direction asked for the meeting's main decision without naming
+   * an item, so the writer read the whole bounded meeting instead of one locked
+   * subject. Citations are then derived against every candidate, not against a
+   * focus's visible segments.
+   */
+  meetingEvidenceWide?: boolean;
   news: string;
   why_it_matters: string;
   angle: string;
@@ -1351,6 +1358,7 @@ export async function reportAndDraft(
 
   let effectiveExtraEvidence = opts.extraEvidence ?? "";
   let meetingFocus: MeetingStoryFocus | null = null;
+  let meetingEvidenceWide = false;
   if (opts.extraEvidenceMode === "meeting-transcript" &&
       (effectiveExtraEvidence.length > 90_000 || effectiveExtraEvidence.includes("--- ITEM "))) {
     const { retrieveMeetingEvidence } = await import("./meeting-evidence-retrieval.ts");
@@ -1358,11 +1366,16 @@ export async function reportAndDraft(
       onBatch: (current, total) => deps.onStage?.(`Reading the full meeting transcript (${current}/${total})`),
       editorialAssignment: opts.editorialAssignment?.text,
     });
-    if (!retrieved.focus) {
+    // The editor's direction named no item, so no finding can be vouched for as
+    // the decision it asks for. Send the whole bounded meeting rather than one
+    // arbitrary item; the direction still reaches the writer in the assignment
+    // block and chooses the subject there.
+    meetingEvidenceWide = !retrieved.focus && retrieved.focusScope === "meeting";
+    if (!retrieved.focus && !meetingEvidenceWide) {
       return { error: "The meeting transcript was read, but no single source-grounded story subject could be selected. Review the meeting leads before drafting." };
     }
     meetingFocus = retrieved.focus;
-    effectiveExtraEvidence = retrieved.focusedEvidence;
+    effectiveExtraEvidence = meetingEvidenceWide ? retrieved.evidence : retrieved.focusedEvidence;
   }
 
   const seedUrls = sanitizePublicUrls([...opts.urls, ...(opts.extraUrls ?? [])]).slice(0, 6);
@@ -2043,6 +2056,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     research_memo: {
       nameCheck: names.check,
       ...(meetingFocus ? { meetingFocus } : {}),
+      ...(meetingEvidenceWide ? { meetingEvidenceWide: true } : {}),
       news: String(research?.news ?? opts.lead.headline).slice(0, 500),
       why_it_matters: String(research?.why_it_matters ?? opts.lead.why).slice(0, 800),
       angle: String(research?.angle ?? opts.lead.headline).slice(0, 400),

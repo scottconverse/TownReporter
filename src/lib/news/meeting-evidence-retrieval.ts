@@ -22,6 +22,19 @@ export type MeetingStoryFocus = {
   voteOutcome: "carried" | "failed" | "unclear";
 };
 
+/**
+ * What the writer's evidence covers.
+ *
+ * - `item`: one finding (or the editor's named measure) was locked and the
+ *   writer sees only that item's material.
+ * - `meeting`: the editor gave a direction that names no item ("lead with the
+ *   main decision"), so nothing can be vouched for as that decision; the writer
+ *   sees the whole bounded meeting and the direction picks the subject.
+ * - `none`: no subject was locked and no direction asked for the meeting, so the
+ *   caller keeps its existing refusal.
+ */
+export type MeetingFocusScope = "item" | "meeting" | "none";
+
 type IndexedFinding = ReporterFinding & { candidateId: string };
 
 function jsonObject(text: string): Record<string, unknown> | null {
@@ -162,6 +175,42 @@ function meaningfulTerms(text: string): string[] {
   return [...new Set(text.toLowerCase().match(/[a-z0-9$-]{3,}/g) ?? [])].filter((word) => !STOP_WORDS.has(word) && !GENERIC_TOPIC_WORDS.has(word));
 }
 
+/**
+ * Words an editor uses to shape the writing rather than to name its subject.
+ * A direction always mixes the two ("Report only what the recording says: ...
+ * the tally, and the result in the first two paragraphs"), and on a real
+ * redraft the instruction words did the selecting: "report" matched a finding
+ * about the meeting's "Electric director reports only 5,000 of 100,000 feet of
+ * underground cable" and "main" matched the "Maintenance" in its impact line, so
+ * the direction ranked that item above the council's recorded 4-3 vote and the
+ * redraft left the decision out. Instructions steer the draft; they never select
+ * its subject.
+ */
+const INSTRUCTION_TERMS = new Set(
+  ("lead leads main decision decisions actually made recorded name names named naming moved mover move second seconded " +
+    "tally tallies result results paragraph paragraphs treat treated completed complete write writes writing written " +
+    "past tense consider considered considering expected could would should report reports reported reporting recording recordings " +
+    "say says said claim claims figure figures date dates stated state states instead estimate estimates estimated estimating " +
+    "attribute attributes attributed person persons people transcript transcripts only first two three fourth fifth " +
+    "tell tells told mention mentions mentioned include includes including accurate accurately verify verified " +
+    "unidentified anonymous speaker speakers role roles title titles pronoun pronouns gender gendered dollar " +
+    "focus focuses story stories article angle").split(" "),
+);
+
+/** One trailing plural "s" so "ordinance"/"ordinances" and "report"/"reports" agree. */
+function stemTerm(word: string): string {
+  return word.replace(/s$/, "");
+}
+
+function isInstructionTerm(term: string): boolean {
+  return INSTRUCTION_TERMS.has(term) || INSTRUCTION_TERMS.has(stemTerm(term));
+}
+
+/** The direction's words that can name an item, with its writing instructions removed. */
+function subjectTerms(assignment: string): string[] {
+  return meaningfulTerms(assignment).filter((term) => !isInstructionTerm(term));
+}
+
 function topicOverlap(left: ReporterFinding, right: ReporterFinding): number {
   const terms = new Set(meaningfulTerms(left.summary));
   return meaningfulTerms(right.summary).filter((term) => terms.has(term)).length;
@@ -241,6 +290,12 @@ function takeRowsWithin(
  * segment numbers, and the final writer receives the corresponding raw windows
  * plus deterministic signal/distributed windows. The model-generated index is
  * clearly labelled as an index; the raw transcript remains the evidence.
+ *
+ * An editor's direction can narrow that evidence to one item, but only when the
+ * direction's own subject words agree with a finding (`focusScope: "item"`). A
+ * direction that only says how to write returns the whole bounded meeting
+ * (`focusScope: "meeting"`) instead of locking whichever item its instruction
+ * words happened to match.
  */
 export async function retrieveMeetingEvidence(
   evidence: string,
@@ -251,14 +306,14 @@ export async function retrieveMeetingEvidence(
     editorialAssignment?: string;
     onBatch?: (current: number, total: number) => Promise<void> | void;
   } = {},
-): Promise<{ evidence: string; focusedEvidence: string; focus: MeetingStoryFocus | null; batchesExamined: number; findings: number }> {
+): Promise<{ evidence: string; focusedEvidence: string; focus: MeetingStoryFocus | null; focusScope: MeetingFocusScope; batchesExamined: number; findings: number }> {
   const rows = transcriptRows(evidence);
-  if (!rows.length) return { evidence, focusedEvidence: "", focus: null, batchesExamined: 0, findings: 0 };
+  if (!rows.length) return { evidence, focusedEvidence: "", focus: null, focusScope: "none", batchesExamined: 0, findings: 0 };
   const namedMeasure = options.editorialAssignment?.match(/\b(ordinance|resolution)\s+(\d{4})\s*[-–—]\s*(\d{1,3})\b/i);
   const measureLabel = namedMeasure ? `${namedMeasure[1]!.toLowerCase()} ${namedMeasure[2]}-${namedMeasure[3]}` : null;
   const measureRow = measureLabel ? rows.find((row) => row.text.toLowerCase().includes(measureLabel)) : null;
   if (measureLabel && !measureRow) {
-    return { evidence, focusedEvidence: "", focus: null, batchesExamined: 0, findings: 0 };
+    return { evidence, focusedEvidence: "", focus: null, focusScope: "none", batchesExamined: 0, findings: 0 };
   }
   // Caption text is much less token-dense than prose because every short line
   // carries a segment identifier and often fragmented speech. The old 100k
@@ -314,8 +369,14 @@ export async function retrieveMeetingEvidence(
   // Lock one actionable beat from the already completed full-meeting scan. This
   // intentionally costs no extra model call and keeps housekeeping from winning
   // over an actual decision merely because it appears late in the recording.
-  const assignedTerms = meaningfulTerms(options.editorialAssignment ?? "");
-  const assignmentMatches = (finding: ReporterFinding) => assignedTerms.filter((term) => `${finding.summary} ${finding.why}`.toLowerCase().includes(term)).length;
+  // Match the direction's subject words as words, not as substrings: "main"
+  // inside "Maintenance" is not a subject match, and a term shared by one word
+  // of a longer word cannot pick an item.
+  const assignedTerms = subjectTerms(options.editorialAssignment ?? "");
+  const assignmentMatches = (finding: ReporterFinding) => {
+    const words = new Set(meaningfulTerms(`${finding.summary} ${finding.why}`).map(stemTerm));
+    return assignedTerms.filter((term) => words.has(stemTerm(term))).length;
+  };
   const rankedFindings: IndexedFinding[] = findings
     .map((finding, index) => ({ ...finding, candidateId: `F${String(index + 1).padStart(2, "0")}` }))
     .filter((finding) => substantiveScore(finding, options.editorialAssignment ?? "") > 0)
@@ -324,11 +385,36 @@ export async function retrieveMeetingEvidence(
   // An editor can name an exact ordinance or resolution. Anchor that request
   // to the recording itself; a generic model finding must not replace it with
   // a different motion. If the named item is absent, keep the old draft.
+  //
+  // A direction that names no item may not narrow the draft either. Two
+  // independent subject words have to agree with the top finding before the
+  // redraft is locked to that item; one shared word is a coincidence (a single
+  // instruction word, or a common noun two items share), and locking on it is
+  // exactly how the real direction switched subjects. Without a direction the
+  // ranking stands. A direction too terse to contribute two subject words keeps
+  // the whole meeting: the direction still reaches the writer, so the editor's
+  // preference survives as guidance instead of as a lock.
+  const direction = Boolean(options.editorialAssignment?.trim());
+  const lockedCandidate = direction
+    ? assignedTerms.length && rankedFindings.length && assignmentMatches(rankedFindings[0]!) >= 2
+      ? rankedFindings[0]!
+      : null
+    : rankedFindings[0] ?? null;
   const chosen: IndexedFinding | null = measureLabel
     ? measureRow
       ? { candidateId: "EDITOR", summary: `Recorded council action on ${measureLabel}`, why: "Editor-selected subject located in the captured transcript.", segmentIndexes: [measureRow.index] }
       : null
-    : rankedFindings[0] ?? null;
+    : lockedCandidate;
+  // The direction did not name an item, so no finding can be vouched for as the
+  // subject it asks for. The writer reads the whole bounded meeting instead and
+  // the direction, which still reaches the writer, picks the decision.
+  const focusScope: MeetingFocusScope = chosen
+    ? "item"
+    : measureLabel
+      ? "none"
+      : direction && findings.length
+        ? "meeting"
+        : "none";
   const meetingSections = meetingItemSections(evidence, rows);
   const focusSection = chosen
     ? meetingSections.sections.find((section) => chosen.segmentIndexes.some((index) => section.rows.some((row) => row.index === index))) ?? null
@@ -489,6 +575,7 @@ export async function retrieveMeetingEvidence(
       .join("\n"),
     focusedEvidence,
     focus,
+    focusScope,
     batchesExamined,
     findings: findings.length,
   };

@@ -1761,6 +1761,10 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         // actually saw. Older drafts with saved transcript notes retain their
         // original derivation until they are redrafted through this path.
         const focus = reported.research_memo.meetingFocus;
+        // A direction that named no item gave the writer the whole bounded
+        // meeting, so the focus visibility filter would cull every citation
+        // outside the one item it was never locked to. Derive over every
+        // candidate instead, exactly as a draft with no focus does.
         const used = meetingMaterial
           ? focus
             ? deriveFocusedUsedCitations({
@@ -1769,7 +1773,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
                 anchorSegmentIndexes: focus.anchorSegmentIndexes,
                 ...draftText,
               })
-            : []
+            : reported.research_memo.meetingEvidenceWide
+              ? deriveUsedCitations({ candidates, ...draftText })
+              : []
           : deriveUsedCitations({ candidates, ...draftText });
         if (used.length) {
           await linkDraftToTranscript(sql, {
