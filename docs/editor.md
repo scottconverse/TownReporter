@@ -496,6 +496,20 @@ offers **Redraft and reverify citations**. A missing comparison is labeled
 unavailable; it must not be treated as confirmation. Publishing remains
 blocked until the current transcript is used and its citations are verified.
 
+A meeting draft is also checked for speaker identity before you see it. A name
+the check cannot resolve is replaced in the saved copy with neutral wording —
+“an unidentified speaker” — including a two-word office, so “Mayor Pro Tem”
+does not survive as a loose title in front of a masked name. That mask records
+what the desk could not verify; it does not verify anything. If a name matters,
+read the passage and restore it yourself.
+
+Two honest limits on this path. Vote extraction refuses to guess: structured
+votes come back **not established** rather than inferred from prose, so a tally
+or a mover can appear in a draft with no citation behind it. Check the tape
+before you print one. A capture can also fail because YouTube rate-limited it
+(HTTP 429); the desk retries that video on a later pass instead of inventing a
+transcript.
+
 If a transcript changes after publication, open **Published**. The page puts
 pending transcript reviews first, shows the old published evidence beside the
 current recording, and requires a note plus checking every cited passage to

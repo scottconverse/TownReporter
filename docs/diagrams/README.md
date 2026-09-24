@@ -28,6 +28,7 @@ bash docs/diagrams/render.sh
 | Choosing a provider at call time | [provider-at-call-time.svg](provider-at-call-time.svg) | [.mmd](provider-at-call-time.mmd) | First choice, technical failover, terminal refusal |
 | Dark Desk, one round | [dark-desk-one-round.svg](dark-desk-one-round.svg) | [.mmd](dark-desk-one-round.mmd) | Competing hypotheses, the whole tape, trails that reopen |
 | The Opinion desk and its voice handoff | [opinion-voice-handoff.svg](opinion-voice-handoff.svg) | [.mmd](opinion-voice-handoff.mmd) | How the publication voice reaches the writer |
+| How a meeting becomes a story | [meeting-to-story.svg](meeting-to-story.svg) | [.mmd](meeting-to-story.mmd) | A recording to a lead to a bounded draft to the publication gate — and the one editor review if the recording is revised after publication |
 
 ## Scan (v0.6.54)
 
