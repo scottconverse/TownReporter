@@ -210,6 +210,26 @@ test("the real redraft-162 speaker text masks the full name, its later surname m
   assert.match(masked, /"as we come to you each year asking for additional budget, it's going to be thrown at this maintenance crew um predominantly\."/);
   assert.match(masked, /"That is something that we are aware of\."/);
 });
+// The vote sentence of the real lead 206 redraft (draft 164, longmont council
+// zREvH6v072E), with invented surnames in the masked slots. "Mayor Pro Tem" was
+// not a recognized title, so only the surname was replaced and the saved draft
+// read "seconded by Mayor Pro Tem an unidentified speaker".
+const voteSentence164 = "The motion was made by Alvarez and seconded by Mayor Pro Tem Sandoval, and it carried 4-3 with Okafor, Brennan and Novak in opposition, according to the meeting transcript.";
+test("the draft-164 vote sentence masks a two-word title with the name and reads as a sentence", () => {
+  let masked = voteSentence164;
+  for (const name of ["Sandoval", "Alvarez", "Okafor", "Brennan", "Novak"]) masked = maskUnverifiedMeetingIdentity(masked, name);
+  masked = polishMaskedMeetingIdentities(masked);
+  assert.doesNotMatch(masked, /Alvarez|Sandoval|Okafor|Brennan|Novak/);
+  assert.doesNotMatch(masked, /Pro Tem an unidentified/i);
+  assert.doesNotMatch(masked, /\bmayor\b|\bpro tem\b/i);
+  assert.equal(masked, "The motion was made by an unidentified speaker and seconded by an unidentified speaker, and it carried 4-3 with three unidentified speakers in opposition, according to the meeting transcript.");
+});
+test("every council title in front of an unresolved name is masked together with the name", () => {
+  for (const title of ["Mayor Pro Tem", "Mayor Pro Tempore", "Council Member", "Councilmember", "Councilwoman", "Councilman", "Mayor", "Commissioner"]) {
+    const masked = maskUnverifiedMeetingIdentity(`seconded by ${title} Dana Whitfield, according to the transcript.`, "Dana Whitfield");
+    assert.equal(masked, "seconded by an unidentified speaker, according to the transcript.", title);
+  }
+});
 test("a bare surname another reviewed person also uses stays visible while the full name is masked", () => {
   const text = 'Daryl Han reported the cable figures. Maria Han seconded the motion. Han said the count continued. Han wrote "Han said so". [Han](https://example.test) Daryl added a chart.';
   const masked = polishMaskedMeetingIdentities(maskUnverifiedMeetingIdentity(text, "Daryl Han", { otherNames: ["Maria Han"] }));
