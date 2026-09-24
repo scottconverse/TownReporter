@@ -329,7 +329,6 @@ jobs:
       PORT: "8080"
       HOST: 127.0.0.1
       SCANFIX_BASE_URL: http://127.0.0.1:8080
-      SCANFIX_ARTIFACT_DIR: "${{ runner.temp }}/scan-refresh-evidence"
       TOWNREPORTER_CLAUDE_CODE: "0"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -343,6 +342,8 @@ jobs:
         run: node scripts/scan-refresh-old-merge-falsification.mjs
       - run: npm run build
       - name: Keep the open page synchronized with the same scan row
+        env:
+          SCANFIX_ARTIFACT_DIR: ${{ runner.temp }}/scan-refresh-evidence
         run: |
           npm start > /tmp/scan-refresh.log 2>&1 &
           for i in $(seq 1 60); do
